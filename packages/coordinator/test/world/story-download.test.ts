@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
 import { ZipFile } from "yazl";
-import { cleanupStoryDownload, downloadStory, type StoryDownload } from "../../src/world/story-download.js";
+import { cleanupStoryDownload, discardStoryDownload, downloadStory, inspectStoryDownload, type StoryDownload } from "../../src/world/story-download.js";
 import { isStoryReleaseAuthoredPath, isStoryReleaseHistoryFile, isStoryReleaseLegacyChange, referencesStoryArtifact } from "../../src/world/story-release-history.js";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { installSampleWorld } from "../../src/world/sample-world.js";
@@ -144,4 +144,93 @@ it("aborts and cleans a transfer that stops making progress", async t => {
   const refused = assert.rejects(attempt, /abort|progress/i);
   await called; await nextTurn(); t.mock.timers.tick(180_001);
   await refused; assert.deepEqual(await readdir(root), []);
+});
+
+async function interruptDownload(source: StoryDownload, data: Buffer, root: string, network = false) {
+  const offset = Math.floor(data.length / 2), control = new AbortController();
+  let stream!: ReadableStreamDefaultController<Uint8Array>;
+  const request: typeof fetch = async () => new Response(new ReadableStream({ start(c) { stream = c; c.enqueue(new Uint8Array(data.subarray(0, offset))); } }));
+  const failed = assert.rejects(downloadStory(source, root, { signal: control.signal, fetch: request }));
+  const file = join(root, `story-${source.sha256}.part`);
+  for (let i = 0; i < 1000 && (await stat(file).catch(() => null))?.size !== offset; i++) await nextTurn();
+  assert.equal((await stat(file)).size, offset, "the prefix has reached disk before interruption");
+  if (network) stream.error(new Error("connection lost")); else control.abort();
+  await failed;
+  assert.deepEqual(await readdir(root), [`story-${source.sha256}.part`], "only the resumable prefix remains, not extraction scratch");
+  return { offset, file };
+}
+
+for (const network of [false, true]) it(`resumes a ${network ? "network interruption" : "cancelled download"} after restarting the downloader`, async () => {
+  const { source, data } = await archive(), root = await tempDir("story-resume-");
+  const { offset } = await interruptDownload(source, data, root, network);
+  const status = await inspectStoryDownload(source, root);
+  assert.equal(status.retainedBytes, offset); assert.ok(status.freeBytes! > 0);
+  assert.equal(status.requiredBytes, source.bytes - offset + source.unpackedBytes * 2 + 64 * 1024 * 1024);
+  const request: typeof fetch = async (_url, init) => {
+    assert.deepEqual(init?.headers, { Range: `bytes=${offset}-` });
+    return new Response(new Uint8Array(data.subarray(offset)), { status: 206, headers: { "content-range": `bytes ${offset}-${data.length - 1}/${data.length}`, "content-length": String(data.length - offset) } });
+  };
+  const result = await downloadStory(source, root, { signal: new AbortController().signal, fetch: request });
+  assert.equal(JSON.parse(await readFile(join(result.directory, "world.json"), "utf8")).schemaVersion > 0, true);
+  await result.dispose(); assert.deepEqual(await readdir(root), []);
+});
+
+it("starts over safely when the server ignores Range", async () => {
+  const { source, data, fetcher } = await archive(), root = await tempDir("story-no-range-");
+  await interruptDownload(source, data, root);
+  const result = await downloadStory(source, root, { signal: new AbortController().signal, fetch: fetcher });
+  await result.dispose(); assert.deepEqual(await readdir(root), []);
+});
+
+for (const mismatch of ["start", "end", "total", "length", "prefix"] as const) it(`discards invalid resumed ${mismatch} before extraction`, async () => {
+  const { source, data } = await archive(), root = await tempDir("story-bad-resume-");
+  const { offset, file } = await interruptDownload(source, data, root);
+  if (mismatch === "prefix") await writeFile(file, Buffer.alloc(offset));
+  const request: typeof fetch = async () => new Response(new Uint8Array(data.subarray(offset)), { status: 206, headers: {
+    "content-range": `bytes ${offset + (mismatch === "start" ? 1 : 0)}-${data.length - (mismatch === "end" ? 2 : 1)}/${data.length + (mismatch === "total" ? 1 : 0)}`,
+    "content-length": String(data.length - offset + (mismatch === "length" ? 1 : 0)),
+  } });
+  await assert.rejects(downloadStory(source, root, { signal: new AbortController().signal, fetch: request }), /range|size|integrity/);
+  assert.deepEqual(await readdir(root), []);
+});
+
+it("never resumes a different release and removes only the selected release's retained data", async () => {
+  const first = await archive(), second = await archive([{ name: "other.txt" }]), root = await tempDir("story-release-change-");
+  const { file } = await interruptDownload(first.source, first.data, root);
+  const request: typeof fetch = async (_url, init) => { assert.equal(init?.headers, undefined); return second.fetcher(_url, init); };
+  const result = await downloadStory(second.source, root, { signal: new AbortController().signal, fetch: request });
+  await result.dispose(); assert.ok((await stat(file)).size > 0);
+  await writeFile(join(root, "user-file.txt"), "keep");
+  await discardStoryDownload(first.source, root);
+  assert.deepEqual(await readdir(root), ["user-file.txt"]);
+});
+
+it("reuses a complete retained archive only after hashing it again", async () => {
+  const { source, data } = await archive(), root = await tempDir("story-complete-cache-");
+  const file = join(root, `story-${source.sha256}.part`);
+  await writeFile(file, data);
+  const noNetwork: typeof fetch = async () => { throw Error("a complete archive needs no transfer"); };
+  const result = await downloadStory(source, root, { signal: new AbortController().signal, fetch: noNetwork });
+  await result.dispose();
+  await writeFile(file, Buffer.alloc(data.length));
+  await assert.rejects(downloadStory(source, root, { signal: new AbortController().signal, fetch: noNetwork }), /integrity/);
+  assert.deepEqual(await readdir(root), []);
+});
+
+it("refuses insufficient disk space before making a request", async () => {
+  const { source } = await archive(), root = await tempDir("story-low-space-");
+  source.unpackedBytes = 1_000_000_000_000_000;
+  let called = false;
+  await assert.rejects(downloadStory(source, root, { signal: new AbortController().signal, fetch: async () => { called = true; throw Error("must not fetch"); } }), /Not enough disk space/);
+  assert.equal(called, false); assert.deepEqual(await readdir(root), []);
+});
+
+it("reports invalid retained data for removal without counting it toward the download", async () => {
+  const { source } = await archive(), root = await tempDir("story-invalid-cache-");
+  await writeFile(join(root, `story-${source.sha256}.part`), Buffer.alloc(source.bytes + 1));
+  const status = await inspectStoryDownload(source, root);
+  assert.equal(status.hasRetainedData, true); assert.equal(status.retainedBytes, 0);
+  await assert.rejects(downloadStory(source, root, { signal: new AbortController().signal }), /Remove downloaded data/);
+  await discardStoryDownload(source, root);
+  assert.equal((await inspectStoryDownload(source, root)).hasRetainedData, false);
 });

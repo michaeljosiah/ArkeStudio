@@ -3311,6 +3311,10 @@ export function installSampleWorld(): void {
   send({ kind: "install-sample-world" });
 }
 
+export function cancelSampleWorldDownload(): void { send({ kind: "cancel-sample-world-download" }); }
+export function discardSampleWorldDownload(): void { send({ kind: "discard-sample-world-download" }); }
+export function refreshSampleWorldDownload(): void { send({ kind: "refresh-sample-world-download" }); }
+
 /**
  * Whether there is a sample world to install, and how the last attempt went. Read off the
  * snapshot rather than folded from events: the answer is settled at start-up, so a Settings

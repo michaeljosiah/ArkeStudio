@@ -99,6 +99,9 @@ import {
   setRoutingDefault,
   setHarnessEngine,
   installSampleWorld,
+  cancelSampleWorldDownload,
+  discardSampleWorldDownload,
+  refreshSampleWorldDownload,
   useSampleWorld,
   useArchiveNote,
   useDiagnosticsBundle,
@@ -2543,6 +2546,11 @@ export function SettingsSampleWorldScreen() {
   const sample = useSampleWorld();
   const installing = sample?.installing === true;
   const available = sample?.available === true;
+  const download = sample?.download;
+  const retained = download?.retainedBytes ?? 0;
+  const lowSpace = download?.freeBytes != null && download.requiredBytes != null && download.freeBytes < download.requiredBytes;
+  const space = (bytes: number) => `${(bytes / 1073741824).toFixed(2)} GiB`;
+  useEffect(() => { if (!isRemoteSession()) refreshSampleWorldDownload(); }, []);
   return (
     <div data-screen="settings-sample-world" className="fy-set">
       <div className="fy-set__eyebrow">SAMPLE WORLD</div>
@@ -2562,12 +2570,30 @@ export function SettingsSampleWorldScreen() {
             {available ? sample?.download ? "Novel illustrated · audiobook and video unfinished" : "cast · canon · a production · a proposal" : "not available in this build"}
           </div>
         </div>
-        {available && (isRemoteSession() ? <OnYourPC>download and install the story</OnYourPC> : (
-          <Button variant="primary" disabled={installing} onClick={() => installSampleWorld()}>
-            {installing ? "Downloading / installing…" : sample?.download ? "Download and install" : "Install"}
+        {available && (isRemoteSession() ? <OnYourPC>download and install the story</OnYourPC> : installing && sample?.cancellable ? (
+          <Button variant="ghost" onClick={() => cancelSampleWorldDownload()}>Cancel download</Button>
+        ) : (
+          <Button variant="primary" disabled={installing || lowSpace} onClick={() => installSampleWorld()}>
+            {installing ? "Finishing…" : retained ? "Resume and install" : download ? "Download and install" : "Install"}
           </Button>
         ))}
       </div>
+
+      {download && <div className="fy-set__row">
+        <div className="fy-set__name fy-set__name--wide">
+          <div className="fy-set__title">Disk space</div>
+          <div className="fy-set__aboutline">{download.requiredBytes == null ? "Checking space…" : `${space(download.requiredBytes)} free needed · ${download.freeBytes == null ? "available space unknown" : `${space(download.freeBytes)} available`}`}</div>
+          {lowSpace && <div className="fy-set__aboutline">Free up space before downloading.</div>}
+        </div>
+        {!isRemoteSession() && <Button variant="ghost" disabled={installing} onClick={() => refreshSampleWorldDownload()}>Check space</Button>}
+      </div>}
+      {(download?.hasRetainedData || retained > 0) && !installing && <div className="fy-set__row">
+        <div className="fy-set__name fy-set__name--wide">
+          <div className="fy-set__title">Saved download</div>
+          <div className="fy-set__aboutline">{retained ? `${space(retained)} kept for this release. Checked again before installation.` : "Saved data cannot be resumed. Remove it to start again."}</div>
+        </div>
+        {!isRemoteSession() && <Button variant="ghost" onClick={() => discardSampleWorldDownload()}>Remove downloaded data</Button>}
+      </div>}
 
       {sample?.note && (
         <div className="fy-set__why" style={{ marginTop: 10 }}>

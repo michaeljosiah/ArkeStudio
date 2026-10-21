@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
-import { createWriteStream } from "node:fs";
-import { mkdir, mkdtemp, rm, statfs } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { lstat, mkdir, mkdtemp, open, rm, statfs } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { crc32 } from "node:zlib";
 import { openPromise, type Entry } from "yauzl";
 import { readWorldMeta } from "./scan.js";
+import { storyDownloadRequiredBytes } from "@arke-studio/contracts";
 
 export interface StoryDownload {
   url: string;
@@ -17,22 +18,46 @@ export interface StoryDownload {
   summary: string;
 }
 
+function archivePath(source: StoryDownload, scratchRoot: string): string {
+  if (!/^[a-f0-9]{64}$/.test(source.sha256)) throw new Error("Invalid story release descriptor.");
+  storyDownloadRequiredBytes(source);
+  return join(scratchRoot, `story-${source.sha256}.part`);
+}
+
+export async function inspectStoryDownload(source: StoryDownload, scratchRoot: string) {
+  const info = await lstat(archivePath(source, scratchRoot)).catch(() => null);
+  const retainedBytes = info?.isFile() && !info.isSymbolicLink() && info.size <= source.bytes ? info.size : 0;
+  const disk = await statfs(scratchRoot).catch(() => statfs(dirname(scratchRoot))).catch(() => null);
+  return { retainedBytes, hasRetainedData: info !== null, requiredBytes: storyDownloadRequiredBytes(source, retainedBytes), freeBytes: disk ? disk.bavail * disk.bsize : null };
+}
+
+/** Only the currently pinned archive is owned here; never sweep other releases or user files. */
+export async function discardStoryDownload(source: StoryDownload, scratchRoot: string): Promise<void> {
+  await rm(archivePath(source, scratchRoot), { force: true });
+}
+
 /** A build-pinned release, never a URL or digest supplied by a renderer. SPEC-016 R-6. */
 export async function downloadStory(source: StoryDownload, scratchRoot: string, options: {
   signal: AbortSignal;
   progress?: (text: string) => void;
   fetch?: typeof fetch;
 }): Promise<{ directory: string; dispose(): Promise<void> }> {
-  if (!/^[a-f0-9]{64}$/.test(source.sha256) || !Number.isSafeInteger(source.bytes) || source.bytes <= 0 ||
-      !Number.isSafeInteger(source.unpackedBytes) || source.unpackedBytes <= 0) throw new Error("Invalid story release descriptor.");
+  const archive = archivePath(source, scratchRoot);
+  options.signal.throwIfAborted();
   await mkdir(scratchRoot, { recursive: true });
-  const disk = await statfs(scratchRoot);
-  if (disk.bavail * disk.bsize < source.bytes + source.unpackedBytes * 2 + 64 * 1024 * 1024) {
+  const partial = await lstat(archive).catch(error => { if (error.code === "ENOENT") return null; throw error; });
+  if (partial && (!partial.isFile() || partial.isSymbolicLink() || partial.size > source.bytes)) throw new Error("The retained story download is invalid. Remove downloaded data and try again.");
+  const space = await inspectStoryDownload(source, scratchRoot);
+  if (space.freeBytes === null) throw new Error("Could not check free disk space for the story download.");
+  if (space.freeBytes < space.requiredBytes) {
     throw new Error("Not enough disk space to download and install this story. Free space and try again.");
   }
   const container = await mkdtemp(join(scratchRoot, "story-download-"));
-  const directory = join(container, "world"), archive = join(container, "story.zip");
-  const dispose = () => rm(container, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  const directory = join(container, "world");
+  const clearScratch = () => rm(container, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  const dispose = async () => { await clearScratch(); await discardStoryDownload(source, scratchRoot); };
+  let keepPartial = true, verified = false;
+  const invalid = (message: string) => { keepPartial = false; return new Error(message); };
   // Bound stalled transfers, not the total time a slow connection needs for a large story.
   const idle = new AbortController();
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -43,41 +68,58 @@ export async function downloadStory(source: StoryDownload, scratchRoot: string, 
   };
   const signal = AbortSignal.any([options.signal, idle.signal]);
   try {
-    let url = new URL(source.url), response: Response | undefined;
-    for (let redirects = 0; redirects <= 5; redirects++) {
-      if (url.protocol !== "https:" || url.username || url.password ||
-          !["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"].includes(url.hostname)) {
-        throw new Error("Story download redirected outside its release host.");
+    let received = space.retainedBytes;
+    if (received < source.bytes) {
+      let url = new URL(source.url), response: Response | undefined;
+      for (let redirects = 0; redirects <= 5; redirects++) {
+        if (url.protocol !== "https:" || url.username || url.password ||
+            !["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"].includes(url.hostname)) {
+          throw invalid("Story download redirected outside its release host.");
+        }
+        resetIdle();
+        response = await (options.fetch ?? fetch)(url, { signal, redirect: "manual", ...(received ? { headers: { Range: `bytes=${received}-` } } : {}) });
+        if (![301, 302, 303, 307, 308].includes(response.status)) break;
+        const location = response.headers.get("location");
+        await response.body?.cancel();
+        if (!location || redirects === 5) throw new Error("Story download redirect failed.");
+        url = new URL(location, url);
       }
-      resetIdle();
-      response = await (options.fetch ?? fetch)(url, { signal, redirect: "manual" });
-      if (![301, 302, 303, 307, 308].includes(response.status)) break;
-      const location = response.headers.get("location");
-      await response.body?.cancel();
-      if (!location || redirects === 5) throw new Error("Story download redirect failed.");
-      url = new URL(location, url);
+      if (!response?.ok || !response.body) {
+        await response?.body?.cancel();
+        throw new Error(`Story download failed (${response?.status ?? "no response"}). Try again when online.`);
+      }
+      // Like local setup, append only a complete, explicitly bounded remainder. A server that
+      // ignores Range may send 200; start over, never append its full response to retained bytes.
+      if (response.status === 200) received = 0;
+      else if (received && response.status === 206) {
+        const range = response.headers.get("content-range")?.match(/^bytes (\d+)-(\d+)\/(\d+)$/);
+        if (!range || Number(range[1]) !== received || Number(range[2]) !== source.bytes - 1 || Number(range[3]) !== source.bytes) {
+          await response.body.cancel(); throw invalid("Story download resume range differs from this release. Please retry.");
+        }
+      } else { await response.body.cancel(); throw invalid("Story download returned an unexpected response. Please retry."); }
+      const length = response.headers.get("content-length");
+      if (length !== null && Number(length) !== source.bytes - received) { await response.body.cancel(); throw invalid("Story download size differs from this release."); }
+      let lastPercent = -1;
+      options.progress?.(`${received ? "Resuming" : "Downloading"} The Undersong… ${Math.floor(received * 100 / source.bytes)}%`);
+      const measure = new Transform({ transform(chunk: Buffer, _encoding, callback) {
+        resetIdle();
+        received += chunk.length;
+        if (received > source.bytes) { callback(invalid("Story download exceeds its declared size.")); return; }
+        const percent = Math.floor(received * 100 / source.bytes);
+        if (percent !== lastPercent) { lastPercent = percent; options.progress?.(`Downloading The Undersong… ${percent}%`); }
+        callback(null, chunk);
+      } });
+      await pipeline(Readable.fromWeb(response.body as never), measure, createWriteStream(archive, { flags: received ? "a" : "w" }), { signal });
+      clearTimeout(idleTimer);
+      idleTimer = undefined; // Extraction has caller cancellation, not the network idle deadline.
     }
-    if (!response?.ok || !response.body) {
-      await response?.body?.cancel();
-      throw new Error(`Story download failed (${response?.status ?? "no response"}). Try again when online.`);
-    }
-    const length = response.headers.get("content-length");
-    if (length !== null && Number(length) !== source.bytes) { await response.body.cancel(); throw new Error("Story download size differs from this release."); }
-    let received = 0, lastPercent = -1;
+    if (received !== source.bytes) throw new Error("Story download was interrupted. Resume to finish it.");
+    options.progress?.("Verifying The Undersong…");
+    // A retained prefix is never trusted. Hash all bytes, including the prefix, on every attempt.
     const digest = createHash("sha256");
-    const measure = new Transform({ transform(chunk: Buffer, _encoding, callback) {
-      resetIdle();
-      received += chunk.length;
-      if (received > source.bytes) { callback(new Error("Story download exceeds its declared size.")); return; }
-      digest.update(chunk);
-      const percent = Math.floor(received * 100 / source.bytes);
-      if (percent !== lastPercent) { lastPercent = percent; options.progress?.(`Downloading The Undersong… ${percent}%`); }
-      callback(null, chunk);
-    } });
-    await pipeline(Readable.fromWeb(response.body as never), measure, createWriteStream(archive, { flags: "wx" }), { signal });
-    clearTimeout(idleTimer);
-    idleTimer = undefined; // Extraction has caller cancellation, not the network idle deadline.
-    if (received !== source.bytes || digest.digest("hex") !== source.sha256) throw new Error("Story download failed its integrity check. Please retry.");
+    for await (const chunk of createReadStream(archive, { signal })) digest.update(chunk);
+    if (digest.digest("hex") !== source.sha256) throw invalid("Story download failed its integrity check. Please retry.");
+    verified = true; keepPartial = false;
     options.progress?.("Verifying and unpacking The Undersong…");
     await mkdir(directory);
     const zip = await openPromise(archive, { autoClose: false, strictFileNames: true, validateEntrySizes: true });
@@ -118,7 +160,16 @@ export async function downloadStory(source: StoryDownload, scratchRoot: string, 
     await readWorldMeta(directory);
     options.progress?.("Installing your independent copy…");
     return { directory, dispose };
-  } catch (error) { await dispose().catch(() => {}); throw error; }
+  } catch (error) {
+    await clearScratch().catch(() => {});
+    if (verified && options.signal.aborted) keepPartial = true;
+    const file = await lstat(archive).catch(() => null);
+    if (keepPartial && file?.isFile() && file.size > 0 && file.size <= source.bytes) {
+      const handle = await open(archive, "r+");
+      try { await handle.sync(); } finally { await handle.close(); }
+    } else await discardStoryDownload(source, scratchRoot).catch(() => {});
+    throw error;
+  }
   finally { clearTimeout(idleTimer); }
 }
 
