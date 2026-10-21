@@ -202,7 +202,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 101: the exact prompt saved picture checks examined (#2011).
 // 102: explicit chapter drafting intent survives queued turns and retries (#1928).
 // 103: explicitly authored character identity aliases (#1944).
-export const SUPPORTED_SCHEMA_VERSION = 103;
+// 104: immutable performance identities in shared agent media receipts (#2103).
+export const SUPPORTED_SCHEMA_VERSION = 104;
 
 export class WorldOpenError extends Error {
   constructor(

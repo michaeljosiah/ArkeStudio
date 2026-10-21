@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AgentMediaObservationSchema, AnalyzeAudioArgsSchema, SampleVideoArgsSchema, measureAudioSignal } from "../src/agent-media.js";
+import { AgentMediaSourceSchema, AgentMediaObservationSchema, AnalyzeAudioArgsSchema, SampleVideoArgsSchema, measureAudioSignal } from "../src/agent-media.js";
 import { WorldChatCheckReceiptSchema } from "../src/world-chat.js";
 const hash = "sha256:" + "a".repeat(64);
 function pcm(values: number[]) { const result = Buffer.alloc(values.length * 4); values.forEach((value, index) => result.writeFloatLE(value, index * 4)); return result; }
@@ -35,4 +35,10 @@ test("typed receipts cannot confuse metadata, frame inspection and audio measure
   const receipt = { id: "check_01J8F0000000000000000000C1", runId: "run_01J8F0000000000000000000C1", tool: "inspect-media", status: "complete", consulted: [], media, at: "2026-10-13T00:00:00Z" };
   assert.ok(WorldChatCheckReceiptSchema.safeParse(receipt).success);
   for (const value of [{ ...receipt, tool: "sample-video" }, { ...receipt, tool: "search-canon" }, { ...receipt, media: undefined }, { ...receipt, status: "failed" }]) assert.equal(WorldChatCheckReceiptSchema.safeParse(value).success, false);
+});
+
+test("performance media sources name an exact production and immutable performance without path or selection aliases", () => {
+  const source = { kind: "performance", productionId: "saltlight", performanceId: "pf_01J8F0000000000000000000P1" };
+  assert.ok(AgentMediaSourceSchema.safeParse(source).success);
+  for (const invalid of [{ ...source, performanceId: "selected" }, { ...source, performanceId: "tk_01J8F0000000000000000000P1" }, { ...source, productionId: "../saltlight" }, { ...source, path: "clip.wav" }]) assert.equal(AgentMediaSourceSchema.safeParse(invalid).success, false);
 });

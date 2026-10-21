@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { FullSha256Schema } from "./audio.js";
+import { PerformanceIdSchema } from "./performance.js";
 import { SessionIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
 import { ImageObservationSchema } from "./world-chat-images.js";
 import { AgentSpeechTranscriptSchema, AgentTranscriptTextSchema, type AgentSpeechTranscript } from "./agent-audio.js";
@@ -7,10 +8,12 @@ import { AgentSpeechTranscriptSchema, AgentTranscriptTextSchema, type AgentSpeec
 import { AgentAudioListeningSchema, AgentListeningFocusesSchema, type AgentAudioListening } from "./agent-listening.js";
 
 export const AGENT_MEDIA_SCHEMA_VERSION = 79;
+export const AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSION = 104;
 export const AGENT_MEDIA_PROFILE = "arke-media-evidence-v1";
 export const AGENT_MEDIA_LIMITS = Object.freeze({ frames: 8, intervalSeconds: 60, edge: 1024,
   streams: 16, channels: 8, sampleRate: 192000, pcmBytes: 64 * 1024 * 1024, calls: 16 });
 export const AgentMediaSourceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("performance"), productionId: SlugSchema, performanceId: PerformanceIdSchema }).strict(),
   z.object({ kind: z.literal("production-take"), productionId: SlugSchema, takeId: TakeIdSchema }).strict(),
   z.object({ kind: z.literal("bench-take"), sessionId: SessionIdSchema, takeId: TakeIdSchema }).strict(),
   z.object({ kind: z.literal("artifact"), id: z.string().min(1).max(200) }).strict(),
