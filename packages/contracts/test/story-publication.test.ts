@@ -42,6 +42,12 @@ describe("private publication formatting review", () => {
       assert.equal(StoryPublicationSettingsSchema.safeParse({ ...pdf, pdf: { ...pdf.pdf, ...changes } }).success, false);
     assert.equal(StoryPublicationSettingsSchema.safeParse({ ...pdf, outputs: ["pdf", "pdf"] }).success, false);
   });
+  it("keeps illustrations opt-in and refuses them without EPUB", () => {
+    const settings = { title: "Story", author: "", language: "en", description: "", label: "", cover: null, chapterIds: ["one"], outputs: ["epub"], avoidEmDashes: false };
+    assert.equal(StoryPublicationSettingsSchema.parse(settings).includeIllustrations, undefined);
+    assert.ok(StoryPublicationSettingsSchema.safeParse({ ...settings, includeIllustrations: true }).success);
+    assert.equal(StoryPublicationSettingsSchema.safeParse({ ...settings, outputs: ["m4b"], includeIllustrations: true }).success, false);
+  });
   it("refuses navigation outside PDF pages and duplicated chapter destinations", () => {
     const chapter = { id: "one", title: "One", pageNumber: 1, physicalPage: 3, destination: "chapter-1" };
     const base = { pageCount: 3, pageLabels: ["Title", "Contents", "1"], chapters: [chapter] };

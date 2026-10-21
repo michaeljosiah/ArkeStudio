@@ -19,7 +19,8 @@ import { slugify, uniqueSlug } from "../world/slug.js";
 import type { WorldStore } from "../world/store.js";
 import { MarkdownFile } from "../world/text-files.js";
 import { highestChapterRank, openChapter } from "./ops.js";
-import { writeZip } from "./zip.js";
+import { illustrationName, type StoryIllustration } from "../publications/story-illustrations.js";
+import { writeZip, type ZipEntry } from "./zip.js";
 
 /**
  * A manuscript out and a manuscript in (design turn 131, issue 915, SPEC-012 §2.4.3).
@@ -175,24 +176,36 @@ function html(runs: readonly ManuscriptRun[]): string {
  * container, the package with title, language and identifier, a navigation document, one XHTML
  * file a chapter, and a stylesheet of a few lines.
  */
-export function writeEpub(doc: ManuscriptDocument, opts: { identifier: string; language: string; modified: string; author?: string; description?: string; cover?: { bytes: Uint8Array; mediaType: "image/jpeg" | "image/png" } }): Uint8Array {
+export type EpubOptions = { identifier: string; language: string; modified: string; author?: string; description?: string; cover?: { bytes: Uint8Array; mediaType: "image/jpeg" | "image/png" }; illustrations?: Array<StoryIllustration & { bytes: Uint8Array }> };
+
+export function writeEpub(doc: ManuscriptDocument, opts: EpubOptions): Uint8Array {
+  return writeZip(epubEntries(doc, opts));
+}
+
+/** The same package parts feed the streamed illustrated publication and ordinary manuscript export. */
+export function epubEntries(doc: ManuscriptDocument, opts: EpubOptions): ZipEntry[] {
   const utf8 = (text: string) => new TextEncoder().encode(text);
   const coverName = opts.cover?.mediaType === "image/png" ? "cover.png" : "cover.jpg";
+  const illustrations = opts.illustrations ?? [];
+  for (const image of illustrations) if (!Number.isInteger(image.chapter) || !Number.isInteger(image.paragraph) || image.paragraph < -1 || !doc.chapters[image.chapter] || image.paragraph >= doc.chapters[image.chapter]!.blocks.length || !image.alt.trim()) throw new Error("An illustration has no manuscript position or alternative text.");
+  const figure = (index: number) => `<figure class="illustration"><img src="${illustrationName(index, illustrations[index]!)}" alt="${xml(illustrations[index]!.alt)}"/></figure>`;
+  const at = (chapter: number, paragraph: number) => illustrations.flatMap((image, index) => image.chapter === chapter && image.paragraph === paragraph ? [figure(index)] : []).join("\n");
   const chapterFile = (index: number) => `chapter-${index + 1}.xhtml`;
   const chapters = doc.chapters.map((chapter, index) => {
     let first = true;
     const blocks = chapter.blocks
-      .map((block) => {
+      .map((block, paragraphIndex) => {
+        const pictures = at(index, paragraphIndex);
         if (block.kind === "break") {
           first = true;
-          return '<hr class="break"/>';
+          return pictures + '<hr class="break"/>';
         }
         const paragraph = `<p${first ? ' class="first"' : ""}>${html(block.runs)}</p>`;
         first = false;
-        return paragraph;
+        return pictures + paragraph;
       })
       .join("\n");
-    return { name: `OEBPS/${chapterFile(index)}`, data: utf8(xhtml(chapter.title, `<section epub:type="chapter"><h1>${xml(chapter.title)}</h1>\n${blocks}</section>`, opts.language)) };
+    return { name: `OEBPS/${chapterFile(index)}`, data: utf8(xhtml(chapter.title, `<section epub:type="chapter"><h1>${xml(chapter.title)}</h1>\n${at(index, -1)}${blocks}</section>`, opts.language)) };
   });
   const title = xhtml(doc.title, `<section epub:type="titlepage"><h1 class="title">${xml(doc.title)}</h1><p class="subtitle">${xml(opts.author ?? doc.subtitle)}</p></section>`, opts.language);
   const nav = xhtml(
@@ -205,6 +218,7 @@ export function writeEpub(doc: ManuscriptDocument, opts: { identifier: string; l
   const modified = opts.modified.replace(/\.\d{3}Z$/, "Z");
   const manifest =
     (opts.cover ? '<item id="cover-image" href="' + coverName + '" media-type="' + opts.cover.mediaType + '" properties="cover-image"/><item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>' : '') +
+    illustrations.map((image, index) => `<item id="illustration-${index + 1}" href="${illustrationName(index, image)}" media-type="${image.mediaType}"/>`).join("") +
     '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>' +
     '<item id="css" href="style.css" media-type="text/css"/>' +
     '<item id="title" href="title.xhtml" media-type="application/xhtml+xml"/>' +
@@ -226,16 +240,17 @@ export function writeEpub(doc: ManuscriptDocument, opts: { identifier: string; l
     '<?xml version="1.0" encoding="UTF-8"?>\n' +
     '<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">' +
     '<rootfiles><rootfile full-path="OEBPS/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>';
-  return writeZip([
+  return [
     { name: "mimetype", data: utf8("application/epub+zip"), stored: true },
     { name: "META-INF/container.xml", data: utf8(container) },
     { name: "OEBPS/package.opf", data: utf8(opf) },
     { name: "OEBPS/nav.xhtml", data: utf8(nav) },
-    { name: "OEBPS/style.css", data: utf8(EPUB_CSS) },
+    { name: "OEBPS/style.css", data: utf8(EPUB_CSS + (illustrations.length ? "\nfigure.illustration { margin: 1.5em 0; text-align: center; break-inside: avoid; page-break-inside: avoid; }\nfigure.illustration img { max-width: 100%; max-height: 85vh; width: auto; height: auto; object-fit: contain; }" : "")) },
     { name: "OEBPS/title.xhtml", data: utf8(title) },
     ...(opts.cover ? [{ name: "OEBPS/" + coverName, data: opts.cover.bytes }, { name: "OEBPS/cover.xhtml", data: utf8(xhtml(doc.title, `<section epub:type="cover"><img src="${coverName}" alt="${xml(doc.title)}" style="max-width:100%;height:auto"/></section>`, opts.language)) }] : []),
     ...chapters,
-  ]);
+    ...illustrations.map((image, index) => ({ name: "OEBPS/" + illustrationName(index, image), data: image.bytes, stored: true })),
+  ];
 }
 
 // ---------------------------------------------------------------------------

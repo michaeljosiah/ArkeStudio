@@ -13,7 +13,7 @@
 .fy-publish textarea{min-height:110px;resize:vertical}
 .fy-publish fieldset{border:1px solid var(--border);border-radius:12px;padding:16px}
 .fy-publish-choice{display:flex;align-items:center;gap:12px;min-height:56px;padding:10px 0;cursor:pointer}
-.fy-publish-choice input{width:20px;height:20px;flex:none}.fy-publish-choice small{display:block;color:var(--muted-foreground);margin-top:4px}
+.fy-publish-choice input{accent-color:var(--foreground);width:20px;height:20px;flex:none}.fy-publish-choice small{display:block;color:var(--muted-foreground);margin-top:4px}
 .fy-publish-card{display:flex;flex-direction:column;align-items:flex-start;gap:10px;padding:18px;border:1px solid var(--border);border-radius:12px;min-width:0;overflow-wrap:anywhere}
 .fy-publish-card audio{width:100%;min-width:0}
 .fy-publish-files,.fy-publish-library{display:grid;gap:14px;width:100%;min-width:0}

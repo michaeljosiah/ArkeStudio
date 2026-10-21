@@ -65,6 +65,30 @@ portable asset path rules and dependency receipt/fingerprint helpers. The owning
 `packages/contracts/test/publication.test.ts`. These are new output contracts; no existing world
 schema, production record or timeline is migrated by importing them.
 
+## Attached EPUB illustrations
+
+Publish offers **Include attached illustrations**, off by default and available only with EPUB.
+It reuses the current audiobook picture bindings and their manuscript positions; no recording or
+image generation is required. Pictures appear before their block's first manuscript paragraph,
+in block order, with chapter-opening artwork after the heading. Existing joined-block placement
+keeps its first picture; retained pictures hidden by a join and unused takes are not exported.
+The saved frame description supplies alternative text, with a chapter/passage label when a
+chosen image has no frame description. This fallback identifies the attachment; it is not an
+invented visual description.
+
+Missing or unlisted pictures, changed passage or look bindings, unreadable records and unsupported
+images block the illustrated edition. Reattach or review those pictures in the chapter, or leave
+the option off for an ordinary text-and-cover EPUB. PNG/JPEG inputs are bounded to 20 MiB and
+40 megapixels each, 1,000 placed pictures and 2 GiB of distinct image inputs. Original image bytes
+are retained through the existing hash-checked publication capture; no other takes are bundled.
+
+Illustrated editions use compiler version 4. `publications/story-illustrations.ts` resolves and
+checks bindings; `story-epub.ts` streams the same package parts used by the manuscript writer,
+hashing each captured image while writing. Cancellation and failures remove the unfinished ZIP.
+Preview reads just the packaged XHTML/CSS and serves only captured, inventoried illustrations
+through the authenticated preview route. Its frame permits same-origin media for paired browsers
+but no scripts. Ordinary text-only exports and previously captured editions remain supported.
+
 ## Story PDF editions
 
 PDF uses the same explicit chapter selection, review, captured preview and Create boundary as

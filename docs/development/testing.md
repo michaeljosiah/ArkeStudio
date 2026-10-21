@@ -1265,3 +1265,13 @@ preload-auth and both dev-session regressions listed in CLAUDE.md. After buildin
 `node --import tsx apps/desktop/scripts/smoke-transport-flow.mjs` for the real sandboxed file-page
 hello, compact/repeated snapshots and authenticated media range. This disposable local check
 uses no generation and does not establish performance on a physical phone or through Tailscale.
+
+Illustrated EPUB (#2033) adds coordinator `test/publications/story-illustrations.test.ts` and
+`story-routes.test.ts`, contracts `test/story-publication.test.ts`, and client
+`test/audiobook-export.test.tsx`. Run the client checks with `packages/client` as cwd. Verify the
+built Electron app too: image inspection must not depend on PDFKit standard-font lookup in the
+main bundle. For a real illustrated story, use Publish with Include attached illustrations,
+review all selected chapters, inspect captured pages, Create, restart, and verify the same edition.
+Compare PNG/JPEG inventory and manuscript text/order to the captured input; inspect phone,
+tablet and desktop layouts against approved turn 224. This does not establish physical reader
+or Send to Kindle compatibility.
