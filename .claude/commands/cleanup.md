@@ -58,8 +58,9 @@ finishes those off itself and reports the git error when it cannot. An orphan th
 
 ## If something looks wrong afterwards
 
-Every applied run writes `.claude/pruned-<date>.txt` before it removes anything, with the SHA of
-every branch and worktree it was about to take. Restore from there:
+Every applied run appends to `.claude/pruned-<date>.txt` before it removes anything, under its
+own `# Pruned <time>` header, with the SHA of every branch and worktree it was about to take. A
+second run on the same day adds to the file rather than replacing it. Restore from there:
 
 ```
 git branch <name> <sha>
