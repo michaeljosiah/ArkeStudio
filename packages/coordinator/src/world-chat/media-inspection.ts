@@ -1,4 +1,4 @@
-import { AGENT_LISTENING_SCHEMA_VERSION, AGENT_LISTENING_LIMITS, ListenAudioArgsSchema, AGENT_AUDIO_SCHEMA_VERSION, AGENT_TRANSCRIPT_LIMITS, AGENT_MEDIA_LIMITS, AGENT_MEDIA_PROFILE, AGENT_MEDIA_SCHEMA_VERSION, AgentMediaObservationSchema, AnalyzeAudioArgsSchema,
+import { AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSION, PerformanceRecordBaseSchema, AGENT_LISTENING_SCHEMA_VERSION, AGENT_LISTENING_LIMITS, ListenAudioArgsSchema, AGENT_AUDIO_SCHEMA_VERSION, AGENT_TRANSCRIPT_LIMITS, AGENT_MEDIA_LIMITS, AGENT_MEDIA_PROFILE, AGENT_MEDIA_SCHEMA_VERSION, AgentMediaObservationSchema, AnalyzeAudioArgsSchema,
   InspectMediaArgsSchema, SampleVideoArgsSchema, ReviewAudioContentArgsSchema, newId, type AgentListeningFocus, type AgentMediaObservation, type AgentMediaSource, type WorldChatCheckReceipt } from "@arke-studio/contracts";
 import { readBenchSession } from "../bench/chat-reads.js";
 import { resolveTakeSource } from "../bench/service.js";
@@ -20,6 +20,14 @@ export type InspectionSource = { id: string; path: string; expectedHash: string;
 /** Catalogue identities are the authority. There is no path-shaped or mutable-selection input. */
 export async function agentMediaSource(store: WorldStore, source: AgentMediaSource): Promise<InspectionSource> {
   const bundle = store.getBundle();
+  if (source.kind === "performance") {
+    const record = bundle.productions.find(row => row.meta.id === source.productionId)?.performances.find(row => row.id === source.performanceId);
+    if (!record || record.target.productionId !== source.productionId || !PerformanceRecordBaseSchema.shape.file.safeParse(record.file).success) {
+      throw new RetrievalError("unavailable", "That immutable performance's media is unavailable.");
+    }
+    return { id: `performance:${source.productionId}:${record.id}`, path: `productions/${source.productionId}/performances/${record.id}/${record.file}`,
+      expectedHash: record.provenance.outputHash, startSec: 0, endSec: null };
+  }
   if (source.kind === "artifact") {
     const artifact = bundle.artifacts.find(row => row.id === source.id && ["image", "board", "video", "audio"].includes(row.kind));
     if (!artifact?.hash || /[\\/:]/.test(artifact.file) || artifact.file.includes("\0") || [".", ".."].includes(artifact.file)) throw new RetrievalError("unavailable", "That artifact has no valid original media identity.");
@@ -161,7 +169,8 @@ export class ConversationMediaInspection {
     const receipt: WorldChatCheckReceipt = { id: newId("check"), runId: lease.runId, tool: TOOLS[name], status: "complete", consulted: [],
       media: observation, querySummary: `${listeningRead ? "Local audio-model listening" : speechRead ? "Recognized speech content" : name === "inspect_media" ? "Media metadata" : name === "sample_video" ? "Sampled video frames" : "Audio sample measurements"}: ${source.id}`.slice(0, 300), at: new Date().toISOString() };
     this.access(lease, name);
-    await this.store.raiseSchemaBoundary(listeningRead ? AGENT_LISTENING_SCHEMA_VERSION : speechRead ? AGENT_AUDIO_SCHEMA_VERSION : AGENT_MEDIA_SCHEMA_VERSION, "agent-media-evidence");
+    await this.store.raiseSchemaBoundary(args.source.kind === "performance" ? AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSION
+      : listeningRead ? AGENT_LISTENING_SCHEMA_VERSION : speechRead ? AGENT_AUDIO_SCHEMA_VERSION : AGENT_MEDIA_SCHEMA_VERSION, "agent-media-evidence");
     await this.store.ownedWrite(async () => {
       this.access(lease, name);
       if (identity(await agentMediaSource(this.store, args.source)) !== identity(source)) throw new RetrievalError("unavailable", "Media identity changed before the receipt was recorded.");

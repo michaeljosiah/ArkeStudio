@@ -6,7 +6,7 @@ The conversation harness can now inspect generated media through five shared lea
 use the same coordinator implementation through MCP, across supported harness adapters.
 These reads introduce no agent-owned paths, provider calls, authored edits or acceptance.
 
-Sources are immutable production takes (including pass segments), Bench takes and catalogued
+Sources are immutable performances, production takes (including pass segments), Bench takes and catalogued
 artifacts with landed hashes. Legacy hashless takes refuse. Inspection hashes a contained source
 into a private snapshot, decodes that snapshot, then verifies the current identity and bytes
 again before recording a receipt. World closure, Stop, run/lease revocation, changed world and
@@ -54,6 +54,13 @@ Receipts persist as `media.receipt`, replay into the bounded workspace projectio
 the world reader boundary to schema 79 for metadata/frames/signal, or schema 80 for speech evidence.
 Schema-79 readers refuse worlds with the new speech receipts. Each observation records the profile and both ffprobe
 and ffmpeg versions, including when the host resolves them to different installations.
+A performance source names its production and immutable performance ID from list_performances,
+never the current line selection. Its landed provenance hash and contained file pass the same
+source verification and local processing as other media. New performance-source receipts need
+reader boundary 104; existing source kinds keep their existing boundaries. The boundary rises
+after successful preparation and current-source validation, before the durable event append so
+older readers refuse safely. A late cancellation or append failure can conservatively leave the
+higher boundary without a new receipt; no media is accepted or regenerated.
 There is no cross-run evidence cache: every call verifies current source bytes. A later cache
 must key probe/decoder/profile/source/stream/interval and revalidate identity before reuse.
 

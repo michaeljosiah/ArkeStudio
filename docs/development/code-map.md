@@ -32,8 +32,8 @@ them through the same mixer. See [implementation scope](audio-studio.md), SPEC-0
 
 Shared conversation media evidence: contracts `src/agent-media.ts` owns source/interval,
 coverage and signal measurements. Coordinator `src/world-chat/media-inspection.ts` resolves
-immutable source identities, verifies contained snapshots and persists receipts under leases;
-`media-tool-catalog.ts` exposes the five MCP reads. `src/media/agent-media-tools.ts` owns bounded
+immutable source identities (including explicit production/performance IDs, schema 104), verifies contained snapshots and persists receipts under leases;
+`media-tool-catalog.ts` exposes the six MCP reads. `src/media/agent-media-tools.ts` owns bounded
 ffprobe/FFmpeg decoding through `MediaProcessRunner`. Desktop `src/media-tools.ts` and coordinator
 `src/media/node-media-host.ts` wire the same tools. `fold.ts`/`project.ts` replay media receipts;
 `take-review-inspection.ts` requires current, completed-turn evidence for review coverage.
