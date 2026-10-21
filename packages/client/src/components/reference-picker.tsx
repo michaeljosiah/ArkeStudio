@@ -296,7 +296,7 @@ export function ReferencePickerBody({
   onAdd?: (picks: ReadonlyArray<{ pick: PickerSource["pick"]; replace?: string }>) => void;
   /** Slot: the one choice. */
   onChoose?: (pick: PickerSource["pick"]) => void;
-  onUpload: () => void;
+  onUpload?: () => void;
   onClose: () => void;
 }) {
   const [lane, setLane] = useState<"world" | "characters" | "session" | "elsewhere">("world");
@@ -457,7 +457,7 @@ export function ReferencePickerBody({
       </div>
 
       {worldChoices}
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div className="fy-refpicker__sources" style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div className="fy-refpicker__lanes" role="group" aria-label="Where from">
           <button type="button" aria-pressed={lane === "world"} onClick={() => setLane("world")}>
             {`${sounds ? "All" : worldChoices || world.some((source) => source.group) ? "World images" : "World artifacts"} ${offered(world).length}`}
@@ -482,9 +482,9 @@ export function ReferencePickerBody({
               {`World artifacts ${offered(elsewhere).length}`}
             </button>
           )}
-          <button type="button" aria-pressed={false} onClick={onUpload}>
+          {onUpload && <button type="button" aria-pressed={false} onClick={onUpload}>
             Upload
-          </button>
+          </button>}
         </div>
         <span style={{ flex: 1 }} />
         <span className="fy-refpicker__searchwrap">
@@ -571,7 +571,7 @@ export function ReferencePickerBody({
             >
               <div className="fy-refpicker__thumb">
                 {source.imagePath ? (
-                  <Portrait worldSlug={worldSlug} path={source.imagePath} label={source.name} radius={0} />
+                  <Portrait worldSlug={worldSlug} path={source.imagePath} label={source.name} radius={0} loading="lazy" />
                 ) : source.kind === "audio" ? (
                   <span className={cx("fy-refpicker__wave", refusal !== null && "fy-refpicker__wave--muted")}>
                     <Wave seed={source.name} width={104} height={20} />
@@ -613,10 +613,10 @@ export function ReferencePickerBody({
             {action.label}
           </button>
         ))}
-        <button type="button" className="fy-refpicker__upload" onClick={onUpload}>
+        {onUpload && <button type="button" className="fy-refpicker__upload" onClick={onUpload}>
           <Upload size={16} />
           Upload a file
-        </button>
+        </button>}
       </div>
 
       {replacing !== null && (
@@ -646,7 +646,7 @@ export function ReferencePickerBody({
       )}
 
       <div className="fy-refpicker__foot">
-        <span style={{ flex: 1, display: "inline-flex", alignItems: "center", gap: 7, font: "400 11.5px var(--font-sans)", color: "var(--muted-foreground)" }}>
+        <span className="fy-refpicker__selection" style={{ display: "inline-flex", alignItems: "center", gap: 7, font: "400 11.5px var(--font-sans)", color: "var(--muted-foreground)" }}>
           {mode === "bench" ? (
             picks.length === 0 ? (
               "Nothing picked yet."

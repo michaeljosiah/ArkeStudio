@@ -13,7 +13,7 @@ import { frameRunReadRows, performanceReadRows, voiceSampleReadRows, audioCutRea
 import { readAudioRightsSync } from "../audio/rights.js";
 import type { ProductionBatchControls } from "./production-batch.js";
 import { readPlanRecords } from "../productions/plans.js";
-import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema, checkPropName, newId } from "@arke-studio/contracts";
+import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema, checkPropName, newId, pickableArtifacts } from "@arke-studio/contracts";
 import { createProp, addPropState, renameProp, acceptPropStateReference } from "../references/props.js";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -251,7 +251,6 @@ import {
 import { acceptMainPhoto } from "../references/main-photo.js";
 import {
   pendingReferenceTake,
-  recordUploadedPropImage,
   recordReferenceReview,
   referenceReviewDecision,
 } from "../references/takes.js";
@@ -586,8 +585,10 @@ function currentWorldObservation(
     case "sheets": return { target: store.worldId, fence: sheetsFence(bundle) };
     case "bible": return { target: "bible", fence: bibleFence(bundle) };
     case "art-direction": return { target: "art-direction", fence: artDirectionFence(bundle) };
-    case "references": return { target: store.worldId, fence: referencesFence(bundle) };
-    case "artifacts": return { target: store.worldId, fence: artifactsFence(bundle) };
+    case "references": return target?.startsWith("prop:")
+      ? { target, fence: referencesFence(bundle, target.slice(5)) } : { target: store.worldId, fence: referencesFence(bundle) };
+    case "artifacts": return target?.startsWith("artifact:")
+      ? { target, fence: artifactsFence(bundle, target.slice(9)) } : { target: store.worldId, fence: artifactsFence(bundle) };
     case "voices": return { target: store.worldId, fence: voicesFence(bundle) };
     case "production-metadata": {
       const productionId = target ?? store.worldId;
@@ -899,6 +900,14 @@ function worldActionObservations(
     }];
   });
   const observed = new Set(observations.map((observation) => observation.requirement));
+  // A narrow prop/image read is sufficient only for the named binding, never a substitute for
+  // another action's complete inventory. Whole-inventory receipts remain supported.
+  for (const observation of observations) {
+    if ((observation.requirement === "references" || observation.requirement === "artifacts") && observation.target !== store.worldId) {
+      const expected = action.kind === "prop-reference" ? observation.requirement === "references" ? `prop:${action.propId}` : `artifact:${action.artifactId}` : null;
+      if (observation.target !== expected) receiptProblems.push("This scoped inventory read does not cover the action's exact prop and image. Read its target or the complete inventory.");
+    }
+  }
   const missing = WORLD_ACTION_REQUIREMENTS[action.kind].filter((requirement) => !observed.has(requirement));
   const wrongTargets = productionActionTargets(store, action).filter((required) =>
     !missing.includes(required.requirement) &&
@@ -2653,7 +2662,7 @@ async function sharedResourceProjection(
       authority = { kind: "reference-kit", id: intent.actionId };
       const prop = bundle.props.find(prop => prop.id === payload.action.propId);
       const state = prop?.states.find(state => state.id === payload.action.stateId);
-      const artifact = bundle.artifacts.find(artifact => artifact.id === payload.action.artifactId);
+      const artifact = pickableArtifacts(bundle.artifacts).find(artifact => artifact.id === payload.action.artifactId);
       if (!prop || !state || !artifact || !["image", "board"].includes(artifact.kind)) throw new Error("The prop, state, or image artifact is unavailable.");
       if (state.reference && !payload.action.replace) throw new Error("This state already has a reference; propose an explicit replacement.");
       const path = `artifacts/${artifact.file}`;
@@ -3974,21 +3983,12 @@ async function executeSharedResource(
       const input = payload.action;
       const prop = store.getBundle().props.find(prop => prop.id === input.propId);
       const artifact = store.getBundle().artifacts.find(artifact => artifact.id === input.artifactId);
-      if (!prop || !artifact) throw new Error("The target or source is unavailable.");
-      const [image] = await readContainedImageReferences(store.dir, [`artifacts/${artifact.file}`]);
-      if ("sha256:" + createHash("sha256").update(image!.data).digest("hex").slice(0, 16) !== artifact.hash) throw new Error("The artifact image changed.");
-      const take = await recordUploadedPropImage(store, input.propId, input.stateId, image!.name, image!.data,
-        { requestId: action.actionId, precondition });
-      // Creating our pending take changes the collection fence. Preserve the reviewed target
-      // and artifact individually while committing the reference and its artifact link together.
-      const stable = () => JSON.stringify(store.getBundle().props.find(one => one.id === prop.id)) !== JSON.stringify(prop) ||
-        JSON.stringify(store.getBundle().artifacts.find(one => one.id === artifact.id)) !== JSON.stringify(artifact)
-        ? "The prop or artifact changed during acceptance." : null;
+      const state = prop?.states.find(state => state.id === input.stateId);
+      if (!prop || !state || !artifact) throw new Error("The target or source is unavailable.");
       const result = await acceptPropStateReference(store, { propId: input.propId, stateId: input.stateId,
-        selection: { source: "take", takeId: take.id }, replace: input.replace },
-        { ...options, artifactId: artifact.id, precondition: stable });
+        selection: { source: "artifact", artifactId: artifact.id, artifactHash: artifact.hash, expectedReferenceId: state.reference?.id ?? null }, replace: input.replace }, options);
       if (result.status !== "accepted") throw new Error(result.reason);
-      return { status: "completed", receipt: { kind: "prop-reference", id: take.id, summary: "The image was approved for this state and linked from its artifact." } };
+      return { status: "completed", receipt: { kind: "prop-reference", id: result.takeId, summary: "The image was approved for this state and linked from its artifact." } };
     }
     case "world-chat-voice-clone": {
       const selected = await deps.pickFiles?.({ accept: [...CLONEABLE_AUDIO_EXTENSIONS] }) ?? [];

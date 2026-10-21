@@ -1872,6 +1872,10 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   border: 1px solid var(--border); border-radius: 7px; background: var(--background); padding: 6px 9px;
 }
 .fy-sheetrefs { display: flex; flex-direction: column; gap: 6px; }
+/* The selected prop design is one compact state list (master 105f). */
+.fy-prop-detail { padding: 0 24px 48px; }
+.fy-prop-detail > .fy-sheetsec { max-width: 520px; margin: 24px auto 0; }
+.fy-prop-detail .fy-sheetrefs > div:last-child > input { flex: 1; min-width: 0; }
 .fy-sheetref {
   display: flex; align-items: center; gap: 9px;
   border: 1px solid var(--border); border-radius: 9px; background: var(--card);
@@ -5448,6 +5452,7 @@ span.fy-bench__who { border-bottom: 0; }
   border: 1px solid var(--border); border-left: 2px solid var(--warning); border-radius: 9px; background: var(--muted);
 }
 .fy-refpicker__foot { display: flex; align-items: center; gap: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.fy-refpicker__selection { flex: 1; min-width: 0; flex-wrap: wrap; overflow-wrap: anywhere; }
 .fy-refpicker__pickchip {
   padding: 1px 8px; border-radius: 999px; background: var(--secondary);
   font: 500 10.5px var(--font-sans); color: var(--foreground);
@@ -5479,6 +5484,19 @@ span.fy-bench__who { border-bottom: 0; }
 .fy-refpicker__capacity {
   display: inline-flex; align-items: center; gap: 8px; padding: 4px 11px;
   border: 1px solid var(--border); border-radius: 999px; font: 400 10.5px var(--font-mono); color: var(--muted-foreground);
+}
+
+/* Keep the shared picker composition (69a) at phone widths: browse, then confirm. */
+@media (max-width: 640px) {
+  .fy-refpicker__sources { flex-wrap: wrap; }
+  .fy-refpicker__lanes { flex-wrap: wrap; border-radius: 16px; }
+  .fy-refpicker__lanes button { white-space: nowrap; min-height: 44px; }
+  .fy-refpicker__searchwrap { width: 100%; min-width: 0; height: 44px; }
+  .fy-refpicker__search { min-width: 0; }
+  .fy-refpicker__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 35dvh; overflow-y: auto; }
+  .fy-refpicker__foot { flex-wrap: wrap; justify-content: flex-end; }
+  .fy-refpicker__foot > .fy-refpicker__selection { flex-basis: 100%; }
+  .fy-refpicker__foot > button { min-height: 44px; }
 }
 
 /* The Artifacts door (design 68a): the pair rides the pill nav's own row. The screen wrapper

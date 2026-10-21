@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDateTimeSchema, JobIdSchema, prefixedIdSchema, TakeIdSchema } from "./ids.js";
+import { ArtifactIdSchema, IsoDateTimeSchema, JobIdSchema, prefixedIdSchema, Sha256Schema, TakeIdSchema } from "./ids.js";
 
 /**
  * Props — a stable identity with ordered named states, and nothing owned beyond them (design
@@ -14,6 +14,14 @@ import { IsoDateTimeSchema, JobIdSchema, prefixedIdSchema, TakeIdSchema } from "
 
 export const PropIdSchema = prefixedIdSchema("prop");
 export const PropStateIdSchema = prefixedIdSchema("pst");
+
+export const PropStateSelectionSchema = z.discriminatedUnion("source", [
+  z.object({ source: z.literal("take"), takeId: TakeIdSchema }).strict(),
+  z.object({ source: z.literal("candidate"), file: z.string().regex(/^[^/\\]+\.(?:png|jpe?g|webp)$/i, "expected an image filename") }).strict(),
+  z.object({ source: z.literal("artifact"), artifactId: ArtifactIdSchema, artifactHash: Sha256Schema,
+    expectedReferenceId: z.string().min(1).nullable() }).strict(),
+]);
+export type PropStateSelection = z.infer<typeof PropStateSelectionSchema>;
 
 /**
  * The accepted reference for one state. The character look's shape, mirrored rather than

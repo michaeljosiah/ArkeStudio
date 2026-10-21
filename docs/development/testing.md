@@ -1,5 +1,17 @@
 # Running and validating changes
 
+Prop library binding (#1921, SPEC-041 R-9/R-87..R-91) uses coordinator
+`test/world-chat/retrieval.test.ts`, `actions.test.ts`, `action-guide.test.ts`,
+`shape-drift.test.ts` and `test/references/prop-state.test.ts`; contracts
+`test/prop.test.ts`; client `test/props-screen.test.tsx` and the shared reference-picker
+consumer tests. Check exact record reassembly, complete scoped receipts, changed targets,
+image bytes and reference changes, retired/superseded images and immutable take history.
+Native acceptance additionally requires a real writer-prepared prop-image card, approval,
+an explicit library replacement and reopening the world to verify all prior take bytes.
+Compare full-App phone, tablet and desktop captures in light/dark with master turns 69
+and 105f, including long filenames, reachable confirmation and native upload. A phone
+capture uses browser composition, not Electron below its minimum window width.
+
 Retained World Chat drafts (#2048): run coordinator `test/world-chat/retrieval.test.ts`,
 `turn-result.test.ts`, `shape-drift.test.ts`, `run.test.ts`, `context.test.ts`, `action-guide.test.ts` and
 `test/world/schema-version.test.ts`. The retrieval regression reopens location, character and
