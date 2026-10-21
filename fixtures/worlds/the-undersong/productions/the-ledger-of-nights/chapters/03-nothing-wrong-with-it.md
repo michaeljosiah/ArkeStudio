@@ -32,8 +32,8 @@ annoyed by the hurdy-gurdy.
 So she goes to the north gate and reads the box.
 
 It takes her an afternoon; the orthography is four centuries old and worn nearly through. What
-it says is not a mystery, or a curse, or a warning. It is a term of agreement, and it is the
-plainest sentence Ines has read all year. *For the keeping of the water, I will bear my share of
+it says is not a mystery or a curse. It is a notice of a shared burden, and it is the plainest
+sentence Ines has read all year. *For the keeping of the water, I will bear my share of
 the keeping.*
 
 She has nodded at that box since she was six.
@@ -48,13 +48,13 @@ So she files it correctly, and adds one line beneath the recommendation in her o
 
 *The record is accurate. I would like it noted that I do not find this reassuring.*
 
-The fair copy for the Council archive is made by her junior that same week — careful, a little
-too careful, the kind of young clerk who copies a thing twice before he trusts it copied once.
-He keeps a second copy of the last line for himself. He could not have said why, then or since.
+Years later, while cataloguing the historic audit, Perrin makes a careful copy of the last
+line. It remains framed in a drawer, for reasons Perrin has never explained to anyone who
+has asked. The 1974 audit itself remains Ines's.
 
-Fifty-two years later Maren reads that line, and then, because she has begun to think like an
-auditor, she goes and finds the other document — the ward register, kept in the same building,
-two floors down, by a different office that has never had cause to compare notes.
+Fifty-two years after the audit Maren reads that line, and then, because she has begun to think
+like an auditor, she goes and finds the other document — the ward register, kept in the same
+building, two floors down, by a different office that has never had cause to compare notes.
 
 Thirty-one names. Nine of them Half-Hitch. The ninth was admitted in 1981 and is the woman who
 wrote the line.
