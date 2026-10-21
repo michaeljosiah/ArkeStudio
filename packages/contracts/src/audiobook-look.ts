@@ -536,6 +536,29 @@ export function chooseLook(
   };
 }
 
+/** The exact unresolved line the author reviewed before choosing a sheet. */
+export function lookCharacterHash(line: LookCharacter): string {
+  return textDigest(JSON.stringify([line.name, line.sheet ?? null, line.text, line.blocks ?? [], line.by ?? null, line.lookId ?? null, line.from ?? null, line.reading ?? null, line.conflicts ?? []]));
+}
+
+/** Link one existing chapter line without rewriting its words, evidence or saved pictures. */
+export function linkLookCharacter(held: AudiobookLook | null | undefined, input: {
+  key: string; expectedName: string; expectedHash: string; sheet: { id: string; name: string };
+}, at: string): AudiobookLook {
+  const line = held?.characters[input.key];
+  if (held === null || held === undefined || line === undefined || line.name !== input.expectedName || lookCharacterHash(line) !== input.expectedHash) {
+    throw new Error("This character line changed. Review it again before linking.");
+  }
+  if (line.sheet !== undefined) throw new Error("This character line already has an identity. Review the chapter's current links.");
+  if (input.key !== input.sheet.id && held.characters[input.sheet.id] !== undefined) {
+    throw new Error(input.sheet.name + " already has a line in this chapter. Review those two lines before linking.");
+  }
+  const characters = { ...held.characters };
+  delete characters[input.key];
+  characters[input.sheet.id] = { ...line, name: input.sheet.name, sheet: input.sheet.id, by: "author" };
+  return { ...held, at, characters };
+}
+
 /** What the author changes on the sheet: the place, the mood, or one character's line (a new character takes a name). */
 export const LookTargetSchema = z.union([
   z.object({ kind: z.literal("place") }).strict(),

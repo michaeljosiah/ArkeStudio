@@ -170,3 +170,34 @@ describe("the look sheet", () => {
     assert.equal(m.closed(), true);
   });
 });
+
+describe("linking an unresolved chapter identity", () => {
+  const chooseBray = async () => {
+    const select = bodyAll('[aria-label="Character for Sereth"]')[0];assert.ok(select);
+    await act(async () => handlers(select).onChange?.({ target: { value: "bray-half-hitch" }, currentTarget: select }));
+    return bodyAll('[data-testid="look-identity-link"] button')[0] as HTMLButtonElement;
+  };
+  it("requires an explicit choice and sends the reviewed identity without editing its words", async () => {
+    const mounted = await mount(LOOK);
+    assert.equal((bodyAll('[data-testid="look-identity-link"] button')[0] as HTMLButtonElement).disabled, true);
+    const button = await chooseBray();assert.equal(button.disabled, false);await press(button);
+    const command = sentOf(mounted, "link-audiobook-character")[0];assert.ok(command);
+    assert.equal(command.key, "sereth");assert.equal(command.expectedName, "Sereth");assert.equal(command.sheetId, "bray-half-hitch");assert.ok(command.expectedHash.length > 0);
+    assert.equal(sentOf(mounted, "set-audiobook-look").length, 0);assert.equal(button.disabled, true);
+    const nextLook = { ...LOOK, characters: { "maren-kest": LOOK.characters["maren-kest"]!, "bray-half-hitch": { ...LOOK.characters.sereth!, name: "Bray Half-Hitch", sheet: "bray-half-hitch" } } };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "saltlight", chapterId: "07-the-tenth-key", requestId: command.requestId, record: { ...record(nextLook), updatedAt: "2026-10-03T09:01:00.000Z" } }));
+    assert.equal(bodyAll('[aria-label="Character for Sereth"]').length, 0);
+    assert.match(text(bodyAll('[data-testid="look-sheet"]')[0]), /Bray Half-Hitch/);
+  });
+  it("shows a stale-link refusal and leaves the unresolved choice available", async () => {
+    const mounted = await mount(LOOK);await press(await chooseBray());const command = sentOf(mounted, "link-audiobook-character")[0]!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "saltlight", chapterId: "07-the-tenth-key", requestId: command.requestId, refused: "This character line changed. Review it again before linking." }));
+    assert.match(text(bodyAll('[data-testid="look-refused"]')[0]), /line changed/);
+    assert.equal((bodyAll('[data-testid="look-identity-link"] button')[0] as HTMLButtonElement).disabled, false);
+    assert.equal(sentOf(mounted, "link-audiobook-character").length, 1);
+  });
+  it("does not offer a link while disconnected", async () => {
+    const mounted = await mount(LOOK, "closed");assert.equal((bodyAll('[aria-label="Character for Sereth"]')[0] as HTMLSelectElement).disabled, true);
+    assert.equal((bodyAll('[data-testid="look-identity-link"] button')[0] as HTMLButtonElement).disabled, true);assert.equal(sentOf(mounted, "link-audiobook-character").length, 0);
+  });
+});

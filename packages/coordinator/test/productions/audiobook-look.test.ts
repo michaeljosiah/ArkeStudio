@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ChapterAudiobookSchema, type ClientMessage, type DomainEvent } from "@arke-studio/contracts";
+import { lookCharacterHash, ChapterAudiobookSchema, type ClientMessage, type DomainEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -259,3 +259,55 @@ it("keeps alias collisions unresolved when the other claimant is outside the 24-
   assert.equal(resolveChapterPerson(people, "Witness"), undefined);
   assert.equal(resolveChapterPerson(people, "person-0")?.key, "person-0", "a canonical key stays explicit");
 }));
+
+describe("explicit chapter character identity links", () => {
+  const add = (send: (message: ClientMessage) => Promise<void>, key = "harbour-witness") => send({ kind: "set-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", target: { kind: "character", key, name: "Maren Kest" }, text: "Oilskin coat, dark and stiff with salt.", requestId: REQUEST });
+  const link = (events: DomainEvent[], patch: Partial<Extract<ClientMessage, { kind: "link-audiobook-character" }>> = {}): Extract<ClientMessage, { kind: "link-audiobook-character" }> => ({ kind: "link-audiobook-character", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", key: "harbour-witness", expectedName: "Maren Kest", expectedHash: lookCharacterHash(answer(events).record!.look!.characters["harbour-witness"]!), sheetId: "maren-kest", requestId: "01J00000000000000000000010", ...patch });
+  it("links a same-name unresolved line without an appearance edit or provider call", () => withHarness(async ({ events, send, worldDir, asked }) => {
+    await add(send);const before = answer(events).record!;
+    const body = await readFile(join(worldDir, "productions", LEDGER, "chapters/01-neap.md"), "utf8");
+    await send(link(events));const after = answer(events).record!;
+    assert.equal(answer(events).refused, undefined);
+    assert.equal(after.look!.characters["harbour-witness"], undefined);
+    assert.deepEqual(after.look!.characters["maren-kest"], { ...before.look!.characters["harbour-witness"], sheet: "maren-kest" });
+    const { look: _beforeLook, updatedAt: _beforeAt, ...otherBefore } = before;
+    const { look: _afterLook, updatedAt: _afterAt, ...otherAfter } = after;
+    assert.deepEqual(otherAfter, otherBefore);
+    assert.equal(await readFile(join(worldDir, "productions", LEDGER, "chapters/01-neap.md"), "utf8"), body);
+    assert.equal(asked.length, 0);
+  }));
+  it("refuses a stale source fingerprint and leaves the newer record untouched", () => withHarness(async ({ events, send, worldDir }) => {
+    await add(send);const command = link(events);
+    await send({ kind: "set-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", target: { kind: "character", key: "harbour-witness" }, text: "A dry red coat.", requestId: REQUEST });
+    const file = join(worldDir, audiobookPath(LEDGER, "01-neap")), before = await readFile(file, "utf8");
+    await send(command);assert.match(answer(events).refused!, /line changed/);
+    assert.equal(await readFile(file, "utf8"), before);
+  }));
+  it("does not overwrite the selected character's existing authored line", () => withHarness(async ({ events, send, worldDir }) => {
+    await add(send);const command = link(events);
+    await send({ kind: "set-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", target: { kind: "character", key: "maren-kest", name: "Maren Kest", sheet: "maren-kest" }, text: "Her father's reefer jacket.", requestId: REQUEST });
+    const file = join(worldDir, audiobookPath(LEDGER, "01-neap")), before = await readFile(file, "utf8");
+    await send(command);assert.match(answer(events).refused!, /already has a line/);
+    assert.equal(await readFile(file, "utf8"), before);
+  }));
+  it("refuses an unavailable selected character", () => withHarness(async ({ events, send, worldDir }) => {
+    await add(send);const command = link(events, { sheetId: "no-such-character" });
+    const file = join(worldDir, audiobookPath(LEDGER, "01-neap")), before = await readFile(file, "utf8");
+    await send(command);assert.match(answer(events).refused!, /no longer available/);
+    assert.equal(await readFile(file, "utf8"), before);
+  }));
+  it("refuses a look prepared before the current chapter words", () => withHarness(async ({ events, send, worldDir }) => {
+    await add(send);const command = link(events);
+    const chapter = join(worldDir, "productions", LEDGER, "chapters/01-neap.md");
+    await writeFile(chapter, (await readFile(chapter, "utf8")) + "\nA new sentence changes the chapter.\n", "utf8");
+    const file = join(worldDir, audiobookPath(LEDGER, "01-neap")), before = await readFile(file, "utf8");
+    await send(command);assert.match(answer(events).refused!, /chapter words changed/);
+    assert.equal(await readFile(file, "utf8"), before);
+  }));
+  it("keeps an unreadable chapter record intact rather than replacing it", () => withHarness(async ({ events, send, worldDir }) => {
+    await add(send);const command = link(events);
+    const file = join(worldDir, audiobookPath(LEDGER, "01-neap"));await writeFile(file, "not a readable record", "utf8");
+    await send(command);assert.match(answer(events).refused!, /unreadable/);
+    assert.equal(await readFile(file, "utf8"), "not a readable record");
+  }));
+});

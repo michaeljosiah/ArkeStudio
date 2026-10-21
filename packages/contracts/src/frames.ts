@@ -3754,6 +3754,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema.optional(),
     })
     .strict(),
+  /** Explicit identity choice for an existing unresolved chapter line; no new sheet or reference is made. */
+  z.object({ kind: z.literal("link-audiobook-character"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), key: z.string().min(1).max(120), expectedName: z.string().min(1).max(120), expectedHash: z.string().min(1).max(128), sheetId: SlugSchema, requestId: UlidSchema }).strict(),
   /**
    * Which chapters of the book chose each kit look (design turn 193, SPEC-047 R-114): read from the
    * chapters' records, nothing changed. Answered as `audiobook.looks` under the same id.

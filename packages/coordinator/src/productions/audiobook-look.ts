@@ -6,6 +6,7 @@ import {
   MAIN_PHOTO_LOOK,
   chooseLook,
   characterAliasKey,
+  linkLookCharacter,
   cutMoodClothing,
   editLook,
   lookClothing,
@@ -424,6 +425,21 @@ export async function writeDerivedLook(store: WorldStore, productionId: string, 
     return { ...current, updatedAt: at, look: merged.look };
   });
   return { record, kept };
+}
+
+/** Link one unresolved chapter identity without changing its appearance or existing pictures. */
+export async function linkChapterCharacter(store: WorldStore, productionId: string, chapterId: string, input: {
+  key: string; expectedName: string; expectedHash: string; sheetId: string;
+}): Promise<ChapterAudiobook> {
+  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId) });
+  return updateAudiobook(store, productionId, plan.chapter, current => {
+    if (current.look?.chapterHash !== plan.chapter.hash) throw new Error("The chapter words changed. Read Chapter details again before linking.");
+    const sheet = store.getBundle().sheets.find(candidate => candidate.type === "character" && candidate.id === input.sheetId && candidate.retired !== true);
+    if (sheet === undefined) throw new Error("That character is no longer available in this world.");
+    const at = store.now();
+    const look = linkLookCharacter(current.look, { ...input, sheet }, at);
+    return { ...current, updatedAt: at, look };
+  }, { requireReadable: true });
 }
 
 /**
