@@ -5,6 +5,7 @@ import {
   LOOK_LINE_MAX,
   MAIN_PHOTO_LOOK,
   chooseLook,
+  characterAliasKey,
   cutMoodClothing,
   editLook,
   lookClothing,
@@ -78,6 +79,8 @@ export interface ChapterPerson {
   /** Authored identity context, not appearance or evidence that someone is in frame. */
   identity?: string;
   aliases?: string[];
+  /** Collisions from the complete candidate set, retained when the model context is bounded. */
+  ambiguousNames?: string[];
   pov?: true;
   /** The sheet says this character is never to be pictured (issue 905): no line, no reference, never in a prompt. */
   neverDepicted: boolean;
@@ -125,7 +128,7 @@ export function chapterPeople(store: Pick<WorldStore, "getBundle">, plan: Pick<A
     const identitySections = sheet.sections.filter((entry) => /essence|relationship|family|background|history|name|identity|connection|backstory|biography|origin/i.test(entry.heading));
     identitySections.sort((a, b) => Number(/relationship|family|name|identity/i.test(b.heading)) - Number(/relationship|family|name|identity/i.test(a.heading)));
     const identity = clip([sheet.role, ...identitySections.map((entry) => `${entry.heading}: ${entry.body}`)].filter(Boolean).join("; "), LOOK_BOUNDS.identity);
-    const aliases = [...new Set([shortNameOf(sheet), ...[...sheet.name.matchAll(/["“(]([^"”()]+)["”)]/g)].map((match) => match[1]!.trim())])].filter((name) => name !== sheet.name && !/^(the|mrs?|miss|ms|dr|sir)$/i.test(name));
+    const aliases = [...new Set([...(sheet.aliases ?? []), shortNameOf(sheet), ...[...sheet.name.matchAll(/["“(]([^"”()]+)["”)]/g)].map((match) => match[1]!.trim())])].filter((name) => name !== sheet.name && !/^(the|mrs?|miss|ms|dr|sir)$/i.test(name));
     return {
       key: sheet.id,
       name: sheet.name,
@@ -166,6 +169,15 @@ export function chapterPeople(store: Pick<WorldStore, "getBundle">, plan: Pick<A
     if (!people.has(key)) people.set(key, { key, name: line.speaker, identity: "Unlinked cast name: resolve against the character sheets where the context establishes who this is.", neverDepicted: false, first });
   }
   const related = new Set(sheets.filter((sheet) => people.get(sheet.id)!.first < Number.MAX_SAFE_INTEGER).flatMap((sheet) => sheet.links));
+  const claims = new Map<string, Set<string>>();
+  for (const person of people.values()) for (const name of [person.name, ...(person.aliases ?? [])]) {
+    const key = characterAliasKey(name), owners = claims.get(key) ?? new Set<string>();
+    owners.add(person.key); claims.set(key, owners);
+  }
+  for (const [key, person] of people) {
+    const ambiguousNames = [person.name, ...(person.aliases ?? [])].map(characterAliasKey).filter(name => claims.get(name)!.size > 1);
+    if (ambiguousNames.length > 0) people.set(key, { ...person, ambiguousNames });
+  }
   const rank = (person: ChapterPerson): number => person.first < 0 ? 0 : person.first < Number.MAX_SAFE_INTEGER ? 1 : related.has(person.key) ? 2 : 3;
   return [...people.values()]
     .sort((a, b) => rank(a) - rank(b) || (a.billing === "lead" ? 0 : 1) - (b.billing === "lead" ? 0 : 1) || a.first - b.first)
@@ -173,11 +185,12 @@ export function chapterPeople(store: Pick<WorldStore, "getBundle">, plan: Pick<A
 }
 
 /** Exact keys win; names and authored aliases resolve only when they identify one sheet. */
-export function resolveChapterPerson<T extends { key: string; name: string; aliases?: readonly string[] }>(people: readonly T[], value: string): T | undefined {
+export function resolveChapterPerson<T extends { key: string; name: string; aliases?: readonly string[]; ambiguousNames?: readonly string[] }>(people: readonly T[], value: string): T | undefined {
   const exact = people.find((person) => person.key === value.trim());
   if (exact !== undefined) return exact;
-  const name = value.trim().toLowerCase();
-  const matches = people.filter((person) => [person.name, ...(person.aliases ?? [])].some((alias) => alias.toLowerCase() === name));
+  const name = characterAliasKey(value);
+  if (people.some(person => person.ambiguousNames?.includes(name))) return undefined;
+  const matches = people.filter((person) => [person.name, ...(person.aliases ?? [])].some((alias) => characterAliasKey(alias) === name));
   return matches.length === 1 ? matches[0] : undefined;
 }
 

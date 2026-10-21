@@ -2,6 +2,8 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   SHEET_SHAPES,
+  CharacterAliasesInputSchema,
+  characterAliases,
   PERFORMANCE_NOTE_MAX,
   EXPRESSIVE_DIRECTION_SCHEMA_VERSION,
   propSlugs,
@@ -121,6 +123,7 @@ export function editSheetContent(input: {
       ...(billing !== undefined ? { billing } : {}),
       ...(sheet.neverDepicted !== undefined ? { neverDepicted: sheet.neverDepicted } : {}),
       ...(sheet.shortName !== undefined ? { shortName: sheet.shortName } : {}),
+      ...(sheet.aliases !== undefined ? { aliases: sheet.aliases } : {}),
       ...(region !== undefined ? { region } : {}),
       // The live version, not 1: the committer stamps the real one either way, and restating what
       // the sheet actually says keeps the staged file readable as the thing it is a version of.
@@ -288,10 +291,12 @@ export async function duplicateSheet(
     updated: store.now().slice(0, 10),
   });
   // A copy goes by its own name: carrying the source's short name would give two characters the
-  // same one, and rows would fall back to their full names (design turn 194, rule 12b).
-  if ("shortName" in copy.data) {
+  // same one, and rows would fall back to their full names (design turn 194, rule 12b). Its
+  // identity aliases belong to the original too; cloning them would create ambiguous bindings.
+  if ("shortName" in copy.data || "aliases" in copy.data) {
     const next = { ...copy.data };
     delete next["shortName"];
+    delete next["aliases"];
     copy.data = next;
     copy.setData({});
   }
@@ -334,17 +339,19 @@ export async function stageSheetStatus(
 export async function stageSheetRename(
   store: WorldStore,
   gate: ProposalManager,
-  input: { path: string; name: string; shortName?: string | null },
+  input: { path: string; name: string; shortName?: string | null; aliases?: string[] },
 ): Promise<Proposal> {
   const live = await readLive(store, input.path);
   if (live === null) throw new Error(`${input.path} does not exist`);
   const doc = MarkdownFile.parse(live);
   const oldName = String(doc.data["name"]);
-  const content = sheetRenameContent(live, input.name, input.shortName);
+  const content = sheetRenameContent(live, input.name, input.shortName, input.aliases);
   return gate.stage({
     kind: "sheet-edit",
     summary:
-      input.name.trim() === oldName && input.shortName !== undefined
+      input.aliases !== undefined && input.name.trim() === oldName
+        ? `Set other names for ${oldName}: ${characterAliases(input.aliases).join(", ") || "none"} — existing briefs and takes stay unchanged`
+        : input.name.trim() === oldName && input.shortName !== undefined
         ? `Call ${oldName} ${input.shortName?.trim() ? input.shortName.trim() : "by the default short name"} in rows and filters — the name, the id and every citation stay`
         : `Rename ${oldName} to ${input.name} — the id and every citation stay`,
     source: "form",
@@ -398,9 +405,15 @@ export function sheetStatusContent(content: string, status: "sketch" | "locked")
  * The sheet renamed, and — for a character — its short name set (`shortName` text), put back to the
  * default (`null` or empty) or left alone (absent). Frontmatter only.
  */
-export function sheetRenameContent(content: string, name: string, shortName?: string | null): string {
+export function sheetRenameContent(content: string, name: string, shortName?: string | null, aliases?: readonly string[]): string {
   const doc = MarkdownFile.parse(content);
   doc.setData({ name: name.trim() });
+  if (aliases !== undefined) {
+    if (doc.data["type"] !== "character") throw new Error("Only a character has identity aliases.");
+    const names = characterAliases(CharacterAliasesInputSchema.parse(aliases));
+    if (names.length > 0) doc.setData({ aliases: names });
+    else { const next = { ...doc.data }; delete next["aliases"]; doc.data = next; doc.setData({}); }
+  }
   if (shortName === undefined) return doc.serialize();
   const written = shortName === null ? "" : shortName.trim();
   if (written === "") {

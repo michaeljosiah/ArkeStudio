@@ -34,6 +34,7 @@ import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX, CadencePlanSchema } from "./cad
 import { PerformanceIdSchema } from "./performance.js";
 import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
+import { CharacterAliasesInputSchema } from "./world.js";
 import { RoutingCommandSchema } from "./world-chat-actions.js";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { ClientStateSchema } from "./client-state.js";
@@ -1227,6 +1228,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       name: z.string().min(1).max(200),
       /** A character's short name (design turn 194, rule 12b): absent leaves it, empty or null puts the default back. */
       shortName: z.string().trim().max(SHORT_NAME_MAX).nullable().optional(),
+      /** Explicit character identity names: absent leaves them, empty removes them. */
+      aliases: CharacterAliasesInputSchema.optional(),
     })
     .strict(),
   /** The human's own action: assigning (or clearing) a voice commits straight to the sheet —
