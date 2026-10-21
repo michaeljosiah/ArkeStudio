@@ -9,6 +9,10 @@ import {
   isWorldImagePath,
   listeningChapter,
   placePictures,
+  kitLookLibrary,
+  lookDigest,
+  lookLinesFor,
+  pictureLookChanged,
   worldImageReferences,
   type AudiobookListening,
   type AudiobookPicture,
@@ -277,11 +281,24 @@ export async function setAudiobookPicture(
     if (!listed || !(await onShelf(store, picture.file))) throw new Error("that picture is not in this world");
   }
   const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+  const record = plan.record === "unreadable" ? null : plan.record;
+  const index = blocks.findIndex(candidate => candidate.key === block);
+  const shown = (record: ChapterAudiobook | null) => placePictures(blocks, record?.pictures).placed.find(entry => entry.index === index)?.picture;
+  const original = shown(record);
+  // Only an explicit same-file choice for the same words can reaffirm a retained generation.
+  const reaffirm = picture !== null && !made.arke && !made.look && !made.shot && original?.file === picture.file && original.textHash === audiobookTextHash(planned.block.text);
+  const reviewHash = (record: ChapterAudiobook | null) => original?.look === undefined ? undefined : lookDigest(lookLinesFor(record?.look, original.look.who, original.look.looks, kitLookLibrary(store.getBundle().referenceKits, record?.look)));
+  const expectedLook = reaffirm ? reviewHash(record) : undefined;
+  const checkReview = (record: ChapterAudiobook | null) => {
+    if (reaffirm && (JSON.stringify(shown(record)) !== JSON.stringify(original) || reviewHash(record) !== expectedLook)) throw new Error("The picture or its look changed; choose the picture again.");
+  };
   return updateAudiobook(store, productionId, plan.chapter, (current) => {
+    checkReview(current);
     const held = current.pictures ?? {};
     const rest = otherBlockPictures(blocks, held, block, picture !== null);
     if (picture === null && Object.keys(rest).length === Object.keys(held).length) return null;
-    const next: Record<string, AudiobookPicture> = picture === null ? rest : { ...rest, [block]: { file: picture.file, source: picture.source, textHash: audiobookTextHash(planned.block.text), at: store.now(), ...(made.look !== undefined ? { look: made.look } : {}), ...(made.shot !== undefined ? { shot: made.shot } : {}) } };
+    const kept = reaffirm ? { ...original, ...(expectedLook !== undefined && pictureLookChanged(original.look, current.look, kitLookLibrary(store.getBundle().referenceKits, current.look), original.lookReview) ? { lookReview: { hash: expectedLook, at: store.now() } } : {}) } : undefined;
+    const next: Record<string, AudiobookPicture> = picture === null ? rest : { ...rest, [block]: kept ?? { file: picture.file, source: picture.source, textHash: audiobookTextHash(planned.block.text), at: store.now(), ...(made.look !== undefined ? { look: made.look } : {}), ...(made.shot !== undefined ? { shot: made.shot } : {}) } };
     const { pictures: _old, ownLooks: pending, ...without } = current;
     // What was held for this block's next picture is that picture's own now (R-146): on its stamp.
     const { [block]: _made, ...others } = pending ?? {};
@@ -291,5 +308,7 @@ export async function setAudiobookPicture(
     const fresh = await planAudiobook(store, productionId, summary.id, { narrator });
     const currentBlocks = fresh.blocks.map(candidate => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
     if (JSON.stringify(currentBlocks) !== JSON.stringify(blocks)) throw new Error("The chapter's blocks changed; choose the picture again.");
+    checkReview(fresh.record === "unreadable" ? null : fresh.record);
+    if (reaffirm && picture !== null && !(await onShelf(store, picture.file))) throw new Error("that picture is not in this world");
   } });
 }

@@ -448,6 +448,11 @@ describe("Suggest picture (turn 191a)", () => {
     assert.equal(q(same, '[data-testid="picture-look-changed"]'), null);
     const changed = await mount(2, { "p1.0": made("A red coat.") }, look);
     assert.equal(text(q(changed, '[data-testid="picture-look-changed"]')), "look changed");
+    const reviewed = { ...made("A red coat."), lookReview: { hash: lookDigest([{ key: "maren-kest", text: "Oilskin coat." }]), at: AT } };
+    const kept = await mount(2, { "p1.0": reviewed }, look);
+    assert.equal(q(kept, '[data-testid="picture-look-changed"]'), null);
+    const later = await mount(2, { "p1.0": reviewed }, { ...look, characters: { "maren-kest": { name: "Maren", text: "A dry coat." } } });
+    assert.equal(text(q(later, '[data-testid="picture-look-changed"]')), "look changed");
   });
 });
 

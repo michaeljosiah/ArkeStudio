@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
-import { PictureLookSchema } from "./audiobook-look.js";
+import { PictureLookSchema, PictureLookReviewSchema } from "./audiobook-look.js";
 import { PictureShotSchema } from "./audiobook-illustrate.js";
 import { AudiobookMotionSchema } from "./audiobook-motion.js";
 
@@ -33,6 +33,8 @@ export const AudiobookPictureSchema = z
      * never remade without asking. Absent on a picture the author chose rather than Arke made.
      */
     look: PictureLookSchema.optional(),
+    /** Same-file picker reaffirmation against a later look; the original look and shot stay intact. */
+    lookReview: PictureLookReviewSchema.optional(),
     /**
      * The shot it was made from (design turn 194g, SPEC-047 R-120, R-121): the frame, who was in it
      * and who was not, and the checks as they stood when Generate was pressed — so the block's card
