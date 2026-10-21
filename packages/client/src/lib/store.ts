@@ -6004,6 +6004,12 @@ export function deriveAudiobookLook(worldId: string, productionId: string, chapt
   return send({ kind: "derive-audiobook-look", worldId, productionId, chapterFile, requestId }) ? requestId : null;
 }
 
+/** The author's explicit identity choice for one existing unresolved chapter line. */
+export function linkAudiobookCharacter(worldId: string, productionId: string, chapterFile: string, input: { key: string; expectedName: string; expectedHash: string; sheetId: string }): string | null {
+  const requestId = ulid();
+  return send({ kind: "link-audiobook-character", worldId, productionId, chapterFile, ...input, requestId }) ? requestId : null;
+}
+
 /** One line of the look written (R-98): the place's or one character's; null takes it away. Answered as `audiobook.record`. */
 export function setAudiobookLook(worldId: string, productionId: string, chapterFile: string, target: import("@arke-studio/contracts").LookTarget, text: string | null): string | null {
   const requestId = ulid();

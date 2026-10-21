@@ -360,7 +360,7 @@ import type { AudiobookWordTimingState } from "@arke-studio/contracts";
 import { prepareAudiobookWordTiming } from "./productions/audiobook-word-timing.js";
 import { audiobookVideoState, exportAudiobookVideo, forgetVideoJob, listVideoExports, pendingVideoJobs } from "./productions/audiobook-video.js";
 import { bookLookChoices, lookUsage } from "./productions/audiobook-look-book.js";
-import { chooseChapterLook, deriveChapterLook, makeAdapterLookDeriver, setChapterLook, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
+import { chooseChapterLook, deriveChapterLook, makeAdapterLookDeriver, setChapterLook, linkChapterCharacter, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
 import { makeAdapterIllustrateDeriver, proposeIllustrations, type IllustrateDeriver } from "./productions/audiobook-illustrate.js";
 import { clipPrompt, depictable, makeAdapterPictureDeriver, neutralWhereLooksRide, pictureAspect, pictureRoom, pictureWho, promptRoom, suggestPicture, type PictureDeriver } from "./productions/audiobook-picture-suggest.js";
 import { clothingChange, makeAdapterPromptRewriter, rewritePictureClothing, type PromptRewriter } from "./productions/audiobook-picture-rewrite.js";
@@ -16308,6 +16308,21 @@ export class Coordinator {
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.look-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
           this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "link-audiobook-character": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find(production => production.meta.id === msg.productionId)?.chapters.find(candidate => candidate.file === msg.chapterFile || candidate.id === msg.chapterFile);
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter?.id ?? "unavailable", requestId: msg.requestId };
+        try {
+          if (chapter === undefined || chapter.retired) throw new Error("That chapter is no longer available.");
+          const record = await linkChapterCharacter(store, msg.productionId, chapter.id, msg);
+          this.emit({ at: this.nowIso(), type: "audiobook.record", ...ids, record });
+          this.refreshIfStillOpen(store);
+        } catch (error) {
+          this.emit({ at: this.nowIso(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(error) });
         }
         return;
       }

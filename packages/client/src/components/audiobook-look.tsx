@@ -3,6 +3,7 @@ import {
   chapterLooksOf,
   estimateCharacterImageMicroUsd,
   lookClothing,
+  lookCharacterHash,
   lookName,
   lookOlderFace,
   mainPhotoFor,
@@ -20,7 +21,7 @@ import { PageSheet } from "./page-sheet.js";
 import { SavedLookCollection, SavedLookImage } from "./saved-look-collection.js";
 import { NewLookSheet } from "./audiobook-new-look.js";
 import { mediaUrl } from "../lib/media.js";
-import { acceptChapterLook, chooseAudiobookLook, deriveAudiobookLook, makeChapterLook, rejectReferenceTake, setAudiobookLook, useAudiobookRecords, useStore } from "../lib/store.js";
+import { acceptChapterLook, chooseAudiobookLook, deriveAudiobookLook, makeChapterLook, rejectReferenceTake, setAudiobookLook, linkAudiobookCharacter, useAudiobookRecords, useStore } from "../lib/store.js";
 import { lookJobState, lookJobs, useQueueRefusals } from "./look-jobs.js";
 import { Button, Select, Textarea } from "./ui.js";
 
@@ -103,9 +104,23 @@ function LookLine({ row, disabled, onWrite }: { row: Row; disabled: boolean; onW
   const tag = row.id === "place" ? "Place" : row.id === "mood" ? "Mood" : null;
   return <div className="fy-look__line" data-testid="look-line" data-key={row.id}>
     <div className="fy-look__tx"><b>{row.label ?? tag}</b><Field row={row} label={row.label ?? tag ?? "Line"} disabled={disabled} onWrite={onWrite} />
-      {tag === null && row.sheet === undefined && <span className="fy-ch__who-where--warn" data-testid="look-unlinked">Identity not linked · confirm which character this is</span>}
+      {tag === null && row.sheet === undefined && <span className="fy-ch__who-where--warn" data-testid="look-unlinked">Identity not linked · choose a character above</span>}
     </div>
     {row.source !== null && <span className="fy-look__src fy-mono">{row.source}</span>}
+  </div>;
+}
+
+function IdentityLink({ row, sheets, disabled, busy, onLink }: { row: Row; sheets: readonly { id: string; name: string }[]; disabled: boolean; busy: boolean; onLink: (row: Row, sheetId: string) => void }) {
+  const [chosen, setChosen] = useState("");
+  const fingerprint = row.line === undefined ? "" : lookCharacterHash(row.line);
+  useEffect(() => setChosen(""), [row.id, fingerprint]);
+  return <div className="fy-look__detailactions" data-testid="look-identity-link">
+    <Select label={"Character for " + (row.label ?? row.id)} value={chosen} disabled={disabled} onChange={event => setChosen(event.target.value)}>
+      <option value="">Choose an existing character…</option>
+      {sheets.map(sheet => <option key={sheet.id} value={sheet.id}>{sheet.name}</option>)}
+    </Select>
+    <Button variant="outline" disabled={disabled || !sheets.some(sheet => sheet.id === chosen)} onClick={() => onLink(row, chosen)}>{busy ? "Linking…" : "Link character"}</Button>
+    <span className="fy-look__savehint">This links the chapter. Other names on the character sheet apply across chapters.</span>
   </div>;
 }
 
@@ -329,6 +344,8 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
   const queueRefused = useQueueRefusals();
   const [asked, setAsked] = useState<string | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
+  const [linking, setLinking] = useState<{ requestId: string; key: string; sheetId: string } | null>(null);
+  useEffect(() => setLinking(null), [chapterFile]);
   const [making, setMaking] = useState<{ key: string; name: string; sheet: string; line: string } | null>(null);
   const [browsing, setBrowsing] = useState<string | null>(null);
   /** Close views asked for here, by look: the request whose job is that row's. */
@@ -351,6 +368,10 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
   const [writing, setWriting] = useState<ReadonlyArray<{ requestId: string; target: LookTarget; text: string | null }>>([]);
   useEffect(() => {
     const landed = (id: string) => Object.values(answers).find((value) => value.requestId === id);
+    if (linking !== null && landed(linking.requestId) !== undefined) {
+      setRefused(landed(linking.requestId)!.refused ?? null);
+      setLinking(null);
+    }
     if (asked !== null && landed(asked) !== undefined) {
       setRefused(landed(asked)!.refused ?? null);
       setAsked(null);
@@ -361,11 +382,12 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
     if (refusal !== undefined) setRefused(refusal);
     if (answered.length > 0) setChoosing((held) => Object.fromEntries(Object.entries(held).filter(([key]) => !answered.some(([done]) => done === key))));
     if (wrote.length > 0) setWriting((held) => held.filter((press) => !wrote.includes(press)));
-  }, [answers, asked, choosing, writing]);
+  }, [answers, asked, choosing, writing, linking]);
   // A press the record already shows is settled, whichever answer brought it: answers to quick
   // presses replace one another in the store, so its own may never be read.
   useEffect(() => {
     if (look === null) return;
+    if (linking !== null && look.characters[linking.sheetId]?.sheet === linking.sheetId && (linking.key === linking.sheetId || look.characters[linking.key] === undefined)) setLinking(null);
     const shown = Object.entries(choosing).filter(([key, press]) => (look.characters[key]?.lookId ?? null) === press.lookId);
     if (shown.length > 0) setChoosing((held) => Object.fromEntries(Object.entries(held).filter(([key]) => !shown.some(([done]) => done === key))));
     const written = writing.filter((press) => (lineOf(look, press.target) ?? null) === press.text);
@@ -409,7 +431,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
   const addable = (world?.sheets ?? []).filter((sheet) => sheet.type === "character" && sheet.retired !== true && sheet.neverDepicted !== true && !held.has(sheet.id) && !adding.some((entry) => entry.key === sheet.id));
   const count = Object.keys(shownLook?.characters ?? {}).length;
   const chosenCount = Object.values(shownLook?.characters ?? {}).filter((line) => line.lookId !== undefined).length;
-  const saving = Object.keys(choosing).length > 0 || writing.length > 0;
+  const saving = Object.keys(choosing).length > 0 || writing.length > 0 || linking !== null;
   const slug = world?.meta.slug ?? "";
   const orderOf = (file: string): number | null => world?.productions.find((candidate) => candidate.meta.id === productionId)?.chapters.find((chapter) => chapter.file === file)?.order ?? null;
   const choose = (row: Row, lookId: string | null) => {
@@ -477,6 +499,13 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
             </Button>
           </div>
   );
+  const linkIdentity = (row: Row, sheetId: string) => {
+    if (row.line === undefined) return;
+    setRefused(null);
+    const requestId = linkAudiobookCharacter(worldId, productionId, chapterFile, { key: row.id, expectedName: row.line.name, expectedHash: lookCharacterHash(row.line), sheetId });
+    if (requestId !== null) { asking.current.add(requestId); setLinking({ requestId, key: row.id, sheetId }); }
+  };
+  const linkable = world?.sheets.filter(sheet => sheet.type === "character" && sheet.retired !== true) ?? [];
   const renderRow = (row: Row, view: "overview" | "details") => row.line !== undefined && row.sheet !== undefined ? (
     <CharacterRow
       view={view}
@@ -506,7 +535,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
       }}
     />
   ) : (
-    view === "details" ? <LookLine key={row.id} row={row} disabled={off} onWrite={write} /> : <div className="fy-look__unlinked" key={row.id}><b>{row.label}</b><p className="fy-ch__who-where--warn">Identity not linked · confirm which character this is in Chapter details</p></div>
+    view === "details" ? <LookLine key={row.id} row={row} disabled={off} onWrite={write} /> : <div className="fy-look__unlinked" key={row.id}><b>{row.label}</b><p className="fy-ch__who-where--warn">Identity not linked</p><IdentityLink row={row} sheets={linkable} busy={linking?.key === row.id} disabled={off || linking !== null || writing.length > 0} onLink={linkIdentity} /></div>
   );
   const chapter = world?.productions.find((production) => production.meta.id === productionId)?.chapters.find((entry) => entry.file === chapterFile);
   const footer = <><span className="fy-look__footcount">{chosenCount} chosen look{chosenCount === 1 ? "" : "s"} · {count} character{count === 1 ? "" : "s"}</span><span className="fy-ch__panelpush" /><Button variant="primary" onClick={onClose} data-testid="look-done">Done</Button></>;
