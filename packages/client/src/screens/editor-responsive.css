@@ -27,6 +27,12 @@
 .fy-cut-lane-sheet .fy-page-sheet__body > button { padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--foreground); }
 .fy-cut-lane-sheet button[aria-pressed=true] { background: var(--foreground); color: var(--background); }
 
+@media (max-width: 1199px) {
+  /* The open Library covers the page switcher. Keep it out of both the heading and keyboard
+     order until the drawer closes; the existing close action returns to the Cut's tools. */
+  .fy-production-app[data-cut-route]:has(.fy-artpanel[data-open="true"]) .fy-production-drawer-toggle { visibility: hidden; }
+}
+
 @media (pointer: coarse) {
   .fy-pictclip, .fy-typedclip { touch-action: pan-x; }
   .fy-pictclip[aria-pressed=true], .fy-typedclip[aria-pressed=true] { touch-action: none; border: 0; box-shadow: inset 0 0 0 3px var(--timeline-selection); }
