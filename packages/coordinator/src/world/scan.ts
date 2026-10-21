@@ -199,7 +199,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 98: what of an episode's mix was heard, with its notes — drama-mix `heard` (issue 1882).
 // 99: retained prose-first sheet creation review on conversation action bindings (#2047).
 // 100: exact retained conversation-candidate read receipts (#2048).
-export const SUPPORTED_SCHEMA_VERSION = 100;
+// 101: the exact prompt saved picture checks examined (#2011).
+export const SUPPORTED_SCHEMA_VERSION = 101;
 
 export class WorldOpenError extends Error {
   constructor(

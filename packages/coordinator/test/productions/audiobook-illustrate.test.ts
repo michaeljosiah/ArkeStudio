@@ -6,7 +6,7 @@ import { acceptCharacterLook } from "../../src/references/kit.js";
 import { pngBytes } from "../queue/fake-provider.js";
 import { pictureLookChanged, type AudiobookPicture, type ClientMessage, type DomainEvent, type IllustrationProposal } from "@arke-studio/contracts";
 import { readAudiobook } from "../../src/productions/audiobook.js";
-import { AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { buildIllustratePrompt, type IllustrateDeriver, type IllustrateDeriverInput, type RawIllustration } from "../../src/productions/audiobook-illustrate.js";
 import { CHAPTER, IMAGE, LEDGER, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
 
@@ -77,6 +77,7 @@ describe("Illustrate this chapter: the proposal (R-101)", () => {
         assert.deepEqual(proposal.rows.map((row) => row.at), proposal.rows.map((row) => row.at).toSorted((x, y) => x - y), "in reading order");
         assert.ok(proposal.rows.every((row, index) => index === 0 || row.at - proposal.rows[index - 1]!.at >= 20), "never closer than the twenty seconds a picture holds");
         assert.ok(proposal.rows.every((row) => row.title !== "" && row.prompt !== ""));
+        assert.ok(proposal.rows.every((row) => row.shot?.checkedPrompt === row.prompt), "each set of checks identifies its exact prompt");
         assert.ok(proposal.rows.every((row) => row.estimatedMicroUsd === (row.who.some((entry) => entry.carried) ? 45_000 : 40_000)), "each row priced from the manifest's figures and the references that ride");
         assert.equal(proposal.model.id, "stair-image");
         assert.equal(proposal.aspect, "16:9");
@@ -243,7 +244,7 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
         assert.equal(records.length, proposal.rows.length);
         assert.deepEqual(records.map((event) => Object.keys(event.record!.pictures!).length), proposal.rows.map((_, index) => index + 1), "each picture landed on its block before the next was begun");
         assert.ok(proposal.rows.every((row) => row.shot !== undefined), "each row was drafted with its shot");
-        assert.equal(h.schemaVersion(), AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, "a picture keeping its shot raises the world first");
+        assert.equal(h.schemaVersion(), AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION, "a picture keeping its checked prompt raises the world first");
         // Nothing is left to make: the proposal is spent, and no second card follows the run.
         assert.equal(h.events.filter((event) => event.type === "illustration.finished").length, 1);
       },

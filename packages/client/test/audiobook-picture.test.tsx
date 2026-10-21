@@ -552,6 +552,33 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.equal(text(q(m, '[data-testid="suggest-generate"]')), "Generating…");
   });
 
+  it("marks edited prompt checks as historical and keeps their original receipt when making again (#2011)", async () => {
+    extraArtifacts = [madeArtifact()];
+    const shot = { ...SHOT, checkedPrompt: PROMPT };
+    const m = await mount(2, { "p1.0": made(shot) });
+    assert.equal(q(m, '[data-testid="picture-card-checks-stale"]'), null);
+    assert.equal(all(m, '[data-testid="picture-card-check"] i svg').length, 3);
+    await press(q(m, '[data-testid="picture-card-prompt"]'));
+    const edited = `${PROMPT} No face in frame.`;
+    await typeInto(q(m, '[data-testid="suggest-card"] textarea') as HTMLTextAreaElement, edited);
+    assert.match(text(q(m, '[data-testid="picture-card-checks-stale"]')), /Checks from an earlier prompt.*current prompt not checked/);
+    assert.equal(all(m, '[data-testid="picture-card-check"] i svg').length, 0, "no current-pass ticks on historical checks");
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    const make = asked(m, "make-audiobook-picture")[0]!;
+    assert.equal(make.prompt, edited);
+    assert.deepEqual(make.shot, shot);
+  });
+
+  it("identifies historical and unstamped checks when a made picture is reopened (#2011)", async () => {
+    extraArtifacts = [madeArtifact()];
+    const m = await mount(2, { "p1.0": made({ ...SHOT, checkedPrompt: "An earlier draft." }) });
+    assert.match(text(q(m, '[data-testid="picture-card-checks-stale"]')), /earlier prompt/);
+    assert.equal(all(m, '[data-testid="picture-card-check"]').length, 3, "historical outcomes remain visible");
+    const legacy = await mount(2, { "p1.0": made(SHOT) });
+    assert.match(text(q(legacy, '[data-testid="picture-card-checks-stale"]')), /Saved checks.*prompt version not recorded/);
+    assert.equal(all(legacy, '[data-testid="picture-card-check"] i svg').length, 0);
+  });
+
   it("prices Make again for someone the picture went without, now that their look rides, and confirms that price (issue 1876)", async () => {
     // Made with the Vigil alone: Maren had nothing to carry then. The chapter dresses her in the storm coat now.
     const without = artifact("ar_01J8G0000000000000000PICMD", "made-maren.png", {

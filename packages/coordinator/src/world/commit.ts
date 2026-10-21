@@ -425,6 +425,8 @@ export const SHEET_SHORT_NAME_SCHEMA_VERSION = 59;
  * Sixty is production readiness's (SPEC-051 T-9), so this is 61.
  */
 export const AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION = 61;
+/** The prompt a picture's historical checks examined; earlier readers reject the added field. */
+export const AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION = 101;
 /**
  * Where a picture's subject stands (design turn 197b): `focus` on a picture in the chapter's
  * strict audiobook record, which the video's vertical crop and Slow push follow. A build before

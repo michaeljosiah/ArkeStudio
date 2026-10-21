@@ -121,6 +121,8 @@ export const PictureShotSchema = z
     expressions: z.record(z.string().min(1).max(120), z.string().min(1).max(PICTURE_EXPRESSION_MAX)),
     details: z.array(PictureDetailSchema).max(12),
     checks: z.array(PictureCheckSchema).max(7),
+    /** The exact prompt these historical checks examined; absent on older saved pictures. */
+    checkedPrompt: z.string().min(1).max(PICTURE_PROMPT_MAX).optional(),
   })
   .strict();
 export type PictureShot = z.infer<typeof PictureShotSchema>;

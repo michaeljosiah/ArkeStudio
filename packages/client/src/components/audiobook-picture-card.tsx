@@ -610,9 +610,16 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
       </div>
       {((shot !== undefined && shot.checks.length > 0) || changes.length > 0) && (
         <ul className="fy-pcard__checks" data-testid="picture-card-checks">
+          {shot !== undefined && shot.checks.length > 0 && shot.checkedPrompt !== prompt && (
+            <li className="fy-pcard__check fy-pcard__check--mark" data-testid="picture-card-checks-stale" role="status">
+              <i aria-hidden="true">!</i>
+              <span>{shot.checkedPrompt === undefined ? "Saved checks" : "Checks from an earlier prompt"}</span>
+              <span className="fy-mono">{shot.checkedPrompt === undefined ? "prompt version not recorded" : "current prompt not checked"}</span>
+            </li>
+          )}
           {(shot?.checks ?? []).map((check) => (
             <li key={check.id} className={cx("fy-pcard__check", !check.ok && "fy-pcard__check--mark")} data-testid="picture-card-check" data-check={check.id} data-ok={check.ok ? "true" : "false"}>
-              <i aria-hidden="true">{check.ok ? <Check size={12} /> : "!"}</i>
+              <i aria-hidden="true">{check.ok ? shot?.checkedPrompt === prompt ? <Check size={12} /> : null : "!"}</i>
               <span>{check.label}</span>
               {check.note !== undefined && <span className="fy-mono">{check.note}</span>}
             </li>
