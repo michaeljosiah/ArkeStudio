@@ -1,6 +1,7 @@
 # Turn 233 · Export → Arke Player
 
-Drawn 21 October 2026 for review; nothing is built. Specified in SPEC-058 (the private
+Drawn 21 October 2026 and approved as drawn by the owner the same day, with the calls below;
+nothing is built. Specified in SPEC-058 (the private
 specification set; R-1 – R-8 and R-29 are this turn) and tracked in #2037.
 
 ## Asked
