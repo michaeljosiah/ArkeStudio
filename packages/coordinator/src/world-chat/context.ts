@@ -312,7 +312,7 @@ function renderRegistry(
       `  rationale: ${g.rationale}`,
       `  members: ${g.members.map((m) => `${m.candidateId} r${m.revision}`).join(", ")}`,
     ]);
-  const guide = lines.length > 0 ? ["Read exact retained drafts with get_candidate(candidateId, expectedRevision); follow every page before updating."] : [];
+  const guide = lines.length > 0 ? ["Read exact drafts with get_candidate(candidateId, expectedRevision); follow every page. Update the same identity, preserving authored fields, original evidence and groups unless asked to change them. Retained checks are historical: refresh current world checks."] : [];
   if (groupLines.length === 0) return [...guide, ...lines].join("\n");
   return [...guide, ...lines, "", "Groups (an update restates all three fields):", ...groupLines].join("\n");
 }
