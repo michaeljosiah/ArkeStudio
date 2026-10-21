@@ -771,29 +771,37 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     await reopened.close();
   });
 
-  it("refuses a newer schema version without modifying the world (R-25)", async () => {
-    const dir = await tempDir("arke-newer-");
-    const worldDir = join(dir, "future-world");
-    await cp(FIXTURE_WORLD, worldDir, { recursive: true });
-    const metaPath = join(worldDir, "world.json");
-    const meta = JSON.parse(await readFile(metaPath, "utf8")) as Record<string, unknown>;
-    meta["schemaVersion"] = SUPPORTED_SCHEMA_VERSION + 1;
-    const raw = JSON.stringify(meta, null, 2);
-    await writeFile(metaPath, raw, "utf8");
-    const snapshot = async (folder: string): Promise<unknown[]> => {
-      const entries = await fs.readdir(folder, { withFileTypes: true });
-      return Promise.all(entries.sort((a, b) => a.name.localeCompare(b.name)).map(async (entry) => [
-        entry.name, entry.isDirectory() ? await snapshot(join(folder, entry.name)) : sha256(await readFile(join(folder, entry.name))),
-      ]));
-    };
-    const before = await snapshot(worldDir);
+  for (const interruptedAt of [undefined, "staged-written", "committing-marked"] as const) {
+    it(`refuses a newer schema without modifying the world${interruptedAt ? ` or its ${interruptedAt} journal` : ""} (R-25)`, async () => {
+      const dir = await tempDir("arke-newer-");
+      const worldDir = join(dir, "future-world");
+      await cp(FIXTURE_WORLD, worldDir, { recursive: true });
+      if (interruptedAt) {
+        await assert.rejects(new Committer(worldDir, CLOCK).commit({
+          kind: "world-rename", source: "future-world-test", files: [], worldFields: { name: "Pending name" },
+        }, { at: (point) => { if (point === interruptedAt) throw new CrashSignal("interrupted"); } }), CrashSignal);
+      }
+      const metaPath = join(worldDir, "world.json");
+      const meta = JSON.parse(await readFile(metaPath, "utf8")) as Record<string, unknown>;
+      meta["schemaVersion"] = SUPPORTED_SCHEMA_VERSION + 1;
+      const raw = JSON.stringify(meta, null, 2);
+      await writeFile(metaPath, raw, "utf8");
+      const snapshot = async (folder: string): Promise<unknown[]> => {
+        const entries = await fs.readdir(folder, { withFileTypes: true });
+        return Promise.all(entries.sort((a, b) => a.name.localeCompare(b.name)).map(async (entry) => [
+          entry.name, entry.isDirectory() ? await snapshot(join(folder, entry.name)) : sha256(await readFile(join(folder, entry.name))),
+        ]));
+      };
+      const before = await snapshot(worldDir);
 
-    const newer = (error: unknown) => error instanceof WorldOpenError && error.reason === "schema-newer";
-    await assert.rejects(() => readWorldMeta(worldDir), newer);
-    await assert.rejects(() => WorldStore.open(worldDir, { clock: CLOCK }), newer);
-    assert.equal(await readFile(metaPath, "utf8"), raw, "the world was not modified");
-    assert.deepEqual(await snapshot(worldDir), before, "no world file was created, removed or rewritten");
-  });
+      const newer = (error: unknown) => error instanceof WorldOpenError && error.reason === "schema-newer";
+      await assert.rejects(() => readWorldMeta(worldDir), newer);
+      await assert.rejects(() => WorldStore.open(worldDir, { clock: CLOCK, readOnly: true }), newer);
+      await assert.rejects(() => WorldStore.open(worldDir, { clock: CLOCK }), newer);
+      assert.equal(await readFile(metaPath, "utf8"), raw, "the world was not modified");
+      assert.deepEqual(await snapshot(worldDir), before, "no world file was created, removed or rewritten");
+    });
+  }
 
   it("contains no absolute path in any world file (R-24)", async () => {
     const dir = await makeTempWorld();

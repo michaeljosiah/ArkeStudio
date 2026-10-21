@@ -7,7 +7,9 @@ location fixtures distinct; assert visible cast status without forbidding extra 
 Video-cache coverage needs two fully read manuscript chapters and an incomplete one, verifies
 actual encode calls, then renders again without another encode. An outline-only fixture is not
 a narrated chapter. Future-schema refusal must use the current supported version plus one and
-preserve every world file. Keep the shape guide below its existing bound with all schema-owned
+preserve every world file, including pending rollback and roll-forward journals. Run coordinator
+`test/world/ownership.test.ts` and `test/world/crash.test.ts` when changing that admission check;
+supported recovery still runs under ownership before the scan. Keep the shape guide below its existing bound with all schema-owned
 examples, typed fields, receipt rules and approval requirements intact. Run the full affected
 files and package typechecks, and inspect Windows and Linux CI results.
 
