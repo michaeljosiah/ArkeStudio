@@ -3,7 +3,7 @@ import { ulid, type AudiobookListening, type ProductionBundle } from "@arke-stud
 import { downloadMedia } from "../lib/download.js";
 import { mediaUrl } from "../lib/media.js";
 import { listWebPackages, openExportsFolder, subscribeArkePlayerExported, subscribeWebPackages, exportArkePlayer, useStore, type ArkePlayerExported } from "../lib/store.js";
-import { Folder, megabytes, Toggle, wholeChapters } from "./audiobook-video.js";
+import { Folder, megabytes, Toggle } from "./audiobook-video.js";
 
 /**
  * Export → Arke Player (design turn 233, SPEC-058 R-1 – R-8): the world package a person adds by
@@ -34,8 +34,14 @@ export interface ArkePlayerCounts {
   minutes: number;
 }
 
+/**
+ * The chapters a package carries, by the exporter's own test: read whole, by takes or by an
+ * Audio Studio chapter's one mix, which may hold no speech block at all.
+ */
+const carried = (plan: AudiobookListening) => plan.chapters.filter((chapter) => chapter.state === "read" && (chapter.blocks.length > 0 || (chapter.audioStudio !== undefined && chapter.mix !== undefined)));
+
 export function arkePlayerCounts(plan: AudiobookListening, options: { book: boolean; motion: boolean }): ArkePlayerCounts {
-  const whole = wholeChapters(plan);
+  const whole = carried(plan);
   // The cover ships with the narration only: a package of the book alone shows no pictures.
   const pictures = new Set<string>(whole.length === 0 ? [] : [...(plan.cover !== null ? [plan.cover] : []), ...whole.flatMap((chapter) => [...chapter.pictures.map((picture) => picture.file), ...(chapter.opening !== null ? [chapter.opening] : [])])]);
   const loops = new Set(whole.flatMap((chapter) => chapter.pictures.flatMap((picture) => (picture.motion !== undefined ? [picture.motion.file] : []))));

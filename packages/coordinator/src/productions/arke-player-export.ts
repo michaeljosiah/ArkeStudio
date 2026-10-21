@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { LISTENING_MEDIA_TYPE, manuscriptDocument, WORLD_PACKAGE_FORMAT, type ListeningChapter, type ListeningDocumentChapter, type WorldAsset } from "@arke-studio/contracts";
+import { z } from "zod";
+import { LISTENING_MEDIA_TYPE, manuscriptDocument, SlugSchema, WORLD_PACKAGE_FORMAT, type ListeningChapter, type ListeningDocumentChapter, type WorldAsset } from "@arke-studio/contracts";
 import type { FfmpegRunner } from "../takes/export.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -71,12 +72,55 @@ export function pngHasAlpha(bytes: Uint8Array): boolean {
   return false;
 }
 
-/** What a package depends on in the plan, to read it again under the gate and compare (R-4). */
-function signature(chapters: readonly ListeningChapter[]): string {
-  return JSON.stringify(chapters.map((chapter) => [chapter.chapterId, chapter.title, chapter.mix?.file ?? null, chapter.blocks.map((block) => [block.key, block.file, block.seconds, block.words?.length ?? 0]), chapter.pictures.map((picture) => [picture.key, picture.file, picture.at, picture.seconds, picture.focus ?? null, picture.motion?.file ?? null, picture.motionProblem ?? null]), chapter.opening]));
+/** Whether a WebP carries alpha: the VP8X alpha flag, or a lossless image's alpha bit (R-6). */
+export function webpHasAlpha(bytes: Uint8Array): boolean {
+  if (bytes.length < 30) return false;
+  const view = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.toString("latin1", 0, 4) !== "RIFF" || view.toString("latin1", 8, 12) !== "WEBP") return false;
+  const chunk = view.toString("latin1", 12, 16);
+  if (chunk === "VP8X") return (view[20]! & 0x10) !== 0;
+  if (chunk === "VP8L") return ((view.readUInt32LE(21) >>> 28) & 1) === 1;
+  return false;
+}
+
+/** Whether a picture must stay PNG to keep its transparency. */
+const transparent = (bytes: Uint8Array) => pngHasAlpha(bytes) || webpHasAlpha(bytes);
+
+/**
+ * Everything the package is made from, to read it again under the gate and compare (R-4): the
+ * plan in full — takes, sentences, words, pictures, focus, loops and how they play — the book's
+ * prose, and the world's name, logline and key art.
+ */
+function fingerprint(whole: readonly ListeningChapter[], cover: string | null, book: readonly BookChapter[], store: WorldStore, productionId: string): string {
+  const bundle = store.getBundle();
+  const production = bundle.productions.find((entry) => entry.meta.id === productionId);
+  return JSON.stringify({ whole, cover, book, world: [bundle.meta.name, bundle.meta.logline ?? null, bundle.keyArt ?? null], title: production?.meta.title ?? null });
 }
 
 const readWhole = (chapter: ListeningChapter) => chapter.state === "read" && (chapter.blocks.length > 0 || (chapter.audioStudio !== undefined && chapter.mix !== undefined));
+
+interface BookChapter {
+  id: string;
+  title: string;
+  body: string;
+}
+
+/**
+ * The book: every chapter still in the manuscript, in its order (R-2), as the story edition
+ * compiler writes it. A chapter with no prose is left out of the EPUB, so its place is known only
+ * by writing each chapter's document the way the book does.
+ */
+async function readBook(store: WorldStore, productionId: string): Promise<BookChapter[]> {
+  const production = store.getBundle().productions.find((entry) => entry.meta.id === productionId);
+  if (production === undefined) return [];
+  const chapters: BookChapter[] = [];
+  const ordered = production.chapters.filter((chapter) => !chapter.retired).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+  for (const chapter of ordered) {
+    const opened = await openChapter(store, productionId, chapter.id);
+    if (manuscriptDocument({ title: "", worldName: "", chapters: [{ title: opened.title, body: opened.body }] }).chapters.length === 1) chapters.push({ id: chapter.id, title: opened.title, body: opened.body });
+  }
+  return chapters;
+}
 
 export async function exportArkePlayer(store: WorldStore, productionId: string, options: ArkePlayerExportOptions): Promise<ArkePlayerExportResult> {
   if (!ARKE_PLAYER_EXPORT_ID.test(options.exportId)) throw new Error("invalid Arke Player export id");
@@ -93,17 +137,8 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
   const listening = await audiobookListening(store, productionId, listeningOptions);
   const whole = listening.chapters.filter(readWhole);
 
-  // The book: every chapter still in the manuscript, in its order (R-2), as the story edition
-  // compiler writes it. A chapter with no prose is left out of the EPUB, so its place is known
-  // only by writing each chapter's document the way the book does.
-  const bookChapters: Array<{ id: string; title: string; body: string }> = [];
-  if (options.include.book) {
-    const ordered = production.chapters.filter((chapter) => !chapter.retired).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-    for (const chapter of ordered) {
-      const opened = await openChapter(store, productionId, chapter.id);
-      if (manuscriptDocument({ title: "", worldName: "", chapters: [{ title: opened.title, body: opened.body }] }).chapters.length === 1) bookChapters.push({ id: chapter.id, title: opened.title, body: opened.body });
-    }
-  }
+  const bookChapters = options.include.book ? await readBook(store, productionId) : [];
+  const madeFrom = fingerprint(whole, listening.cover, bookChapters, store, productionId);
   if (whole.length === 0 && bookChapters.length === 0) return { ok: false, blockers: [options.include.book ? "no chapter is read whole and the book has no prose yet" : "no chapter is read whole yet"] };
 
   // A loop that will not play holds the package back, as R-72's does (R-11) — unless loops are
@@ -199,17 +234,17 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
       if (signal.aborted) return cancelled();
       step(`Fitting pictures · ${index + 1} of ${fitting}`, 50 + (index / Math.max(1, fitting)) * 35);
       const original = await readFile(toExtendedLength(real.get(file)!));
-      const transparent = file.toLowerCase().endsWith(".png") && pngHasAlpha(original);
+      const keepsAlpha = transparent(original);
       const assetId = file === keyArt ? "key-art" : `p${pad(++numbered, 3)}`;
-      const path = assetId === "key-art" ? `key-art.${transparent ? "png" : "jpg"}` : `pictures/${assetId}.${transparent ? "png" : "jpg"}`;
+      const path = assetId === "key-art" ? `key-art.${keepsAlpha ? "png" : "jpg"}` : `pictures/${assetId}.${keepsAlpha ? "png" : "jpg"}`;
       const fit = `scale='min(${PICTURE_SIDE},iw)':'min(${PICTURE_SIDE},ih)':force_original_aspect_ratio=decrease`;
       try {
-        await ffmpeg.run(["-y", "-i", real.get(file)!, "-vf", fit, "-frames:v", "1", "-update", "1", ...(transparent ? [] : ["-q:v", "4"]), at(path)], () => {}, signal);
+        await ffmpeg.run(["-y", "-i", real.get(file)!, "-vf", fit, "-frames:v", "1", "-update", "1", ...(keepsAlpha ? [] : ["-q:v", "4"]), at(path)], () => {}, signal);
       } catch {
         if (signal.aborted) return cancelled();
         return { ok: false, blockers: [`${file.split("/").pop()} could not be fitted for a phone`] };
       }
-      await add(assetId, path, transparent ? "image/png" : "image/jpeg");
+      await add(assetId, path, keepsAlpha ? "image/png" : "image/jpeg");
       originals[assetId] = sha256(original);
       pictureIds.set(file, assetId);
     }
@@ -278,7 +313,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
     await mkdir(toExtendedLength(join(store.dir, "exports")), { recursive: true });
     const taken = new Set(await readdir(toExtendedLength(join(store.dir, "exports"))).catch(() => [] as string[]));
     let edition = day;
-    for (let counter = 2; taken.has(`${slug}-player-${edition}.zip`); counter++) edition = `${day}-${counter}`;
+    for (let counter = 2; taken.has(`${slug}-player-${edition}.zip`) || taken.has(`${slug}-player-${edition}.zip.json`); counter++) edition = `${day}-${counter}`;
     const name = `${slug}-player-${edition}.zip`;
     const manifest = {
       format: WORLD_PACKAGE_FORMAT,
@@ -303,7 +338,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
         studio: options.studioVersion,
         exportId: options.exportId,
         exportedAt: stamp,
-        listening: sha256(new TextEncoder().encode(signature(whole))),
+        listening: sha256(new TextEncoder().encode(madeFrom)),
         originals,
       },
     };
@@ -318,18 +353,27 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
     const shown = new Set([...(cover !== null ? [cover] : []), ...whole.flatMap((chapter) => [...(chapter.opening !== null ? [chapter.opening] : []), ...chapter.pictures.map((picture) => picture.file)])]).size;
     const holds = [whole.length > 0 ? `${whole.length} chapter${whole.length === 1 ? "" : "s"}` : null, shown > 0 ? `${shown} picture${shown === 1 ? "" : "s"}` : null, bookId !== undefined ? "the book" : null].filter((part) => part !== null).join(" · ");
 
-    // Under the gate, the plan is read again: a take made, a picture moved or a focus changed
-    // meanwhile refuses the package rather than shipping it beside the snapshot's (R-4).
+    // Under the gate, everything the package was made from is read again: a take made, a
+    // sentence or a chapter's prose edited, a picture moved, a focus changed or a loop set to
+    // hold meanwhile refuses the package rather than shipping it beside the snapshot's (R-4).
     return await store.gateOp(async () => {
-      const again = (await audiobookListening(store, productionId, listeningOptions)).chapters.filter(readWhole);
-      if (signature(again) !== signature(whole)) return { ok: false as const, blockers: ["the book changed while the package was made · make it again"] };
+      const plan = await audiobookListening(store, productionId, listeningOptions);
+      const book = options.include.book ? await readBook(store, productionId) : [];
+      if (fingerprint(plan.chapters.filter(readWhole), plan.cover, book, store, productionId) !== madeFrom) return { ok: false as const, blockers: ["the book changed while the package was made · make it again"] };
       const destination = join(store.dir, "exports", name);
       // Never over an earlier export (SPEC-048 R-10).
-      if (await stat(toExtendedLength(destination)).then(() => true, () => false)) return { ok: false as const, blockers: [`exports/${name} already exists · make it again`] };
-      await rename(toExtendedLength(zip), toExtendedLength(destination));
-      // Beside it, what Publications lists without reading the package again (233e).
+      const exists = (path: string) => stat(toExtendedLength(path)).then(() => true, () => false);
+      if ((await exists(destination)) || (await exists(`${destination}.json`))) return { ok: false as const, blockers: [`exports/${name} already exists · make it again`] };
+      // What Publications lists, written before the package is named (233e): a record without
+      // its package is never listed, and a package is never left without its record.
       const listed: ArkePlayerListed = { kind: "arke-player", exportId: options.exportId, exportedAt: stamp, productionId, title: bundle.meta.name, bytes: checked.bytes, sha256: checked.sha256, holds };
-      await writeFile(toExtendedLength(`${destination}.json`), `${JSON.stringify(listed, null, 2)}\n`, "utf8");
+      await writeFile(toExtendedLength(`${destination}.json`), `${JSON.stringify(listed, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+      try {
+        await rename(toExtendedLength(zip), toExtendedLength(destination));
+      } catch (error) {
+        await rm(toExtendedLength(`${destination}.json`), { force: true }).catch(() => {});
+        throw error;
+      }
       step("Done", 100);
       return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: whole.length, pictures: shown, book: bookId !== undefined };
     });
@@ -338,16 +382,18 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
   }
 }
 
-interface ArkePlayerListed {
-  kind: "arke-player";
-  exportId: string;
-  exportedAt: string;
-  productionId: string;
-  title: string;
-  bytes: number;
-  sha256: string;
-  holds: string;
-}
+/** The record beside a package (233e), read whole: one that is not, by hand or by a fault, is not listed. */
+const ArkePlayerListedSchema = z.object({
+  kind: z.literal("arke-player"),
+  exportId: z.string().regex(ARKE_PLAYER_EXPORT_ID),
+  exportedAt: z.string().min(1),
+  productionId: SlugSchema,
+  title: z.string(),
+  bytes: z.number().int().min(0),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  holds: z.string(),
+}).strict();
+type ArkePlayerListed = z.infer<typeof ArkePlayerListedSchema>;
 
 /**
  * The world's Arke Player packages for Publications (233e), newest first: each by the record
@@ -359,8 +405,9 @@ export async function listArkePlayerPackages(store: WorldStore): Promise<Array<A
   const out: Array<ArkePlayerListed & { dir: string; file: string }> = [];
   for (const name of names) {
     try {
-      const listed = JSON.parse(await readFile(toExtendedLength(join(exportsDir, `${name}.json`)), "utf8")) as ArkePlayerListed;
-      if (listed.kind !== "arke-player" || typeof listed.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(listed.sha256) || typeof listed.exportedAt !== "string") continue;
+      const parsed = ArkePlayerListedSchema.safeParse(JSON.parse(await readFile(toExtendedLength(join(exportsDir, `${name}.json`)), "utf8")));
+      if (!parsed.success) continue;
+      const listed = parsed.data;
       if ((await stat(toExtendedLength(join(exportsDir, name)))).size !== listed.bytes) continue;
       out.push({ ...listed, dir: `exports/${name}`, file: `exports/${name}` });
     } catch {

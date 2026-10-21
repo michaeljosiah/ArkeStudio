@@ -270,8 +270,13 @@ export function readListening(source: string, assets: Readonly<Record<string, Wo
       if (!asset(picture.picture, WORLD_PICTURE_MEDIA_TYPES)) return notAPackage(`${where}: a picture`);
       before = picture;
     }
+    let heard: ListeningDocumentPhrase | undefined;
     for (const phrase of chapter.phrases ?? []) {
       if (phrase.at >= phrase.end || phrase.end > chapter.duration) return notAPackage(`${where}: a phrase out of its chapter`);
+      // In time order and apart: Text shows the first phrase still being heard, so one starting
+      // before the last has ended could never be shown.
+      if (heard !== undefined && phrase.at < heard.end) return notAPackage(`${where}: phrases out of order or overlapping`);
+      heard = phrase;
       for (const word of phrase.words ?? []) {
         if (word.at >= word.end || word.at < phrase.at || word.end > phrase.end) return notAPackage(`${where}: a word outside its phrase`);
       }

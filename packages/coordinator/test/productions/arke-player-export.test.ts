@@ -9,7 +9,7 @@ import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
 import { phrasesOf } from "../../src/productions/arke-player-listening.js";
-import { packageSlug, pngHasAlpha } from "../../src/productions/arke-player-export.js";
+import { listArkePlayerPackages, packageSlug, pngHasAlpha, webpHasAlpha } from "../../src/productions/arke-player-export.js";
 import { checkWorldPackageZip } from "../../src/productions/world-package.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
@@ -220,6 +220,44 @@ describe("the package's parts", () => {
     assert.equal(pngHasAlpha(png(2)), false);
     assert.equal(pngHasAlpha(png(2, "tRNS")), true);
     assert.equal(pngHasAlpha(png(3, "PLTE")), false);
+  });
+
+  it("knows a transparent WebP, lossy with VP8X or lossless (R-6)", () => {
+    const webp = (chunk: string, flagOrBits: number) => {
+      const bytes = Buffer.alloc(32);
+      bytes.write("RIFF", 0, "latin1");
+      bytes.write("WEBP", 8, "latin1");
+      bytes.write(chunk, 12, "latin1");
+      if (chunk === "VP8X") bytes[20] = flagOrBits;
+      if (chunk === "VP8L") { bytes[20] = 0x2f; bytes.writeUInt32LE(flagOrBits, 21); }
+      return new Uint8Array(bytes);
+    };
+    assert.equal(webpHasAlpha(webp("VP8X", 0x10)), true);
+    assert.equal(webpHasAlpha(webp("VP8X", 0x00)), false);
+    assert.equal(webpHasAlpha(webp("VP8L", 1 << 28)), true);
+    assert.equal(webpHasAlpha(webp("VP8L", 0)), false);
+    assert.equal(webpHasAlpha(webp("VP8 ", 0)), false);
+  });
+
+  it("lists a package only by a whole record beside it, at the length it records (233e)", async () => {
+    const { root, worldDir } = await makeTempRoot();
+    const provider = new FsWorldProvider(root, { clock: () => "2026-10-21T09:00:00.000Z" });
+    await provider.loadWorld(WORLD_ID);
+    try {
+      await mkdir(join(worldDir, "exports"), { recursive: true });
+      const record = { kind: "arke-player", exportId: "ap_01J8G000000000000000000001", exportedAt: "2026-10-21T09:00:00.000Z", productionId: LEDGER, title: "The Undersong", bytes: 4, sha256: "a".repeat(64), holds: "the book" };
+      await writeFile(join(worldDir, "exports", "the-undersong-player-2026-10-21.zip"), "zip!");
+      await writeFile(join(worldDir, "exports", "the-undersong-player-2026-10-21.zip.json"), JSON.stringify(record));
+      // A record edited by hand, missing what Publications needs, and one whose package has grown.
+      await writeFile(join(worldDir, "exports", "the-undersong-player-2026-10-21-2.zip"), "zip!");
+      await writeFile(join(worldDir, "exports", "the-undersong-player-2026-10-21-2.zip.json"), JSON.stringify({ ...record, productionId: undefined }));
+      await writeFile(join(worldDir, "exports", "the-undersong-player-2026-10-21-3.zip"), "zip!!");
+      await writeFile(join(worldDir, "exports", "the-undersong-player-2026-10-21-3.zip.json"), JSON.stringify(record));
+      const listed = await listArkePlayerPackages(provider.openStore!()!);
+      assert.deepEqual(listed.map((entry) => entry.file), ["exports/the-undersong-player-2026-10-21.zip"]);
+    } finally {
+      await provider.close();
+    }
   });
 
   it("names a world by its slug, within a package's vocabulary", () => {

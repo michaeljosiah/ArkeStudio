@@ -98,6 +98,10 @@
       "expect": "notAPackage"
     },
     {
+      "file": "phrase-overlap.json",
+      "expect": "notAPackage"
+    },
+    {
       "file": "duplicate-order.json",
       "expect": "notAPackage"
     },

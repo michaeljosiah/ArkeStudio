@@ -89,6 +89,9 @@ describe("Export → Arke Player (turn 233)", () => {
     const counts = arkePlayerCounts(PLAN, { book: true, motion: true });
     assert.deepEqual([counts.chapters, counts.of, counts.range, counts.pictures, counts.loops, counts.wordsTimed], [1, 2, "Chapter 1", 2, 0, 1]);
     assert.ok(counts.bytes > arkePlayerCounts(PLAN, { book: false, motion: true }).bytes, "the book has its size");
+    // An Audio Studio chapter is carried by its one mix, though it holds no speech block.
+    const mixed: AudiobookListening = { ...PLAN, chapters: [...PLAN.chapters, { chapterId: "weir", order: 3, title: "The Weir", state: "read", seconds: 30, blocks: [], gaps: [], pictures: [], opening: null, mix: { file: "audio/weir.wav", seconds: 30 }, audioStudio: { revision: 1, issues: [], omissions: [] } }] };
+    assert.equal(arkePlayerCounts(mixed, { book: true, motion: true }).chapters, 2);
   });
 
   it("offers Arke Player as a fourth kind, with its rows, and makes the package on the desktop", async () => {
