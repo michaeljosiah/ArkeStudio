@@ -136,6 +136,26 @@ describe("Listen on every chat's replies", () => {
     assert.equal(sent.some(message => message.kind === "conversation-action-decide"), false);
   });
 
+  it("keeps a long inline span formatted while navigating the shared reply", async () => {
+    const state = chatArtifactsFixture();
+    const content = "Maren kept the warning. ".repeat(800).trim();
+    state.worldChat!.messages[1]!.text = `**${content}**`;
+    const container = await worldChat(state);
+    const studio = turns(container).find(turn => turn.classList.contains("fy-chat__turn--studio"))!;
+    const pages = studio.querySelector('[aria-label="Reply parts"]')!;
+    const next = [...pages.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Next")!;
+    let read = "";
+    for (;;) {
+      const part = studio.querySelector(".fy-chat__reply-part")!;
+      assert.ok(part.querySelector("strong"));
+      assert.ok(!part.textContent?.includes("**"));
+      read += part.textContent;
+      if (next.disabled) break;
+      await click(next);
+    }
+    assert.equal(read, content);
+  });
+
   it("World Chat on a desktop: Listen under each of Arke's replies, never the author's, read by address", async () => {
     const state = chatArtifactsFixture();
     const container = await worldChat(state);

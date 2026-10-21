@@ -25,3 +25,28 @@ it("bounds unusually long paragraphs without dropping whitespace or splitting su
     assert.ok(parts.every(part => !/^[\uDC00-\uDFFF]/.test(part)));
   }
 });
+
+it("keeps stacked headings with their first prose instead of making a title-only part", () => {
+  const first = "# Chapter one\r\n\r\n## Opening\r\n\r\n" + "Maren watched the harbour.\r\n\r\n".repeat(150);
+  const second = "# Chapter two\r\n\r\n## Crossing\r\n\r\n" + "The watch crossed the harbour.\r\n\r\n".repeat(150);
+  assert.deepEqual(chatReplyParts(first + second), [first, second]);
+});
+
+it("coalesces dense heading blocks and short sections into bounded useful parts", () => {
+  for (const text of ["# A\n## B\n\n".repeat(20_000), "# A\n\nA line.\n\n".repeat(14_000)]) {
+    const parts = chatReplyParts(text);
+    assert.equal(parts.join(""), text);
+    assert.ok(parts.length <= Math.ceil(text.length / 1_998), "short headings cannot make thousands of pages");
+    assert.ok(parts.every(part => part.length <= 8_000));
+    assert.ok(parts.slice(0, -1).every(part => part.length >= 1_998));
+  }
+});
+
+it("keeps CRLF pairs intact at a hard display boundary", () => {
+  const text = "a".repeat(7_999) + "\r\n" + "b".repeat(12_000);
+  const parts = chatReplyParts(text);
+  assert.equal(parts.join(""), text);
+  assert.equal(parts[0], "a".repeat(7_999));
+  assert.ok(parts.every(part => !part.endsWith("\r")));
+  assert.ok(parts.every(part => !part.startsWith("\n")));
+});

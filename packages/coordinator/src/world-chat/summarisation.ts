@@ -9,7 +9,7 @@ import {
 import { extractJson } from "../canon/ask.js";
 import { createPreparedSession, sessionTurnTimeoutMs, type SessionInput } from "../harness/session-files.js";
 import { toExtendedLength } from "../world/paths.js";
-import { boundSummary, shouldSummarise } from "./context.js";
+import { boundSummary, budgetFor, shouldSummarise } from "./context.js";
 import type { WorldChatStore } from "./store.js";
 import { foldWorldChatInputs } from "./input-fold.js";
 
@@ -190,46 +190,68 @@ export function makeConversationSummariser(
        * model that must be chosen by name installed, every summary was refused and the old one
        * silently kept, so a long thread stopped being condensed while the chat answered fine.
        */
-      let session: Awaited<ReturnType<typeof create>>;
-      try { session = await create(); }
-      catch (error) {
-        if (abort.signal.aborted || input.model === undefined) throw error;
-        session = await create(input.model);
-      }
-      sessionId = session.sessionId;
-      if (abort.signal.aborted) { stop(); return null; }
-      let finalText = "";
-      const collected = (async () => {
-      for await (const event of adapter.streamEvents(abort.signal)) {
-        if (!("sessionId" in event) || event.sessionId !== session.sessionId) continue;
-        if (event.type === "message.completed") {
-          finalText = event.text ?? "";
-          return;
+      let summary = input.previousSummary;
+      let messageIndex = 0;
+      let offset = 0;
+      do {
+        // Each batch has a fresh session: continuing the same session would accumulate the
+        // very transcript we are bounding. Only a fully processed transcript is checkpointed.
+        let session: Awaited<ReturnType<typeof create>>;
+        try { session = await create(); }
+        catch (error) {
+          if (abort.signal.aborted || input.model === undefined) throw error;
+          session = await create(input.model);
         }
-        if (event.type === "session.error") throw new Error(event.message);
-      }
-      })();
-      const prior = input.previousSummary
-      ? `Existing summary:\n${input.previousSummary}\n\n`
-      : "";
-      const transcript = input.messages
-      .map((message) => `${message.role === "user" ? "User" : "Studio"} [${message.id}]${message.replyMessageId
-        ? ` (direction included in Studio reply [${message.replyMessageId}])` : ""}: ${message.text}`)
-      .join("\n\n");
-      const prompt = `${prior}New conversation messages to incorporate:\n${transcript}`;
-      const timeout = new Promise<never>((_, reject) => {
-      deadline = setTimeout(() => reject(new Error("conversation summarisation timed out")), sessionTurnTimeoutMs(session.model, SUMMARY_TIMEOUT_MS));
-      });
-      await cancellable(Promise.race([
-        Promise.all([
-          adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] }),
-          collected,
-        ]),
-        timeout,
-      ]).then(() => undefined), abort.signal, undefined);
-      if (abort.signal.aborted) return null;
-      const parsed = SummaryResponseSchema.safeParse(extractJson(finalText));
-      return parsed.success ? parsed.data.summary.trim() : null;
+        sessionId = session.sessionId;
+        if (abort.signal.aborted) { stop(); return null; }
+        const window = adapter.knownInputTokenLimit?.(sessionId) ?? undefined;
+        const budget = budgetFor(window, window !== undefined
+          ? adapter.promptReserveTokens?.("conversation-summarizer", window) : undefined);
+        let prompt = `${summary ? `Existing summary:\n${summary}\n\n` : ""}New conversation messages to incorporate:\n`;
+        const startIndex = messageIndex;
+        const startOffset = offset;
+        while (messageIndex < input.messages.length) {
+          const message = input.messages[messageIndex]!;
+          const label = `${message.role === "user" ? "User" : "Studio"} [${message.id}]${message.replyMessageId
+            ? ` (direction included in Studio reply [${message.replyMessageId}])` : ""}${offset ? " (continued)" : ""}: `;
+          const room = budget - prompt.length - label.length - 2;
+          if (room <= 0) break;
+          let end = Math.min(message.text.length, offset + room);
+          // Do not send half a Unicode pair at the boundary of a long manuscript.
+          if (end < message.text.length && /[\uD800-\uDBFF]/u.test(message.text[end - 1]!) &&
+            /[\uDC00-\uDFFF]/u.test(message.text[end]!)) end--;
+          if (end === offset && message.text.length > offset) break;
+          prompt += `${label}${message.text.slice(offset, end)}\n\n`;
+          if (end === message.text.length) { messageIndex++; offset = 0; }
+          else { offset = end; break; }
+        }
+        if (prompt.length > budget || (input.messages.length > 0 &&
+          messageIndex === startIndex && offset === startOffset)) return null;
+        let finalText = "";
+        const collected = (async () => {
+          for await (const event of adapter.streamEvents(abort.signal)) {
+            if (!("sessionId" in event) || event.sessionId !== session.sessionId) continue;
+            if (event.type === "message.completed") { finalText = event.text ?? ""; return; }
+            if (event.type === "session.error") throw new Error(event.message);
+          }
+        })();
+        const timeout = new Promise<never>((_, reject) => {
+          deadline = setTimeout(() => reject(new Error("conversation summarisation timed out")), sessionTurnTimeoutMs(session.model, SUMMARY_TIMEOUT_MS));
+        });
+        await cancellable(Promise.race([
+          Promise.all([
+            adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] }),
+            collected,
+          ]),
+          timeout,
+        ]).then(() => undefined), abort.signal, undefined);
+        clearTimeout(deadline);
+        if (abort.signal.aborted) return null;
+        const parsed = SummaryResponseSchema.safeParse(extractJson(finalText));
+        if (!parsed.success || !parsed.data.summary.trim()) return null;
+        summary = parsed.data.summary.trim();
+      } while (messageIndex < input.messages.length);
+      return summary ?? null;
     } catch {
       return null;
     } finally {

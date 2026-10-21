@@ -18,10 +18,11 @@ export function ConversationReply({ text }: { text: string }) {
     content.current?.scrollIntoView({ block: "start" });
   }, [current]);
   if (parts.length === 1) return renderInlineMarkdown(text);
+  const start = parts.slice(0, current).reduce((length, value) => length + value.length, 0);
   const move = (next: number) => { moving.current = true; setPart(next); };
   return <>
     <div ref={content} id={id} className="fy-chat__reply-part" tabIndex={-1} aria-label={`Reply, part ${current + 1} of ${parts.length}`}>
-      {renderInlineMarkdown(parts[current]!)}
+      {renderInlineMarkdown(text, { start, end: start + parts[current]!.length })}
     </div>
     <nav className="fy-chat__reply-pages" aria-label="Reply parts">
       <Button variant="ghost" size="sm" disabled={current === 0} aria-controls={id} onClick={() => move(current - 1)}>Previous</Button>
