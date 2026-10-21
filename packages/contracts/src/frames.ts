@@ -3960,6 +3960,23 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * The world package for Arke Player (design turn 233, SPEC-058 R-1 – R-8): the book and the
+   * illustrated narration of the chapters read whole, in one ZIP under `exports/`, answered as
+   * `arke-player.exported` and followed in Activity through `export.progress`.
+   */
+  z
+    .object({
+      kind: z.literal("export-arke-player"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      /** Chosen by the window, so it can find the package again after a reconnect lost the answer. */
+      exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/),
+      /** The book and the pictures' loops are each the author's to leave out (233a). */
+      options: z.object({ book: z.boolean(), motion: z.boolean() }).strict(),
+    })
+    .strict(),
+  /**
    * The audiobook as a video (design turn 197, SPEC-047): the chapters read whole rendered to MP4
    * on this machine, one a chapter or one for the book, answered as `audiobook.video-exported`
    * and followed in Activity through `export.progress`.

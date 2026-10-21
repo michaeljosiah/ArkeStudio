@@ -359,7 +359,7 @@ export function computeRunning(
   state: ClientState,
   extras: {
     sidecar?: { state: string; detail: string } | null;
-    exports?: Record<string, { productionId: string; status: string; percent: number; video?: AudiobookVideoProgress }>;
+    exports?: Record<string, { productionId: string; status: string; percent: number; video?: AudiobookVideoProgress; label?: string; step?: string }>;
   } = {},
 ): RunningEntry[] {
   const entries: RunningEntry[] = [];
@@ -396,8 +396,8 @@ export function computeRunning(
     }
     entries.push({
       kind: "export",
-      title: `export · ${e.productionId}`,
-      detail: "rendering locally",
+      title: e.label ?? `export · ${e.productionId}`,
+      detail: e.step ?? "rendering locally",
       percent: e.percent,
       ref: id,
       cancellable: true,
