@@ -9,6 +9,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchPa
 import {
   artifactPosterPath,
   CHARACTER_ROLE_MAX,
+  CharacterAliasesInputSchema,
   MICRODRAMA_DEFAULTS,
   AUDIO_DRAMA_KIND,
   adaptableStories,
@@ -1864,6 +1865,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const [renaming, setRenaming] = useState<string | null>(null);
   // A character's short name, edited with the name (design turn 194, rule 12b); empty is the default.
   const [shortDraft, setShortDraft] = useState("");
+  const [aliasesDraft, setAliasesDraft] = useState("");
   const [duplicating, setDuplicating] = useState<string | null>(null);
   const lifecycle = useSingleAct();
   const { talk: talkAboutSheet, starting: sheetTalkStarting } = useTalkItThrough(worldId);
@@ -1885,6 +1887,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const refs = sheetRefsMap[sheet.id];
   const references = referenceSummary(kit);
   const isCharacter = sheet.type === "character";
+  const aliasNames = aliasesDraft.split(/\r?\n/).map(name => name.trim()).filter(Boolean);
+  const aliasesValid = CharacterAliasesInputSchema.safeParse(aliasNames).success;
   const mainPhoto = kit ? mainPhotoFor(kit) : null;
   const characterSheet = kit ? designatedCompilation(kit) : null;
   const slug = world.meta.slug;
@@ -2243,6 +2247,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           aria-pressed={renaming !== null}
           onClick={() => {
             setShortDraft(sheet.shortName ?? "");
+            setAliasesDraft((sheet.aliases ?? []).join("\n"));
             setRenaming(renaming === null ? sheet.name : null);
           }}
         >
@@ -2295,15 +2300,23 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
               />
             </div>
           )}
+          {isCharacter && (
+            <div className="scr-field">
+              <label className="scr-field__label" htmlFor="sheet-aliases">Other names</label>
+              <Textarea id="sheet-aliases" rows={2} value={aliasesDraft} maxLength={2904} data-testid="sheet-aliases" aria-describedby="sheet-aliases-hint" onChange={event => setAliasesDraft(event.target.value)} />
+              <p id="sheet-aliases-hint" className="scr-field__hint">One name per line. Shared names need review. Saved pictures and recordings keep their identity.</p>
+              {!aliasesValid && <p role="alert" className="fy-ch__who-where--warn">Use at most 24 names, each up to 120 characters.</p>}
+            </div>
+          )}
           <div className="fy-sheet-inline-form__actions">
             <Button
               variant="primary"
-              disabled={renaming.trim().length === 0 || (renaming.trim() === sheet.name && (!isCharacter || shortDraft.trim() === (sheet.shortName ?? "")))}
+              disabled={renaming.trim().length === 0 || (isCharacter && !aliasesValid) || (renaming.trim() === sheet.name && (!isCharacter || (shortDraft.trim() === (sheet.shortName ?? "") && aliasesDraft.trim() === (sheet.aliases ?? []).join("\n"))))}
               onClick={() => {
-                if (worldId) lifecycle.track(renameSheet(worldId, sheetPath, renaming.trim(), isCharacter && shortDraft.trim() !== (sheet.shortName ?? "") ? shortDraft.trim() : undefined));
+                if (worldId) lifecycle.track(renameSheet(worldId, sheetPath, renaming.trim(), isCharacter && shortDraft.trim() !== (sheet.shortName ?? "") ? shortDraft.trim() : undefined, isCharacter && aliasesDraft.trim() !== (sheet.aliases ?? []).join("\n") ? aliasNames : undefined));
               }}
             >
-              Rename
+              {renaming.trim() === sheet.name && aliasesDraft.trim() !== (sheet.aliases ?? []).join("\n") ? "Save other names" : "Rename"}
             </Button>
             <Button variant="ghost" onClick={() => setRenaming(null)}>
               Cancel

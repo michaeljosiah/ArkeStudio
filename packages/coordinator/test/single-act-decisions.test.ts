@@ -139,6 +139,15 @@ describe("remaining single-act decisions (SPEC-040)", () => {
     await undo(h, renamed);
     assert.equal(store.getBundle().sheets.find((sheet) => sheet.id === original.id)?.name, original.name);
 
+    const aliasId = ulid();
+    await h.send({ kind: "rename-sheet", worldId: WORLD_ID, requestId: aliasId, path, name: original.name, aliases: ["Rena"] });
+    const aliased = resultFor(h.events, aliasId);
+    assert.equal(aliased.disposition, "accepted");
+    assert.deepEqual(aliased.undo, { kind: "rename-sheet", path, name: original.name, aliases: [] });
+    assert.deepEqual(store.getBundle().sheets.find(sheet => sheet.id === original.id)?.aliases, ["Rena"]);
+    await undo(h, aliased);
+    assert.equal(store.getBundle().sheets.find(sheet => sheet.id === original.id)?.aliases, undefined);
+
     const statusId = ulid();
     const nextStatus = original.status === "locked" ? "sketch" : "locked";
     await h.send({ kind: "set-sheet-status", worldId: WORLD_ID, requestId: statusId, path, status: nextStatus });

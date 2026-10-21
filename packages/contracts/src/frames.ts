@@ -34,6 +34,7 @@ import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX, CadencePlanSchema } from "./cad
 import { PerformanceIdSchema } from "./performance.js";
 import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
+import { CharacterAliasesInputSchema } from "./world.js";
 import { RoutingCommandSchema } from "./world-chat-actions.js";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { ClientStateSchema } from "./client-state.js";
@@ -1227,6 +1228,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       name: z.string().min(1).max(200),
       /** A character's short name (design turn 194, rule 12b): absent leaves it, empty or null puts the default back. */
       shortName: z.string().trim().max(SHORT_NAME_MAX).nullable().optional(),
+      /** Explicit character identity names: absent leaves them, empty removes them. */
+      aliases: CharacterAliasesInputSchema.optional(),
     })
     .strict(),
   /** The human's own action: assigning (or clearing) a voice commits straight to the sheet —
@@ -3949,6 +3952,23 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
       /** The package's id, chosen by the window so it can find the package again after a reconnect lost the answer. */
       exportId: z.string().regex(/^ab_[0-9A-HJKMNP-TV-Z]{26}$/).optional(),
+    })
+    .strict(),
+  /**
+   * The world package for Arke Player (design turn 233, SPEC-058 R-1 – R-8): the book and the
+   * illustrated narration of the chapters read whole, in one ZIP under `exports/`, answered as
+   * `arke-player.exported` and followed in Activity through `export.progress`.
+   */
+  z
+    .object({
+      kind: z.literal("export-arke-player"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      /** Chosen by the window, so it can find the package again after a reconnect lost the answer. */
+      exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/),
+      /** The book and the pictures' loops are each the author's to leave out (233a). */
+      options: z.object({ book: z.boolean(), motion: z.boolean() }).strict(),
     })
     .strict(),
   /**

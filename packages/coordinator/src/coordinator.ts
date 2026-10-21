@@ -371,6 +371,7 @@ import { audioStudioMedia, audioStudioSourceProblems, decideAudioStudioProposal,
 import { AudioStudioPreviews } from "./productions/audio-studio-preview.js";
 import { renderAudioStudioMix } from "./productions/audio-studio-mix.js";
 import { audiobookPlayerFile, exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
+import { exportArkePlayer, listArkePlayerPackages } from "./productions/arke-player-export.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
 import { checkDirection, directionPlan, heldKey } from "./voice/direction.js";
@@ -6901,7 +6902,7 @@ export class Coordinator {
     // A request owns its world independently of the renderer route. Use the same authenticated
     // commands and store, never a second coordinator or an unowned filesystem writer.
     if (!audiobookStore && "worldId" in msg && msg.worldId &&
-      ["read-audiobook-chapter", "read-audiobook-book", "open-audiobook", "open-audiobook-listening", "keep-audiobook-split", "export-audiobook-player"].includes(msg.kind) &&
+      ["read-audiobook-chapter", "read-audiobook-book", "open-audiobook", "open-audiobook-listening", "keep-audiobook-split", "export-audiobook-player", "export-arke-player"].includes(msg.kind) &&
       this.opts.provider.withBackgroundWorldStore) {
       if (this.stopping) return;
       return this.opts.provider.withBackgroundWorldStore(msg.worldId, store =>
@@ -9278,7 +9279,7 @@ export class Coordinator {
                 requestId: msg.requestId,
                 operation: msg.operation,
                 path: msg.path,
-                edit: (content) => sheetRenameContent(content, undo.name, undo.shortName),
+                edit: (content) => sheetRenameContent(content, undo.name, undo.shortName, undo.aliases),
               })
             ) {
               await this.refreshWorldSnapshot(msg.worldId);
@@ -9291,7 +9292,7 @@ export class Coordinator {
               path: () => msg.path,
               stage: async () => {
                 if (!gate) throw new Error("The accept gate is unavailable.");
-                return stageSheetRename(store, gate, { path: msg.path, name: undo.name, ...(undo.shortName !== undefined ? { shortName: undo.shortName } : {}) });
+                return stageSheetRename(store, gate, { path: msg.path, name: undo.name, ...(undo.shortName !== undefined ? { shortName: undo.shortName } : {}), ...(undo.aliases !== undefined ? { aliases: undo.aliases } : {}) });
               },
               undo: () => undefined,
               successDisposition: "undone",
@@ -9472,7 +9473,7 @@ export class Coordinator {
             requestId: msg.requestId,
             operation: "sheet-rename",
             path: msg.path,
-            edit: (content) => sheetRenameContent(content, msg.name, msg.shortName),
+            edit: (content) => sheetRenameContent(content, msg.name, msg.shortName, msg.aliases),
           }).catch((err) => {
             this.emitSingleAct({
               worldId: msg.worldId,
@@ -9495,9 +9496,9 @@ export class Coordinator {
           path: () => msg.path,
           stage: async () => {
             if (!gate || !store || !sheet) throw new Error("That sheet is not in the open world.");
-            return stageSheetRename(store, gate, { path: msg.path, name: msg.name, ...(msg.shortName !== undefined ? { shortName: msg.shortName } : {}) });
+            return stageSheetRename(store, gate, { path: msg.path, name: msg.name, ...(msg.shortName !== undefined ? { shortName: msg.shortName } : {}), ...(msg.aliases !== undefined ? { aliases: msg.aliases } : {}) });
           },
-          undo: () => ({ kind: "rename-sheet", path: msg.path, name: sheet!.name, ...(msg.shortName !== undefined ? { shortName: sheet!.shortName ?? null } : {}) }),
+          undo: () => ({ kind: "rename-sheet", path: msg.path, name: sheet!.name, ...(msg.shortName !== undefined ? { shortName: sheet!.shortName ?? null } : {}), ...(msg.aliases !== undefined ? { aliases: sheet!.aliases ?? [] } : {}) }),
         });
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -14715,10 +14716,60 @@ export class Coordinator {
         }
         return;
       }
+      case "export-arke-player": {
+        // The world package for Arke Player (design turn 233, SPEC-058 R-1 – R-8): made on this
+        // machine whichever window asked, followed in Activity by its step (233b), cancelled
+        // with the other exports, and answered when it ends.
+        const store = audiobookStore ?? this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+        if (!production || this.exports.has(msg.exportId)) return;
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        const label = `Arke Player · ${production.meta.title}`.slice(0, 200);
+        let last = 0;
+        const progress = (status: "running" | "done" | "cancelled" | "failed", percent: number, step?: string, output: string | null = null, error: string | null = null) =>
+          this.emit({ at: new Date().toISOString(), type: "export.progress", worldId: msg.worldId, productionId: msg.productionId, exportId: msg.exportId, status, percent: Math.max(0, Math.min(100, Math.round(percent))), label, ...(step !== undefined ? { step: step.slice(0, 200) } : {}), output, error });
+        progress("running", 0, "Reading the book");
+        // Publish's settings are read inside the run, after it is registered below, so a Cancel
+        // pressed while they load still finds the export (codex on PR 2058).
+        const run = this.storyPublications.settings(msg.worldId, msg.productionId).catch(() => undefined).then((publish) => exportArkePlayer(store, msg.productionId, {
+          clock: () => new Date().toISOString(),
+          ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}),
+          exportId: msg.exportId,
+          signal: control.signal,
+          include: msg.options,
+          ...(publish !== undefined ? { publish: { title: publish.title, author: publish.author, language: publish.language } } : {}),
+          studioVersion: this.opts.appVersion,
+          // Each step said at once, the percent within it at most twice a second.
+          onStep: (step, percent) => {
+            const now = Date.now();
+            if (percent < 100 && now - last < 500 && !/ 1 of /.test(step)) return;
+            last = now;
+            progress("running", percent, step);
+          },
+        })).catch((err: unknown): { ok: false; blockers: string[] } => {
+          void this.appLog?.append({ kind: "arke-player.export-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+          return { ok: false, blockers: [control.signal.aborted ? "the export was cancelled" : describeCoordinatorError(err)] };
+        });
+        const done = run.then((result) => (result.ok ? { status: "done" as const, output: result.file } : control.signal.aborted ? { status: "cancelled" as const } : { status: "failed" as const, error: result.blockers.join("; ") }));
+        this.exports.set(msg.exportId, { id: msg.exportId, cancel: () => control.abort(), done });
+        try {
+          const result = await run;
+          if (result.ok) progress("done", 100, undefined, result.file);
+          else progress(control.signal.aborted ? "cancelled" : "failed", 0, undefined, null, result.blockers.join("; ").slice(0, 2000));
+          this.emit({ at: new Date().toISOString(), type: "arke-player.exported", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, exportId: msg.exportId, result });
+        } finally {
+          this.exports.delete(msg.exportId);
+          store.closingSignal.removeEventListener("abort", onClose);
+        }
+        return;
+      }
       case "list-web-packages": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        const packages = [...(await listWebPackages(store).catch(() => [])), ...(await listVideoExports(store).catch(() => []))].sort((a, b) => (a.exportedAt < b.exportedAt ? 1 : -1));
+        const packages = [...(await listWebPackages(store).catch(() => [])), ...(await listVideoExports(store).catch(() => [])), ...(await listArkePlayerPackages(store).catch(() => []))].sort((a, b) => (a.exportedAt < b.exportedAt ? 1 : -1));
         this.emit({ at: new Date().toISOString(), type: "web-packages.listed", requestId: msg.requestId, worldId: msg.worldId, packages });
         return;
       }

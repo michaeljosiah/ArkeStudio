@@ -182,6 +182,7 @@ export * from "./audiobook-word-timing.js";
 export * from "./audiobook-look.js";
 export * from "./audiobook-illustrate.js";
 export * from "./audiobook-listening.js";
+export * from "./world-package.js";
 export * from "./audiobook-video.js";
 export * from "./audiobook-timing.js";
 export * from "./audiobook-timing-proposal.js";
