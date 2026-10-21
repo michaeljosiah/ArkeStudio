@@ -186,6 +186,23 @@ function goodAnswer(said: string, quote: string, messageId: string): string {
 }
 
 describe("taking a turn", () => {
+  it("fences retained draft receipts before journalling them and refuses a host without that boundary", async () => {
+    const answer = JSON.stringify({ reply: "I read the earlier draft.", candidateOperations: [], groupOperations: [] }), raised: number[] = [];
+    const receiptsFor: NonNullable<RunDeps["receiptsFor"]> = runId => [{ id: newId("check"), runId, tool: "target-read", status: "complete", consulted: [],
+      target: { requirement: "conversation-candidate", id: "retained-draft" }, observedRevisionOrDigest: "current", complete: true, nextCursor: null, at: AT }];
+    const h = await setup(fakeAdapter([answer]), { receiptsFor, raiseSchemaBoundary: async version => {
+      assert.equal((await h.store.read()).events.some(e => e.event.type === "turn.completed"), false); raised.push(version);
+    } });
+    assert.equal((await h.runner.send(h.store, h.conversationId, "Read the earlier draft.")).status, "completed");
+    assert.deepEqual(raised, [100]);
+    const restarted = new WorldChatStore(h.store.dir);
+    const completed = (await restarted.read()).events.find(e => e.event.type === "turn.completed")!;
+    assert.equal(completed.event.type, "turn.completed");
+    if (completed.event.type === "turn.completed") assert.equal(completed.event.receipts[0]!.target!.requirement, "conversation-candidate");
+    const unsupported = await setup(fakeAdapter([answer]), { receiptsFor });
+    assert.notEqual((await unsupported.runner.send(unsupported.store, unsupported.conversationId, "Read it.")).status, "completed");
+    assert.equal((await unsupported.store.read()).events.some(e => e.event.type === "turn.completed"), false);
+  });
   it("raises floor 60 before recording plan suggestions and rebuilds the plan after restart", async () => {
     const receiptId = newId("check"), raised: number[] = [];
     const plan = {productionId:"saltlight",checkReceiptIds:[receiptId],nextSteps:["Select the missing takes."]};

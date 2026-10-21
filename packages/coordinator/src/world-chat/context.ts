@@ -273,7 +273,8 @@ function trimToBound(text: string, bound: number): { text: string; trimmed: bool
 }
 
 /**
- * The live propositions and groups, each with everything an operation on it has to restate.
+ * Live proposition identities and group membership. Exact drafts are read through get_candidate
+ * so long authored sheets do not crowd the whole conversation out of the prompt.
  *
  * Groups are here for the same reason candidates are: `update` and `withdraw` carry a `grp_...`
  * id and its expected revision, and an id that is nowhere in the prompt can only be guessed at.
@@ -311,8 +312,9 @@ function renderRegistry(
       `  rationale: ${g.rationale}`,
       `  members: ${g.members.map((m) => `${m.candidateId} r${m.revision}`).join(", ")}`,
     ]);
-  if (groupLines.length === 0) return lines.join("\n");
-  return [...lines, "", "Groups (an update restates all three fields):", ...groupLines].join("\n");
+  const guide = lines.length > 0 ? ["Read exact retained drafts with get_candidate(candidateId, expectedRevision); follow every page before updating."] : [];
+  if (groupLines.length === 0) return [...guide, ...lines].join("\n");
+  return [...guide, ...lines, "", "Groups (an update restates all three fields):", ...groupLines].join("\n");
 }
 
 /**

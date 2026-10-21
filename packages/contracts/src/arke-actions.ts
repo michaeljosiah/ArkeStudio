@@ -114,6 +114,7 @@ export const ArkeReadRequirementSchema = z.enum([
   "exports",
   "bench",
   "readiness",
+  "conversation-candidate",
 ]);
 export type ArkeReadRequirement = z.infer<typeof ArkeReadRequirementSchema>;
 

@@ -3146,6 +3146,8 @@ op is one of create | update | withdraw | split.
 
 candidateId and expectedRevision come from "What you have already understood" — the registry lists each as [cand_... rN]. temporaryId is yours to invent ("t1", "t2", ...) and only means anything inside this one result.
 
+Before updating a retained proposition, call get_candidate with its candidateId and expectedRevision, following nextCursor until complete. Join its ordered text chunks to read the exact candidate and groups. Preserve every authored field, section, evidence item and group membership unless this request changes it. Use update on that identity, never a duplicate create. Retained checks are historical: obtain current world checks this turn; the draft read is context, not a substitute for those checks. Accepted or already-carried propositions remain immutable.
+
 ### Every candidate
 
 {"classification": ..., "title": ..., "rationale": ..., "settledness": ..., "evidence": [...], "checkReceiptIds": [...], ...}

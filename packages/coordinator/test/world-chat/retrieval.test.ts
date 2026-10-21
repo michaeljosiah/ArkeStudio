@@ -9,12 +9,18 @@ import {
   type WorldChatAttachment,
   type WorldChatCheckReceipt,
   type ProductionTimeline,
+  WorldChangeCandidateSchema,
+  type WorldChangeCandidate,
+  type CandidateGroup,
+  type WorldChatStoredEvent,
 } from "@arke-studio/contracts";
 import { WorldIndex } from "../../src/index-db/world-index.js";
 import { WorldQueryServer } from "../../src/harness/world-query.js";
 import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { LeaseDeniedError, QueryLeaseRegistry } from "../../src/world-chat/lease.js";
-import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
+import { RetrievalError, WorldChatRetrieval, type RetrievalDeps } from "../../src/world-chat/retrieval.js";
+import { WorldChatService } from "../../src/world-chat/service.js";
+import { assembleContext } from "../../src/world-chat/context.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { buildItemsFence, exportsFence, type ArkeBuildItemRead, type ArkeExportReadRecord } from "../../src/world-chat/target-reads.js";
 import { fixtureBundle } from "../index-db/helpers.js";
@@ -35,6 +41,9 @@ async function harness(options: {
   withIndex?: boolean;
   buildItems?: () => readonly ArkeBuildItemRead[];
   exports?: (worldId: string) => readonly ArkeExportReadRecord[];
+  withDrafts?: boolean;
+  drafts?: RetrievalDeps["getConversationDrafts"];
+  textBudget?: number;
 } = {}) {
   const worldDir = await makeTempWorld();
   const bundle = await fixtureBundle();
@@ -61,6 +70,13 @@ async function harness(options: {
     getIndex: () => index,
     attachments,
     findAttachment: async (_lease, id) => known.get(id) ?? null,
+    ...(options.withDrafts ? { getConversationDrafts: async (lease: import("../../src/world-chat/lease.js").QueryLease) => {
+      const loaded = await new WorldChatService(worldPath).load(lease.conversationId, { messageLimit: 0 });
+      if (!loaded || loaded.problems.length) throw new RetrievalError("unavailable", "The retained drafts could not be read completely.");
+      return loaded;
+    } } : {}),
+    ...(options.drafts ? { getConversationDrafts: options.drafts } : {}),
+    ...(options.textBudget !== undefined ? { textBudgetChars: () => options.textBudget! } : {}),
     ...(options.exports ? { getExports: () => options.exports!(bundle.meta.worldId) } : {}),
     ...(options.buildItems ? { getBuildItems: options.buildItems } : {}),
     now: NOW,
@@ -69,8 +85,84 @@ async function harness(options: {
   const mint = (allowed: ChatAttachmentId[] = []) =>
     leases.mint({ worldId: bundle.meta.worldId, conversationId, runId, allowedAttachmentIds: allowed });
 
-  return { retrieval, leases, mint, state, attachments, conversationId, known, index, runId, bundle };
+  return { retrieval, leases, mint, state, attachments, conversationId, known, index, runId, bundle, log, worldPath };
 }
+
+function retainedSheet(conversationId: ConversationId, type: "character" | "location" | "faction"): WorldChangeCandidate {
+  return WorldChangeCandidateSchema.parse({ id: newId("cand"), conversationId, revision: 1, status: "live", settledness: "tentative",
+    subject: { kind: "new", label: type }, title: `Retained ${type}`, rationale: "Keep every authored word.", sourceMessageIds: [], evidence: [],
+    checks: { state: "partial", basedOnCanonRevision: 1, required: ["sheet-search", "canon-search"], completed: [], consulted: [], likelyDuplicates: [], possibleAmendments: [], contradictionCandidates: [], explanation: "Historical checks." },
+    createdAt: NOW(), updatedAt: NOW(), classification: "sheet.create", draft: { type, name: `Retained ${type}`, role: "Keeper", billing: "Supporting", region: "Harbour", canonRules: [], links: [],
+      sections: [{ heading: "Look", body: "First paragraph with an exact line break.\n\n" + "Unabridged harbour prose. ".repeat(260) }, { heading: "Sound", body: "A low bell.\n\nThen silence." }] } });
+}
+
+function retainedTurn(candidates: WorldChangeCandidate[] = [], groups: CandidateGroup[] = []): WorldChatStoredEvent {
+  const turnId = newId("turn");
+  return { type: "turn.completed", message: { id: newId("msg"), turnId, role: "studio", text: "A later reply.", attachmentIds: [], createdAt: NOW() },
+    run: { id: newId("run"), turnId, basedOnConversationSeq: 0, status: "completed", adapter: "fake", harnessCleanup: "not-required", contextDigest: `sha256:${"a".repeat(64)}`, startedAt: NOW(), endedAt: NOW() }, receipts: [], candidates, groups, tombstones: [] };
+}
+
+describe("retained proposition reads", () => {
+  it("reopens exact location, character and faction drafts outside the message window without bloating the prompt", async () => {
+    const h = await harness({ withIndex: false, withDrafts: true }), token = h.mint().token;
+    const candidates = (["location", "character", "faction"] as const).map(type => retainedSheet(h.conversationId, type));
+    const messageId = newId("msg"), text = "Keep these three as tentative drafts.";
+    const original = retainedTurn(); if (original.type !== "turn.completed") throw new Error("Expected a completed turn");
+    await h.log.append({ type: "turn.started", message: { ...original.message, id: messageId, role: "user", text }, run: { ...original.run, status: "running" } }, { at: NOW() });
+    candidates.forEach(c => { c.sourceMessageIds = [messageId]; c.evidence = [{ kind: "message", messageId, quote: text, start: 0, end: text.length, purpose: "intent" }]; });
+    const group: CandidateGroup = { id: newId("grp"), conversationId: h.conversationId, revision: 1, title: "Harbour inhabitants", rationale: "Their links land together.", members: candidates.map(c => ({ candidateId: c.id, revision: c.revision })), atomic: true, status: "live" };
+    candidates.forEach(c => { c.groupId = group.id; });
+    await h.log.append({ ...original, candidates, groups: [group] }, { at: NOW() });
+    for (let n = 0; n < 28; n++) await h.log.append(retainedTurn(), { at: NOW() });
+    const reopened = await new WorldChatService(h.worldPath).load(h.conversationId, { messageLimit: 1 });
+    assert.equal(reopened!.messages.length, 1); assert.deepEqual(reopened!.candidates, candidates);
+    const prompt = assembleContext({ candidates: reopened!.candidates, groups: reopened!.groups, messages: reopened!.messages, tombstones: [], currentUserMessage: "Settle the retained drafts.", currentUserMessageId: newId("msg") });
+    assert.match(prompt.registry, /get_candidate/); assert.ok(!prompt.registry.includes("Unabridged harbour prose"));
+    for (const candidate of candidates) {
+      let cursor: string | null = null, text = "", pages = 0;
+      do {
+        const read = await h.retrieval.call(token, "get_candidate", { candidateId: candidate.id, expectedRevision: 1, limit: 1, ...(cursor ? { cursor } : {}) });
+        const page = read.result as import("@arke-studio/contracts").ArkeTargetReadPage;
+        assert.deepEqual(read.receipt.target, { requirement: "conversation-candidate", id: `${h.conversationId}:${candidate.id}` });
+        assert.deepEqual(read.receipt.consulted, []); assert.equal(read.receipt.complete, page.complete);
+        for (const chunk of page.items as { offset: number; text: string }[]) { assert.equal(chunk.offset, text.length); assert.ok(chunk.text.length <= 4000); text += chunk.text; }
+        cursor = page.nextCursor; pages++;
+      } while (cursor);
+      assert.ok(pages > 1); assert.deepEqual(JSON.parse(text), { candidate, groups: [group] });
+    }
+    assert.deepEqual((await new WorldChatService(h.worldPath).load(h.conversationId))!.candidates, candidates, "reads never revise the journal");
+  });
+
+  it("fences changed drafts, groups, foreign cursors and missing identities", async () => {
+    const h = await harness({ withIndex: false, withDrafts: true }), token = h.mint().token;
+    const candidate = retainedSheet(h.conversationId, "location");
+    const group: CandidateGroup = { id: newId("grp"), conversationId: h.conversationId, revision: 1, title: "Pair", rationale: "Original", members: [{ candidateId: candidate.id, revision: 1 }], atomic: true, status: "live" };
+    await h.log.append(retainedTurn([candidate], [group]), { at: NOW() });
+    const args = { candidateId: candidate.id, expectedRevision: 1, limit: 1 };
+    const first = await h.retrieval.call(token, "get_candidate", args), cursor = (first.result as { nextCursor: string }).nextCursor;
+    await assert.rejects(h.retrieval.call(h.mint().token, "get_candidate", { ...args, cursor }), /cursor is not valid/);
+    await h.log.append(retainedTurn([], [{ ...group, revision: 2, rationale: "Changed" }]), { at: NOW() });
+    await assert.rejects(h.retrieval.call(token, "get_candidate", { ...args, cursor }), /changed while it was being read/);
+    await h.log.append(retainedTurn([{ ...candidate, revision: 2, settledness: "settled" }]), { at: NOW() });
+    await assert.rejects(h.retrieval.call(token, "get_candidate", args), /proposition changed/);
+    const missing = await h.retrieval.call(token, "get_candidate", { ...args, candidateId: newId("cand") });
+    assert.equal(missing.receipt.status, "empty"); assert.equal(missing.receipt.complete, true);
+    const foreign = h.leases.mint({ worldId: h.bundle.meta.worldId, conversationId: newId("cv"), runId: newId("run") });
+    assert.equal((await h.retrieval.call(foreign.token, "get_candidate", args)).receipt.status, "unavailable");
+  });
+
+  it("bounds reads and distinguishes unavailable journals from absence", async () => {
+    const h = await harness({ withIndex: false, withDrafts: true, textBudget: 5000 }), token = h.mint().token;
+    const candidate = retainedSheet(h.conversationId, "character"); await h.log.append(retainedTurn([candidate]), { at: NOW() });
+    const args = { candidateId: candidate.id, expectedRevision: 1, limit: 1 };
+    const first = await h.retrieval.call(token, "get_candidate", args);
+    await assert.rejects(h.retrieval.call(token, "get_candidate", { ...args, cursor: (first.result as { nextCursor: string }).nextCursor }), /as much retained draft/);
+    const absent = await harness({ withIndex: false });
+    assert.equal((await absent.retrieval.call(absent.mint().token, "get_candidate", args)).receipt.status, "unavailable");
+    const switching = await harness({ withIndex: false, drafts: async () => { switching.state.world = "another-world"; return { candidates: [], groups: [] }; } });
+    await assert.rejects(switching.retrieval.call(switching.mint().token, "get_candidate", args), LeaseDeniedError);
+  });
+});
 
 describe("leased retrieval", () => {
   it("pages derived readiness with a receipt for every scene and refuses a changed checklist", async () => {

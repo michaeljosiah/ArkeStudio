@@ -36,6 +36,7 @@ export type ModelActionKind = ModelWorldChatAction["kind"];
  * ship without its tools; Bench and route records have their own leased reads (SPEC-050 R-28).
  */
 const READ_TOOLS: Record<ArkeReadRequirement, readonly ArkeTargetReadTool[]> = {
+  "conversation-candidate": ["get_candidate"],
   "world-metadata": ["get_world_metadata"],
   canon: ["list_canon"],
   sheets: ["list_sheets"],

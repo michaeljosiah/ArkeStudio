@@ -1,4 +1,4 @@
-import { editShot, newId, worldChatContextSchemaVersion, BENCH_CHAT_SCHEMA_VERSION, PRODUCTION_CHAT_CONTEXT_SCHEMA_VERSION, PRODUCTION_READINESS_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { editShot, newId, worldChatContextSchemaVersion, BENCH_CHAT_SCHEMA_VERSION, PRODUCTION_CHAT_CONTEXT_SCHEMA_VERSION, PRODUCTION_READINESS_SCHEMA_VERSION, CONVERSATION_CANDIDATE_READ_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { SHEET_SHORT_NAME_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { parseSceneRecord } from "../../src/productions/scene-record.js";
 import { sha256 } from "../../src/world/text-files.js";
@@ -70,6 +70,15 @@ it("keeps a short-name reader from opening newer production plan semantics witho
   await assert.rejects(readWorldMeta(dir,{supports:SHEET_SHORT_NAME_SCHEMA_VERSION}),error=>error instanceof WorldOpenError && error.reason === "schema-newer");
   assert.equal(await readFile(join(dir,"world.json"),"utf8"),before);
   assert.equal((await readWorldMeta(dir)).schemaVersion,PRODUCTION_READINESS_SCHEMA_VERSION);
+});
+
+it("refuses pre-draft-read builds after the retained candidate receipt boundary", async () => {
+  const { dir, store } = await open();
+  await store.raiseSchemaBoundary(CONVERSATION_CANDIDATE_READ_SCHEMA_VERSION, "world-chat-constraints");
+  const before = await readFile(join(dir, "world.json"), "utf8");
+  await assert.rejects(readWorldMeta(dir, { supports: 99 }), error => error instanceof WorldOpenError && error.reason === "schema-newer");
+  assert.equal((await readWorldMeta(dir)).schemaVersion, 100);
+  assert.equal(await readFile(join(dir, "world.json"), "utf8"), before);
 });
 
 describe("the world schema-version boundary (issue 403)", () => {

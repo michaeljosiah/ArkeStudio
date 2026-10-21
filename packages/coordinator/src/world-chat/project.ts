@@ -133,6 +133,7 @@ const WORKING_LABELS: Record<string, string> = {
   search_sheets: "Searching the cast",
   get_entry: "Reading canon",
   get_sheet: "Reading a sheet",
+  get_candidate: "Reading the earlier draft",
   list_entities: "Looking over the world",
   related: "Checking what references it",
   get_attachment_text: "Reading what you attached",

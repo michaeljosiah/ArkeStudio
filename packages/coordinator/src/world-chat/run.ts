@@ -9,6 +9,7 @@ import {
   type ProductionSetupState,
   REFUSED_TOOLS_MAX,
   PRODUCTION_READINESS_SCHEMA_VERSION,
+  CONVERSATION_CANDIDATE_READ_SCHEMA_VERSION,
   type ProductionPlanRequest,
   type BibleEdit,
   type CandidateChecks,
@@ -1270,6 +1271,10 @@ export class WorldChatRunner {
       if (!this.deps.validateProductionPlan) return { ok: false, problems: [{ code: "production-plan", safeMessage: "Production plans are unavailable in this host. Answer without one." }] };
       try { await this.deps.validateProductionPlan({ request: outcome.turn.productionPlan, entryContext: folded.entryContext, receipts: this.deps.receiptsFor(runId) }); }
       catch { return { ok: false, problems: [{ code: "production-plan", safeMessage: "The production or readiness changed. Read get_readiness again for this thread before proposing a plan." }] }; }
+    }
+    if (this.deps.receiptsFor(runId).some(r => r.target?.requirement === "conversation-candidate")) {
+      if (!this.deps.raiseSchemaBoundary) return { ok: false, problems: [{ code: "candidate-read", safeMessage: "This host cannot preserve retained draft receipts." }] };
+      await this.deps.raiseSchemaBoundary(CONVERSATION_CANDIDATE_READ_SCHEMA_VERSION);
     }
     if (outcome.turn.productionPlan || this.deps.receiptsFor(runId).some(r => r.target?.requirement === "readiness")) {
       if (!this.deps.raiseSchemaBoundary) return { ok: false, problems: [{ code: "production-plan", safeMessage: "This host cannot preserve readiness receipts. Answer without a readiness read or plan." }] };

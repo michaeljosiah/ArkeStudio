@@ -146,6 +146,25 @@ function turn(result: Partial<WorldChatTurnResult>): string {
   return JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [], ...result });
 }
 
+it("settles retained sheet drafts by identity without losing sections, metadata or original intent", async () => {
+  for (const type of ["location", "character", "faction"] as const) {
+    const input = await baseInput();
+    const candidate: ModelCandidateDraft = { classification: "sheet.create", title: `Retained ${type}`, rationale: "Keep the authored draft.", settledness: "tentative",
+      evidence: intentEvidence(input.message, "Her aunt raised her"), checkReceiptIds: [], draft: { type, name: `Retained ${type}`, role: "Keeper", billing: "Supporting", region: "Harbour", canonRules: [], links: [],
+        sections: [{ heading: "Look", body: "A complete first paragraph.\n\nA complete second paragraph." }, { heading: "Sound", body: "The unaltered sound." }] } };
+    const created = validateTurnResult({ ...input, raw: turn({ candidateOperations: [{ op: "create", temporaryId: "draft", candidate }] }) });
+    assert.equal(created.ok, true); if (!created.ok) throw new Error("create refused");
+    const retained = created.turn.candidates[0]!;
+    const revision = validateTurnResult({ ...input, existing: [retained], raw: turn({ candidateOperations: [{ op: "update", candidateId: retained.id, expectedRevision: retained.revision, candidate: { ...candidate, settledness: "settled" } }] }) });
+    assert.equal(revision.ok, true); if (!revision.ok) throw new Error("update refused");
+    assert.equal(revision.turn.candidates.length, 1);
+    const updated = revision.turn.candidates[0]!;
+    assert.equal(updated.id, retained.id); assert.equal(updated.revision, retained.revision + 1);
+    assert.equal(updated.settledness, "settled"); assert.deepEqual(updated.draft, retained.draft);
+    assert.deepEqual(updated.evidence, retained.evidence); assert.deepEqual(updated.sourceMessageIds, retained.sourceMessageIds);
+  }
+});
+
 describe("parsing a turn result", () => {
   it("accepts a suggestion only in a production thread with this run's complete readiness read", async () => {
     const receipt: WorldChatCheckReceipt = { id:newId("check"),runId:newId("run"),tool:"target-read",status:"complete",consulted:[],

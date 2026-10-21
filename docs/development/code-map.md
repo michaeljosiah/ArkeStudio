@@ -810,6 +810,15 @@ Missing or ambiguous legacy evidence and amendments keep the expanded diff. `con
 coordinator `test/world-chat/actions.test.ts` and client `test/production-studio.test.tsx` cover
 preserved values, decisions and replay.
 
+Retained conversation drafts (#2048): `world-chat/target-reads.ts` serves `get_candidate`
+through the existing leased pager, using `application/conversation-runs.ts` to reload the owning
+conversation's current candidates and groups independently of the recent message window.
+The result preserves the exact record as ordered JSON text chunks, with a revision/digest fence;
+`retrieval.ts` shares its per-run text budget with attachment reads. It supplies draft context,
+not Canon/sheet check evidence or approval authority. `run.ts` raises the schema-100 boundary
+before retaining those receipts. Regressions are in coordinator `retrieval.test.ts`,
+`turn-result.test.ts`, `run.test.ts` and `world/schema-version.test.ts`.
+
 Proposal cancellation (#1981): `harness/authoring.ts` retains the active-run guard through the
 writer's terminal event and interrupt acknowledgement. The v1 adapter scopes abort to the same
 directory and execution API as prompt_async, waits for pending prompt admission, and translates

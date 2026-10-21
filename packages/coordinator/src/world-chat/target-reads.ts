@@ -5,6 +5,7 @@ import {
   episodeScriptFile,
   productionShape,
   FrameRunIdSchema,
+  CandidateIdSchema,
   orderedShots,
   canonicalSceneFlow,
   chapterParagraphs,
@@ -71,6 +72,7 @@ export interface ArkeExportReadRecord {
 }
 
 export interface TargetReadDeps {
+  readonly getConversationDrafts?: (lease: QueryLease) => Promise<Pick<import("@arke-studio/contracts").WorldChatLoaded, "candidates" | "groups">>;
   readonly getAudioStudio?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").AudioStudioSnapshot>;
   readonly getBenchRows?: (sessionId?: string) => readonly ProductionReadRow[];
   readonly getGenerationRouteRows?: () => readonly ProductionReadRow[];
@@ -580,6 +582,21 @@ export class WorldChatTargetReads {
     let rows: Row[];
 
     switch (tool) {
+      case "get_candidate": {
+        assertArgs(args, ["candidateId", "expectedRevision"]);
+        const id = CandidateIdSchema.parse(args["candidateId"]);
+        const revision = args["expectedRevision"];
+        if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1) throw new TargetReadError("expectedRevision must be the positive revision from the registry");
+        if (!this.deps.getConversationDrafts) throw new TargetReadError("Conversation drafts are unavailable on this host.");
+        const retained = await this.deps.getConversationDrafts(lease);
+        const candidate = retained.candidates.find(entry => entry.id === id && entry.conversationId === lease.conversationId);
+        if (candidate && candidate.revision !== revision) throw new TargetReadError("That proposition changed; use its current registry revision and start again without a cursor.");
+        const record = candidate ? { candidate, groups: retained.groups.filter(group => group.conversationId === lease.conversationId && group.members.some(member => member.candidateId === id)) } : null;
+        readTarget = target("conversation-candidate", `${lease.conversationId}:${id}`);
+        revisionOrDigest = fence(record);
+        rows = record ? chunks(JSON.stringify(record)) : [];
+        break;
+      }
       case "get_world_metadata":
         assertArgs(args, []);
         readTarget = target("world-metadata", bundle.meta.worldId);
