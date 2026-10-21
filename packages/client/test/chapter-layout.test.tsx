@@ -57,6 +57,7 @@ it('an empty chapter conversation welcomes in the global sheet and preserves one
  await act(async()=>props(editor).onInput!({currentTarget:editor} as never));await click(find('[aria-label="Close Chat"]'));await click(find('[data-global-chat-trigger]'));
  assert.equal(find('.fy-global-chat .fy-cx__editor'),editor,'the shared owner keeps the mounted composer');assert.equal(editor.textContent,'Keep this unsent chapter direction.');
  assert.equal(sent.some(m=>m.kind==='world-chat-send'||m.kind==='world-chat-create'),false,'typing and reopening never send');
+ await act(async()=>{width=1024;coarse=false;for(const listener of listeners)listener();});assert.ok(find('.fy-global-chat [aria-label="Language model"]'),'the global chapter composer keeps its model at Fold widths');
  await click(find('.fy-global-chat-welcome .fy-arke__prompt'));assert.equal(sent.filter(m=>m.kind==='world-chat-create').length,1,'a welcome press uses ordinary admission once');
 });
 it('a fresh global chapter drafting press sends once through asynchronous create and admission (2076)',async()=>{

@@ -1500,7 +1500,7 @@ export function ProductionConversationBody({
             disabledReason={presentation?.scopeMissing ? "Choose this page to restore the saved subject before sending." : languageUnavailableReason}
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             readReplies={readReplies.composer}
-            {...(modelChip !== null && !half ? { modelControl: modelChip } : {})}
+            {...(modelChip !== null && (!half || chapterPanel) ? { modelControl: modelChip } : {})}
             {...attachProps}
           />
           {/* Only a dock that departs from the promise says anything here (issue 1008). The
