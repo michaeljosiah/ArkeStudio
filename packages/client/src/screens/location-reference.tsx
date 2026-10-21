@@ -219,7 +219,7 @@ export function LocationReferenceScreen() {
     <div data-screen="location-reference">
       <LocationHeader worldId={worldId} sheetId={sheetId} name={sheet.name} status={sheet.status} />
       <main className={cx("fy-locref", !sheetFile && "fy-locref--uncompiled")}>
-        <section className={cx("fy-locref__views", views.length === 0 && pending.length === 0 && superseded.length === 0 && "fy-locref__views--empty")}>
+        <section className="fy-locref__views">
           {views.length > 0 && <div className="fy-locref__sechead">
             <h2>Accepted views</h2>
             <span className="fy-mono">
@@ -227,57 +227,61 @@ export function LocationReferenceScreen() {
             </span>
           </div>}
 
-          {views.map((view, index) => (
-            <article key={view.id} className="fy-locref__view">
-              <span className="fy-locref__panel fy-mono">PANEL {String(index + 1).padStart(2, "0")}</span>
-              <div className="fy-locref__viewimage fy-imghost">
-                <ImageDialog
-                  worldSlug={world.meta.slug}
-                  path={`references/${sheetId}/${view.file}`}
-                  label={`${sheet.name}: ${view.name}`}
-                  title={sheet.name}
-                  subtitle={view.name}
-                  triggerLabel={`View larger: ${view.name}`}
-                  closeLabel="Close view"
-                  triggerClassName="fy-locref__zoom"
-                  triggerRadius={6}
-                  download
-                  downloadName={`${sheet.name} ${view.name}`}
-                />
-              </div>
-              <div className="fy-locref__viewfoot">
-                <h3>{view.name}</h3>
-                <p className="fy-mono">
-                  accepted {shortDate(view.acceptedAt)} · sheet v{view.sheetVersion} · look v
-                  {view.artDirectionVersion}
-                </p>
-                {/* The establishing view is what the sheet opens on and the dialog's Kit card; a scene pins another angle, never that one (codex round 4). */}
-                {preset !== null && index !== 0 && !(kit?.looks ?? []).some((look) => look.id === view.id && look.attachedTo?.kind === "scene" && look.attachedTo.productionId === preset.productionId && look.attachedTo.sceneId === preset.sceneId) ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => attachCharacterLook(worldId, sheetId, view.id, { kind: "scene", productionId: preset.productionId, sceneId: preset.sceneId })}
-                  >
-                    Use in scene {preset.number}
-                  </Button>
-                ) : null}
-                {index === 0 && (
-                  // Panel 1 is the anchor every other angle was generated against, so replacing it
-                  // is the one generation that is deliberately *not* anchored to anything.
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      setAngleName(view.name);
-                      setReplacingEstablishing(true);
-                      setAdding(true);
-                    }}
-                  >
-                    Replace
-                  </Button>
-                )}
-              </div>
-            </article>
-          ))}
+          {views.length > 0 && <div className="fy-locref__gallery">
+            {views.map((view, index) => (
+              <article key={view.id} className={cx("fy-locref__view", index === 0 && "fy-locref__view--establishing")}>
+                <div className="fy-locref__viewimage fy-imghost">
+                  <ImageDialog
+                    worldSlug={world.meta.slug}
+                    path={`references/${sheetId}/${view.file}`}
+                    label={`${sheet.name}: ${view.name}`}
+                    title={sheet.name}
+                    subtitle={view.name}
+                    triggerLabel={`View larger: ${view.name}`}
+                    closeLabel="Close view"
+                    triggerClassName="fy-locref__zoom"
+                    triggerRadius={6}
+                    download
+                    downloadName={`${sheet.name} ${view.name}`}
+                  />
+                </div>
+                <div className="fy-locref__viewfoot">
+                  <div className="fy-locref__viewhead">
+                    <span className="fy-locref__panel fy-mono">PANEL {String(index + 1).padStart(2, "0")}</span>
+                    <h3 title={view.name}>{view.name}</h3>
+                    {/* The establishing view is what the sheet opens on and the dialog's Kit card; a scene pins another angle, never that one (codex round 4). */}
+                    {preset !== null && index !== 0 && !(kit?.looks ?? []).some((look) => look.id === view.id && look.attachedTo?.kind === "scene" && look.attachedTo.productionId === preset.productionId && look.attachedTo.sceneId === preset.sceneId) ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => attachCharacterLook(worldId, sheetId, view.id, { kind: "scene", productionId: preset.productionId, sceneId: preset.sceneId })}
+                      >
+                        Use in scene {preset.number}
+                      </Button>
+                    ) : null}
+                    {index === 0 && (
+                      // Panel 1 is the anchor every other angle was generated against, so replacing it
+                      // is the one generation that is deliberately *not* anchored to anything.
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setAngleName(view.name);
+                          setReplacingEstablishing(true);
+                          setAdding(true);
+                        }}
+                      >
+                        Replace
+                      </Button>
+                    )}
+                  </div>
+                  <p className="fy-mono">
+                    accepted {shortDate(view.acceptedAt)} · sheet v{view.sheetVersion} · look v
+                    {view.artDirectionVersion}
+                  </p>
+                </div>
+              </article>
+            ))}
+          </div>}
 
           {superseded.length > 0 && (
             <p className="fy-locref__superseded">
@@ -520,7 +524,7 @@ export function LocationReferenceScreen() {
             <h2>Location sheet</h2>
             <span className="fy-mono">assembled here, not generated</span>
           </div>
-          <div className="fy-imghost">
+          <div className="fy-locref__compilation fy-imghost">
             <ImageDialog
               worldSlug={world.meta.slug}
               path={`references/${sheetId}/${sheetFile}`}
