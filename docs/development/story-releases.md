@@ -25,6 +25,8 @@ installed worlds or other files. Invalid or empty retained files can also be rem
 Install, cancel, resume, remove and refresh remain host-only commands. Once independent
 installation starts, Cancel is withdrawn and the copy drains before shutdown. Successful
 installation removes the archive and extraction scratch; cleanup failure is reported separately.
+If the copy fails, extraction scratch is removed but the verified archive remains for another
+attempt. Retry still rehashes it before extraction and installation, without another transfer.
 
 ## Prepare and publish
 

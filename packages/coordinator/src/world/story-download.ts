@@ -41,7 +41,7 @@ export async function downloadStory(source: StoryDownload, scratchRoot: string, 
   signal: AbortSignal;
   progress?: (text: string) => void;
   fetch?: typeof fetch;
-}): Promise<{ directory: string; dispose(): Promise<void> }> {
+}): Promise<{ directory: string; dispose(options?: { keepArchive?: boolean }): Promise<void> }> {
   const archive = archivePath(source, scratchRoot);
   options.signal.throwIfAborted();
   await mkdir(scratchRoot, { recursive: true });
@@ -55,7 +55,7 @@ export async function downloadStory(source: StoryDownload, scratchRoot: string, 
   const container = await mkdtemp(join(scratchRoot, "story-download-"));
   const directory = join(container, "world");
   const clearScratch = () => rm(container, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  const dispose = async () => { await clearScratch(); await discardStoryDownload(source, scratchRoot); };
+  const dispose = async (options?: { keepArchive?: boolean }) => { await clearScratch(); if (!options?.keepArchive) await discardStoryDownload(source, scratchRoot); };
   let keepPartial = true, verified = false;
   const invalid = (message: string) => { keepPartial = false; return new Error(message); };
   // Bound stalled transfers, not the total time a slow connection needs for a large story.
@@ -174,7 +174,7 @@ export async function downloadStory(source: StoryDownload, scratchRoot: string, 
 }
 
 /** Cleanup cannot turn an already installed world into a failed command. */
-export async function cleanupStoryDownload(download: { dispose(): Promise<void> } | undefined): Promise<boolean> {
-  try { await download?.dispose(); return true; }
+export async function cleanupStoryDownload(download: { dispose(options?: { keepArchive?: boolean }): Promise<void> } | undefined, options?: { keepArchive?: boolean }): Promise<boolean> {
+  try { await download?.dispose(options); return true; }
   catch { return false; }
 }

@@ -7184,7 +7184,7 @@ export class Coordinator {
             } else refuse(describeCoordinatorError(err));
           }
         } finally {
-          const cleaned = await cleanupStoryDownload(downloaded);
+          const cleaned = await cleanupStoryDownload(downloaded, { keepArchive: !installed });
           this.sampleInstallAbort = null;
           this.readModel.setSampleWorld({ installing: false, cancellable: false });
           await this.refreshStoryDownload();

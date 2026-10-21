@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { ZipFile } from "yazl";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { it } from "node:test";
 import type { ClientMessage, DomainEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { UNDERSONG_RELEASE } from "../../src/world/undersong-release.js";
 import { tempDir } from "../tmp.js";
+import { FIXTURE_WORLD } from "../world/helpers.js";
 
 it("overlapping install commands admit only one copy", async t => {
   const root = await tempDir("story-admission-");
@@ -86,4 +89,30 @@ it("shutdown aborts a story download, cleans scratch and never installs it", asy
   assert.equal(installs, 0);
   assert.deepEqual(await readdir(join(root, "downloads")), []);
   assert.equal(events.some(e => e.type === "sample-world.installed" || e.type === "sample-world.refused"), false);
+});
+
+it("retries a failed independent copy without downloading the verified archive again", async t => {
+  const root = await tempDir("story-copy-retry-"), world = await readFile(join(FIXTURE_WORLD, "world.json"));
+  const zip = new ZipFile(), chunks: Buffer[] = [];
+  const collect = (async () => { for await (const chunk of zip.outputStream) chunks.push(Buffer.from(chunk)); })();
+  zip.addBuffer(world, "world.json"); zip.end(); await collect;
+  const data = Buffer.concat(chunks), release = { ...UNDERSONG_RELEASE, bytes: data.length, unpackedBytes: world.length, sha256: createHash("sha256").update(data).digest("hex") };
+  let requests = 0, installs = 0;
+  t.mock.method(globalThis, "fetch", async () => { requests++; return new Response(new Uint8Array(data)); });
+  const coordinator = new Coordinator({ adapter: null, appRoot: root, appVersion: "test", changeLogPath: join(root, "changes.jsonl"), sampleWorldDownload: release,
+    provider: { async listWorlds() { return []; }, async loadWorld() { throw Error("unused"); }, async installSampleWorld() {
+      if (++installs === 1) throw new Error("Temporary copy failure");
+      return { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", slug: "sample", name: "Sample" };
+    } } });
+  const internal = coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void>; readModel: { getState(): import("@arke-studio/contracts").ClientState } };
+  try {
+    await internal.handleClientMessage({ kind: "install-sample-world" });
+    assert.equal(internal.readModel.getState().app.sampleWorld.download?.retainedBytes, data.length);
+    assert.equal(internal.readModel.getState().app.sampleWorld.note?.refused, true);
+    assert.deepEqual(await readdir(join(root, "downloads")), [`story-${release.sha256}.part`], "only the verified archive survives the failed copy");
+    await internal.handleClientMessage({ kind: "install-sample-world" });
+    assert.equal(requests, 1); assert.equal(installs, 2);
+    assert.equal(internal.readModel.getState().app.sampleWorld.note?.refused, false);
+    assert.deepEqual(await readdir(join(root, "downloads")), []);
+  } finally { await coordinator.stop(); }
 });
