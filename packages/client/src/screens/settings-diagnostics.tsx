@@ -46,6 +46,7 @@ const CHECK_WORDS: Record<string, string> = {
   "comfyui-models-folder-unmapped": "models folder",
   "waiting-on-component": "waiting downloads",
   "hardware-unmeasured": "hardware",
+  "windows-commit": "Windows memory",
   "provider-repeated-faults": "provider faults",
   "spend-above-previous": "spend",
 };

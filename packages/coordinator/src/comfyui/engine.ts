@@ -11,6 +11,7 @@ import type {
   RecipeReadiness,
   RecipeReasonKind,
   RuntimeProbes,
+  WindowsCommitSnapshot,
 } from "@arke-studio/contracts";
 import { COMFYUI_VERSION_FLOOR, compareComfyUiVersions, meetsComfyUiVersion } from "@arke-studio/contracts";
 import type { ChildSupervisor, SupervisedSpec } from "../supervisor.js";
@@ -90,6 +91,8 @@ export interface EngineServiceDeps {
    * for the same reason: without it a recipe's free-RAM floor is simply not checked here.
    */
   freeMemMb?: () => Promise<number | null>;
+  /** Diagnostic facts only; no unmeasured workload floor is inferred from commit capacity. */
+  windowsCommit?: () => Promise<WindowsCommitSnapshot>;
   /** Where well-known installs are looked for. Injectable so tests need no real home. */
   homeDir?: string;
   onStatus?: (status: ComfyUiEngineStatus) => void;
@@ -1232,6 +1235,15 @@ export class ComfyUiEngineService {
    * invalidation publishes again anyway.
    */
   async status(probes: RuntimeProbes | null): Promise<ComfyUiStatus> {
+    // One attempt per status refresh, shared by every recipe and any verification reruns.
+    // The desktop supplies this only on Windows; remote engines never borrow host figures.
+    const measuredEngine = this.engineStatus();
+    const windowsCommit = measuredEngine.locality === "local" && measuredEngine.source !== "absent" && this.deps.windowsCommit
+      ? await this.deps.windowsCommit().catch(() => ({
+          source: "windows-performance-memory" as const,
+          measuredAt: (this.deps.clock ?? (() => new Date().toISOString()))(), values: null,
+        }))
+      : undefined;
     for (let attempt = 0; ; attempt += 1) {
       const settled = attempt >= STATUS_RECOMPUTE_LIMIT;
       const generation = this.verificationGeneration;
@@ -1268,7 +1280,8 @@ export class ComfyUiEngineService {
       // interval is slow and every pass awaits real work, so retrying here cannot spin a core.
       if (reclaimGeneration !== this.reclaimableVramGeneration) continue;
       if (!settled && generation !== this.verificationGeneration) continue;
-      return { engine, recipes, checkedAt: (this.deps.clock ?? (() => new Date().toISOString()))() };
+      return { engine, recipes, ...(engine.locality === "local" && windowsCommit !== undefined ? { windowsCommit } : {}),
+        checkedAt: (this.deps.clock ?? (() => new Date().toISOString()))() };
     }
   }
 
