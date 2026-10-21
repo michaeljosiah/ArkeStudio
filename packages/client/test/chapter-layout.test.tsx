@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import { type ClientMessage } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __applyEventForTest, __clearWorldChatHoldsForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __clearWorldChatHoldsForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __clearHeldAsksForTest } from "../src/screens/chapter-workspace.js";
 import { FormatBar } from "../src/screens/chapter-room.js";
@@ -30,13 +30,14 @@ const props=(element:HTMLElement)=>{const key=Object.keys(element).find(key=>key
 const click=async(element:HTMLElement)=>{assert.ok(element);await act(async()=>element.click());};
 // The phone bar's ⋯ (SPEC-056 R-7, 227l): Brief, the read and the views are its items.
 const pageAction=async(label:string)=>{await click(find('[aria-label="Page actions"]'));await click([...document.querySelectorAll<HTMLElement>('.fy-scene-menu button')].find(b=>b.textContent===label)!);};
-async function mount(route='p/ledger/story/chapters',size=390,mode='normal',remote=false,touch=true){
+async function mount(route='p/ledger/story/chapters',size=390,mode='normal',remote=false,touch=true,onSend?:(message:ClientMessage)=>void){
   width=size;coarse=touch;sent=[];
   const host=document.createElement('div');document.body.append(host);root=createRoot(host);
   if(remote){const marker=document.createElement('meta');marker.name='arke-remote';marker.content='true';document.head.append(marker);}
-  const bridge={connect(){},subscribe(){return()=>{};},send(raw:string){sent.push(JSON.parse(raw));}} as unknown as ArkeBridge;
+  const bridge={connect(){},subscribe(){return()=>{};},send(raw:string){const message=JSON.parse(raw) as ClientMessage;sent.push(message);onSend?.(message);}} as unknown as ArkeBridge;
   Object.assign(dom.window,{arke:remote?undefined:bridge});
   const state=chapterLayoutFixture(mode);
+  if(mode==='fresh-chat'){state.world!.conversations=[];state.worldChat=null;}
   await act(async()=>{__setBridgeForTest(bridge);__setStateForTest(state);__connectionStatusForTest('open');root!.render(<MemoryRouter initialEntries={['/w/'+state.world!.meta.worldId+'/'+route]}><App/></MemoryRouter>);});
 }
 afterEach(async()=>{await act(async()=>root?.unmount());root=null;document.body.replaceChildren();document.head.replaceChildren();Object.assign(dom.window,{visualViewport:undefined});Object.defineProperty(document,'activeElement',{value:document.body,configurable:true});__setBridgeForTest(null);__connectionStatusForTest('closed');__clearWorldChatHoldsForTest();__clearHeldAsksForTest();});
@@ -57,6 +58,27 @@ it('an empty chapter conversation welcomes in the global sheet and preserves one
  assert.equal(find('.fy-global-chat .fy-cx__editor'),editor,'the shared owner keeps the mounted composer');assert.equal(editor.textContent,'Keep this unsent chapter direction.');
  assert.equal(sent.some(m=>m.kind==='world-chat-send'||m.kind==='world-chat-create'),false,'typing and reopening never send');
  await click(find('.fy-global-chat-welcome .fy-arke__prompt'));assert.equal(sent.filter(m=>m.kind==='world-chat-create').length,1,'a welcome press uses ordinary admission once');
+});
+it('a fresh global chapter drafting press sends once through asynchronous create and admission (2076)',async()=>{
+ const fixture=chapterLayoutFixture(),row=fixture.world!.conversations[0]!,pending:Promise<void>[]=[];
+ const later=(reply:()=>void)=>{pending.push(new Promise(resolve=>setTimeout(()=>{reply();resolve();},5)));};
+ await mount('p/ledger/story/chapters/neap',1280,'fresh-chat',false,false,message=>{
+  if(message.kind==='world-chat-create')later(()=>{
+   const current=__stateForTest(),state={...current.state!,world:{...current.state!.world!,conversations:[row]},worldChat:{...fixture.worldChat!,seq:1,messages:[],actions:[],points:[],runStatus:null}};
+   __setStateForTest(state,{...current,state});
+   __applyEventForTest({type:'world-chat.create-result',at:'2026-10-21T10:00:00Z',worldId:message.worldId,requestId:message.requestId,conversationId:row.id});
+  });
+  if(message.kind==='world-chat-send')later(()=>__applyEventForTest({type:'world-chat.send-result',at:'2026-10-21T10:00:01Z',conversationId:message.conversationId,requestId:message.requestId,admitted:true}));
+ });
+ await openChapter();await click(find('[data-global-chat-trigger]'));
+ await click([...document.querySelectorAll<HTMLElement>('.fy-global-chat .fy-arke__prompt')].find(button=>button.textContent==='Draft the rest')!);
+ while(pending.length)await act(async()=>{await pending.shift();});
+ const requests=()=>sent.filter(message=>message.kind==='world-chat-send');
+ assert.equal(sent.filter(message=>message.kind==='world-chat-create').length,1);
+ assert.equal(requests().length,1,'one fresh drafting press has one send request');
+ const request=requests()[0]!;assert.equal(request.kind,'world-chat-send');if(request.kind==='world-chat-send')assert.deepEqual(request.subject,{kind:'chapter',chapterId:'neap',intent:'draft'});
+ await click(find('[aria-label="Close Chat"]'));await click(find('[data-global-chat-trigger]'));
+ assert.equal(requests().length,1,'reopening an admitted ask never replays its opening');
 });
 it('chapter card actions reorder stable files and retire the selected chapter',async()=>{
  await mount();await click(find('.fy-chapter-card__more'));await click([...document.querySelectorAll<HTMLElement>('.fy-chapter-menu button')].find(b=>b.textContent==='Move down')!);

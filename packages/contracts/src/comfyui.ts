@@ -230,11 +230,34 @@ export const RecipeReadinessSchema = z
   .strict();
 export type RecipeReadiness = z.infer<typeof RecipeReadinessSchema>;
 
+/** Windows commit is a separate resource from physical RAM (SPEC-021 R-40).
+ * Null means the bounded probe failed; the timestamp describes that attempt, not an old success. */
+export const WindowsCommitValuesSchema = z.object({
+  committedBytes: z.number().int().nonnegative().safe(),
+  limitBytes: z.number().int().positive().safe(),
+  physicalAvailableBytes: z.number().int().nonnegative().safe(),
+}).strict();
+export type WindowsCommitValues = z.infer<typeof WindowsCommitValuesSchema>;
+
+export const WindowsCommitSnapshotSchema = z.object({
+  source: z.literal("windows-performance-memory"),
+  measuredAt: IsoDateTimeSchema,
+  values: WindowsCommitValuesSchema.nullable(),
+}).strict();
+export type WindowsCommitSnapshot = z.infer<typeof WindowsCommitSnapshotSchema>;
+
+/** Retain the measured totals; a crossed limit has zero headroom, never negative capacity. */
+export function windowsCommitHeadroomBytes(values: WindowsCommitValues | null): number | null {
+  return values === null ? null : Math.max(0, values.limitBytes - values.committedBytes);
+}
+
 /** The one combined result Settings, the picker, routing and enqueue admission all read. */
 export const ComfyUiStatusSchema = z
   .object({
     engine: ComfyUiEngineStatusSchema,
     recipes: z.array(RecipeReadinessSchema),
+    /** Local Windows only; absent on older hosts, other platforms and remote engines. */
+    windowsCommit: WindowsCommitSnapshotSchema.optional(),
     checkedAt: IsoDateTimeSchema,
   })
   .strict();

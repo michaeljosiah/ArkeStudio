@@ -2490,3 +2490,34 @@ describe("engine version compatibility is per recipe (SPEC-021 R-18, R-19; issue
     assert.equal(service.identityFor("runs-here")?.recipe.engineVersion, "0.33.1", "the reported version is frozen into the identity");
   });
 });
+
+
+it("carries Windows commit measurements once per readiness refresh without changing recipe admission", async () => {
+  const world = fakeWorld();
+  world.urls.set("http://127.0.0.1:8188", {});
+  const at = "2026-10-21T12:00:00.000Z";
+  let calls = 0, fail = false;
+  const service = new ComfyUiEngineService({ ...engineDeps(world, "C:/app"), clock: () => at,
+    windowsCommit: async () => { calls++; if (fail) throw new Error("unavailable");
+      return { source: "windows-performance-memory", measuredAt: at,
+        values: { committedBytes: 100, limitBytes: 100, physicalAvailableBytes: 999 } }; },
+  });
+  try {
+    await service.applySettings({ ...NO_SETTINGS, engineUrl: "http://127.0.0.1:8188" });
+    const first = await service.status(PROBES);
+    assert.equal(calls, 1);
+    assert.equal(first.windowsCommit?.values?.committedBytes, 100);
+    fail = true;
+    const unknown = await service.status(PROBES);
+    assert.equal(calls, 2);
+    assert.deepEqual(unknown.windowsCommit, { source: "windows-performance-memory", measuredAt: at, values: null });
+    assert.deepEqual(unknown.recipes, first.recipes);
+    world.urls.set("https://engine.example", {});
+    await service.applySettings({ ...NO_SETTINGS, engineUrl: "https://engine.example" });
+    assert.equal((await service.status(PROBES)).windowsCommit, undefined);
+    assert.equal(calls, 2);
+    await service.applySettings(NO_SETTINGS);
+    assert.equal((await service.status(PROBES)).windowsCommit, undefined);
+    assert.equal(calls, 2);
+  } finally { await service.dispose(); }
+});

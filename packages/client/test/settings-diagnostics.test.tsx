@@ -269,3 +269,24 @@ describe("Settings · Diagnostics (R-36, R-37, turn 111)", () => {
     assert.equal(text.includes("Nothing to report"), false);
   });
 });
+
+
+it("renders Windows commit figures in the existing advisory row, with unknown distinct from unmeasured", () => {
+  const status: NonNullable<ClientState["app"]["comfyui"]> = {
+    engine: { source: "user-url", state: "ready", locality: "local", location: null,
+      version: null, instanceId: "local-engine", detail: null, detected: [] },
+    recipes: [], checkedAt: NOW,
+    windowsCommit: { source: "windows-performance-memory", measuredAt: NOW,
+      values: { committedBytes: 40 * 1024 ** 3, limitBytes: 50 * 1024 ** 3, physicalAvailableBytes: 1024 ** 3 } },
+  };
+  const measured = plain(render(derived({ runtime: SOUND_RUNTIME, comfyui: status })));
+  assert.match(measured, /ADVISORY/);
+  assert.match(measured, /40 GB committed of 50 GB/);
+  assert.match(measured, /10 GB headroom/);
+  assert.match(measured, /1 GB physical RAM free/);
+  status.windowsCommit!.values = null;
+  const unknown = plain(render(derived({ runtime: SOUND_RUNTIME, comfyui: status })));
+  assert.match(unknown, /UNKNOWN/);
+  assert.match(unknown, /Windows memory .* unavailable/);
+  assert.doesNotMatch(unknown, /NOT MEASURED/);
+});
