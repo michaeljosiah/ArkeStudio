@@ -29,6 +29,20 @@ describe("location candidates and unresolved briefs (#1948)", () => {
     });
   });
 
+  it("keeps full-name ambiguity when the other saved location falls beyond the prompt limit", () => {
+    const earlier = Array.from({ length: 7 }, (_, i) => ({ id: "place-" + i, name: "Place " + i, type: "location", sections: [] }));
+    const sheets = [...earlier, { id: "north-one", name: "North Salt", type: "location", sections: [] },
+      { id: "north-two", name: "The North Salt", type: "location", sections: [] }];
+    const store = { getBundle: () => ({ sheets }) } as unknown as Pick<WorldStore, "getBundle">;
+    const places = chapterPlaces(store, { body: [...earlier.map(sheet => sheet.name), "North Salt"].join(". ") });
+    assert.equal(places.length, 8);
+    assert.equal(places.at(-1)?.ambiguousName, true);
+    assert.equal(places.some(place => place.key === "north-two"), false);
+    assert.deepEqual(resolveChapterPlace(places, "North Salt"), { key: "north salt", name: "North Salt", unlinked: true });
+    assert.deepEqual(resolveChapterPlace(places, "The North Salt"), { key: "the north salt", name: "The North Salt", unlinked: true });
+    assert.equal(resolveChapterPlace(places, "north-one"), places.at(-1));
+  });
+
   it("keeps the unknown place visible without inventing a sheet or leaking it into detail references", () => {
     const prompt = "Wide shot of the shelter's trestle tables.";
     const ctx = { people: [], places: [], prompt, fallback: () => [] };

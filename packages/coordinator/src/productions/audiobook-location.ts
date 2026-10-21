@@ -11,13 +11,17 @@ export interface ChapterPlace {
   name: string;
   look?: string;
   unlinked?: true;
+  /** Full-world name collision, retained when the other candidate falls outside the prompt. */
+  ambiguousName?: true;
 }
 
 /** Exact saved names in story order; coverage separately discloses this prompt's existing limit. */
 export function chapterPlaces(store: Pick<WorldStore, "getBundle">, plan: Pick<AudiobookPlan, "body">): ChapterPlace[] {
-  return namedChapterLocations(plan.body, store.getBundle().sheets).slice(0, CHAPTER_PLACES_MAX).map(sheet => {
+  const named = namedChapterLocations(plan.body, store.getBundle().sheets);
+  return named.slice(0, CHAPTER_PLACES_MAX).map(sheet => {
     const look = clip(section(sheet, /^look/i), CHAPTER_PLACE_LOOK_MAX);
-    return { key: sheet.id, name: sheet.name, ...(look === undefined ? {} : { look }) };
+    return { key: sheet.id, name: sheet.name, ...(look === undefined ? {} : { look }),
+      ...(named.some(other => other.id !== sheet.id && sameLocationName(other.name, sheet.name)) ? { ambiguousName: true as const } : {}) };
   });
 }
 
@@ -28,5 +32,5 @@ export function resolveChapterPlace(places: readonly ChapterPlace[], value: stri
   const byKey = places.find(place => place.key === name);
   if (byKey !== undefined) return byKey;
   const byName = places.filter(place => sameLocationName(place.name, name));
-  return byName.length === 1 ? byName[0] : { key: name.toLowerCase(), name, unlinked: true };
+  return byName.length === 1 && byName[0]?.ambiguousName !== true ? byName[0] : { key: name.toLowerCase(), name, unlinked: true };
 }
