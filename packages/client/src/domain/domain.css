@@ -412,7 +412,7 @@
   padding-block: var(--space-2);
 }
 .dom-review__metadata[open] > .dom-review__field { margin-top: var(--space-2); }
-@media (pointer: coarse) {
+@media (any-pointer: coarse) {
   .dom-review__metadata > summary { min-height: 44px; padding-block: var(--space-3); }
 }
 .dom-authoring__activity[open] > .dom-authoring__lines { max-height: 140px; overflow: auto; }

@@ -1,4 +1,5 @@
 import type { ConversationActionRecord, WorldChangeCandidate } from "@arke-studio/contracts";
+import { conversationActionDigest } from "../arke-actions/digest.js";
 
 /**
  * Recover old candidate cards without rewriting their binding, values or preview digest.
@@ -11,6 +12,10 @@ export function sheetCreationProseFields(
   if (action.actionKind !== "world-chat-proposal" || action.shown.body.family !== "authored-diff") return;
   const fields = action.shown.body.fields;
   if (fields.some(field => field.before !== null)) return;
+  const members = action.targets.map(target => ({ candidateId: target.id, revision: candidates.get(target.id)?.revision }));
+  // An atomic group's initiating candidate need not be its first member. The sealed payload
+  // proves all revisions before a later draft can reclassify any frozen prose as setup.
+  if (!members.some(candidate => conversationActionDigest({ kind: "world-chat-proposal", worldId: action.worldId, candidate, members }) === action.payloadDigest)) return;
   const indices = new Set<number>();
   for (const target of action.targets) {
     const candidate = candidates.get(target.id);

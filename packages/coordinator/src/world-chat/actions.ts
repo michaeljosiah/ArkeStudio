@@ -1699,6 +1699,7 @@ async function proposalProjection(
   gate: ProposalManager,
   intent: Pick<ConversationActionPrepareIntent, "targets">,
   proposalId: string,
+  preparing = true,
 ): Promise<PreparedConversationActionAuthority> {
   const { proposal, review, ripple, scenePreview } = await gate.project(proposalId);
   const productionPreview = scenePreview ? { kind: "scene" as const, ...scenePreview } : undefined;
@@ -1720,7 +1721,7 @@ async function proposalProjection(
   // so both authoring paths retain the same review after acceptance, denial and reopening.
   const proseFields = review.targets.length > 0 && review.targets.every(target => target.action === "create" && target.kind.endsWith(" sheet"))
     ? review.targets.flatMap(target => target.fields).flatMap((field, index) => field.metadata ? [] : [index]) : [];
-  if (proseFields.length > 0) await store.ensureSchemaVersion(SHEET_CREATION_CARD_REVIEW_SCHEMA_VERSION, "sheet-creation-card-review");
+  if (preparing && proseFields.length > 0) await store.ensureSchemaVersion(SHEET_CREATION_CARD_REVIEW_SCHEMA_VERSION, "sheet-creation-card-review");
   return {
     authority: { kind: "proposal-manager", id: proposal.id },
     authorityRevision: proposal.draftRevision,
@@ -4716,7 +4717,7 @@ export function worldChatActionAdapters(
       if (!checked.ok) {
         return { ok: false, reason: checked.stale ? "stale" : "blocked", detail: checked.detail };
       }
-      const currentProjection = await proposalProjection(store, gate, action, action.authority.id);
+      const currentProjection = await proposalProjection(store, gate, action, action.authority.id, false);
       if (conversationActionDigest(currentProjection.shown) !== action.previewDigest) {
         await gate.discard(action.authority.id);
         return { ok: false, reason: "stale", detail: "The proposal preview changed after this card was prepared." };

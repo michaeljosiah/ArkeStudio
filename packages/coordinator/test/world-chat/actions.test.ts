@@ -460,6 +460,11 @@ describe("World Chat authority adapters", () => {
       assert.ok(card.shown.body.fields.some(field => field.label.endsWith(": Region") && field.after === "Slackwater"));
       const candidates = new Map(points.map(point => [point.id, point]));
       if (authoring === "candidate") assert.deepEqual(sheetCreationProseFields(card, candidates), card.sheetCreationProseFields, "old candidate cards recover the same reading order");
+      const later = new Map(points.map(point => {
+        if (point.classification !== "sheet.create") throw new Error("Expected sheet candidate");
+        return [point.id, { ...point, revision: point.revision + 1, draft: { ...point.draft, sections: point.draft.sections.slice(0, 2) } }] as const;
+      }));
+      assert.equal(sheetCreationProseFields(card, later), undefined, "a later draft removing a section cannot hide frozen prose");
       assert.equal(sheetCreationProseFields(card, new Map()), undefined, "missing retained evidence stays expanded");
       const edited = structuredClone(card);
       if (edited.shown.body.family !== "authored-diff") throw new Error("Expected sheet review");
@@ -471,7 +476,14 @@ describe("World Chat authority adapters", () => {
       assert.equal(sheetCreationProseFields(ambiguous, candidates), undefined, "an ambiguous frozen review stays expanded");
     }
     assert.deepEqual(await w.log.read(), journal, "projecting a legacy card does not rewrite the journal");
+    let validationUpgrades = 0;
+    const ensureSchema = w.store.ensureSchemaVersion.bind(w.store);
+    w.store.ensureSchemaVersion = async (version, source) => {
+      if (source === "sheet-creation-card-review") validationUpgrades++;
+      await ensureSchema(version, source);
+    };
     assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed");
+    assert.equal(validationUpgrades, 0, "checking an existing card never requests a layout schema upgrade");
     assert.equal((await decide(w.lifecycle, w.log, cards[1]!, "deny")).status, "denied");
     const reopened = await loaded(new WorldChatStore(conversationDir(w.store.dir, w.conversationId)));
     assert.deepEqual(reopened.actions.map(card => card.status), ["completed", "denied"]);
