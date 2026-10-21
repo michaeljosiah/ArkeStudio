@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
+import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import type { BenchSession, ClientState, ManifestModel } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
@@ -102,6 +103,39 @@ function renderAt(path: string, state: ClientState): string {
 }
 
 describe("the bench screen (issue 305 §3)", () => {
+  for (const alternative of [false, true]) {
+    it(`keeps the saved local model and measured reason while offline${alternative ? " with a cloud alternative" : " without another model"}`, () => {
+      const state = stateWithBench();
+      const local: ManifestModel = { ...IMAGE_MODEL, id: "local-h3", provider: "comfyui", capability: "video", displayName: "Local · H3 Reference Video", pricing: { kind: "unmetered" } };
+      const cloud: ManifestModel = { ...local, id: "cloud-video", provider: "fal", displayName: "Cloud Video" };
+      state.app.manifest = { ...state.app.manifest!, models: alternative ? [local, cloud] : [local] };
+      state.app.comfyui = {
+        engine: { source: "user-path", state: "unreachable", locality: "local", location: "ComfyUI", version: "0.38.1", instanceId: null, detail: null, detected: [] },
+        recipes: [{ recipeId: local.id, recipeVersion: 1, displayName: local.displayName, capability: "video", state: "disabled", reason: "The local engine is stopped. Start it in Settings." }],
+        checkedAt: "2026-10-21T12:00:00.000Z",
+      };
+      state.bench!.session!.composer = { ...state.bench!.session!.composer, mode: "video", provider: "comfyui", model: local.id, params: { kind: "video", durationSec: 15, aspect: "16:9", sound: true } };
+      const before = JSON.stringify(state.bench);
+      const { document } = parseHTML(`<html><body>${renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, state)}</body></html>`);
+      const select = document.querySelector('select[aria-label="Model"]');
+      assert.equal(select?.querySelector('option[selected]')?.getAttribute('value'), "comfyui/local-h3");
+      assert.match(select?.querySelector('option[selected]')?.textContent ?? "", /H3 Reference Video/);
+      assert.match(document.querySelector('[data-testid="bench-model-unavailable"]')?.textContent ?? "", /engine is stopped/);
+      assert.equal(document.querySelector('[data-testid="bench-generate"]')?.hasAttribute('disabled'), true);
+      assert.match(document.body.textContent, /TAKE 1/);
+      assert.equal(JSON.stringify(state.bench), before, "availability does not change the saved composer or take");
+    });
+  }
+
+  it("names a saved model missing from the current manifest instead of implying no selection", () => {
+    const state = stateWithBench();
+    state.app.manifest = { ...state.app.manifest!, models: [] };
+    const { document } = parseHTML(`<html><body>${renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, state)}</body></html>`);
+    assert.equal(document.querySelector('select[aria-label="Model"] option[selected]')?.getAttribute('value'), "fal/test-image");
+    assert.match(document.querySelector('[data-testid="bench-model-unavailable"]')?.textContent ?? "", /no longer listed/);
+    assert.equal(document.querySelector('[data-testid="bench-generate"]')?.hasAttribute('disabled'), true);
+  });
+
   it("keeps included-plan funding visible on a saved image take", () => {
     const state = stateWithBench();
     state.bench!.session!.takes[0]!.cost = { estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "included-plan" };
