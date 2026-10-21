@@ -736,6 +736,8 @@ export class FsWorldProvider implements WorldProvider {
     if (portable.startsWith("exports/")) {
       if (ext === ".docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
       if (ext === ".epub") return "application/epub+zip";
+      // An Arke Player package, so a paired phone can download it and hand it to the Player (233f).
+      if (ext === ".zip" && /^exports\/[^/]+-player-\d{4}-\d{2}-\d{2}(?:-\d+)?\.zip$/.test(portable)) return "application/zip";
     }
     const text = FsWorldProvider.TEXT_TYPES[ext];
     if (text === undefined) return undefined;

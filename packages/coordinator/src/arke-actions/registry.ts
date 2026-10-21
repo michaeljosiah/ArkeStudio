@@ -640,6 +640,7 @@ const CLIENT_COMMAND_METADATA = {
   "accept-audiobook-timing": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   // The audiobook's web package and the world's packages (turn 186e): a file the host writes, and a read.
   "export-audiobook-player": action("production", "host-action", "export", "export", ["chapters", "artifacts", "exports"]),
+  "export-arke-player": action("production", "host-action", "export", "export", ["chapters", "artifacts", "exports"]),
   "export-audiobook-video": action("production", "host-action", "export", "export", ["chapters", "artifacts", "exports"]),
   "read-audiobook-video": readOnly(QUERY),
   "list-web-packages": readOnly(QUERY),
