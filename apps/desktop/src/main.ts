@@ -46,6 +46,7 @@ import {
   SecretRegistry,
   nodeSetupDeps,
   harnessTrace,
+  hashAudioFile,
   lazyCodexImageRunner,
   spoolBytes,
   sweepSpool,
@@ -94,6 +95,7 @@ import {
   safeVoxaExtraArgs,
   selectVoxa,
   validateVoxaExecutable,
+  createVoxaTranscriptionIdentity,
   type VoxaSelection,
 } from "./voxa-runtime.js";
 import {
@@ -1079,6 +1081,11 @@ async function initialize(): Promise<{ port: number }> {
   );
   voxaSupervisorRef = voxaSupervisor;
   registerExitBackstop(...(opencodeSupervisor ? [opencodeSupervisor] : []), voxaSupervisor);
+  const transcriptionIdentity = createVoxaTranscriptionIdentity({
+    path: () => voxaPaths().whisperModel,
+    health: signal => voxaSelection.command === null || !voxaRequestsEnabled ? Promise.resolve(null) : voxaClient.health({ signal }),
+    hash: async (path, signal) => (await hashAudioFile(path, signal)).hash,
+  });
   const voxaSidecar = {
     /*
      * The catalogue asks this before offering a voice (2026-08-24), so it has to be here and not
@@ -1096,7 +1103,8 @@ async function initialize(): Promise<{ port: number }> {
     // than leaving the engine to finish a paragraph nobody is waiting for.
     synthesize: (input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }) =>
       voxaClient.synthesize(input, options ?? {}),
-    transcribe: (audio: Uint8Array, contentType: string) => voxaClient.transcribe(audio, contentType),
+    transcribe: (audio: Uint8Array, contentType: string, options?: { signal?: AbortSignal }) => voxaClient.transcribe(audio, contentType, options),
+    transcriptionIdentity,
     transcribeWords: (audio: Uint8Array, options?: { signal?: AbortSignal }) => voxaClient.transcribeWords(audio, options),
   };
 

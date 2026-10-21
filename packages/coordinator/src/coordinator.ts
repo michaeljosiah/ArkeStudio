@@ -359,6 +359,7 @@ import { anyNarrator, audiobookListening, setAudiobookPicture, setAudiobookPictu
 import { chooseAudiobookMotion, quoteAudiobookMotion, saveAudiobookMotionCandidate, quotedMotionSource } from "./productions/audiobook-motion.js";
 import type { AudiobookWordTimingState } from "@arke-studio/contracts";
 import { prepareAudiobookWordTiming } from "./productions/audiobook-word-timing.js";
+import { checkAudiobookWords, readAudiobookWords } from "./productions/audiobook-words.js";
 import { audiobookVideoState, exportAudiobookVideo, forgetVideoJob, listVideoExports, pendingVideoJobs } from "./productions/audiobook-video.js";
 import { bookReferenceCoverage } from "./productions/audiobook-reference-coverage.js";
 import { bookLookChoices, lookUsage } from "./productions/audiobook-look-book.js";
@@ -1367,6 +1368,7 @@ export class Coordinator {
   private readonly audiobookJobs = new JobWaiters();
   private readonly makingMotion = new Map<string, AbortController>();
   private readonly preparingWordTiming = new Map<string, AbortController>();
+  private readonly checkingAudiobookWords = new Map<string, { control: AbortController; requestId: string; state: import("@arke-studio/contracts").AudiobookWordsState }>();
   private readonly audioStudioPreviews = new AudioStudioPreviews();
   private readonly wordTimingRequests = new Map<string, string>();
   private readonly wordTimingProgress = new Map<string, { done: number; total: number; chapters: string[] }>();
@@ -16026,6 +16028,39 @@ export class Coordinator {
         finally { store.closingSignal.removeEventListener("abort", onClose); if (this.makingMotion.get(key) === control) this.makingMotion.delete(key); }
         return;
       }
+      case "audiobook-words": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const key = `${store.worldId}/${msg.productionId}`;
+        const active = this.checkingAudiobookWords.get(key);
+        const emit = (state: import("@arke-studio/contracts").AudiobookWordsState) => this.emit({ at: this.nowIso(), type: "audiobook.words",
+          worldId: store.worldId, productionId: msg.productionId, requestId: msg.requestId, state });
+        if (active !== undefined) {
+          if (msg.action === "stop") active.control.abort();
+          emit({ ...active.state, runningRequestId: active.requestId });
+          return;
+        }
+        if (msg.action === "stop") return;
+        const control = new AbortController(), onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        const run = { control, requestId: msg.requestId, state: { available: false, running: msg.action === "check", done: 0, total: 0, chapters: [], rows: [] } as import("@arke-studio/contracts").AudiobookWordsState };
+        const update = (state: import("@arke-studio/contracts").AudiobookWordsState) => { run.state = state; emit({ ...state, ...(state.running ? { runningRequestId: msg.requestId } : {}) }); };
+        if (msg.action === "check") this.checkingAudiobookWords.set(key, run);
+        try {
+          const identity = (signal: AbortSignal) => this.voiceService?.transcriptionIdentity(signal) ?? Promise.resolve(null);
+          if (msg.action === "read") update(await readAudiobookWords(store, msg, await identity(control.signal), control.signal));
+          else if (this.preparingWordTiming.has(key)) update({ ...run.state, running: false, reason: "word timing is running · stop it before checking words" });
+          else update(await checkAudiobookWords(store, msg, { identity,
+            transcribe: (audio, contentType, signal) => this.voiceService!.transcribe(audio, contentType, signal),
+            ...(this.opts.audioMediaTools ? { tools: this.opts.audioMediaTools } : {}) }, control.signal, update));
+        } catch {
+          if (!store.closingSignal.aborted) update({ ...run.state, running: false, reason: control.signal.aborted ? "stopped · completed checks are kept" : "local words check is unavailable · check Voxa in Settings" });
+        } finally {
+          if (this.checkingAudiobookWords.get(key) === run) this.checkingAudiobookWords.delete(key);
+          store.closingSignal.removeEventListener("abort", onClose);
+        }
+        return;
+      }
       case "audiobook-word-timing": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
@@ -16066,8 +16101,10 @@ export class Coordinator {
         };
         try {
           if (msg.action === "read" || this.preparingWordTiming.has(key)) { await report(); return; }
+          if (this.checkingAudiobookWords.has(key)) { await report(); return; }
           const availability = await this.voiceService?.wordTimingAvailability();
           if (availability?.ready !== true) { await report(); return; }
+          if (this.checkingAudiobookWords.has(key)) { await report(); return; }
           this.preparingWordTiming.set(key, control);
           this.wordTimingRequests.set(key, msg.requestId);
           const blocks = (await report()).filter(included);
@@ -22203,6 +22240,7 @@ export class Coordinator {
       for (const control of this.makingPictures.values()) control.abort();
       for (const control of this.makingMotion.values()) control.abort();
       for (const control of this.preparingWordTiming.values()) control.abort();
+      for (const run of this.checkingAudiobookWords.values()) run.control.abort();
       for (const run of this.illustrating.values()) run.control.abort();
       for (const run of this.makingIllustrations.values()) run.control.abort();
       for (const run of this.readingBooks.values()) run.control.abort();

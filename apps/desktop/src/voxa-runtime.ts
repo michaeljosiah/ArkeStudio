@@ -12,6 +12,41 @@ export interface VoxaSelection {
   failure: VoiceRuntimeFailure | null;
 }
 
+/** The host owns the model path passed to Voxa. Unknown/unhealthy runtimes never supply a
+ * reusable recognition identity. Hashes are reused only while the exact file stamp stands. */
+export function createVoxaTranscriptionIdentity(input: {
+  path: () => string;
+  health: (signal: AbortSignal) => Promise<{ version: string; protocolVersion: number; architecture: string; engineStatus: { whisper: { ready: boolean } } } | null>;
+  hash: (path: string, signal: AbortSignal) => Promise<string>;
+}) {
+  let cached: { path: string; stamp: string; hash: string } | null = null;
+  return async (signal: AbortSignal): Promise<{ id: string; version: string } | null> => {
+    signal.throwIfAborted();
+    const health = await input.health(signal);
+    if (!health?.engineStatus.whisper.ready || !health.version.trim()) return null;
+    const path = input.path();
+    const stamp = () => {
+      const file = statSync(path);
+      if (!file.isFile() || file.size <= 0 || file.size > 512 * 1024 * 1024) throw new Error("recognizer model unavailable");
+      return `${file.size}/${file.mtimeMs}/${file.ctimeMs}/${file.ino}`;
+    };
+    try {
+      const before = stamp();
+      if (cached?.path !== path || cached.stamp !== before) {
+        const hash = await input.hash(path, signal);
+        signal.throwIfAborted();
+        if (!/^sha256:[a-f0-9]{64}$/.test(hash) || stamp() !== before) return null;
+        cached = { path, stamp: before, hash };
+      }
+      signal.throwIfAborted();
+      return { id: "voxa-whisper", version: `${health.version}/${health.protocolVersion}/${health.architecture}/${cached.hash}` };
+    } catch {
+      signal.throwIfAborted();
+      return null;
+    }
+  };
+}
+
 export function executableArchitecture(path: string): "x64" | "arm64" | null {
   let fd: number | null = null;
   try {
