@@ -496,20 +496,32 @@ describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
     } finally { finishWork(); acknowledge(); await cancel; await run; await store.close(); }
   });
 
-  it("does not let an unresponsive interruption hold cleanup after the deadline (#1981)", { timeout: 8_000 }, async () => {
+  it("does not let an unresponsive interruption hold cleanup after the deadline (#1981)", { timeout: 30_000 }, async t => {
     const { store, gate, proposal } = await setup();
     const events: DomainEvent[] = []; const adapter = neverendingAdapter();
     let dispatched!: () => void; const ready = new Promise<void>(resolve => { dispatched = resolve; });
     adapter.dispatchAsync = async input => { dispatched(); return { sessionId: input.sessionId, correlationId: "c" }; };
-    adapter.interrupt = async () => new Promise<void>(() => {});
+    let acknowledge!: () => void;
+    const interruption = new Promise<void>(resolve => { acknowledge = resolve; });
+    adapter.interrupt = async () => interruption;
     const authoring = service(adapter, events, { wallClockMs: 150 });
+    let run: Promise<void> | undefined, cancel: Promise<void> | undefined;
     try {
-      const run = authoring.run(store, gate, { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "draft" });
+      run = authoring.run(store, gate, { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "draft" });
       await ready;
-      await Promise.all([authoring.cancel(proposal.id), run]);
-      assert.equal(authoring.isRunning(proposal.id), false);
-      assert.ok(events.some(e => e.type === "authoring.status" && e.status === "timeout"));
-    } finally { await store.close(); }
+      // Keep the same cleanup bound; copying/opening the world is not part of it (#2094).
+      await t.test("Stop and the turn settle without an interrupt acknowledgement", { timeout: 8_000 }, async () => {
+        cancel = authoring.cancel(proposal.id);
+        await Promise.all([cancel, run]);
+        assert.equal(authoring.isRunning(proposal.id), false);
+        assert.ok(events.some(e => e.type === "authoring.status" && e.status === "timeout"));
+      });
+    } finally {
+      // Release the fake even when the bound fails, then close the real world watcher.
+      acknowledge();
+      try { await Promise.all([cancel, run]); }
+      finally { await store.close(); }
+    }
   });
 
   it("keeps the budget cause when the writer acknowledges interruption (#1981)", async () => {
