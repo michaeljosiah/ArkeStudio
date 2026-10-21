@@ -635,6 +635,64 @@ describe("the craft loop (turn 128)", () => {
     assert.match(sent.text, /Draft the rest$/);
   });
 
+  const draftingChapter = async () => {
+    const plain = inkbound();
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const m = await mount({ ...plain, world: { ...plain.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState);
+    await answerOpen(m);
+    return m;
+  };
+  const pressDraft = async (m: Mounted) => {
+    const button = [...m.container.querySelectorAll("button.fy-arke__prompt")].find(button => button.textContent === "Draft the rest") as HTMLElement;
+    assert.ok(button);
+    await act(async () => button.click());
+  };
+  const settleDraft = async () => act(async () => { await new Promise(resolve => setTimeout(resolve, 700)); });
+
+  it("drafting flushes pending prose and waits for the latest save acknowledgement", async () => {
+    const m = await draftingChapter();
+    const first = `${BODY}\n\nThe first new paragraph.`;
+    await typeProse(m, first);
+    await pressDraft(m);
+    const save = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.equal(save.body, first, "the press flushes before the autosave delay");
+    assert.equal(m.sent.some(message => message.kind === "world-chat-send"), false);
+
+    const latest = `${first}\n\nTyped while that save was pending.`;
+    await typeProse(m, latest);
+    await answerSave(save, "saved");
+    await settleDraft();
+    assert.equal(m.sent.some(message => message.kind === "world-chat-send"), false, "the earlier acknowledgement cannot draft from older prose");
+    await settleDraft();
+    const next = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.notEqual(next.requestId, save.requestId);
+    assert.equal(next.body, latest);
+    await answerSave(next, "saved", `sha256:${"b".repeat(64)}`);
+    await settleDraft();
+    const asks = m.sent.filter(message => message.kind === "world-chat-send");
+    assert.equal(asks.length, 1);
+    assert.deepEqual(asks[0]!.subject, { kind: "chapter", chapterId: "neap", intent: "draft" });
+  });
+
+  it("a refused save cancels the pending draft request even if the prose is later recovered", async () => {
+    const m = await draftingChapter();
+    await typeProse(m, `${BODY}\n\nKeep these words.`);
+    await pressDraft(m);
+    const save = m.sent.findLast(message => message.kind === "save-chapter")!;
+    await answerSave(save, "refused");
+    await answerOpen(m, BODY, `sha256:${"c".repeat(64)}`);
+    const retry = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.notEqual(retry.requestId, save.requestId);
+    await answerSave(retry, "saved");
+    await settleDraft();
+    assert.equal(m.sent.some(message => message.kind === "world-chat-send"), false);
+    await pressDraft(m);
+    assert.equal(m.sent.filter(message => message.kind === "world-chat-send").length, 1, "a fresh press after recovery can draft");
+  });
+
   it("a suggested question is asked for its answer alone (issue 1295)", async () => {
     const plain = inkbound();
     const workspace = {
