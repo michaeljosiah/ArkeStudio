@@ -121,6 +121,17 @@ describe("Export audiobook (turn 186e)", () => {
     assert.equal(iframe.getAttribute("sandbox"), "allow-same-origin", "captured image origin is retained without allowing scripts");
     await press(button("Next chapter"));
     assert.deepEqual(lastAsk(m, "publish-story")!.input, { action: "preview-page", editionId: edition.id, chapter: 1 });
+    const interrupted = lastAsk(m, "publish-story")!;
+    await act(async () => __setStateForTest({ ...inkbound(), world: null }, { connection: "closed" }));
+    assert.match(dom.document.body.textContent ?? "", /Reconnect to open this captured book/);
+    assert.doesNotMatch(dom.document.body.textContent ?? "", /Opening captured book/);
+    await act(async () => __setStateForTest({ ...inkbound(), world: null }, { connection: "open" }));
+    const resumed = lastAsk(m, "publish-story")!;
+    assert.notEqual(resumed.requestId, interrupted.requestId);
+    assert.deepEqual(resumed.input, { action: "preview-page", editionId: edition.id, chapter: 1 });
+    await act(async () => __applyEventForTest({ at: AT, type: "story.published", worldId: edition.worldId, productionId: edition.productionId, requestId: resumed.requestId,
+      result: { preview: { chapter: 1, count: 2, html: "<h1>Captured second chapter</h1>" } } }));
+
     await press(button("Done")); assert.equal(dom.document.querySelector("iframe"), null);
     await press(button("Preview EPUB"));
     assert.equal(lastAsk(m, "publish-story")!.input.action, "preview-page");

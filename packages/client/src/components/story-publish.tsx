@@ -75,20 +75,23 @@ export function StoryEditionFiles({ edition }: { edition: StoryEdition }) {
 function StoryBookPreview({ edition }: { edition: StoryEdition }) {
   const [chapter, setChapter] = useState(0), [html, setHtml] = useState(""), [error, setError] = useState<string | null>(null);
   const asked = useRef<string | null>(null);
+  const connection = useStore().connection;
   useEffect(() => {
+    asked.current = null; setHtml(""); setError(null);
+    if (connection !== "open") { setError("Reconnect to open this captured book."); return; }
     const off = subscribeStoryPublications(answer => {
       if (answer.type !== "story.published" || answer.requestId !== asked.current) return;
       if (answer.result.preview) { setHtml(answer.result.preview.html.replace(/src="(illustration-\d+\.(?:png|jpg))"/g, (_, name: string) => `src="${storyPreviewMediaUrl(edition.id, name).replace(/&/g, "&amp;")}"`)); setError(null); }
       if (answer.result.error) setError(answer.result.error);
     });
-    setHtml("");
     asked.current = publishStory(edition.worldId, edition.productionId, { action: "preview-page", editionId: edition.id, chapter });
+    if (!asked.current) setError("Reconnect to open this captured book.");
     return off;
-  }, [edition.id, chapter]);
+  }, [edition.id, chapter, connection]);
   return <section className="fy-publish-book-preview" aria-label="Captured EPUB preview">
     <div className="fy-publish-actions"><Button disabled={chapter === 0} onClick={() => setChapter(value => value - 1)}>Previous chapter</Button><span>Chapter {chapter + 1} of {edition.settings.chapterIds.length}</span><Button disabled={chapter + 1 >= edition.settings.chapterIds.length} onClick={() => setChapter(value => value + 1)}>Next chapter</Button></div>
     {error && <p role="alert">{error}</p>}
-    {html ? <iframe title="Captured book page" sandbox="allow-same-origin" srcDoc={html} className="fy-publish-book" /> : <p role="status">Opening captured book…</p>}
+    {html ? <iframe title="Captured book page" sandbox="allow-same-origin" srcDoc={html} className="fy-publish-book" /> : !error && <p role="status">Opening captured book…</p>}
     <p className="fy-publish-muted">Content from this EPUB. Your reader controls type size and page layout.</p>
   </section>;
 }
