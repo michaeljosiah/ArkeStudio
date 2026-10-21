@@ -95,7 +95,7 @@ type Row = {
  * it out under a coarse pointer, as a phone's sheet does; Read replies joins the row when a case
  * offers it.
  */
-async function measure(chrome: string, cases: { key: string; value: string | undefined; set: boolean; variant?: string; readReplies?: boolean }[], widths: number[], { touch = false, world = false } = {}): Promise<Row[]> {
+async function measure(chrome: string, cases: { key: string; value: string | undefined; set: boolean; variant?: string; readReplies?: boolean; busy?: boolean }[], widths: number[], { touch = false, world = false } = {}): Promise<Row[]> {
   const s = state();
   // Dictation off, as in the installed app: the reason that used to be written into the row.
   __setStateForTest(s, { voiceSidecar: { state: "unavailable", detail: "the dictation model has not been downloaded" } });
@@ -103,8 +103,8 @@ async function measure(chrome: string, cases: { key: string; value: string | und
   try {
     for (const c of cases) {
       for (const width of widths) {
-        const chip = <ModelChip readOnly={world} state={s} value={c.value} set={c.set} onPick={() => {}} onVariant={() => {}} {...(c.variant === undefined ? {} : { variant: c.variant })} />;
-        const html = renderToString(<Composer value="" onChange={() => {}} onSubmit={() => {}} placeholder="Ask about chapter 01" modelControl={chip} onAttach={() => {}} onDictate={() => {}} {...(c.readReplies ? { readReplies: { offered: true, on: false, onToggle: () => {}, notice: null } } : {})} />);
+        const chip = world && c.value === undefined ? undefined : <ModelChip readOnly={world} state={s} value={c.value} set={c.set} onPick={() => {}} onVariant={() => {}} {...(c.variant === undefined ? {} : { variant: c.variant })} />;
+        const html = renderToString(<Composer value="" onChange={() => {}} onSubmit={() => {}} placeholder="Ask about chapter 01" modelControl={chip} onAttach={() => {}} onDictate={() => {}} {...(c.busy ? { busy: true, busyLabel: "Thinking…" } : {})} {...(c.readReplies ? { readReplies: { offered: true, on: false, onToggle: () => {}, notice: null } } : {})} />);
         // The dock's own frame (fidelity.css: .fy-arke__foot pads 14 a side here, and the dock has a 1px rule), sized so the composer is `width`.
         body += `<section data-key="${c.key}" data-width="${width}">${world
           ? `<div class="fy-chat__composer" style="width:${width}px;padding:0">${html}</div>`
@@ -154,11 +154,15 @@ async function measure(chrome: string, cases: { key: string; value: string | und
 
 const chrome = findChrome();
 
-it("keeps World Chat's fixed model and touch controls beneath the full-width editor", { skip: chrome === null ? "no Chrome to lay the row out" : false }, async () => {
+it("keeps World Chat's tools beneath the full-width editor with a fixed model or harness default", { skip: chrome === null ? "no Chrome to lay the row out" : false }, async () => {
   // An 820px window activates the same <=1099px overrides as the phone. The composer widths
   // reproduce 320/390px phone gutters and the tablet without pretending this is a full App.
-  const rows = await measure(chrome!, [{ key: "world-long", value: "opencode/long", set: false, readReplies: true }], [296, 366, 747], { touch: true, world: true });
-  assert.equal(rows.length, 3);
+  const rows = await measure(chrome!, [
+    { key: "world-long", value: "opencode/long", set: false, readReplies: true },
+    { key: "world-default", value: undefined, set: false, readReplies: true },
+    { key: "world-default-busy", value: undefined, set: false, readReplies: true, busy: true },
+  ], [296, 366, 747], { touch: true, world: true });
+  assert.equal(rows.length, 9);
   for (const row of rows) {
     assert.ok(row.editor.w >= row.composer.w - 4, `full-width editor at ${row.width}`);
     const send = row.controls.find(c => c.label === "Send")!;

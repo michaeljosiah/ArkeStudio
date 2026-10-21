@@ -116,6 +116,7 @@
   .fy-artifact-candidate__actions { flex-wrap: wrap; flex-basis: 100%; }
   .fy-artifact-candidate__actions .ui-btn { white-space: normal; }
   /* Keep the shared editor and toolbar rows (225), including its model-width queries. */
+  .fy-chat__composer .fy-cx { display: block; }
   .fy-chat__composer .fy-cx :is(.fy-cx__attach, .fy-cx__send, .fy-cx__mic, .fy-cx__tool) { min-width: 44px; min-height: 44px; }
   /* World Chat names one fixed model. Let its name yield before wrapping the read toggle. */
   .fy-chat__composer .fy-cx__left:has(.fy-mchip__btn--fixed) { flex-wrap: nowrap; }
