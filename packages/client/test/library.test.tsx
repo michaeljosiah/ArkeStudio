@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { MemoryRouter, Route, Routes } from "react-router";
-import { applyTimelineCommands, seedStoryPictureTimeline, type ClientMessage, type ClientState } from "@arke-studio/contracts";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { applyTimelineCommands, seedStoryPictureTimeline, DialogueTimingIntentSchema, orderedShots, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { CutScreen } from "../src/screens/cut.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -50,6 +51,8 @@ function bridge(sent: ClientMessage[]) {
   } as unknown as NonNullable<Window["arke"]>;
 }
 
+function SceneDestination() { const location = useLocation(); return <div data-scene-destination>{location.pathname}{location.search}</div>; }
+
 async function mount(state: ClientState, search = ""): Promise<Mounted> {
   const sent: ClientMessage[] = [];
   __setBridgeForTest(bridge(sent));
@@ -63,6 +66,7 @@ async function mount(state: ClientState, search = ""): Promise<Mounted> {
       <MemoryRouter initialEntries={[`/w/${state.world!.meta.worldId}/p/${production.meta.id}/cut${search}`]}>
         <Routes>
           <Route path="/w/:worldId/p/:prodId/cut" element={<CutScreen />} />
+          <Route path="/w/:worldId/p/:prodId/scenes/:sceneId" element={<SceneDestination />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -378,5 +382,80 @@ describe("the Library (SPEC-039 T-3)", () => {
     } finally {
       await close(screen);
     }
+  });
+});
+
+
+const PERFORMANCE = "pf_01J8E0000000000000000000P1", PERFORMANCE_HASH = `sha256:${"1".repeat(64)}`;
+function stateWithPerformance() {
+  const state = stateWithBells(), production = state.world!.productions[0]!;
+  const scene = production.scenes.find(value => value.id === "sc_04")!, shot = orderedShots(scene).find(value => value.id === "sh_12")!;
+  const target = { productionId: production.meta.id, sceneId: scene.id, sceneVersion: scene.version - 1, shotId: shot.id,
+    speakerSheetId: shot.audio!.speaker!, authoredTextHash: `sha256:${createHash("sha256").update(shot.audio!.line!).digest("hex")}` };
+  production.performances = [{ id: PERFORMANCE, kind: "generated-tts", target, authoredText: shot.audio!.line,
+    file: `sha256-${"1".repeat(64)}.wav`, createdAt: "2026-09-09T10:00:00.000Z",
+    provenance: { outputHash: PERFORMANCE_HASH, outputTechnical: { durationSec: 2 } } }] as never;
+  production.performanceReview = { reviews: [{ performanceId: PERFORMANCE, decision: "accept" }],
+    selections: { "sc_04/sh_12/legacy": { performanceId: PERFORMANCE, target } }, reviewHash: null, selectionHash: null } as never;
+  if (production.timeline?.status !== "ready") throw new Error("fixture timeline");
+  production.timeline.timeline = applyTimelineCommands(production.timeline.timeline, [
+    { kind: "add-track", trackId: "tr_performance", trackKind: "dialogue", name: "Dialogue" },
+    { kind: "place", trackId: "tr_performance", clip: { id: "cl_performance", startFrame: 48, durationFrames: 48, sourceInFrames: 0,
+      source: { kind: "performance", performanceId: PERFORMANCE, shotId: shot.id, sourceHash: PERFORMANCE_HASH, leadInSec: 0, label: "Selected dialogue", timing: DialogueTimingIntentSchema.parse({}) } } },
+  ]);
+  return state;
+}
+async function settleWording() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); }); }
+const lineRow = (screen: Mounted) => screen.container.querySelector<HTMLElement>('[data-library-item="line:sh_12"]')!;
+
+describe("Library saved performances (#2100)", () => {
+  it("shows the selected read across unrelated scene versions and locates its exact timeline source without writing", async () => {
+    const state = stateWithPerformance(), screen = await mount(state, "?library=audio");
+    try {
+      await settleWording(); const row = lineRow(screen);
+      assert.equal(row.querySelector(".fy-artrow__status")?.textContent, "selected read");
+      assert.ok(row.querySelector('[aria-label="In the cut"]'));
+      assert.equal(row.querySelector(".fy-artrow__voice")?.textContent, "Open scene");
+      await act(async () => rowButton(screen, "line:sh_12").click());
+      assert.equal(action(screen, "Add to timeline"), null, "a selected performance must not place a legacy take");
+      await act(async () => action(screen, "Locate in timeline")!.click());
+      assert.equal(screen.container.querySelector('[data-clip][aria-pressed="true"]')?.getAttribute("data-clip"), "cl_performance");
+      assert.equal(commandsSent(screen).length, 0, "Locate is read-only");
+      await act(async () => (row.querySelector(".fy-artrow__voice") as HTMLButtonElement).click());
+      assert.match(screen.container.querySelector("[data-scene-destination]")!.textContent!, /scenes\/sc_04\?shot=sh_12$/);
+      assert.equal(screen.sent.some(message => message.kind === "voice-line" || message.kind === "generate-performance"), false);
+    } finally { await close(screen); }
+  });
+  it("keeps a saved read visible after selection is cleared and distinguishes review and wording states", async () => {
+    for (const [change, expected] of [
+      [(s: ClientState) => { s.world!.productions[0]!.performanceReview.selections = {}; }, "saved read"],
+      [(s: ClientState) => { s.world!.productions[0]!.performanceReview.reviews = []; }, "needs review"],
+      [(s: ClientState) => { s.world!.productions[0]!.performanceReview.reviews[0]!.decision = "reject"; }, "rejected read"],
+      [(s: ClientState) => { orderedShots(s.world!.productions[0]!.scenes.find(v => v.id === "sc_04")!).find(v => v.id === "sh_12")!.audio!.line = "Changed authored line"; }, "earlier read"],
+      [(s: ClientState) => { s.world!.productions[0]!.performances = []; }, "read unavailable"],
+    ] as const) {
+      const state = stateWithPerformance(); change(state); const screen = await mount(state, "?library=audio");
+      try { await settleWording(); assert.equal(lineRow(screen).querySelector(".fy-artrow__status")?.textContent, expected); assert.equal(lineRow(screen).querySelector(".fy-artrow__voice")?.textContent, "Open scene"); }
+      finally { await close(screen); }
+    }
+  });
+  it("does not mark another hash or shot's placement as this selected read's use", async () => {
+    for (const field of ["sourceHash", "shotId"] as const) {
+      const state = stateWithPerformance(), timeline = state.world!.productions[0]!.timeline;
+      if (timeline?.status !== "ready") throw new Error("fixture timeline");
+      const source = timeline.timeline.tracks.find(t => t.id === "tr_performance")!.clips[0]!.source;
+      if (source.kind !== "performance") throw new Error("fixture performance");
+      source[field] = field === "sourceHash" ? `sha256:${"2".repeat(64)}` : "sh_13";
+      const screen = await mount(state, "?library=audio");
+      try { await settleWording(); assert.equal(lineRow(screen).querySelector('[aria-label="In the cut"]'), null); await act(async () => rowButton(screen, "line:sh_12").click()); assert.equal(action(screen, "Locate in timeline"), null); }
+      finally { await close(screen); }
+    }
+  });
+  it("preserves the legacy voice-take path when no modern read belongs to the line", async () => {
+    const state = stateWithBells(), production = state.world!.productions[0]!;
+    production.takes.push({ id: "tk_legacy", kind: "voice", coversShots: ["sh_12"], media: "voice.wav", completedAt: "2026-09-09T10:00:00.000Z" } as never);
+    const screen = await mount(state, "?library=audio");
+    try { assert.equal(lineRow(screen).querySelector(".fy-artrow__status")?.textContent, "read"); assert.equal(lineRow(screen).querySelector(".fy-artrow__voice")?.textContent, "Again"); await act(async () => rowButton(screen, "line:sh_12").click()); assert.ok(action(screen, "Add to timeline")); }
+    finally { await close(screen); }
   });
 });

@@ -1,7 +1,7 @@
 import {
   artifactPicturePath,
 } from "@arke-studio/contracts";
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useNavigate } from "react-router";
 import {
   type BorrowableArtifact,
@@ -22,6 +22,8 @@ import {
   ulid,
   type ArtifactSidecar,
   orderedShots,
+  performanceLineKey,
+  resolvePerformanceLine,
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
 import {
@@ -55,6 +57,7 @@ import {
 import { Wave } from "../components/wave.js";
 import { takeMediaPath } from "../lib/take-presentation.js";
 import { useMediaQuery } from "../lib/media-query.js";
+import { textHash } from "./scene-workspace/line-doors.js";
 
 /**
  * Below this width the Library is a drawer (the SPEC-039 editor shell in `fidelity.css`): kept
@@ -68,7 +71,7 @@ export const LIBRARY_DRAWER_QUERY = "(max-width: 1199px)";
  *
  * A performance carries a shot id too, and keying it by that shot would file it under the shot's
  * row — where the row's `Locate` would then walk onto a clip the row does not stand for. It keeps
- * its own key and no row asks for it, which is the row that was there before this was an index.
+ * its own immutable identity; the dialogue row asks for that exact performance and hash.
  */
 function clipSourceKey(source: TimelineClip["source"]): string {
   switch (source.kind) {
@@ -79,7 +82,7 @@ function clipSourceKey(source: TimelineClip["source"]): string {
     case "artifact":
       return `artifact:${source.artifactId}`;
     case "performance":
-      return `performance:${source.performanceId}`;
+      return `performance:${source.performanceId}:${source.sourceHash}:${source.shotId}`;
   }
 }
 
@@ -270,6 +273,22 @@ export function ArtifactPanel({
    * shelf being browsed, where Locate got to — so reopening finds the panel as it was left.
    * Above the breakpoint the column is always shown and `open` is not consulted.
    */
+  // A selected read can outlive an unrelated scene edit. Its wording, speaker and stable line
+  // identify it (SPEC-044 R-16); hashing is read-only and never changes the selection.
+  const performanceTexts = useMemo(() => (production?.performances ?? []).flatMap(record => {
+    const scene = production?.scenes.find(value => value.id === record.target.sceneId);
+    const line = scene && resolvePerformanceLine(scene, record.target.shotId, record.target.blockId);
+    return line?.ok ? [[record.id, line.text] as const] : [];
+  }), [production?.scenes, production?.performances]);
+  const wordingKey = JSON.stringify(performanceTexts);
+  const [wording, setWording] = useState<{ key: string; hashes: Record<string, string> }>({ key: "", hashes: {} });
+  useEffect(() => {
+    let active = true;
+    void Promise.all(performanceTexts.map(async ([id, text]) => [id, await textHash(text)] as const))
+      .then(entries => { if (active) setWording({ key: wordingKey, hashes: Object.fromEntries(entries) }); })
+      .catch(() => { if (active) setWording({ key: wordingKey, hashes: {} }); });
+    return () => { active = false; };
+  }, [wordingKey]);
   const drawer = useMediaQuery(LIBRARY_DRAWER_QUERY);
   if (drawer && !open) {
     return <aside ref={panelRef} className="fy-artpanel" id="cut-library" data-open={false} aria-label="Library" />;
@@ -336,7 +355,7 @@ export function ArtifactPanel({
     /** The scenes this row belongs to: a shot's own, an artifact's links. */
     scenes: string[];
     /** A spoken line's shot, and what has been read of it. */
-    line?: { shotId: string; status: "read" | "reading…" | "not generated" };
+    line?: { shotId: string; status: string; sceneId?: string };
     /** The file, when the name shown is a known name rather than the file's. */
     file?: string;
   }
@@ -434,8 +453,23 @@ export function ArtifactPanel({
         const voice = production ? [...takesForShot(production, shot.id)].reverse().filter((take) => take.kind === "voice") : [];
         const read = voice.find((take) => take.completedAt !== undefined && take.media !== undefined) ?? null;
         const reading = voice.some((take) => take.completedAt === undefined);
-        const status: "read" | "reading…" | "not generated" = read !== null ? "read" : reading ? "reading…" : "not generated";
-        const uses = read === null ? [] : usesOf(`take:${read.id}`);
+        const authored = resolvePerformanceLine(scene, shot.id);
+        const selection = authored.ok ? production?.performanceReview.selections[performanceLineKey({ sceneId: scene.id, shotId: shot.id, blockId: authored.blockId })] : undefined;
+        const saved = (production?.performances ?? []).filter(record => record.target.productionId === production?.meta.id
+          && record.target.sceneId === scene.id && record.target.shotId === shot.id
+          && authored.ok && record.target.blockId === authored.blockId);
+        const performance = saved.find(record => record.id === selection?.performanceId) ?? saved.at(-1);
+        const missingSelection = !!selection?.performanceId && !saved.some(record => record.id === selection.performanceId);
+        const decision = performance && production?.performanceReview.reviews.filter(review => review.performanceId === performance.id).at(-1)?.decision;
+        const hash = wording.key === wordingKey && performance ? wording.hashes[performance.id] : undefined;
+        const earlier = performance && authored.ok && (performance.target.speakerSheetId !== authored.speakerSheetId
+          || (hash !== undefined && performance.target.authoredTextHash !== hash));
+        const hasPerformance = performance !== undefined || missingSelection;
+        const status = missingSelection ? "read unavailable" : performance ? earlier ? "earlier read"
+          : hash === undefined ? "saved read" : decision === "reject" ? "rejected read" : decision !== "accept" ? "needs review"
+          : selection?.performanceId === performance.id ? "selected read" : "saved read"
+          : read !== null ? "read" : reading ? "reading…" : "not generated";
+        const uses = performance && !missingSelection ? usesOf(`performance:${performance.id}:${performance.provenance.outputHash}:${shot.id}`) : hasPerformance || read === null ? [] : usesOf(`take:${read.id}`);
         return {
           key: `line:${shot.id}`,
           name: `“${shot.audio!.line!.trim()}”`,
@@ -443,16 +477,18 @@ export function ArtifactPanel({
           subTone: "muted" as const,
           thumb: <Mic size={12} />,
           lane: "Dialogue",
-          why: read === null ? "read the line first" : null,
+          why: hasPerformance ? (missingSelection ? "The selected read is unavailable. Open the scene to review it."
+            : earlier ? "This read belongs to an earlier line. Open the scene to review it."
+            : uses.length ? null : "Open the scene to review the saved read and its placement.") : read === null ? "read the line first" : null,
           used: uses.length > 0,
           uses,
-          add: read !== null && read.completedAt !== undefined && onAddLine !== null ? () => onAddLine(read, shot, scene.number) : null,
+          add: !hasPerformance && read !== null && read.completedAt !== undefined && onAddLine !== null ? () => onAddLine(read, shot, scene.number) : null,
           drag: null,
           durationFrames: null,
           search: `${scene.number} ${scene.title} ${shot.number} ${shot.title} ${shot.id} ${shot.audio?.speaker ?? ""} ${shot.audio?.line ?? ""} line`,
           kind: "line" as const,
           scenes: [scene.id],
-          line: { shotId: shot.id, status },
+          line: { shotId: shot.id, status, ...(hasPerformance ? { sceneId: scene.id } : {}) },
         };
       }),
   );
@@ -707,9 +743,11 @@ export function ArtifactPanel({
                   <button
                     type="button"
                     className="fy-tlbtn fy-tlbtn--text fy-artrow__voice"
-                    onClick={() => navigate(`/w/${worldId}/p/${production.meta.id}/generate/voice-line?shot=${encodeURIComponent(item.line!.shotId)}`)}
+                    onClick={() => navigate(item.line!.sceneId
+                      ? `/w/${worldId}/p/${production.meta.id}/scenes/${item.line!.sceneId}?shot=${encodeURIComponent(item.line!.shotId)}`
+                      : `/w/${worldId}/p/${production.meta.id}/generate/voice-line?shot=${encodeURIComponent(item.line!.shotId)}`)}
                   >
-                    {item.line.status === "not generated" ? "Generate" : "Again"}
+                    {item.line.sceneId ? "Open scene" : item.line.status === "not generated" ? "Generate" : "Again"}
                   </button>
                 )}
                 {selected && (
