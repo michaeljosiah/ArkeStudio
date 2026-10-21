@@ -1312,6 +1312,18 @@ export function ProductionConversationBody({
     />
   ) : null;
   const modelStatus = productionId && !sceneDock && harnessModelsNeedAWord(state) ? <HarnessModelStatus state={state} /> : null;
+  const chapterPanel = presentation?.inPanel && (subject?.kind === "chapter" || subject?.kind === "passage");
+  const promptButtons = !dock?.prompts?.length ? null : <div className="fy-arke__prompts">
+    {dock.prompts.map((entry) => {
+      const prompt = typeof entry === "string" ? entry : entry.label;
+      const replyOnly = typeof entry === "string" ? false : entry.replyOnly === true;
+      const press = typeof entry === "string" ? undefined : entry.press;
+      // A prompt says its subject; an explicit press keeps its own action (turns 128–129).
+      return <button key={prompt} type="button" className="fy-arke__prompt"
+        disabled={press === undefined && (opening !== null || running || echo !== null || languageUnavailableReason !== undefined)}
+        onClick={() => press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly)}>{prompt}</button>;
+    })}
+  </div>;
   const transcript = (
     <ConversationTranscript
       workspace={loaded}
@@ -1337,10 +1349,16 @@ export function ProductionConversationBody({
           }
         : {})}
       empty={
-        thread ? (
+        thread && (!chapterPanel || !loaded) ? (
           <div className="fy-bubble--user">
             {thread.title}
             <div className="fy-bubble__note">{openingNote ?? "opening…"}</div>
+          </div>
+        ) : chapterPanel ? (
+          <div className="fy-global-chat-welcome">
+            <span className="fy-global-chat-welcome__mark" aria-hidden="true">a</span>
+            <h3>{emptyLine}</h3>
+            {promptButtons}
           </div>
         ) : (
           <div className="fy-bubble--gate">{emptyLine}</div>
@@ -1445,6 +1463,7 @@ export function ProductionConversationBody({
         </div>
         <div className="fy-arke__log" aria-live="polite" ref={setLog}>
           {transcript}
+          {chapterPanel && (loaded?.messages.length ?? 0) > 0 && <div className="fy-global-chat-followups">{promptButtons}</div>}
         </div>
         {strip && <div className="fy-arke__strip"><StudioSidebar /></div>}
         <div className="fy-arke__foot">
@@ -1462,30 +1481,7 @@ export function ProductionConversationBody({
               <button type="button" onClick={() => onAsk?.(null)}>Dismiss</button>
             </div>
           )}
-          {dock.prompts === undefined || dock.prompts.length === 0 ? null : (
-            <div className="fy-arke__prompts">
-              {dock.prompts.map((entry) => {
-                const prompt = typeof entry === "string" ? entry : entry.label;
-                const replyOnly = typeof entry === "string" ? false : entry.replyOnly === true;
-                const press = typeof entry === "string" ? undefined : entry.press;
-                // A prompt is said with the subject before it, as a typed line is (turn 128):
-                // `Tighten this` said bare names nothing, and the thread never sees the selection.
-                // A prompt with a press of its own is a press, not a line (turn 129): `Derive
-                // again` under a stale record derives, and nothing is said.
-                return (
-                  <button
-                    key={prompt}
-                    type="button"
-                    className="fy-arke__prompt"
-                    disabled={press === undefined && (opening !== null || running || echo !== null || languageUnavailableReason !== undefined)}
-                    onClick={() => (press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly))}
-                  >
-                    {prompt}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {!chapterPanel && promptButtons}
           {/* The scene dock has no model chip (design turn 143): the production's language model
               is chosen in Settings and remembered from the other docks, which keep theirs. */}
           <Composer

@@ -12,7 +12,7 @@ import { ProductionSetupView } from "../screens/production-setup.js";
 import { useClientRender } from "./production-studio-context.js";
 import { ConversationPresentationContext, GlobalChatContext, useGlobalChat } from "./global-chat-context.js";
 import { PageSheet } from "./page-sheet.js";
-import { More, X } from "./icons.js";
+import { ChevronDown, More, X } from "./icons.js";
 import { ProductionStudioCanvas } from "./production-studio-canvas.js";
 import { RouteErrorBoundary } from "./route-error-boundary.js";
 import { setWorldChatInitiative, subscribeProductionSetupResults, subscribeWorldChatCreateResults } from "../lib/store.js";
@@ -114,6 +114,7 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
   const path = isSettingsPath(location.pathname) ? settingsReturnPath() : location.pathname + location.search;
   owner.setCurrent(chatSurfaceForPage(state, path)); const current = owner.forPage();
   const selected = snapshot.selected;
+  const chapterChat = selected?.props?.subject?.kind === "chapter" || selected?.props?.subject?.kind === "passage";
   const world = state?.world;
   useLayoutEffect(() => { if (world) owner.reconcileConversations(world.meta.worldId, new Set(world.conversations.map(row => row.id)), state?.worldChat?.conversationId); }, [owner, world?.meta.worldId, world?.conversations, state?.worldChat?.conversationId]);
   const sameWorld = !!selected && selected.worldId === world?.meta.worldId && current?.worldId === selected.worldId;
@@ -218,11 +219,11 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
   return <GlobalChatContext.Provider value={owner}>
     {children}
     <div hidden ref={parked} />
-    <PageSheet open={snapshot.open} onClose={close} title={selected?.title ?? "Chat"} headless modeless keepMounted className="fy-global-chat"
+    <PageSheet open={snapshot.open} onClose={close} title={selected?.title ?? "Chat"} headless modeless={!phone || !chapterChat} keepMounted className={`fy-global-chat${chapterChat ? " fy-global-chat--chapter" : ""}`}
       preserveReturnFocus>
       <div className="fy-global-chat-panel" style={{ "--chat-width": `${width}px` } as CSSProperties}>
         <header><div><h2>{selected?.title ?? "Chat"}</h2><p>{selected?.label ?? "Open a world to begin"}</p></div>
-          {sameWorld && <button type="button" aria-label="Conversations" aria-expanded={history} onClick={() => setHistory(value => !value)}><More size={16} /></button>}
+          {sameWorld && <button type="button" aria-label="Conversations" aria-expanded={history} onClick={() => setHistory(value => !value)}>{chapterChat ? <ChevronDown size={16} /> : <More size={16} />}</button>}
           <button type="button" aria-label="Close Chat" onClick={close}><X size={16} /></button>
         </header>
         {history && <nav className="fy-global-chat-history" aria-label="Conversations">

@@ -78,7 +78,7 @@ export function chatSurfaceForPage(state: ClientState | null, path: string): Cha
       // A chapter's conversation is the production's own thread (turn 126); the Chat names the
       // chapter it is open beside (SPEC-056 R-42).
       const chapter = production.chapters.find(c => c.id === route[6] || c.file === route[6]);
-      if (chapter) label += " / " + chapter.title;
+      if (chapter) label = production.meta.title + " / " + chapter.title;
     }
     else if (route[4] === "episodes" && route[5]) {
       const episode = production.episodes.find(e => e.id === route[5]);

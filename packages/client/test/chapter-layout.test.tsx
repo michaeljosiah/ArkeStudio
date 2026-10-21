@@ -44,6 +44,20 @@ afterEach(async()=>{await act(async()=>root?.unmount());root=null;document.body.
 
 
 async function openChapter(){const ask=sent.findLast(m=>m.kind==='open-chapter');assert.ok(ask);await act(async()=>__applyEventForTest({type:'chapter.open-result',at:'2026-09-28T14:00:00Z',requestId:ask.requestId,worldId:ask.worldId,productionId:ask.productionId,chapterId:'neap',disposition:'opened',body:CHAPTER_BODY+'\n\n<br>',version:4,hash:CHAPTER_HASH,versions:[3,2]}));}
+it('an empty chapter conversation welcomes in the global sheet and preserves one draft across close and reopen (2071)',async()=>{
+ await mount('p/ledger/story/chapters/neap',390,'empty-thread');await openChapter();await click(find('[data-global-chat-trigger]'));
+ const panel=find('.fy-global-chat--chapter[open]');assert.ok(panel,'global chapter panel is open');assert.equal(panel.hasAttribute('data-modeless'),false,'phone chapter Chat uses the shared modal sheet');
+ assert.match(find('.fy-global-chat-welcome h3').textContent!,/Nothing written with Arke/);
+ assert.equal(find('.fy-global-chat-panel header p').textContent,'The Ledger of Nights / Neap');
+ assert.equal(find('.fy-arke__subject').textContent,'Chapter 1');
+ assert.deepEqual([...document.querySelectorAll('.fy-global-chat-welcome button')].map(e=>e.textContent),['Draft the rest','What does this chapter draw on?']);
+ assert.equal(find('.fy-arke__foot .fy-arke__prompts'),null,'initial prompts belong to the welcome, once');
+ const editor=find('.fy-global-chat .fy-cx__editor');editor.textContent='Keep this unsent chapter direction.';
+ await act(async()=>props(editor).onInput!({currentTarget:editor} as never));await click(find('[aria-label="Close Chat"]'));await click(find('[data-global-chat-trigger]'));
+ assert.equal(find('.fy-global-chat .fy-cx__editor'),editor,'the shared owner keeps the mounted composer');assert.equal(editor.textContent,'Keep this unsent chapter direction.');
+ assert.equal(sent.some(m=>m.kind==='world-chat-send'||m.kind==='world-chat-create'),false,'typing and reopening never send');
+ await click(find('.fy-global-chat-welcome .fy-arke__prompt'));assert.equal(sent.filter(m=>m.kind==='world-chat-create').length,1,'a welcome press uses ordinary admission once');
+});
 it('chapter card actions reorder stable files and retire the selected chapter',async()=>{
  await mount();await click(find('.fy-chapter-card__more'));await click([...document.querySelectorAll<HTMLElement>('.fy-chapter-menu button')].find(b=>b.textContent==='Move down')!);
  const reorder=sent.find(m=>m.kind==='reorder-chapters');assert.ok(reorder);
