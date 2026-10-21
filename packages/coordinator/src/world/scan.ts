@@ -197,7 +197,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 96: an audio drama episode's Audio Studio arrangement — drama-mix (SPEC-057 R-67, issue 1863).
 // 97: setup's narrator samples on the draft (SPEC-057 R-6, issue 1882).
 // 98: what of an episode's mix was heard, with its notes — drama-mix `heard` (issue 1882).
-export const SUPPORTED_SCHEMA_VERSION = 98;
+// 99: retained prose-first sheet creation review on conversation action bindings (#2047).
+export const SUPPORTED_SCHEMA_VERSION = 99;
 
 export class WorldOpenError extends Error {
   constructor(

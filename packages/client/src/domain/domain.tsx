@@ -245,13 +245,13 @@ function invalidNotice(detail: string | undefined): { title: string; hint: strin
 
 type ProposalReviewTarget = NonNullable<StagedProposal["review"]>["targets"][number];
 
-function ProposalReviewFields({ target }: { target: ProposalReviewTarget }) {
+export function ProposalReviewFields({ target }: { target: Pick<ProposalReviewTarget, "action" | "fields"> & { path?: string } }) {
   const prose = target.fields.filter(f => !f.metadata);
   const metadata = target.fields.filter(f => f.metadata);
   const renderField = (f: ProposalReviewTarget["fields"][number]) => (
     <div key={f.field} className="dom-review__field">
       <div className="dom-review__name">{f.field}</div>
-      {f.field.endsWith("· Prompt override") && <ShotPromptProposalDiff before={f.before} after={f.proposed} targetPath={target.path} />}
+      {target.path && f.field.endsWith("· Prompt override") && <ShotPromptProposalDiff before={f.before} after={f.proposed} targetPath={target.path} />}
       {f.before !== null && (
         <div className="dom-review__was">
           <span className="dom-review__tag mono">was</span>

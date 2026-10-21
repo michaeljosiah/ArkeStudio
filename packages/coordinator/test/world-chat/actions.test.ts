@@ -72,6 +72,7 @@ import { ConversationImages } from "../../src/world-chat/images.js";
 import { QueryLeaseRegistry } from "../../src/world-chat/lease.js";
 import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
+import { sheetCreationProseFields } from "../../src/world-chat/sheet-card.js";
 import { stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -422,6 +423,67 @@ function candidate(
 }
 
 describe("World Chat authority adapters", () => {
+  for (const authoring of ["candidate", "typed"] as const) it(`reads retained ${authoring} sheet creation cards prose first without changing their approval envelope (#2047)`, async () => {
+    const w = await setup();
+    const points = ["Review harbour", "Review quay"].map(name => candidate(w.conversationId, name, {
+      classification: "sheet.create",
+      draft: { type: "location", name, role: "Harbour watch", region: "Slackwater", canonRules: [], links: [],
+        sections: [{ heading: "Look", body: "Stone steps.\n\nA sheltered doorway." }, { heading: "Sound", body: "A quiet bell." }, { heading: "Customs", body: "Share the warning." }] },
+    }));
+    const receipts = [currentReceipt(w.store, "sheets"), currentReceipt(w.store, "canon")];
+    const one = turn(w.conversationId, w.entryContext, authoring === "candidate" ? { candidates: points } : {
+      receipts, actions: points.map(point => {
+        if (point.classification !== "sheet.create") throw new Error("Expected sheet candidate");
+        return ModelWorldChatActionSchema.parse({ kind: "sheet", checkReceiptIds: receipts.map(read => read.id),
+          change: { operation: "create", sheetType: "location", name: point.draft.name, region: point.draft.region,
+            canonRules: [], links: [], sections: point.draft.sections } });
+      }),
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const journal = await w.log.read();
+    const cards = (await loaded(w.log)).actions;
+    assert.equal((await readWorldMeta(w.store.dir)).schemaVersion, 99);
+    await assert.rejects(readWorldMeta(w.store.dir, { supports: 98 }), /newer|schema/i);
+    const binding = journal.events.find(e => e.event.type === "action.prepared")!.event;
+    if (binding.type !== "action.prepared") throw new Error("Expected binding");
+    assert.equal(ConversationActionBindingSchema.safeParse({ ...binding.binding, sheetCreationProseFields: [10000] }).success, false);
+    assert.equal(ConversationActionBindingSchema.safeParse({ ...binding.binding, sheetCreationProseFields: [11, 11] }).success, false);
+    assert.equal(cards.length, 2);
+    for (const card of cards) {
+      assert.equal(card.shown.body.family, "authored-diff");
+      if (card.shown.body.family !== "authored-diff") throw new Error("Expected sheet review");
+      assert.ok(card.sheetCreationProseFields);
+      assert.deepEqual(card.sheetCreationProseFields.map(index => card.shown.body.family === "authored-diff" && card.shown.body.fields[index]!.label.split(": ").at(-1)), ["Look", "Sound", "Customs"]);
+      assert.equal(card.shown.body.fields[card.sheetCreationProseFields[0]!]!.after, "Stone steps.\n\nA sheltered doorway.");
+      assert.ok(card.shown.body.fields.some(field => field.label.endsWith(": Region") && field.after === "Slackwater"));
+      const candidates = new Map(points.map(point => [point.id, point]));
+      if (authoring === "candidate") assert.deepEqual(sheetCreationProseFields(card, candidates), card.sheetCreationProseFields, "old candidate cards recover the same reading order");
+      assert.equal(sheetCreationProseFields(card, new Map()), undefined, "missing retained evidence stays expanded");
+      const edited = structuredClone(card);
+      if (edited.shown.body.family !== "authored-diff") throw new Error("Expected sheet review");
+      edited.shown.body.fields[0]!.before = "Old value";
+      assert.equal(sheetCreationProseFields(edited, candidates), undefined, "amendments are never folded");
+      const ambiguous = structuredClone(card);
+      if (ambiguous.shown.body.family !== "authored-diff") throw new Error("Expected sheet review");
+      ambiguous.shown.body.fields.push(ambiguous.shown.body.fields[card.sheetCreationProseFields[0]!]!);
+      assert.equal(sheetCreationProseFields(ambiguous, candidates), undefined, "an ambiguous frozen review stays expanded");
+    }
+    assert.deepEqual(await w.log.read(), journal, "projecting a legacy card does not rewrite the journal");
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed");
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!, "deny")).status, "denied");
+    const reopened = await loaded(new WorldChatStore(conversationDir(w.store.dir, w.conversationId)));
+    assert.deepEqual(reopened.actions.map(card => card.status), ["completed", "denied"]);
+    for (const [index, card] of reopened.actions.entries()) {
+      assert.deepEqual(card.shown, cards[index]!.shown);
+      assert.equal(card.previewDigest, cards[index]!.previewDigest);
+      assert.deepEqual(card.sheetCreationProseFields, cards[index]!.sheetCreationProseFields);
+    }
+    assert.ok(w.store.getBundle().sheets.some(sheet => sheet.name === "Review harbour"));
+    assert.ok(!w.store.getBundle().sheets.some(sheet => sheet.name === "Review quay"));
+  });
+
   for (const decision of ["approve", "deny"] as const) it(`keeps one chapter decision surface through ${decision} and reopening (#2016)`, async () => {
     const w = await setup({ kind: "production", productionId: "the-ledger-of-nights" });
     const chapter = () => w.store.getBundle().productions.find(p => p.meta.id === "the-ledger-of-nights")!.chapters.find(c => c.id === "neap")!;
