@@ -404,7 +404,7 @@ interface RunHarness {
   run: (extra?: { confirmationToken?: string; only?: string[] }) => Promise<void>;
 }
 
-async function harness(store: WorldStore, opts: { transcribe?: (text: string, request: number) => Promise<string>; heardFor?: (text: string) => string; fail?: string; failAfter?: number; dailyQuota?: () => DailySpeechQuota | null; actual?: number; tail?: number; model?: ManifestModel } = {}): Promise<RunHarness> {
+async function harness(store: WorldStore, opts: { transcribe?: (text: string, request: number) => Promise<string>; heardFor?: (text: string) => string; fail?: string; failAfter?: number; failClass?: Job["failureClass"]; enqueueError?: unknown; dailyQuota?: () => DailySpeechQuota | null; actual?: number; tail?: number; model?: ManifestModel } = {}): Promise<RunHarness> {
   const reader = opts.model === undefined ? READER : { provider: opts.model.provider, model: opts.model.id, voiceId: "calen", label: "Calen" };
   const plan = await planAudiobook(store, LEDGER, "neap", { narrator: reader });
   const textOf = new Map(plan.blocks.map((planned) => [planned.block.key, planned.block.text.replace(/\s+/g, " ").trim()]));
@@ -434,6 +434,7 @@ async function harness(store: WorldStore, opts: { transcribe?: (text: string, re
       enqueue: async (inputs) => {
         const input = inputs[0]!;
         sent.push(input);
+        if (opts.enqueueError !== undefined && sent.length > (opts.failAfter ?? 0)) throw opts.enqueueError;
         const keys = (input.params["blocks"] as string[] | undefined) ?? [String(input.params["block"])];
         // A second of speech a block, half a second of pause between.
         const pcm = join_(...keys.flatMap((key, index) => [...(index > 0 ? [silence(0.5)] : [silence(0.2)]), tone(1, 0.2)]), silence(0.2), ...(opts.tail !== undefined ? [silence(0.4), blips(opts.tail)] : []));
@@ -443,7 +444,7 @@ async function harness(store: WorldStore, opts: { transcribe?: (text: string, re
         heard = keys.map((key) => (opts.heardFor ?? ((text: string) => text))(textOf.get(key)!));
         const id = `jb_01J8G00000000000000000000${sent.length}`;
         jobs.set(id, (opts.fail !== undefined && sent.length > (opts.failAfter ?? 0)
-          ? { ...input, id, status: "failed", error: opts.fail, landedFiles: [] }
+          ? { ...input, id, status: "failed", error: opts.fail, ...(opts.failClass !== undefined ? { failureClass: opts.failClass } : {}), landedFiles: [] }
           : { ...input, id, status: "succeeded", landedFiles: [file] }) as unknown as Job);
         return { jobIds: [id] };
       },
@@ -678,6 +679,76 @@ describe("a chapter read grouped (design turn 185)", () => {
       assert.equal(Object.keys(after.flags).length, 0);
       assert.equal(h.events.filter(e => e.type === "finished").at(-1)?.outcome, "read");
       assert.equal(h.sent.length, Object.keys(after.takes).length + 1, "only the one refused request is extra");
+    } finally { await w.close(); }
+  });
+
+  for (const grouped of [false, true]) for (const failure of ["thrown", "durable"] as const) {
+    it("interrupts a " + (grouped ? "grouped" : "solo") + " read at a " + failure + " connection failure and explicitly resumes only missing takes", async () => {
+      const body = Array.from({ length: 8 }, (_, i) => "Maren opened ledger number " + (i + 1) + " and read the tide marks beneath the harbour bell. She waited for the water.").join("\n\n");
+      const w = await world(body);
+      try {
+        const model: ManifestModel = { ...GROUPABLE, cadence: { ...GROUPABLE.cadence!, groupable: grouped ? true : undefined }, limits: { ...GROUPABLE.limits, maxPromptChars: 350 } };
+        const opts = { model, failAfter: 1, fail: failure === "durable" ? "The speech endpoint cannot be reached." : undefined,
+          failClass: "offline" as const, enqueueError: failure === "thrown" ? new TypeError("fetch failed", { cause: { code: "ENOTFOUND" } }) : undefined };
+        const h = await harness(w.store, opts);
+        await h.run(); await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+        assert.equal(h.sent.length, 2, "nothing after the first connection failure is requested");
+        const before = await recordOf(w.worldDir), saved = Object.keys(before.takes);
+        assert.ok(saved.length > 0); assert.deepEqual(before.flags, {});
+        assert.equal(finished(h.events)?.outcome, "failed");
+        assert.equal(finished(h.events)?.made, saved.length); assert.equal(finished(h.events)?.flagged, 0);
+        assert.match(finished(h.events)?.reason ?? "", /^Connection interrupted: .*Saved recordings are kept/);
+        assert.equal(h.activity.at(-1)?.phase, "interrupted");
+        const remaining = (await planAudiobook(w.store, LEDGER, "neap", { narrator: { ...READER, voiceId: "calen", label: "Calen" } })).blocks.filter(b => !saved.includes(b.block.key));
+        assert.ok(remaining.length > 0); assert.ok(remaining.every(b => b.state === "not made"));
+        opts.fail = undefined; opts.enqueueError = undefined; h.events.length = 0;
+        await h.run(); const quote = priced(h.events)!; assert.ok(quote);
+        assert.equal(h.sent.length, 2, "recovery still waits for explicit confirmation");
+        await h.run({ confirmationToken: quote.confirmationToken });
+        const after = await recordOf(w.worldDir);
+        for (const key of saved) assert.deepEqual(after.takes[key], before.takes[key], "earlier take identity, provenance and timestamp are preserved");
+        assert.deepEqual(after.flags, {}); assert.equal(finished(h.events)?.outcome, "read");
+        assert.equal(Object.keys(after.takes).length, saved.length + remaining.length);
+        for (const request of h.sent.slice(2)) {
+          const keys = (request.params["blocks"] as string[] | undefined) ?? [String(request.params["block"])];
+          assert.ok(keys.every(key => !saved.includes(key)), "no completed passage is submitted again");
+        }
+      } finally { await w.close(); }
+    });
+  }
+
+  it("retains a paid solo part through a later DNS failure and reuses it on the explicit retry", async () => {
+    const w = await world(Array.from({ length: 18 }, () => "Maren read the old ledger and counted the tide marks beside the window.").join(" "));
+    try {
+      const model: ManifestModel = { ...GROUPABLE, cadence: { ...GROUPABLE.cadence!, groupable: undefined }, limits: { ...GROUPABLE.limits, maxPromptChars: 350 } };
+      const opts = { model, failAfter: 2, enqueueError: new Error("DNS lookup failed (ENOTFOUND)") as Error | undefined };
+      const h = await harness(w.store, opts);
+      await h.run(); await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+      assert.equal(h.sent.length, 3); assert.equal(finished(h.events)?.flagged, 0);
+      const before = await recordOf(w.worldDir); assert.equal(Object.keys(before.takes).length, 1);
+      const received = [...h.jobs.values()].at(-1)!; assert.equal(received.status, "succeeded");
+      assert.equal(received.params["part"], 0); assert.ok(Number(received.params["parts"]) > 1);
+      const retained = await readFile(join(w.worldDir, received.landedFiles![0]!)); assert.ok(retained.length > 44);
+      opts.enqueueError = undefined; h.events.length = 0;
+      await h.run(); const quote = priced(h.events)!; assert.ok(quote);
+      assert.deepEqual(await readFile(join(w.worldDir, received.landedFiles![0]!)), retained);
+      await h.run({ confirmationToken: quote.confirmationToken });
+      assert.equal(finished(h.events)?.outcome, "read");
+      assert.ok(h.activity.some(update => update.job?.id === received.id && update.job.reused));
+      assert.equal(h.sent.filter(input => input.params["block"] === received.params["block"] && input.params["part"] === 0).length, 1, "the received part is never bought twice");
+      const after = await recordOf(w.worldDir); assert.deepEqual(after.flags, {});
+      for (const [key, take] of Object.entries(before.takes)) assert.deepEqual(after.takes[key], take);
+    } finally { await w.close(); }
+  });
+
+  it("keeps a witnessed terminal failure as a block review even when its message mentions a network code", async () => {
+    const w = await world();
+    try {
+      const h = await harness(w.store, { fail: "HTTP 422 invalid request: ENOTFOUND is not a supported voice", failClass: "terminal" });
+      await h.run(); await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+      assert.equal(finished(h.events)?.outcome, "read");
+      assert.ok((finished(h.events)?.flagged ?? 0) > 0);
+      assert.ok(Object.keys((await recordOf(w.worldDir)).flags).length > 0);
     } finally { await w.close(); }
   });
 
