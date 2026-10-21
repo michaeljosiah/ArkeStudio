@@ -102,3 +102,17 @@ it("refuses changed captured bytes during streaming and removes only its unfinis
   await assert.rejects(writeIllustratedEpub(document, options, [], [], root, join(root, "story.epub"), stop.signal));
   assert.deepEqual(await readdir(root), ["image.png"]);
 });
+
+it("refuses Create when a new invalid picture leaves the captured image list unchanged", async () => {
+  const h = await setup(), review = await h.service.review(h.store, h.productionId, h.settings);
+  const preview = await h.service.preview(h.store, h.productionId, h.settings, review.fingerprint, () => {});
+  assert.equal(preview.status, "preview", preview.error);
+  await updateAudiobook(h.store, h.productionId, h.plan.chapter, record => ({ ...record, pictures: { ...record.pictures,
+    "p999.0": { file: "missing.png", source: "world", textHash: "text-v1:unknown", at: "2026-10-21T00:00:00Z" },
+  } }));
+  const changed = await h.service.review(h.store, h.productionId, h.settings);
+  assert.equal(changed.fingerprint, review.fingerprint, "successful picture rows still match the captured edition");
+  assert.ok(changed.blockers.some(row => row.includes("p999.0")));
+  await assert.rejects(h.service.create(h.store, h.productionId, preview.id), /picture p999\.0 is missing/);
+  assert.equal((await h.service.list()).find(row => row.id === preview.id)?.status, "preview");
+});

@@ -413,6 +413,8 @@ export class StoryPublicationService {
       return store.ownedRead(async () => {
       const current = await readStoryPublication(store, productionId, edition.settings);
       if (current.review.fingerprint !== edition.fingerprint) throw new Error("The source changed since preview. Recheck and prepare a fresh preview.");
+      // A newly invalid picture can leave the successful captured inputs unchanged.
+      if (current.review.blockers.length) throw new Error(current.review.blockers.join("\n"));
       await this.verify(edition);
       saved.edition = { ...edition, status: "ready", phase: "Files ready" };
       await this.write(saved); return saved.edition;

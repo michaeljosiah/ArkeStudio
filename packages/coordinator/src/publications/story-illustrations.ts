@@ -28,6 +28,7 @@ export async function storyIllustrations(store: WorldStore, chapters: readonly {
       blockers.push(`${source.title}: illustration bindings could not be read.`); continue;
     }
     const record = plan.record;
+    const paragraphs = chapterParagraphs(source.body).length;
     const blocks = plan.blocks.map(row => row.block);
     const { placed, lost } = placePictures(blocks, record?.pictures, file => listed.has(file));
     for (const key of lost) blockers.push(`${source.title}: picture ${key} is missing or no longer has a manuscript position.`);
@@ -41,7 +42,7 @@ export async function storyIllustrations(store: WorldStore, chapters: readonly {
       if (pictureLookChanged(entry.picture.look, record?.look, kitLookLibrary(bundle.referenceKits, record?.look))) {
         blockers.push(`${source.title}: picture ${entry.key} has a changed look. Review it before publishing.`); continue;
       }
-      if (block.paragraph < -1 || block.paragraph >= chapterParagraphs(source.body).length) {
+      if (block.paragraph < -1 || block.paragraph >= paragraphs) {
         blockers.push(`${source.title}: picture ${entry.key} has an unavailable manuscript position.`); continue;
       }
       if (images.length >= STORY_ILLUSTRATION_LIMITS.count) { blockers.push("The illustrated EPUB exceeds 1,000 pictures. Select fewer chapters."); return images; }
@@ -73,4 +74,3 @@ export async function storyIllustrations(store: WorldStore, chapters: readonly {
   }
   return images;
 }
-
