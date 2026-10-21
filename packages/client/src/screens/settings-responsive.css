@@ -52,7 +52,7 @@
   .fy-settings__sheet { max-height: calc(95dvh - 52px); }
   .fy-settings__rail { padding: 24px 12px 18px 18px; }
   .fy-settings__title { margin: 0 0 10px 8px; }
-  .fy-settings__tab { padding: 0 10px; border-radius: 10px; }
+  .fy-settings__tab { padding: 6px 10px; border-radius: 10px; }
   .fy-settings__tab--active { margin-left: 0; box-shadow: none; background: var(--muted); }
   .fy-settings__pane > .fy-set, .fy-cols__pane { padding: 24px; }
   .fy-settings__pane .fy-rt__head, .fy-settings__pane .fy-pane__head { padding-right: 40px; flex-wrap: wrap; }
