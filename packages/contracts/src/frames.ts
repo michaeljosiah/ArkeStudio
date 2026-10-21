@@ -473,6 +473,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * twice is not an error — the second copy is a world of its own, slugged accordingly.
    */
   z.object({ kind: z.literal("install-sample-world") }).strict(),
+  z.object({ kind: z.literal("cancel-sample-world-download") }).strict(),
+  z.object({ kind: z.literal("discard-sample-world-download") }).strict(),
+  z.object({ kind: z.literal("refresh-sample-world-download") }).strict(),
   /** SPEC-002: adopt one closed-world edit — snapshot, bump, log (R-28). */
   z
     .object({ kind: z.literal("reconcile-external-edit"), worldId: UlidSchema, path: z.string().min(1) })

@@ -498,7 +498,7 @@ import { noteSentence, performanceNote } from "@arke-studio/contracts";
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
-import { cleanupStoryDownload, downloadStory, type StoryDownload } from "./world/story-download.js";
+import { cleanupStoryDownload, discardStoryDownload, downloadStory, inspectStoryDownload, type StoryDownload } from "./world/story-download.js";
 import {
   characterLookRequests,
   characterSheetRequest,
@@ -7100,6 +7100,37 @@ export class Coordinator {
         this.transport.broadcastSnapshot();
         return;
       }
+      case "refresh-sample-world-download": {
+        await this.refreshStoryDownload();
+        if (!this.stopping) this.transport.broadcastSnapshot();
+        return;
+      }
+      case "cancel-sample-world-download": {
+        if (this.readModel.getState().app.sampleWorld.cancellable && this.sampleInstallAbort) {
+          this.readModel.setSampleWorld({ cancellable: false, note: { text: "Stopping download…", refused: false } });
+          this.sampleInstallAbort.abort(new Error("Story download cancelled. Retained data can be resumed or removed."));
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "discard-sample-world-download": {
+        const release = this.opts.sampleWorldDownload;
+        if (this.stopping || this.sampleInstallAbort || !release || !this.opts.appRoot) return;
+        this.sampleInstallAbort = new AbortController();
+        this.readModel.setSampleWorld({ installing: true, cancellable: false, note: { text: "Removing downloaded data…", refused: false } });
+        this.transport.broadcastSnapshot();
+        try {
+          await discardStoryDownload(release, join(this.opts.appRoot, "downloads"));
+          this.readModel.setSampleWorld({ note: { text: "Downloaded data removed. Installed worlds are unchanged.", refused: false } });
+        } catch (error) { this.readModel.setSampleWorld({ note: { text: describeCoordinatorError(error), refused: true } }); }
+        finally {
+          this.sampleInstallAbort = null;
+          this.readModel.setSampleWorld({ installing: false });
+          await this.refreshStoryDownload();
+          if (!this.stopping) this.transport.broadcastSnapshot();
+        }
+        return;
+      }
       case "install-sample-world": {
         if (this.stopping || this.sampleInstallAbort) return;
         const install = this.opts.provider.installSampleWorld?.bind(this.opts.provider);
@@ -7109,7 +7140,7 @@ export class Coordinator {
         let installed = false;
         const refuse = (reason: string) => {
           outcomeNote = reason;
-          this.readModel.setSampleWorld({ installing: false, note: { text: reason, refused: true } });
+          this.readModel.setSampleWorld({ note: { text: reason, refused: true } });
           this.emit({ at: new Date().toISOString(), type: "sample-world.refused", reason });
         };
         if (!install || (source === null && (!release || !this.opts.appRoot))) {
@@ -7121,7 +7152,7 @@ export class Coordinator {
         // starting a second copy while the first is still being written.
         const control = new AbortController();
         this.sampleInstallAbort = control;
-        this.readModel.setSampleWorld({ installing: true, note: null });
+        this.readModel.setSampleWorld({ installing: true, cancellable: !!release && source === null, note: null });
         this.transport.broadcastSnapshot();
         let downloaded: Awaited<ReturnType<typeof downloadStory>> | undefined;
         try {
@@ -7134,21 +7165,29 @@ export class Coordinator {
             },
           });
           control.signal.throwIfAborted();
+          this.readModel.setSampleWorld({ cancellable: false });
+          this.transport.broadcastSnapshot();
           const { worldId, slug, name } = await install(downloaded?.directory ?? source!);
           installed = true;
           outcomeNote = `${name} is in your library.`;
           if (this.stopping) return;
           this.readModel.setWorlds(await this.opts.provider.listWorlds());
           this.readModel.setSampleWorld({
-            installing: false,
             note: { text: outcomeNote, refused: false },
           });
           this.emit({ at: new Date().toISOString(), type: "sample-world.installed", worldId, slug, name });
         } catch (err) {
-          if (!this.stopping) refuse(describeCoordinatorError(err));
+          if (!this.stopping) {
+            if (control.signal.aborted) {
+              outcomeNote = "Download cancelled. Retained data can be resumed or removed.";
+              this.readModel.setSampleWorld({ note: { text: outcomeNote, refused: false } });
+            } else refuse(describeCoordinatorError(err));
+          }
         } finally {
-          const cleaned = await cleanupStoryDownload(downloaded);
+          const cleaned = await cleanupStoryDownload(downloaded, { keepArchive: !installed });
           this.sampleInstallAbort = null;
+          this.readModel.setSampleWorld({ installing: false, cancellable: false });
+          await this.refreshStoryDownload();
           if (!cleaned && !this.stopping) this.readModel.setSampleWorld({
             note: { text: `${outcomeNote} Temporary download files could not be removed; check the downloads folder in your Arke app folder to reclaim space.`, refused: !installed },
           });
@@ -21924,6 +21963,13 @@ export class Coordinator {
     this.transport.broadcastSnapshot();
   }
 
+  private async refreshStoryDownload(): Promise<void> {
+    const source = this.opts.sampleWorldDownload;
+    if (!source || !this.opts.appRoot || this.stopping) return;
+    const space = await inspectStoryDownload(source, join(this.opts.appRoot, "downloads"));
+    if (!this.stopping) this.readModel.setSampleWorld({ download: { version: source.version, bytes: source.bytes, summary: source.summary, ...space } });
+  }
+
   private async refreshWorldSnapshot(worldId: string): Promise<void> {
     try {
       this.readModel.setWorld(await this.opts.provider.loadWorld(worldId));
@@ -21977,6 +22023,7 @@ export class Coordinator {
         version: this.opts.sampleWorldDownload.version, bytes: this.opts.sampleWorldDownload.bytes, summary: this.opts.sampleWorldDownload.summary,
       } } : {}),
     });
+    await this.refreshStoryDownload();
   }
 
   /**

@@ -9,8 +9,24 @@ Desktop and development composition use `UNDERSONG_RELEASE` from coordinator
 status before installation. The coordinator fetches only the pinned HTTPS GitHub release,
 checks exact compressed size and SHA-256, validates archive paths, types, expanded size and
 entry CRCs, then uses the existing world installer to assign a fresh identity. Existing worlds
-are not updated or overwritten. Failure removes the partial download; shutdown aborts network
-and extraction work. Installation already in progress drains before shutdown.
+are not updated or overwritten. Settings shows required and available disk space before the
+action, with a refresh control after space has been freed. Required space accounts for the
+remaining archive, extraction, an independent installed copy and a 64 MiB margin.
+
+Cancel download stops only this transfer or extraction. Cancellation, shutdown and network
+interruption retain a nonempty archive prefix under its pinned SHA-256 in the app's downloads
+folder; extraction scratch is removed. Resume survives restarting Arke and requests exactly
+the remaining range. If the host ignores Range, the archive is replaced from the beginning.
+Every attempt hashes the entire completed archive before extracting it; invalid ranges,
+sizes, digests or archive contents discard the cache. A different release never uses its
+predecessor's bytes. Remove downloaded data deletes only the selected release's cache, not
+installed worlds or other files. Invalid or empty retained files can also be removed there.
+
+Install, cancel, resume, remove and refresh remain host-only commands. Once independent
+installation starts, Cancel is withdrawn and the copy drains before shutdown. Successful
+installation removes the archive and extraction scratch; cleanup failure is reported separately.
+If the copy fails, extraction scratch is removed but the verified archive remains for another
+attempt. Retry still rehashes it before extraction and installation, without another transfer.
 
 ## Prepare and publish
 

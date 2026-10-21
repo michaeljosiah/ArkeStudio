@@ -1,5 +1,17 @@
 # Running and validating changes
 
+Story download recovery (#1950, SPEC-016 R-6): contracts `test/story-download.test.ts` covers
+space arithmetic; coordinator `test/world/story-download.test.ts` covers pinned ranges,
+whole-archive verification, cancellation, restart, changed releases, low space and cleanup.
+`test/application/story-install.test.ts` checks the public commands and admission/lifecycle
+boundary; `test/remote-access.test.ts` rejects host-only commands at the gateway. Client
+`test/story-download.test.tsx` and `test/settings-responsive.test.tsx` cover visible recovery
+states and the shared Settings layout. Run each from its package using `node --import tsx --test`.
+For native acceptance, use an isolated app root and the real pinned release: cancel, quit,
+restart, resume, reopen the installed world and remove another retained download. Keep these
+large downloads out of automated fixtures. Review full-App captures at 320/390, 820 and 1440
+in light/dark against master turns 150a and 175a/c, including 44px coarse-pointer controls.
+
 Audiobook header layout (#2041, SPEC-001 R-7) is measured by client
 `test/audiobook-show-layout.test.tsx` using the full stylesheet cascade and a long production
 title. Set `CHROME_PATH` if Chrome is not in a standard location. It checks touch browser widths

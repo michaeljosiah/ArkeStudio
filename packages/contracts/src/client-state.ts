@@ -587,7 +587,12 @@ export const ClientStateSchema = valueSchema(z
           .object({
             available: z.boolean(),
             installing: z.boolean(),
-            download: z.object({ version: z.string(), bytes: z.number().int().positive(), summary: z.string() }).strict().optional(),
+            cancellable: z.boolean().optional(),
+            download: z.object({ version: z.string(), bytes: z.number().int().positive(), summary: z.string(),
+              requiredBytes: z.number().int().nonnegative().optional(), freeBytes: z.number().int().nonnegative().nullable().optional(),
+              retainedBytes: z.number().int().nonnegative().optional(),
+              hasRetainedData: z.boolean().optional(),
+            }).strict().optional(),
             /** What the last attempt did, in words. Null until one has been made. */
             note: z.object({ text: z.string().min(1), refused: z.boolean() }).strict().nullable(),
           })
