@@ -230,6 +230,25 @@ const AWAY = /\b(turned away|faces? (?:is |are )?(?:turned )?away|out of (?:the 
 const REFERENCE_FACE = /\b(as in the reference|reference'?s (?:face|expression)|same (?:face|expression) as (?:the )?reference)\b/i;
 const STOP = new Set(["with", "that", "this", "from", "into", "over", "onto", "their", "them", "they", "then", "than", "very", "little", "slightly", "just", "only", "still", "while"]);
 
+/** Only a simple, named clothing action can belong wholly to somebody else. Keep ambiguous
+ * clauses in the check: dropping them could restore an outfit the scene explicitly removed. */
+function clothingSceneFor(block: string, person: ChapterPerson, people: readonly ChapterPerson[]): string {
+  return block.split(/(?<=[.!?;])\s+|\n+/u).filter(sentence => {
+    const action = sentence.trim().match(/^(.+?)\s+(wears?|wore|(?:is|was) wearing|straightens?|straightened|adjusts?|adjusted|buttons?|buttoned|removes?|removed|takes? off|took off)\s+(his own|her own|their own|an?|the)\s+([^.!?;]+)[.!?;]?$/i);
+    if (action === null) return true;
+    // The actor may be handling somebody else's clothes. Only explicit "own" or wearing
+    // without an unresolved possessor establishes whose outfit this describes.
+    if (!/ own$/i.test(action[3]!) && !/^(?:wears?|wore|(?:is|was) wearing)$/i.test(action[2]!)) return true;
+    const subject = action[1]!;
+    const familiar = /^[\p{L}-]+$/u.test(subject) ? people.filter(candidate => namedInText(subject, candidate)) : [];
+    const owner = resolveChapterPerson(people, subject) ?? (familiar.length === 1 ? familiar[0] : undefined);
+    if (owner === undefined || owner.key === person.key) return true;
+    if (people.some(other => other.key !== owner.key && namedInText(sentence, other))) return true;
+    // Another clause or possessor is not a single person's wardrobe description.
+    return /\b(?:and|but|while|as|he|she|they|him|her|his|their|them|my|your|our|who|which|that)\b|['’]s\b/i.test(action[4]!);
+  }).join(" ");
+}
+
 /** Whether an expression is written in the prompt (check 7): its own words, at least half of those that carry meaning. */
 function expressionIn(prompt: string, said: string): boolean {
   const text = normalizeSpeechText(prompt).toLowerCase();
@@ -312,7 +331,7 @@ export function pictureChecks(input: CheckInput): PictureCheck[] {
     const reference = who.find((entry) => entry.key === person.key && entry.sheet === person.sheet);
     const line = input.lines.find((entry) => entry.key === person.key);
     if (!reference?.reference || reference.look || line?.lookId) return false;
-    const current = `${line?.text ?? ""} ${input.block}`;
+    const current = `${line?.text ?? ""} ${clothingSceneFor(input.block, person, input.people)}`;
     return !GARMENT_WORDS.test(current.replace(/\b(?:hoods?|sleeves?|collars?)\b/gi, "")) && !/\b(?:without|no longer|remov(?:e[sd]?|ing)|tak(?:es?|ing|en) off|took off|chang(?:e[sd]?|ing) into|instead of)\b/i.test(current);
   });
   const allowed = [scene, ...canonical.map((person) => person.appearance)].join(" ").toLowerCase();

@@ -192,6 +192,28 @@ describe("the other checks", () => {
     assert.equal(pictureChecks({ ...input, held: { ...held, prompt: `${prompt} A silk shirt.` } }).find(check => check.id === "garments")!.ok, false);
   });
 
+  it("keeps clearly named unrelated clothing out of the canonical fallback decision (#2069)", () => {
+    const maren = { ...person("maren", "Maren Kest"), appearance: "An oilskin coat, dark with salt." };
+    const bray = { ...person("bray", "Bray Half-Hitch"), aliases: ["Hitch"] };
+    const people = [maren, bray];
+    const prompt = "Medium shot of Maren in her oilskin coat.";
+    const held = holdBrief({ frame: "Medium shot", inFrame: ["maren"], prompt }, { people, places: [], prompt, fallback: () => [] });
+    const main: PictureWho = { key: "maren", name: maren.name, sheet: "maren", kind: "character", reference: "references/maren/main.png", carried: true };
+    const garments = (block: string, text = "Hood down.", who = main, lookId?: string, candidates = people) => pictureChecks({ held, who: [who], people: candidates, lines: [{ key: "maren", text, ...(lookId ? { lookId } : {}) }], block, mood: undefined }).find(check => check.id === "garments")!;
+    for (const block of ["Bray straightens his own shirt.", "Bray Half-Hitch wears a shirt.", "Hitch adjusts his own shirt. Maren reads the ledger.", "Bray removes his own outer layer."]){
+      const check = garments(block);
+      assert.equal(check.ok, true, block);
+      assert.match(check.note!, /canonical appearance/);
+    }
+    for (const block of ["Maren straightens her dress.", "Maren removes her outer layer.", "She straightens her shirt.", "Bray and Maren wear shirts.", "Bray adjusts Maren’s dress.", "Bray straightens his own shirt while she removes her outer layer.", "Bray straightens his own shirt. She removes her outer layer.", "Someone straightens his shirt.", "Bray removes her outer layer.", "Bray straightens his shirt.", "Bray adjusts their dress.", "Bray removes the outer layer.", "Bray takes off an outer layer."])
+      assert.equal(garments(block).ok, false, block);
+    assert.equal(garments("Hitch wears a shirt.", undefined, main, undefined, [...people, { ...person("other", "Other Person"), aliases: ["Hitch"] }]).ok, false, "an ambiguous alias retains the warning");
+    assert.equal(garments("Bray wears a shirt.", "A plain dress.").ok, false, "the depicted person's own look line keeps authority");
+    assert.equal(garments("Bray wears a shirt.", undefined, { ...main, look: { lookId: "tk_other", view: "full" } }).ok, false);
+    assert.equal(garments("Bray wears a shirt.", undefined, main, "tk_other").ok, false);
+    assert.equal(garments("Bray wears a shirt.", undefined, { ...main, reference: null, carried: false }).ok, false);
+  });
+
   it("keeps prop materials distinct from invented garments (#1942)", () => {
     const objects = "Beside her lies a leather-bound ledger on a linen cloth, a velvet chair, silk curtains and an embroidered cushion.";
     const checks = checksOf({ ...EYES, prompt: `${EYES.prompt} ${objects}` }, EYES_BLOCK);

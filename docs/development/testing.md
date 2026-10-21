@@ -1,5 +1,13 @@
 # Running and validating changes
 
+Canonical picture clothing (#2069) uses coordinator `test/productions/audiobook-picture-brief.test.ts`
+and the existing `audiobook-picture-suggest.test.ts` / `audiobook-picture-only.test.ts` paths. Check
+that a named other person wearing an outfit or handling their explicitly own clothing does not
+suppress the depicted person's main-photo appearance. Keep warnings for unresolved garment
+possessors (including a named actor removing her/his/their outer layer), ambiguous names, compound
+clauses, the depicted person's own changes/removals, missing references and selected kit looks.
+This advisory check neither rewrites historical checks nor establishes semantic wardrobe ownership.
+
 Explicit chapter drafting (#1928) uses coordinator `test/world-chat/chapter-draft.test.ts`,
 `chapter-brief.test.ts`, `run.test.ts`, `input-journal.test.ts` and `test/application/writing.test.ts`,
 plus client `test/chapter-workspace.test.tsx`. Verify that the drafting presses require one complete
