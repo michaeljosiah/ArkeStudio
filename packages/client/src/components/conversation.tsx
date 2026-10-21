@@ -1164,7 +1164,11 @@ export function ProductionConversationBody({
   rejoinsRef.current = rejoins;
   const conversationIdRef = useRef(conversationId);
   conversationIdRef.current = conversationId;
-  const sentAs = (pressed: DockAsk) => (requestId: string) => {
+  // The global owner's refreshed ask can arrive after the opening has sent. Remember that
+  // create request until its sent state catches up, so stale opening props cannot replay it.
+  const sentOpening = useRef<string | null>(null);
+  const sentAs = (pressed: DockAsk, openingRequest?: string) => (requestId: string) => {
+    if (openingRequest !== undefined) sentOpening.current = openingRequest;
     const { again: _again, opening: _opening, answered: _answered, ...sent } = pressed;
     const into = loadedRef.current?.conversationId ?? conversationIdRef.current ?? "";
     onAsk?.({ ...sent, sent: { requestId, at: new Date().toISOString(), rejoins: rejoinsRef.current, conversationId: into } });
@@ -1212,13 +1216,13 @@ export function ProductionConversationBody({
         const { opening: lost, ...again } = ask;
         setOpening(null);
         onAsk?.({ ...again, again: lost.request });
-      } else if (opening === null) {
+      } else if (opening === null && sentOpening.current !== ask.opening.request) {
         setOpening({
           text: ask.text,
           was: ask.opening.was,
           ...(ask.subject !== undefined ? { subject: ask.subject } : {}),
           ...(ask.replyOnly === true ? { replyOnly: true } : {}),
-          onSent: sentAs(ask),
+          onSent: sentAs(ask, ask.opening.request),
         });
       }
       return;
@@ -1230,7 +1234,7 @@ export function ProductionConversationBody({
     const was = workspace?.conversationId ?? null;
     const opens = !conversationId;
     const request = opens ? pressed.again ?? crypto.randomUUID() : pressed.again;
-    if (say(pressed.text, pressed.replyOnly === true, pressed.subject, sentAs(pressed), request) && opens) {
+    if (say(pressed.text, pressed.replyOnly === true, pressed.subject, sentAs(pressed, opens ? request : undefined), request) && opens) {
       onAsk?.({ ...pressed, opening: { was, rejoins: rejoinsRef.current, request: request! } });
     }
     // say and sentAs are rebuilt every render; where the ask stands and the dock's readiness are
