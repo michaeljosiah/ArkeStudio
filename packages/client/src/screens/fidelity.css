@@ -5201,6 +5201,7 @@ span.fy-bench__who { border-bottom: 0; }
   transition: var(--transition-control);
 }
 .fy-bench__model:hover { background: var(--accent); }
+.fy-bench__modelnote { flex: none; margin: 8px 0 0; font: 400 var(--text-2xs)/1.5 var(--font-sans); color: var(--muted-foreground); overflow-wrap: anywhere; }
 .fy-bench__estimate { font: 400 var(--text-2xs) var(--font-mono); color: var(--muted-foreground); flex: none; white-space: nowrap; }
 .fy-bench__refusal { margin: 8px 0 0; font: 400 11.5px var(--font-sans); color: var(--destructive); }
 
