@@ -1,6 +1,7 @@
 import {
   MAIN_PHOTO_LOOK,
   PICTURE_PROMPT_MAX,
+  PICTURE_TEXT_DIRECTION,
   pictureAspect,
   pictureQuote,
   sheetReferencePicture,
@@ -109,12 +110,12 @@ export function madePicture(
 /**
  * The prompt a made picture was asked with. A picture made from a block's card went to the Bench
  * as the prompt, then the app's own closing lines (`pictureBench`: who is in which picture, the
- * light, no text), each a paragraph; the card shows the prompt alone. A brief the author wrote at
+ * light, text direction), each a paragraph; the card shows the prompt alone. A brief the author wrote at
  * the Bench has none of those lines and is the prompt whole.
  */
 export function madePrompt(brief: string): string {
   const whole = brief.trim();
-  if (!whole.endsWith("No text in the picture.")) return whole;
+  if (!whole.endsWith(PICTURE_TEXT_DIRECTION) && !whole.endsWith("No text in the picture.")) return whole;
   return (whole.split("\n\n")[0] ?? "").trim();
 }
 

@@ -115,6 +115,7 @@ it("quotes without spending, refuses a changed ceiling, and dispatches exactly o
   assert.ok(h.events.some((event) => event.type === "audiobook.motion" && event.reason?.includes("price changed")));
   await h.send({ kind: "make-audiobook-motion", ...ids, requestId: "01J00000000000000000000002", quote: response.quote });
   assert.equal(h.enqueued.length, 1, JSON.stringify(h.events));
+  assert.equal(h.enqueued[0]!.params.prompt, "A gentle movement.", "motion keeps the authored prompt without still-image lettering instructions");
   const record = await readAudiobook(h.store()!, LEDGER, CHAPTER);
   assert.ok(record !== null && record !== "unreadable");
   assert.equal(record.pictures?.["p0.0"]?.motion, undefined);

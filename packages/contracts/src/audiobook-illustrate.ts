@@ -443,6 +443,9 @@ export const IllustrationProgressSchema = z
   .strict();
 export type IllustrationProgress = z.infer<typeof IllustrationProgressSchema>;
 
+/** Generated lettering on story objects remains part of the authored scene (SPEC-047 R-120). */
+export const PICTURE_TEXT_DIRECTION = "No added captions, subtitles or text overlays. Keep writing, markings and maps on objects in the scene when the prompt calls for them.";
+
 /**
  * The brief a picture is made from at the Bench (R-99): the prompt, then who is shown in which
  * attached picture, then the chapter's light and mood. The prompt is the author's words as they
@@ -456,7 +459,7 @@ export function pictureBench(
   detailed: ReadonlyArray<PictureDetailSkin> = [],
 ): string {
   // The closing lines are the app's, never the model's (193k, check 6): who is shown where, that the
-  // references fix identity, hair and clothes and never the expression, the light, and no text.
+  // references fix identity, hair and clothes and never the expression, the light, and no overlays.
   const people = cited.some((entry) => entry.kind === "character");
   return [
     prompt.replace(/\s+/g, " ").trim(),
@@ -465,7 +468,7 @@ export function pictureBench(
     // choice retain the authored sheet fallback only for a person whose image does not ride.
     detailSkinLine(detailed.filter((detail) => !cited.some((entry) => entry.kind === "character" && entry.name === detail.name))),
     mood !== undefined && mood !== "" ? `Light and mood: ${mood}` : "",
-    "No text in the picture.",
+    PICTURE_TEXT_DIRECTION,
   ]
     .filter((part) => part !== "")
     .join("\n\n");

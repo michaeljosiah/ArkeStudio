@@ -7,12 +7,22 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { audiobookTextHash, kitLookLibrary, lookDigest, pictureBench, pictureLookFor, type ArtifactSidecar, type ChapterAudiobook, type ClientMessage, type ClientState, type ManifestModel, type PictureShot, type PictureSuggestion, type ProductionBundle } from "@arke-studio/contracts";
 import { BlockPicturePanel, pictureBrief, picturesByTab, useChapterPictures } from "../src/components/audiobook-picture.js";
 import { frameViewWord, ridesLabel, withOwnLooks } from "../src/components/audiobook-picture-card.js";
-import { madePicture } from "../src/components/audiobook-made-picture.js";
+import { madePicture, madePrompt } from "../src/components/audiobook-made-picture.js";
 import { AudiobookBlocks, type BlockRow } from "../src/screens/chapter-audiobook.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest, useStore } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+
+describe("made picture prompt compatibility (issue 2107)", () => {
+  it("removes current or legacy app directions but preserves authored in-scene writing", () => {
+    const prompt = 'Detail, the ledger reads "paid" beside a crossed-out entry.';
+    assert.equal(madePrompt(pictureBench(prompt, [], undefined)), prompt);
+    assert.equal(madePrompt(prompt + "\n\nNo text in the picture."), prompt);
+    const authored = prompt + "\n\nThe next page contains the harbour map.";
+    assert.equal(madePrompt(authored), authored);
+  });
+});
 
 /**
  * Pictures on blocks (design turn 186c, SPEC-047 R-69): a block's panel gains Picture — chosen

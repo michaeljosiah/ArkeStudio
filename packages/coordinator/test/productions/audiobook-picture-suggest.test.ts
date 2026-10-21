@@ -276,7 +276,7 @@ describe("the brief's answer, held and checked (design turn 193k, R-120, R-121)"
         const session = await new BenchStore(sessionDir(h.worldDir, done.sessionId as never)).fold();
         const brief = session!.takes[0]!.request.brief;
         assert.match(brief, /Maren Kest is shown in @Image 1\. Keep each person's identity, hair and clothes as in the references; the expression is as written above, not the reference's\./);
-        assert.match(brief, /No text in the picture\.$/);
+        assert.match(brief, /No added captions, subtitles or text overlays\. Keep writing, markings and maps on objects in the scene when the prompt calls for them\.$/);
         assert.deepEqual(done.record!.pictures!["p0.0"]!.look?.looks, { "maren-kest": { lookId: LOOK_ID, view: "close" } });
       },
       { prepare: prepareLook, picture: async () => CLOSE },
@@ -475,6 +475,8 @@ describe("Generate (R-99)", () => {
       // The Bench's own gate planned it: one job, the price of one picture and one reference.
       assert.equal(enqueued.length, 1);
       assert.equal(enqueued[0]!.estimatedMicroUsd, 45_000);
+      assert.match(String(enqueued[0]!.params.prompt), /No added captions, subtitles or text overlays\. Keep writing, markings and maps on objects in the scene when the prompt calls for them\.$/, "the provider receives the physical-writing policy");
+      assert.ok(!String(enqueued[0]!.params.prompt).includes("No text in the picture."));
       assert.deepEqual((enqueued[0]!.params as { references?: string[] }).references, ["references/maren-kest/head-front.png"], "Maren by her sheet's main picture; Bray has none and is not sent");
       const session = await new BenchStore(sessionDir(worldDir, done.sessionId as never)).fold();
       const take = session!.takes[0]!;
@@ -505,7 +507,7 @@ describe("Generate (R-99)", () => {
       const artifact = store()!.getBundle().artifacts.find((candidate) => `artifacts/${candidate.file}` === picture.file)!;
       const brief = artifact.generation?.source === "bench" ? artifact.generation.brief : "";
       assert.equal(brief.split("\n\n")[0], "Maren on the rail at dawn.");
-      assert.match(brief, /No text in the picture\.$/);
+      assert.match(brief, /No added captions, subtitles or text overlays\. Keep writing, markings and maps on objects in the scene when the prompt calls for them\.$/);
     }));
 
   it("keeps no shot when the press sends none, and leaves the world where the look put it", () =>
