@@ -15,13 +15,17 @@ export function refreshIllustrationRow(store: WorldStore, room: PictureRoom, mod
   const chosen = row.who.map(entry => {
     if (entry.kind === "character") {
       const resolved = resolveReferenceCharacter(entry, sheets, room.look);
-      if (resolved.state !== "linked") return { key: entry.key, name: entry.name, kind: entry.kind };
+      if (resolved.state !== "linked") {
+        if (entry.sheet !== undefined) throw new Error(`${entry.name}’s linked character is unavailable · review its identity before refreshing`);
+        return { key: entry.key, name: entry.name, kind: entry.kind };
+      }
       if (resolved.sheet.neverDepicted === true) throw new Error(`${entry.name} is never depicted · review the picture brief`);
       remap.set(entry.key, resolved.sheet.id);
       return { key: resolved.sheet.id, name: entry.name, kind: entry.kind, sheet: resolved.sheet.id, ...(resolved.sheet.billing === undefined ? {} : { billing: resolved.sheet.billing }) };
     }
     const explicit = entry.sheet === undefined ? undefined : sheets.find(sheet => sheet.id === entry.sheet && sheet.type === "location" && !sheet.retired);
-    const place = entry.sheet !== undefined ? explicit === undefined ? undefined : { key: explicit.id, name: explicit.name } : resolveChapterPlace(room.places, entry.name);
+    if (entry.sheet !== undefined && explicit === undefined) throw new Error(`${entry.name}’s linked location is unavailable · review its identity before refreshing`);
+    const place = explicit === undefined ? resolveChapterPlace(room.places, entry.name) : { key: explicit.id, name: explicit.name };
     return { key: place?.key ?? entry.key, name: entry.name, kind: entry.kind, ...(place === undefined || place.unlinked === true ? {} : { sheet: place.key }) };
   });
   const unique = [...new Map(chosen.map(entry => [`${entry.kind}:${entry.key}`, entry])).values()];

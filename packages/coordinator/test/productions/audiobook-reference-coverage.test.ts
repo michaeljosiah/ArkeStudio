@@ -80,3 +80,18 @@ it("holds changed references until refresh and keeps pictures already landed out
 },{illustrate:async input=>({pictures:[input.blocks[0]!,input.blocks.find(block=>block.at>=100)!].map(block=>({block:block.key,prompt:"Medium shot of Maren waiting.",who:["maren-kest"]}))}),prepare:async worldDir=>{
   const dir=join(worldDir,"references/maren-kest/takes/tk_01J8Z3X4Y5Z6A7B8C9D0E1F2K3");await mkdir(dir,{recursive:true});await writeFile(join(dir,"look.png"),pngBytes());
 }}));
+
+for (const kind of ["character", "place"] as const) it(`preserves an unavailable explicit ${kind} identity through repeated refresh refusal`, () => withHarness(async h => {
+  await illustrate(h); const before = proposed(h), original = structuredClone(before);
+  const bound = before.rows[0]!.who.find(who => who.kind === kind)!; assert.ok(bound?.sheet);
+  await h.send({kind:"retire-entity", worldId:WORLD_ID, path:`${kind === "character" ? "characters" : "locations"}/${bound.sheet}.md`});
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await refresh(h, before);
+    assert.match(refused(h)!, /linked (character|location) is unavailable/);
+    assert.deepEqual(proposed(h), original);
+  }
+  assert.equal(h.enqueued.length, 0);
+}, {illustrate:async input => ({pictures:[{block:input.blocks[0]!.key, prompt:kind === "character" ? "Medium shot of Maren waiting." : "Wide shot of the empty Vigil.", frame:kind === "character" ? "Medium" : "Wide", inFrame:kind === "character" ? ["maren-kest"] : [], place:kind === "place" ? "the-vigil" : null}]}), prepare:async worldDir => {
+  const file=join(worldDir,"productions",LEDGER,"chapters",CHAPTER+".md");
+  await writeFile(file,(await readFile(file,"utf8"))+"\nAt The Vigil, Maren waits.\n");
+}}));
