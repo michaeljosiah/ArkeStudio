@@ -32,7 +32,10 @@ attempt. Retry still rehashes it before extraction and installation, without ano
 
 1. Finish native world edits, stop authoring work, and select the intended productions,
    artifacts and completed exports in a versioned JSON configuration. Exclude unrelated worlds,
-   operational sessions and credentials. Describe missing deliverables explicitly.
+   operational sessions and credentials. Set `completion` to an explicit, nonempty release
+   status and describe missing deliverables in `status`. The packager requires the completion
+   label before creating output and copies it into `story-package.json`; it does not infer
+   editorial readiness from the presence of media files.
 2. Run `node --import tsx scripts/package-story-world.mts SOURCE NEW_OUTPUT CONFIG`.
    The new output must be outside the source world. It preserves selected authored history,
    follows artifact references, binds configured prop artwork through native domain operations,
