@@ -208,14 +208,42 @@ export async function setAudiobookPictureFocus(store: WorldStore, productionId: 
   });
 }
 
+/** A choice replaces this passage's pictures, not a shifted picture merely using its key. */
+function otherBlockPictures(blocks: readonly ListeningInputBlock[], held: Readonly<Record<string, AudiobookPicture>>, block: string, choosing: boolean): Record<string, AudiobookPicture> {
+  const index = blocks.findIndex(candidate => candidate.key === block);
+  const hashes = blocks.map(candidate => audiobookTextHash(candidate.text));
+  const matches = (picture: AudiobookPicture) => hashes.flatMap((hash, at) => hash === picture.textHash ? [at] : []);
+  const occupied = held[block];
+  const refusal = () => new Error("The earlier picture has no clear place. Choose its picture on the unchanged passage first.");
+  // The old key is not authority when its words now occur in several other places.
+  if (occupied && occupied.textHash !== hashes[index] && matches(occupied).length > 1) throw refusal();
+  const here = new Set(Object.entries(held).filter(([key, entry]) => placePictures(blocks, { [key]: entry }).placed[0]?.index === index).map(([key]) => key));
+  const rest: Record<string, AudiobookPicture> = Object.fromEntries(Object.entries(held).filter(([key]) => !here.has(key)));
+  if (!choosing || !rest[block]) return rest;
+
+  // Free the new choice's key, carrying each displaced object unchanged to its unique text.
+  // Work only on the copy: a collision or ambiguous chain refuses the entire write.
+  let displaced: AudiobookPicture | undefined = rest[block];
+  delete rest[block];
+  const moved = new Set([block]);
+  while (displaced) {
+    const positions = matches(displaced);
+    if (positions.length !== 1) throw refusal();
+    const destination = blocks[positions[0]!]!.key;
+    if (moved.has(destination)) throw refusal();
+    moved.add(destination);
+    const next = rest[destination];
+    rest[destination] = displaced;
+    displaced = next;
+  }
+  return rest;
+}
+
 /**
  * A picture set on a block, or taken off (turn 186c, R-69): only a picture the world holds — one
  * `worldImageReferences` lists, as the panel offers it — written into the chapter's record keyed
  * by the block, with the block's words so it can follow them, through the record's own lane.
- *
- * The block's picture is the one shown there, wherever it is kept: a picture that followed its
- * words to this block after a paragraph moved is still kept under its old key, and a Remove or a
- * replacement that only looked under the block's own key left it standing (codex on PR 1491).
+ * The shown picture may still be kept under an earlier key after its paragraph moved.
  */
 export async function setAudiobookPicture(
   store: WorldStore,
@@ -240,7 +268,8 @@ export async function setAudiobookPicture(
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   const summary = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
   if (summary === undefined) throw new Error("that chapter is no longer in this production");
-  const plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId) });
+  const narrator = await anyNarrator(store, productionId);
+  const plan = await planAudiobook(store, productionId, summary.id, { narrator });
   const planned = plan.blocks.find((candidate) => candidate.block.key === block);
   if (planned === undefined) throw new Error("that block is no longer in the chapter");
   if (picture !== null) {
@@ -248,13 +277,9 @@ export async function setAudiobookPicture(
     if (!listed || !(await onShelf(store, picture.file))) throw new Error("that picture is not in this world");
   }
   const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
-  const index = blocks.findIndex((candidate) => candidate.key === block);
   return updateAudiobook(store, productionId, plan.chapter, (current) => {
     const held = current.pictures ?? {};
-    // Every key whose picture would stand on this block now, its own included — each placed on
-    // its own, so one a second picture shadows there goes too rather than surfacing later.
-    const here = new Set([block, ...Object.entries(held).filter(([key, entry]) => placePictures(blocks, { [key]: entry }).placed[0]?.index === index).map(([key]) => key)]);
-    const rest: Record<string, AudiobookPicture> = Object.fromEntries(Object.entries(held).filter(([key]) => !here.has(key)));
+    const rest = otherBlockPictures(blocks, held, block, picture !== null);
     if (picture === null && Object.keys(rest).length === Object.keys(held).length) return null;
     const next: Record<string, AudiobookPicture> = picture === null ? rest : { ...rest, [block]: { file: picture.file, source: picture.source, textHash: audiobookTextHash(planned.block.text), at: store.now(), ...(made.look !== undefined ? { look: made.look } : {}), ...(made.shot !== undefined ? { shot: made.shot } : {}) } };
     const { pictures: _old, ownLooks: pending, ...without } = current;
@@ -262,5 +287,9 @@ export async function setAudiobookPicture(
     const { [block]: _made, ...others } = pending ?? {};
     const owned = made.arke === true && picture !== null ? others : (pending ?? {});
     return { ...without, updatedAt: store.now(), ...(Object.keys(next).length > 0 ? { pictures: next } : {}), ...(Object.keys(owned).length > 0 ? { ownLooks: owned } : {}) };
-  });
+  }, { requireReadable: true, beforeWrite: async () => {
+    const fresh = await planAudiobook(store, productionId, summary.id, { narrator });
+    const currentBlocks = fresh.blocks.map(candidate => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+    if (JSON.stringify(currentBlocks) !== JSON.stringify(blocks)) throw new Error("The chapter's blocks changed; choose the picture again.");
+  } });
 }

@@ -764,7 +764,11 @@ native Save dialog. See [publications](publications.md) for file ownership and f
 Illustrated EPUB (#2033) uses `publications/story-illustrations.ts` to resolve existing block
 pictures against manuscript paragraphs. Shared `placePictures` in contracts `audiobook-listening.ts`
 finds unique surviving text before a reused key's joined-block fallback (#2118), preserving the
-picture's metadata without reattachment. `story-epub.ts` streams captured PNG/JPEG inputs
+picture's metadata without reattachment. Coordinator `productions/audiobook-listening.ts`
+preserves displaced picture objects when a new choice reuses their stored key (#2120), follows
+unique-text destination chains, and refuses ambiguous collisions before writing; the grouping
+regressions in `test/productions/audiobook-seams.test.ts` cover selection as well as placement.
+`story-epub.ts` streams captured PNG/JPEG inputs
 through the shared manuscript EPUB parts. The existing Publish sheet owns the explicit option;
 its authenticated preview reads only inventoried edition media. Regressions live in
 `test/publications/story-illustrations.test.ts`, `story-routes.test.ts`, contracts

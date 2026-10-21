@@ -7,6 +7,7 @@ import {
   audiobookBlockPlan,
   audiobookSeamHash,
   audiobookTextHash,
+  placePictures,
   type AudiobookSeamAnchor,
   type ChapterAudiobook,
   type ChapterVoices,
@@ -18,6 +19,7 @@ import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { planAudiobook, readAudiobook, writeAudiobook } from "../../src/productions/audiobook.js";
 import { followChapterTakes } from "../../src/productions/audiobook-book.js";
+import { setAudiobookPicture, setAudiobookPictureFocus } from "../../src/productions/audiobook-listening.js";
 import { AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION, CAST_PARAGRAPHS_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta, SUPPORTED_SCHEMA_VERSION } from "../../src/world/scan.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -126,6 +128,95 @@ const gapAt = async (store: WorldStore, press: "join" | "split", block: string, 
   assert.ok(gap?.anchor, `a ${press} at ${block}`);
   return gap.anchor;
 };
+
+describe("picture choices after paragraph shifts (#2120)", () => {
+  const oldBody = "The first lamp stays lit.\n\nThe second lamp stays dark.\n\nThe third lamp waits.";
+  const save = (send: (message: ClientMessage) => Promise<void>, body: string) => send({ kind: "save-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", body });
+  const choose = (store: WorldStore, block: string) => setAudiobookPicture(store, LEDGER, "01-neap", block, { file: "world-art.png", source: "world" });
+  const placed = async (store: WorldStore) => {
+    const current = await plan(store);
+    return placePictures(current.blocks.map(row => row.block), (current.record as ChapterAudiobook).pictures).placed.map(entry => ({ block: current.blocks[entry.index]!.block.key, picture: entry.picture }));
+  };
+
+  it("inserts, joins and chooses a new picture without losing displaced picture objects or narration", () => withHarness(async ({ store, send }) => {
+    await save(send, oldBody);
+    await read(send);
+    for (const block of ["p0.0", "p1.0", "p2.0"]) {
+      await setAudiobookPicture(store, LEDGER, "01-neap", block, { file: "artifacts/board-v2.png", source: "generated" }, {
+        look: { hash: "look-kept", who: ["maren-kest"], looks: { "maren-kest": { lookId: "kept-look", view: "close" } } },
+        shot: { frame: "Close-up", inFrame: ["maren-kest"], notInFrame: [], expressions: {}, details: [], checks: [] },
+      });
+      await setAudiobookPictureFocus(store, LEDGER, "01-neap", block, { x: 0.3, y: 0.7 });
+    }
+    const original = await readAudiobook(store, LEDGER, "01-neap") as ChapterAudiobook;
+    await save(send, "A new warning arrives.\n\nA second warning follows.\n\n" + oldBody);
+    await seam(send, "join", await gapAt(store, "join", "p1.0"));
+    const before = await readAudiobook(store, LEDGER, "01-neap") as ChapterAudiobook;
+    const after = await choose(store, "p0.0");
+    assert.deepEqual(after.pictures?.["p2.0"], original.pictures?.["p0.0"], "first retained picture moves to its exact words");
+    assert.deepEqual(after.pictures?.["p4.0"], original.pictures?.["p2.0"], "occupied destination carries the next retained object onward");
+    assert.deepEqual(after.pictures?.["p1.0"], original.pictures?.["p1.0"], "unaffected historical key stays intact");
+    assert.deepEqual(after.takes, before.takes); assert.deepEqual(after.flags, before.flags);
+    assert.deepEqual((await placed(store)).map(row => [row.block, row.picture.file]), [
+      ["p0.0", "world-art.png"], ["p2.0", "artifacts/board-v2.png"], ["p3.0", "artifacts/board-v2.png"], ["p4.0", "artifacts/board-v2.png"],
+    ]);
+  }));
+
+  for (const reason of ["repeated text", "competing picture"] as const) {
+    it(`refuses ${reason} without changing any record`, () => withHarness(async ({ store, send, worldDir }) => {
+      await save(send, oldBody); await choose(store, "p0.0");
+      await save(send, "A new warning arrives.\n\n" + oldBody + (reason === "repeated text" ? "\n\nThe first lamp stays lit." : ""));
+      if (reason === "competing picture") {
+        const current = await readAudiobook(store, LEDGER, "01-neap") as ChapterAudiobook;
+        current.pictures!["p1.0"] = { ...current.pictures!["p0.0"]!, file: "artifacts/board-v2.png" };
+        await writeAudiobook(store, LEDGER, "01-neap", current);
+      }
+      const recordPath = join(worldDir, "productions", LEDGER, ".audiobook", "chapters", "01-neap.json");
+      const before = await readFile(recordPath, "utf8");
+      await assert.rejects(choose(store, "p0.0"), /earlier picture has no clear place/);
+      assert.equal(await readFile(recordPath, "utf8"), before);
+    }));
+  }
+
+  it("replaces an exact own-key picture even when another passage repeats its words", () => withHarness(async ({ store, send }) => {
+    await save(send, "The lamp stays lit.\n\nThe lamp stays lit.");
+    await choose(store, "p0.0"); await choose(store, "p1.0");
+    const before = await readAudiobook(store, LEDGER, "01-neap") as ChapterAudiobook;
+    const after = await setAudiobookPicture(store, LEDGER, "01-neap", "p0.0", { file: "artifacts/board-v2.png", source: "generated" });
+    assert.equal(after.pictures?.["p0.0"]?.file, "artifacts/board-v2.png");
+    assert.deepEqual(after.pictures?.["p1.0"], before.pictures?.["p1.0"]);
+  }));
+
+  it("clears only the shown passage and preserves normal joined replacement/removal", () => withHarness(async ({ store, send }) => {
+    await save(send, oldBody); await choose(store, "p0.0"); await choose(store, "p1.0");
+    const original = await readAudiobook(store, LEDGER, "01-neap") as ChapterAudiobook;
+    await save(send, "A new warning arrives.\n\n" + oldBody);
+    const cleared = await setAudiobookPicture(store, LEDGER, "01-neap", "p0.0", null);
+    assert.deepEqual(cleared.pictures, original.pictures, "clearing an unillustrated insertion cannot delete its old-key neighbour");
+    await save(send, oldBody);
+    await seam(send, "join", await gapAt(store, "join", "p1.0"));
+    const replaced = await choose(store, "p0.0");
+    assert.deepEqual(Object.keys(replaced.pictures ?? {}), ["p0.0"], "a real joined replacement removes the hidden later image as before");
+    const removed = await setAudiobookPicture(store, LEDGER, "01-neap", "p0.0", null);
+    assert.equal(removed.pictures, undefined);
+  }));
+
+  it("refuses changed manuscript at the owned-write boundary before relocating pictures", () => withHarness(async ({ store, send, worldDir }) => {
+    await save(send, oldBody); await choose(store, "p0.0");
+    await save(send, "A new warning arrives.\n\n" + oldBody);
+    const before = await readAudiobook(store, LEDGER, "01-neap");
+    const chapterPath = join(worldDir, "productions", LEDGER, "chapters", "01-neap.md");
+    const raw = await readFile(chapterPath, "utf8"), write = store.ownedWrite.bind(store);
+    const boundary = mock.method(store, "ownedWrite", async (operation: () => Promise<unknown>) => {
+      await writeFile(chapterPath, raw.replace("The first lamp stays lit.", "The first lamp goes out."), "utf8");
+      return write(operation);
+    });
+    try {
+      await assert.rejects(choose(store, "p0.0"), /blocks changed/);
+      assert.deepEqual(await readAudiobook(store, LEDGER, "01-neap"), before);
+    } finally { boundary.mock.restore(); }
+  }));
+});
 
 describe("Join, Split and Reset (design turn 198)", () => {
   it("recovers shifted unique passages with their selected take metadata and no synthesis (#2115)", () =>
