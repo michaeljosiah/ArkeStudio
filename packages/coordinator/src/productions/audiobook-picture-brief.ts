@@ -9,6 +9,7 @@ import {
   normalizeSpeechText,
   type PictureCheck,
   type PictureDetail,
+  type PictureLookLine,
   type PictureWho,
 } from "@arke-studio/contracts";
 import { clip } from "./audiobook-direction.js";
@@ -225,7 +226,7 @@ export function namedInText(text: string, person: Pick<ChapterPerson, "name" | "
 
 const TITLES = new Set(["the", "old", "young", "mr", "mrs", "ms", "miss", "dr", "lady", "lord", "sir", "dame", "madam", "mother", "father", "aunt", "uncle", "brother", "sister", "captain", "chief", "king", "queen", "prince", "princess", "saint"]);
 
-const AWAY = /\b(turned away|faces? (?:is |are )?(?:turned )?away|out of (?:the )?frame|from behind|back to (?:the )?camera|faces? (?:are |is )?(?:not|never) (?:seen|shown|visible))\b/i;
+const AWAY = /\b(turned away|faces? (?:is |are )?(?:turned )?away|out of (?:the )?frame|no faces? in (?:the )?frame(?=\s*(?:[.,;:!?—]|$))|from behind|back to (?:the )?camera|faces? (?:are |is )?(?:not|never) (?:seen|shown|visible))\b/i;
 const REFERENCE_FACE = /\b(as in the reference|reference'?s (?:face|expression)|same (?:face|expression) as (?:the )?reference)\b/i;
 const STOP = new Set(["with", "that", "this", "from", "into", "over", "onto", "their", "them", "they", "then", "than", "very", "little", "slightly", "just", "only", "still", "while"]);
 
@@ -243,7 +244,7 @@ export interface CheckInput {
   who: readonly PictureWho[];
   people: readonly ChapterPerson[];
   /** The look lines of the people in frame and in details: what they may wear. */
-  lines: ReadonlyArray<{ key: string | null; text: string }>;
+  lines: ReadonlyArray<Pick<PictureLookLine, "key" | "text" | "lookId">>;
   /** The block's own words: a garment the block names is not invented. */
   block: string;
   mood: string | undefined;
@@ -302,10 +303,23 @@ export function pictureChecks(input: CheckInput): PictureCheck[] {
   checks.push({ id: "frame", ok: word !== null && opening === word, label: "Frame named first", ...(word === null ? { note: "no frame word" } : opening !== word ? { note: `prompt opens ${opening ?? "without one"}` } : { note: word }) });
 
   // (4) A garment, hairstyle or ornament no look line and no word of the block gives is invented.
-  const allowed = [...input.lines.map((line) => line.text), input.block].join(" ").toLowerCase();
+  const scene = [...input.lines.map((line) => line.text), input.block].join(" ").toLowerCase();
+  // A main-photo appearance supplies the base when the scene adds only posture or a hood's
+  // state. Explicit wardrobe words, removals and selected kit looks keep their own authority;
+  // this vocabulary check must not silently combine a new outfit with the canonical one.
+  const canonical = input.people.filter((person) => {
+    if (!person.sheet || !person.appearance || (!inKeys.has(person.key) && !detailKeys.has(person.key))) return false;
+    const reference = who.find((entry) => entry.key === person.key && entry.sheet === person.sheet);
+    const line = input.lines.find((entry) => entry.key === person.key);
+    if (!reference?.reference || reference.look || line?.lookId) return false;
+    const current = `${line?.text ?? ""} ${input.block}`;
+    return !GARMENT_WORDS.test(current.replace(/\b(?:hoods?|sleeves?|collars?)\b/gi, "")) && !/\b(?:without|no longer|remov(?:e[sd]?|ing)|tak(?:es?|ing|en) off|took off|chang(?:e[sd]?|ing) into|instead of)\b/i.test(current);
+  });
+  const allowed = [scene, ...canonical.map((person) => person.appearance)].join(" ").toLowerCase();
   const found = [...new Set([...held.prompt.matchAll(new RegExp(GARMENT_WORDS.source, "gi"))].map((match) => match[0].toLowerCase()))];
   const invented = found.filter((wordFound) => !new RegExp(`\\b${wordFound.replace(/s$/, "")}`, "i").test(allowed));
-  checks.push({ id: "garments", ok: invented.length === 0, label: "Look lines", ...(invented.length > 0 ? { note: `invented: ${invented.join(", ")}` } : { note: "from the chosen look" }) });
+  const usedCanonical = found.some((wordFound) => !new RegExp(`\\b${wordFound.replace(/s$/, "")}`, "i").test(scene) && new RegExp(`\\b${wordFound.replace(/s$/, "")}`, "i").test(allowed));
+  checks.push({ id: "garments", ok: invented.length === 0, label: "Look lines", note: invented.length > 0 ? `invented: ${invented.join(", ")} · checked chapter look and passage${canonical.length > 0 ? " and canonical appearance" : ""}` : usedCanonical ? "includes canonical appearance" : "from chapter look or passage" });
 
   // (5) The Mood line carries no clothing.
   const moodClothes = input.mood === undefined ? false : GARMENT_WORDS.test(input.mood);

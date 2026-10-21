@@ -214,7 +214,7 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
     const stamp = pictureLookFor(room.look, who.filter((person) => person.kind === "character").map((person) => person.key), picks, library);
     const used = lookLinesFor(room.look, [...keys, ...held.details.map((detail) => detail.of)], { ...ownLookPicks(own), ...picks }, library);
     const checks = pictureChecks({ held, who, people: visible, lines: used, block: planned.block.text, mood: room.mood });
-    const shot = { frame: held.frame, inFrame: keys, notInFrame: held.notInFrame, expressions: held.expressions, details: held.details, checks };    return {
+    const shot = { frame: held.frame, inFrame: keys, notInFrame: held.notInFrame, expressions: held.expressions, details: held.details, checks, checkedPrompt: held.prompt };    return {
       block: planned.block.key,
       textHash: audiobookTextHash(planned.block.text),
       at: candidate.at,

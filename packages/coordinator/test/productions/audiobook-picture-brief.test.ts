@@ -93,6 +93,14 @@ describe("the eyes: a close frame on her, without him (193i)", () => {
 });
 
 describe("the hands: detail owners carry identity references (#1677)", () => {
+  it("recognizes explicit no-face wording without excusing a missing visible expression (#2011)", () => {
+    for (const phrase of ["No face in frame.", "No faces in the frame.", "Faces stay out of frame.", "No face in frame, only her hands."]) {
+      assert.equal(checksOf({ ...HANDS, prompt: `Detail shot of their hands. ${phrase}` }, HANDS_BLOCK)["expression"]!.ok, true, phrase);
+      assert.equal(checksOf({ ...EYES, prompt: `Close-up on Ife. ${phrase}`, expressions: {} }, EYES_BLOCK)["expression"]!.ok, false, "an in-frame face still requires its expression");
+    }
+    assert.equal(checksOf({ ...HANDS, prompt: "Detail shot of their hands. No face in frame is smiling." }, HANDS_BLOCK)["expression"]!.ok, false, "a longer statement about faces does not exclude them");
+  });
+
   it("has no full person in frame and carries the detail owners without the place", () => {
     const held = hold(HANDS);
     assert.deepEqual(held.inFrame, []);
@@ -151,6 +159,39 @@ describe("expression named (check 7)", () => {
 });
 
 describe("the other checks", () => {
+  it("grounds a main-photo detail line in its person's canonical appearance (#2011)", () => {
+    const maren = { ...person("maren", "Maren Kest"), appearance: "An oilskin coat, dark with salt." };
+    const held = holdBrief({ frame: "Medium shot", inFrame: ["maren"], prompt: "Medium shot of Maren in her oilskin coat." }, { people: [maren], places: [], prompt: "Medium shot of Maren in her oilskin coat.", fallback: () => [] });
+    const who: PictureWho[] = [{ key: "maren", name: maren.name, sheet: "maren", kind: "character", reference: "references/maren/main.png", carried: true }];
+    const check = pictureChecks({ held, who, people: [maren], lines: [{ key: "maren", text: "Hood down, wet hair against her face." }], block: "She looked at the ledger.", mood: undefined }).find(check => check.id === "garments")!;
+    assert.equal(check.ok, true);
+    assert.match(check.note!, /canonical appearance/);
+  });
+
+  it("keeps explicit scene clothing and selected kit looks authoritative (#2011)", () => {
+    const maren = { ...person("maren", "Maren Kest"), appearance: "An oilskin coat, dark with salt." };
+    const prompt = "Medium shot of Maren in her oilskin coat.";
+    const held = holdBrief({ frame: "Medium shot", inFrame: ["maren"], prompt }, { people: [maren], places: [], prompt, fallback: () => [] });
+    const main: PictureWho = { key: "maren", name: maren.name, sheet: "maren", kind: "character", reference: "references/maren/main.png", carried: true };
+    const garments = (text: string, block = "She studies the page.", who = main, lookId?: string) => pictureChecks({ held, who: [who], people: [maren], lines: [{ key: "maren", text, ...(lookId ? { lookId } : {}) }], block, mood: undefined }).find(check => check.id === "garments")!;
+    for (const text of ["A plain dress.", "She has removed her outer layer.", "Without her usual outer layer.", "She takes off her outer layer.", "She took off her outer layer.", "She removes her outer layer."])
+      assert.equal(garments(text).ok, false, text);
+    assert.equal(garments("Hood down, wet hair.", "She changed into a dress.").ok, false, "the passage can change the wardrobe");
+    assert.equal(garments("Hood down, wet hair.", undefined, { ...main, look: { lookId: "tk_other", view: "full" } }).ok, false, "a selected picture look does not inherit another outfit");
+    assert.equal(garments("Hood down, wet hair.", undefined, main, "tk_other").ok, false, "a selected chapter look keeps its authority");
+    assert.equal(garments("Hood down, wet hair.", undefined, { ...main, reference: null, carried: false }).ok, false, "canonical prose is not a substitute for an applicable reference");
+  });
+
+  it("grounds a linked detail owner but never borrows an off-camera person's clothes (#2011)", () => {
+    const people = [{ ...person("maren", "Maren"), appearance: "An oilskin coat." }, { ...person("bray", "Bray"), appearance: "A silk shirt." }];
+    const prompt = "Detail shot of Maren's oilskin coat sleeve, no face in frame.";
+    const held = holdBrief({ frame: "Detail shot", inFrame: [], details: [{ of: "maren", part: "forearm" }], prompt }, { people, places: [], prompt, fallback: () => [] });
+    const who: PictureWho[] = [{ key: "maren", name: "Maren", sheet: "maren", kind: "character", reference: "references/maren/main.png", carried: true }];
+    const input = { held, who, people, lines: [{ key: "maren", text: "Sleeves rolled up." }], block: "She rests her hand on the page.", mood: undefined };
+    assert.equal(pictureChecks(input).find(check => check.id === "garments")!.ok, true);
+    assert.equal(pictureChecks({ ...input, held: { ...held, prompt: `${prompt} A silk shirt.` } }).find(check => check.id === "garments")!.ok, false);
+  });
+
   it("keeps prop materials distinct from invented garments (#1942)", () => {
     const objects = "Beside her lies a leather-bound ledger on a linen cloth, a velvet chair, silk curtains and an embroidered cushion.";
     const checks = checksOf({ ...EYES, prompt: `${EYES.prompt} ${objects}` }, EYES_BLOCK);

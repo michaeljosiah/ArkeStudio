@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { lookViewFor, pictureLookChanged, ridingPicks, type AudiobookLook, type ClientMessage, type DomainEvent, type ManifestModel, type WorldBundle } from "@arke-studio/contracts";
 import { BenchStore, sessionDir } from "../../src/bench/store.js";
-import { AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readAudiobook } from "../../src/productions/audiobook.js";
 import { buildPicturePrompt, clipPrompt, pictureAspect, pictureQuote, pictureWho, promptRoom, type PictureDeriverInput } from "../../src/productions/audiobook-picture-suggest.js";
 import { acceptCharacterLook } from "../../src/references/kit.js";
@@ -34,6 +34,32 @@ const suggestion = (events: DomainEvent[]): SuggestionEvent => {
 const madeEvents = (events: DomainEvent[]): MadeEvent[] => events.filter((event): event is MadeEvent => event.type === "audiobook.picture-made");
 
 describe("Suggest picture (R-99)", () => {
+  it("retains checks against their exact prompt when an edited picture is made and reopened (#2011)", () => {
+    const prompt = "Detail shot of Maren's hand on the ledger.";
+    return withHarness(async ({ events, send, store, schemaVersion, enqueued }) => {
+      await suggest(send);
+      const picked = suggestion(events).suggestion!;
+      assert.equal(picked.shot!.checkedPrompt, prompt);
+      assert.equal(picked.shot!.checks.find(check => check.id === "expression")!.ok, false);
+      const edited = `${prompt} No face in frame.`;
+      await send({ kind: "make-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER,
+        chapterFile: CHAPTER, block: "p0.0", requestId: REQUEST, prompt: edited,
+        who: picked.who.map(person => person.key), frame: picked.shot!.frame,
+        shot: picked.shot!, confirmedMicroUsd: picked.estimatedMicroUsd });
+      assert.equal(madeEvents(events).at(-1)!.state, "made");
+      assert.equal(enqueued.length, 1);
+      assert.match(String(enqueued[0]!.params.prompt), /No face in frame/);
+      assert.equal(schemaVersion(), AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION);
+      const record = await readAudiobook(store()!, LEDGER, CHAPTER);
+      assert.ok(record !== null && record !== "unreadable");
+      assert.deepEqual(record.pictures!["p0.0"]!.shot, picked.shot, "the receipt is historical, not silently rechecked");
+      await send({ kind: "open-world", worldId: WORLD_ID });
+      const reopened = await readAudiobook(store()!, LEDGER, CHAPTER);
+      assert.ok(reopened !== null && reopened !== "unreadable");
+      assert.deepEqual(reopened.pictures!["p0.0"], record.pictures!["p0.0"]);
+    }, { picture: async () => ({ frame: "Detail shot", inFrame: [], details: [{ of: "maren-kest", part: "hand" }], prompt }) });
+  });
+
   it("keeps a leather ledger in the suggestion and makes the reviewed picture (#1942)", () => {
     const prompt = "Medium shot, Maren Kest at the desk, eyes down on the page. On the far corner sits a broad, worn leather volume under a folded rag.";
     return withHarness(async ({ events, send, enqueued, store }) => {

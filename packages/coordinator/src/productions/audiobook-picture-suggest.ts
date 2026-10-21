@@ -344,6 +344,6 @@ export async function suggestPicture(store: WorldStore, room: PictureRoom, block
     ...(aspect !== undefined ? { aspect } : {}),
     estimatedMicroUsd: pictureQuote(options.model, who.filter((entry) => entry.carried).length, aspect),
     ...(stamp !== undefined ? { look: stamp } : {}),
-    shot: { frame: held.frame, inFrame: held.inFrame.map((person) => person.key), notInFrame: held.notInFrame, expressions: held.expressions, details: held.details, checks },
+    shot: { frame: held.frame, inFrame: held.inFrame.map((person) => person.key), notInFrame: held.notInFrame, expressions: held.expressions, details: held.details, checks, checkedPrompt: held.prompt },
   };
 }
