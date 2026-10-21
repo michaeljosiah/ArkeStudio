@@ -104,6 +104,40 @@ function retainedTurn(candidates: WorldChangeCandidate[] = [], groups: Candidate
     run: { id: newId("run"), turnId, basedOnConversationSeq: 0, status: "completed", adapter: "fake", harnessCleanup: "not-required", contextDigest: `sha256:${"a".repeat(64)}`, startedAt: NOW(), endedAt: NOW() }, receipts: [], candidates, groups, tombstones: [] };
 }
 
+it("pages authored chapter plans through media progress while full reads and prose changes remain fenced (#2065)", async () => {
+  const h = await harness({ withIndex: false }), token = h.mint().token;
+  const production = h.bundle.productions.find(p => p.meta.id === "the-ledger-of-nights")!;
+  const chapter = production.chapters[0]!;
+  const args = { productionId: production.meta.id, limit: 1 };
+  const read = async (extra: Record<string, unknown> = {}) => {
+    const outcome = await h.retrieval.call(token, "list_chapters", { ...args, ...extra });
+    return { page: outcome.result as ArkeTargetReadPage, receipt: outcome.receipt };
+  };
+  const full = await read(), plan = await read({ section: "plan" });
+  assert.equal(plan.receipt.target?.id, `${production.meta.id}::plan`);
+  assert.equal(plan.receipt.complete, false);
+  assert.equal(plan.page.total, production.chapters.length);
+  chapter.audiobook = { chapterVersion: chapter.version, hash: chapter.bodyHash!, takes: 1, flagged: 0, updatedAt: NOW() };
+  chapter.voices = { unreadable: true };
+  chapter.continuity = { unreadable: true };
+  const reread = await read({ section: "plan" });
+  assert.deepEqual(reread.page.items, plan.page.items, "derived records are never supplied by an authored-only read");
+  assert.equal(reread.receipt.observedRevisionOrDigest, plan.receipt.observedRevisionOrDigest);
+  assert.notEqual((await read()).receipt.observedRevisionOrDigest, full.receipt.observedRevisionOrDigest);
+  assert.deepEqual((await read()).page.items[0], chapter, "the default still serves the complete summary");
+  let page = plan.page;
+  const items = [...page.items];
+  while (page.nextCursor) { page = (await read({ section: "plan", cursor: page.nextCursor })).page; items.push(...page.items); }
+  assert.equal(page.complete, true);
+  assert.deepEqual(items, [...production.chapters].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+    .map(({ audiobook: _a, voices: _v, continuity: _c, ...authored }) => authored));
+  await assert.rejects(read({ cursor: full.page.nextCursor }), /changed while it was being read/);
+  await assert.rejects(read({ cursor: plan.page.nextCursor }), /different target/);
+  await assert.rejects(read({ section: "audio" }), /section must be plan/);
+  chapter.hash = "changed-prose";
+  await assert.rejects(read({ section: "plan", cursor: plan.page.nextCursor }), /changed while it was being read/);
+});
+
 describe("retained proposition reads", () => {
   it("reopens exact location, character and faction drafts outside the message window without bloating the prompt", async () => {
     const h = await harness({ withIndex: false, withDrafts: true }), token = h.mint().token;

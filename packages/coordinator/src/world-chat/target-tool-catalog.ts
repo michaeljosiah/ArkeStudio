@@ -57,7 +57,7 @@ export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
   tool("get_story", "Read one production's story overview, prose style, and treatment in bounded chunks. The overview section excludes the treatment and supports chapter proposals; other story actions require the full read.", { ...PRODUCTION, section: { type: "string", enum: ["overview"], description: "Overview and prose style only. Omit for the full story." } }, ["productionId"]),
   tool("get_season", "Read one production's complete season, including every arc.", PRODUCTION, ["productionId"]),
   tool("list_episodes", "Read every episode and scene membership in explicit order.", PRODUCTION, ["productionId"]),
-  tool("list_chapters", "Read every chapter summary in explicit order.", PRODUCTION, ["productionId"]),
+  tool("list_chapters", "Read every chapter summary in explicit order. Use section plan for chapter authoring and ordering: every authored field and prose hash, excluding derived audiobook, voice and continuity progress. Other actions require the full inventory.", { ...PRODUCTION, section: { type: "string", enum: ["plan"], description: "Authored chapter inventory only. Omit to include derived records." } }, ["productionId"]),
   tool(
     "get_chapter",
     "Read one chapter's complete prose in bounded chunks.",

@@ -661,6 +661,10 @@ manuscript and chapter inventory within the same budget. `world-chat/chapter-dra
 bounded manuscript contract with `application/local-writing.ts`: exactly one chapter-body edit,
 with optional title and draft status, before any result side effects. Advice alone receives the
 existing single corrective attempt and otherwise fails; ordinary chapter chat remains conversational.
+Chapter authoring and ordering can read `list_chapters` with `section: "plan"` (#2065).
+`target-reads.ts` serves and fences the same complete authored inventory, including prose hashes,
+without derived audiobook/voice/continuity records. `actions.ts` permits this scope only for those
+two actions; full chapter, passage and audio reads retain their existing guards.
 `production-authoring.ts` stages a `production-chapter` action as a chapter
 proposal; acceptance cuts a version. Its `outline` operation stages several planned chapters on
 one card. Implies stays on the chapter until Propose sends its separate canon/sheet ask or Dismiss

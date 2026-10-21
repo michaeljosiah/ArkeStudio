@@ -1,5 +1,13 @@
 # Running and validating changes
 
+Chapter authoring freshness (#2065) uses coordinator `test/world-chat/retrieval.test.ts`,
+`actions.test.ts` and `chapter-brief.test.ts`. Read the complete `list_chapters` plan scope,
+then advance another chapter's narration and approve a status-only edit. The manuscript must
+remain exact. Prose, metadata, membership and order changes still refuse; full inventory and
+full target reads still fence derived records. Partial, foreign and inappropriate scoped
+receipts must not authorize actions. Native acceptance repeats authoring plus narration on
+a disposable world through public commands; simulated summary changes alone are not that proof.
+
 Canonical picture clothing (#2069) uses coordinator `test/productions/audiobook-picture-brief.test.ts`
 and the existing `audiobook-picture-suggest.test.ts` / `audiobook-picture-only.test.ts` paths. Check
 that a named other person wearing an outfit or handling their explicitly own clothing does not
