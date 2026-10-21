@@ -8,6 +8,7 @@ import {
   type AudioPolicy,
   type KeyArtIntent,
   CHARACTER_ROLE_MAX,
+  CharacterAliasesInputSchema,
   ChapterFrontmatterSchema,
   EpisodeSchema,
   isGraphScene,
@@ -1382,6 +1383,20 @@ export class ProposalManager {
         const slug = sheetTarget[1]!;
         const id = sheetIdOf(file.content!) ?? slug;
         const live = file.baseHash === null ? null : await this.readLive(file.path);
+        let data: Record<string, unknown>, priorAliases: unknown;
+        try {
+          data = MarkdownFile.parse(file.content!).data;
+          priorAliases = live === null ? undefined : MarkdownFile.parse(live).data["aliases"];
+        } catch {
+          problems.push({ path: file.path, message: "The sheet frontmatter cannot be read." });
+          continue;
+        }
+        const aliases = data["aliases"];
+        if (aliases !== undefined && JSON.stringify(aliases) !== JSON.stringify(priorAliases) &&
+            (data["type"] !== "character" || !CharacterAliasesInputSchema.safeParse(aliases).success)) {
+          problems.push({ path: file.path, message: "Only characters may have other names: use at most 24 names, each up to 120 characters." });
+          continue;
+        }
         const heldAlready = live !== null && sheetIdOf(live) === id;
         if (!heldAlready) {
           if (id !== slug) {

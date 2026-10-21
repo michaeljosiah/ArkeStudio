@@ -1555,6 +1555,6 @@ function reviseNarration(subject: Extract<WorldChatSubject, { kind: "passage" }>
   // and the story, each complete and current. Measured, the model found them one refusal at a
   // time and spent the corrective turn on the second, so all three are named before it starts.
   const production = productionId === undefined ? "this production" : `productionId ${productionId}`;
-  const read = ` Before the edit, read each to its last page: list_chapters (${production}), get_chapter (${production}, chapterId ${subject.chapterId}, no section) and get_story (${production}; the overview receipt in the brief counts). Cite each read's final receipt in the action's checkReceiptIds.`;
+  const read = ` Before the edit, read each to its last page: list_chapters (${production}, section plan), get_chapter (${production}, chapterId ${subject.chapterId}, no section) and get_story (${production}; the overview receipt in the brief counts). Cite each read's final receipt in the action's checkReceiptIds.`;
   return ` They asked for these words rewritten, and the page shows your revision in place.${read} Then answer with one production-chapter edit action for chapter ${subject.chapterId} whose changes are { "passage": { "find": <the selected words, exactly as quoted>, "with": <your revision>${paragraph} } }, and a reply of one line saying what you changed. Do not offer the new wording in the reply instead. If the passage cannot be revised as asked, propose nothing and say why in one sentence.`;
 }
