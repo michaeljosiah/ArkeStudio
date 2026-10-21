@@ -819,3 +819,26 @@ describe("the declared registry and kinds (R-8, R-24, R-27)", () => {
     assert.deepEqual(ranks, [...ranks].sort((a, b) => a - b));
   });
 });
+
+
+it("publishes Windows commit facts as advisory, and an unavailable read as unknown without a refusal", () => {
+  const status = comfyui({});
+  status.windowsCommit = { source: "windows-performance-memory", measuredAt: RECENT,
+    values: { committedBytes: 40 * 1024 ** 3, limitBytes: 50 * 1024 ** 3, physicalAvailableBytes: 1024 ** 3 } };
+  const measured = derive({ comfyui: status }).findings.find(f => f.kind === "windows-commit")!;
+  assert.equal(measured.severity, "advisory");
+  assert.equal(measured.facts.find(f => f.name === "commit-headroom-bytes")!.value, 10 * 1024 ** 3);
+  assert.ok(measured.facts.every(f => f.measuredAt === RECENT));
+  assert.match(measured.cause.statement, /40 GB committed of 50 GB/);
+  assert.match(measured.cause.statement, /1 GB physical RAM free/);
+  status.windowsCommit = { ...status.windowsCommit, values: null };
+  const unknown = derive({ comfyui: status }).findings.find(f => f.kind === "windows-commit")!;
+  assert.equal(unknown.severity, "unknown");
+  assert.ok(unknown.facts.every(f => f.value === null));
+  assert.match(unknown.cause.statement, /workload fit not assessed/);
+  status.engine.locality = "remote";
+  assert.ok(!derive({ comfyui: status }).findings.some(f => f.kind === "windows-commit"));
+  delete status.windowsCommit;
+  status.engine.locality = "local";
+  assert.ok(!derive({ comfyui: status }).findings.some(f => f.kind === "windows-commit"));
+});

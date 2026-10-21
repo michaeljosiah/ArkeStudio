@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
-import { comfyUiWeightsComponentId, comfyUiWeightsRecipeId } from "./comfyui.js";
+import { comfyUiWeightsComponentId, comfyUiWeightsRecipeId, windowsCommitHeadroomBytes } from "./comfyui.js";
 import { PROVIDERS, type ProviderId } from "./provider.js";
 import { formatMicroUsd } from "./money.js";
+import { formatGb } from "./runtime-gate.js";
 import type { ClientState } from "./client-state.js";
 
 /**
@@ -203,6 +204,8 @@ export const FINDING_KINDS = {
   "hardware-unmeasured": { subsumes: [] },
   /** R-4 — hardware detection ran and a probe failed. */
   "hardware-unknown": { subsumes: [] },
+  /** SPEC-032 R-41 - Windows commit facts, independent of physical RAM and readiness refusal. */
+  "windows-commit": { subsumes: [] },
   /** R-20.9 — three or more faults for one provider inside the window (#555). */
   "provider-repeated-faults": { subsumes: [] },
   /** R-20.10 — the trailing seven days materially above the seven before (#555). */
@@ -933,6 +936,34 @@ const hardwareFacts: Rule = {
   },
 };
 
+/** Measured capacity is advisory, not evidence that any particular recipe will fit. */
+const windowsCommitFacts: Rule = {
+  kind: "windows-commit",
+  run(ctx) {
+    const comfyui = ctx.sources.comfyui;
+    const measured = comfyui?.windowsCommit;
+    if (comfyui?.engine.locality !== "local" || measured === undefined) return [];
+    const values = measured.values;
+    const facts: FindingFact[] = ([
+      ["committed-bytes", values?.committedBytes ?? null],
+      ["commit-limit-bytes", values?.limitBytes ?? null],
+      ["commit-headroom-bytes", windowsCommitHeadroomBytes(values)],
+      ["physical-available-bytes", values?.physicalAvailableBytes ?? null],
+    ] as const).map(([name, value]) => ({ name, value,
+      source: "app.comfyui.windowsCommit", measuredAt: measured.measuredAt }));
+    return [{
+      kind: "windows-commit", occurrence: "local-host",
+      severity: values === null ? "unknown" : "advisory",
+      title: values === null ? "Windows memory · unavailable" : "Windows memory · committed capacity",
+      facts,
+      cause: { statement: values === null ? "Windows memory measurement unavailable; workload fit not assessed" : `${formatGb(values.committedBytes / 1048576)} committed of ${formatGb(values.limitBytes / 1048576)} · ${formatGb(windowsCommitHeadroomBytes(values)! / 1048576)} headroom · ${formatGb(values.physicalAvailableBytes / 1048576)} physical RAM free · workload fit not assessed` },
+      remedy: { control: "comfyui-refresh" },
+      consequences: [],
+      ...staleOf(facts, ctx.now, { control: "comfyui-refresh" }),
+    }];
+  },
+};
+
 // ---------------------------------------------------------------------------
 // The windowed correlations (R-20.9, R-20.10) — the two joins over the log and the ledger
 // ---------------------------------------------------------------------------
@@ -1253,6 +1284,7 @@ const STATE_RULES: readonly Rule[] = [
   modelsFolderUnmapped,
   waitingOnComponent,
   hardwareFacts,
+  windowsCommitFacts,
   providerRepeatedFaults,
   spendAbovePrevious,
 ];

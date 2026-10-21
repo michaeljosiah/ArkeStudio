@@ -1,3 +1,4 @@
+import { createWindowsCommitProbe } from "./windows-commit.js";
 import { pathToFileURL } from "node:url";
 import { webWindowOpenHandler } from "./external-links.js";
 import { storyPublicationFileFilter } from "./story-publication-file.js";
@@ -855,6 +856,7 @@ async function initialize(): Promise<{ port: number }> {
   const comfyUiEngine = new ComfyUiEngineService({
     freeVramMb,
     freeMemMb,
+    windowsCommit: createWindowsCommitProbe(),
     appRoot,
     recipes: COMFYUI_RECIPES.map((recipe) => ({
       id: recipe.id,
