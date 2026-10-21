@@ -89,7 +89,8 @@ const GLYPHS: Readonly<Record<string, readonly number[]>> = {
 
 /**
  * A name as the sheet renders it: compatibility-decomposed, stripped of combining marks,
- * upper-cased, whitespace collapsed, and anything the face cannot draw replaced by `?`.
+ * common dashes and apostrophes folded, upper-cased, whitespace collapsed, and anything the
+ * face cannot draw replaced by `?`.
  *
  * The original Unicode name stays in kit.json and in the UI — this is only what gets burned
  * into the image, and a burned-in glyph cannot be corrected later.
@@ -98,6 +99,8 @@ export function normalizeLabel(text: string): string {
   const folded = text
     .normalize("NFKD")
     .replace(/\p{M}+/gu, "")
+    .replace(/[\u2010-\u2015]/g, "-")
+    .replace(/[\u2018\u2019]/g, "'")
     .toUpperCase()
     .replace(/\s+/g, " ")
     .trim();
