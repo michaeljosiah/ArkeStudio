@@ -10,7 +10,7 @@ import {
   type WorldChatAttachment,
   type WorldChatLoaded,
 } from "@arke-studio/contracts";
-import { ATTACHABLE_EXTENSIONS, kindForFile } from "../artifacts/filing.js";
+import { kindForFile } from "../artifacts/filing.js";
 import { spoolName } from "../artifacts/spool.js";
 import {
   extractDocumentText,
@@ -216,7 +216,8 @@ function digest(bytes: Uint8Array): string {
  * are explicit prompt context, so the model can acknowledge the file without inventing its
  * contents. This is the same set the artifact path can safely retain if the user later promotes it.
  */
-export const CHAT_ATTACHMENT_EXTENSIONS: readonly string[] = ATTACHABLE_EXTENSIONS;
+// A live re-export avoids reading filing before it initializes when that path loads this module.
+export { ATTACHABLE_EXTENSIONS as CHAT_ATTACHMENT_EXTENSIONS } from "../artifacts/filing.js";
 
 /**
  * Whether this file can be retained by a conversation, or the sentence explaining why not.

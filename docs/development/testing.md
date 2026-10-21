@@ -1,5 +1,13 @@
 # Running and validating changes
 
+Coordinator import-order regressions (#2057) use
+`node --import tsx --test packages/coordinator/test/productions/audiobook-grouped.test.ts`
+from the repository root, without pre-importing Coordinator. Also run coordinator
+`test/world-chat/attachments.test.ts` and `test/artifacts/artifacts.test.ts`; the former
+loads artifact filing first in a fresh process and checks that chat retains the same
+extension inventory. Check supported Node 22 as well as newer local runtimes; a passing
+Windows run does not establish Linux success.
+
 Prop library binding (#1921, SPEC-041 R-9/R-87..R-91) uses coordinator
 `test/world-chat/retrieval.test.ts`, `actions.test.ts`, `action-guide.test.ts`,
 `shape-drift.test.ts` and `test/references/prop-state.test.ts`; contracts
