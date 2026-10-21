@@ -621,7 +621,7 @@ function currentWorldObservation(
         return { target: `${productionId}:${canonical}${section === "plan" || section === "ending" || section === "audio-studio" ? `:${section}` : ""}`,
           fence: section === "audio-studio" ? audioStudioSubjectFence(production, canonical) : chapterFence(production, canonical) };
       }
-      return { target: targetId, fence: chaptersFence(production) };
+      return { target: targetId, fence: chaptersFence(production, section === "plan" ? section : undefined) };
     }
     case "scenes": {
       const targetId = target ?? store.worldId;
@@ -903,6 +903,10 @@ function worldActionObservations(
   // A narrow prop/image read is sufficient only for the named binding, never a substitute for
   // another action's complete inventory. Whole-inventory receipts remain supported.
   for (const observation of observations) {
+    if (observation.requirement === "chapters" && observation.target.endsWith("::plan") &&
+        action.kind !== "production-chapter" && action.kind !== "production-chapter-order") {
+      receiptProblems.push("This chapter-plan inventory covers chapter authoring and ordering only. Read the full chapter inventory for this action.");
+    }
     if ((observation.requirement === "references" || observation.requirement === "artifacts") && observation.target !== store.worldId) {
       const expected = action.kind === "prop-reference" ? observation.requirement === "references" ? `prop:${action.propId}` : `artifact:${action.artifactId}` : null;
       if (observation.target !== expected) receiptProblems.push("This scoped inventory read does not cover the action's exact prop and image. Read its target or the complete inventory.");
@@ -914,6 +918,8 @@ function worldActionObservations(
     !observations.some((observation) =>
       observation.requirement === required.requirement &&
       (observation.target === required.target ||
+        ((action.kind === "production-chapter" || action.kind === "production-chapter-order") && required.requirement === "chapters" &&
+          required.target === action.productionId && observation.target === `${required.target}::plan`) ||
         (action.kind === "production-chapter" && required.requirement === "story" && observation.target === `${required.target}:overview`))));
   // One corrective turn should discover every prerequisite, not spend a full draft learning
   // about sheets and then another learning about canon. Invalid receipts never count as reads.

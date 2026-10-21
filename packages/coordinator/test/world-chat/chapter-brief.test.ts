@@ -62,6 +62,7 @@ it("assembles the plan, bounded previous ending, resolved draws and style with d
   assert.match(manuscriptBrief, /do not include changes.implies/);
   assert.doesNotMatch(manuscriptBrief, /ask that specific question/);
   assert.ok(receipts.some(r => r.target?.id === `${production.meta.id}:${chapter.id}` && r.complete && r.nextCursor === null));
+  assert.ok(receipts.some(r => r.target?.id === `${production.meta.id}::plan` && r.complete && r.nextCursor === null));
   production.chapters[0]!.hash = "changed";
   const reread = await read("get_chapter", { productionId: production.meta.id, chapterId: production.chapters[0]!.id, section: "ending" });
   assert.notEqual(reread.receipt.observedRevisionOrDigest, ending.observedRevisionOrDigest);

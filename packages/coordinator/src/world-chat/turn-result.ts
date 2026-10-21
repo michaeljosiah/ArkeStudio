@@ -995,7 +995,7 @@ export function correctiveMessage(problems: readonly TurnProblem[]): string {
 }
 
 const REPLY_ONLY_PROBLEM = "This ask was for a reply only. Return the reply with every list empty — no actions, candidates, groups, bible edits, scene edits or editor requests. Say in the reply anything you would change.";
-const REVISE_PROBLEM = "This ask was a rewrite of the selected passage, shown in the page, not in the reply. Return the whole result again with one production-chapter edit action whose changes are { \"passage\": { \"find\": the selected words exactly as quoted, \"with\": your revision, \"paragraph\": the paragraph the ask named } }, citing the final receipts of complete list_chapters, get_chapter (that chapter, no section) and get_story reads, and a reply of one line saying what changed. If the passage cannot be revised as asked, return no action and say why in one sentence.";
+const REVISE_PROBLEM = "This ask was a rewrite of the selected passage, shown in the page, not in the reply. Return the whole result again with one production-chapter edit action whose changes are { \"passage\": { \"find\": the selected words exactly as quoted, \"with\": your revision, \"paragraph\": the paragraph the ask named } }, citing the final receipts of complete list_chapters (section plan), get_chapter (that chapter, no section) and get_story reads, and a reply of one line saying what changed. If the passage cannot be revised as asked, return no action and say why in one sentence.";
 
 const REVISE_ONLY_PROBLEM = "This ask was a rewrite of the selected passage. Return only the one production-chapter passage edit, or no action at all with a one-sentence reason; leave every other list empty.";
 

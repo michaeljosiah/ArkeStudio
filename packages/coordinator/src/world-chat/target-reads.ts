@@ -27,6 +27,7 @@ import {
   type ArkeTargetReadTool,
   type AudioRightsEvent,
   type ChapterVoices,
+  type ChapterSummary,
   type Job,
   type ProductionBundle,
   type WorldBundle,
@@ -219,8 +220,15 @@ export function seriesFence(bundle: WorldBundle): string {
   return fence(bundle.series);
 }
 
-export function chaptersFence(production: ProductionBundle | undefined): string {
-  return fence(production?.chapters ?? []);
+function chapterPlans(chapters: readonly ChapterSummary[]) {
+  // Authoring still depends on every chapter's prose hash, plan and membership, but not on
+  // derived media progress. Full reads keep those fields and their original freshness guard.
+  return chapters.map(({ audiobook: _audiobook, voices: _voices, continuity: _continuity, ...plan }) => plan);
+}
+
+export function chaptersFence(production: ProductionBundle | undefined, section?: "plan"): string {
+  const chapters = production?.chapters ?? [];
+  return fence(section === "plan" ? chapterPlans(chapters) : chapters);
 }
 
 /**
@@ -804,12 +812,15 @@ export class WorldChatTargetReads {
         break;
       }
       case "list_chapters": {
-        assertArgs(args, ["productionId"]);
+        assertArgs(args, ["productionId", "section"]);
         const productionId = requireString(args, "productionId");
-        const chapters = productionOf(bundle, productionId)?.chapters ?? [];
-        readTarget = target("chapters", productionId);
+        const section = args["section"];
+        if (section !== undefined && section !== "plan") throw new TargetReadError("section must be plan");
+        const production = productionOf(bundle, productionId);
+        const chapters = section === "plan" ? chapterPlans(production?.chapters ?? []) : production?.chapters ?? [];
+        readTarget = target("chapters", section === "plan" ? `${productionId}::plan` : productionId);
         rows = [...chapters].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)).map((chapter) => ({ key: `${padded(chapter.order)}:${chapter.id}`, value: chapter }));
-        revisionOrDigest = chaptersFence(productionOf(bundle, productionId));
+        revisionOrDigest = chaptersFence(production, section);
         break;
       }
       case "get_chapter": {

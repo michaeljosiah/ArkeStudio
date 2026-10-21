@@ -47,7 +47,7 @@ import { ConversationActionLifecycle, conversationActionDigest } from "../../src
 import { ARKE_CLIENT_COMMAND_REGISTRY, worldChatActionDescriptor } from "../../src/arke-actions/registry.js";
 import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
 import { readEditorRequest } from "../../src/productions/editor-requests.js";
-import { createEpisode, createProduction } from "../../src/productions/ops.js";
+import { createEpisode, createProduction, openChapter } from "../../src/productions/ops.js";
 import { bookAuthoringRefusal } from "../../src/world-chat/production-authoring.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
@@ -2802,6 +2802,80 @@ describe("a passage revision is held to the selected passage (turn 128)", () => 
   });
 });
 
+
+describe("authored chapter inventory freshness (#2065)", () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  async function chapterEdit(full = false) {
+    const w = await setup(context);
+    const leases = new QueryLeaseRegistry(() => w.store.worldId);
+    const lease = leases.mint({ worldId: w.store.worldId, conversationId: w.conversationId, runId: newId("run"), allowedAttachmentIds: [] });
+    const retrieval = new WorldChatRetrieval({ leases, getBundle: () => w.store.getBundle(), getIndex: () => null,
+      attachments: new WorldChatAttachmentStore(w.store.dir), findAttachment: async () => null,
+      getChapterBody: async (productionId, file) => (await openChapter(w.store, productionId, file)).body });
+    const read = async (tool: string, args: Record<string, unknown>) => {
+      let outcome = await retrieval.call(lease.token, tool, args);
+      while (outcome.receipt.nextCursor) outcome = await retrieval.call(lease.token, tool, { ...args, cursor: outcome.receipt.nextCursor });
+      return outcome.receipt;
+    };
+    const chapters = await read("list_chapters", { productionId: context.productionId, ...(full ? {} : { section: "plan" }) });
+    const story = await read("get_story", { productionId: context.productionId, section: "overview" });
+    const target = await read("get_chapter", { productionId: context.productionId, chapterId: "neap" });
+    const receipts = [chapters, story, target];
+    const action = { kind: "production-chapter" as const, productionId: context.productionId,
+      change: { operation: "edit" as const, chapterId: "neap", changes: { status: "reviewed" } }, checkReceiptIds: receipts.map(r => r.id) };
+    const one = turn(w.conversationId, context, { receipts, actions: [action] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared); await bindAll(w.lifecycle, prepared);
+    const production = () => w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!;
+    return { ...w, read, one, action, chapters, production, card: (await loaded(w.log)).actions[0]! };
+  }
+
+  for (const full of [false, true]) it(`${full ? "refuses full reads" : "accepts explicit authoring reads"} after another chapter receives narration`, async () => {
+    const w = await chapterEdit(full);
+    const target = w.production().chapters.find(c => c.id === "neap")!;
+    const before = await openChapter(w.store, context.productionId, target.file);
+    const other = w.production().chapters.find(c => c.id !== target.id)!;
+    other.audiobook = { chapterVersion: other.version, hash: other.bodyHash!, updatedAt: AT, takes: 2, flagged: 1 };
+    other.voices = { unreadable: true };
+    other.continuity = { unreadable: true };
+    assert.equal((await decide(w.lifecycle, w.log, w.card)).status, full ? "stale" : "completed");
+    const after = await openChapter(w.store, context.productionId, target.file);
+    assert.equal(after.body, before.body, "a status-only edit preserves every manuscript character");
+    assert.equal(w.production().chapters.find(c => c.id === target.id)!.status, full ? target.status : "reviewed");
+  });
+
+  for (const change of ["prose", "title", "plan", "order", "membership", "retirement", "target-audio"] as const) {
+    it(`refuses changed ${change} after preparing an authoring read`, async () => {
+      const w = await chapterEdit();
+      const chapters = w.production().chapters, target = chapters.find(c => c.id === "neap")!;
+      if (change === "prose") target.hash = "new-file-hash";
+      if (change === "title") target.title += " changed";
+      if (change === "plan") chapters[1]!.synopsis = "A revised neighbouring plan.";
+      if (change === "order") chapters[1]!.order += 10;
+      if (change === "membership") chapters.pop();
+      if (change === "retirement") chapters[1]!.retired = true;
+      if (change === "target-audio") target.audiobook = { chapterVersion: target.version, hash: target.bodyHash!, updatedAt: AT, takes: 1, flagged: 0 };
+      assert.equal((await decide(w.lifecycle, w.log, w.card)).status, "stale",
+        "authored dependencies and the explicitly cited full target read remain authoritative");
+    });
+  }
+
+  it("rejects partial, foreign and inappropriate scoped reads, retaining passage requirements", async () => {
+    const w = await chapterEdit();
+    const prepare = (action: unknown, receipts: WorldChatCheckReceipt[]) => prepareWorldChatActions(w.store, w.lifecycle,
+      turn(w.conversationId, context, { receipts, actions: [ModelWorldChatActionSchema.parse(action)] }));
+    const story = w.one.receipts![1]!;
+    const readAction = (chapterRead: WorldChatCheckReceipt) => ({ ...w.action, checkReceiptIds: [chapterRead.id, story.id] });
+    const partial = { ...w.chapters, complete: false };
+    assert.throws(() => prepare(readAction(partial), [partial, story]), /is an earlier page/);
+    const foreign = await w.read("list_chapters", { productionId: "saltlight", section: "plan" });
+    assert.throws(() => prepare(readAction(foreign), [foreign, story]), /requires the complete current chapters read for the-ledger-of-nights/);
+    assert.throws(() => prepare({ kind: "chapter-review", productionId: context.productionId, chapterId: "neap",
+      checkReceiptIds: [w.chapters.id] }, [w.chapters]), /chapter-plan inventory covers chapter authoring and ordering only/);
+    assert.throws(() => prepare({ ...readAction(w.chapters), change: { operation: "edit", chapterId: "neap",
+      changes: { passage: { find: "the ledger", with: "the book" } } } }, [w.chapters, story]), /requires the complete current chapters read for the-ledger-of-nights:neap/);
+  });
+});
 
 it("verifies a fresh optional Bible receipt when preparing and approving a chapter order (#1925)", async () => {
   const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
