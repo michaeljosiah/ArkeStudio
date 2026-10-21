@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   audiobookBlockPlan,
+  audiobookBlockState,
   audiobookDirectionFor,
   audiobookNoteFor,
   sheetNarrations,
@@ -524,8 +525,9 @@ export async function followTakes(store: WorldStore, productionId: string, room:
 /**
  * One chapter's blocks finding their kept takes again (R-48), as `followTakes` does for the book.
  * A seam changed by hand asks the same (design turn 198, rule 5): a block returned to a shape it
- * had before — split back, joined back, reset — finds its old take by its key and its words, and
- * is made again with nothing to read.
+ * had before — split back, joined back, reset — finds its old take by its key and its words.
+ * An inserted paragraph can move that key: a unique unchanged passage can also recover its
+ * selected take, preserving the original performance and measurements (#2115).
  */
 export async function followChapterTakes(store: WorldStore, productionId: string, summary: Pick<ChapterSummary, "id" | "file">, room: Pick<ReadingRoom, "narrator">): Promise<number> {
   let plan: AudiobookPlan;
@@ -536,15 +538,41 @@ export async function followChapterTakes(store: WorldStore, productionId: string
   }
   if (castRefusal(plan) !== null || plan.record === null || plan.record === "unreadable") return 0;
   const record = plan.record;
+  const fingerprint = (value: AudiobookPlan) => JSON.stringify({ ...value, present: [...value.present].sort() });
+  const basis = fingerprint(plan);
+  const textCounts = new Map<string, number>();
+  for (const { block } of plan.blocks) {
+    const hash = audiobookTextHash(block.text);
+    textCounts.set(hash, (textCounts.get(hash) ?? 0) + 1);
+  }
+  const artifacts = store.getBundle().artifacts;
   const picks: Record<string, AudiobookTake> = {};
   for (const planned of plan.blocks) {
     if (planned.recorded === true || (planned.state !== "stale" && planned.state !== "not made" && planned.state !== "flagged")) continue;
     const textHash = audiobookTextHash(planned.block.text);
+    if (planned.state !== "flagged" && textCounts.get(textHash) === 1) {
+      const moved = new Map<string, AudiobookTake>();
+      for (const [key, take] of Object.entries(record.takes)) {
+        if (key === planned.block.key || take.source === "recorded" || take.textHash !== textHash ||
+          !plan.present.has(take.artifactId) || (record.flags[key]?.at ?? "") > take.madeAt) continue;
+        const generation = artifacts.find(artifact => artifact.id === take.artifactId)?.generation;
+        if (generation?.source !== "audiobook" || generation.recording !== undefined ||
+          generation.productionId !== productionId || generation.chapterId !== plan.chapter.id ||
+          generation.textHash !== textHash || !sameVoice(generation, take.reader) || generation.directionHash !== take.directionHash) continue;
+        const candidate = { ...record, takes: { ...record.takes, [planned.block.key]: take } };
+        if (audiobookBlockState(planned.block, candidate, planned.assigned, id => plan.present.has(id), false,
+          planned.note, planned.reading, plan.reading === "performed") === "made") moved.set(take.artifactId, take);
+      }
+      // Repeated passages or multiple selected performances cannot identify the author's
+      // choice. Same-key shelf recovery below retains its existing rules in those cases.
+      if (moved.size === 1) {
+        picks[planned.block.key] = moved.values().next().value!;
+        continue;
+      }
+    }
     const turns = plan.reading === "performed" && planned.assigned.provider === "elevenlabs" && planned.assigned.model === "eleven_v4" ? planned.block : undefined;
     const want = audiobookTakeDirectionHash(audiobookBlockPlan(record, planned.block), planned.note, planned.reading, turns);
-    const candidates = store
-      .getBundle()
-      .artifacts.filter((artifact) => {
+    const candidates = artifacts.filter((artifact) => {
         const g = artifact.generation;
         return (
           artifact.retiredAt === undefined &&
@@ -582,11 +610,21 @@ export async function followChapterTakes(store: WorldStore, productionId: string
     }
   }
   if (Object.keys(picks).length === 0) return 0;
+  let chosen = 0;
   await updateAudiobook(store, productionId, { file: summary.file, version: plan.chapter.version, hash: plan.chapter.hash }, (current) => {
+    if (JSON.stringify(current) !== JSON.stringify(record)) return null;
     const flags = Object.fromEntries(Object.entries(current.flags).filter(([key]) => picks[key] === undefined));
+    chosen = Object.keys(picks).length;
     return { ...current, updatedAt: store.now(), takes: { ...current.takes, ...picks }, flags };
-  });
-  return Object.keys(picks).length;
+  }, { requireReadable: true, beforeWrite: async () => {
+    const fresh = await planAudiobook(store, productionId, summary.id, { narrator: room.narrator });
+    if (fingerprint(fresh) !== basis || Object.values(picks).some(take =>
+      JSON.stringify(store.getBundle().artifacts.find(artifact => artifact.id === take.artifactId)) !==
+      JSON.stringify(artifacts.find(artifact => artifact.id === take.artifactId)))) {
+      throw new Error("The chapter or its narration changed; review its kept takes again.");
+    }
+  } });
+  return chosen;
 }
 
 function sameVoice(g: { provider: string; model: string; voiceId: string }, reader: AudiobookReader): boolean {

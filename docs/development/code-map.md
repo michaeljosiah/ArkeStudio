@@ -50,6 +50,11 @@ injects the supervised `VoiceService.transcribeWords` seam; recognized speech ra
 The current harness interprets speech meaning from text; no audio-model listening is implied.
 
 ElevenLabs audiobook direction and grouping: [implementation boundaries and checks](audiobook-direction.md).
+Retained narration after paragraph insertions: coordinator `productions/audiobook-book.ts`
+extends the existing reader/seam recovery with unique selected-take matching across moved keys.
+Text, voice, direction, shelf presence and current source/record checks remain required;
+recorded takes and ambiguous repeated passages are excluded. The original take metadata stays
+intact. Coverage: `test/productions/audiobook-seams.test.ts`; SPEC-047 R-48, issue #2115.
 Paid Google audiobook quotas: contracts `provider-plans.ts` projects model/key-scoped daily
 refusals from retained jobs; coordinator supplies that projection to chapter and book preparation.
 The runners retain provider limit/reset details and use existing confirmation/status surfaces.
