@@ -241,7 +241,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
         />
       ) : !open ? (
         <>
-          <div className={motionControl === undefined ? "fy-pcard__top" : "fy-pcard__top fy-pcard__top--motion"}>
+          <div className="fy-pcard__top">
             {here !== null && world !== null ? (
               <PicturePress onChoose={choosePicture}>
                 <img className="fy-pcard__img fy-ab__picnow" src={mediaUrl(world.meta.slug, here.file)} alt="" data-testid="picture-card-picture" />
@@ -251,7 +251,6 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
                 <span className="fy-mono">Choose</span>
               </button>
             )}
-            {motionControl}
             <div className="fy-pcard__facts">
               {here !== null && world !== null ? (
                 <>
@@ -278,6 +277,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
               )}
             </div>
           </div>
+          {motionControl}
           <div className="fy-abp__foot">
             {here !== null && (
               <Button variant="outline" disabled={connection !== "open"} onClick={remove} data-testid="audiobook-picture-remove">

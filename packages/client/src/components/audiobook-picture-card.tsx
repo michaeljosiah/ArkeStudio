@@ -326,7 +326,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   offline: boolean;
   /** The picture set on the block, drawn in the slot. */
   picture?: string | null;
-  /** Turn 208 places the saved picture's motion choice immediately below its media. */
+  /** Turn 208 motion choices follow the retained image/facts row (turn 194). */
   mediaActions?: ReactNode;
   onRemove?: () => void;
   /** Pick another picture from the world: the picture is the press. */
@@ -536,7 +536,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
         };
   return (
     <div className="fy-sugg fy-pcard" data-testid="suggest-card">
-      <div className={cx("fy-pcard__top", mediaActions !== undefined && "fy-pcard__top--motion")}>
+      <div className="fy-pcard__top">
         {picture !== null ? (
           <PicturePress onChoose={busy ? undefined : onChoose}>
             <img className="fy-pcard__img" src={picture} alt="" data-testid="picture-card-picture" />
@@ -546,7 +546,6 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
             <span className="fy-mono">{suggestion.aspect ?? ""}</span>
           </div>
         )}
-        {mediaActions}
         <div className="fy-pcard__facts" data-testid="picture-card-facts">
           {shot !== undefined && shot.frame !== "" && (
             <div className="fy-pcard__fact">
@@ -567,6 +566,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
           </div>
         </div>
       </div>
+      {mediaActions}
       <div className="fy-pcard__sec" data-testid="picture-card-in-frame">
         <span className="fy-pcard__h">In frame</span>
         {riding.length === 0 ? (
