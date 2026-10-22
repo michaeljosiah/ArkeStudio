@@ -24,6 +24,14 @@ it("shows scoped evidence and limits without presenting zero unresolved as compl
  assert.match(host.textContent!,/Principal character/);assert.match(host.textContent!,/Supporting character/);assert.match(host.textContent!,/Anonymous people and object or detail/);assert.match(host.textContent!,/does not discover every person/);
  assert.equal(host.querySelector("details")!.hasAttribute("open"),false);
 });
+it("labels existing support billing without losing legacy or custom billing fallbacks",async()=>{
+ const billings=["lead","support","supporting","guest",undefined];
+ const rows=chapter.rows[0]!;
+ const host=await mount(<ReferenceCoverage chapter={{...chapter,rows:billings.map((billing,index)=>({...rows,key:String(index),name:`Person ${index}`,billing}))}}/>);
+ assert.deepEqual([...host.querySelectorAll("[data-testid=reference-coverage-row] .fy-look__facts")].map(row=>row.textContent),[
+  "Principal character · Reference saved","Supporting character · Reference saved","Supporting character · Reference saved","Character · Reference saved","Character · Reference saved",
+ ]);
+});
 it("reads book references only on explicit Check and shows unavailable chapters without changing any source",async()=>{
  const sent:ClientMessage[]=[];
  __setBridgeForTest({send:(json:string)=>sent.push(JSON.parse(json))} as unknown as ArkeBridge);

@@ -19,7 +19,7 @@ export function ReferenceCoverage({ chapter }: { chapter: ChapterReferenceCovera
       {chapter.preparation !== "current" && <p className="fy-ch__who-where--warn">{preparation[chapter.preparation]} · review this chapter’s Looks.</p>}
       {Object.entries(chapter.bounds).filter(([, bound]) => bound.omitted > 0).map(([key, bound]) => <p key={key} className="fy-ch__who-where--warn" data-testid="reference-bound">{key === "people" ? `${bound.omitted} character candidates outside the ${bound.limit}-person preparation` : key === "places" ? `${bound.omitted} known places outside the ${bound.limit}-place preparation` : `${bound.omitted} characters of prose omitted from preparation`}</p>)}
       {chapter.rows.map(row => <div key={`${row.kind}:${row.key}`} className="fy-look__detailchar" data-testid="reference-coverage-row">
-        <b>{row.name}</b><p className="fy-look__facts">{row.kind === "place" ? "Location" : row.billing === "lead" ? "Principal character" : row.billing === "supporting" ? "Supporting character" : "Character"} · {state[row.state]}</p>
+        <b>{row.name}</b><p className="fy-look__facts">{row.kind === "place" ? "Location" : row.billing === "lead" ? "Principal character" : row.billing === "support" || row.billing === "supporting" ? "Supporting character" : "Character"} · {state[row.state]}</p>
         {(row.aliases?.length ?? 0) > 0 && <p className="fy-look__savehint">Other names: {row.aliases!.join(", ")}</p>}
         {row.blocks.length > 0 && <p className="fy-look__savehint">{row.blocks.length} passage{row.blocks.length === 1 ? "" : "s"} cited</p>}
       </div>)}
