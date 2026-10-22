@@ -1,3 +1,4 @@
+import { GUIDE_RECORD_FILE } from "@arke-studio/contracts";
 import { mkdir, readdir, readFile, rm, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -230,12 +231,15 @@ type Classified =
   | { track: "production-meta"; production: string }
   | { track: "art-direction" }
   | { track: "bible" }
+  | { track: "guide" }
   | { track: "unversioned" };
 
 export function classify(path: string): Classified {
   const narrative = /^productions\/([a-z0-9-]+)\/narrative\.json$/.exec(path);
   if (narrative) return { track: "narrative", production: narrative[1]! };
   if (path === BIBLE_PATH) return { track: "bible" };
+  // A world's Guide (SPEC-059 R-8) is versioned as a sheet is, a JSON record like a story's.
+  if (path === GUIDE_RECORD_FILE) return { track: "guide" };
   let m = /^canon\/(CANON-\d+)\.md$/.exec(path);
   if (m) return { track: "canon", id: m[1]! };
   m = /^(characters|locations|factions)\/([a-z0-9][a-z0-9-]*)\.md$/.exec(path);
@@ -641,7 +645,8 @@ export function changesAnything(path: string, live: string, proposed: string): b
       track === "narrative" ||
       track === "episode" ||
       track === "episode-script" ||
-      track === "series"
+      track === "series" ||
+      track === "guide"
     ) {
       const before = JsonFile.parse(live).value;
       const after = JsonFile.parse(proposed).value;
@@ -816,12 +821,15 @@ export class Committer {
         kind.track === "narrative" ||
         kind.track === "episode" ||
         kind.track === "episode-script" ||
-        kind.track === "series"
+        kind.track === "series" ||
+        kind.track === "guide"
       ) {
         // Season, episode, and series ride the same JSON version/history machinery the story
         // track proved (SPEC-023 R-17): the committer stamps `version`, snapshots whole files.
         const dirPath =
-          kind.track === "series"
+          kind.track === "guide"
+            ? ".history/guide"
+            : kind.track === "series"
             ? `.history/series/${kind.id}`
             : `.history/productions/${kind.production}/${
                 kind.track === "scene"

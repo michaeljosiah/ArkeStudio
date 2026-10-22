@@ -1,0 +1,128 @@
+import assert from "node:assert/strict";
+import { afterEach, describe, it } from "node:test";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { parseHTML } from "linkedom";
+import { MemoryRouter } from "react-router";
+import type { ClientMessage, ClientState } from "@arke-studio/contracts";
+import { App } from "../src/App.js";
+import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import type { ArkeBridge } from "../src/arke-bridge.js";
+import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { FIXTURE_STATE } from "./fixture-state.js";
+
+/**
+ * A world's Guide (design turn 234, SPEC-059 R-1 – R-7): nothing public until it is turned on, only
+ * settled canon has a switch, an entry turned on brings its sections, and the Player's page beside
+ * an entry says what waits for a chapter.
+ */
+
+const dom = parseHTML("<!doctype html><html><body></body></html>");
+Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1360, innerHeight: 850 });
+Object.assign(globalThis, {
+  window: dom.window,
+  document: dom.document,
+  HTMLElement: dom.HTMLElement,
+  Node: dom.Node,
+  Event: dom.Event,
+  IS_REACT_ACT_ENVIRONMENT: true,
+  requestAnimationFrame: (cb: (t: number) => void) => setTimeout(() => cb(0), 0),
+});
+
+interface Mounted { container: HTMLElement; root: Root }
+const open: Mounted[] = [];
+
+async function mount(state: ClientState): Promise<Mounted> {
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => {
+    __setStateForTest(state);
+    root.render(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/guide`]}><App /></MemoryRouter>);
+  });
+  const mounted = { container, root };
+  open.push(mounted);
+  return mounted;
+}
+
+afterEach(async () => {
+  for (const mounted of open.splice(0)) {
+    await act(async () => mounted.root.unmount());
+    mounted.container.remove();
+  }
+  dom.document.body.replaceChildren();
+  __setStateForTest(FIXTURE_STATE);
+  __setBridgeForTest(null);
+});
+
+const capture = (sent: ClientMessage[]): ArkeBridge =>
+  ({ appVersion: "test", platform: "test", connect: () => {}, subscribe: () => {}, send: (json: string) => sent.push(JSON.parse(json) as ClientMessage) }) as unknown as ArkeBridge;
+const click = async (element: Element | null) => {
+  assert.ok(element, "nothing to click");
+  await act(async () => (element as HTMLElement).click());
+};
+
+/** The fixture with a story whose chapters an entry can wait for. */
+function withChapters(): ClientState {
+  const state = structuredClone(FIXTURE_STATE) as ClientState;
+  const production = state.world!.productions[0]!;
+  production.chapters = [1, 2, 6].map((order) => ({ id: `chapter-${order}`, file: `0${order}-chapter.md`, order, title: `Chapter ${order}`, status: "drafted", version: 1 }));
+  return state;
+}
+
+describe("a world's Guide (design turn 234)", () => {
+  it("sits after Productions and starts with nothing public (R-1, R-2)", async () => {
+    const { container } = await mount(withChapters());
+    const pills = [...container.querySelectorAll(".fy-pillnav__item")].map((pill) => pill.textContent);
+    assert.equal(pills.at(-1), "Guide");
+    assert.equal(pills.at(-2), "Productions");
+    assert.equal(container.querySelector("[data-testid=guide-counts]")?.textContent, "0 of 1 characters · 0 of 2 places · 0 of 1 lore");
+  });
+
+  it("gives an open thread no switch (R-3)", async () => {
+    const { container } = await mount(withChapters());
+    assert.equal(container.querySelector("[data-testid=guide-row-CANON-044] [role=switch]"), null);
+    assert.ok(container.querySelector("[data-testid=guide-row-CANON-002] [role=switch]"));
+  });
+
+  it("turns an entry on with its sections (R-4)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const { container } = await mount(withChapters());
+    await click(container.querySelector("[data-testid=guide-row-maren-kest] [role=switch]"));
+    const change = sent.find((message) => message.kind === "set-guide-entry");
+    assert.deepEqual(change, {
+      kind: "set-guide-entry",
+      worldId: FIXTURE_WORLD_ID,
+      change: { entryKind: "characters", id: "maren-kest", entry: { public: true, sections: { Essence: { public: true }, Appearance: { public: true } } } },
+    });
+    assert.equal(container.querySelector("[data-testid=guide-row-maren-kest] [role=switch]")?.getAttribute("aria-checked"), "true");
+  });
+
+  it("draws what waits for a chapter, on the row and on the Player's page (R-4, R-7)", async () => {
+    const state = withChapters();
+    state.world!.guide = {
+      schemaVersion: 1,
+      characters: { "maren-kest": { public: true, sections: { Essence: { public: true }, Appearance: { public: true, after: { production: "saltlight", chapter: "chapter-6" } } } } },
+      locations: { "the-vigil": { public: true, after: { production: "saltlight", chapter: "chapter-6" }, sections: { Look: { public: true } } } },
+      factions: {},
+      lore: {},
+    };
+    const { container } = await mount(state);
+    assert.equal(container.querySelector("[data-testid=guide-counts]")?.textContent, "1 of 1 characters · 1 of 2 places · 0 of 1 lore · 1 after a chapter");
+    assert.match(container.querySelector("[data-testid=guide-row-the-vigil] .fy-guide-col--shows")?.textContent ?? "", /After Chapter 6/);
+    await click(container.querySelector("[data-testid=guide-row-maren-kest] .fy-guide-row__open"));
+    const panel = container.querySelector("[data-testid=guide-entry]");
+    assert.ok(panel);
+    const phone = panel.querySelector(".fy-guide-phone")!;
+    assert.match(phone.textContent ?? "", /Tide-caller\. She hears the verse/);
+    assert.match(phone.textContent ?? "", /After Chapter 6/);
+    assert.doesNotMatch(phone.textContent ?? "", /Salt-crusted/);
+  });
+
+  it("previews nothing public as nothing (R-7)", async () => {
+    const { container } = await mount(withChapters());
+    await click(container.querySelector("[data-testid=guide-preview]"));
+    assert.match(container.querySelector("[data-testid=guide-preview-sheet]")?.textContent ?? "", /Nothing public/);
+  });
+});

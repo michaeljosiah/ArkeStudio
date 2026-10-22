@@ -40,6 +40,9 @@ const MAX_PHRASES = 20000;
 
 export type WorldRefusal = "not-a-package" | "newer-arke";
 
+/** A Studio slug as a package id: the same vocabulary, at most 64 long. */
+export const packageSlug = (slug: string) => slug.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+/, "").slice(0, 64).replace(/-+$/, "") || "world";
+
 const SlugSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/);
 const text = (max: number) => z.string().max(max).refine((value) => value.trim().length > 0);
 const TicksSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);

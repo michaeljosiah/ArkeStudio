@@ -1,3 +1,4 @@
+import { GuideVoiceLinesRequestSchema, SetGuideEntrySchema } from "./world-guide.js";
 import { ChapterReviewDecisionSchema } from "./chapter-review.js";
 import { StoryPublishActionSchema } from "./story-publication.js";
 import { valueSchema } from "./value-schema.js";
@@ -3996,6 +3997,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("read-audiobook-video"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, options: AudiobookVideoOptionsSchema }).strict(),
   /** The world's web packages — interactive, visual novel and audiobook — answered as `web-packages.listed`. */
   z.object({ kind: z.literal("list-web-packages"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  /** One entry of the world's Guide (SPEC-059 R-4, R-8): what is public and when, written to `guide.json`. */
+  z.object({ kind: z.literal("set-guide-entry"), worldId: UlidSchema, change: SetGuideEntrySchema }).strict(),
+  /** The sentences a character speaks in takes of chapters read whole (R-6), answered as `guide.voice-lines`. */
+  z.object({ kind: z.literal("list-guide-voice-lines"), ...GuideVoiceLinesRequestSchema.shape }).strict(),
   z.object({ kind: z.literal("pick-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("import-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   /** The same file read again at the level the person chose (turn 131): the held document, nothing written. */

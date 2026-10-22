@@ -378,6 +378,7 @@ import { AudioStudioPreviews } from "./productions/audio-studio-preview.js";
 import { renderAudioStudioMix } from "./productions/audio-studio-mix.js";
 import { audiobookPlayerFile, exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
 import { exportArkePlayer, listArkePlayerPackages } from "./productions/arke-player-export.js";
+import { guideVoiceLines, setGuideEntry } from "./productions/world-guide.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
 import { checkDirection, directionPlan, heldKey } from "./voice/direction.js";
@@ -10867,6 +10868,29 @@ export class Coordinator {
           ...(msg.baseVersion !== undefined ? { baseVersion: msg.baseVersion } : {}),
         }).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "set-guide-entry": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        try {
+          await setGuideEntry(store, msg.change, "editor");
+        } catch (err) {
+          // The switch springs back with the snapshot below; this says why.
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The Guide could not be saved" });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "list-guide-voice-lines": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        try {
+          const lines = await guideVoiceLines(store, msg.character, store.closingSignal);
+          this.emit({ at: this.nowIso(), type: "guide.voice-lines", requestId: msg.requestId, worldId: msg.worldId, character: msg.character, lines });
+        } catch (err) {
+          this.emit({ at: this.nowIso(), type: "guide.voice-lines", requestId: msg.requestId, worldId: msg.worldId, character: msg.character, lines: [], refused: err instanceof Error ? err.message.slice(0, 300) : "Lines could not be read" });
+        }
         return;
       }
       case "restore-bible": {

@@ -1,3 +1,4 @@
+import { GuideVoiceLineSchema } from "./world-guide.js";
 import { DramaEditionSchema } from "./audio-drama-edition.js";
 import { ChapterReviewSchema } from "./chapter-review.js";
 import { DramaRequestSchema } from "./audio-drama.js";
@@ -1692,6 +1693,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     .strict(),
   /** What a video render would make (design turn 197a): each chapter read whole and whether it is already rendered, and this machine's rates. */
   z.object({ ...base, type: z.literal("audiobook.video-state"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, state: AudiobookVideoStateSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
+  /** A character's lines to choose a voice line from (SPEC-059 R-6), in manuscript order. */
+  z.object({ ...base, type: z.literal("guide.voice-lines"), requestId: UlidSchema, worldId: UlidSchema, character: SlugSchema, lines: z.array(GuideVoiceLineSchema), refused: z.string().min(1).optional() }).strict(),
   /** The world's web packages, newest first (design turn 186e). */
   z
     .object({

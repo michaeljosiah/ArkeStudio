@@ -95,6 +95,7 @@ import { initStore } from "./lib/store.js";
 import { isRemoteSession } from "./lib/remote-session.js";
 import { RemoteEntry } from "./components/remote-entry.js";
 import "./screens/remote-access.css";
+import "./screens/world-guide.css";
 import "./screens/settings-responsive.css";
 // Last: Arke's hinge half on a Fold7 (design turn 202) stands over the drawers' rules.
 import "./components/arke-half.css";

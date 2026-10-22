@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { LISTENING_MEDIA_TYPE, manuscriptDocument, SlugSchema, WORLD_PACKAGE_FORMAT, type ListeningChapter, type ListeningDocumentChapter, type WorldAsset } from "@arke-studio/contracts";
+import { LISTENING_MEDIA_TYPE, manuscriptDocument, packageSlug, SlugSchema, WORLD_PACKAGE_FORMAT, type ListeningChapter, type ListeningDocumentChapter, type WorldAsset } from "@arke-studio/contracts";
 import type { FfmpegRunner } from "../takes/export.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -54,8 +54,7 @@ export interface ArkePlayerExportOptions {
 const pad = (value: number, width: number) => String(value).padStart(width, "0");
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-/** A Studio slug as a package id: the same vocabulary, at most 64 long. */
-export const packageSlug = (slug: string) => slug.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+/, "").slice(0, 64).replace(/-+$/, "") || "world";
+export { packageSlug } from "@arke-studio/contracts";
 
 /** Whether a WebP carries alpha: the VP8X alpha flag, or a lossless image's alpha bit (R-6). */
 export function webpHasAlpha(bytes: Uint8Array): boolean {
