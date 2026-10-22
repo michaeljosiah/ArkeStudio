@@ -218,6 +218,78 @@ describe("picture choices after paragraph shifts (#2120)", () => {
   }));
 });
 
+describe("selected narration after repeated paragraph shifts (#2117)", () => {
+  const body = "The first lamp stays lit.\n\nThe second lamp stays dark.";
+  const save = (send: (message: ClientMessage) => Promise<void>, text: string) => send({ kind: "save-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", body: text });
+  const follow = (store: WorldStore) => followChapterTakes(store, LEDGER, { id: "neap", file: "01-neap" }, { narrator: NARRATOR });
+
+  for (const duplicate of [false, true]) it(`keeps an intervening replacement ${duplicate ? "unresolved when words repeat" : "selected through a second shift"}`, () =>
+    withHarness(async ({ store, spoken, send }) => {
+      await save(send, body);
+      await read(send);
+      const first = (await plan(store)).record as ChapterAudiobook;
+      const original = first.takes["p0.0"]!;
+      const artifact = store.getBundle().artifacts.find(row => row.id === original.artifactId)!;
+      const bytes = await readFile(join(store.dir, "artifacts", artifact.file));
+      const once = "A new warning arrives.\n\n" + body;
+      await save(send, once);
+      const calls = spoken.length;
+      await follow(store);
+      const moved = (await plan(store)).record as ChapterAudiobook;
+      assert.deepEqual(moved.takes["p1.0"], original);
+      assert.equal(moved.takes["p0.0"], undefined, "the former key is not a second selected performance");
+      assert.equal(spoken.length, calls);
+      moved.flags["p1.0"] = { at: "2026-10-06T09:00:00.000Z", reason: "Read another take" };
+      await writeAudiobook(store, LEDGER, "01-neap", moved);
+      await read(send);
+      const replaced = (await plan(store)).record as ChapterAudiobook;
+      const replacement = replaced.takes["p1.0"]!;
+      assert.notEqual(replacement.artifactId, original.artifactId);
+      replacement.loudness = { integratedLufs: -22, gainDb: 2, peakDbfs: -3 };
+      await writeAudiobook(store, LEDGER, "01-neap", replaced);
+      await save(send, "A second warning follows.\n\n" + once + (duplicate ? "\n\nThe first lamp stays lit." : ""));
+      const callsAfterReplacement = spoken.length;
+      await follow(store);
+      const after = await plan(store);
+      const matches = after.blocks.filter(row => row.block.text === "The first lamp stays lit.");
+      assert.equal(matches.length, duplicate ? 2 : 1);
+      for (const row of matches) {
+        if (duplicate) assert.notEqual(row.state, "made", "identical words do not establish a unique destination");
+        else {
+          assert.equal(row.state, "made");
+          assert.deepEqual((after.record as ChapterAudiobook).takes[row.block.key], replacement, "complete selected take metadata moves");
+        }
+      }
+      assert.equal(spoken.length, callsAfterReplacement, "recovery never synthesizes");
+      assert.deepEqual(store.getBundle().artifacts.find(row => row.id === original.artifactId), artifact, "replaced take provenance remains on the shelf");
+      assert.deepEqual(await readFile(join(store.dir, "artifacts", artifact.file)), bytes, "old audio bytes remain intact");
+      assert.ok(store.getBundle().artifacts.some(row => row.id === replacement.artifactId));
+    }));
+
+  it("removes only exact redundant aliases before applying colliding destinations together", () =>
+    withHarness(async ({ store, spoken, send }) => {
+      await save(send, body);
+      await read(send);
+      const before = (await plan(store)).record as ChapterAudiobook;
+      before.takes["p0.0"]!.loudness = { integratedLufs: -21, gainDb: 1, peakDbfs: -2 };
+      before.takes.retained = { ...before.takes["p0.0"]! };
+      await writeAudiobook(store, LEDGER, "01-neap", before);
+      const artifacts = JSON.stringify(store.getBundle().artifacts);
+      await save(send, "A new warning arrives.\n\n" + body);
+      const calls = spoken.length;
+      assert.equal(await follow(store), 2);
+      const after = (await plan(store)).record as ChapterAudiobook;
+      assert.deepEqual(after.takes["p1.0"], before.takes["p0.0"], "first selection survives removal of the second passage's old key");
+      assert.deepEqual(after.takes["p2.0"], before.takes["p1.0"]);
+      assert.deepEqual(after.takes.title, before.takes.title);
+      assert.equal(after.takes["p0.0"], undefined);
+      assert.equal(after.takes.retained, undefined, "only the identical selected alias is removed");
+      assert.equal(JSON.stringify(store.getBundle().artifacts), artifacts);
+      assert.equal(spoken.length, calls);
+      assert.equal(await follow(store), 0, "the current selections are already settled");
+    }));
+});
+
 describe("Join, Split and Reset (design turn 198)", () => {
   it("recovers shifted unique passages with their selected take metadata and no synthesis (#2115)", () =>
     withHarness(async ({ store, spoken, send }) => {
