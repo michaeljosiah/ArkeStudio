@@ -504,8 +504,6 @@ function BenchWorkspace({
    */
   const tokenSources = useMemo(() => {
     const rows = [...worldSources, ...sessionSources, ...characterSources];
-    if (subject === undefined) return rows;
-
     const byKey = new Map(rows.map((source) => [source.key, source]));
     const active = new Set(session.composer.activeTokens);
     for (const entry of session.tokenRegistry) {
@@ -531,6 +529,8 @@ function BenchWorkspace({
                     ? undefined
                     : `.sessions/${session.id}/media/${take.id}/${take.media.file}`;
                 })());
+      // A registry identity alone cannot make an absent artifact or take available.
+      if (entry.kind === "image" && imagePath === undefined) continue;
       const pick: PickerSource["pick"] =
         referenceSource.source === "artifact"
           ? { source: "artifact", artifactId: referenceSource.artifactId }
@@ -551,7 +551,7 @@ function BenchWorkspace({
       });
     }
     return [...byKey.values()];
-  }, [worldSources, sessionSources, characterSources, subject, session, world?.artifacts]);
+  }, [worldSources, sessionSources, characterSources, session, world?.artifacts]);
   const carried = useMemo(() => carriedForPicker(session, tokenSources), [session, tokenSources]);
   const [pickerOpen, setPickerOpen] = useState(false);
   /** Which lane the open picker fills — the tabs choose what a picked picture is FOR. */

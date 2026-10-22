@@ -335,6 +335,33 @@ describe("a reference picked from a character (issue 505)", () => {
   });
 });
 
+describe("durable references in a standalone session (reopened issue 505)", () => {
+  for (const path of ["artifacts/standalone-plate.png", "references/new-location/interior.png"]) it(`resolves ${path} from the saved registry after reopening`, () => {
+    const state = stateWithBench(), session = state.bench!.session!;
+    session.tokenRegistry = [{ token: "Image 1", kind: "image", label: "Harbour interior", detail: "accepted view", source: { source: "world-file", path, hash: "sha256:cafebabe" } }];
+    session.takes[0]!.request.references = [{ token: "Image 1", kind: "image", source: session.tokenRegistry[0]!.source }];
+    const before = JSON.stringify(session);
+    for (const restored of [state, structuredClone(state)]) {
+      const { document } = parseHTML(`<html><body>${renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, restored)}</body></html>`);
+      const image = document.querySelector('.fy-bench__reftile img');
+      assert.ok(image?.getAttribute('src')?.includes(path));
+      assert.equal(document.querySelector('.fy-bench__refname')?.textContent, "Harbour interior · accepted view");
+      assert.equal(document.querySelector('.fy-bench__takestate')?.textContent, undefined);
+      assert.match(document.body.textContent, /TAKE 1/);
+      assert.equal(JSON.stringify(restored.bench!.session), before, "display never changes the frozen request or composer");
+    }
+  });
+
+  for (const source of [{ source: "artifact" as const, artifactId: "ar_missing", hash: "sha256:deadbeef" }, { source: "take" as const, takeId: "tk_missing", hash: "sha256:deadbeef" }]) it(`keeps an unavailable ${source.source} reference missing`, () => {
+    const state = stateWithBench();
+    state.bench!.session!.tokenRegistry = [{ token: "Image 1", kind: "image", label: "Unavailable view", source }];
+    const { document } = parseHTML(`<html><body>${renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, state)}</body></html>`);
+    assert.equal(document.querySelector('.fy-bench__reftile img'), null);
+    assert.equal(document.querySelector('.fy-bench__takestate')?.textContent, "missing");
+    assert.match(document.querySelector('.fy-bench__refname')?.textContent ?? "", /Unavailable view/);
+  });
+});
+
 describe("the Artifacts door (issue 305 §2)", () => {
   it("carries Generate, and the made-here count appears only when a bench artifact exists", () => {
     const plain = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts`, FIXTURE_STATE);
