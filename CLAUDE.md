@@ -252,7 +252,9 @@ upload.**
    It reads the package back with the shared readers before naming it
    `exports/<slug>-player-<UTC date>.zip`. A world with a public Guide makes schema 3; one without,
    schema 2, which every Player reads. Use the installed app's ffmpeg: winget's on PATH has crashed
-   on exports.
+   on exports. A world with a public Guide also gets its guide alone (SPEC-059 R-10) — the same
+   command with `--guide-alone` in place of the production id, making
+   `exports/<slug>-guide-<UTC date>.zip` — so it can be explored before it is installed.
 2. **Check it as the Player reads it**: arke_world's `readWorldPackage`, and `pin_world` (below),
    which refuses a package the Player would.
 3. **Upload it under its new name** to the world's public story release
@@ -260,7 +262,8 @@ upload.**
    package: phones pinned to it would refuse new bytes. Never mark a release that is not an app
    release Latest: the Studio's updater reads Latest.
 4. **Pin it and publish the list** from ArkePlayer: `dart run arke_world:pin_world <zip> <url>`,
-   paste the pin into `apps/arke_player/assets/worlds/catalogue.json`, raise its `serial`, commit,
+   paste the pin into `apps/arke_player/assets/worlds/catalogue.json` (a guide alone's pin as the
+   world's `guide`, beside its `package`), raise its `serial`, commit,
    and `gh release upload arke-player-worlds apps/arke_player/assets/worlds/catalogue.json --clobber
    --repo michaeljosiah/ArkeStudio`. Installed phones show `Update` within a day.
 
