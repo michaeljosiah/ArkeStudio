@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFile, writeFile, rename, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
-import { audiobookTextHash, DEFAULT_NARRATOR, pictureLookFor, type StoryPublicationSettings } from "@arke-studio/contracts";
+import { audiobookTextHash, DEFAULT_NARRATOR, pictureLookFor, STORY_EPUB_READING_PROFILE, type StoryPublicationSettings } from "@arke-studio/contracts";
+import { inspectStoryImage } from "../../src/publications/story-illustrations.js";
 import { writeIllustratedEpub } from "../../src/publications/story-epub.js";
 import { manuscriptDocument } from "@arke-studio/contracts";
 import { StoryPublicationService } from "../../src/publications/story.js";
@@ -32,6 +33,97 @@ async function setup() {
   return { dir, root, store, productionId, chapter, plan, settings, image, service: new StoryPublicationService(root) };
 }
 const text = (bytes: Uint8Array, name: string) => new TextDecoder().decode(zipEntry(bytes, "OEBPS/" + name)!);
+
+it("requires explicit reading-size choice and host tools without changing original exports", async () => {
+  const h = await setup(), original = await h.service.review(h.store, h.productionId, h.settings);
+  const settings = { ...h.settings, epubImageSize: "reading" as const };
+  const reading = await h.service.review(h.store, h.productionId, settings);
+  assert.notEqual(reading.fingerprint, original.fingerprint);
+  const unavailable = await h.service.preview(h.store, h.productionId, settings, reading.fingerprint, () => {});
+  assert.equal(unavailable.status, "failed"); assert.match(unavailable.error!, /host’s image tools/);
+  assert.deepEqual(await readFile(join(h.dir, "world-art.png")), Buffer.from(h.image));
+  const originalPreview = await h.service.preview(h.store, h.productionId, h.settings, original.fingerprint, () => {});
+  assert.equal(originalPreview.status, "preview", originalPreview.error);
+});
+
+it("does not deliver a partial reading edition when image conversion fails", async () => {
+  const h = await setup(), service = new StoryPublicationService(h.root, { ffmpeg: { slateFont: "", identity: async () => "fixture-encoder",
+    run: async args => { await writeFile(args.at(-1)!, "partial image"); throw new Error("Image encoder stopped"); } } });
+  const settings = { ...h.settings, epubImageSize: "reading" as const }, review = await service.review(h.store, h.productionId, settings);
+  const failed = await service.preview(h.store, h.productionId, settings, review.fingerprint, () => {});
+  assert.equal(failed.status, "failed"); assert.match(failed.error!, /Image encoder stopped/); assert.deepEqual(failed.files, []);
+  assert.equal(await service.serve(failed.id, "story.epub"), null);
+  assert.equal((await readdir(join(h.root, failed.id, "inputs", "artifacts"))).some(file => file.includes(".tmp.")), false);
+  assert.deepEqual(await readFile(join(h.dir, "world-art.png")), Buffer.from(h.image));
+});
+
+it("creates a smaller real reading EPUB with captured derivatives, exact placements and retry identity", { skip: process.env.ARKE_STORY_CODEC_SMOKE !== "1" }, async t => {
+  const { execFile } = await import("node:child_process"), { promisify } = await import("node:util");
+  const exec = promisify(execFile), command = process.env.ARKE_FFMPEG ?? "ffmpeg";
+  const h = await setup(), noisy = solidImage(3072, 2048, [0, 0, 0, 255]);
+  let seed = 1938;
+  for (let i = 0; i < noisy.pixels.length; i++) { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; if (i % 4 !== 3) noisy.pixels[i] = seed >>> 24; }
+  await writeFile(join(h.root, "noise.png"), encodePng(noisy));
+  await exec(command, ["-y", "-i", join(h.root, "noise.png"), "-pix_fmt", "rgb24", "-frames:v", "1", join(h.dir, "world-art.png")], { windowsHide: true, timeout: 60000 });
+  const source = await readFile(join(h.dir, "world-art.png"));
+  const originalSettings = { ...h.settings, cover: "world-art.png" };
+  const originalReview = await h.service.review(h.store, h.productionId, originalSettings);
+  const original = await h.service.preview(h.store, h.productionId, originalSettings, originalReview.fingerprint, () => {});
+  assert.equal(original.status, "preview", original.error);
+  const originalBytes = await readFile((await h.service.previewMedia(original.id, "story.epub"))!.path);
+  const calls: string[][] = [];
+  const identity = (await exec(command, ["-version"], { windowsHide: true })).stdout.split("\n")[0]!;
+  const service = new StoryPublicationService(h.root, { ffmpeg: { slateFont: "", identity: async () => identity,
+    run: async (args, _progress, signal) => { calls.push(args); await exec(command, args, { windowsHide: true, signal, timeout: 60000, maxBuffer: 4 * 1024 ** 2 }); } } });
+  const settings = { ...originalSettings, epubImageSize: "reading" as const };
+  const review = await service.review(h.store, h.productionId, settings);
+  const cancelled = await service.preview(h.store, h.productionId, settings, review.fingerprint, edition => { if (edition.phase === "Preparing EPUB") service.cancel(edition.id); });
+  assert.equal(cancelled.status, "cancelled", cancelled.error);
+  assert.equal(calls.length, 1, "repeated placements and cover share one derivative");
+  const frozen = JSON.parse(await readFile(join(h.root, cancelled.id, "inputs.json"), "utf8"));
+  assert.deepEqual(frozen.epubImages.profile, STORY_EPUB_READING_PROFILE); assert.equal(frozen.epubImages.encoder, identity);
+  assert.equal(frozen.compiler.compilerVersion, "5"); assert.equal(frozen.media.length, 2);
+  const fitted = frozen.epubImages.images[0]; assert.equal(fitted.width, 2048); assert.equal(fitted.height, 1365);
+  assert.ok(Math.abs(fitted.width / fitted.height - 1.5) < .001);
+  const independent = new StoryPublicationService(h.root);
+  const preview = await independent.retry(cancelled.id, () => {});
+  assert.equal(preview.status, "preview", preview.error); assert.equal(calls.length, 1, "retry reuses captured rendition without an encoder");
+  const ready = await independent.create(h.store, h.productionId, preview.id);
+  const bytes = await readFile((await independent.serve(ready.id, "story.epub"))!.path);
+  assert.ok(bytes.length < originalBytes.length / 2, `${bytes.length} should be smaller than original ${originalBytes.length}`);
+  t.diagnostic(`Measured fixture EPUB: original ${originalBytes.length} bytes; reading ${bytes.length} bytes. This fixture is not the full story.`);
+  assert.equal(ready.files[0]!.bytes, bytes.length);
+  assert.equal(text(bytes, "chapter-1.xhtml"), text(originalBytes, "chapter-1.xhtml").replaceAll(".png", ".jpg"));
+  assert.equal(text(bytes, "nav.xhtml"), text(originalBytes, "nav.xhtml"));
+  assert.match(text(bytes, "package.opf"), /href="cover.jpg" media-type="image\/jpeg"/);
+  const packed = Buffer.from(zipEntry(bytes, "OEBPS/illustration-1.jpg")!);
+  assert.deepEqual(inspectStoryImage(packed), { width: 2048, height: 1365, mediaType: "image/jpeg" });
+  assert.deepEqual(Buffer.from(zipEntry(bytes, "OEBPS/cover.jpg")!), packed);
+  assert.deepEqual(await readFile((await independent.previewMedia(ready.id, "illustration-1.jpg"))!.path), packed);
+  assert.deepEqual(await readFile((await independent.previewMedia(ready.id, "cover"))!.path), packed);
+  assert.deepEqual(await readFile(join(h.dir, "world-art.png")), source, "world original unchanged");
+  assert.deepEqual(await readFile(join(h.root, ready.id, "inputs", fitted.source)), source, "original capture retained");
+  assert.deepEqual(await readFile((await h.service.previewMedia(original.id, "story.epub"))!.path), originalBytes, "existing edition unchanged");
+  await writeFile(join(h.dir, "world-art.png"), h.image);
+  assert.deepEqual(await readFile((await independent.previewMedia(ready.id, "illustration-1.jpg"))!.path), packed);
+  await writeFile(join(h.root, ready.id, "inputs", fitted.file), "damaged");
+  assert.equal(await independent.previewMedia(ready.id, "illustration-1.jpg"), null);
+});
+
+it("preserves alpha and avoids upscaling reading-size PNGs", { skip: process.env.ARKE_STORY_CODEC_SMOKE !== "1" }, async () => {
+  const { execFile } = await import("node:child_process"), { promisify } = await import("node:util");
+  const exec = promisify(execFile), command = process.env.ARKE_FFMPEG ?? "ffmpeg";
+  const h = await setup();
+  const transparent = encodePng(solidImage(32, 64, [24, 48, 96, 80])); await writeFile(join(h.dir, "world-art.png"), transparent);
+  const service = new StoryPublicationService(h.root, { ffmpeg: { slateFont: "", identity: async () => "fixture-encoder",
+    run: async (args, _progress, signal) => { await exec(command, args, { windowsHide: true, signal, timeout: 60000 }); } } });
+  const settings = { ...h.settings, epubImageSize: "reading" as const }, review = await service.review(h.store, h.productionId, settings);
+  const preview = await service.preview(h.store, h.productionId, settings, review.fingerprint, () => {});
+  assert.equal(preview.status, "preview", preview.error);
+  const fitted = await readFile((await service.previewMedia(preview.id, "illustration-1.png"))!.path);
+  const { decodePng } = await import("../../src/references/png.js");
+  const decoded = decodePng(fitted); assert.equal(decoded.width, 32); assert.equal(decoded.height, 64); assert.equal(decoded.pixels[3], 80);
+});
 
 it("captures attached pictures in manuscript order with exact prose, alt text and a world-independent preview", async () => {
   const h = await setup(), review = await h.service.review(h.store, h.productionId, h.settings);

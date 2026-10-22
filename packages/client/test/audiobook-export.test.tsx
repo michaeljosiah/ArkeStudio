@@ -234,16 +234,24 @@ describe("Export audiobook (turn 186e)", () => {
     const picture = () => [...dom.document.querySelectorAll("label")].find(row => row.textContent?.includes("Include attached illustrations"));
     assert.equal(picture()!.querySelector("input")!.checked, false);
     await choose("Include attached illustrations", true);
+    const size = dom.document.querySelector<HTMLSelectElement>('select[aria-describedby="epub-image-size-help"]')!;
+    assert.equal(size.value, "original");
+    Object.defineProperty(size, "value", { value: "reading", configurable: true });
+    await act(async () => void size.dispatchEvent(new dom.Event("change", { bubbles: true })));
+    assert.match(text(q(m, '.fy-publish')), /Originals are kept/);
     await press([...dom.document.querySelectorAll("button")].find(button => text(button) === "Review chapters")!);
     await press([...dom.document.querySelectorAll("button")].find(button => text(button) === "Formatting & style")!);
     const command = lastAsk(m, "publish-story")!;
     assert.equal(command.input.action, "review");
     assert.ok("settings" in command.input && command.input.settings.includeIllustrations);
+    assert.ok("settings" in command.input && command.input.settings.epubImageSize === "reading");
     // Start another sheet to exercise the output transition independently of the pending review.
     await act(async () => m.root.render(<MemoryRouter><StoryPublishSheet key="second" worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} /></MemoryRouter>));
     await choose("Include attached illustrations", true); await choose("Listen · M4B", true); await choose("Read · EPUB", false);
     assert.equal(picture(), undefined);
     await choose("Read · EPUB", true); assert.equal(picture()!.querySelector("input")!.checked, false);
+    await choose("Include attached illustrations", true);
+    assert.equal(dom.document.querySelector<HTMLSelectElement>('select[aria-describedby="epub-image-size-help"]')!.value, "original");
   });
 
   it("leaves outlined chapters out of the default private-edition selection", async () => {

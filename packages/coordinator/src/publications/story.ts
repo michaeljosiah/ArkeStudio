@@ -22,6 +22,7 @@ import type { STORY_PDF_IDENTITY } from "./story-pdf.js";
 
 import { writeIllustratedEpub, readEpubPreview } from "./story-epub.js";
 import { illustrationName, type StoryIllustration } from "./story-illustrations.js";
+import { captureEpubImages, epubImage, type StoryEpubImages } from "./story-epub-images.js";
 
 const Hash = z.string().regex(/^[a-f0-9]{64}$/);
 const Stored = z.object({ edition: StoryEditionSchema, inputHash: Hash.optional() }).strict();
@@ -36,6 +37,7 @@ interface FrozenStory {
   pdfIdentity?: typeof STORY_PDF_IDENTITY;
   chapterIds?: string[];
   illustrations?: StoryIllustration[];
+  epubImages?: StoryEpubImages;
 }
 const metadata = (value: string) => value.replace(/\\/g, "\\\\").replace(/[=;#]/g, "\\$&").replace(/[\r\n]+/g, " ");
 const errorText = (error: unknown) => error instanceof Error ? error.message : "The edition could not be prepared.";
@@ -151,7 +153,7 @@ export class StoryPublicationService {
         await readPublicationFile(directory, "inputs.json", 64 * 1024 ** 2, undefined, undefined, chunks);
         const frozen = JSON.parse(Buffer.concat(chunks).toString("utf8")) as FrozenStory;
         if (storyDigest(frozen) !== saved.inputHash) return null;
-        const image = frozen.illustrations?.find((image, index) => illustrationName(index, image) === name);
+        const image = frozen.illustrations?.map(image => epubImage(image, frozen.epubImages)).find((image, index) => illustrationName(index, image) === name);
         const receipt = image && frozen.media.find(file => file.file === image.file);
         if (!image || !receipt) return null;
         const path = "inputs/" + receipt.file;
@@ -170,11 +172,12 @@ export class StoryPublicationService {
         const frozen = JSON.parse(Buffer.concat(chunks).toString("utf8")) as FrozenStory;
         if (storyDigest(frozen) !== saved.inputHash || !frozen.cover ||
           !["image/png", "image/jpeg"].includes(frozen.cover.mediaType)) return null;
-        const receipt = frozen.media.find(file => file.file === frozen.cover!.file);
+        const cover = epubImage(frozen.cover, frozen.epubImages);
+        const receipt = frozen.media.find(file => file.file === cover.file);
         if (!receipt) return null;
         const path = "inputs/" + receipt.file;
         requirePublicationDigest(await readPublicationFile(directory, path, LIMIT), receipt);
-        return { path: await checkedPublicationPath(directory, path), contentType: frozen.cover.mediaType };
+        return { path: await checkedPublicationPath(directory, path), contentType: cover.mediaType };
       } catch { return null; }
     }
     const hit = await this.resolveMedia(id, name, true);
@@ -241,6 +244,7 @@ export class StoryPublicationService {
         if (snapshot.review.findings.some(finding => !finding.kept)) blockers.push("Review the remaining style suggestions or turn off the optional rule.");
         if (blockers.length) throw new Error(blockers.join("\n"));
         if (settings.outputs.includes("m4b") && (!this.options.ffmpeg || !this.options.probe?.info)) throw new Error("Audiobook export needs the host’s audio tools.");
+        if (settings.epubImageSize === "reading" && !this.options.ffmpeg?.identity) throw new Error("Reading-size EPUB needs the host’s image tools. Choose Original images or use a host with those tools.");
         const records = Object.fromEntries(Object.keys(snapshot.manifest).map(path => [path, path]));
         const identity = snapshot.identity;
         return { request: { records, media: Object.fromEntries(snapshot.media.map(file => [file.key, file.key])), receipt: {
@@ -284,6 +288,10 @@ export class StoryPublicationService {
             beds: chapter.mix.beds.map(bed => ({ ...bed, file: pathOf(bed.file) })),
             sounds: chapter.mix.sounds.map(sound => ({ ...sound, file: pathOf(sound.file) })),
           } }] : []), media, cover };
+        if (settings.epubImageSize === "reading") {
+          frozen.epubImages = await captureEpubImages(inputRoot, [...(frozen.illustrations ?? []).map(image => image.file), ...(cover ? [cover.file] : [])], media, this.options.ffmpeg!, signal);
+          media.push(...frozen.epubImages.images.map(({ file, sha256, byteLength }) => ({ file, sha256, byteLength })));
+        }
         const text = JSON.stringify(frozen);
         await atomicWriteFile(join(directory, "inputs.json"), text);
         saved.inputHash = storyDigest(frozen);
@@ -318,10 +326,11 @@ export class StoryPublicationService {
     const edition = saved.edition, directory = this.directory(edition.id), inputRoot = join(directory, "inputs"), output = join(directory, "files");
     const frozen = JSON.parse(await readFile(await checkedPublicationPath(directory, "inputs.json"), "utf8")) as FrozenStory;
     if (!saved.inputHash || storyDigest(frozen) !== saved.inputHash) throw new Error("Captured inputs changed. This edition cannot be rebuilt.");
-    if (frozen.compiler?.compiler !== STORY_COMPILER.compiler || !["1", "2", "3", "4"].includes(frozen.compiler.compilerVersion)) throw new Error("This edition uses an unsupported compiler. Prepare a new edition.");
+    if (frozen.compiler?.compiler !== STORY_COMPILER.compiler || !["1", "2", "3", "4", "5"].includes(frozen.compiler.compilerVersion)) throw new Error("This edition uses an unsupported compiler. Prepare a new edition.");
+    if (edition.settings.epubImageSize === "reading" && (!frozen.epubImages || frozen.compiler.compilerVersion !== "5")) throw new Error("This edition has no captured reading-size images. Prepare a new edition.");
     if (edition.settings.outputs.includes("pdf")) {
       const current = await (await import("./story-pdf.js")).storyPdfIdentity();
-      if (!frozen.pdfIdentity || !["3", "4"].includes(frozen.compiler.compilerVersion) || storyDigest(frozen.pdfIdentity) !== storyDigest(current))
+      if (!frozen.pdfIdentity || !["3", "4", "5"].includes(frozen.compiler.compilerVersion) || storyDigest(frozen.pdfIdentity) !== storyDigest(current))
         throw new Error("The PDF renderer or fonts changed. Prepare a new edition.");
     }
     if (frozen.encoder !== null && frozen.encoder !== (await this.options.ffmpeg?.identity?.(signal) ?? "injected-runner")) throw new Error("The audio encoder changed. Recheck and prepare a fresh preview.");
@@ -334,11 +343,12 @@ export class StoryPublicationService {
       const name = "story." + format, path = join(output, name);
       let pdf: import("@arke-studio/contracts").StoryPdfMetadata | undefined;
       if (format === "epub") {
-        const cover = frozen.cover ? { bytes: await readFile(join(inputRoot, frozen.cover.file)), mediaType: frozen.cover.mediaType } : undefined;
-        if (edition.settings.includeIllustrations && (!frozen.illustrations || frozen.compiler.compilerVersion !== "4")) throw new Error("This edition has no captured illustrations. Prepare a new edition.");
+        const coverImage = frozen.cover ? epubImage(frozen.cover, frozen.epubImages) : undefined;
+        const cover = coverImage ? { bytes: await readFile(join(inputRoot, coverImage.file)), mediaType: coverImage.mediaType } : undefined;
+        if (edition.settings.includeIllustrations && (!frozen.illustrations || !["4", "5"].includes(frozen.compiler.compilerVersion))) throw new Error("This edition has no captured illustrations. Prepare a new edition.");
         const options = { identifier: "urn:uuid:" + edition.id, language: edition.settings.language,
           modified: edition.createdAt, author: edition.settings.author, description: edition.settings.description, ...(cover ? { cover } : {}) };
-        if (edition.settings.includeIllustrations) await writeIllustratedEpub(frozen.document, options, frozen.illustrations!, frozen.media, inputRoot, path, signal);
+        if (edition.settings.includeIllustrations) await writeIllustratedEpub(frozen.document, options, frozen.illustrations!.map(image => epubImage(image, frozen.epubImages)), frozen.media, inputRoot, path, signal);
         else await atomicWriteFile(path, writeEpub(frozen.document, options));
       } else if (format === "pdf") {
         if (!edition.settings.pdf) throw new Error("This edition has no saved PDF formatting. Prepare a new preview.");

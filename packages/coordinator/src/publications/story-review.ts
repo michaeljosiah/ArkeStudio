@@ -20,7 +20,7 @@ import { audioStudioScript, audioStudioSourceProblems } from "../productions/aud
 export const storyDigest = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export const STORY_COMPILER = { compiler: "arke-private-story", compilerVersion: "2" };
 export const storyCompiler = (settings: StoryPublicationSettings) => settings.includeIllustrations
-  ? { compiler: "arke-private-story", compilerVersion: "4" } : settings.outputs.includes("pdf")
+  ? { compiler: "arke-private-story", compilerVersion: settings.epubImageSize === "reading" ? "5" : "4" } : settings.outputs.includes("pdf")
   ? { compiler: "arke-private-story", compilerVersion: "3" } : STORY_COMPILER;
 export interface StoryAudioStudio { state: AudioArrangementState; script: AudioScript; revision: number }
 export function mixFiles(mix: ChapterMix): string[] {

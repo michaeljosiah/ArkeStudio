@@ -16,6 +16,18 @@ export interface StoryIllustration {
 export const STORY_ILLUSTRATION_LIMITS = { count: 1000, fileBytes: 20 * 1024 ** 2, totalBytes: 2 * 1024 ** 3, pixels: 40_000_000 };
 export const illustrationName = (index: number, image: Pick<StoryIllustration, "mediaType">) => `illustration-${index + 1}.${image.mediaType === "image/png" ? "png" : "jpg"}`;
 
+/** Reuse the PDF cover parser for bounded PNG/JPEG validation, without a new native codec. */
+export function inspectStoryImage(bytes: Buffer): { mediaType: StoryIllustration["mediaType"]; width: number; height: number } {
+  const mediaType = bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) ? "image/png" : bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 ? "image/jpeg" : undefined;
+  if (!mediaType) throw new Error("use a PNG or JPEG illustration");
+  const parser = new PDFDocument({ autoFirstPage: false, font: "" }); parser.resume();
+  try {
+    const { width, height } = (parser as unknown as { openImage(bytes: Buffer): { width: number; height: number } }).openImage(bytes);
+    if (!(width > 0 && height > 0 && width * height <= STORY_ILLUSTRATION_LIMITS.pixels)) throw new Error("the picture exceeds 40 megapixels");
+    return { mediaType, width, height };
+  } finally { parser.end(); }
+}
+
 /** Reuse the player's placement, but refuse its stale/missing fallbacks at the publication boundary. */
 export async function storyIllustrations(store: WorldStore, chapters: readonly { title: string; body: string; plan: AudiobookPlan | null }[], blockers: string[]): Promise<StoryIllustration[]> {
   const bundle = store.getBundle(), listed = new Set(worldImageReferences(bundle).map(image => image.file));
@@ -54,17 +66,7 @@ export async function storyIllustrations(store: WorldStore, chapters: readonly {
           const receipt = await readPublicationFile(store.dir, file, STORY_ILLUSTRATION_LIMITS.fileBytes, store.closingSignal, undefined, chunks);
           totalBytes += receipt.byteLength;
           if (totalBytes > STORY_ILLUSTRATION_LIMITS.totalBytes) throw new Error("the selected pictures exceed 2 GiB");
-          const bytes = Buffer.concat(chunks);
-          mediaType = bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) ? "image/png" : bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 ? "image/jpeg" : undefined;
-          if (!mediaType) throw new Error("use a PNG or JPEG illustration");
-          // The same PNG/JPEG parser as the PDF cover checks structure and dimensions without
-          // introducing a new image codec or a native-tool requirement for a reading edition.
-          // An empty font skips the optional standard-font loader in the bundled host; no text is rendered here.
-          const parser = new PDFDocument({ autoFirstPage: false, font: "" }); parser.resume();
-          try {
-            const size = (parser as unknown as { openImage(bytes: Buffer): { width: number; height: number } }).openImage(bytes);
-            if (!(size.width > 0 && size.height > 0 && size.width * size.height <= STORY_ILLUSTRATION_LIMITS.pixels)) throw new Error("the picture exceeds 40 megapixels");
-          } finally { parser.end(); }
+          mediaType = inspectStoryImage(Buffer.concat(chunks)).mediaType;
           checked.set(file, mediaType);
         }
         const alt = entry.picture.shot?.frame.trim() || `Illustration for ${source.title}, ${block.paragraph < 0 ? "chapter opening" : `passage ${block.paragraph + 1}`}.`;

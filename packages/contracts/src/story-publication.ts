@@ -6,6 +6,8 @@ import { SlugSchema, UlidSchema } from "./ids.js";
 /** Turn 224, SPEC-048: author-approved source changes and private, frozen editions. */
 const Text = z.string().max(512);
 const Hash = z.string().regex(/^[a-f0-9]{64}$/);
+/** Explicit EPUB derivative profile; original bytes remain the default and are always captured. */
+export const STORY_EPUB_READING_PROFILE = { version: 1, maxEdge: 2048, jpegQuality: 4, transparency: "preserve", upscale: false } as const;
 /** SPEC-058: resolved values travel with the edition; new defaults never reinterpret old files. */
 export const StoryPdfSettingsSchema = z.object({
   version: z.literal(1), preset: z.enum(["book", "a4", "letter"]), font: z.enum(["serif", "sans"]),
@@ -38,9 +40,11 @@ export const StoryPublicationSettingsSchema = z.object({
   outputs: z.array(z.enum(["epub", "m4b", "pdf"])).min(1).max(3).refine(values => new Set(values).size === values.length),
   subtitle: Text.optional(), editionLabel: Text.optional(), pdf: StoryPdfSettingsSchema.optional(),
   includeIllustrations: z.boolean().optional(),
+  epubImageSize: z.enum(["original", "reading"]).optional(),
   avoidEmDashes: z.boolean(),
 }).strict().superRefine((value, ctx) => {
   if (value.includeIllustrations && !value.outputs.includes("epub")) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["includeIllustrations"], message: "Attached illustrations require EPUB output." });
+  if (value.epubImageSize && (!value.includeIllustrations || !value.outputs.includes("epub"))) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["epubImageSize"], message: "Image size requires an illustrated EPUB." });
   if (value.outputs.includes("pdf") && !value.pdf) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["pdf"], message: "Choose PDF formatting before preparing the edition." });
 });
 export type StoryPublicationSettings = z.infer<typeof StoryPublicationSettingsSchema>;
