@@ -434,17 +434,17 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   // The model as Make weighs it, at the references the card was drafted under, and each sheet's billing.
   const model = models?.find((candidate) => candidate.provider === suggestion.model.provider && candidate.id === suggestion.model.id);
   const admission = model === undefined ? undefined : { model: { ...model, accepts: { ...model.accepts, referenceImages: suggestion.model.references } }, billing: (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.billing };
-  const riding = chapter === undefined ? suggestion.who : withOwnLooks(suggestion.who, own, chapterLook, world.referenceKits, shot?.frame, admission);
+  const riding = chapter === undefined || suggestion.reuse !== undefined ? suggestion.who : withOwnLooks(suggestion.who, own, chapterLook, world.referenceKits, shot?.frame, admission);
   // Make again's price is what rides now (issue 1876): the coordinator weighs everyone again and
   // refuses a press confirmed below that, so a reference gained since the draft was `the price
   // moved` on every press. Priced as the suggestion was, from the same figures the Bench plans with.
-  const carriedNow = riding.filter((entry) => entry.carried).length;
-  const quote = model !== undefined && carriedNow !== suggestion.who.filter((entry) => entry.carried).length ? pictureQuote(model, carriedNow, suggestion.aspect) : suggestion.estimatedMicroUsd;
+  const carriedNow = suggestion.references?.length ?? riding.filter((entry) => entry.carried).length;
+  const quote = suggestion.reuse === undefined && model !== undefined && carriedNow !== suggestion.who.filter((entry) => entry.carried).length ? pictureQuote(model, carriedNow, suggestion.aspect) : suggestion.estimatedMicroUsd;
   // Whose look is not the one the prompt was written for (rule 8): their clothing words are marked
   // until Update prompt rewrites them. The prompt was written for what the card was drafted or made
   // with, and since an Update prompt, for what it rewrote it for.
   const lookIdOf = (who: PictureWho): string => who.look?.lookId ?? MAIN_PHOTO_LOOK;
-  const changes = chapter === undefined
+  const changes = chapter === undefined || suggestion.reuse !== undefined
     ? []
     : riding.flatMap((now, index) => {
         const was = suggestion.who[index];
@@ -505,7 +505,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
     if (own[who.key] !== undefined) setPressedOwn((pressing) => ({ ...pressing, [who.key]: null }));
   };
   const menuOf = (who: PictureWho) =>
-    chapter === undefined || who.kind !== "character" || who.sheet === undefined
+    chapter === undefined || suggestion.reuse !== undefined || who.kind !== "character" || who.sheet === undefined
       ? undefined
       : {
           open: menuFor === who.key,
@@ -555,7 +555,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
           )}
           <div className="fy-pcard__fact">
             <span className="fy-mono">Rides</span>
-            <b data-testid="picture-card-rides">{ridesLabel(riding, shot, { labelOf, hasClose })}</b>
+            <b data-testid="picture-card-rides">{suggestion.references !== undefined ? `${suggestion.references.length} reference${suggestion.references.length === 1 ? "" : "s"}` : ridesLabel(riding, shot, { labelOf, hasClose })}</b>
           </div>
           <div className="fy-pcard__fact">
             <span className="fy-mono">Model</span>
@@ -569,7 +569,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
       {mediaActions}
       <div className="fy-pcard__sec" data-testid="picture-card-in-frame">
         <span className="fy-pcard__h">In frame</span>
-        {riding.length === 0 ? (
+        {suggestion.inFrameRecorded === false ? <span className="fy-pcard__none">not recorded</span> : riding.length === 0 ? (
           <span className="fy-pcard__none">{detail ? "no one · a detail" : "no one"}</span>
         ) : (
           riding.map((who) => (

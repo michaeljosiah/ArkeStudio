@@ -6150,10 +6150,10 @@ export function suggestAudiobookPicture(worldId: string, productionId: string, c
 }
 
 /** A suggestion made (R-99): the prompt as the author left it and the price the press showed; made through the Bench and filed on the block. */
-export function makeAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, input: { prompt: string; who: readonly string[]; frame?: string; shot?: PictureShot; looks?: Readonly<Record<string, string>>; confirmedMicroUsd: number }): string | null {
+export function makeAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, input: { prompt: string; who: readonly string[]; reuse?: import("@arke-studio/contracts").PictureReuse; frame?: string; shot?: PictureShot; looks?: Readonly<Record<string, string>>; confirmedMicroUsd: number }): string | null {
   const requestId = ulid();
   // The looks chosen for this picture alone ride with it (design turn 193d, R-146), each in place of the chapter's for that person.
-  if (!send({ kind: "make-audiobook-picture", worldId, productionId, chapterFile, block, prompt: input.prompt, who: [...input.who], ...(input.frame !== undefined ? { frame: input.frame } : {}), ...(input.shot !== undefined ? { shot: input.shot } : {}), ...(input.looks !== undefined ? { looks: { ...input.looks } } : {}), confirmedMicroUsd: input.confirmedMicroUsd, requestId })) return null;
+  if (!send({ kind: "make-audiobook-picture", worldId, productionId, chapterFile, block, prompt: input.prompt, who: [...input.who], ...(input.reuse !== undefined ? { reuse: input.reuse } : {}), ...(input.frame !== undefined ? { frame: input.frame } : {}), ...(input.shot !== undefined ? { shot: input.shot } : {}), ...(input.looks !== undefined ? { looks: { ...input.looks } } : {}), confirmedMicroUsd: input.confirmedMicroUsd, requestId })) return null;
   emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
   return requestId;
 }
@@ -7211,8 +7211,8 @@ export function sendBenchRebuildSubject(worldId: string, sessionId: string): str
     : null;
 }
 
-export function sendBenchNewSession(worldId: string): void {
-  send({ kind: "bench-new-session", worldId });
+export function sendBenchNewSession(worldId: string, picture?: Extract<ClientMessage, { kind: "bench-new-session" }>["picture"]): void {
+  send({ kind: "bench-new-session", worldId, ...(picture !== undefined ? { picture } : {}) });
 }
 
 export function sendBenchClose(worldId: string): void {

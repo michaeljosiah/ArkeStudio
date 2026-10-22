@@ -60,7 +60,7 @@ export function usePictureSuggestion(worldId: string, productionId: string, chap
     },
     generate: (suggestion, words, looks, confirmedMicroUsd) => {
       // The shot goes with it, kept on the picture so the block's card still shows it once made (194g).
-      setMakeId(makeAudiobookPicture(worldId, productionId, chapterFile, blockKey, { prompt: words, who: suggestion.who.map((who) => who.key), ...(suggestion.shot?.frame ? { frame: suggestion.shot.frame } : {}), ...(suggestion.shot !== undefined ? { shot: suggestion.shot } : {}), ...(looks !== undefined ? { looks } : {}), confirmedMicroUsd: confirmedMicroUsd ?? suggestion.estimatedMicroUsd }));
+      setMakeId(makeAudiobookPicture(worldId, productionId, chapterFile, blockKey, { prompt: words, who: suggestion.who.map((who) => who.key), ...(suggestion.reuse !== undefined ? { reuse: suggestion.reuse } : {}), ...(suggestion.shot?.frame ? { frame: suggestion.shot.frame } : {}), ...(suggestion.shot !== undefined ? { shot: suggestion.shot } : {}), ...(looks !== undefined ? { looks } : {}), confirmedMicroUsd: confirmedMicroUsd ?? suggestion.estimatedMicroUsd }));
     },
     dismiss: () => {
       setSuggestId(null);

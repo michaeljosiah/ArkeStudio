@@ -539,6 +539,41 @@ describe("a made picture on its block (turn 194g)", () => {
     ...(shot !== undefined ? { shot } : {}),
   });
 
+  it("retains mixed artifact references and separates unknown in-frame facts from explicit absence (#2143)", async () => {
+    const saved = madeArtifact();
+    const generation = saved.generation as Extract<NonNullable<ArtifactSidecar["generation"]>, { source: "bench" }>;
+    generation.references = [
+      { token: "Image 3", kind: "image", source: { source: "world-file", path: "artifacts/old-picture.png", hash: "sha256:12345678" } },
+      generation.references[0]!,
+    ];
+    generation.brief = "Edit @Image 3, keeping the person in @Image 1.";
+    extraArtifacts = [saved];
+    const { look: _look, ...entry } = made();
+    const m = await mount(2, { "p1.0": entry });
+    assert.equal(text(q(m, '[data-testid="picture-card-rides"]')), "2 references");
+    assert.match(text(q(m, '[data-testid="picture-card-in-frame"]')), /not recorded/);
+    assert.equal(all(m, '[data-testid="suggest-who"]').length, 0, "references do not prove who appears");
+    assert.equal(m.sent.length, 0);
+    await press(q(m, '[data-testid="suggest-edit"]'));
+    assert.deepEqual(asked(m, "bench-new-session")[0]!.picture, { source: { artifactId: saved.id, hash: saved.hash }, prompt: generation.brief });
+    assert.equal(asked(m, "bench-add-reference").length, 0, "the host restores frozen tokens, not client who reconstruction");
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    assert.deepEqual(asked(m, "make-audiobook-picture")[0]!.reuse, { artifactId: saved.id, hash: saved.hash });
+    assert.equal(asked(m, "make-audiobook-picture")[0]!.confirmedMicroUsd, 55_000);
+    assert.deepEqual(madePicture(state().world!, [GPT_IMAGE], entry, null, "p1.0")!.references, generation.references);
+  });
+
+  it("retains explicitly empty shot facts for a standalone Bench picture (#2143)", async () => {
+    const saved = madeArtifact();
+    const generation = saved.generation as Extract<NonNullable<ArtifactSidecar["generation"]>, { source: "bench" }>;
+    generation.references = [{ token: "Image 1", kind: "image", source: { source: "world-file", path: "artifacts/detail.png", hash: "sha256:12345678" } }];
+    extraArtifacts = [saved];
+    const { look: _look, ...entry } = made({ frame: "Detail, the ledger", inFrame: [], notInFrame: [], expressions: {}, details: [], checks: [] });
+    const m = await mount(2, { "p1.0": entry });
+    assert.match(text(q(m, '[data-testid="picture-card-in-frame"]')), /no one.*a detail/);
+    assert.equal(text(q(m, '[data-testid="picture-card-rides"]')), "1 reference");
+  });
+
   for (const source of ["generated", "world"] as const) {
     for (const mode of ["still", "candidate", "chosen", "retained"] as const) {
       it(`keeps ${source} image/facts together before ${mode} motion controls (issue 2127)`, async () => {

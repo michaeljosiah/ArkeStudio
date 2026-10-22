@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { BenchReferenceTokenSchema } from "./bench-reference.js";
+import type { BenchImageParams } from "./bench.js";
+import { ArtifactIdSchema, Sha256Schema } from "./ids.js";
 import { ChapterReferenceCoverageSchema } from "./audiobook-reference-coverage-schema.js";
 import { LOOK_LINE_MAX, LookViewSchema, MAIN_PHOTO_LOOK, PictureLookSchema, type PictureLookPick } from "./audiobook-look.js";
 import { CODEX_IMAGE_PLAN_LABEL, aspectOffered, estimateMicroUsd, imageOutputFor, type ManifestModel } from "./manifest.js";
@@ -172,12 +175,20 @@ function detailSkinLine(detailed: ReadonlyArray<PictureDetailSkin>): string {
 /** The identity line the app writes after every prompt with someone in it (rule 8c, 193k). */
 export const PICTURE_IDENTITY_LINE = "Keep each person's identity, hair and clothes as in the references; the expression is as written above, not the reference's.";
 
+/** A saved Bench picture, resolved authoritatively again before reuse. Not a world record. */
+export const PictureReuseSchema = z.object({ artifactId: ArtifactIdSchema, hash: Sha256Schema }).strict();
+export type PictureReuse = z.infer<typeof PictureReuseSchema>;
+
 /** One block's suggestion (R-99): the prompt, who is in it, the look it used, the model, ratio and price. */
 export const PictureSuggestionSchema = z
   .object({
     block: z.string().min(1).max(40),
     prompt: z.string().min(1).max(PICTURE_PROMPT_MAX),
     who: z.array(PictureWhoSchema).max(24),
+    /** Standalone Bench provenance is not a cast list. Preserve its ordered tokens separately. */
+    reuse: PictureReuseSchema.optional(),
+    references: z.array(BenchReferenceTokenSchema).max(24).optional(),
+    inFrameRecorded: z.boolean().optional(),
     /** The look lines the prompt was written from: the place first, then each person's. */
     lines: z.array(z.object({ label: z.string().min(1), text: z.string().min(1).max(LOOK_LINE_MAX) }).strict()).max(25),
     model: PictureModelSchema,
@@ -202,8 +213,8 @@ export function pictureAspect(model: ManifestModel): string | undefined {
  * figures the Bench plans with. Here rather than in the coordinator so a picture already made can
  * say what Make again costs before anything is asked (design turn 194g's foot).
  */
-export function pictureQuote(model: ManifestModel, referenceImages: number, aspect = pictureAspect(model)): number {
-  const output = imageOutputFor(model, { landscape: true, ...(aspect !== undefined ? { aspect } : {}) });
+export function pictureQuote(model: ManifestModel, referenceImages: number, aspect = pictureAspect(model), tier?: BenchImageParams["tier"]): number {
+  const output = imageOutputFor(model, { landscape: true, ...(aspect !== undefined ? { aspect } : {}), ...(tier !== undefined ? { tier } : {}) });
   return estimateMicroUsd(model, {
     images: 1,
     megapixels: (output.width * output.height) / 1_000_000,

@@ -17,7 +17,7 @@ import { AudiobookScopeSchema } from "./audiobook-listening.js";
 import { AudiobookVideoOptionsSchema } from "./audiobook-video.js";
 import { AudiobookMotionQuoteSchema } from "./audiobook-motion-quote.js";
 import { LOOK_LINE_MAX, LookTargetSchema, PictureOwnLooksSchema } from "./audiobook-look.js";
-import { PICTURE_PROMPT_MAX, PictureShotSchema } from "./audiobook-illustrate.js";
+import { PICTURE_PROMPT_MAX, PictureShotSchema, PictureReuseSchema } from "./audiobook-illustrate.js";
 import { BedInputSchema, BlockSoundInputSchema, BlockTimingInputSchema, ReactionInputSchema } from "./audiobook-timing.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { AudioArrangementEditSchema } from "./audio-arrangement-schema.js";
@@ -3663,6 +3663,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("make-audiobook-picture"),
+      reuse: PictureReuseSchema.optional(),
       worldId: UlidSchema,
       productionId: SlugSchema,
       chapterFile: z.string().min(1),
@@ -4097,7 +4098,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /** Clear-the-bench: a NEW session. The old one keeps running; nothing is cancelled by this. */
-  z.object({ kind: z.literal("bench-new-session"), worldId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("bench-new-session"), worldId: UlidSchema, picture: z.object({ source: PictureReuseSchema, prompt: z.string().min(1).max(PICTURE_PROMPT_MAX) }).strict().optional() }).strict(),
   z.object({ kind: z.literal("bench-close"), worldId: UlidSchema }).strict(),
   z
     .object({
