@@ -11,6 +11,7 @@ import {
   guideSheetPicture,
   MAX_GUIDE_VOICE_MS,
   packageSlug,
+  type AudiobookTake,
   type GuideDocument,
   type GuideProductionChapters,
   type GuideRecord,
@@ -52,8 +53,21 @@ async function liveGuide(store: WorldStore): Promise<{ raw: string | null; recor
   return { raw, record: parsed.data };
 }
 
+/**
+ * One Guide write at a time for each world. The coordinator handles frames concurrently, so two
+ * switches flipped quickly would otherwise both read the same record, and the second's commit would
+ * fail its base hash and be lost (codex on PR 2156): each change reads what the last one wrote.
+ */
+const lanes = new WeakMap<WorldStore, Promise<unknown>>();
+
 /** Replaces one entry's choices, or clears them (R-4, R-8), through the world's own write. */
-export async function setGuideEntry(store: WorldStore, change: SetGuideEntry, source: string): Promise<void> {
+export function setGuideEntry(store: WorldStore, change: SetGuideEntry, source: string): Promise<void> {
+  const run = (lanes.get(store) ?? Promise.resolve()).then(() => writeGuideEntry(store, change, source));
+  lanes.set(store, run.catch(() => {}));
+  return run;
+}
+
+async function writeGuideEntry(store: WorldStore, change: SetGuideEntry, source: string): Promise<void> {
   const { raw, record } = await liveGuide(store);
   const kind = record[change.entryKind] as Record<string, unknown>;
   const next = { ...kind };
@@ -76,11 +90,35 @@ export function guideProductions(store: WorldStore): GuideProductionChapters[] {
 const readWhole = (chapter: ListeningChapter) => chapter.state === "read" && (chapter.blocks.length > 0 || (chapter.audioStudio !== undefined && chapter.mix !== undefined));
 
 /**
- * Each sentence of a block the character's own voice reads (R-6), in a chapter read whole, short
- * enough to be a voice line. A block the narrator reads for them is the narrator's voice, not
- * theirs, so a character with no line of their own read has none. Times come from the take: a
- * sentence starts where the plan places it in its block, and runs to the next one.
+ * A chapter's lines in one character's own voice (R-6): each sentence of a block whose retained
+ * take — the one the chapter plays — records that character as its speaker and was not handed to
+ * the narrator, short enough to be a voice line. The plan says who a block is meant for; only the
+ * take says who read it, and a take kept for its words may be a narrator's stand-in (codex on PR
+ * 2156). A sentence starts where the plan places it in its block and runs to the next one, as an
+ * offset into the take.
+ *
+ * A chapter arranged in Audio Studio offers none: its sentences sit on the arranged clock and its
+ * blocks name a performance's source, so no offset into one file is the passage heard.
  */
+export function chapterVoiceLines(chapter: ListeningChapter, takes: Readonly<Record<string, Pick<AudiobookTake, "artifactId" | "sheet" | "substituted">>>, characterId: string, production: { id: string; title: string; number: number }): GuideVoiceLine[] {
+  if (chapter.audioStudio !== undefined) return [];
+  const lines: GuideVoiceLine[] = [];
+  for (const block of chapter.blocks) {
+    const take = takes[block.key];
+    if (take === undefined || take.sheet !== characterId || take.substituted !== undefined || (block.artifactId !== undefined && block.artifactId !== take.artifactId)) continue;
+    block.sentences.forEach((sentence, index) => {
+      const start = Math.max(0, sentence.at - block.at);
+      const end = (block.sentences[index + 1]?.at ?? block.at + block.seconds) - block.at;
+      const seconds = end - start;
+      const text = sentence.text.trim();
+      if (text === "" || seconds <= 0 || seconds * 1000 > MAX_GUIDE_VOICE_MS) return;
+      lines.push({ production: production.id, productionTitle: production.title, chapter: chapter.chapterId, chapterNumber: production.number, block: block.key, sentence: index, text, file: block.file, start, seconds });
+    });
+  }
+  return lines;
+}
+
+/** A character's lines across the world's productions, in manuscript order (R-6). */
 export async function guideVoiceLines(store: WorldStore, characterId: string, signal?: AbortSignal): Promise<GuideVoiceLine[]> {
   const lines: GuideVoiceLine[] = [];
   for (const production of guideProductions(store)) {
@@ -91,30 +129,9 @@ export async function guideVoiceLines(store: WorldStore, characterId: string, si
     const narrator = await anyNarrator(store, production.id);
     for (const chapter of listening.chapters.filter(readWhole)) {
       const plan = await planAudiobook(store, production.id, chapter.chapterId, { narrator }).catch(() => null);
-      if (plan === null) continue;
-      const theirs = new Set(plan.blocks.filter((planned) => planned.sheet === characterId && planned.substituted === undefined).map((planned) => planned.block.key));
-      for (const block of chapter.blocks) {
-        if (!theirs.has(block.key)) continue;
-        block.sentences.forEach((sentence, index) => {
-          const start = Math.max(0, sentence.at - block.at);
-          const end = (block.sentences[index + 1]?.at ?? block.at + block.seconds) - block.at;
-          const seconds = end - start;
-          const text = sentence.text.trim();
-          if (text === "" || seconds <= 0 || seconds * 1000 > MAX_GUIDE_VOICE_MS) return;
-          lines.push({
-            production: production.id,
-            productionTitle: production.title,
-            chapter: chapter.chapterId,
-            chapterNumber: numbers.get(chapter.chapterId) ?? chapter.order,
-            block: block.key,
-            sentence: index,
-            text,
-            file: block.file,
-            start,
-            seconds,
-          });
-        });
-      }
+      const record = plan === null || plan.record === "unreadable" ? null : plan.record;
+      if (record === null) continue;
+      lines.push(...chapterVoiceLines(chapter, record.takes, characterId, { id: production.id, title: production.title, number: numbers.get(chapter.chapterId) ?? chapter.order }));
     }
   }
   return lines;

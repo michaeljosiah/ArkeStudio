@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { guideCounts, guideDocument, type GuideDocument, type GuideRecord } from "@arke-studio/contracts";
-import { guideProductions, packGuide, setGuideEntry } from "../../src/productions/world-guide.js";
+import { guideCounts, guideDocument, type GuideDocument, type GuideRecord, type ListeningChapter } from "@arke-studio/contracts";
+import { chapterVoiceLines, guideProductions, packGuide, setGuideEntry } from "../../src/productions/world-guide.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
 import { WorldStore } from "../../src/world/store.js";
 import { sha256 } from "../../src/world/text-files.js";
@@ -33,6 +33,23 @@ describe("a world's Guide record (SPEC-059 R-8)", () => {
       // Cleared choices leave the record.
       await setGuideEntry(store, { entryKind: "lore", id: "CANON-001", entry: null }, "editor");
       assert.deepEqual(store.getBundle().guide.lore, {});
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("keeps every change when several arrive at once (codex on PR 2156)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      await Promise.all([
+        setGuideEntry(store, { entryKind: "characters", id: "maren-kest", entry: { public: true } }, "editor"),
+        setGuideEntry(store, { entryKind: "characters", id: "bray-half-hitch", entry: { public: true } }, "editor"),
+        setGuideEntry(store, { entryKind: "lore", id: "CANON-001", entry: { public: true } }, "editor"),
+      ]);
+      const record = store.getBundle().guide;
+      assert.deepEqual(Object.keys(record.characters).sort(), ["bray-half-hitch", "maren-kest"]);
+      assert.equal(record.lore["CANON-001"]?.public, true);
     } finally {
       await store.close();
     }
@@ -113,6 +130,22 @@ describe("a world's Guide record (SPEC-059 R-8)", () => {
     } finally {
       await store.close();
     }
+  });
+
+  it("offers a line only from a take the character read, never the narrator's stand-in or an arranged passage (R-6)", () => {
+    const block = (key: string, at: number) => ({ key, number: 1, file: `artifacts/${key}.wav`, artifactId: `art_${key}`, at, seconds: 6, sentences: [{ at, text: "I hear it." }, { at: at + 2, text: "I always hear it." }] });
+    const chapter: ListeningChapter = { chapterId: "neap", order: 1, title: "Neap", state: "read", seconds: 30, blocks: [block("b1", 0), block("b2", 10), block("b3", 20)], gaps: [], pictures: [], opening: null };
+    const takes = {
+      b1: { artifactId: "art_b1", sheet: "maren-kest" },
+      // Meant for Maren, read by the narrator when her voice was not there.
+      b2: { artifactId: "art_b2", sheet: "maren-kest", substituted: { reason: "no-voice" } as never },
+      b3: { artifactId: "art_b3", sheet: "bray-half-hitch" },
+    };
+    const production = { id: "the-ledger-of-nights", title: "The Ledger of Nights", number: 1 };
+    const lines = chapterVoiceLines(chapter, takes, "maren-kest", production);
+    assert.deepEqual(lines.map((line) => [line.block, line.sentence, line.file, line.start, line.seconds]), [["b1", 0, "artifacts/b1.wav", 0, 2], ["b1", 1, "artifacts/b1.wav", 2, 4]]);
+    // A chapter arranged in Audio Studio sits on another clock, so none of its lines is offered.
+    assert.deepEqual(chapterVoiceLines({ ...chapter, audioStudio: { revision: 1, issues: [], omissions: [] }, mix: { file: "cache/mix.m4a", seconds: 30 } }, takes, "maren-kest", production), []);
   });
 
   it("numbers each production's chapters as the Studio calls them", async () => {
