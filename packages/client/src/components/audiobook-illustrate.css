@@ -26,7 +26,9 @@
 .fy-ills__sum { min-width: 0; font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-ills__short { display: none; }
 .fy-ills__push { flex: 1; }
-.fy-ills__grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px 16px; align-content: start; align-items: start; }
+/* Keep the proposal review scrollable when coverage and large text leave little height. */
+.fy-ills__body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+.fy-ills__grid { flex: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px 16px; align-content: start; align-items: start; }
 .fy-ills__card { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
 .fy-ills__th { position: relative; aspect-ratio: 16 / 9; box-sizing: border-box; padding: 8px 10px; display: flex; align-items: flex-end; overflow: hidden; border: 1px dashed var(--neutral-400); border-radius: 10px; }
 .fy-ills__tm { position: absolute; right: 8px; top: 8px; font-size: var(--text-2xs); color: var(--muted-foreground); }
@@ -50,7 +52,8 @@
 .fy-ills__card--held .fy-ills__th { border-color: var(--warning); }
 .fy-ills__card--off { opacity: 0.5; }
 .fy-ills__foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: none; padding-top: 14px; border-top: 1px solid var(--border); }
-.fy-ills__foot .ui-btn { max-width: 100%; min-width: 0; white-space: normal; }
+.fy-ills__foot .ui-btn { max-width: 100%; min-width: 0; height: auto; white-space: normal; }
+.fy-ills__decisions { display: flex; gap: 8px; min-width: 0; max-width: 100%; margin-inline-start: auto; }
 .fy-ills__read { padding-inline: 0; font: 400 var(--text-2xs) var(--font-mono); color: var(--muted-foreground); }
 @container ills (max-width: 999px) {
   .fy-ills__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -72,6 +75,7 @@
 @media (max-width: 599px) {
   .fy-page-sheet.fy-ills-modal { inset: 12px 0 0; border-radius: 14px 14px 0 0; }
   .fy-ills__sheet { padding: 12px 20px 0; gap: 8px; }
+  .fy-ills__body { gap: 8px; }
   .fy-ills__again, .fy-ills__sum { display: none; }
   .fy-ills__read { flex-basis: 100%; justify-content: flex-start; }
   .fy-ills__short { display: inline; }
@@ -80,7 +84,8 @@
   .fy-ills__th { grid-row: 1 / 3; grid-column: 1; aspect-ratio: auto; width: 104px; height: 58px; align-items: center; justify-content: center; padding: 0; }
   .fy-ills__words, .fy-ills__tm, .fy-ills__frame { display: none; }
   .fy-ills__figs { display: flex; gap: 6px; }
-  .fy-ills__hd { grid-column: 2; grid-row: 1; align-items: center; }
+  .fy-ills__hd { grid-column: 2; grid-row: 1; align-items: center; flex-wrap: wrap; }
+  .fy-ills__t { flex-basis: 7em; }
   .fy-ills__meta { display: block; }
   .fy-ills__card:not(.fy-ills__card--held) .fy-ills__wh { display: none; }
   .fy-ills__wh { grid-column: 2; grid-row: 2; }
@@ -89,12 +94,13 @@
   .fy-ills__foot .ui-btn--primary { flex: 1; }
 }
 /* Reference evidence stays folded above the proposal grid; opening it must not push Accept off-screen. */
-.fy-ills__sheet > .fy-look__chapterdetails { flex: none; margin-top: 0; max-height: min(320px, 35vh); overflow-y: auto; overflow-wrap: anywhere; }
-.fy-ills__sheet > .fy-look__chapterdetails .fy-look__chapterfields { padding-inline: 0; }
+.fy-ills__body > .fy-look__chapterdetails { flex: none; margin-top: 0; max-height: min(320px, 35vh); overflow-y: auto; overflow-wrap: anywhere; }
+.fy-ills__body > .fy-look__chapterdetails .fy-look__chapterfields { padding-inline: 0; }
 .fy-ills__who { min-width: 0; flex-wrap: wrap; overflow-wrap: anywhere; }
 .fy-ills__review-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 @media (max-width: 599px) {
   .fy-ills__review-actions { flex-basis: 100%; }
-  .fy-ills__review-actions .fy-ills__read { flex: 1; }
-  .fy-ills__foot .ui-btn--primary { flex: 1 0 auto; white-space: nowrap; }
+  .fy-ills__review-actions .ui-btn { flex: 1; }
+  .fy-ills__decisions { flex: 1 0 100%; }
+  .fy-ills__decisions .ui-btn--primary { flex: 1; }
 }

@@ -275,45 +275,48 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
             <Button variant="secondary" className="fy-ills__again" disabled={disabled} onClick={onAgain} data-testid="illustration-again">Illustrate again</Button>
             <Button variant="secondary" onClick={onClose} data-testid="illustration-close">Close</Button>
           </header>
-          {proposal.coverage !== undefined && <ReferenceCoverage chapter={proposal.coverage} />}
-          {proposal.refreshed === true && <p className="fy-mono fy-ab__card-line" data-testid="illustration-refreshed">References checked · {proposal.refreshedBlocks?.length ?? 0} picture{proposal.refreshedBlocks?.length === 1 ? "" : "s"} changed · review references and price before accepting</p>}
-          {ended !== undefined && (
-            <p className="fy-mono fy-ab__card-line" data-testid="illustration-ended">
-              {ended.state === "stopped" ? "stopped" : "made"} · {ended.made.length} of {ended.total}
-              {ended.failed.length > 0 ? ` · ${ended.failed.length} held` : ""}
-            </p>
-          )}
-          <div className="fy-ills__grid">
-            {proposal.rows.map((row) => (
-              <Card
-                key={row.block}
-                row={row}
-                estimated={proposal.estimated}
-                words={wordsOf(row.block)}
-                skipped={skipped.has(row.block)}
-                without={run.without.includes(row.block)}
-                reason={reasons.get(row.block)}
-                slug={slug}
-                disabled={disabled}
-                refreshed={proposal.refreshedBlocks?.includes(row.block) === true}
-                onSkip={() => onSkip(row.block)}
-                onWithout={() => onWithout(row.block)}
-                onMakeLook={onMakeLook}
-                onLook={onLook}
-              />
-            ))}
+          <div className="fy-ills__body">
+            {proposal.coverage !== undefined && <ReferenceCoverage chapter={proposal.coverage} />}
+            {proposal.refreshed === true && <p className="fy-mono fy-ab__card-line" data-testid="illustration-refreshed">References checked · {proposal.refreshedBlocks?.length ?? 0} picture{proposal.refreshedBlocks?.length === 1 ? "" : "s"} changed · review references and price before accepting</p>}
+            {ended !== undefined && (
+              <p className="fy-mono fy-ab__card-line" data-testid="illustration-ended">
+                {ended.state === "stopped" ? "stopped" : "made"} · {ended.made.length} of {ended.total}
+                {ended.failed.length > 0 ? ` · ${ended.failed.length} held` : ""}
+              </p>
+            )}
+            <div className="fy-ills__grid">
+              {proposal.rows.map((row) => (
+                <Card
+                  key={row.block}
+                  row={row}
+                  estimated={proposal.estimated}
+                  words={wordsOf(row.block)}
+                  skipped={skipped.has(row.block)}
+                  without={run.without.includes(row.block)}
+                  reason={reasons.get(row.block)}
+                  slug={slug}
+                  disabled={disabled}
+                  refreshed={proposal.refreshedBlocks?.includes(row.block) === true}
+                  onSkip={() => onSkip(row.block)}
+                  onWithout={() => onWithout(row.block)}
+                  onMakeLook={onMakeLook}
+                  onLook={onLook}
+                />
+              ))}
+            </div>
+            {run.reason !== undefined && <p className="fy-mono fy-ch__who-where--warn" data-testid="illustration-refused">{run.reason}</p>}
           </div>
-          {run.reason !== undefined && <p className="fy-mono fy-ch__who-where--warn" data-testid="illustration-refused">{run.reason}</p>}
           <footer className="fy-ills__foot">
             <div className="fy-ills__review-actions">
-            <Button variant="ghost" className="fy-ills__read" onClick={onLook} data-testid="illustration-look">Review chapter looks</Button>
-            {onRefresh !== undefined && <Button variant="secondary" disabled={disabled} onClick={onRefresh} data-testid="illustration-refresh">{run.refreshing ? "Checking…" : "Refresh references"}</Button>}
+              <Button variant="ghost" className="fy-ills__read" onClick={onLook} data-testid="illustration-look">Review chapter looks</Button>
+              {onRefresh !== undefined && <Button variant="secondary" disabled={disabled} onClick={onRefresh} data-testid="illustration-refresh">{run.refreshing ? "Checking…" : "Refresh references"}</Button>}
             </div>
-            <span className="fy-ills__push" />
-            <Button variant="ghost" disabled={run.refreshing} onClick={onDiscard} data-testid="illustration-discard">Discard</Button>
-            <Button variant="primary" disabled={disabled || total.count === 0} onClick={onAccept} data-testid="illustration-accept">
-              Accept · {priceLabel(total.microUsd, proposal.model.plan)}
-            </Button>
+            <div className="fy-ills__decisions">
+              <Button variant="ghost" disabled={run.refreshing} onClick={onDiscard} data-testid="illustration-discard">Discard</Button>
+              <Button variant="primary" disabled={disabled || total.count === 0} onClick={onAccept} data-testid="illustration-accept">
+                Accept · {priceLabel(total.microUsd, proposal.model.plan)}
+              </Button>
+            </div>
           </footer>
         </section>
       </div>
