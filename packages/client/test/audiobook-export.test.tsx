@@ -102,14 +102,65 @@ async function chooseShape(value: string) {
 const lastAsk = <K extends ClientMessage["kind"]>(m: Mounted, kind: K) => m.sent.filter((message): message is Extract<ClientMessage, { kind: K }> => message.kind === kind).at(-1);
 
 describe("Export audiobook (turn 186e)", () => {
+  for (const cover of ["artifacts/captured-cover.png", null]) it(`keeps the ready Publish identity captured ${cover ? "with" : "without"} a cover`, async () => {
+    const state = inkbound(), production = state.world!.productions.find(p => p.meta.id === "inkbound")!;
+    const edition: StoryEdition = { id: "00000000-0000-4000-8000-000000000003", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", createdAt: AT,
+      status: "ready", phase: "Files ready", fingerprint: "a".repeat(64), files: [{ format: "epub", name: "story.epub", bytes: 123, sha256: "b".repeat(64) }, { format: "m4b", name: "story.m4b", bytes: 456, sha256: "c".repeat(64) }],
+      settings: { title: "The captured title", author: cover ? "Saved author" : "", language: "en", label: cover ? "Family copy · October" : "No-cover reading copy", description: "", cover, chapterIds: ["slack-water", "neap"], outputs: ["epub", "m4b"], avoidEmDashes: false } };
+    const original = JSON.stringify(edition);
+    const m = await mount(<MemoryRouter><StoryPublishSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} /></MemoryRouter>);
+    const button = (label: string) => [...dom.document.querySelectorAll("button")].find(button => text(button) === label)!;
+    const answer = async (result: Parameters<typeof __applyEventForTest>[0] & { type: "story.published" }) => { await act(async () => __applyEventForTest(result)); };
+    await press(button("Review chapters")); await press(button("Formatting & style"));
+    let request = lastAsk(m, "publish-story")!;
+    assert.equal(request.input.action, "review");
+    await answer({ at: AT, type: "story.published", worldId: edition.worldId, productionId: edition.productionId, requestId: request.requestId, result: { review: { fingerprint: edition.fingerprint, settings: edition.settings, chapters: [], findings: [], blockers: [], warnings: [] } } });
+    await press(button("Prepare preview")); request = lastAsk(m, "publish-story")!;
+    assert.equal(request.input.action, "preview");
+    await answer({ at: AT, type: "story.published", worldId: edition.worldId, productionId: edition.productionId, requestId: request.requestId, result: { edition: { ...edition, status: "preview", phase: "Preview ready" } } });
+    await press(button("Create edition"));
+    request = m.sent.filter((message): message is Extract<ClientMessage, { kind: "publish-story" }> => message.kind === "publish-story" && message.input.action === "create").at(-1)!;
+    assert.ok(request);
+    await answer({ at: AT, type: "story.published", worldId: edition.worldId, productionId: edition.productionId, requestId: request.requestId, result: { edition } });
+    const identity = () => q(m, '[aria-label="Captured edition"]')!;
+    assert.match(text(identity()), /The captured title/);
+    assert.match(text(identity()), new RegExp(edition.settings.label));
+    assert.match(text(identity()), /2 chapters · en/);
+    assert.doesNotMatch(text(identity()), /No author set/);
+    const image = identity().querySelector("img");
+    if (cover) assert.match(image!.getAttribute("src")!, /story-preview-media\/00000000-0000-4000-8000-000000000003\/cover/);
+    else assert.equal(image, null);
+    assert.equal(dom.document.querySelector("iframe"), null, "ready Files waits for the explicit saved-book Preview action");
+    const afterReady = m.sent.length;
+    const changed = { ...production, meta: { ...production.meta, title: "Working title changed" } };
+    await act(async () => {
+      __setStateForTest({ ...state, world: { ...state.world!, keyArt: "artifacts/later-world-cover.png" } }, { connection: "open" });
+      m.root.render(<MemoryRouter><StoryPublishSheet worldId={FIXTURE_WORLD_ID} production={changed} onClose={() => {}} /></MemoryRouter>);
+    });
+    assert.doesNotMatch(text(identity()), /Working title changed|later-world-cover/);
+    assert.equal(identity().querySelector("img")?.getAttribute("src"), image?.getAttribute("src"));
+    assert.equal(m.sent.length, afterReady, "mutable world identity does not prepare another edition");
+    const downloads = [...identity().querySelectorAll("a[download]")];
+    assert.deepEqual(downloads.map(link => link.getAttribute("download")), ["The captured title.epub", "The captured title.m4b"]);
+    assert.ok(downloads.every(link => link.getAttribute("href")?.includes(`/story-edition-media/${edition.id}/story.`)));
+    await press(button("Read on Kindle")); assert.match(text(identity()), /Open Send to Kindle/);
+    await press(button("Listen on your phone")); assert.match(text(identity()), /Import it into an audiobook app/);
+    await press(button("Preview EPUB"));
+    assert.deepEqual(lastAsk(m, "publish-story")!.input, { action: "preview-page", editionId: edition.id, chapter: 0 });
+    await press(button("Done"));
+    assert.equal(JSON.stringify(edition), original, "viewing identity and file actions preserve the captured edition and file inventory");
+  });
   it("opens a ready illustrated edition and navigates captured pages without a source world or write request", async () => {
     const edition: StoryEdition = { id: "00000000-0000-4000-8000-000000000001", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", createdAt: AT,
       status: "ready", phase: "Files ready", fingerprint: "a".repeat(64), files: [{ format: "epub", name: "story.epub", bytes: 123, sha256: "b".repeat(64) }],
-      settings: { title: "Inkbound", author: "", language: "en", label: "Saved illustrated edition", description: "", cover: null, chapterIds: ["slack-water", "neap"], outputs: ["epub"], avoidEmDashes: false, includeIllustrations: true } };
+      settings: { title: "Inkbound", author: "", language: "en", label: "Saved illustrated edition", description: "", cover: "world-art.png", chapterIds: ["slack-water", "neap"], outputs: ["epub"], avoidEmDashes: false, includeIllustrations: true } };
     const m = await mount(<MemoryRouter><StoryEditionLibrary /></MemoryRouter>);
     await act(async () => __setStateForTest({ ...inkbound(), world: null }, { connection: "open" }));
     const list = lastAsk(m, "list-story-publications")!;
     await act(async () => __applyEventForTest({ at: AT, type: "story.editions", requestId: list.requestId, editions: [edition] }));
+    const identity = q(m, '[aria-label="Captured edition"]')!;
+    assert.match(text(identity), /Saved illustrated edition/);
+    assert.match(identity.querySelector("img")!.getAttribute("src")!, /story-preview-media\/00000000-0000-4000-8000-000000000001\/cover/, "reopening uses captured cover delivery without the source world");
     const button = (label: string) => [...dom.document.querySelectorAll("button")].find(button => text(button) === label)!;
     await press(button("Preview EPUB"));
     const first = lastAsk(m, "publish-story")!;
