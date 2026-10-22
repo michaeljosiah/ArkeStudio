@@ -6658,6 +6658,9 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ab__blocks > * { flex: none; }
 .fy-ab__block { --ab-measure: 780px; position: relative; display: grid; grid-template-columns: 120px minmax(0, var(--ab-measure)) minmax(16px, 1fr) auto; column-gap: 14px; align-items: start; margin: 2px 0; padding: 7px 0 7px 12px; border-bottom: 1px solid var(--border); cursor: pointer; box-sizing: border-box; container-type: inline-size; }
 .fy-ab__block::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 3px; border-radius: 2px; background: var(--border); }
+/* Quiet rows still have a keyboard opener. Pointer input stays on selectable prose and sibling controls. */
+.fy-ab__open { position: absolute; inset: 0; padding: 0; border: 0; background: transparent; pointer-events: none; }
+.fy-ab__open:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; box-shadow: none; }
 /* Containment makes each block its own stacking context: one with a menu open stands over the rest. */
 .fy-ab__block:has(.fy-ab__menu) { z-index: 7; }
 /* Who speaks (SPEC-047 R-33): a colour a speaker, grey for the narrator, a dashed dot for a name

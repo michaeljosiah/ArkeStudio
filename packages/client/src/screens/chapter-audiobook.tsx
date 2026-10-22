@@ -1742,8 +1742,8 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
             onClick={(event) => {
               onSelectionChange?.(audiobookSelection(rows) ?? pressedSelection.current);
               pressedSelection.current = null;
-              // The existing picture chip is also the keyboard opener and the return target.
-              event.currentTarget.querySelector<HTMLElement>(".fy-ab__picchip")?.focus({ preventScroll: true });
+              // Use the row's native opener for pointer and keyboard return, with or without art.
+              event.currentTarget.querySelector<HTMLElement>(".fy-ab__picchip, .fy-ab__open")?.focus({ preventScroll: true });
               onSelect(row.block.key);
             }}
           >
@@ -1869,6 +1869,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
                 </button>
               )}
             </span>
+            {(picture === undefined || slug === undefined) && <button type="button" className="fy-ab__open" aria-label={`Open block ${rows.indexOf(row) + 1}`} />}
             {joinAbove.has(row.block.key) && seamPress(joinAbove.get(row.block.key)!, row)}
           </div>
           {split !== null && (
