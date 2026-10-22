@@ -276,6 +276,7 @@
   .is-desktop [data-screen="bench"] .fy-titlebar__side--right { max-width: calc(50% - 186px); }
   [data-screen="bench"] .fy-titlebar__side--right > button { flex: none; white-space: nowrap; }
   [data-screen="bench"] .fy-bench__pill { min-width: 0; }
+  .fy-bench__sessionmenu { width: max(240px, 100%); }
 }
 @media (max-width: 899px) {
   /* The subject and spend pills cannot fit beside a centred wordmark here: on the desktop
