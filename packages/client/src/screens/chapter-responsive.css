@@ -612,7 +612,12 @@
   [data-screen="chapter"][data-view="audiobook"] { --ab-gutter: 24px; }
   [data-screen="chapter"][data-view="audiobook"] .fy-sw__centre { padding: 0 var(--ab-gutter); }
   [data-screen="chapter"][data-view="audiobook"] :is(.fy-sw__head, .fy-ch__body) { max-width: none; }
-  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline { position: relative; flex-wrap: wrap; align-items: center; gap: 0 6px; margin: 0 calc(-1 * var(--ab-gutter)); padding: 10px var(--ab-gutter); border-bottom: 1px solid var(--border); font: var(--type-ui); }
+  /* Approved journey B: one existing action band follows the reader inside this scrollport.
+     The header has no box here so it cannot end the sticky range at the first block. */
+  [data-screen="chapter"][data-view="audiobook"] .fy-sw__head { display: contents; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-sw__head > button { align-self: flex-start; }
+  [data-screen="chapter"][data-view="audiobook"] :is(.fy-ab__block, .fy-ab__block button, .fy-ab__block [tabindex]) { scroll-margin-top: var(--chapter-action-space, 0px); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline { position: sticky; top: var(--chapter-action-top, 0px); z-index: 7; background: var(--background); flex-wrap: wrap; align-items: center; gap: 0 6px; margin: 0 calc(-1 * var(--ab-gutter)); padding: 10px var(--ab-gutter); border-bottom: 1px solid var(--border); font: var(--type-ui); }
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__compact-actions { display: none; }
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewrow { align-self: center; margin-bottom: 8px; padding: 0; border: 1px solid var(--border); border-radius: 9px; background: transparent; overflow: hidden; flex: none; }
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewrow .fy-seg__item { height: 30px; min-height: 0; min-width: 0; padding: 0 13px; border-radius: 0; box-shadow: none; font: var(--type-label); color: var(--muted-foreground); }
@@ -727,3 +732,6 @@
 }
 
 .fy-chapter-read-recovery, .fy-chapter-read-recovery * { box-sizing: border-box; }
+
+/* A dismissed narrow inspector stays dismissed if the chapter widens. */
+.fy-ch__block-side[hidden] { display: none; }

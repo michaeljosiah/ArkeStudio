@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { chapterLooksOf, estimateCharacterImageMicroUsd, mainPhotoFor, priceLabel, type Take } from "@arke-studio/contracts";
 import { resolveModel, worldModel } from "./dispatch-bar.js";
-import { PageSheet } from "./page-sheet.js";
+import { ChapterLookSheet } from "./chapter-look-sheet.js";
 import { SavedLookCollection } from "./saved-look-collection.js";
 import { mediaUrl } from "../lib/media.js";
 import { acceptChapterLook, chooseAudiobookLook, makeChapterLook, useStore } from "../lib/store.js";
@@ -142,7 +142,7 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
   );
   return (
     <>
-    <PageSheet preserveReturnFocus open={open} onClose={onClose} title={`New look · ${who.name}`} subtitle={`For Chapter ${chapterOrder}`} className="fy-newlook" footer={footer}>
+    <ChapterLookSheet preserveReturnFocus open={open} onClose={onClose} title={`New look · ${who.name}`} subtitle={`For Chapter ${chapterOrder}`} className="fy-newlook" footer={footer}>
       <div className="fy-newlook__body" data-testid="new-look-sheet">
         <div className="fy-newlook__top">
           <div className="fy-newlook__photo" data-testid="new-look-photo" hidden>
@@ -213,7 +213,7 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
         <details className="fy-newlook__looks" data-testid="new-look-looks"><summary>Saved looks · {looks.length}</summary><Button variant="ghost" onClick={() => setBrowsing(true)} data-testid="new-look-browse">Browse saved looks</Button></details>
         <p className="fy-newlook__price fy-mono" data-testid="new-look-price">{LOOK_CANDIDATES} candidates{closeOn && plan ? " + close view" : ""} · {plan ? "Included in your plan" : manyCost}{closeOn && !plan ? ` · close view ${closeCost}` : ""}</p>
       </div>
-    </PageSheet>
+    </ChapterLookSheet>
     {open && browsing && <SavedLookCollection worldId={worldId} productionId={productionId} sheetId={who.sheet} name={who.name} chapterOrder={chapterOrder} currentId={null} fromNewLook onClose={() => setBrowsing(false)} onChoose={(id) => { if (id !== null && chooseAudiobookLook(worldId, productionId, chapterFile, who, id) !== null) { setBrowsing(false); onClose(); } }} />}
     </>
   );

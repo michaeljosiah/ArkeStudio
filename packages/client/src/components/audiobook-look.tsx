@@ -17,7 +17,7 @@ import {
   type ReferenceKit,
 } from "@arke-studio/contracts";
 import { resolveModel, worldModel } from "./dispatch-bar.js";
-import { PageSheet } from "./page-sheet.js";
+import { ChapterLookSheet } from "./chapter-look-sheet.js";
 import { SavedLookCollection, SavedLookImage } from "./saved-look-collection.js";
 import { BookReferenceCoverage } from "./reference-coverage.js";
 import { NewLookSheet } from "./audiobook-new-look.js";
@@ -542,7 +542,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
   const footer = <><span className="fy-look__footcount">{chosenCount} chosen look{chosenCount === 1 ? "" : "s"} · {count} character{count === 1 ? "" : "s"}</span><span className="fy-ch__panelpush" /><Button variant="primary" onClick={onClose} data-testid="look-done">Done</Button></>;
   return (
     <>
-      <PageSheet preserveReturnFocus open={open} onClose={onClose} title="Looks" subtitle={`Chapter ${chapterOrder}${chapter?.title ? ` · ${chapter.title}` : ""}`} className="fy-look" footer={footer}>
+      <ChapterLookSheet preserveReturnFocus open={open} onClose={onClose} title="Looks" subtitle={`Chapter ${chapterOrder}${chapter?.title ? ` · ${chapter.title}` : ""}`} className="fy-look" footer={footer}>
         <div className="fy-look__body" data-testid="look-sheet">
           {rows.length === 0 && adding.length === 0 && (
             <p className="fy-mono fy-look__none" data-testid="look-none">
@@ -576,7 +576,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
           </details>
 
         </div>
-      </PageSheet>
+      </ChapterLookSheet>
       {browsing !== null && (() => {
         const row = rows.find((entry) => entry.id === browsing);
         return row?.sheet === undefined ? null : <SavedLookCollection worldId={worldId} productionId={productionId} sheetId={row.sheet} name={row.label ?? row.id} chapterOrder={chapterOrder} currentId={row.line?.lookId ?? null} sourceOrder={row.line?.from === undefined ? null : orderOf(row.line.from)} onClose={() => setBrowsing(null)} onChoose={(id) => { choose(row, id); setBrowsing(null); }} onNewLook={() => { setBrowsing(null); setMaking({ key: row.id, name: row.label ?? row.id, sheet: row.sheet!, line: row.text }); }} />;

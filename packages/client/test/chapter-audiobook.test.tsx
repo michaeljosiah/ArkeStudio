@@ -38,7 +38,7 @@ import { FIXTURE_STATE } from "./fixture-state.js";
  */
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
-Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1024, innerHeight: 768 });
+Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr", getPropertyValue: () => "" }), innerWidth: 1024, innerHeight: 768 });
 Object.assign(dom.HTMLElement.prototype, { focus() {}, scrollIntoView() {}, showModal(this: HTMLElement) { this.setAttribute("open", ""); }, close(this: HTMLElement) { this.removeAttribute("open"); } });
 Object.assign(Object.getPrototypeOf(dom.document.createElement("video")), {
   pause() {},
@@ -1432,7 +1432,7 @@ describe("the director reads the book (design turn 184)", () => {
     assert.doesNotMatch(q(m, '[data-block="p1.0"]')?.textContent ?? "", /Maren Kest/, "discarded, the blocks are the record's again");
   });
 
-  it("the note fields hold while the book or another chapter is being read, and Direct puts a pressed block down (codex on PR 1479)", async () => {
+  it("the note fields hold while another chapter is read, and Direct retains the selected passage behind its modal", async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m);
     await act(async () => all(m, ".fy-ab__block")[1]!.click());
@@ -1440,7 +1440,8 @@ describe("the director reads the book (design turn 184)", () => {
     const item = (await menuItem(m, "direct-audiobook"))!;
     await act(async () => item.click());
     assert.ok(q(m, '[data-testid="direct-sheet"]'), "the sheet takes the panel");
-    assert.equal(q(m, '[data-testid="audiobook-block"]'), null, "the block pressed before is put down");
+    assert.ok(q(m, '[data-testid="audiobook-block"]'), "the selected passage remains behind Direct");
+    await act(async () => dom.document.querySelector("dialog[open]")!.dispatchEvent(new Event("cancel", { cancelable: true })));
     await act(async () => q(m, '[data-testid="reading-notes-press"]')!.click());
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "slack-water", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H2", toMake: 3, blocks: 3 }));
     const inputs = [...q(m, '[data-testid="reading-notes"]')!.querySelectorAll("input, textarea")] as HTMLInputElement[];
@@ -2354,7 +2355,9 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
       assert.equal(sheet.getAttribute("aria-label"), titles[0]!.textContent, "the dialog still named for the block");
       assert.equal(sheet.hasAttribute("aria-labelledby"), false);
       await act(async () => (sheet.querySelector('button[aria-label="Close"]') as HTMLElement).click());
-      assert.equal(sheet.querySelector('[data-testid="audiobook-block-panel"]') === null, true, "the one close puts the block down");
+      assert.equal(sheet.hasAttribute("open"), false, "the one close hides the inspector");
+      assert.equal(sheet.querySelector(".fy-ch__block-side")?.hasAttribute("hidden"), true);
+      assert.ok(q(m, '[data-block="p0.0"]')!.classList.contains("fy-ab__block--selected"), "the passage stays selected");
     });
   }
 
@@ -2833,4 +2836,42 @@ it("chapter export recovery quotes only its missing blocks and names the return 
   assert.equal(q(m, '[data-testid="read-sheet"]'), null);
   assert.ok(q(m, '[data-testid="audiobook-export"]'));
   assert.equal(m.sent.filter(message => message.kind === "read-audiobook-chapter").length, 1, "returning from the quote never confirms it");
+});
+
+
+describe("retained chapter passage (issues 1688 and 1692)", () => {
+  for (const width of [390, 1440]) it(`closing the inspector at ${width} preserves only a narrow passage selection`, async () => {
+    const prior = dom.window.matchMedia;
+    dom.window.matchMedia = ((query: string) => ({ matches: query.includes("max-width") && width <= Number(query.match(/(\d+)px/)?.[1] ?? 0) })) as typeof dom.window.matchMedia;
+    try {
+      const m = await mount(voiced(inkbound()));
+      await answerOpen(m);
+      const row = q(m, '[data-block="p0.0"]')!;
+      await act(async () => row.click());
+      await act(async () => all(m, '[role="tab"]')[2]!.click());
+      assert.ok(q(m, '[data-testid="block-timing"]'));
+      await act(async () => q(m, '.fy-abp__x')!.click());
+      assert.equal(row.classList.contains("fy-ab__block--selected"), width < 1100);
+      assert.equal(dom.document.querySelector("dialog.fy-chapter-block-sheet[open]"), null);
+      await act(async () => row.click());
+      assert.equal(all(m, '[role="tab"]')[2]!.getAttribute("aria-selected"), "true", "reopening keeps the chosen panel tab");
+      if (width < 1100) assert.ok(dom.document.querySelector("dialog.fy-chapter-block-sheet[open]"));
+      await act(async () => q(m, '[data-block="p1.0"]')!.click());
+      assert.ok(q(m, '[data-block="p1.0"]')!.classList.contains("fy-ab__block--selected"), "a different passage opens normally");
+    } finally { dom.window.matchMedia = prior; }
+  });
+  it("opening Direct and cancelling keeps the selected passage", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    const row = q(m, '[data-block="p0.0"]')!;
+    await act(async () => row.click());
+    const directItem = (await menuItem(m, "direct-audiobook"))!;
+    await act(async () => directItem.click());
+    assert.ok(row.classList.contains("fy-ab__block--selected"));
+    const direct = dom.document.querySelector('dialog[open]')!;
+    assert.ok(direct);
+    await act(async () => direct.dispatchEvent(new Event("cancel", { cancelable: true })));
+    assert.ok(row.classList.contains("fy-ab__block--selected"));
+    assert.equal(m.sent.filter(message => message.kind === "direct-chapter").length, 0, "opening the editor never runs direction");
+  });
 });

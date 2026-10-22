@@ -1307,10 +1307,38 @@ export function ChapterWorkspace({
       filled?.disconnect();
     };
   }, [compact, view, narrowToolbar]);
+  useLayoutEffect(() => {
+    const centre = chapterCentre.current, line = viewLine.current;
+    if (!compact || view !== "audiobook" || !centre || !line) return;
+    const back = centre.querySelector<HTMLElement>(".fy-scene-back");
+    const scroller = centre.closest<HTMLElement>('[data-screen="chapter"]') ?? centre;
+    const measure = () => {
+      const top = back?.getBoundingClientRect().height ?? 0;
+      scroller.style.setProperty("--chapter-action-top", top + "px");
+      scroller.style.setProperty("--chapter-action-space", top + line.getBoundingClientRect().height + "px");
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(line); if (back) observer?.observe(back);
+    return () => { observer?.disconnect(); scroller.style.removeProperty("--chapter-action-top"); scroller.style.removeProperty("--chapter-action-space"); };
+  }, [compact, view, phone]);
   // Illustrate this chapter (design turn 191b): the proposal this window holds, dashed on the blocks and listed in the dock's card.
   const illustration = useIllustration(worldId, prodId, chapter);
   const illustrationSheet = useIllustrationSheet(illustration.run);
   const [illustrationLookOpen, setIllustrationLookOpen] = useState(false);
+  const chapterLookOpener = useRef<HTMLElement | null>(null);
+  const focusChapterAction = (opener: HTMLElement | null) => requestAnimationFrame(() => {
+    // A nested return belongs to the still-open parent, never to its inert chapter underneath.
+    if (document.activeElement?.closest("dialog[open]")) return;
+    const current = opener?.isConnected ? opener : viewLine.current?.querySelector<HTMLElement>('[data-testid="direct-illustrate"]');
+    current?.focus({ preventScroll: true });
+  });
+  const openChapterLooks = () => {
+    chapterLookOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setIllustrationLookOpen(true);
+  };
+  const closeChapterLooks = () => { setIllustrationLookOpen(false); focusChapterAction(chapterLookOpener.current); };
+  const closeChapterDirect = () => { audiobook.closeDirect(); focusChapterAction(null); };
   const [chapterExportOpen, setChapterExportOpen] = useState(false);
   const chapterExportOpener = useRef<HTMLElement | null>(null);
   const openChapterExport = () => {
@@ -1323,11 +1351,7 @@ export function ChapterWorkspace({
     setChapterExportOpen(false);
     // A menu item or the toolbar that opened it can be replaced as takes arrive under the sheet.
     // Resolve the current chapter action when that original control is gone.
-    requestAnimationFrame(() => {
-      const opener = chapterExportOpener.current;
-      const current = opener?.isConnected ? opener : viewLine.current?.querySelector<HTMLElement>('[data-testid="direct-illustrate"]');
-      current?.focus({ preventScroll: true });
-    });
+    focusChapterAction(chapterExportOpener.current);
   };
   useEffect(() => setChapterExportOpen(false), [chapter.id]);
   // Make a look from a held row of the proposal (design turn 193h, rule 17): the same sheet the Looks opens, for that character.
@@ -1367,7 +1391,7 @@ export function ChapterWorkspace({
           ? { running: { line: `making pictures · ${illustration.run.progress.made.length} of ${illustration.run.progress.total}`, stop: illustration.stop } }
           : {}),
     },
-    looks: { open: () => setIllustrationLookOpen(true), state: lookState(audiobookRecord.record) },
+    looks: { open: openChapterLooks, state: lookState(audiobookRecord.record) },
     export: openChapterExport,
     // Cast the edited paragraphs or the chapter from the view (design turn 198), as the rail does.
     casting: { press: castLinesPress, busy: castingNow },
@@ -1412,8 +1436,14 @@ export function ChapterWorkspace({
   const [narratorOpen, setNarratorOpen] = useState(false);
   const audiobookColumn = useRef<HTMLDivElement | null>(null);
   const blockOpener = useRef<HTMLElement | null>(null);
+  // Closing the responsive inspector puts it away, not the passage (approved journey A).
+  // The key keeps a hidden inspector hidden across resize, while selecting another opens it.
+  const [hiddenBlock, setHiddenBlock] = useState<string | null>(null);
+  useEffect(() => setHiddenBlock(null), [chapter.id]);
+  const selectBlock = (key: string) => { setHiddenBlock(null); audiobook.setSelected(key); };
   const closeBlock = () => {
-    audiobook.setSelected(null);
+    if (blockSheet) setHiddenBlock(audiobook.selected);
+    else audiobook.setSelected(null);
     // The modal sheet restores its own opener; the inline panel has no modal focus lifecycle.
     if (!blockSheet && blockOpener.current?.isConnected) blockOpener.current.focus({ preventScroll: true });
   };
@@ -2552,7 +2582,7 @@ export function ChapterWorkspace({
                 {/* The chapter's Looks from the rail too (design turn 193, rule 18), so Manuscript reaches them;
                     once the chapter is cast, since an uncast panel is its heading and its press alone (turn 192). */}
                 {voicesRecord !== null && (
-                  <button type="button" className="fy-ch__derive" disabled={connection !== "open"} onClick={() => setIllustrationLookOpen(true)} data-testid="voices-looks">
+                  <button type="button" className="fy-ch__derive" disabled={connection !== "open"} onClick={openChapterLooks} data-testid="voices-looks">
                     Looks
                   </button>
                 )}
@@ -3341,7 +3371,7 @@ export function ChapterWorkspace({
       voiceCard={voiceCard}
       steps={<ProgressSteps steps={progressSteps} />}
       pictures={pictureFiles.map(([, picture]) => mediaUrl(worldSlug, picture.file))}
-      onPicture={(index) => { const key = pictureFiles[index]?.[0]; chooseView("audiobook"); if (key !== undefined) audiobook.setSelected(key); }}
+      onPicture={(index) => { const key = pictureFiles[index]?.[0]; chooseView("audiobook"); if (key !== undefined) selectBlock(key); }}
       illustrate={<Button variant="ghost" onClick={() => chooseView("audiobook")}>Illustrate</Button>}
       continuity={continuitySection}
       versions={<>
@@ -3574,7 +3604,7 @@ export function ChapterWorkspace({
                   onSelectionChange={setBlockSelection}
                   onSelect={(key) => {
                     blockOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-                    audiobook.setSelected(key);
+                    selectBlock(key);
                   }}
                   slug={worldSlug}
                   pictures={chapterPictures}
@@ -3974,7 +4004,7 @@ export function ChapterWorkspace({
           )}
           {/* The Direct sheet (design turn 184a): what the director reads, before it runs. */}
           {view === "audiobook" && audiobook.directOpen && (
-            <PageSheet open title="Direct this chapter" onClose={audiobook.closeDirect} className="fy-chapter-review-sheet">
+            <PageSheet open title="Direct this chapter" onClose={closeChapterDirect} className="fy-chapter-review-sheet">
               <aside className="fy-ch__side fy-ch__block-side">
                 <DirectSheet
                   worldId={worldId}
@@ -3984,7 +4014,7 @@ export function ChapterWorkspace({
                   blocks={audiobook.rows.length}
                   reading={production.audiobook?.reading ?? "narrator"}
                   chapterNote={production.audiobook?.chapterNotes?.[chapter.id] !== undefined}
-                  onCancel={audiobook.closeDirect}
+                  onCancel={closeChapterDirect}
                   // The proposal comes back as the dock's card, Accept and Discard on it (turn 184b):
                   // with the dock put away by default here (194), Direct opens it to show the run.
                   onDirect={(also) => {
@@ -3996,13 +4026,13 @@ export function ChapterWorkspace({
             </PageSheet>
           )}
           {/* The chapter's Looks (design turn 193a): from the Audiobook head and from the rail's Voices in any view (rule 18). */}
-          <LookSheet open={illustrationLookOpen} onClose={() => setIllustrationLookOpen(false)} worldId={worldId} productionId={prodId} chapterFile={chapter.file} chapterOrder={chapter.order} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} blockKeys={audiobook.rows.map((row) => row.block.key)} />
+          <LookSheet open={illustrationLookOpen} onClose={closeChapterLooks} worldId={worldId} productionId={prodId} chapterFile={chapter.file} chapterOrder={chapter.order} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} blockKeys={audiobook.rows.map((row) => row.block.key)} />
           {view === "audiobook" && lookToMake !== null && <NewLookSheet open onClose={() => setLookToMake(null)} worldId={worldId} productionId={prodId} chapterFile={chapter.file} chapterOrder={chapter.order} who={{ key: lookToMake.key, name: lookToMake.name, sheet: lookToMake.sheet }} line={lookToMake.line} />}
           {/* The block's panel (design turn 194, rules 11 and 12): its head, then Picture, Voice and Timing as tabs.
               Raised as a sheet, the panel's head is the sheet's (194h): one title, one close. */}
           {view === "audiobook" && (
-            <ResponsiveSheet sheet={blockSheet} open={audiobook.selected !== null} title={panelHead?.title ?? "Block"} onClose={closeBlock} className="fy-chapter-block-sheet" headless={panelHead !== null} preserveReturnFocus>
-              <aside className="fy-ch__side fy-ch__block-side">
+            <ResponsiveSheet sheet={blockSheet} open={audiobook.selected !== null && hiddenBlock !== audiobook.selected} title={panelHead?.title ?? "Block"} onClose={closeBlock} className="fy-chapter-block-sheet" headless={panelHead !== null} preserveReturnFocus>
+              <aside className="fy-ch__side fy-ch__block-side" hidden={hiddenBlock !== null && hiddenBlock === audiobook.selected}>
                 {pictureRow !== null && panelHead !== null && (
                   <BlockPanel
                     acts={seamActs.bar}
@@ -4122,7 +4152,7 @@ export function ChapterWorkspace({
           onMakeLook={(who) => {
             if (who.sheet === undefined) {
               if (who.kind === "place") void navigate(`/w/${worldId}/locations`);
-              else setIllustrationLookOpen(true);
+              else openChapterLooks();
               return;
             }
             // A character with a main photo has a look made here, over the proposal; a place, or a

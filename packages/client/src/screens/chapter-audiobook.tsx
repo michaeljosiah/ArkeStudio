@@ -840,7 +840,6 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const resume = useCallback(
     (intent: AudiobookIntent) => {
       if (intent.kind === "open-direct") {
-        setSelected(null);
         setDirectOpen(true);
         return;
       }
@@ -888,8 +887,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const directPress = useCallback(() => {
     if (locked || connection !== "open" || directionRun?.state === "directing" || directionRun?.state === "accepting") return;
     // The sheet reads the saved words (codex on PR 1479): unsaved typing is saved first, and the
-    // sheet opens once it lands, so Reads describes the chapter Direct will send. It takes the
-    // block panel's place, so a block pressed before is put down.
+    // sheet opens once it lands, so Reads describes the chapter Direct will send. The modal
+    // covers the retained passage and inspector without clearing their local selection.
     const intent: AudiobookIntent = { kind: "open-direct" };
     if (input.beforeRead !== undefined && !input.beforeRead(intent)) return;
     resume(intent);
