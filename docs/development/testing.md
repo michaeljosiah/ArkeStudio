@@ -97,6 +97,10 @@ Electron viewport below its minimum. These rendered checks are separate from the
 Story download recovery (#1950, SPEC-016 R-6): contracts `test/story-download.test.ts` covers
 space arithmetic; coordinator `test/world/story-download.test.ts` covers pinned ranges,
 whole-archive verification, cancellation, restart, changed releases, low space and cleanup.
+Multipart cases also cover part-relative ranges, boundary and partial resume, ignored Range,
+per-part corruption/size limits, untrusted descriptors and aggregate progress/space.
+`test/world/story-release-parts.test.ts` verifies the packager's ordered slices reconstruct
+the unchanged ZIP and refuses unsafe sizing or existing output files.
 `test/application/story-install.test.ts` checks the public commands and admission/lifecycle
 boundary; `test/remote-access.test.ts` rejects host-only commands at the gateway. Client
 `test/story-download.test.tsx` and `test/settings-responsive.test.tsx` cover visible recovery
