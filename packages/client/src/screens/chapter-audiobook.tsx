@@ -1739,7 +1739,13 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
             data-block={row.block.key}
             data-speaker={row.speakerKey ?? "narrator"}
             onPointerDown={() => { pressedSelection.current = audiobookSelection(rows); }}
-            onClick={() => { onSelectionChange?.(audiobookSelection(rows) ?? pressedSelection.current); pressedSelection.current = null; onSelect(row.block.key); }}
+            onClick={(event) => {
+              onSelectionChange?.(audiobookSelection(rows) ?? pressedSelection.current);
+              pressedSelection.current = null;
+              // The existing picture chip is also the keyboard opener and the return target.
+              event.currentTarget.querySelector<HTMLElement>(".fy-ab__picchip")?.focus({ preventScroll: true });
+              onSelect(row.block.key);
+            }}
           >
             {/* A beat's head (design turn 201, rule 4): its name, then whose it is, its paragraphs and its length, in the text column. */}
             {row.beat !== undefined && (
@@ -1839,7 +1845,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
                 stale, flagged, waiting, awaiting recording — and nothing on a made block but the play
                 a fine pointer finds on hover. On touch the row's press selects it and its sheet plays. */}
             <span className="fy-ab__marks">
-              {picture !== undefined && slug !== undefined ? <PictureChip slug={slug} picture={picture} /> : proposedPicture !== undefined ? <ProposedChip title={proposedPicture.title} /> : null}
+              {picture !== undefined && slug !== undefined ? <PictureChip slug={slug} picture={picture} label={`Open block ${rows.indexOf(row) + 1}`} /> : proposedPicture !== undefined ? <ProposedChip title={proposedPicture.title} /> : null}
               {/* A block whose shape a seam changed is `not read` (design turn 198, rule 4); one put back
                   and found made again is `made` in green until the author leaves the view (198g). */}
               {row.state !== "made" && (
