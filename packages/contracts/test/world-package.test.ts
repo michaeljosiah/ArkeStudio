@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { listeningPhraseAt, listeningPictureAt, readListening, readWorldManifest, WorldAssetSchema, type ListeningDocumentChapter, type WorldAsset } from "../src/index.js";
+import { guideChapterNumber, listeningPhraseAt, listeningPictureAt, readGuide, readListening, readWorldManifest, WorldAssetSchema, type GuideDocument, type ListeningDocumentChapter, type WorldAsset } from "../src/index.js";
 
 // SPEC-058 R-16: one reader in two languages. These fixtures are Arke Player's own
 // (`packages/arke_world/test/fixtures/listening`, made by its tool/make_listening_fixtures.py) and
@@ -92,7 +92,9 @@ describe("world.json (Player ADR 0005; SPEC-058 R-9, R-15)", () => {
   });
 
   it("refuses what it does not know as made with a newer Arke", () => {
-    assert.equal(verdict({ ...base, schemaVersion: 3 }), "newer-arke");
+    assert.equal(verdict({ ...base, schemaVersion: 4 }), "newer-arke");
+    // A schema 2 reader does not know a guide (SPEC-059 R-9).
+    assert.equal(verdict({ ...base, guide: "listening" }), "newer-arke");
     assert.equal(verdict({ ...base, requires: ["video-v1"] }), "newer-arke");
     assert.equal(verdict({ ...base, shelf: "front" }), "newer-arke");
     assert.equal(verdict({ ...base, productions: [{ ...base.productions[0], rating: "PG" }] }), "newer-arke");
@@ -108,5 +110,47 @@ describe("world.json (Player ADR 0005; SPEC-058 R-9, R-15)", () => {
     assert.equal(verdict({ ...base, assets: { ...base.assets, a01: { ...base.assets.a01, path: "Key-Art.jpg" } } }), "not-a-package");
     assert.equal(verdict({ ...base, assets: { ...base.assets, a01: { ...base.assets.a01, sha256: "A".repeat(64) } } }), "not-a-package");
     assert.equal(verdict("[]"), "not-a-package");
+  });
+});
+
+// SPEC-059 R-16: the guide's cases, Arke Player's own (`packages/arke_world/test/fixtures/guide`, made
+// by its tool/make_guide_fixtures.py), which arke_world runs too.
+describe("the shared guide cases (SPEC-059 R-9 – R-14, R-16)", () => {
+  const guides = join(import.meta.dirname, "fixtures", "world-package", "guide");
+  const readGuideFixture = (name: string) => readFileSync(join(guides, name), "utf8");
+  const guideAssets: Record<string, WorldAsset> = Object.fromEntries(Object.entries(JSON.parse(readGuideFixture("assets.json")) as Record<string, unknown>).map(([id, raw]) => [id, WorldAssetSchema.parse(raw)]));
+  interface GuideCase {
+    file: string;
+    reader?: "manifest";
+    expect: "ok" | "newerArke" | "notAPackage";
+    counts?: { characters: number; places: number; lore: number };
+    after?: Array<{ entry: string; section?: number; number: number | null }>;
+  }
+  const afterOf = (guide: GuideDocument, entryId: string, section: number | undefined) => {
+    const entry = [...guide.characters, ...guide.places, ...guide.lore].find((candidate) => candidate.id === entryId)!;
+    return section === undefined ? entry.after : (entry as { sections: Array<{ after?: GuideDocument["characters"][number]["after"] }> }).sections[section]!.after;
+  };
+
+  for (const entry of (JSON.parse(readGuideFixture("cases.json")) as { cases: GuideCase[] }).cases) {
+    it(entry.file, () => {
+      const result = entry.reader === "manifest" ? readWorldManifest(readGuideFixture(entry.file)) : readGuide(readGuideFixture(entry.file), guideAssets);
+      if (entry.expect === "ok") {
+        if (!result.ok) assert.fail(result.reason);
+        if (!("guide" in result) || typeof result.guide !== "object") return;
+        const guide = result.guide;
+        if (entry.counts !== undefined) assert.deepEqual({ characters: guide.characters.length, places: guide.places.length, lore: guide.lore.length }, entry.counts);
+        for (const probe of entry.after ?? []) assert.equal(guideChapterNumber(guide, afterOf(guide, probe.entry, probe.section)), probe.number, `${probe.entry} ${probe.section ?? ""}`);
+      } else {
+        assert.equal(result.ok, false);
+        if (!result.ok) assert.equal(result.refusal, entry.expect === "newerArke" ? "newer-arke" : "not-a-package", result.reason);
+      }
+    });
+  }
+
+  it("keeps a guide alone's guide and its want of productions", () => {
+    const result = readWorldManifest(readGuideFixture("world-guide-alone.json"));
+    assert.ok(result.ok);
+    assert.equal(result.manifest.guide, "guide");
+    assert.deepEqual(result.manifest.productions, []);
   });
 });

@@ -5,7 +5,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { openPromise, type Entry } from "yauzl";
 import { ZipFile } from "yazl";
-import { listeningAssetIds, readListening, readWorldManifest, WORLD_MANIFEST_FILE, type WorldManifest } from "@arke-studio/contracts";
+import { guideAssetIds, listeningAssetIds, readGuide, readListening, readWorldManifest, WORLD_MANIFEST_FILE, type WorldManifest } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
 
 /**
@@ -54,8 +54,8 @@ export async function writeWorldPackageZip(manifestText: string, files: Readonly
 export type WorldPackageCheck = { ok: true; manifest: WorldManifest; sha256: string; bytes: number } | { ok: false; problems: string[] };
 
 /**
- * Reads a written package back as Arke Player will (SPEC-058 R-5, R-13): world.json and each
- * listening document through the shared readers, nothing in the ZIP the manifest does not name,
+ * Reads a written package back as Arke Player will (SPEC-058 R-5, R-13; SPEC-059 R-14): world.json,
+ * each listening document and the guide through the shared readers, nothing in the ZIP the manifest does not name,
  * nothing compressed, every file at its declared length and digest, and every file used.
  */
 export async function checkWorldPackageZip(file: string, signal?: AbortSignal): Promise<WorldPackageCheck> {
@@ -83,7 +83,13 @@ export async function checkWorldPackageZip(file: string, signal?: AbortSignal): 
       if (name !== WORLD_MANIFEST_FILE && !named.has(name)) problems.push(`${entry.fileName} is not in world.json`);
       if (entry.compressionMethod !== 0) problems.push(`${entry.fileName} is compressed`);
     }
-    const used = new Set<string>(manifest.keyArt !== undefined ? [manifest.keyArt] : []);
+    const used = new Set<string>([manifest.keyArt, manifest.guide].filter((assetId) => assetId !== undefined));
+    const guideEntry = manifest.guide !== undefined ? entries.get(manifest.assets[manifest.guide]!.path.toLowerCase()) : undefined;
+    if (guideEntry !== undefined) {
+      const guide = readGuide((await bytesOf(guideEntry)).toString("utf8"), manifest.assets);
+      if (!guide.ok) problems.push(`guide: ${guide.reason}`);
+      else for (const assetId of guideAssetIds(guide.guide)) used.add(assetId);
+    }
     for (const production of manifest.productions) {
       for (const assetId of [production.picture, production.book, production.narration, production.listening]) if (assetId !== undefined) used.add(assetId);
       if (production.listening === undefined) continue;

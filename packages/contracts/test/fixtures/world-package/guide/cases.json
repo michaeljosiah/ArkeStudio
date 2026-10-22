@@ -1,0 +1,123 @@
+{
+  "note": "SPEC-059 R-16: the guide cases both readers run, Arke Player arke_world (Dart) and ArkeStudio contracts (TypeScript). A guide file is read against assets.json; a \"manifest\" case is a world.json. \"after\" lists the chapter number each entry or section waits for.",
+  "cases": [
+    {
+      "file": "valid.json",
+      "expect": "ok",
+      "counts": {
+        "characters": 3,
+        "places": 1,
+        "lore": 2
+      },
+      "after": [
+        {
+          "entry": "maren-kest",
+          "number": null
+        },
+        {
+          "entry": "maren-kest",
+          "section": 1,
+          "number": 6
+        },
+        {
+          "entry": "the-chorister",
+          "number": 6
+        },
+        {
+          "entry": "the-vigil",
+          "section": 0,
+          "number": null
+        },
+        {
+          "entry": "canon-031",
+          "number": 6
+        }
+      ]
+    },
+    {
+      "file": "metadata.json",
+      "expect": "ok"
+    },
+    {
+      "file": "newer-version.json",
+      "expect": "newerArke"
+    },
+    {
+      "file": "requires.json",
+      "expect": "newerArke"
+    },
+    {
+      "file": "unknown-key.json",
+      "expect": "newerArke"
+    },
+    {
+      "file": "repeat-id.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "repeat-id-across.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "link-to-nothing.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "after-no-chapter.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "after-no-production.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "empty-section.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "missing-asset.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "wrong-media.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "long-voice.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "lore-kind.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "chapters-out-of-order.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-guide-alone.json",
+      "reader": "manifest",
+      "expect": "ok"
+    },
+    {
+      "file": "world-guide-and-book.json",
+      "reader": "manifest",
+      "expect": "ok"
+    },
+    {
+      "file": "world-schema2-guide.json",
+      "reader": "manifest",
+      "expect": "newerArke"
+    },
+    {
+      "file": "world-nothing.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-guide-wrong-media.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    }
+  ]
+}

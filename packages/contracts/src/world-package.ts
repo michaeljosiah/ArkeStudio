@@ -5,7 +5,9 @@ import { PUBLICATION_MANIFEST_FILE, PublicationAssetPathSchema } from "./publica
  * Arke Player's world package (Player ADR 0005; SPEC-058 R-9 – R-16): `world.json` at a ZIP's root,
  * naming the world as published and its productions, each made of files the Player plays, with an
  * inventory of every file. Schema 2 adds a production's listening document: the illustrated
- * narration as data, a file a chapter with its pictures and phrases.
+ * narration as data, a file a chapter with its pictures and phrases. Schema 3 (SPEC-059 R-9, R-10)
+ * adds the world's guide, and lets a package carry the guide alone, so a world can be explored
+ * before it is installed.
  *
  * One reader in two languages (R-16): this one and Arke Player's `arke_world` (Dart) read the same
  * shared fixtures to the same verdicts. Both are strict as SPEC-048 R-17 asks: a key, schema or
@@ -18,7 +20,7 @@ import { PUBLICATION_MANIFEST_FILE, PublicationAssetPathSchema } from "./publica
 
 export const WORLD_MANIFEST_FILE = "world.json";
 export const WORLD_PACKAGE_FORMAT = "arke-world-package";
-export const WORLD_SCHEMA_VERSION = 2;
+export const WORLD_SCHEMA_VERSION = 3;
 export const LISTENING_MEDIA_TYPE = "application/vnd.arke.listening+json";
 export const LISTENING_FORMAT = "arke-listening";
 export const LISTENING_VERSION = 1;
@@ -69,7 +71,7 @@ const ProductionV1Schema = z.object(productionShape).strict();
 const ProductionV2Schema = z.object({ ...productionShape, listening: z.string().optional() }).strict();
 export type WorldProduction = z.infer<typeof ProductionV2Schema>;
 
-const manifestShape = (production: typeof ProductionV1Schema | typeof ProductionV2Schema) => z.object({
+const manifestFields = {
   format: z.literal(WORLD_PACKAGE_FORMAT),
   schemaVersion: z.number().int(),
   id: SlugSchema,
@@ -77,12 +79,15 @@ const manifestShape = (production: typeof ProductionV1Schema | typeof Production
   name: text(200),
   logline: text(400).optional(),
   keyArt: z.string().optional(),
-  productions: z.array(production).min(1).max(64),
   assets: z.record(z.string(), WorldAssetSchema),
   requires: z.array(z.unknown()).max(0).optional(),
   metadata: Ignorable,
   provenance: Ignorable,
-}).strict();
+};
+const ManifestV1Schema = z.object({ ...manifestFields, productions: z.array(ProductionV1Schema).min(1).max(64) }).strict();
+const ManifestV2Schema = z.object({ ...manifestFields, productions: z.array(ProductionV2Schema).min(1).max(64) }).strict();
+// A guide alone carries no production (R-10); that it carries something is checked once read.
+const ManifestV3Schema = z.object({ ...manifestFields, productions: z.array(ProductionV2Schema).max(64), guide: z.string().optional() }).strict();
 
 export interface WorldManifest {
   schemaVersion: number;
@@ -92,6 +97,8 @@ export interface WorldManifest {
   logline?: string;
   keyArt?: string;
   productions: WorldProduction[];
+  /** The guide document's asset id (SPEC-059 R-9). */
+  guide?: string;
   assets: Record<string, WorldAsset>;
 }
 
@@ -125,9 +132,12 @@ export function readWorldManifest(source: string): WorldManifestRead {
   if (!Array.isArray(requires)) return notAPackage("requires is not a list");
   if (requires.length > 0) return newer(`requires ${requires.join(", ")}`);
 
-  const parsed = manifestShape(version >= 2 ? ProductionV2Schema : ProductionV1Schema).safeParse(raw);
+  const parsed = (version >= 3 ? ManifestV3Schema : version === 2 ? ManifestV2Schema : ManifestV1Schema).safeParse(raw);
   if (!parsed.success) return refusedBy(parsed.error, "world.json");
-  const manifest = parsed.data;
+  // Every older manifest is a schema 3 one with less in it.
+  const manifest: z.infer<typeof ManifestV3Schema> = parsed.data;
+  const guide = manifest.guide;
+  if (manifest.productions.length === 0 && guide === undefined) return notAPackage("productions");
 
   const assetIds = Object.keys(manifest.assets);
   if (assetIds.length === 0 || assetIds.length > MAX_WORLD_ASSETS) return notAPackage("assets");
@@ -148,6 +158,7 @@ export function readWorldManifest(source: string): WorldManifestRead {
     return true;
   };
   if (!role(manifest.keyArt, WORLD_PICTURE_MEDIA_TYPES)) return notAPackage("keyArt");
+  if (!role(guide, [GUIDE_MEDIA_TYPE])) return notAPackage("guide");
   const productionIds = new Set<string>();
   for (const production of manifest.productions) {
     if (productionIds.has(production.id)) return notAPackage("production id or title");
@@ -164,9 +175,9 @@ export function readWorldManifest(source: string): WorldManifestRead {
     if (production.narration !== undefined && listening !== undefined) return notAPackage(`production ${production.id} names a narration and a listening document`);
     if (production.book === undefined && production.narration === undefined && listening === undefined) return notAPackage(`production ${production.id} has nothing to play`);
   }
-  // Every file is one the world uses (SPEC-048 R-13). A listening document's files are known only
-  // once it is read, so with one the package check makes this check instead.
-  if (manifest.productions.every((production) => !("listening" in production) || production.listening === undefined)) {
+  // Every file is one the world uses (SPEC-048 R-13). A listening document's or a guide's files are
+  // known only once it is read, so with one the package check makes this check instead.
+  if (guide === undefined && manifest.productions.every((production) => !("listening" in production) || production.listening === undefined)) {
     const unused = assetIds.filter((assetId) => !used.has(assetId));
     if (unused.length > 0) return notAPackage(`unused assets ${unused.join(", ")}`);
   }
@@ -325,4 +336,157 @@ export function listeningPhraseAt(chapter: ListeningDocumentChapter, time: numbe
     if (time < phrase.end) return phrase;
   }
   return null;
+}
+
+// ---- The guide (SPEC-059 R-11 – R-14) -----------------------------------------------------------
+
+export const GUIDE_MEDIA_TYPE = "application/vnd.arke.guide+json";
+export const GUIDE_FORMAT = "arke-guide";
+export const GUIDE_VERSION = 1;
+/** Canon's entry types; the Player files them under Lore, Rules and Timeline, the rest under All. */
+export const GUIDE_LORE_KINDS = ["lore", "rule", "timeline", "location", "faction", "tone", "thread"] as const;
+export const GUIDE_VOICE_MEDIA_TYPES: readonly string[] = ["audio/mp4"];
+/** A line in a character's voice is a sentence, not a scene (R-6). */
+export const MAX_GUIDE_VOICE_MS = 15_000;
+
+const MAX_GUIDE_ENTRIES = 2000;
+const MAX_GUIDE_SECTIONS = 64;
+const MAX_GUIDE_LINKS = 200;
+
+const GuideAfterSchema = z.object({ production: SlugSchema, chapter: SlugSchema, metadata: Ignorable }).strict();
+const after = GuideAfterSchema.nullable().optional();
+const links = z.array(z.string()).max(MAX_GUIDE_LINKS).optional();
+const GuideSectionSchema = z.object({ heading: text(200), text: text(20_000), after, metadata: Ignorable }).strict();
+const sections = z.array(GuideSectionSchema).max(MAX_GUIDE_SECTIONS);
+const GuideVoiceSchema = z.object({
+  audio: z.string(),
+  text: text(2000),
+  duration: z.number().int().min(1).max(MAX_GUIDE_VOICE_MS),
+  production: SlugSchema,
+  chapter: SlugSchema,
+  metadata: Ignorable,
+}).strict();
+const GuideCharacterSchema = z.object({
+  id: SlugSchema,
+  name: text(200),
+  role: text(200).optional(),
+  portrait: z.string().optional(),
+  after,
+  sections,
+  voice: GuideVoiceSchema.optional(),
+  links,
+  metadata: Ignorable,
+}).strict();
+const GuidePlaceSchema = z.object({ id: SlugSchema, name: text(200), role: text(200).optional(), picture: z.string().optional(), after, sections, links, metadata: Ignorable }).strict();
+const GuideLoreSchema = z.object({ id: SlugSchema, kind: z.enum(GUIDE_LORE_KINDS), title: text(200), text: text(20_000), after, links, metadata: Ignorable }).strict();
+// What an `after` or a voice line names: a production's chapters in manuscript order, each with the
+// number a reader knows it by. The guide carries them because a guide alone has no production to
+// read them from, and After Chapter 6 needs the 6.
+const GuideChapterSchema = z.object({ id: SlugSchema, number: z.number().int().min(1), book: z.string().min(1).max(512).optional(), metadata: Ignorable }).strict();
+const GuideProductionSchema = z.object({ id: SlugSchema, title: text(200), chapters: z.array(GuideChapterSchema).max(MAX_CHAPTERS), metadata: Ignorable }).strict();
+const GuideDocumentSchema = z.object({
+  format: z.literal(GUIDE_FORMAT),
+  version: z.literal(GUIDE_VERSION),
+  requires: z.array(z.unknown()).max(0).optional(),
+  productions: z.array(GuideProductionSchema).max(64),
+  characters: z.array(GuideCharacterSchema).max(MAX_GUIDE_ENTRIES),
+  places: z.array(GuidePlaceSchema).max(MAX_GUIDE_ENTRIES),
+  lore: z.array(GuideLoreSchema).max(MAX_GUIDE_ENTRIES),
+  metadata: Ignorable,
+}).strict();
+
+export type GuideDocument = z.infer<typeof GuideDocumentSchema>;
+export type GuideAfter = z.infer<typeof GuideAfterSchema>;
+export type GuideSection = z.infer<typeof GuideSectionSchema>;
+export type GuideVoice = z.infer<typeof GuideVoiceSchema>;
+export type GuideCharacter = z.infer<typeof GuideCharacterSchema>;
+export type GuidePlace = z.infer<typeof GuidePlaceSchema>;
+export type GuideLore = z.infer<typeof GuideLoreSchema>;
+export type GuideLoreKind = (typeof GUIDE_LORE_KINDS)[number];
+export type GuideProduction = z.infer<typeof GuideProductionSchema>;
+
+export type GuideRead = { ok: true; guide: GuideDocument } | { ok: false; refusal: WorldRefusal; reason: string };
+
+/**
+ * Reads a guide document against its package's inventory (SPEC-059 R-11 – R-14), as strictly as
+ * the listening document: an id that repeats anywhere in the guide (a link names an entry without
+ * its kind), a link or `after` that names nothing, an empty section, an asset that is missing or
+ * of the wrong kind, or a voice line over 15 seconds is not an Arke package.
+ */
+export function readGuide(source: string, assets: Readonly<Record<string, WorldAsset>>): GuideRead {
+  const notAPackage = (reason: string) => ({ ok: false as const, refusal: "not-a-package" as const, reason });
+  let json: unknown;
+  try {
+    json = JSON.parse(source);
+  } catch {
+    return notAPackage("the guide is not JSON");
+  }
+  if (typeof json !== "object" || json === null || Array.isArray(json) || (json as Record<string, unknown>)["format"] !== GUIDE_FORMAT) return notAPackage(`not an ${GUIDE_FORMAT}`);
+  const raw = json as Record<string, unknown>;
+  const version = raw["version"];
+  if (typeof version !== "number" || !Number.isInteger(version)) return notAPackage("no version");
+  if (version > GUIDE_VERSION) return { ok: false, refusal: "newer-arke", reason: `guide version ${version}` };
+  if (version !== GUIDE_VERSION) return notAPackage(`guide version ${version}`);
+  const requires = raw["requires"] ?? [];
+  if (!Array.isArray(requires)) return notAPackage("requires is not a list");
+  if (requires.length > 0) return { ok: false, refusal: "newer-arke", reason: `requires ${requires.join(", ")}` };
+
+  const parsed = GuideDocumentSchema.safeParse(raw);
+  if (!parsed.success) return refusedBy(parsed.error, "the guide");
+  const guide = parsed.data;
+
+  const chapters = new Map<string, Set<string>>();
+  for (const production of guide.productions) {
+    if (chapters.has(production.id)) return notAPackage(`production ${production.id} repeats`);
+    const ids = new Set<string>();
+    let number = 0;
+    for (const chapter of production.chapters) {
+      if (ids.has(chapter.id)) return notAPackage(`production ${production.id}: chapter ${chapter.id} repeats`);
+      if (chapter.number <= number) return notAPackage(`production ${production.id}: chapters out of order`);
+      ids.add(chapter.id);
+      number = chapter.number;
+    }
+    chapters.set(production.id, ids);
+  }
+  const names = (place: { production: string; chapter: string } | null | undefined) => place == null || chapters.get(place.production)?.has(place.chapter) === true;
+  const asset = (assetId: string | undefined, mediaTypes: readonly string[]) => assetId === undefined || (assets[assetId] !== undefined && mediaTypes.includes(assets[assetId]!.mediaType));
+
+  const entries = [...guide.characters, ...guide.places, ...guide.lore];
+  const ids = new Set<string>();
+  for (const entry of entries) {
+    if (ids.has(entry.id)) return notAPackage(`entry ${entry.id} repeats`);
+    ids.add(entry.id);
+  }
+  for (const entry of entries) {
+    const where = `entry ${entry.id}`;
+    if (!names(entry.after)) return notAPackage(`${where}: after names no chapter of the guide`);
+    if ("sections" in entry && entry.sections.some((section) => !names(section.after))) return notAPackage(`${where}: a section's after names no chapter of the guide`);
+    for (const link of entry.links ?? []) if (!ids.has(link)) return notAPackage(`${where}: a link to ${link}, which is not in the guide`);
+  }
+  for (const character of guide.characters) {
+    if (!asset(character.portrait, WORLD_PICTURE_MEDIA_TYPES)) return notAPackage(`entry ${character.id}: portrait`);
+    if (character.voice !== undefined) {
+      if (!asset(character.voice.audio, GUIDE_VOICE_MEDIA_TYPES)) return notAPackage(`entry ${character.id}: voice`);
+      if (!names(character.voice)) return notAPackage(`entry ${character.id}: the voice names no chapter of the guide`);
+    }
+  }
+  for (const place of guide.places) if (!asset(place.picture, WORLD_PICTURE_MEDIA_TYPES)) return notAPackage(`entry ${place.id}: picture`);
+  return { ok: true, guide };
+}
+
+/** Every asset a guide names, so a package can be checked for files nothing uses. */
+export function guideAssetIds(guide: GuideDocument): Set<string> {
+  const ids = new Set<string>();
+  for (const character of guide.characters) {
+    if (character.portrait !== undefined) ids.add(character.portrait);
+    if (character.voice !== undefined) ids.add(character.voice.audio);
+  }
+  for (const place of guide.places) if (place.picture !== undefined) ids.add(place.picture);
+  return ids;
+}
+
+/** The number of the chapter an `after` waits for, as a reader knows it; null when it waits for none. */
+export function guideChapterNumber(guide: GuideDocument, place: GuideAfter | null | undefined): number | null {
+  if (place == null) return null;
+  return guide.productions.find((production) => production.id === place.production)?.chapters.find((chapter) => chapter.id === place.chapter)?.number ?? null;
 }
