@@ -12,6 +12,8 @@ import { containedWorldFile } from "./interactive.js";
 import { writeEpub } from "./manuscript.js";
 import { openChapter } from "./ops.js";
 import { checkWorldPackageZip, writeWorldPackageZip } from "./world-package.js";
+import { fitReadingImage, pngHasAlpha } from "../references/reading-image.js";
+export { pngHasAlpha } from "../references/reading-image.js";
 
 /**
  * Export → Arke Player (design turn 233, SPEC-058 R-1 – R-8): one world package of a Story
@@ -29,7 +31,6 @@ import { checkWorldPackageZip, writeWorldPackageZip } from "./world-package.js";
 export const ARKE_PLAYER_EXPORT_ID = /^ap_[0-9A-HJKMNP-TV-Z]{26}$/;
 const COMPILER = "arke-studio/arke-player-export";
 const COMPILER_VERSION = 1;
-const PICTURE_SIDE = 2048;
 const MOTION_SIDE = 1080;
 
 export type ArkePlayerExportResult =
@@ -55,22 +56,6 @@ const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest(
 
 /** A Studio slug as a package id: the same vocabulary, at most 64 long. */
 export const packageSlug = (slug: string) => slug.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+/, "").slice(0, 64).replace(/-+$/, "") || "world";
-
-/** Whether a PNG carries transparency: an alpha channel, or a tRNS chunk before its pixels (R-6). */
-export function pngHasAlpha(bytes: Uint8Array): boolean {
-  if (bytes.length < 33 || bytes[1] !== 0x50 || bytes[2] !== 0x4e || bytes[3] !== 0x47) return false;
-  const colorType = bytes[25];
-  if (colorType === 4 || colorType === 6) return true;
-  const view = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  for (let at = 8; at + 8 <= view.length;) {
-    const length = view.readUInt32BE(at);
-    const type = view.toString("latin1", at + 4, at + 8);
-    if (type === "tRNS") return true;
-    if (type === "IDAT" || type === "IEND") return false;
-    at += 12 + length;
-  }
-  return false;
-}
 
 /** Whether a WebP carries alpha: the VP8X alpha flag, or a lossless image's alpha bit (R-6). */
 export function webpHasAlpha(bytes: Uint8Array): boolean {
@@ -239,9 +224,8 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
       const keepsAlpha = transparent(original);
       const assetId = file === keyArt ? "key-art" : `p${pad(++numbered, 3)}`;
       const path = assetId === "key-art" ? `key-art.${keepsAlpha ? "png" : "jpg"}` : `pictures/${assetId}.${keepsAlpha ? "png" : "jpg"}`;
-      const fit = `scale='min(${PICTURE_SIDE},iw)':'min(${PICTURE_SIDE},ih)':force_original_aspect_ratio=decrease`;
       try {
-        await ffmpeg.run(["-y", "-i", real.get(file)!, "-vf", fit, "-frames:v", "1", "-update", "1", ...(keepsAlpha ? [] : ["-q:v", "4"]), at(path)], () => {}, signal);
+        await fitReadingImage(real.get(file)!, at(path), keepsAlpha, ffmpeg, signal);
       } catch {
         if (signal.aborted) return cancelled();
         return { ok: false, blockers: [`${file.split("/").pop()} could not be fitted for a phone`] };

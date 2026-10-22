@@ -82,12 +82,25 @@ the option off for an ordinary text-and-cover EPUB. PNG/JPEG inputs are bounded 
 40 megapixels each, 1,000 placed pictures and 2 GiB of distinct image inputs. Original image bytes
 are retained through the existing hash-checked publication capture; no other takes are bundled.
 
-Illustrated editions use compiler version 4. `publications/story-illustrations.ts` resolves and
+Original-image illustrated editions use compiler version 4. `publications/story-illustrations.ts` resolves and
 checks bindings; `story-epub.ts` streams the same package parts used by the manuscript writer,
 hashing each captured image while writing. Cancellation and failures remove the unfinished ZIP.
 Preview reads just the packaged XHTML/CSS and serves only captured, inventoried illustrations
 through the authenticated preview route. Its frame permits same-origin media for paired browsers
 but no scripts. Ordinary text-only exports and previously captured editions remain supported.
+
+An illustrated EPUB can explicitly choose **Reading size · up to 2048 px** instead of the
+default **Original images**. Compiler version 5 captures both originals and distinct reading
+copies, with profile version 1, the host encoder identity, dimensions and byte digests. It reuses
+Arke Player's no-upscale, aspect-preserving fit: JPEG at FFmpeg q4, or PNG to preserve an alpha
+channel/tRNS transparency. The cover follows the same EPUB-only choice; PDF/M4B keep their
+original covers. `publications/story-epub-images.ts` owns these captured copies and
+`references/reading-image.ts` shares the existing fit with Arke Player. No world image or prior
+edition is changed. Retries use the exact saved copies without reconversion; preview serves the
+same images packaged in the EPUB. The Files view shows the saved choice and measured final size,
+not an estimate or promised reduction. Check source-critical lettering in Preview before Create.
+The local codec smoke is `ARKE_STORY_CODEC_SMOKE=1` with `ARKE_FFMPEG` pointing to the installed
+encoder, running `test/publications/story-illustrations.test.ts` from the coordinator package.
 
 ## Story PDF editions
 

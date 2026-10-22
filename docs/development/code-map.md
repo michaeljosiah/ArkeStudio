@@ -760,6 +760,9 @@ readiness/approved prose changes and story.ts owns capture, EPUB/M4B/PDF build, 
 Client components/story-publish.tsx is shared by Story, Audiobook and Publications. Desktop
 arke:save-story-publication resolves an inventoried edition through the coordinator before a
 native Save dialog. See [publications](publications.md) for file ownership and format boundaries.
+Optional reading-size EPUB copies are captured by `publications/story-epub-images.ts`; the
+versioned profile lives in contracts `story-publication.ts`, and `references/reading-image.ts`
+shares the existing image fit with Arke Player. Original captures and older editions are preserved.
 
 Illustrated EPUB (#2033) uses `publications/story-illustrations.ts` to resolve existing block
 pictures against manuscript paragraphs. Shared `placePictures` in contracts `audiobook-listening.ts`
