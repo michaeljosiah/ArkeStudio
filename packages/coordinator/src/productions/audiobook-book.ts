@@ -547,6 +547,7 @@ export async function followChapterTakes(store: WorldStore, productionId: string
   }
   const artifacts = store.getBundle().artifacts;
   const picks: Record<string, AudiobookTake> = {};
+  const movedAliases = new Set<string>();
   for (const planned of plan.blocks) {
     if (planned.recorded === true || (planned.state !== "stale" && planned.state !== "not made" && planned.state !== "flagged")) continue;
     const textHash = audiobookTextHash(planned.block.text);
@@ -566,7 +567,14 @@ export async function followChapterTakes(store: WorldStore, productionId: string
       // Repeated passages or multiple selected performances cannot identify the author's
       // choice. Same-key shelf recovery below retains its existing rules in those cases.
       if (moved.size === 1) {
-        picks[planned.block.key] = moved.values().next().value!;
+        const take = moved.values().next().value!;
+        picks[planned.block.key] = take;
+        // A recovered selection moves with its words. Leaving copies at historical keys
+        // would make an older performance compete after the author replaces this take
+        // and moves the passage again (#2117). Artifacts and their provenance stay put.
+        for (const [key, alias] of Object.entries(record.takes)) {
+          if (key !== planned.block.key && JSON.stringify(alias) === JSON.stringify(take)) movedAliases.add(key);
+        }
         continue;
       }
     }
@@ -615,7 +623,9 @@ export async function followChapterTakes(store: WorldStore, productionId: string
     if (JSON.stringify(current) !== JSON.stringify(record)) return null;
     const flags = Object.fromEntries(Object.entries(current.flags).filter(([key]) => picks[key] === undefined));
     chosen = Object.keys(picks).length;
-    return { ...current, updatedAt: store.now(), takes: { ...current.takes, ...picks }, flags };
+    // Remove aliases before applying all picks: another moved passage can own the same key.
+    const takes = Object.fromEntries(Object.entries(current.takes).filter(([key]) => !movedAliases.has(key)));
+    return { ...current, updatedAt: store.now(), takes: { ...takes, ...picks }, flags };
   }, { requireReadable: true, beforeWrite: async () => {
     const fresh = await planAudiobook(store, productionId, summary.id, { narrator: room.narrator });
     if (fingerprint(fresh) !== basis || Object.values(picks).some(take =>
