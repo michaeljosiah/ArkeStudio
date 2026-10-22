@@ -267,6 +267,8 @@ export async function setAudiobookPicture(
      * held on the block for its next picture are its stamp's now, and leave the block.
      */
     arke?: true;
+    /** A saved-picture repeat may only replace the exact selection it started from. */
+    expected?: AudiobookPicture;
   } = {},
 ): Promise<ChapterAudiobook> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
@@ -290,6 +292,7 @@ export async function setAudiobookPicture(
   const reviewHash = (record: ChapterAudiobook | null) => original?.look === undefined ? undefined : lookDigest(lookLinesFor(record?.look, original.look.who, original.look.looks, kitLookLibrary(store.getBundle().referenceKits, record?.look)));
   const expectedLook = reaffirm ? reviewHash(record) : undefined;
   const checkReview = (record: ChapterAudiobook | null) => {
+    if (made.expected && (JSON.stringify(shown(record)) !== JSON.stringify(made.expected) || audiobookTextHash(planned.block.text) !== made.expected.textHash)) throw new Error("The block's picture changed. The new take remains in Bench.");
     if (reaffirm && (JSON.stringify(shown(record)) !== JSON.stringify(original) || reviewHash(record) !== expectedLook)) throw new Error("The picture or its look changed; choose the picture again.");
   };
   return updateAudiobook(store, productionId, plan.chapter, (current) => {

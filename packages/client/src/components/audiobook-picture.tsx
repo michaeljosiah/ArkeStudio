@@ -22,7 +22,7 @@ import {
 import { usableModels } from "./dispatch-bar.js";
 import { setupForMode, type ModeSetup } from "../lib/composer-mode.js";
 import { mediaUrl } from "../lib/media.js";
-import { sendBenchAddReference, sendBenchCompose, sendBenchNewSession, setAudiobookPicture, useBench, useStore } from "../lib/store.js";
+import { subscribeCommandFailures, sendBenchAddReference, sendBenchCompose, sendBenchNewSession, setAudiobookPicture, useBench, useStore } from "../lib/store.js";
 import type { BlockRow } from "../screens/chapter-audiobook.js";
 import { Button, Textarea, cx } from "./ui.js";
 import { usePictureSuggestion, type PictureSuggestionState } from "./audiobook-suggest.js";
@@ -169,12 +169,16 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   // Generate (R-69): a new Bench session in image mode with the brief written in, then the Bench —
   // which prices and confirms the picture as any image, and files it as an artifact kept there.
   const bench = useBench();
-  const pending = useRef<{ before: string | null; brief: string; refs?: readonly string[]; setup?: ModeSetup } | null>(null);
+  const pending = useRef<{ before: string | null; brief: string; refs?: readonly string[]; setup?: ModeSetup; restored?: true } | null>(null);
+  useEffect(() => subscribeCommandFailures(event => {
+    if (event.command === "bench-new-session" && pending.current?.restored) pending.current = null;
+  }), []);
   useEffect(() => {
     const asked = pending.current;
     const session = bench?.session;
     if (asked === null || session === undefined || session.id === asked.before || bench?.worldId !== worldId) return;
     pending.current = null;
+    if (asked.restored) { void navigate(`/w/${worldId}/artifacts/bench/${session.id}`); return; }
     // Editing a plan-backed picture must not silently switch it to a paid Bench default.
     // Keep an unavailable original model too: the Bench requires a usable choice before dispatch.
     const setup = asked.setup ?? setupForMode("image", undefined, usableModels(store.state, "image"));
@@ -190,6 +194,11 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
 
   // Edit prompt (R-99): the same prompt in the Bench, each carried reference attached there as `Image n`.
   const editInBench = (picked: PictureSuggestion, prompt: string) => {
+    if (picked.reuse !== undefined) {
+      pending.current = { before: bench?.session.id ?? null, brief: prompt, restored: true };
+      sendBenchNewSession(worldId, { source: picked.reuse, prompt });
+      return;
+    }
     const carried = picked.who.filter((who) => who.carried && who.reference !== null);
     const cited = carried.map((who, order) => ({ name: who.name, kind: who.kind, token: `Image ${order + 1}` }));
     // Whose hand a detail shows, with the skin their sheet gives: a person's key is their sheet's id.

@@ -34,7 +34,7 @@ export function madePicture(
 ): PictureSuggestion | null {
   const artifact = world.artifacts.find((candidate) => `artifacts/${candidate.file}` === entry.file);
   const generation = artifact?.generation;
-  if (generation === undefined || generation.source !== "bench") return null;
+  if (artifact === undefined || generation === undefined || generation.source !== "bench") return null;
   const prompt = madePrompt(generation.brief).slice(0, PICTURE_PROMPT_MAX);
   if (prompt === "") return null;
   const model = models?.find((candidate) => candidate.provider === generation.provider && candidate.id === generation.model);
@@ -82,12 +82,17 @@ export function madePicture(
   for (const riding of rode) if (world.sheets.find((sheet) => sheet.id === riding.sheetId)?.type !== "location") add(riding.sheetId, riding.path, true);
   for (const riding of rode) if (world.sheets.find((sheet) => sheet.id === riding.sheetId)?.type === "location") add(riding.sheetId, riding.path, true);
 
+  // A standalone edit has no authored shot/lookup authority. Keep its actual inputs rather
+  // than pretending artifact references are cast, or re-deriving them for Make again.
+  const reuse = (entry.look === undefined && entry.shot === undefined) || rode.length !== generation.references.length;
   const asked = generation.params.kind === "image" ? generation.params.aspect : undefined;
   const aspect = asked !== undefined && asked !== "" ? asked : pictureAspect(model);
   return {
     block,
     prompt,
     who,
+    ...(reuse ? { reuse: { artifactId: artifact.id, hash: artifact.hash }, references: generation.references,
+      inFrameRecorded: entry.look !== undefined || entry.shot !== undefined } : {}),
     lines: [],
     model: {
       provider: model.provider,
@@ -101,7 +106,7 @@ export function madePicture(
     },
     ...(aspect !== undefined ? { aspect } : {}),
     // What Make again costs, from the figures the suggestion priced it with.
-    estimatedMicroUsd: pictureQuote(model, who.filter((entry) => entry.carried).length, aspect),
+    estimatedMicroUsd: pictureQuote(model, reuse ? generation.references.length : who.filter((entry) => entry.carried).length, aspect, reuse && generation.params.kind === "image" ? generation.params.tier : undefined),
     ...(entry.look !== undefined ? { look: entry.look } : {}),
     ...(entry.shot !== undefined ? { shot: entry.shot } : {}),
   };

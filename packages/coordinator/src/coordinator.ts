@@ -1,3 +1,4 @@
+import { savedPicture, openSavedPicture, type SavedPicture } from "./productions/audiobook-picture-reuse.js";
 import { chapterReviewSummary } from "@arke-studio/contracts";
 import { rebuildBenchPrefill } from "@arke-studio/contracts";
 import { ChapterReviewService } from "./productions/chapter-review.js";
@@ -173,6 +174,7 @@ import {
   kitLookLibrary,
   ridingPicks,
   PICTURE_PROMPT_MAX,
+  placePictures,
   type PictureWho,
   pictureBench,
   pictureDetailSkins,
@@ -13069,7 +13071,15 @@ export class Coordinator {
       case "bench-new-session": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        await this.openBenchWorkspace(store, undefined, true);
+        if (msg.picture !== undefined) {
+          try {
+            const saved = await savedPicture(store, msg.picture.source, msg.picture.prompt);
+            const opened = await openSavedPicture(store, saved, () => this.nowIso());
+            await this.openBenchWorkspace(store, opened.session.id);
+          } catch (error) {
+            this.emit({ type: "command.failed", at: this.nowIso(), command: msg.kind, requestId: null, reason: describeCoordinatorError(error) });
+          }
+        } else await this.openBenchWorkspace(store, undefined, true);
         return;
       }
       case "bench-close": {
@@ -16149,7 +16159,8 @@ export class Coordinator {
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         try {
-          const model = await this.pictureModel(store);
+          const saved = msg.reuse === undefined ? undefined : await savedPicture(store, msg.reuse, msg.prompt);
+          const model = saved === undefined ? await this.pictureModel(store) : this.opts.manifest?.models.find(candidate => candidate.provider === saved.generation.provider && candidate.id === saved.generation.model);
           if (!model) return fail("no picture model is on");
           this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "making" });
           const held = await readAudiobook(store, msg.productionId, chapter.file);
@@ -16157,6 +16168,8 @@ export class Coordinator {
           const room = await pictureRoom(store, msg.productionId, chapter.id, look);
           const index = room.plan.blocks.findIndex((planned) => planned.block.key === msg.block);
           if (index < 0) return fail("that block is no longer in the chapter");
+          const shown = placePictures(room.plan.blocks.map(planned => planned.block), held === "unreadable" ? {} : held?.pictures).placed.find(entry => entry.index === index)?.picture;
+          if (msg.reuse !== undefined && shown?.file !== `artifacts/${store.getBundle().artifacts.find(artifact => artifact.id === msg.reuse!.artifactId)?.file}`) return fail("The block's picture changed. Open its current picture again.");
           const characters = depictable(room.people).filter((person) => msg.who.includes(person.key));
           const place = room.places.find((candidate) => msg.who.includes(candidate.key));
           // The looks chosen for this picture alone (turn 193d, R-146): as the card sent them, else
@@ -16168,6 +16181,7 @@ export class Coordinator {
             ...(place === undefined ? [] : [{ key: place.key, name: place.name, sheet: place.key, kind: "place" as const }]),
           ], { look, frame: msg.frame ?? null, own });
           const made = await this.makeBenchPicture(store, {
+            ...(saved !== undefined ? { saved } : {}),
             title: `Chapter ${chapter.order} · ${msg.block === "title" ? "title" : `block ${index + 1}`}`,
             prompt: clipPrompt(msg.prompt, promptRoom(model)),
             // The Mood line rides after the prompt, so it is held to rule 4 the same way (codex on PR 1559).
@@ -16182,9 +16196,9 @@ export class Coordinator {
           });
           if (!made.ok) return fail(made.reason, made.sessionId);
           // A look chosen for this picture alone is stamped `only` (R-115): the chapter's later choice never marks it.
-          const stamp = pictureLookFor(look, characters.map((person) => person.key), ridingPicks(who), kitLookLibrary(store.getBundle().referenceKits, look));
+          const stamp = saved !== undefined ? shown?.look : pictureLookFor(look, characters.map((person) => person.key), ridingPicks(who), kitLookLibrary(store.getBundle().referenceKits, look));
           // The shot the press was made from rides on the picture, so its card still says it (design turn 194g).
-          const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, { ...(stamp !== undefined ? { look: stamp } : {}), ...(msg.shot !== undefined ? { shot: msg.shot } : {}), arke: true });
+          const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, { ...(stamp !== undefined ? { look: stamp } : {}), ...((saved !== undefined ? shown?.shot : msg.shot) !== undefined ? { shot: saved !== undefined ? shown!.shot! : msg.shot! } : {}), ...(saved !== undefined && shown !== undefined ? { expected: shown } : {}), arke: true });
           this.refreshIfStillOpen(store);
           // The record the picture now stands in goes to every window as any record write does: the margin's chip and the panel read it from there, and the card's own word is only that it is done.
           this.emit({ at: at(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, requestId: msg.requestId, record });
@@ -20382,13 +20396,13 @@ export class Coordinator {
    */
   private async makeBenchPicture(
     store: WorldStore,
-    input: { title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; detailed?: readonly PictureDetailSkin[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal; motion?: { params: import("@arke-studio/contracts").BenchVideoParams; startFrame: string; sourceHash: string } },
+    input: { saved?: SavedPicture; title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; detailed?: readonly PictureDetailSkin[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal; motion?: { params: import("@arke-studio/contracts").BenchVideoParams; startFrame: string; sourceHash: string } },
   ): Promise<{ ok: true; sessionId: SessionId; artifact: { id: string; file: string }; costMicroUsd: number | null; estimatedMicroUsd: number } | { ok: false; reason: string; sessionId?: SessionId; provider?: true }> {
     if (input.signal?.aborted) return { ok: false, reason: "stopped" };
     const worldId = store.worldId;
     const mode = input.motion === undefined ? "image" : "video";
     const params = input.motion?.params ?? { kind: "image" as const, count: 1, ...(input.aspect !== undefined ? { aspect: input.aspect } : {}) };
-    const opened = await openBenchSession(store.dir, () => this.nowIso(), { fresh: true, defaultModel: { provider: input.model.provider, model: input.model.id }, initial: { mode, brief: input.prompt, title: input.title } }).catch(() => null);
+    const opened = input.saved !== undefined ? await openSavedPicture(store, input.saved, () => this.nowIso(), input.title) : await openBenchSession(store.dir, () => this.nowIso(), { fresh: true, defaultModel: { provider: input.model.provider, model: input.model.id }, initial: { mode, brief: input.prompt, title: input.title } }).catch(() => null);
     if (opened === null) return { ok: false, reason: "the Bench could not open a session" };
     const sessionId = opened.session.id;
     const fail = async (reason: string) => {
@@ -20396,7 +20410,7 @@ export class Coordinator {
       this.transport.broadcastSnapshot();
       return { ok: false as const, reason, sessionId };
     };
-    await opened.store.append({ type: "composer-set", mode, provider: input.model.provider, model: input.model.id, params, brief: input.prompt }, { at: this.nowIso(), requestId: `pic-composer:${input.requestId}` });
+    if (input.saved === undefined) await opened.store.append({ type: "composer-set", mode, provider: input.model.provider, model: input.model.id, params, brief: input.prompt }, { at: this.nowIso(), requestId: `pic-composer:${input.requestId}` });
     if (input.motion !== undefined) {
       const bench = await this.benchFor(worldId, sessionId);
       if (bench === null) return fail("the Bench session is gone");
@@ -20406,7 +20420,7 @@ export class Coordinator {
     // The pictures that ride, each by the name the Bench gives it; a picture it refuses is left
     // off and the take is made without it — the refusal is the Bench's own and is logged.
     const cited: Array<{ name: string; kind: "character" | "place"; token: string }> = [];
-    for (const [index, entry] of input.who.filter((candidate) => candidate.carried && candidate.reference !== null).entries()) {
+    for (const [index, entry] of (input.saved === undefined ? input.who : []).filter((candidate) => candidate.carried && candidate.reference !== null).entries()) {
       const bench = await this.benchFor(worldId, sessionId);
       if (bench === null) return fail("the Bench session is gone");
       const outcome = await addBenchReference(bench, store.getBundle(), input.model, {
@@ -20419,10 +20433,10 @@ export class Coordinator {
       else cited.push({ name: entry.name, kind: entry.kind, token: outcome.token });
     }
     if (input.signal?.aborted) return fail("stopped");
-    const brief = input.motion === undefined ? pictureBench(input.prompt, cited, input.mood, input.detailed ?? []) : input.prompt;
+    const brief = input.saved?.brief ?? (input.motion === undefined ? pictureBench(input.prompt, cited, input.mood, input.detailed ?? []) : input.prompt);
     const composed = await this.benchFor(worldId, sessionId);
     if (composed === null) return fail("the Bench session is gone");
-    await composed.store.append({ type: "composer-set", mode, provider: input.model.provider, model: input.model.id, params, brief }, { at: this.nowIso(), requestId: `pic-brief:${input.requestId}` });
+    if (input.saved === undefined) await composed.store.append({ type: "composer-set", mode, provider: input.model.provider, model: input.model.id, params, brief }, { at: this.nowIso(), requestId: `pic-brief:${input.requestId}` });
     const bench = await this.benchFor(worldId, sessionId);
     if (bench === null) return fail("the Bench session is gone");
     const plan = planBenchDispatch(bench.session, store.getBundle(), this.opts.manifest ?? null, {
