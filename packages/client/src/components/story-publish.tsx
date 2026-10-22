@@ -225,7 +225,7 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
       {!preparing && <><nav className="fy-publish-steps" aria-label="Publishing steps">{steps.map((label, index) => <span key={label} aria-current={step === label ? "step" : undefined}>{index + 1}. {label}</span>)}</nav>
       <h3>{finding ? "Review proposed change" : step === "Files" ? "Your private edition is ready" : step}</h3></>}
       {error && <p role="alert" className="fy-publish-notice">{error}</p>}
-      {changed && <div role="status" className="fy-publish-notice">The source or options changed. Recheck before creating an edition. <Button disabled={busy || !valid} onClick={() => { setChanged(false); refresh(); }}>Recheck</Button></div>}
+      {changed && !(step === "Files" && edition?.status === "ready") && <div role="status" className="fy-publish-notice">The source or options changed. Recheck before creating an edition. <Button disabled={busy || !valid} onClick={() => { setChanged(false); refresh(); }}>Recheck</Button></div>}
       {step === "Edition" && <>
         <div className="fy-publish-fields">
           <label>Title<input value={settings.title} onChange={event => update({ title: event.target.value })} /></label>

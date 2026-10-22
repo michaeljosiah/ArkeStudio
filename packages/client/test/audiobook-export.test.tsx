@@ -132,12 +132,15 @@ describe("Export audiobook (turn 186e)", () => {
     else assert.equal(image, null);
     assert.equal(dom.document.querySelector("iframe"), null, "ready Files waits for the explicit saved-book Preview action");
     const afterReady = m.sent.length;
-    const changed = { ...production, meta: { ...production.meta, title: "Working title changed" } };
+    const changed = { ...production, meta: { ...production.meta, title: "Working title changed" }, chapters: production.chapters.map(chapter => ({ ...chapter, version: chapter.version + 1,
+      audiobook: { ...chapter.audiobook!, hash: "later-picture-choice", updatedAt: "2026-10-22T00:00:00.000Z" } })) };
     await act(async () => {
       __setStateForTest({ ...state, world: { ...state.world!, keyArt: "artifacts/later-world-cover.png" } }, { connection: "open" });
       m.root.render(<MemoryRouter><StoryPublishSheet worldId={FIXTURE_WORLD_ID} production={changed} onClose={() => {}} /></MemoryRouter>);
     });
     assert.doesNotMatch(text(identity()), /Working title changed|later-world-cover/);
+    assert.doesNotMatch(text(dom.document.body), /Recheck before creating an edition/);
+    assert.equal(button("Recheck"), undefined, "working-source changes do not ask to create an already ready edition");
     assert.equal(identity().querySelector("img")?.getAttribute("src"), image?.getAttribute("src"));
     assert.equal(m.sent.length, afterReady, "mutable world identity does not prepare another edition");
     const downloads = [...identity().querySelectorAll("a[download]")];
@@ -149,6 +152,26 @@ describe("Export audiobook (turn 186e)", () => {
     assert.deepEqual(lastAsk(m, "publish-story")!.input, { action: "preview-page", editionId: edition.id, chapter: 0 });
     await press(button("Done"));
     assert.equal(JSON.stringify(edition), original, "viewing identity and file actions preserve the captured edition and file inventory");
+  });
+  it("still requires recheck when the working source changes before Create", async () => {
+    const state = inkbound(), production = state.world!.productions.find(p => p.meta.id === "inkbound")!;
+    const edition: StoryEdition = { id: "00000000-0000-4000-8000-000000000004", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", createdAt: AT,
+      status: "preview", phase: "Preview ready", fingerprint: "a".repeat(64), files: [],
+      settings: { title: "Captured preview", author: "", language: "en", label: "Preview", description: "", cover: null, chapterIds: ["slack-water", "neap"], outputs: ["epub"], avoidEmDashes: false } };
+    const m = await mount(<MemoryRouter><StoryPublishSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} /></MemoryRouter>);
+    const button = (label: string) => [...dom.document.querySelectorAll("button")].find(button => text(button) === label)!;
+    const list = lastAsk(m, "list-story-publications")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "story.editions", requestId: list.requestId, editions: [edition] }));
+    await press(button("Review preview"));
+    assert.equal(button("Create edition").hasAttribute("disabled"), false);
+    const sent = m.sent.length;
+    const changed = { ...production, chapters: production.chapters.map(chapter => ({ ...chapter, version: chapter.version + 1 })) };
+    await act(async () => m.root.render(<MemoryRouter><StoryPublishSheet worldId={FIXTURE_WORLD_ID} production={changed} onClose={() => {}} /></MemoryRouter>));
+    assert.match(text(dom.document.body), /Recheck before creating an edition/);
+    assert.equal(button("Create edition").hasAttribute("disabled"), true);
+    assert.equal(m.sent.length, sent, "source changes never create or regenerate automatically");
+    await press(button("Recheck"));
+    assert.deepEqual(lastAsk(m, "publish-story")!.input, { action: "review", settings: edition.settings });
   });
   it("opens a ready illustrated edition and navigates captured pages without a source world or write request", async () => {
     const edition: StoryEdition = { id: "00000000-0000-4000-8000-000000000001", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", createdAt: AT,
