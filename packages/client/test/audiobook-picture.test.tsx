@@ -539,6 +539,29 @@ describe("a made picture on its block (turn 194g)", () => {
     ...(shot !== undefined ? { shot } : {}),
   });
 
+  for (const source of ["generated", "world"] as const) {
+    for (const mode of ["still", "candidate", "chosen", "retained"] as const) {
+      it(`keeps ${source} image/facts together before ${mode} motion controls (issue 2127)`, async () => {
+        extraArtifacts = source === "generated" ? [madeArtifact()] : [];
+        const clip = { artifactId: "ar_01J00000000000000000000001", file: "artifacts/clip.mp4", seconds: 5, width: 864, height: 480,
+          sourceHash: `sha256:${"a".repeat(64)}`, sourceAt: AT, behavior: "repeat" as const, active: mode === "chosen" };
+        const entry = { ...(source === "generated" ? made(SHOT) : picture(2, "world-art.png")),
+          ...(mode === "candidate" ? { motionCandidate: clip } : mode === "still" ? {} : { motion: clip }) };
+        const before = structuredClone(entry);
+        const m = await mount(2, { "p1.0": entry });
+        const top = q(m, ".fy-pcard__top");
+        assert.ok(top?.querySelector('[data-testid="picture-card-picture"]'));
+        assert.ok(top?.querySelector(".fy-pcard__facts"));
+        assert.equal(top?.querySelector(".fy-abmotion-actions"), null, "controls cannot force a third item into the image/facts row");
+        assert.equal(top?.nextElementSibling, q(m, ".fy-abmotion-actions"), "motion choices immediately follow the summary");
+        assert.ok(button(m, mode === "candidate" ? "Review clip" : mode === "chosen" ? "Clip in use" : "Animate"));
+        if (mode === "retained") assert.ok(button(m, "Use clip"));
+        assert.deepEqual(entry, before, "rendering preserves the retained source and clip records");
+        assert.equal(m.sent.length, 0, "opening the picture does not choose or generate media");
+      });
+    }
+  }
+
   it("draws the card it was made from, priced for Make again, with no Shows, Holds or Choose", async () => {
     extraArtifacts = [madeArtifact()];
     const m = await mount(2, { "p1.0": made(SHOT) });
