@@ -38,6 +38,21 @@ function StoryEditionPreparation({ edition, onClose }: { edition: StoryEdition; 
     <div className="fy-publish-preparation__return"><div><strong>You can keep working</strong><p className="fy-publish-muted">Find this preparation in your private story editions.</p></div><Button onClick={onClose}>Back to story</Button></div>
   </section>;
 }
+/** Turn 224f/j: ready files keep their captured identity, including when reopened. */
+function StoryReadyEdition({ edition }: { edition: StoryEdition }) {
+  const { settings } = edition;
+  return <section className="fy-publish-preparation__edition fy-publish-ready" aria-label="Captured edition">
+    {settings.cover && <img className="fy-publish-preparation__cover" src={storyPreviewMediaUrl(edition.id, "cover")} alt="Captured edition cover" />}
+    <div className="fy-publish-preparation__details">
+      <div className="fy-publish-preparation__summary"><h4>{settings.title}</h4>
+        <p className="fy-publish-muted">{[settings.author, settings.label].filter(Boolean).join(" · ") || "Private edition"}</p>
+        <p className="fy-publish-muted">{settings.chapterIds.length} {settings.chapterIds.length === 1 ? "chapter" : "chapters"} · {settings.language}</p>
+      </div>
+      <StoryEditionFiles edition={edition} />
+    </div>
+  </section>;
+}
+
 export function StoryEditionFiles({ edition }: { edition: StoryEdition }) {
   const [saved, setSaved] = useState<string | null>(null);
   const [preview, setPreview] = useState(false);
@@ -117,8 +132,8 @@ export function StoryEditionLibrary({ worldId, productionId, onPreview }: { worl
     <h2>Private story editions</h2>{error && <p role="alert">{error}</p>}
     {!editions.length && <p className="fy-publish-muted">Create a private reading or listening edition from a story’s Publish action.</p>}
     {editions.map(edition => <article className="fy-publish-card" key={edition.id}>
-      <div><strong>{edition.settings.title}</strong><p>{edition.settings.label || "Private edition"} · {new Date(edition.createdAt).toLocaleString()} · {edition.phase}</p></div>
-      {edition.status === "ready" ? <StoryEditionFiles edition={edition} /> : <>
+      {edition.status === "ready" ? <><p>{new Date(edition.createdAt).toLocaleString()}</p><StoryReadyEdition edition={edition} /></> : <>
+        <div><strong>{edition.settings.title}</strong><p>{edition.settings.label || "Private edition"} · {new Date(edition.createdAt).toLocaleString()} · {edition.phase}</p></div>
         {edition.error && <p role="alert">{edition.error}</p>}
         {(edition.status === "failed" || edition.status === "cancelled") && <Button onClick={() => { retryAsked.current = publishStory(edition.worldId, edition.productionId, { action: "retry", editionId: edition.id }); }}>Retry captured edition</Button>}
         {onPreview ? <Button onClick={() => onPreview(edition)}>{edition.status === "preview" ? "Review preview" : "View preparation"}</Button> : <Link to={`/w/${edition.worldId}/p/${edition.productionId}/story/chapters`}>Continue in story</Link>}
@@ -250,12 +265,14 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
       </>)}
       {preparing && <StoryEditionPreparation edition={edition} onClose={onClose} />}
       {(step === "Preview" || step === "Files") && edition && !preparing && <>
-        <p>{edition.settings.title} · {edition.settings.author || "No author set"} · {edition.settings.language}</p>
-        {edition.status === "preview" && <p>Review the captured files below. These exact files become the edition when you choose Create edition.</p>}
-        {edition.files.some(file => file.format === "epub") && <StoryBookPreview edition={edition} />}
-        {edition.files.some(file => file.format === "pdf") && <StoryPdfPreview edition={edition} />}
-        <StoryEditionFiles edition={edition} />
-        {(edition.status === "failed" || edition.status === "cancelled") && <div className="fy-publish-actions"><Button disabled={busy} onClick={retry}>Retry captured edition</Button><Button disabled={busy} onClick={refresh}>Recheck source</Button></div>}
+        {edition.status === "ready" ? <><StoryReadyEdition edition={edition} />{edition.files.some(file => file.format === "pdf") && <StoryPdfPreview edition={edition} />}</> : <>
+          <p>{edition.settings.title} · {edition.settings.author || "No author set"} · {edition.settings.language}</p>
+          {edition.status === "preview" && <p>Review the captured files below. These exact files become the edition when you choose Create edition.</p>}
+          {edition.files.some(file => file.format === "epub") && <StoryBookPreview edition={edition} />}
+          {edition.files.some(file => file.format === "pdf") && <StoryPdfPreview edition={edition} />}
+          <StoryEditionFiles edition={edition} />
+          {(edition.status === "failed" || edition.status === "cancelled") && <div className="fy-publish-actions"><Button disabled={busy} onClick={retry}>Retry captured edition</Button><Button disabled={busy} onClick={refresh}>Recheck source</Button></div>}
+        </>}
       </>}
     </div>
   </PageSheet>;
