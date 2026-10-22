@@ -44,6 +44,7 @@ import {
 import { CharacterVoiceScreen } from "./screens/character-voice.js";
 import { LocationReferenceScreen } from "./screens/location-reference.js";
 import { PropDetailScreen, PropsScreen } from "./screens/props.js";
+import { GuideScreen } from "./screens/world-guide.js";
 import {
   ArtifactsScreen,
   CanonEntryScreen,
@@ -329,6 +330,7 @@ function AppRoutes() {
           <Route path="productions" element={<ProductionsScreen />} />
           <Route path="productions/new" element={<NewProductionScreen />} />
           <Route path="productions/setup/:setupId" element={<ProductionSetupScreen />} />
+          <Route path="guide" element={<GuideScreen />} />
         </Route>
 
         <Route path="/w/:worldId/p/:prodId" element={<ProductionLayout />}>

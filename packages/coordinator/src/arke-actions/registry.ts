@@ -460,6 +460,8 @@ const CLIENT_COMMAND_METADATA = {
   "edit-chapter-plan": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   "save-bible": action("world", "authored-diff", "bible", "authored-change", ["bible"]),
   "restore-bible": action("world", "authored-diff", "bible", "authored-change", ["bible"]),
+  "set-guide-entry": humanOnly("What a reader of the world may see is the author's to choose (SPEC-059 R-2)."),
+  "list-guide-voice-lines": readOnly(QUERY),
   "reorder-chapters": action("production", "command", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   "reorder-scenes": action("production", "command", "production-store", "authored-change", ["scenes", "episodes"]),
   "set-production-aspect": action("production", "setting", "production-store", "authored-change", ["production-metadata"]),

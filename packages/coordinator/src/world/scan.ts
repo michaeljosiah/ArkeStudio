@@ -1,3 +1,4 @@
+import { EMPTY_GUIDE_RECORD, GUIDE_RECORD_FILE, GuideRecordSchema } from "@arke-studio/contracts";
 import { ProductionSetupOriginSchema } from "@arke-studio/contracts";
 import { parseDesignedVoices, type WorldDesignedVoice } from "@arke-studio/contracts";
 import { isWorldImagePath } from "@arke-studio/contracts";
@@ -596,6 +597,10 @@ export async function scanWorld(
   // excludes this ungated document; the store adopts its hand-edits directly.
   const bible = await readBible(dir, signal);
   if (bible.present) manifested(BIBLE_PATH, await read(join(dir, BIBLE_PATH)));
+
+  // A world's Guide (SPEC-059 R-8). One that will not read is a problem and chooses nothing,
+  // and the Guide's write refuses to replace it.
+  const guide = (await exists(join(dir, GUIDE_RECORD_FILE))) ? ((await tryParse(GUIDE_RECORD_FILE, (raw) => GuideRecordSchema.parse(JSON.parse(raw)))) ?? EMPTY_GUIDE_RECORD) : EMPTY_GUIDE_RECORD;
 
   let artDirectionRecord: ArtDirectionRecord | null = null;
   const artDirectionPath = ART_DIRECTION_PATH;
@@ -1486,6 +1491,7 @@ export async function scanWorld(
   const bundle: WorldBundle = {
     meta,
     bible,
+    guide,
     artDirection: {
       ...resolved,
       reach: {

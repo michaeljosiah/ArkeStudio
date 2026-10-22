@@ -37,12 +37,12 @@ function at(path: string): string {
 const W = `/w/${FIXTURE_WORLD_ID}`;
 
 describe("world navigation (design 160)", () => {
-  it("keeps all eight destinations in order inside the scrollable strip", () => {
+  it("keeps all nine destinations in order inside the scrollable strip", () => {
     const { document } = parseHTML(at(W));
     const nav = document.querySelector('nav[aria-label="World"]')!;
     assert.ok(nav.parentElement?.classList.contains("fy-worldnav"));
     assert.deepEqual([...nav.querySelectorAll("a")].map(a => a.textContent), [
-      "Overview", "Art direction", "Cast", "Bible", "Canon", "World Chat", "Artifacts", "Productions",
+      "Overview", "Art direction", "Cast", "Bible", "Canon", "World Chat", "Artifacts", "Productions", "Guide",
     ]);
     assert.equal(nav.querySelector('[aria-current="page"]')?.textContent, "Overview");
   });

@@ -172,6 +172,7 @@ const state: ClientState = {
       created: "2026-05-02T09:14:00Z",
       updated: AT,
     },
+    guide: { schemaVersion: 1, characters: {}, locations: {}, factions: {}, lore: {} },
     bible: {
       version: 4,
       updated: "2026-07-20",

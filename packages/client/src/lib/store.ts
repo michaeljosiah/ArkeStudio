@@ -1,3 +1,4 @@
+import type { SetGuideEntry } from "@arke-studio/contracts";
 import type { StoryPublishAction } from "@arke-studio/contracts";
 import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
 import type { AudiobookReader, PictureShot, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
@@ -843,6 +844,12 @@ export function subscribeAudiobookWordTiming(listener: (answer: AudiobookWordTim
 export function subscribeAudiobookVideoState(listener: (answer: AudiobookVideoStateAnswer) => void): () => void {
   audiobookVideoStateListeners.add(listener);
   return () => audiobookVideoStateListeners.delete(listener);
+}
+export type GuideVoiceLines = Extract<DomainEvent, { type: "guide.voice-lines" }>;
+const guideVoiceLinesListeners = new Set<(answer: GuideVoiceLines) => void>();
+export function subscribeGuideVoiceLines(listener: (answer: GuideVoiceLines) => void): () => void {
+  guideVoiceLinesListeners.add(listener);
+  return () => guideVoiceLinesListeners.delete(listener);
 }
 export type WebPackagesListed = Extract<DomainEvent, { type: "web-packages.listed" }>;
 const webPackagesListeners = new Set<(answer: WebPackagesListed) => void>();
@@ -1957,6 +1964,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "web-packages.listed") {
       for (const listener of webPackagesListeners) listener(event);
+    }
+    if (event.type === "guide.voice-lines") {
+      for (const listener of guideVoiceLinesListeners) listener(event);
     }
     if (event.type === "audiobook.mix") {
       for (const listener of audiobookMixListeners) listener(event);
@@ -5096,6 +5106,17 @@ export function deleteScene(worldId: string, productionId: string, sceneFile: st
  */
 export function saveBible(worldId: string, text: string, baseVersion?: number): void {
   send({ kind: "save-bible", worldId, text, ...(baseVersion !== undefined ? { baseVersion } : {}) });
+}
+
+/** One entry of the world's Guide (SPEC-059 R-4): its choices replaced whole, or cleared with null. */
+export function setGuideEntry(worldId: string, change: SetGuideEntry): void {
+  send({ kind: "set-guide-entry", worldId, change });
+}
+
+/** A character's lines to choose a voice line from (R-6): answered as `guide.voice-lines` under the id returned. */
+export function listGuideVoiceLines(worldId: string, character: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "list-guide-voice-lines", worldId, requestId, character }) ? requestId : null;
 }
 
 /** Undo, at whatever depth: v<n> returns as a new version and the ones after it stay in history. */

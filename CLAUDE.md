@@ -232,6 +232,38 @@ Implementation entry points: coordinator `src/transport.ts`; desktop `src/transp
 `src/main.ts` and `src/preload.ts`; client `dev-session-plugin.ts` and `src/lib/dev-session.ts`.
 The product-level explanation is in [the architecture guide](docs/architecture/the-program.html).
 
+## Publishing a world to Arke Player
+
+Arke Player's Available list and its `Update` come from one list of worlds, shipped in the app and
+fetched from the public ArkeStudio release `arke-player-worlds` (SPEC-058 R-29 – R-36, Player P9
+and P12). A new edition of a world is published in four steps across both repositories; the Player
+half is in ArkePlayer's CLAUDE.md and `docs/world-package.md`. **Ask the owner before any public
+upload.**
+
+1. **Export from a copy, never the live world.** Copy the world — the latest story release's import
+   (`D:\ArkeStoryPublicImport-<date>-<r>\app\worlds\<slug>`), never the author's live world or a
+   release's `source/` — to a folder on a drive with room, leaving out `exports/`. C: is often
+   nearly full here; use D:. Then run the Studio's own Export → Arke Player on it:
+
+   ```
+   ARKE_STUDIO_VERSION=<x.y.z> npx tsx scripts/export-arke-player.mts <copy> <production-id> "<…\Programs\Arke Studio\resources\ffmpeg\ffmpeg.exe>"
+   ```
+
+   It reads the package back with the shared readers before naming it
+   `exports/<slug>-player-<UTC date>.zip`. A world with a public Guide makes schema 3; one without,
+   schema 2, which every Player reads. Use the installed app's ffmpeg: winget's on PATH has crashed
+   on exports.
+2. **Check it as the Player reads it**: arke_world's `readWorldPackage`, and `pin_world` (below),
+   which refuses a package the Player would.
+3. **Upload it under its new name** to the world's public story release
+   (`gh release upload <tag> <zip> --repo michaeljosiah/ArkeStudio`). Never replace a published
+   package: phones pinned to it would refuse new bytes. Never mark a release that is not an app
+   release Latest: the Studio's updater reads Latest.
+4. **Pin it and publish the list** from ArkePlayer: `dart run arke_world:pin_world <zip> <url>`,
+   paste the pin into `apps/arke_player/assets/worlds/catalogue.json`, raise its `serial`, commit,
+   and `gh release upload arke-player-worlds apps/arke_player/assets/worlds/catalogue.json --clobber
+   --repo michaeljosiah/ArkeStudio`. Installed phones show `Update` within a day.
+
 ## Pull requests
 
 Branch, push, raise the PR, then comment `@codex review` on it. Fix every P1 and re-request until a

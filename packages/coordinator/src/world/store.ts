@@ -1194,6 +1194,7 @@ function historyDirectory(portablePath: string): string | null {
   if (kind.track === "series") return `.history/series/${kind.id}`;
   if (kind.track === "art-direction") return ".history/art-direction";
   if (kind.track === "bible") return ".history/bible";
+  if (kind.track === "guide") return ".history/guide";
   return null;
 }
 

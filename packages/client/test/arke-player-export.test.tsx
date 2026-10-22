@@ -105,6 +105,8 @@ describe("Export → Arke Player (turn 233)", () => {
     assert.match(row("Pictures"), /2 · fitted for a phone/);
     assert.match(row("Text"), /words timed in 1 of 1/);
     assert.match(row("Motion"), /None/);
+    // A world with nothing public carries no guide, and its row says so (SPEC-059 R-15, 234c).
+    assert.match(row("Guide"), /None public.*Edit/);
     assert.match(text(q('[data-testid="arke-player-estimate"]')), /^~\d+ MB · ~\d+ min on this machine/);
 
     await press([...dom.document.querySelectorAll('[role="checkbox"]')].find((el) => text(el) === "The book")!);

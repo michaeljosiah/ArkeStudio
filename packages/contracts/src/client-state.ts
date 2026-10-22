@@ -1,4 +1,5 @@
 import { AudiobookActivitySchema } from "./audiobook-activity.js";
+import { EMPTY_GUIDE_RECORD, GuideRecordSchema } from "./world-guide.js";
 import { valueSchema } from "./value-schema.js";
 import { AudioDramaRecordSchema, EpisodeScriptSchema, EpisodeTakesSchema } from "./audio-drama.js";
 import { DesignedVoiceSchema } from "./designed-voice.js";
@@ -327,6 +328,11 @@ export const WorldBundleSchema = valueSchema(z
      * the bible must still parse rather than taking a whole world down with it.
      */
     bible: WorldBibleSchema.default(EMPTY_BIBLE),
+    /**
+     * What Arke Player may show of the world (SPEC-059 R-8): `guide.json`'s choices, whole. Defaulted
+     * as the bible is, so a bundle from a build that predates the Guide still parses.
+     */
+    guide: GuideRecordSchema.default(EMPTY_GUIDE_RECORD),
     sheets: z.array(SheetSchema),
     canon: z.array(CanonEntrySchema),
     referenceKits: z.array(ReferenceKitSchema),

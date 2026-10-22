@@ -185,6 +185,8 @@ export function WorldLayout() {
     ["chat", "World Chat"],
     ["artifacts", "Artifacts"],
     ["productions", "Productions"],
+    // What Arke Player may show of the world (design turn 234): a world page, reused by every export.
+    ["guide", "Guide"],
   ] as const;
   const onSheets = /\/(cast|locations|factions|props)(\/|$)/.test(path);
   const characterGeneration = path.endsWith("/main-photo") || path.endsWith("/model-sheet");
