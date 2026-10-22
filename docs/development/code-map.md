@@ -913,3 +913,5 @@ take selection or acoustic word-timing record is changed. Tests: coordinator
 `productions/audiobook-words.test.ts`, desktop `voxa-runtime.test.ts`, client `audiobook-words.test.tsx`.
 
 Explicit same-file audiobook picture choices preserve the existing generation look/shot, focus and motion, and may record a separate current-look review (SPEC-047 R-98/R-103, #2125). `setAudiobookPicture` fences source/selection/look freshness; `pictureLookChanged` applies that review consistently in the existing picker and illustrated EPUB preflight. `writeAudiobook` raises reader boundary105 before the first review field.
+
+Audio-only story publication fingerprints exclude chapter pictures, look/own-look choices and their shared update timestamp; all other narration fields and the existing resolved blocks/mix/arrangement, text, metadata, rights and media identities remain checked in `publications/story-review.ts` (#2122, SPEC-048 section2.11). Illustrated outputs retain picture dependencies; coherent capture and immutable ready-edition verification are unchanged.

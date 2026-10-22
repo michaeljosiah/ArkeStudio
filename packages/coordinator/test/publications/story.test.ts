@@ -486,3 +486,77 @@ it("writes a real stereo AAC M4B from mixed arranged and legacy chapters, with a
     await writeFile(join(process.env.ARKE_STORY_SMOKE_OUTPUT, "ffprobe.json"), JSON.stringify(info, null, 2));
   }
 });
+
+
+/** Deterministic encoder seam: source capture/mixing/Create run normally, with no external codec. */
+function previewAudioService(root: string) {
+  let duration = 0;
+  return new StoryPublicationService(root, {
+    ffmpeg: { slateFont: "", run: async args => {
+      const metadata = await readFile(args.find(arg => /[\\/]metadata\.txt$/.test(arg))!, "utf8");
+      duration = Math.max(...[...metadata.matchAll(/^END=(\d+)$/gm)].map(match => Number(match[1]) / 1000));
+      await writeFile(args.at(-1)!, "verified fixture audiobook");
+    } },
+    probe: { durationSec: async () => duration, info: async () => ({ durationSec: duration, hasAudio: true }) },
+  });
+}
+
+describe("audio-only publication dependencies (#2122)", () => {
+  for (const operation of ["choose", "remove", "look", "arranged choose"] as const) it("creates the captured M4B after unrelated picture " + operation, async () => {
+    const h = await setup(); const { plan } = await narrate(h);
+    const { setAudiobookPicture } = await import("../../src/productions/audiobook-listening.js");
+    const { updateAudiobook } = await import("../../src/productions/audiobook.js");
+    if (operation === "remove") await setAudiobookPicture(h.store, h.productionId, h.chapter.file, "p0.0", { file: "world-art.png", source: "world" });
+    if (operation === "arranged choose") {
+      const { openAudioStudio, editAudioStudio } = await import("../../src/productions/audio-studio.js");
+      const opened = await openAudioStudio(h.store, h.productionId, h.chapter.id);
+      await editAudioStudio(h.store, h.productionId, h.chapter.id, opened.base, { kind: "commands", label: "Set level", commands: [{ kind: "set-clip", id: opened.state.clips[0]!.id, changes: { gainDb: -3 } }] });
+    }
+    const service = previewAudioService(h.root), settings: StoryPublicationSettings = { ...h.settings, outputs: ["m4b"], includeIllustrations: false };
+    const review = await service.review(h.store, h.productionId, settings);
+    const preview = await service.preview(h.store, h.productionId, settings, review.fingerprint, () => {});
+    assert.equal(preview.status, "preview", preview.error);
+    const bytes = await readFile((await service.previewMedia(preview.id, "story.m4b"))!.path);
+    if (operation === "look") await updateAudiobook(h.store, h.productionId, plan.chapter, record => ({ ...record, updatedAt: "2027-01-01T00:00:00Z", look: { chapterHash: "h", at: "2027-01-01T00:00:00Z", characters: {}, place: { text: "Harbour at dusk." } }, ownLooks: { "p0.0": { maren: "main-photo" } } }));
+    else await setAudiobookPicture(h.store, h.productionId, h.chapter.file, "p0.0", operation === "remove" ? null : { file: "world-art.png", source: "world" });
+    assert.equal((await service.review(h.store, h.productionId, settings)).fingerprint, review.fingerprint);
+    assert.equal((await service.create(h.store, h.productionId, preview.id)).status, "ready");
+    assert.deepEqual(await readFile((await service.serve(preview.id, "story.m4b"))!.path), bytes);
+  });
+
+  it("still refuses a changed narrative image when the edition includes illustrations", async () => {
+    const h = await setup(); await narrate(h);
+    const { setAudiobookPicture } = await import("../../src/productions/audiobook-listening.js");
+    await setAudiobookPicture(h.store, h.productionId, h.chapter.file, "p0.0", { file: "world-art.png", source: "world" });
+    const service = previewAudioService(h.root), settings: StoryPublicationSettings = { ...h.settings, outputs: ["epub", "m4b"], includeIllustrations: true };
+    const review = await service.review(h.store, h.productionId, settings);
+    const preview = await service.preview(h.store, h.productionId, settings, review.fingerprint, () => {});
+    assert.equal(preview.status, "preview", preview.error);
+    await setAudiobookPicture(h.store, h.productionId, h.chapter.file, "p0.0", null);
+    await assert.rejects(service.create(h.store, h.productionId, preview.id), /source changed/);
+  });
+
+  for (const change of ["selected take", "timing", "text", "cover", "rights", "flag"] as const) it("still refuses Create after a changed " + change, async () => {
+    const h = await setup(); const { plan, takes } = await narrate(h);
+    const service = previewAudioService(h.root), settings: StoryPublicationSettings = { ...h.settings, outputs: ["m4b"], cover: "world-art.png", includeIllustrations: false };
+    const review = await service.review(h.store, h.productionId, settings);
+    const preview = await service.preview(h.store, h.productionId, settings, review.fingerprint, () => {});
+    assert.equal(preview.status, "preview", preview.error);
+    const { updateAudiobook } = await import("../../src/productions/audiobook.js");
+    if (change === "selected take") await updateAudiobook(h.store, h.productionId, plan.chapter, record => ({ ...record, takes: { ...record.takes, "p0.0": { ...record.takes["p0.0"]!, artifactId: takes.title!.artifactId } } }));
+    if (change === "flag") await updateAudiobook(h.store, h.productionId, plan.chapter, record => ({ ...record, flags: { ...record.flags, "p0.0": { at: "2027-01-01T00:00:00Z", reason: "Needs listening review" } } }));
+    if (change === "timing") {
+      const { setBlockTiming } = await import("../../src/productions/audiobook-timing.js");
+      const { DEFAULT_NARRATOR } = await import("@arke-studio/contracts");
+      await setBlockTiming(h.store, h.productionId, h.chapter.file, "p0.0", { start: 1 }, DEFAULT_NARRATOR);
+    }
+    if (change === "text") { const current = await openChapter(h.store, h.productionId, h.chapter.id); await new ProseAuthoringService(h.store).save(h.productionId, h.chapter.file, "Changed narration.", { baseHash: current.hash }); }
+    if (change === "cover") { const { encodePng, solidImage } = await import("../../src/references/png.js"); await writeFile(join(h.dir, "world-art.png"), encodePng(solidImage(4, 4, [255, 0, 0, 255]))); }
+    if (change === "rights") {
+      const { appendAudioRights } = await import("../../src/audio/rights.js");
+      await appendAudioRights(h.store, { schemaVersion: 1, action: "acknowledge", audioHash: "sha256:" + "a".repeat(64), id: "new-clearance", basis: "self", scopes: ["recorded-take"], statementVersion: 1, at: "2027-01-01T00:00:00Z" });
+    }
+    await assert.rejects(service.create(h.store, h.productionId, preview.id), /source changed/);
+    assert.equal(await service.serve(preview.id, "story.m4b"), null);
+  });
+});
