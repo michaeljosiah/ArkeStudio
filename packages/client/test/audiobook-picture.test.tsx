@@ -955,3 +955,29 @@ describe("picture block opener (issue 1688)", () => {
     assert.equal(selected.length, 2, "play does not open the block");
   });
 });
+
+
+describe("unpictured block opener (issue 1688)", () => {
+  for (const state of ["made", "not made"] as const) it(`opens a ${state} row through its named button without wrapping playback or prose`, async () => {
+    const m = await mount(1);
+    const selected: string[] = [], played: string[] = [], focused: string[] = [];
+    await act(async () => m.root.render(<AudiobookBlocks rows={rows.map(row => ({ ...row, state }))} sounding={null} selected={null}
+      onSelect={key => selected.push(key)} onPlayOne={row => played.push(row.block.key)} slug="the-undersong" />));
+    const opener = q(m, '[data-block="p0.0"] .fy-ab__open')!;
+    assert.equal(opener.tagName, "BUTTON");
+    assert.equal(opener.getAttribute("type"), "button");
+    assert.equal(opener.getAttribute("aria-label"), "Open block 2");
+    assert.equal(opener.textContent, "", "quiet rows gain no permanent label or glyph");
+    assert.equal(opener.querySelector("button, .fy-ab__text"), null, "prose and actions remain siblings");
+    opener.focus = () => { focused.push("p0.0"); };
+    await press(opener);
+    await press(q(m, '[data-block="p0.0"] .fy-ab__text'));
+    assert.deepEqual(selected, ["p0.0", "p0.0"]);
+    assert.deepEqual(focused, ["p0.0", "p0.0"], "both entry paths capture the same return target");
+    if (state === "made") {
+      await press(q(m, '[data-block="p0.0"] .fy-ab__rowplay'));
+      assert.deepEqual(played, ["p0.0"]);
+      assert.equal(selected.length, 2, "play does not select the block");
+    }
+  });
+});
