@@ -262,11 +262,17 @@
 /* The world's Bench below desktop. Its four bands (46 rail, 410 composer, the wall, a 104 strip)
    are fixed widths, so at 820 the take had 230 px between the composer and the strip and at 390
    the composer ran 410 px off the right edge. */
+/* Every flex ancestor must shrink before the session's existing ellipsis can apply. */
+.fy-bench__crumb { flex: 0 1 auto; min-width: 0; }
+.fy-bench__crumb > span { min-width: 0; }
+.fy-bench__session { min-width: 0; max-width: 100%; }
+.fy-bench__session svg { flex: none; }
 .fy-bench__sessiontitle { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 @media (min-width: 600px) {
-  /* The brand is centred on the window. Bound this side by its half-width and the native
+  /* The brand is centred on the window. Bound both sides by its half-width and the native
      caption reservation; only context pills may shrink, never the app controls (issue 1971). */
-  [data-screen="bench"] .fy-titlebar__side--right { max-width: calc(50% - 48px); }
+  [data-screen="bench"] .fy-titlebar__side:first-child { max-width: 50%; }
+  [data-screen="bench"] .fy-titlebar__side--right { max-width: calc(50% - 48px); margin-left: auto; }
   .is-desktop [data-screen="bench"] .fy-titlebar__side--right { max-width: calc(50% - 186px); }
   [data-screen="bench"] .fy-titlebar__side--right > button { flex: none; white-space: nowrap; }
   [data-screen="bench"] .fy-bench__pill { min-width: 0; }
@@ -314,9 +320,7 @@
   [data-screen="bench"] .fy-titlebar__side:first-child { flex-wrap: nowrap; }
   [data-screen="bench"] .fy-titlebar .fy-iconbtn--wide { flex: none; width: 44px; height: 44px; padding: 0; justify-content: center; font-size: 0; }
   [data-screen="bench"] .fy-titlebar .fy-iconbtn--wide > svg { width: 20px; height: 20px; }
-  .fy-bench__crumb { flex: 0 1 auto; min-width: 0; }
-  .fy-bench__crumb > span { min-width: 0; }
   .fy-bench__crumbsep { display: none; }
-  .fy-bench__session { min-width: 0; max-width: 100%; min-height: 44px; font-size: var(--text-sm); }
+  .fy-bench__session { min-height: 44px; font-size: var(--text-sm); }
   .fy-bench__sessionmenu { position: fixed; top: calc(52px + env(safe-area-inset-top, 0px)); left: 12px; right: 12px; min-width: 0; }
 }

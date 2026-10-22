@@ -1478,6 +1478,7 @@ function BenchWorkspace({
               <button
                 type="button"
                 className="fy-bench__session"
+                title={sessionTitle}
                 aria-expanded={sessionsOpen}
                 onClick={() => setSessionsOpen((v) => !v)}
               >

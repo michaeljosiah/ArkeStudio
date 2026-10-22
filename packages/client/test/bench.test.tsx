@@ -136,6 +136,18 @@ describe("the bench screen (issue 305 §3)", () => {
     assert.equal(document.querySelector('[data-testid="bench-generate"]')?.hasAttribute('disabled'), true);
   });
 
+  it("keeps a long standalone session name whole for reading and hover (#1971)", () => {
+    const state = stateWithBench();
+    const title = "The harbour records — " + "unbroken_reference_".repeat(12);
+    state.bench!.session!.title = title;
+    const { document } = parseHTML(`<html><body>${renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, state)}</body></html>`);
+    const button = document.querySelector("button.fy-bench__session");
+    assert.equal(button?.textContent, title);
+    assert.equal(button?.getAttribute("title"), title);
+    assert.equal(button?.getAttribute("aria-expanded"), "false");
+    assert.equal(button?.hasAttribute("disabled"), false);
+  });
+
   it("keeps included-plan funding visible on a saved image take", () => {
     const state = stateWithBench();
     state.bench!.session!.takes[0]!.cost = { estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "included-plan" };
