@@ -7,9 +7,13 @@ import { setImmediate as nextTurn } from "node:timers/promises";
 import { it } from "node:test";
 import type { ClientMessage, DomainEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
-import { UNDERSONG_RELEASE } from "../../src/world/undersong-release.js";
+import type { StoryDownload } from "../../src/world/story-download.js";
 import { tempDir } from "../tmp.js";
 import { FIXTURE_WORLD } from "../world/helpers.js";
+
+// Small transfer fixtures must not inherit the live release's transport layout or size.
+const TEST_RELEASE: StoryDownload = { url: "https://github.com/owner/repo/releases/download/test/story.zip", bytes: 100,
+  unpackedBytes: 100, sha256: "0".repeat(64), version: "test", summary: "Transport fixture" };
 
 it("overlapping install commands admit only one copy", async t => {
   const root = await tempDir("story-admission-");
@@ -38,7 +42,7 @@ it("overlapping install commands admit only one copy", async t => {
 
 it("the public cancel command retains a prefix across coordinator restart and explicit removal", async t => {
   const root = await tempDir("story-cancel-");
-  const release = { ...UNDERSONG_RELEASE, bytes: 100, unpackedBytes: 100 };
+  const release = TEST_RELEASE;
   t.mock.method(globalThis, "fetch", async () => new Response(new ReadableStream({ start(c) { c.enqueue(new Uint8Array(50)); } })));
   let installs = 0;
   const options = { adapter: null, appRoot: root, appVersion: "test", changeLogPath: join(root, "changes.jsonl"), sampleWorldDownload: release,
@@ -78,7 +82,7 @@ it("shutdown aborts a story download, cleans scratch and never installs it", asy
   });
   const events: DomainEvent[] = [];
   const coordinator = new Coordinator({ adapter: null, appRoot: root, appVersion: "test",
-    changeLogPath: join(root, "changes.jsonl"), sampleWorldDownload: { ...UNDERSONG_RELEASE, bytes: 1, unpackedBytes: 1 }, observeEvent: e => events.push(e),
+    changeLogPath: join(root, "changes.jsonl"), sampleWorldDownload: { ...TEST_RELEASE, bytes: 1, unpackedBytes: 1 }, observeEvent: e => events.push(e),
     provider: { async listWorlds() { return []; }, async loadWorld() { throw Error("unused"); },
       async installSampleWorld() { installs++; throw Error("must not install"); } } });
   t.after(() => coordinator.stop());
@@ -96,7 +100,7 @@ it("retries a failed independent copy without downloading the verified archive a
   const zip = new ZipFile(), chunks: Buffer[] = [];
   const collect = (async () => { for await (const chunk of zip.outputStream) chunks.push(Buffer.from(chunk)); })();
   zip.addBuffer(world, "world.json"); zip.end(); await collect;
-  const data = Buffer.concat(chunks), release = { ...UNDERSONG_RELEASE, bytes: data.length, unpackedBytes: world.length, sha256: createHash("sha256").update(data).digest("hex") };
+  const data = Buffer.concat(chunks), release = { ...TEST_RELEASE, bytes: data.length, unpackedBytes: world.length, sha256: createHash("sha256").update(data).digest("hex") };
   let requests = 0, installs = 0;
   t.mock.method(globalThis, "fetch", async () => { requests++; return new Response(new Uint8Array(data)); });
   const coordinator = new Coordinator({ adapter: null, appRoot: root, appVersion: "test", changeLogPath: join(root, "changes.jsonl"), sampleWorldDownload: release,

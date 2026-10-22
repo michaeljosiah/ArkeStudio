@@ -20,10 +20,31 @@ The illustration corrections do not change its narration.
 
 These are immutable standalone files created through Arke Publish. They do not update an
 installed world or the earlier editable-world archive. The older original-quality EPUB
-predates the latest 24 illustration corrections. Full-book listening qualification,
-physical-device import, the updated editable-world package and the video episode remain
-unfinished. The [story release](https://github.com/michaeljosiah/ArkeStudio/releases/tag/undersong-2026-10-19-r3)
-keeps current download links and the scope of each historical edition.
+predates the latest 24 illustration corrections. Full-book listening qualification and
+physical-device import remain pending. Video work is paused unfinished at the owner's request.
+The [standalone-edition release](https://github.com/michaeljosiah/ArkeStudio/releases/tag/undersong-2026-10-19-r3)
+keeps their download links and the scope of each historical edition.
+
+## Refreshed editable world
+
+The [2026-10-22-r1 world release](https://github.com/michaeljosiah/ArkeStudio/releases/tag/undersong-2026-10-22-r1)
+contains the revised 23-chapter novel, 290 selected illustrations and 290 single-narrator
+Gemini performances, 21 location sheets with 26 accepted views, cast and prop references,
+retained generated media and scoped authored history. It includes the reviewed reading EPUB,
+23-marker M4B and a current portable player with 23 joined-AAC chapters and 290 picture placements.
+Historical exports and unselected trials are retained without making them current selections.
+
+The logical ZIP is 5,157,822,882 bytes, SHA-256
+`4c7d77e402825dc4fda536379d455977b43d9113b3835021584767c7f09d1d3a`,
+expanding to 5,483,399,755 bytes across 3,336 files. Five ordered transport parts carry it:
+four 1 GiB parts and an 862,855,586-byte final part. The pinned descriptor is consumed
+by Arke's on-demand installer; individual parts are not standalone ZIPs. Older application
+builds keep their earlier release pin until updated, and an existing installed world is preserved.
+
+Full listening qualification remains pending. The 117-second pilot is paused unfinished:
+four of 15 picture shots are accepted, covering 27 seconds. It needs the remaining picture
+coverage, dialogue/editorial qualification and reconciliation with revised chapter-one prose.
+The frozen archive says unfinished; its release notes additionally record the owner's pause.
 
 ## On-demand world installation
 
