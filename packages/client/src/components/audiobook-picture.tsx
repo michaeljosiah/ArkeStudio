@@ -114,12 +114,12 @@ export function pictureStart(picture: Pick<PictureSpan, "at" | "estimated">): st
 }
 
 /** The margin's chip (186c): the picture, and when it starts. */
-export function PictureChip({ slug, picture }: { slug: string; picture: PictureSpan }) {
+export function PictureChip({ slug, picture, label }: { slug: string; picture: PictureSpan; label: string }) {
   return (
-    <span className={cx("fy-ab__picchip", picture.short && "fy-ab__picchip--short")} data-testid="audiobook-picture-chip" title={picture.short ? "under 20 s" : undefined}>
+    <button type="button" aria-label={label} className={cx("fy-ab__picchip", picture.short && "fy-ab__picchip--short")} data-testid="audiobook-picture-chip" title={picture.short ? "under 20 s" : undefined}>
       <img src={mediaUrl(slug, picture.file)} alt="" />
       {pictureStart(picture)}
-    </span>
+    </button>
   );
 }
 

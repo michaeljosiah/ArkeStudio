@@ -933,3 +933,25 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.ok(q(m, '[aria-label="Picture from"]'));
   });
 });
+
+
+describe("picture block opener (issue 1688)", () => {
+  it("names the existing chip as a native button beside independent playback", async () => {
+    const m = await mount(1, { "p0.0": picture(1, "artifacts/harbour-upload.png") });
+    const chip = q(m, '[data-block="p0.0"] [data-testid="audiobook-picture-chip"]')!;
+    assert.equal(chip.tagName, "BUTTON");
+    assert.equal(chip.getAttribute("type"), "button");
+    assert.equal(chip.getAttribute("aria-label"), "Open block 2");
+    assert.equal(chip.querySelector("button"), null);
+    const played: string[] = [], selected: string[] = [];
+    await act(async () => m.root.render(<AudiobookBlocks rows={rows} sounding={null} selected={null}
+      onSelect={key => selected.push(key)} onPlayOne={row => played.push(row.block.key)} slug="the-undersong"
+      pictures={{ byKey: new Map([["p0.0", { file: "artifacts/harbour-upload.png", index: 1, at: 4, seconds: 80, short: false, until: null, estimated: false, entry: picture(1, "artifacts/harbour-upload.png") }]]), estimated: false }} />));
+    await press(q(m, '[data-block="p0.0"] [data-testid="audiobook-picture-chip"]'));
+    await press(q(m, '[data-block="p0.0"] .fy-ab__text'));
+    assert.deepEqual(selected, ["p0.0", "p0.0"], "chip and text click select exactly once each");
+    await press(q(m, '[data-block="p0.0"] .fy-ab__rowplay'));
+    assert.deepEqual(played, ["p0.0"]);
+    assert.equal(selected.length, 2, "play does not open the block");
+  });
+});

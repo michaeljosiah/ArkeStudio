@@ -1411,6 +1411,12 @@ export function ChapterWorkspace({
   const [performer, setPerformer] = useState<string | null>(null);
   const [narratorOpen, setNarratorOpen] = useState(false);
   const audiobookColumn = useRef<HTMLDivElement | null>(null);
+  const blockOpener = useRef<HTMLElement | null>(null);
+  const closeBlock = () => {
+    audiobook.setSelected(null);
+    // The modal sheet restores its own opener; the inline panel has no modal focus lifecycle.
+    if (!blockSheet && blockOpener.current?.isConnected) blockOpener.current.focus({ preventScroll: true });
+  };
   audiobookResume.current = audiobook.resume;
   const directionStands = audiobook.directedBlocks > 0;
   const worldSlug = world.meta.slug;
@@ -3566,7 +3572,10 @@ export function ChapterWorkspace({
                   sounding={audiobook.sounding}
                   selected={audiobook.selected}
                   onSelectionChange={setBlockSelection}
-                  onSelect={audiobook.setSelected}
+                  onSelect={(key) => {
+                    blockOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+                    audiobook.setSelected(key);
+                  }}
                   slug={worldSlug}
                   pictures={chapterPictures}
                   // Join and Split on hover (design turn 198); none while a read runs.
@@ -3992,7 +4001,7 @@ export function ChapterWorkspace({
           {/* The block's panel (design turn 194, rules 11 and 12): its head, then Picture, Voice and Timing as tabs.
               Raised as a sheet, the panel's head is the sheet's (194h): one title, one close. */}
           {view === "audiobook" && (
-            <ResponsiveSheet sheet={blockSheet} open={audiobook.selected !== null} title={panelHead?.title ?? "Block"} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet" headless={panelHead !== null}>
+            <ResponsiveSheet sheet={blockSheet} open={audiobook.selected !== null} title={panelHead?.title ?? "Block"} onClose={closeBlock} className="fy-chapter-block-sheet" headless={panelHead !== null} preserveReturnFocus>
               <aside className="fy-ch__side fy-ch__block-side">
                 {pictureRow !== null && panelHead !== null && (
                   <BlockPanel
@@ -4005,7 +4014,7 @@ export function ChapterWorkspace({
                       ...(shownPicture !== undefined ? { picture: pictureStart(shownPicture) } : {}),
                       ...(panelTakes > 0 ? { voice: `v${panelTakes}` } : {}),
                     }}
-                    onClose={() => audiobook.setSelected(null)}
+                    onClose={closeBlock}
                   >
                     {{
                       picture: <BlockPicturePanel worldId={worldId} production={production} chapterFile={chapter.file} chapterOrder={chapter.order} row={pictureRow} rows={audiobook.rows} pictures={chapterPictures} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} />,
