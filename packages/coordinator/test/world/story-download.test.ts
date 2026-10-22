@@ -234,3 +234,105 @@ it("reports invalid retained data for removal without counting it toward the dow
   await discardStoryDownload(source, root);
   assert.equal((await inspectStoryDownload(source, root)).hasRetainedData, false);
 });
+
+async function multipartArchive() {
+  const { source: single, data } = await archive();
+  const size = Math.ceil(data.length / 3), buffers = [data.subarray(0, size), data.subarray(size, size * 2), data.subarray(size * 2)] as const;
+  const { url, ...metadata } = single;
+  const source: StoryDownload & { parts: NonNullable<StoryDownload["parts"]> } = { ...metadata, parts: buffers.map((b, i) => ({
+    url: `${url}.part-${i + 1}`, bytes: b.length, sha256: createHash("sha256").update(b).digest("hex"),
+  })) };
+  const calls: Array<{ part: number; offset: number }> = [];
+  const fetcher: typeof fetch = async (url, init) => {
+    const part = source.parts.findIndex(p => p.url === String(url));
+    const bytes = buffers[part]; assert.ok(bytes);
+    const range = new Headers(init?.headers).get("range"), offset = range ? Number(range.match(/^bytes=(\d+)-$/)![1]) : 0;
+    calls.push({ part, offset });
+    return new Response(new Uint8Array(bytes.subarray(offset)), { status: offset ? 206 : 200, headers: {
+      "content-length": String(bytes.length - offset),
+      ...(offset ? { "content-range": `bytes ${offset}-${bytes.length - 1}/${bytes.length}` } : {}),
+    } });
+  };
+  return { source, data, buffers, calls, fetcher };
+}
+
+for (const position of ["empty", "boundary", "partial", "complete"] as const) it(`resumes ordered story parts from a ${position} cache with aggregate progress and space`, async () => {
+  const { source, data, buffers, calls, fetcher } = await multipartArchive(), root = await tempDir("story-parts-");
+  const retained = position === "empty" ? 0 : position === "boundary" ? buffers[0].length : position === "partial" ? buffers[0].length + 7 : data.length;
+  if (retained) await writeFile(join(root, `story-${source.sha256}.part`), data.subarray(0, retained));
+  assert.equal((await inspectStoryDownload(source, root)).requiredBytes, source.bytes - retained + source.unpackedBytes * 2 + 64 * 1024 * 1024);
+  const progress: string[] = [];
+  const result = await downloadStory(source, root, { signal: new AbortController().signal, fetch: fetcher, progress: p => progress.push(p) });
+  assert.deepEqual(calls, position === "complete" ? [] : position === "empty" ? [{ part: 0, offset: 0 }, { part: 1, offset: 0 }, { part: 2, offset: 0 }] : [{ part: 1, offset: position === "partial" ? 7 : 0 }, { part: 2, offset: 0 }]);
+  assert.deepEqual(await readFile(join(result.directory, "world.json")), await readFile(join(FIXTURE_WORLD, "world.json")));
+  if (position !== "complete") assert.ok(progress.includes("Downloading The Undersong… 100%"));
+  await result.dispose(); assert.deepEqual(await readdir(root), []);
+});
+
+it("replaces only the resumed part when the release host ignores Range", async () => {
+  const { source, data, buffers, fetcher } = await multipartArchive(), root = await tempDir("story-part-no-range-");
+  await writeFile(join(root, `story-${source.sha256}.part`), data.subarray(0, buffers[0].length + 7));
+  const request: typeof fetch = async (url, init) => {
+    if (String(url) === source.parts[1]!.url) { assert.equal(new Headers(init?.headers).get("range"), "bytes=7-"); return new Response(new Uint8Array(buffers[1])); }
+    return fetcher(url, init);
+  };
+  const result = await downloadStory(source, root, { signal: new AbortController().signal, fetch: request });
+  await result.dispose(); assert.deepEqual(await readdir(root), []);
+});
+
+for (const mismatch of ["cached-part", "received-part", "whole-digest", "oversized-part", "range", "redirect"] as const) it(`discards a multipart archive with invalid ${mismatch}`, async () => {
+  const { source, data, buffers, fetcher } = await multipartArchive(), root = await tempDir("story-part-invalid-");
+  if (mismatch === "whole-digest") source.sha256 = "0".repeat(64);
+  if (mismatch === "cached-part") await writeFile(join(root, `story-${source.sha256}.part`), Buffer.alloc(buffers[0].length));
+  if (mismatch === "range") await writeFile(join(root, `story-${source.sha256}.part`), data.subarray(0, buffers[0].length + 7));
+  let calls = 0;
+  const request: typeof fetch = async (url, init) => {
+    calls++;
+    if (mismatch === "received-part") return new Response(new Uint8Array(Buffer.alloc(buffers[0].length)));
+    if (mismatch === "oversized-part") return new Response(new Uint8Array(Buffer.alloc(buffers[0].length + 1)));
+    if (mismatch === "range") return new Response(new Uint8Array(buffers[1].subarray(7)), { status: 206, headers: { "content-range": `bytes ${buffers[0].length + 7}-${data.length - 1}/${data.length}` } });
+    if (mismatch === "redirect") return new Response(null, { status: 302, headers: { location: "https://evil.example/part" } });
+    return fetcher(url, init);
+  };
+  await assert.rejects(downloadStory(source, root, { signal: new AbortController().signal, fetch: request }), /integrity|size|range|release host/);
+  if (mismatch === "cached-part") assert.equal(calls, 0, "verify completed cached parts before spending another request");
+  assert.deepEqual(await readdir(root), []);
+});
+
+for (const interruption of ["short", "cancel", "network"] as const) it(`retains and resumes a ${interruption} second part without redownloading the first`, async () => {
+  const { source, data, buffers, fetcher, calls } = await multipartArchive(), root = await tempDir("story-part-interrupted-");
+  const control = new AbortController(), file = join(root, `story-${source.sha256}.part`);
+  let stream!: ReadableStreamDefaultController<Uint8Array>;
+  const request: typeof fetch = async (url, init) => {
+    if (String(url) !== source.parts[1]!.url) return fetcher(url, init);
+    return new Response(new ReadableStream({ start(c) { stream = c; c.enqueue(new Uint8Array(buffers[1].subarray(0, 7))); if (interruption === "short") c.close(); } }));
+  };
+  const failed = assert.rejects(downloadStory(source, root, { signal: control.signal, fetch: request }));
+  const retained = buffers[0].length + 7;
+  for (let i = 0; i < 1000 && (await stat(file).catch(() => null))?.size !== retained; i++) await nextTurn();
+  assert.equal((await stat(file)).size, retained);
+  if (interruption === "cancel") control.abort();
+  if (interruption === "network") stream.error(new Error("connection lost"));
+  await failed;
+  assert.deepEqual(await readFile(file), data.subarray(0, retained));
+  calls.length = 0;
+  const result = await downloadStory(source, root, { signal: new AbortController().signal, fetch: fetcher });
+  assert.deepEqual(calls, [{ part: 1, offset: 7 }, { part: 2, offset: 0 }]);
+  await result.dispose();
+});
+
+it("validates every pinned part before creating scratch or making requests", async () => {
+  const { source } = await multipartArchive(), root = await tempDir("story-part-metadata-");
+  const bad = [
+    { parts: [] }, { parts: null }, { parts: Array(1001).fill(source.parts[0]) }, { url: source.parts[0]!.url },
+    ...[0, -1, 1.5, 1024 ** 3 + 1, Number.MAX_SAFE_INTEGER].map(bytes => ({ parts: [{ ...source.parts[0], bytes }] })),
+    { parts: source.parts.slice(1) },
+    ...["http://github.com/part", "https://evil.example/part", "https://user:secret@github.com/part"].map(url => ({ parts: [...source.parts.slice(0, 2), { ...source.parts[2], url }] })),
+    { parts: [{ ...source.parts[0], sha256: "invalid" }, ...source.parts.slice(1)] },
+  ];
+  for (const change of bad) {
+    let called = false;
+    await assert.rejects(downloadStory({ ...source, ...change } as StoryDownload, root, { signal: new AbortController().signal, fetch: async () => { called = true; throw Error("unexpected request"); } }));
+    assert.equal(called, false); assert.deepEqual(await readdir(root), []);
+  }
+});

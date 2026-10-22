@@ -39,11 +39,21 @@ remaining archive, extraction, an independent installed copy and a 64 MiB margin
 Cancel download stops only this transfer or extraction. Cancellation, shutdown and network
 interruption retain a nonempty archive prefix under its pinned SHA-256 in the app's downloads
 folder; extraction scratch is removed. Resume survives restarting Arke and requests exactly
-the remaining range. If the host ignores Range, the archive is replaced from the beginning.
+the remaining range. If the host ignores Range, the current transport file is replaced from
+its beginning; already verified preceding parts remain intact.
 Every attempt hashes the entire completed archive before extracting it; invalid ranges,
 sizes, digests or archive contents discard the cache. A different release never uses its
 predecessor's bytes. Remove downloaded data deletes only the selected release's cache, not
 installed worlds or other files. Invalid or empty retained files can also be removed there.
+
+A pinned descriptor may supply either the existing single `url` or ordered `parts`, each with
+an HTTPS `url`, exact `bytes` and `sha256`. Parts are contiguous slices of one logical ZIP,
+not separate ZIPs; each is at most 1 GiB, with at most 1,000 parts. Their sizes must sum to the
+unchanged whole-archive `bytes`. The downloader appends them sequentially into the same cache,
+verifies each complete part (including retained parts), then checks the whole ZIP's SHA-256
+before extraction. Resumed ranges are relative to the interrupted part. Progress and required
+disk space use total archive bytes; no second concatenation copy or per-part installation is
+needed. Parts have the same release-host and redirect restrictions as a single download.
 
 Install, cancel, resume, remove and refresh remain host-only commands. Once independent
 installation starts, Cancel is withdrawn and the copy drains before shutdown. Successful
@@ -64,17 +74,27 @@ attempt. Retry still rehashes it before extraction and installation, without ano
    follows artifact references, binds configured prop artwork through native domain operations,
    scans the isolated copy, and emits a ZIP, file inventory and release digest. It never edits
    the live world. Use a volume with room for the source copy, archive and installation checks.
+   For an archive exceeding the release host's per-asset limit, set `partBytes: 1073741824`.
+   This additionally emits ordered `.part-001`, `.part-002`, … transport files and their sizes
+   and hashes in `release.json`, leaving the ZIP unchanged. Allow space for both the ZIP and
+   its transport parts during packaging. Existing part files are never overwritten; a failed
+   packaging run is not a publishable release.
 3. Inspect the inventory and text files for private paths, credentials or unrelated content.
    Verify all images, exported players and referenced media. Test the resulting archive through
    `downloadStory` and `installSampleWorld` in an isolated app root; reopen and scan the copy.
-4. Publish the archive under a unique **non-`v*`** GitHub release tag, with `--latest=false`.
+4. Publish the archive, or every ordered transport part, under a unique **non-`v*`** GitHub
+   release tag, with `--latest=false`.
    This prevents triggering the application release workflow or replacing the app-update feed.
    Include completion status and SHA-256 in release notes; never replace a published archive.
-5. Update the pinned descriptor with the exact URL, hash and compressed/expanded byte counts.
-   Verify an unauthenticated download from that URL through the production downloader.
+5. Update the pinned descriptor with the exact URL (or ordered part URLs, sizes and hashes),
+   whole-archive hash and compressed/expanded byte counts. Map the emitted part filenames to
+   the immutable release URLs without changing their order. Verify unauthenticated download,
+   interruption/resume and installation through the production downloader.
 6. Run focused download/install tests, then the normal code gates and Windows/Linux CI.
    Merge the implementation and ship an application release before claiming installed clients
-   have the new flow. The ZIP can also be extracted and opened as a normal world in Arke.
+   have the new flow. The ZIP can also be extracted and opened as a normal world in Arke;
+   transport parts must first be concatenated in descriptor order and checked against the
+   whole-archive size and SHA-256.
 
 The 2026-10-19 delivery contains a novel and its illustrations, six completed audiobook
 chapter exports, and an unfinished pilot plan with stills. It does **not** contain a complete
