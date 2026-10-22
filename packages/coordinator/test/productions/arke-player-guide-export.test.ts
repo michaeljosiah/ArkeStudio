@@ -124,7 +124,21 @@ describe("a world's guide alone (SPEC-059 R-10)", () => {
         await setGuideEntry(store, { entryKind: "lore", id: "CANON-001", entry: { public: true } }, "editor");
       });
       const result = await exportGuideAlone(store, { clock: CLOCK, ffmpeg, exportId: exportId(5), studioVersion: "test" });
-      assert.deepEqual(result, { ok: false, blockers: ["the Guide changed while the package was made · make it again"] });
+      assert.deepEqual(result, { ok: false, blockers: ["the world or its Guide changed while the package was made · make it again"] });
+      assert.deepEqual(await readdir(join(dir, "exports")).catch(() => []), []);
+    }));
+
+  it("is refused when the world is renamed while it is made (codex on PR 2157)", () =>
+    withStore(async (store, dir) => {
+      await makePublic(store);
+      let renamed = false;
+      const ffmpeg = makingFfmpeg(async () => {
+        if (renamed) return;
+        renamed = true;
+        await store.renameWorld("The Undersong, Revised", "editor");
+      });
+      const result = await exportGuideAlone(store, { clock: CLOCK, ffmpeg, exportId: exportId(6), studioVersion: "test" });
+      assert.deepEqual(result, { ok: false, blockers: ["the world or its Guide changed while the package was made · make it again"] });
       assert.deepEqual(await readdir(join(dir, "exports")).catch(() => []), []);
     }));
 });

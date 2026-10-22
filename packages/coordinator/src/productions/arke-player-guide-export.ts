@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { packageSlug, WORLD_PACKAGE_FORMAT, type WorldAsset } from "@arke-studio/contracts";
+import { packageSlug, WORLD_PACKAGE_FORMAT, type GuideDocument, type WorldAsset } from "@arke-studio/contracts";
 import { fitReadingImage, pngHasAlpha } from "../references/reading-image.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import { toExtendedLength } from "../world/paths.js";
@@ -51,7 +51,10 @@ export async function exportGuideAlone(store: WorldStore, options: GuideAloneOpt
   const drafted = await guideDraft(store, undefined, signal);
   if (drafted === null) return { ok: false, blockers: ["nothing in the Guide is public"] };
   const keyArt = bundle.keyArt ?? null;
-  const madeFrom = () => JSON.stringify({ guide: drafted.document, world: [bundle.meta.name, bundle.meta.logline ?? null, keyArt] });
+  // What the package shows of the world as well as its guide: a rename, a new logline or new key
+  // art meanwhile is as stale as an edited entry (codex on PR 2157).
+  const madeFrom = (guide: GuideDocument, world = store.getBundle()) => JSON.stringify({ guide, world: [world.meta.name, world.meta.logline ?? null, world.keyArt ?? null, world.keyArtVersion ?? null] });
+  const made = madeFrom(drafted.document, bundle);
   const keyArtFile = keyArt !== null ? await containedWorldFile(store.dir, keyArt) : null;
   if (signal.aborted) return cancelled();
 
@@ -114,7 +117,7 @@ export async function exportGuideAlone(store: WorldStore, options: GuideAloneOpt
       productions: [],
       guide: "guide",
       assets,
-      provenance: { compiler: COMPILER, compilerVersion: COMPILER_VERSION, studio: options.studioVersion, exportId: options.exportId, exportedAt: stamp, guide: sha256(new TextEncoder().encode(madeFrom())), originals },
+      provenance: { compiler: COMPILER, compilerVersion: COMPILER_VERSION, studio: options.studioVersion, exportId: options.exportId, exportedAt: stamp, guide: sha256(new TextEncoder().encode(made)), originals },
     };
 
     step("Checking the package", 80);
@@ -123,11 +126,12 @@ export async function exportGuideAlone(store: WorldStore, options: GuideAloneOpt
     const checked = await checkWorldPackageZip(zip, signal);
     if (!checked.ok) return { ok: false, blockers: checked.problems };
 
-    // Under the gate the guide is drafted again: an entry edited meanwhile refuses the package
-    // rather than shipping beside what it was made from (SPEC-058 R-4).
+    // Under the gate the guide is drafted again and the world read again: an entry edited or the
+    // world renamed meanwhile refuses the package rather than shipping beside what it was made
+    // from (SPEC-058 R-4).
     return await store.gateOp(async () => {
       const again = await guideDraft(store, undefined, signal);
-      if (again === null || JSON.stringify(again.document) !== JSON.stringify(drafted.document)) return { ok: false as const, blockers: ["the Guide changed while the package was made · make it again"] };
+      if (again === null || madeFrom(again.document) !== made) return { ok: false as const, blockers: ["the world or its Guide changed while the package was made · make it again"] };
       const destination = join(store.dir, "exports", name);
       if (await stat(toExtendedLength(destination)).then(() => true, () => false)) return { ok: false as const, blockers: [`exports/${name} already exists · make it again`] };
       await rename(toExtendedLength(zip), toExtendedLength(destination));
