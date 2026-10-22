@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { guideCounts, guideDocument, type GuideRecord } from "@arke-studio/contracts";
-import { guideProductions, setGuideEntry } from "../../src/productions/world-guide.js";
+import { guideCounts, guideDocument, type GuideDocument, type GuideRecord } from "@arke-studio/contracts";
+import { guideProductions, packGuide, setGuideEntry } from "../../src/productions/world-guide.js";
+import type { FfmpegRunner } from "../../src/takes/export.js";
 import { WorldStore } from "../../src/world/store.js";
 import { sha256 } from "../../src/world/text-files.js";
+import { tempDir } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
 
 // SPEC-059 R-2, R-5, R-8: a world's Guide is its own record, written through the world's writes,
@@ -69,6 +71,45 @@ describe("a world's Guide record (SPEC-059 R-8)", () => {
       await store.commit({ kind: "sheet-edit", source: "editor", files: [{ path: "characters/maren-kest.md", action: "replace", content: sheet.replace("Tide-caller. She hears", "Tide-caller, still. She hears"), baseHash: sha256(sheet) }] });
       const again = guideDocument(store.getBundle().guide, { ...material, characters: store.getBundle().sheets.filter((entry) => entry.type === "character") })!;
       assert.match(again.characters[0]!.sections[0]!.text, /^Tide-caller, still\./);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("cuts a voice line from its take, at most fifteen seconds, and fits each picture once (R-6, R-13)", async () => {
+    const dir = await makeTempWorld();
+    await mkdir(join(dir, "artifacts", "tk_voice"), { recursive: true });
+    await writeFile(join(dir, "artifacts", "tk_voice", "take.wav"), "a take");
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      const calls: string[][] = [];
+      const ffmpeg = { slateFont: "", run: async (args: string[]) => { calls.push(args); await writeFile(args[args.length - 1]!, "made"); } } as unknown as FfmpegRunner;
+      const made = await tempDir("arke-guide-pack-");
+      const added: Array<[string, string, string]> = [];
+      const line = { production: "the-ledger-of-nights", productionTitle: "The Ledger of Nights", chapter: "neap", chapterNumber: 1, block: "b1", sentence: 2, text: "I hear it.", file: "artifacts/tk_voice/take.wav", start: 4.25, seconds: 21 };
+      const portrait = "references/maren-kest/head-front.png";
+      const draft: GuideDocument = {
+        format: "arke-guide",
+        version: 1,
+        productions: [{ id: "the-ledger-of-nights", title: "The Ledger of Nights", chapters: [{ id: "neap", number: 1 }] }],
+        characters: [{ id: "maren-kest", name: "Maren Kest", portrait, sections: [], voice: { audio: line.file, text: line.text, duration: 15_000, production: line.production, chapter: line.chapter } }],
+        places: [{ id: "the-vigil", name: "The Vigil", picture: portrait, sections: [] }],
+        lore: [],
+      };
+      const packed = await packGuide(draft, new Map([["maren-kest", line]]), store, {
+        ffmpeg,
+        signal: new AbortController().signal,
+        at: (path) => join(made, ...path.split("/")),
+        add: async (assetId, path, mediaType) => { added.push([assetId, path, mediaType]); },
+        original: async () => {},
+      });
+      assert.deepEqual(packed, { ok: true });
+      // One picture, though two entries show it; the voice as M4A; the guide document last.
+      assert.deepEqual(added.map(([, path, mediaType]) => [path.replace(/\.(jpg|png)$/, ".pic"), mediaType.split("/")[0]]), [["guide/g001.pic", "image"], ["guide/g002.m4a", "audio"], ["guide/guide.json", "application"]]);
+      const cut = calls.find((args) => args.at(-1)!.endsWith("g002.m4a"))!;
+      assert.deepEqual([cut[cut.indexOf("-ss") + 1], cut[cut.indexOf("-t") + 1]], ["4.250", "15.000"]);
+      const written = JSON.parse(await readFile(join(made, "guide", "guide.json"), "utf8")) as GuideDocument;
+      assert.deepEqual([written.characters[0]!.portrait, written.characters[0]!.voice?.audio, written.places[0]!.picture], ["g001", "g002", "g001"]);
     } finally {
       await store.close();
     }

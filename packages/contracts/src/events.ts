@@ -1673,7 +1673,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       productionId: SlugSchema,
       exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/),
       result: z.union([
-        z.object({ ok: z.literal(true), file: z.string().min(1), bytes: z.number().int().min(0), sha256: z.string().regex(/^[0-9a-f]{64}$/), edition: z.string().min(1), chapters: z.number().int().min(0), pictures: z.number().int().min(0), book: z.boolean() }).strict(),
+        z.object({ ok: z.literal(true), file: z.string().min(1), bytes: z.number().int().min(0), sha256: z.string().regex(/^[0-9a-f]{64}$/), edition: z.string().min(1), chapters: z.number().int().min(0), pictures: z.number().int().min(0), book: z.boolean(), guide: z.boolean().optional() }).strict(),
         z.object({ ok: z.literal(false), blockers: z.array(z.string().min(1)).min(1) }).strict(),
       ]),
     })
@@ -1721,6 +1721,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
         chapters: z.number().int().min(0).optional(),
         pictures: z.number().int().min(0).optional(),
         book: z.boolean().optional(),
+        /** Whether it carries the world's guide (SPEC-059 R-15). */
+        guide: z.boolean().optional(),
       }).strict()),
     })
     .strict(),

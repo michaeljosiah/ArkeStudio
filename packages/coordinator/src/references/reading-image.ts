@@ -17,7 +17,7 @@ export function pngHasAlpha(bytes: Uint8Array): boolean {
 }
 
 /** The existing Arke Player fit, shared with the explicitly chosen EPUB reading profile. */
-export async function fitReadingImage(source: string, destination: string, keepsAlpha: boolean, ffmpeg: FfmpegRunner, signal: AbortSignal, maxEdge = STORY_EPUB_READING_PROFILE.maxEdge): Promise<void> {
+export async function fitReadingImage(source: string, destination: string, keepsAlpha: boolean, ffmpeg: FfmpegRunner, signal: AbortSignal, maxEdge: number = STORY_EPUB_READING_PROFILE.maxEdge): Promise<void> {
   const { jpegQuality } = STORY_EPUB_READING_PROFILE;
   const fit = `scale='min(${maxEdge},iw)':'min(${maxEdge},ih)':force_original_aspect_ratio=decrease`;
   await ffmpeg.run(["-y", "-i", source, "-vf", fit, "-frames:v", "1", "-update", "1", ...(keepsAlpha ? [] : ["-q:v", String(jpegQuality)]), destination], () => {}, signal);

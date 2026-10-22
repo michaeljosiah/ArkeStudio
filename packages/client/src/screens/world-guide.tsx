@@ -104,12 +104,12 @@ export function GuideScreen() {
     if (kind === "lore") setGuideEntry(worldId, { entryKind: "lore", id, entry: entry === null ? null : shownAfter<Choice>({ public: entry.public }, entry.after) });
     else setGuideEntry(worldId, { entryKind: kind, id, entry });
   };
-  // Turned on for the first time, an entry brings its sections with it; turned off, it keeps them.
+  // An entry turned on publishes its name and picture; each section is ticked on its own (R-4). A
+  // sheet's sections include the author's own (a character's Truth, written FOR THE ROOM), so none
+  // follows the switch. Turned off, an entry keeps its choices for when it comes back.
   const toggle = (kind: GuideKind, id: string, on: boolean) => {
     const was = record[kind][id] as GuideRecordEntry | undefined;
-    const sheet = kind === "lore" ? undefined : listed[kind].find((candidate) => candidate.id === id);
-    const sections = was?.sections ?? (on && sheet !== undefined ? Object.fromEntries(guideSections(sheet).map((section) => [section.heading, { public: true }])) : undefined);
-    save(kind, id, { ...was, public: on, ...(sections !== undefined && kind !== "lore" ? { sections } : {}) });
+    save(kind, id, { ...was, public: on });
   };
   const lore = [...canon].sort((a, b) => Number(guideLoreChoosable(b)) - Number(guideLoreChoosable(a)) || a.id.localeCompare(b.id));
 

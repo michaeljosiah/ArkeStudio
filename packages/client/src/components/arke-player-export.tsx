@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ulid, type AudiobookListening, type ProductionBundle } from "@arke-studio/contracts";
+import { guideCounts, guideLiving, ulid, type AudiobookListening, type GuideCounts, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
 import { downloadMedia } from "../lib/download.js";
 import { mediaUrl } from "../lib/media.js";
-import { listWebPackages, openExportsFolder, subscribeArkePlayerExported, subscribeWebPackages, exportArkePlayer, useStore, type ArkePlayerExported } from "../lib/store.js";
+import { listWebPackages, openExportsFolder, subscribeArkePlayerExported, subscribeWebPackages, exportArkePlayer, useStore, useWorld, type ArkePlayerExported } from "../lib/store.js";
 import { Folder, megabytes, Toggle } from "./audiobook-video.js";
 
 /**
@@ -18,6 +18,8 @@ const AUDIO_BYTES_PER_SECOND = 16_000;
 const PICTURE_BYTES = 450_000;
 const LOOP_BYTES = 2_500_000;
 const BOOK_BYTES = 600_000;
+/** A guide's portrait or place fitted to 1024 px, and its text and voice lines, roughly. */
+const GUIDE_ENTRY_BYTES = 160_000;
 const AUDIO_SECONDS_PER_SECOND = 40;
 const SECONDS_PER_PICTURE = 0.4;
 
@@ -61,6 +63,12 @@ export function arkePlayerCounts(plan: AudiobookListening, options: { book: bool
   };
 }
 
+/** What the world's Guide makes public (SPEC-059 R-15), as the Export sheet's Guide row counts it. */
+export function exportGuideCounts(world: WorldBundle): GuideCounts {
+  const sheets = (type: string) => guideLiving(world.sheets.filter((sheet) => sheet.type === type));
+  return guideCounts(world.guide, { characters: sheets("character"), locations: sheets("location"), factions: sheets("faction"), canon: guideLiving(world.canon) });
+}
+
 /** The chapters the book holds (R-2): every chapter still in the manuscript. */
 export const bookChapters = (production: ProductionBundle) => production.chapters.filter((chapter) => chapter.retired !== true && (chapter.words === undefined || chapter.words > 0)).length;
 
@@ -77,7 +85,7 @@ const madeStamp = (at: Date) => {
 const edition = () => new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
 const holds = (result: Extract<ArkePlayerExported["result"], { ok: true }>) =>
-  [result.chapters > 0 ? `${result.chapters} chapter${result.chapters === 1 ? "" : "s"}` : null, result.pictures > 0 ? `${result.pictures} picture${result.pictures === 1 ? "" : "s"}` : null, result.book ? "the book" : null].filter((part) => part !== null).join(" · ");
+  [result.chapters > 0 ? `${result.chapters} chapter${result.chapters === 1 ? "" : "s"}` : null, result.pictures > 0 ? `${result.pictures} picture${result.pictures === 1 ? "" : "s"}` : null, result.book ? "the book" : null, result.guide === true ? "the guide" : null].filter((part) => part !== null).join(" · ");
 
 /**
  * The Arke Player kind of the Export sheet: its rows (233a), what stood in the way (233d), and the
@@ -99,6 +107,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
   onClose: () => void;
 }): { rows: ReactNode; lines: ReactNode; foot: ReactNode; made: boolean; sub: string | null } {
   const connection = useStore().connection;
+  const world = useWorld();
   const [options, setOptions] = useState({ book: committed > 0, motion: true });
   const [result, setResult] = useState<ArkePlayerExported["result"] | null>(null);
   const [making, setMaking] = useState<string | null>(null);
@@ -119,7 +128,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       const found = answer.packages.find((entry) => entry.kind === "arke-player" && entry.exportId === making);
       if (found?.file === undefined || found.sha256 === undefined) return;
       setMaking(null);
-      setResult({ ok: true, file: found.file, bytes: found.bytes ?? 0, sha256: found.sha256, edition: found.exportedAt.slice(0, 10), chapters: found.chapters ?? 0, pictures: found.pictures ?? 0, book: found.book ?? false });
+      setResult({ ok: true, file: found.file, bytes: found.bytes ?? 0, sha256: found.sha256, edition: found.exportedAt.slice(0, 10), chapters: found.chapters ?? 0, pictures: found.pictures ?? 0, book: found.book ?? false, guide: found.guide ?? false });
       setMadeAt(new Date(found.exportedAt));
     });
     return () => {
@@ -131,7 +140,11 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
     if (connection === "open" && making !== null) listing.current = listWebPackages(worldId);
   }, [connection, worldId]);
 
-  const counts = plan === null ? null : arkePlayerCounts(plan, options);
+  const guide = world === null ? null : exportGuideCounts(world);
+  const guided = guide !== null && guide.characters.public + guide.places.public + guide.lore.public > 0;
+  const planned = plan === null ? null : arkePlayerCounts(plan, options);
+  // The guide rides in every package once something is public (R-15), and the estimate counts it.
+  const counts = planned === null || !guided ? planned : { ...planned, bytes: planned.bytes + (guide.characters.public + guide.places.public) * GUIDE_ENTRY_BYTES };
   const empty = counts !== null && counts.chapters === 0 && !options.book;
   const start = () => {
     const id = `ap_${ulid()}`;
@@ -169,17 +182,25 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
     }
   };
 
-  const opt = (label: string, middle: ReactNode, tail?: string) => (
+  const opt = (label: string, middle: ReactNode, tail?: string, action?: ReactNode) => (
     <div className="fy-abv-opt">
       <b>{label}</b>
       {middle}
       <span className="grow" />
       {tail !== undefined && !phone && <i>{tail}</i>}
+      {action}
     </div>
   );
   const rows = made !== null ? null : (
     <>
       {!phone && opt("World", <span>{worldName}</span>, "key art · logline")}
+      {guide !== null && opt(
+        "Guide",
+        <span data-testid="arke-player-guide">{guided ? `${guide.characters.public} characters · ${guide.places.public} places · ${guide.lore.public} lore` : "None public"}</span>,
+        guide.after > 0 ? `${guide.after} after a chapter` : undefined,
+        // A hash link, as the app routes: the sheet is drawn outside a router in its tests too.
+        <a className="fy-abv-btn" href={`#/w/${worldId}/guide`} onClick={onClose}>Edit</a>,
+      )}
       {opt("Book", committed === 0 ? <span>None</span> : <Toggle on={options.book} onChange={(book) => setOptions({ ...options, book })}>The book</Toggle>, committed === 0 ? "no chapter has prose" : `${committed} chapter${committed === 1 ? "" : "s"} · EPUB`)}
       {opt("Narration", <span>{counts === null ? "…" : `${counts.chapters} of ${counts.of}${phone ? "" : " · read whole"}`}</span>, counts?.range)}
       {opt("Pictures", <span>{counts === null ? "…" : `${counts.pictures}${phone ? "" : " · fitted for a phone"}`}</span>, "2048 px · cover before the first")}
@@ -193,7 +214,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       {made === null && (
         <div className="fy-abv-est" data-testid="arke-player-estimate">
           <b>{counts === null ? "…" : `~${megabytes(counts.bytes)} · ~${counts.minutes} min ${remote ? "on the desktop" : "on this machine"}`}</b>
-          {!phone && counts !== null && <span className="m">{[`${counts.chapters} chapter${counts.chapters === 1 ? "" : "s"}`, `${counts.pictures} picture${counts.pictures === 1 ? "" : "s"}`, options.book ? "the book" : null].filter(Boolean).join(" · ")}</span>}
+          {!phone && counts !== null && <span className="m">{[`${counts.chapters} chapter${counts.chapters === 1 ? "" : "s"}`, `${counts.pictures} picture${counts.pictures === 1 ? "" : "s"}`, options.book ? "the book" : null, guided ? "the guide" : null].filter(Boolean).join(" · ")}</span>}
         </div>
       )}
       {making !== null && <div className="fy-abv-note" data-testid="arke-player-making">Making package · follow it in Activity</div>}

@@ -85,7 +85,7 @@ describe("a world's Guide (design turn 234)", () => {
     assert.ok(container.querySelector("[data-testid=guide-row-CANON-002] [role=switch]"));
   });
 
-  it("turns an entry on with its sections (R-4)", async () => {
+  it("turns an entry on with no section chosen yet, each being ticked on its own (R-4)", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     const { container } = await mount(withChapters());
@@ -94,7 +94,7 @@ describe("a world's Guide (design turn 234)", () => {
     assert.deepEqual(change, {
       kind: "set-guide-entry",
       worldId: FIXTURE_WORLD_ID,
-      change: { entryKind: "characters", id: "maren-kest", entry: { public: true, sections: { Essence: { public: true }, Appearance: { public: true } } } },
+      change: { entryKind: "characters", id: "maren-kest", entry: { public: true } },
     });
     assert.equal(container.querySelector("[data-testid=guide-row-maren-kest] [role=switch]")?.getAttribute("aria-checked"), "true");
   });

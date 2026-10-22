@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { openPromise } from "yauzl";
-import { readListening, readWorldManifest, type ClientMessage, type DomainEvent, type ListeningBlock, type ManifestModel } from "@arke-studio/contracts";
+import { guideChapterNumber, readGuide, readListening, readWorldManifest, type ClientMessage, type DomainEvent, type ListeningBlock, type ManifestModel } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -252,6 +252,53 @@ describe("the package's parts", () => {
     assert.equal(webpHasAlpha(webp("VP8L", 1 << 28)), true);
     assert.equal(webpHasAlpha(webp("VP8L", 0)), false);
     assert.equal(webpHasAlpha(webp("VP8 ", 0)), false);
+  });
+
+  it("carries the world's guide when something is public, and none when nothing is (SPEC-059 R-13, R-15)", () => {
+    const calls: string[][] = [];
+    return withHarness(async ({ worldDir, events, send }) => {
+      await read(send, "01-neap");
+      // Nothing public: no guide, and the package stays at the schema an older Player reads.
+      const plain = await exportPackage(send, events, 5);
+      assert.ok(plain.ok, plain.ok ? "" : plain.blockers.join("; "));
+      assert.equal(plain.guide, false);
+      const plainManifest = readWorldManifest(await entry(join(worldDir, ...plain.file.split("/")), "world.json"));
+      assert.ok(plainManifest.ok);
+      assert.equal(plainManifest.manifest.schemaVersion, 2);
+      assert.equal(plainManifest.manifest.guide, undefined);
+
+      const after = { production: LEDGER, chapter: "neap" };
+      await send({ kind: "set-guide-entry", worldId: WORLD_ID, change: { entryKind: "characters", id: "maren-kest", entry: { public: true, sections: { Essence: { public: true }, Relationships: { public: true, after } } } } });
+      await send({ kind: "set-guide-entry", worldId: WORLD_ID, change: { entryKind: "locations", id: "the-vigil", entry: { public: true, sections: { Look: { public: true } } } } });
+      await send({ kind: "set-guide-entry", worldId: WORLD_ID, change: { entryKind: "lore", id: "CANON-001", entry: { public: true, after } } });
+      // An open thread turned on by hand still never ships (R-3).
+      await send({ kind: "set-guide-entry", worldId: WORLD_ID, change: { entryKind: "lore", id: "CANON-044", entry: { public: true } } });
+
+      const result = await exportPackage(send, events, 6);
+      assert.ok(result.ok, result.ok ? "" : result.blockers.join("; "));
+      assert.equal(result.guide, true);
+      const file = join(worldDir, ...result.file.split("/"));
+      const checked = await checkWorldPackageZip(file);
+      assert.ok(checked.ok, checked.ok ? "" : checked.problems.join("; "));
+      const opened = readWorldManifest(await entry(file, "world.json"));
+      assert.ok(opened.ok);
+      assert.equal(opened.manifest.schemaVersion, 3);
+      assert.equal(opened.manifest.guide, "guide");
+      const readBack = readGuide(await entry(file, "guide/guide.json"), opened.manifest.assets);
+      assert.ok(readBack.ok, readBack.ok ? "" : readBack.reason);
+      const guide = readBack.guide;
+      assert.deepEqual(guide.characters.map((character) => character.id), ["maren-kest"]);
+      const maren = guide.characters[0]!;
+      assert.equal(opened.manifest.assets[maren.portrait!]?.mediaType.startsWith("image/"), true);
+      assert.deepEqual(maren.sections.map((section) => [section.heading, guideChapterNumber(guide, section.after)]), [["Essence", null], ["Relationships", 1]]);
+      assert.doesNotMatch(JSON.stringify(guide), /Room note/);
+      assert.deepEqual(guide.lore.map((lore) => lore.id), ["canon-001"]);
+      // A reader in the book finds the chapter by its document.
+      assert.equal(guide.productions[0]?.chapters.find((chapter) => chapter.id === "neap")?.book, "OEBPS/chapter-1.xhtml");
+      // Its pictures are fitted for a phone's page: no longer than 1024 px on a side (R-13).
+      assert.ok(calls.some((args) => args.includes("-vf") && args[args.indexOf("-vf") + 1]!.includes("min(1024,iw)")));
+      assert.match(JSON.parse(await readFile(`${file}.json`, "utf8")).holds, /the guide/);
+    }, recordingFfmpeg(calls));
   });
 
   it("lists a package only by a whole record beside it, at the length it records (233e)", async () => {

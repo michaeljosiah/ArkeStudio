@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CanonIdSchema, SlugSchema, UlidSchema } from "./ids.js";
+import { mainPhotoFor, orderedLocationViews, type ReferenceKit } from "./reference.js";
 import type { CanonEntry, Sheet } from "./world.js";
 import { GUIDE_FORMAT, GUIDE_VERSION, packageSlug, type GuideCharacter, type GuideDocument, type GuideLore, type GuidePlace, type GuideSection, type GuideVoice } from "./world-package.js";
 
@@ -160,6 +161,18 @@ export function guideLoreText(body: string): string {
 /** A sheet's sections as a reader could be given them, in authored order; one its notes leave empty is not offered. */
 export function guideSections(sheet: Pick<Sheet, "sections">): Array<{ heading: string; text: string }> {
   return sheet.sections.map((section) => ({ heading: section.heading, text: guidePublicText(section.body) })).filter((section) => section.text !== "");
+}
+
+/**
+ * The picture a sheet is shown by (R-13): a location's establishing view, else its main photo; a
+ * character's or faction's main photo; else the conventional head-front, which older worlds may
+ * have. World-relative; whether the file is there is the caller's to check.
+ */
+export function guideSheetPicture(kits: readonly ReferenceKit[], kind: GuideSheetKind, sheetId: string): string {
+  const kit = kits.find((candidate) => candidate.sheetId === sheetId);
+  const view = kit !== undefined && kind === "locations" ? orderedLocationViews(kit)[0] : undefined;
+  const photo = kit !== undefined ? mainPhotoFor(kit) : null;
+  return `references/${sheetId}/${view?.file ?? photo?.file ?? "head-front.png"}`;
 }
 
 /** Only settled canon can be public (R-3). */
