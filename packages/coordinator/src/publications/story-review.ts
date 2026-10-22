@@ -27,6 +27,13 @@ export function mixFiles(mix: ChapterMix): string[] {
   return [...new Set([...mix.voices.flatMap(voice => voice.segments.map(segment => segment.file)), ...mix.beds.map(bed => bed.file), ...mix.sounds.map(sound => sound.file)])];
 }
 
+/** Picture selection shares the chapter record, but is not an audio edition dependency (#2122). */
+function audioRecord(record: AudiobookPlan["record"] | undefined) {
+  if (!record || record === "unreadable") return record;
+  const { pictures: _pictures, look: _look, ownLooks: _ownLooks, updatedAt: _updatedAt, ...audio } = record;
+  return audio;
+}
+
 /** Run under the world's read gate. The fresh scan prevents stale bundle metadata winning over disk. */
 export async function readStoryPublication(store: WorldStore, productionId: string, input: StoryPublicationSettings, kept: ReadonlySet<string> = new Set()) {
   const settings = StoryPublicationSettingsSchema.parse(input);
@@ -124,7 +131,7 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
     blockers.push("This PDF exceeds the 2 million character limit. Select fewer chapters.");
   const identity = {
     settings, chapters: chapters.map(({ id, title, order, body, plan, mix, studio }) => ({ id, title, order, body,
-      ...(settings.outputs.includes("m4b") ? { record: plan?.record, book: plan?.book, cast: plan?.cast, blocks: plan?.blocks, mix, studio } : {}) })),
+      ...(settings.outputs.includes("m4b") ? { record: settings.includeIllustrations ? plan?.record : audioRecord(plan?.record), book: plan?.book, cast: plan?.cast, blocks: plan?.blocks, mix, studio } : {}) })),
     media, rights, ...(settings.includeIllustrations ? { illustrations } : {}), compiler: storyCompiler(settings), ...(pdfIdentity ? { pdf: pdfIdentity } : {}),
   };
   const fingerprint = storyDigest(identity);
