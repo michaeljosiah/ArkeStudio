@@ -4,6 +4,29 @@ The full Undersong is a separate, explicitly requested download. The small world
 `fixtures/worlds/the-undersong` remains a test/dev fixture and is excluded from the installer.
 Neither onboarding nor application startup downloads story media automatically.
 
+## Standalone reading editions
+
+The [reviewed illustrated EPUB](https://github.com/michaeljosiah/ArkeStudio/releases/download/undersong-2026-10-19-r3/the-undersong-perrins-awakening-reviewed-reading-2026-10-22.epub)
+contains all 23 revised chapters and 290 picture placements, including the 24 corrections
+accepted after the complete illustration review. It uses reading-size images up to 2048 pixels
+and is 88,354,113 bytes. SHA-256:
+`919fed2be79e5615027d586eb6f2d2cf62bc3f90e661ec7043baa71181307036`.
+
+The [single-narrator M4B](https://github.com/michaeljosiah/ArkeStudio/releases/download/undersong-2026-10-19-r3/the-undersong-perrins-awakening-23-chapters-2026-10-21.m4b)
+contains the same 23 chapters, with 23 chapter markers and a duration of 5h 33m 30s. It is
+262,400,863 bytes, SHA-256
+`a6e5cdee76ce9d93b558390aedacc3c67885bf999fff69c3e10bfe556e917608`.
+The illustration corrections do not change its narration.
+
+These are immutable standalone files created through Arke Publish. They do not update an
+installed world or the earlier editable-world archive. The older original-quality EPUB
+predates the latest 24 illustration corrections. Full-book listening qualification,
+physical-device import, the updated editable-world package and the video episode remain
+unfinished. The [story release](https://github.com/michaeljosiah/ArkeStudio/releases/tag/undersong-2026-10-19-r3)
+keeps current download links and the scope of each historical edition.
+
+## On-demand world installation
+
 Desktop and development composition use `UNDERSONG_RELEASE` from coordinator
 `src/world/undersong-release.ts`. Settings shows its version, download size and completion
 status before installation. The coordinator fetches only the pinned HTTPS GitHub release,
