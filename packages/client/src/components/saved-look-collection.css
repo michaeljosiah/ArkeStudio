@@ -169,3 +169,14 @@
   .fy-look .fy-page-sheet__foot .ui-btn--primary { flex: 1; }
   .fy-look__warning { margin-left: 0; }
 }
+
+/* Approved journey C: only chapter-owned Looks use measured, inert phone context. */
+@media (max-width: 699px) {
+  .fy-page-sheet.fy-chapter-look-sheet {
+    --chapter-look-safe-bottom: env(safe-area-inset-bottom, 0px);
+    inset: var(--chapter-look-top, 0px) 0 var(--chapter-look-bottom, 0px);
+    height: calc(100dvh - var(--chapter-look-top, 0px) - var(--chapter-look-bottom, 0px));
+    max-height: calc(100dvh - var(--chapter-look-top, 0px) - var(--chapter-look-bottom, 0px));
+  }
+  .fy-chapter-look-sheet::backdrop { clip-path: inset(var(--chapter-look-top, 0px) 0 var(--chapter-look-bottom, 0px)); }
+}
