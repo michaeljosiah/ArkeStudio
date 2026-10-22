@@ -12,6 +12,8 @@ export interface SavedPicture {
   references: BenchReferenceToken[];
   keyframes: BenchReferenceToken[];
   brief: string;
+  /** Full hashes for the existing dispatcher guard, in resolved world-file identity. */
+  pins: Array<{ file: string; hash: string }>;
 }
 
 /** Read only the saved authority and contained bytes; never turn an artifact filename into a person. */
@@ -27,9 +29,12 @@ export async function savedPicture(store: WorldStore, source: PictureReuse, prom
       if (store.closingSignal.aborted) throw new Error("stopped");
       hash.update(chunk);
     }
-    if (!`sha256:${hash.digest("hex")}`.startsWith(expected)) throw new Error(`${label} changed since this picture. Choose its reference again in Bench.`);
+    const digest = hash.digest("hex");
+    if (!`sha256:${digest}`.startsWith(expected)) throw new Error(`${label} changed since this picture. Choose its reference again in Bench.`);
+    return digest;
   };
   await verify(`artifacts/${artifact.file}`, artifact.hash, "The saved picture");
+  const pins: SavedPicture["pins"] = [];
   const resolve = async (entry: BenchReferenceToken): Promise<BenchReferenceToken> => {
     let file: string;
     const source = entry.source;
@@ -44,7 +49,8 @@ export async function savedPicture(store: WorldStore, source: PictureReuse, prom
       if (!take?.media) throw new Error(`${entry.token} is no longer in this world. Choose its reference again in Bench.`);
       file = `.sessions/${generation.sessionId}/media/${take.id}/${take.media.file}`;
     }
-    await verify(file, entry.source.hash, entry.token);
+    const digest = await verify(file, entry.source.hash, entry.token);
+    if (entry.kind === "image") pins.push({ file, hash: digest });
     // A take is scoped to its old session. Its immutable path carries those same bytes in the new one.
     return entry.source.source === "take" ? { ...entry, source: { source: "world-file", path: file, hash: entry.source.hash } } : entry;
   };
@@ -57,7 +63,7 @@ export async function savedPicture(store: WorldStore, source: PictureReuse, prom
   const previousPrompt = appBrief ? original.split("\n\n")[0]! : original;
   // The card bounds its editable excerpt. An unchanged excerpt must not truncate a longer original.
   const brief = previousPrompt.slice(0, PICTURE_PROMPT_MAX) === prompt ? original : prompt + suffix;
-  return { generation: { ...generation, params: generation.params }, references, keyframes, brief };
+  return { generation: { ...generation, params: generation.params }, references, keyframes, brief, pins };
 }
 
 /** A fresh, no-spend Bench draft; existing token identities and order remain exact, including gaps. */

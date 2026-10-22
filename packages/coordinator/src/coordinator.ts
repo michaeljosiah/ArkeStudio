@@ -16170,6 +16170,7 @@ export class Coordinator {
           if (index < 0) return fail("that block is no longer in the chapter");
           const shown = placePictures(room.plan.blocks.map(planned => planned.block), held === "unreadable" ? {} : held?.pictures).placed.find(entry => entry.index === index)?.picture;
           if (msg.reuse !== undefined && shown?.file !== `artifacts/${store.getBundle().artifacts.find(artifact => artifact.id === msg.reuse!.artifactId)?.file}`) return fail("The block's picture changed. Open its current picture again.");
+          if (msg.reuse !== undefined && shown?.textHash !== audiobookTextHash(room.plan.blocks[index]!.block.text)) return fail("The passage changed. Choose or make a picture for its current words.");
           const characters = depictable(room.people).filter((person) => msg.who.includes(person.key));
           const place = room.places.find((candidate) => msg.who.includes(candidate.key));
           // The looks chosen for this picture alone (turn 193d, R-146): as the card sent them, else
@@ -20450,6 +20451,16 @@ export class Coordinator {
       localFreeze: (modelId, rerunOf) => localTakeFreeze(modelId, rerunOf, (recipeId) => this.readModel.getState().app.localSampling?.choices[recipeId], randomLocalSeed),
     });
     if (!plan.ok) return fail(plan.reason);
+    if (input.saved !== undefined) {
+      for (const job of plan.inputs) {
+        const paths = job.params.references ?? [];
+        if (!Array.isArray(paths)) return fail("The saved picture references could not be prepared.");
+        const pins = paths.map(file => input.saved!.pins.find(pin => pin.file === file));
+        if (pins.some(pin => pin === undefined)) return fail("The saved picture references changed. Open its current picture again.");
+        // The queue rechecks the bytes it will actually submit, after any wait for its lane.
+        job.params = { ...job.params, generationQuoteReferences: pins };
+      }
+    }
     const planned = plan.inputs.reduce((total, job) => total + job.estimatedMicroUsd, 0);
     if (planned > input.ceilingMicroUsd) return fail(`the price moved · ${priceLabel(planned)}`);
     // The reservation is durable before any job exists, as the Bench's press makes it.

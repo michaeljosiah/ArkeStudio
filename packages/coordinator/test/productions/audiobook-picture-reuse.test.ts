@@ -9,7 +9,10 @@ import { setAudiobookPicture } from "../../src/productions/audiobook-listening.j
 import { readAudiobook } from "../../src/productions/audiobook.js";
 import { BenchStore, sessionDir } from "../../src/bench/store.js";
 import { discoverBenchSessions } from "../../src/bench/service.js";
-import { pngBytes } from "../queue/fake-provider.js";
+import { FakeProvider, pngBytes } from "../queue/fake-provider.js";
+import { JobQueue } from "../../src/queue/dispatcher.js";
+import { readContainedImageReferences } from "../../src/world/reference-files.js";
+import { until } from "../wait.js";
 import { CHAPTER, IMAGE, LEDGER, CLOCK, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
 
 const ID = "ar_01J00000000000000000000001";
@@ -120,6 +123,49 @@ describe("saved Bench pictures retain their real inputs (#2143)", () => {
     const changed = await readAudiobook(h.store()!, LEDGER, CHAPTER);
     await assert.rejects(setAudiobookPicture(h.store()!, LEDGER, CHAPTER, "p0.0", { file: "artifacts/saved.png", source: "generated" }, { expected: initial.pictures!["p0.0"]!, arke: true }), /picture changed/);
     assert.deepEqual(await readAudiobook(h.store()!, LEDGER, CHAPTER), changed);
+  }, { prepare }));
+
+  it("refuses stale passage text before any paid repeat is queued", () => withHarness(async h => {
+    await choose(h);
+    const file = join(h.worldDir, "productions", LEDGER, "chapters", CHAPTER + ".md");
+    const before = await readAudiobook(h.store()!, LEDGER, CHAPTER);
+    const text = await readFile(file, "utf8");
+    assert.match(text, /OUTLINE ONLY/);
+    await writeFile(file, text.replace("OUTLINE ONLY", "REVISED OUTLINE ONLY"));
+    await make(h);
+    assert.equal(last(h.events).state, "failed");
+    assert.match(last(h.events).reason!, /passage changed/);
+    assert.equal(h.enqueued.length, 0);
+    assert.deepEqual(await readAudiobook(h.store()!, LEDGER, CHAPTER), before);
+  }, { prepare }));
+
+  it("pins repeat inputs so a changed file while queued never reaches the provider", () => withHarness(async h => {
+    await choose(h);
+    await make(h);
+    const params = h.enqueued[0]!.params;
+    assert.deepEqual(params.generationQuoteReferences, references.map(entry => ({ file: entry.source.source === "world-file" ? entry.source.path : "", hash: hash(bytes).slice(7) })));
+    const client = new FakeProvider();
+    let release!: () => void, waiting = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const queue = new JobQueue({
+      journalPath: join(h.worldDir, "queued-repeat.jsonl"), clients: { fal: client },
+      getKey: async () => { waiting = true; await gate; return "test-key"; }, emit: () => {},
+      ledger: { readJobIds: async () => new Set(), has: async () => false, append: async () => {} },
+      landInWorld: async (_id, fn) => { await fn(h.worldDir); return true; },
+      readImageReferences: (_id, paths) => readContainedImageReferences(h.worldDir, paths),
+      baseIntervalMs: 1, pollIntervalMs: 5,
+    });
+    try {
+      await queue.start();
+      const job = await queue.enqueue({ worldId: WORLD_ID, target: { kind: "bench-take", id: "repeat" }, provider: "fal", model: IMAGE.id, capability: "image", params, estimatedMicroUsd: 50000 });
+      await until(() => waiting, "queued repeat awaiting admission");
+      const changed = Uint8Array.from(bytes); changed[20] = 1;
+      await writeFile(join(h.worldDir, "artifacts/source.png"), changed);
+      release();
+      await until(() => queue.listJobs().find(row => row.id === job.id)?.status === "failed", "changed queued reference refused");
+      assert.match(queue.listJobs().find(row => row.id === job.id)!.error!, /references changed after generation approval/i);
+      assert.equal(client.submitCount, 0);
+    } finally { release(); await queue.dispose(); }
   }, { prepare }));
 
   it("rejects absent provenance before creating any session", () => withHarness(async h => {
