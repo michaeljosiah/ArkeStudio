@@ -101,6 +101,46 @@ function render(
   ).replace(/<!-- -->/g, "");
 }
 
+describe("location candidate reference provenance (#2149)", () => {
+  const anchor = "takes/tk_original/view.png";
+  const anchorPath = `references/the-vigil/${anchor}`;
+  const style = "artifacts/attached-style.png";
+  const cases = [
+    { name: "saved anchor actually carried", params: { provenance: { anchorFile: anchor } }, references: [style, anchorPath], note: "anchored to the establishing view" },
+    { name: "style-only first view", params: {}, references: [style], note: "other references attached" },
+    { name: "recorded anchor absent from carried files", params: { provenance: { anchorFile: anchor } }, references: [style], note: "other references attached" },
+    { name: "legacy reference matching today's kit without saved anchor", params: {}, references: ["references/the-vigil/takes/tk_01J8F0000000000000000001/view.png"], note: "other references attached" },
+    { name: "another location's same relative filename", params: { provenance: { anchorFile: anchor } }, references: [`references/other-place/${anchor}`], note: "other references attached" },
+    { name: "no references", params: {}, references: [], note: "no references recorded" },
+    { name: "saved anchor with no carried references", params: { provenance: { anchorFile: anchor } }, references: [], note: "no references recorded" },
+    { name: "malformed legacy provenance", params: { provenance: { anchorFile: 42 } }, references: [style], note: "other references attached" },
+  ];
+  for (const source of ["take", "candidate"] as const) for (const row of cases) {
+    it(`${source}: ${row.name}`, () => {
+      const take = candidate("Side view");
+      take.references = [...row.references];
+      take.params = { ...row.params, locationView: { name: "Side view" } };
+      const path = "references/the-vigil/candidates/loose.png";
+      const job: Job = {
+        id: "jb_01KZPR883W8B49PZTR1GE3F1S4", idempotencyKey: "01KZPR883W8B49PZTR1GE3F1S5", worldId: WORLD_ID,
+        target: { kind: "location-view-candidate", id: "the-vigil/test/1" }, capability: "image", provider: "openai", model: "gpt-image-2",
+        params: { ...take.params, references: [...row.references] }, estimatedMicroUsd: 53000, status: "succeeded", providerJobId: "image-fixture", attempt: 1,
+        landedFiles: [path], finalization: { status: "complete", error: null, updatedAt: "2026-08-10T21:12:08Z" }, error: null,
+        createdAt: "2026-08-10T21:11:27Z", updatedAt: "2026-08-10T21:12:08Z",
+      };
+      const before = JSON.stringify({ take, job });
+      // Neither removal nor replacement of the current establishing view changes history.
+      for (const currentKits of [[], [kit([view(1, "Current establishing view", "2026-08-12T10:00:00Z")], "lv_01")]]) {
+        const html = source === "take" ? render(currentKits, [take]) : render(currentKits, [], { candidates: [path], jobs: [job] });
+        const document = parseHTML(html).document;
+        assert.equal(document.querySelector(".fy-locref__candidate > p")?.textContent, `gpt-image-2 · ${row.note}`);
+        assert.ok(document.querySelector(".fy-locref__namefield input"), "the existing naming/acceptance composition remains");
+      }
+      assert.equal(JSON.stringify({ take, job }), before, "projection does not rewrite saved provenance");
+    });
+  }
+});
+
 describe("the location reference tab (#243)", () => {
   it("orders panels by the establishing view first, then acceptance — never by name or date alone", () => {
     // Deliberately adversarial: alphabetically "Day" leads, and by acceptance date the

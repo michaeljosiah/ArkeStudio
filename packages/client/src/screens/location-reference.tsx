@@ -50,11 +50,22 @@ export type PendingLocationView = {
   /** What the generation asked this angle to be called; the name field opens on it. */
   proposedName: string;
   model: string;
-  anchored: boolean;
+  referenceNote: string;
   /** Newest first, and the download name's last resort. */
   at: string;
   sourceId: string;
 };
+
+/** A historical anchor is proved by the saved request, never by today's accepted kit. */
+function locationReferenceNote(params: Record<string, unknown>, references: unknown, sheetId: string): string {
+  const carried = Array.isArray(references) ? references.filter((file): file is string => typeof file === "string" && file.length > 0) : [];
+  const provenance = params["provenance"];
+  const anchor = provenance !== null && typeof provenance === "object" && "anchorFile" in provenance ? provenance.anchorFile : undefined;
+  if (typeof anchor === "string" && anchor.length > 0 && carried.includes(`references/${sheetId}/${anchor}`)) {
+    return "anchored to the establishing view";
+  }
+  return carried.length > 0 ? "other references attached" : "no references recorded";
+}
 
 /**
  * Everything this location has waiting on a name.
@@ -91,7 +102,7 @@ export function pendingLocationViews(
       takeId: take.id,
       proposedName: proposed?.name ?? "",
       model: take.model,
-      anchored: take.references.length > 0,
+      referenceNote: locationReferenceNote(take.params, take.references, sheetId),
       at: take.completedAt ?? take.dispatchedAt,
       sourceId: take.id,
     });
@@ -117,7 +128,7 @@ export function pendingLocationViews(
       takeId: null,
       proposedName: proposed?.name ?? "",
       model: job.model,
-      anchored: ((job.params["references"] as unknown[] | undefined) ?? []).length > 0,
+      referenceNote: locationReferenceNote(job.params, job.params["references"], sheetId),
       at: job.updatedAt,
       sourceId: file.replace(/\.[^.]+$/, ""),
     });
@@ -320,7 +331,7 @@ export function LocationReferenceScreen() {
                     </div>
                     <span className="fy-locref__note">Select the image to view larger</span>
                     <p className="fy-mono">
-                      {candidate.model} · {candidate.anchored ? "anchored to the establishing view" : "unanchored"}
+                      {candidate.model} · {candidate.referenceNote}
                     </p>
                     <label className="fy-locref__namefield">
                       <span>Name this view</span>
