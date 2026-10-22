@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
-import { ReadOnlyMarkdown } from "../src/components/editor/read-only-markdown.js";
+import { ReadOnlyMarkdown, readOnlyMarkdownText } from "../src/components/editor/read-only-markdown.js";
 import { RICH_MODE_MAX_CHARACTERS } from "../src/components/editor/rich-mode.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -47,4 +47,17 @@ it("renders reference links while keeping task inputs and non-web links inert", 
     const link = [...page.querySelectorAll("a")].find(a => a.textContent === label);
     assert.ok(!link?.hasAttribute("href"), label);
   }
+});
+
+it("projects formatted reading text without HTML, links or block punctuation", () => {
+  assert.equal(readOnlyMarkdownText("**Direct manuscript facts.** A *quiet* room with a [desk](https://example.com)."), "Direct manuscript facts. A quiet room with a desk.");
+  assert.equal(readOnlyMarkdownText("# Harbour\n\n> Keep **this** clear.\n\n- One\n- Two\n\n`signal`")?.replace(/\s+/g, " "), "Harbour Keep this clear. One Two signal");
+  assert.equal(readOnlyMarkdownText("**Read** [charter][c].\n\n[c]: https://example.com/charter"), "Read charter.");
+});
+
+it("keeps literal code and unsupported source safe in plain previews", () => {
+  assert.equal(readOnlyMarkdownText("`<img onerror=x>` and \\*quoted\\*"), "<img onerror=x> and *quoted*");
+  assert.equal(readOnlyMarkdownText("[unsafe](javascript:alert(3)) and [safe](https://example.com)"), "unsafe and safe");
+  assert.equal(readOnlyMarkdownText('<script>alert(1)</script>'), null);
+  assert.equal(readOnlyMarkdownText("x".repeat(RICH_MODE_MAX_CHARACTERS + 1)), null);
 });

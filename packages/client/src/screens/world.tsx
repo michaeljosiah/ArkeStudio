@@ -51,7 +51,7 @@ import { AppChrome } from "../components/chrome.js";
 import { Loading } from "../components/loading.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
 import { WorldOpening } from "../components/world-opening.js";
-import { ReadOnlyMarkdown } from "../components/editor/read-only-markdown.js";
+import { ReadOnlyMarkdown, readOnlyMarkdownText } from "../components/editor/read-only-markdown.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { ArtifactViewer } from "../components/artifact-viewer.js";
 import { EditorDialog } from "../components/editor-dialog.js";
@@ -1412,8 +1412,10 @@ export function CastScreen() {
  * ellipsises at the real line break; here we only pick the sentence and flatten the markdown's
  * hard wrapping so it measures as one run of text.
  */
-function sheetLede(sheet: { sections: Array<{ body: string }> }): string {
-  return firstSentence(sheet.sections[0]?.body ?? "");
+function SheetPreview({ text }: { text: string }) {
+  // Parse before choosing the sentence: markup can straddle its punctuation or carry link labels.
+  // Memoize by source so unrelated snapshot updates do not reparse every visible card.
+  return useMemo(() => firstSentence(readOnlyMarkdownText(text) ?? text), [text]);
 }
 
 /** One sentence of prose on one line: markdown's hard wrapping flattened, the rest dropped. */
@@ -1474,7 +1476,7 @@ export function LocationsScreen() {
               <div className="fy-gridcard__title">
                 <span className="fy-gridcard__name">{s.name}</span>
               </div>
-              <div className="fy-gridcard__body">{sheetLede(s)}</div>
+              <div className="fy-gridcard__body"><SheetPreview text={s.sections[0]?.body ?? ""} /></div>
               <div className="fy-gridcard__foot fy-gridcard__foot--spaced">
                 {s.status === "locked" ? `locked · v${s.version}` : `sketch · v${s.version}`}
                 {s.canonRules.length > 0 ? ` · ${s.canonRules.join(", ")}` : ""}
@@ -1538,7 +1540,7 @@ export function FactionsScreen() {
                 <div className="fy-gridcard__title">
                   <span className="fy-gridcard__name">{s.name}</span>
                 </div>
-                <div className="fy-gridcard__body">{sheetLede(s)}</div>
+                <div className="fy-gridcard__body"><SheetPreview text={s.sections[0]?.body ?? ""} /></div>
                 {/*
                   Both lines render whichever facets the sheet has. A faction with no fears keeps
                   a blank line rather than a shorter card, so a sketch sits level beside a written
@@ -1548,14 +1550,14 @@ export function FactionsScreen() {
                   <div className="fy-wants__line">
                     {wants && (
                       <>
-                        <b>wants:</b> {firstSentence(wants)}
+                        <b>wants:</b> <SheetPreview text={wants} />
                       </>
                     )}
                   </div>
                   <div className="fy-wants__line">
                     {fears && (
                       <>
-                        <b>fears:</b> {firstSentence(fears)}
+                        <b>fears:</b> <SheetPreview text={fears} />
                       </>
                     )}
                   </div>

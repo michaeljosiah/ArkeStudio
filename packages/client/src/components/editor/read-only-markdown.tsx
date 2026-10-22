@@ -1,14 +1,23 @@
 import { useMemo } from "react";
 import { externalWebUrl } from "@arke-studio/contracts";
 import { describeRichModeRefusal } from "./rich-mode.js";
-import { markdownHTML } from "./round-trip.js";
+import { markdownHTML, markdownText } from "./round-trip.js";
+
+function canReadMarkdown(value: string): boolean {
+  // Reading does not rewrite definitions, so reference links need no authoring refusal.
+  const refusal = describeRichModeRefusal(value, () => "");
+  return !refusal || refusal.reason === "reference-links";
+}
+
+/** Card copy shares the reading view's supported forms and escaped-source fallback. */
+export function readOnlyMarkdownText(value: string): string | null {
+  return canReadMarkdown(value) ? markdownText(value) : null;
+}
 
 /** A reading view uses the existing parser without mounting an editing session for each section. */
 export function ReadOnlyMarkdown({ value, ariaLabel }: { value: string; ariaLabel: string }) {
   const html = useMemo(() => {
-    // A reading view never rewrites link definitions, so the authoring-only refusal does not apply.
-    const refusal = describeRichModeRefusal(value, () => "");
-    if (refusal && refusal.reason !== "reference-links") return null;
+    if (!canReadMarkdown(value)) return null;
     const rendered = markdownHTML(value);
     if (rendered === null) return null;
     const view = document.createElement("div");
