@@ -124,7 +124,10 @@ failure or timeout. The limits are 200 chapters, two million text code points, 5
 external allocation enforce a 512 MiB worker budget; this is not an operating-system RSS cap.
 Large inputs can refuse before the page ceiling. The coordinator does not hold the world gate
 while formatting. Retry checks the frozen renderer/font identity; it cannot silently use a
-new renderer to reinterpret an old edition.
+new renderer to reinterpret an old edition. The worker refuses PDF.js's optional
+`@napi-rs/canvas` addon, which the packaged worker cannot resolve anyway: in a source checkout
+each finished worker unloaded it, and on Windows that unload intermittently crashed the whole
+process (0xC0000005).
 
 Client `story-pdf-preview.tsx` displays the actual authenticated candidate PDF with canvas and
 selectable text, page/zoom/chapter controls and no native download/annotation actions. Only a
