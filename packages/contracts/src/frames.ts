@@ -3448,10 +3448,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * the book, the direction the new reader cannot express, the price of reading the book
    * again, and the takes kept. Answered by `audiobook.narrator-quote`; nothing written. With a
    * chapter it is that chapter's switch (R-195): its blocks, its direction, its price, and
-   * `voice: null` is the book's narrator rather than the app's.
+   * `voice: null` is the book's narrator rather than the app's. `clears` is the book's switch
+   * made from a chapter with its own narrator, which `set-audiobook-narrator` with that
+   * `chapterId` lets go in the same write: the quote weighs both (codex on PR 2168).
    */
   z
-    .object({ kind: z.literal("quote-audiobook-narrator"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, voice: AudiobookReaderSchema.nullable(), chapterId: SlugSchema.optional() })
+    .object({ kind: z.literal("quote-audiobook-narrator"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, voice: AudiobookReaderSchema.nullable(), chapterId: SlugSchema.optional(), clears: SlugSchema.optional() })
     .strict(),
   /**
    * A block heard as it would be read (R-45, R-46): its words with its direction and, under

@@ -1689,8 +1689,10 @@ export class Coordinator {
     const summary = chapter === undefined ? undefined : chapters.find((c) => c.id === chapter || c.file === chapter);
     const title = (id: string) => chapters.find((c) => c.id === id)?.title || id;
     const room = resolve(chapterNarratorChoice(book, summary?.id), summary !== undefined && book?.chapterNarrators?.[summary.id] !== undefined ? title(summary.id) : undefined);
+    // An outlined chapter is never read by the book (it is `planned` there), so a voice kept for it
+    // is not asked to be available until the chapter has prose (codex on PR 2168).
     const chapterNarrators = chapter !== undefined ? {} : Object.fromEntries(Object.entries(book?.chapterNarrators ?? {})
-      .filter(([id]) => chapters.some((c) => c.id === id && !c.retired))
+      .filter(([id]) => chapters.some((c) => c.id === id && !c.retired && c.status !== "outlined"))
       .map(([id, saved]) => [id, resolve(saved, title(id))]));
     return { ...room, catalogue, ...(Object.keys(chapterNarrators).length > 0 ? { chapterNarrators } : {}) };
   }
@@ -15843,7 +15845,9 @@ export class Coordinator {
             next = { ...now, chapterNarrators: msg.voice === null ? others : { ...others, [msg.chapterId]: { narrator: msg.voice } } };
           } else {
             const app = await this.audiobookNarrator(store, this.voiceService);
-            next = { ...now, narrator: msg.voice ?? app.narrator };
+            // A book's switch from a chapter with its own lets that chapter's go, as its write does.
+            const { [msg.clears ?? ""]: _cleared, ...kept } = now.chapterNarrators ?? {};
+            next = { ...now, narrator: msg.voice ?? app.narrator, ...(msg.clears !== undefined ? { chapterNarrators: kept } : {}) };
           }
           const quote = await quoteNarrator(store, msg.productionId, now, next, () => store.now(), msg.chapterId);
           this.emit({ at: new Date().toISOString(), type: "audiobook.narrator-quote", ...ids, ...quote });

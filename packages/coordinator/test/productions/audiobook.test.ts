@@ -2257,6 +2257,38 @@ describe("a chapter's own narrator (SPEC-047 R-195)", () => {
       assert.equal(again.rows.find((row) => row.chapterId === INK)?.made, ink.total);
     }));
 
+  it("quotes a book's switch from a chapter with its own as the write makes it, letting the chapter's go (codex on PR 2168)", () =>
+    withHarness({ localVoices: TWO }, async ({ worldDir, events, send }) => {
+      await send({ kind: "set-audiobook-chapter-narrator", worldId: WORLD_ID, productionId: LEDGER, chapterId: INK, voice: HEART });
+      await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      const quote = async (requestId: string, extra: { clears?: string }) => {
+        await send({ kind: "quote-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, requestId, voice: null, ...extra });
+        const answer = events.find((e): e is Quote => e.type === "audiobook.narrator-quote" && e.requestId === requestId);
+        assert.ok(answer && answer.refused === undefined, answer?.refused);
+        return answer;
+      };
+      const inkBlocks = (await quote("01J8F3K2QW9VZX4N7M0RTYB6G1", {})).stale;
+      assert.equal(inkBlocks, 0, "the app's narrator for the book, with the chapter keeping Heart, changes nothing");
+      const both = await quote("01J8F3K2QW9VZX4N7M0RTYB6G2", { clears: INK });
+      const heart = await readRecord(worldDir, "02-the-same-ink");
+      assert.equal(both.stale, Object.keys(heart.takes).length, "with the chapter's own let go, every one of Heart's blocks goes stale under George");
+    }));
+
+  it("an outlined chapter's own narrator does not hold the book while it cannot read (codex on PR 2168)", () =>
+    withHarness({
+      cloud: [],
+      before: async (worldDir) => {
+        const file = join(worldDir, "productions", LEDGER, "chapters", "02-the-same-ink.md");
+        await writeFile(file, (await readFile(file, "utf8")).replace(/^status:.*$/m, "status: outlined"));
+      },
+    }, async ({ events, send, spoken }) => {
+      await send({ kind: "set-audiobook-chapter-narrator", worldId: WORLD_ID, productionId: LEDGER, chapterId: INK, voice: { provider: LOW_TIDE.provider, model: LOW_TIDE.model, voiceId: LOW_TIDE.voiceId, label: LOW_TIDE.label } });
+      await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      const finished = events.find((e): e is Extract<DomainEvent, { type: "audiobook.book-finished" }> => e.type === "audiobook.book-finished");
+      assert.equal(finished?.outcome, "read", finished?.reason);
+      assert.ok(spoken.length > 0, "the chapters with prose are read");
+    }));
+
   it("refuses a designed voice the world does not hold, and plans the chapter in its own voice for listening", () =>
     withHarness({ localVoices: TWO }, async ({ store, worldDir, send }) => {
       await send({ kind: "set-audiobook-chapter-narrator", worldId: WORLD_ID, productionId: LEDGER, chapterId: INK, voice: { provider: "google", model: "gemini-3.8-flash-tts", voiceId: "designed:dv_01M5M286AZGETPNR4RV0QSD414:1", label: "Elsewhere" } });

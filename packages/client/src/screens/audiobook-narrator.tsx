@@ -112,7 +112,8 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
     }
     setQuoteId(mode === "chapter" ? quoteAudiobookNarrator(worldId, productionId, picked, chapter!.id)
       : backToBook ? quoteAudiobookNarrator(worldId, productionId, null, chapter!.id)
-        : quoteAudiobookNarrator(worldId, productionId, target));
+        // The book's narrator changed from a chapter with its own: the write lets the chapter's go too.
+        : quoteAudiobookNarrator(worldId, productionId, target, undefined, own !== undefined ? chapter!.id : undefined));
     // `target` is `picked` or null by mode; both are in the list.
   }, [mode, picked?.provider, picked?.model, picked?.voiceId, unchanged, backToBook]);
   // A voice tried on the block, as it would read it (R-46): heard, never a take.

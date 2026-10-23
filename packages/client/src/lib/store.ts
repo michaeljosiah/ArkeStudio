@@ -5853,11 +5853,12 @@ export function setAudiobookChapterNarrator(worldId: string, productionId: strin
 
 /**
  * What a narrator switch would do, before it is made (R-46); answered under the returned id. With
- * a chapter it is that chapter's switch (R-195), and null is the book's narrator.
+ * a chapter it is that chapter's switch (R-195), and null is the book's narrator. `clears` is a
+ * book's switch that also lets that chapter's own narrator go, as the write will.
  */
-export function quoteAudiobookNarrator(worldId: string, productionId: string, voice: AudiobookReader | null, chapterId?: string): string | null {
+export function quoteAudiobookNarrator(worldId: string, productionId: string, voice: AudiobookReader | null, chapterId?: string, clears?: string): string | null {
   const requestId = ulid();
-  if (!send({ kind: "quote-audiobook-narrator", worldId, productionId, requestId, voice, ...(chapterId !== undefined ? { chapterId } : {}) })) return null;
+  if (!send({ kind: "quote-audiobook-narrator", worldId, productionId, requestId, voice, ...(chapterId !== undefined ? { chapterId } : {}), ...(clears !== undefined ? { clears } : {}) })) return null;
   emitChange({ ...current, narratorQuotes: { ...current.narratorQuotes, [requestId]: { state: "working" } } });
   return requestId;
 }
