@@ -254,7 +254,9 @@ upload.**
    schema 2, which every Player reads. Use the installed app's ffmpeg: winget's on PATH has crashed
    on exports. A world with a public Guide also gets its guide alone (SPEC-059 R-10) — the same
    command with `--guide-alone` in place of the production id, making
-   `exports/<slug>-guide-<UTC date>.zip` — so it can be explored before it is installed.
+   `exports/<slug>-guide-<UTC date>.zip` — so it can be explored before it is installed. Add
+   `--cover <world-relative file>` for the production's own picture, as Publish's cover gives it
+   in the app: the script cannot read Publish, and without it Listen shows the world's key art.
 2. **Check it as the Player reads it**: arke_world's `readWorldPackage`, and `pin_world` (below),
    which refuses a package the Player would.
 3. **Upload it under its new name** to the world's public story release

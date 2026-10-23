@@ -14781,7 +14781,7 @@ export class Coordinator {
           exportId: msg.exportId,
           signal: control.signal,
           include: msg.options,
-          ...(publish !== undefined ? { publish: { title: publish.title, author: publish.author, language: publish.language } } : {}),
+          ...(publish !== undefined ? { publish: { title: publish.title, author: publish.author, language: publish.language, cover: publish.cover } } : {}),
           studioVersion: this.opts.appVersion,
           // Each step said at once, the percent within it at most twice a second.
           onStep: (step, percent) => {
