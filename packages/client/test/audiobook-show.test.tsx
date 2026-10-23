@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import type { AudiobookDoor, ChapterSummary, ClientMessage, ClientState } from "@arke-studio/contracts";
-import { AudiobookScreen, chapterHeading, chapterSeconds, chapterSpans, chapterStateWord, formatBookLength, readingWarning } from "../src/screens/audiobook.js";
+import { AudiobookScreen, bookNarrators, chapterHeading, chapterSeconds, chapterSpans, chapterStateWord, formatBookLength, namesCredit, readingWarning } from "../src/screens/audiobook.js";
 import { audiobookPlaceKey } from "../src/lib/audiobook-place.js";
 import { PlayerDock } from "../src/components/player.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -307,6 +307,28 @@ describe("the cast as pictures (rule 6)", () => {
     assert.match(narrator.querySelector("img")!.getAttribute("src")!, /world-art\.png/);
     await press(narrator);
     assert.ok(dom.document.querySelector('[data-testid="narrator-dialog"]'));
+  });
+
+  it("credits a narrator to a part beside the book's, in the order they first read, and its card opens its first chapter (R-195)", async () => {
+    const heart = { name: "Heart", voice: { label: "Heart", provider: "kokoro", local: true }, state: "narrator" as const, blocks: 40, chapters: ["neap"] };
+    const m = await mount(inkbound(91, { narrator: "george" }), door({ voices: [{ name: "George", voice: { label: "George", provider: "kokoro", local: true }, state: "narrator", blocks: 171 }], chapterNarrators: [heart] }));
+    assert.match(q('[data-testid="audiobook-line"]')!.textContent!, / · Read by George and Heart$/, "every narrator, as the video credits them");
+    const cards = all('[data-testid="audiobook-card"]').slice(0, 2);
+    assert.deepEqual(cards.map((card) => [...card.querySelectorAll(".fy-abshow__card-nm, .fy-abshow__card-rl")].map((part) => part.textContent)), [["George", "Narrator · Ch 1, 3"], ["Heart", "Narrator · Ch 2"]]);
+    await press(cards[1]!);
+    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/neap?view=audiobook`, "a chapter's narrator is chosen from its chapter");
+  });
+
+  it("orders narrators by the chapter each first reads, leaves out a book narrator with no chapter left, and names each once", () => {
+    const row = (name: string, chapters?: string[]) => ({ name, state: "narrator" as const, blocks: 1, ...(chapters !== undefined ? { chapters } : {}) });
+    const rows = ROWS;
+    const names = (d: Parameters<typeof bookNarrators>[0]) => bookNarrators(d).map((entry) => [entry.row.name, entry.chapters]);
+    assert.deepEqual(names({ voices: [row("Ines")], rows }), [["Ines", ["chapter-1", "neap", "untitled"]]]);
+    assert.deepEqual(names({ voices: [row("Ines")], chapterNarrators: [row("Mistress", ["chapter-1"])], rows }), [["Mistress", ["chapter-1"]], ["Ines", ["neap", "untitled"]]], "the part read first comes first");
+    assert.deepEqual(names({ voices: [row("Ines")], chapterNarrators: [row("Mistress", ["chapter-1", "neap", "untitled"])], rows }), [["Mistress", ["chapter-1", "neap", "untitled"]]], "no chapter left to the book's narrator");
+    assert.equal(namesCredit(["Ines", "Mistress", "Ines"]), "Ines and Mistress");
+    assert.equal(namesCredit(["A", "B", "C"]), "A, B and C");
+    assert.equal(namesCredit(["A"]), "A");
   });
 });
 
