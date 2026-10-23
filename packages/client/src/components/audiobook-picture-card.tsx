@@ -19,6 +19,7 @@ import {
   type BudgetCandidate,
   type ManifestModel,
   type PictureOwnLooks,
+  type PictureShape,
   type PictureShot,
   type PictureSuggestion,
   type PictureWho,
@@ -26,7 +27,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
-import { chooseAudiobookLook, rewriteAudiobookPicturePrompt, useAudiobookAsks, useStore } from "../lib/store.js";
+import { chooseAudiobookLook, makeAudiobookTallPicture, rewriteAudiobookPicturePrompt, useAudiobookAsks, useStore } from "../lib/store.js";
 import type { PictureSuggestionState } from "./audiobook-suggest.js";
 import { NewLookSheet } from "./audiobook-new-look.js";
 import { Button, Checkbox, Textarea, cx } from "./ui.js";
@@ -318,7 +319,7 @@ export function PicturePress({ onChoose, children }: { onChoose: (() => void) | 
  * pressed, and the checks; Remove (or Discard), Edit prompt and Generate — Make again once a
  * picture is set — in the panel's foot.
  */
-export function PictureCard({ world, worldId, state, onEdit, offline, picture = null, onRemove, onChoose, chapter, mediaActions }: {
+export function PictureCard({ world, worldId, state, onEdit, offline, picture = null, shapes = ["wide"], tall = null, onRemove, onChoose, chapter, mediaActions }: {
   world: Pick<WorldBundle, "meta" | "referenceKits" | "sheets">;
   worldId: string;
   state: PictureSuggestionState;
@@ -326,6 +327,10 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   offline: boolean;
   /** The picture set on the block, drawn in the slot. */
   picture?: string | null;
+  /** The shapes the book's pictures are made in (design turn 235): with Tall, a slot for each. */
+  shapes?: readonly PictureShape[];
+  /** The block's Tall, and whether it was made from an earlier picture (the owner's call 3). */
+  tall?: { url: string; earlier: boolean } | null;
   /** Turn 208 motion choices follow the retained image/facts row (turn 194). */
   mediaActions?: ReactNode;
   onRemove?: () => void;
@@ -380,6 +385,23 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
     setUpdating(null);
   }, [drafted]);
   const answered = updating === null ? null : (asks[updating.id] ?? null);
+  // The Tall (design turn 235): a press of its own when it is missing or from an earlier picture,
+  // and after Generate or Make again, made by this window from the picture that lands (R-196).
+  const [tallAsk, setTallAsk] = useState<string | null>(null);
+  const tallAnswer = tallAsk === null ? null : (asks[tallAsk] ?? null);
+  const [chainTall, setChainTall] = useState(false);
+  const makeTall = useRef<(() => void) | null>(null);
+  const landed = useRef(picture);
+  useEffect(() => {
+    if (chainTall && picture !== null && picture !== landed.current) {
+      setChainTall(false);
+      makeTall.current?.();
+    }
+    landed.current = picture;
+  }, [picture, chainTall]);
+  useEffect(() => {
+    if (state.making?.state === "failed") setChainTall(false);
+  }, [state.making?.state]);
   const setPrompt = state.setPrompt;
   useEffect(() => {
     if (updating === null || answered?.state !== "prompt") return;
@@ -440,6 +462,16 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   // moved` on every press. Priced as the suggestion was, from the same figures the Bench plans with.
   const carriedNow = suggestion.references?.length ?? riding.filter((entry) => entry.carried).length;
   const quote = suggestion.reuse === undefined && model !== undefined && carriedNow !== suggestion.who.filter((entry) => entry.carried).length ? pictureQuote(model, carriedNow, suggestion.aspect) : suggestion.estimatedMicroUsd;
+  // The Tall (235b, 235c): its own slot, priced as one picture riding one reference at 9:16; the
+  // press says what it makes, and on the ChatGPT plan only `ChatGPT plan`, the Model fact keeping
+  // the whole label (the long one pushed the press past a 520 panel, 235 rule 5).
+  const tallOn = shapes.includes("tall") && chapter !== undefined;
+  const tallQuote = model === undefined ? 0 : pictureQuote(model, 1, "9:16");
+  const pressPrice = (microUsd: number) => (suggestion.model.plan === "included-plan" ? "ChatGPT plan" : priceLabel(microUsd));
+  const tallWanted = tallOn && picture !== null && (tall === null || tall.earlier);
+  const tallBusy = tallAnswer?.state === "working";
+  const tallFailed = tallAnswer?.state === "failed" ? tallAnswer.reason : null;
+  makeTall.current = chapter === undefined ? null : () => setTallAsk(makeAudiobookTallPicture(worldId, chapter.productionId, chapter.chapterFile, suggestion.block, tallQuote));
   // Whose look is not the one the prompt was written for (rule 8): their clothing words are marked
   // until Update prompt rewrites them. The prompt was written for what the card was drafted or made
   // with, and since an Update prompt, for what it rewrote it for.
@@ -537,7 +569,33 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   return (
     <div className="fy-sugg fy-pcard" data-testid="suggest-card">
       <div className="fy-pcard__top">
-        {picture !== null ? (
+        {tallOn ? (
+          // One slot per shape on (235b), one height so the two read as one picture, each named.
+          <div className="fy-pcard__shapes" data-testid="picture-card-shapes">
+            <figure>
+              {picture !== null ? (
+                <PicturePress onChoose={busy ? undefined : onChoose}>
+                  <img className="fy-pcard__img" src={picture} alt="" data-testid="picture-card-picture" />
+                </PicturePress>
+              ) : (
+                <div className="fy-pcard__slot" aria-hidden="true">
+                  <span className="fy-mono">16:9</span>
+                </div>
+              )}
+              <figcaption className="fy-mono">Wide</figcaption>
+            </figure>
+            <figure>
+              {tall !== null ? (
+                <img className="fy-pcard__img fy-pcard__img--tall" src={tall.url} alt="" data-testid="picture-card-tall" />
+              ) : (
+                <div className="fy-pcard__slot fy-pcard__slot--tall" aria-hidden="true" data-testid="picture-card-tall-slot">
+                  <span className="fy-mono">9:16</span>
+                </div>
+              )}
+              <figcaption className="fy-mono">Tall</figcaption>
+            </figure>
+          </div>
+        ) : picture !== null ? (
           <PicturePress onChoose={busy ? undefined : onChoose}>
             <img className="fy-pcard__img" src={picture} alt="" data-testid="picture-card-picture" />
           </PicturePress>
@@ -639,6 +697,16 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
           {failed.reason}
         </p>
       )}
+      {tallOn && tall?.earlier === true && !tallBusy && (
+        <p className="fy-mono fy-ch__who-where--warn" data-testid="picture-card-tall-earlier">
+          Tall · from an earlier picture
+        </p>
+      )}
+      {tallFailed !== null && (
+        <p className="fy-mono fy-ch__who-where--warn" data-testid="picture-card-tall-failed">
+          Tall · {tallFailed}
+        </p>
+      )}
       <div className="fy-abp__foot">
         {onRemove !== undefined ? (
           <Button variant="outline" disabled={offline || busy} onClick={onRemove} data-testid="audiobook-picture-remove">
@@ -654,9 +722,23 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
         <Button variant="outline" disabled={offline || busy} onClick={() => onEdit({ ...suggestion, who: riding }, prompt)} data-testid="suggest-edit">
           Edit prompt
         </Button>
-        <Button variant="primary" disabled={offline || busy || updatingNow || prompt.trim() === ""} onClick={() => state.generate(suggestion, prompt, chapter !== undefined ? own : undefined, quote)} data-testid="suggest-generate">
-          {busy ? "Generating…" : `${picture !== null ? "Make again" : "Generate"} · ${priceLabel(quote, suggestion.model.plan)}`}
-        </Button>
+        {tallWanted && !busy ? (
+          <Button variant="primary" disabled={offline || tallBusy} onClick={() => makeTall.current?.()} data-testid="picture-card-make-tall">
+            {tallBusy ? "Making tall…" : `Make tall · ${pressPrice(tallQuote)}`}
+          </Button>
+        ) : (
+          <Button
+            variant="primary"
+            disabled={offline || busy || tallBusy || updatingNow || prompt.trim() === ""}
+            onClick={() => {
+              setChainTall(tallOn);
+              state.generate(suggestion, prompt, chapter !== undefined ? own : undefined, quote);
+            }}
+            data-testid="suggest-generate"
+          >
+            {busy ? "Generating…" : tallBusy ? "Making tall…" : `${picture !== null ? "Make again" : "Generate"} · ${tallOn ? pressPrice(quote + tallQuote) : priceLabel(quote, suggestion.model.plan)}`}
+          </Button>
+        )}
       </div>
       {/* New look from a row's menu: 193b's sheet, drawn on the body over the panel (it puts a raised block sheet away while open). */}
       {chapter !== undefined && newLookFor !== null && newLookFor.sheet !== undefined && (

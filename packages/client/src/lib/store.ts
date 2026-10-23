@@ -808,6 +808,13 @@ export function subscribeArkePlayerExported(listener: (answer: ArkePlayerExporte
   arkePlayerExportedListeners.add(listener);
   return () => arkePlayerExportedListeners.delete(listener);
 }
+/** `Make 290 tall` (design turn 235a): how many, how many landed, what was refused. */
+export type AudiobookTallProgress = Extract<DomainEvent, { type: "audiobook.tall-progress" }>;
+const audiobookTallProgressListeners = new Set<(progress: AudiobookTallProgress) => void>();
+export function subscribeAudiobookTallProgress(listener: (progress: AudiobookTallProgress) => void): () => void {
+  audiobookTallProgressListeners.add(listener);
+  return () => audiobookTallProgressListeners.delete(listener);
+}
 /** The audiobook's video (design turn 197): what a render would make, and what one made. */
 export type AudiobookVideoExported = Extract<DomainEvent, { type: "audiobook.video-exported" }>;
 const audiobookVideoExportedListeners = new Set<(answer: AudiobookVideoExported) => void>();
@@ -1949,6 +1956,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "arke-player.exported") {
       for (const listener of arkePlayerExportedListeners) listener(event);
+    }
+    if (event.type === "audiobook.tall-progress") {
+      for (const listener of audiobookTallProgressListeners) listener(event);
     }
     if (event.type === "character-look.imported") {
       for (const listener of characterLookImportListeners) listener(event);
@@ -6188,6 +6198,28 @@ export function rewriteAudiobookPicturePrompt(worldId: string, productionId: str
   if (!send({ kind: "rewrite-audiobook-picture-prompt", worldId, productionId, chapterFile, block, prompt, changes: changes.map((change) => ({ ...change })), requestId })) return null;
   emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
   return requestId;
+}
+
+/** The book's picture shapes (design turn 235a, SPEC-047 R-195): Wide, Tall or both; nothing is made or removed. */
+export function setAudiobookPictureShapes(worldId: string, productionId: string, shapes: readonly ("wide" | "tall")[]): boolean {
+  return send({ kind: "set-audiobook-picture-shapes", worldId, productionId, shapes: [...shapes] });
+}
+
+/** A block's picture made Tall from the picture it has (design turn 235, R-196); answered under the id returned, held in `audiobookAsks`. */
+export function makeAudiobookTallPicture(worldId: string, productionId: string, chapterFile: string, block: string, confirmedMicroUsd: number): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "make-audiobook-tall-picture", worldId, productionId, chapterFile, block, confirmedMicroUsd, requestId })) return null;
+  emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
+  return requestId;
+}
+
+/** `Make 290 tall` (235a, R-199): the book's missing Talls, one at a time, followed through `subscribeAudiobookTallProgress`. */
+export function makeAudiobookTallPictures(worldId: string, productionId: string, confirmedMicroUsd: number): boolean {
+  return send({ kind: "make-audiobook-tall-pictures", worldId, productionId, confirmedMicroUsd, requestId: ulid() });
+}
+
+export function stopAudiobookTallPictures(worldId: string, productionId: string): boolean {
+  return send({ kind: "stop-audiobook-tall-pictures", worldId, productionId });
 }
 
 export function useAudiobookAsks(): StoreState["audiobookAsks"] {

@@ -305,7 +305,10 @@ export async function setAudiobookPicture(
     const rest = otherBlockPictures(blocks, held, block, picture !== null);
     if (picture === null && Object.keys(rest).length === Object.keys(held).length) return null;
     const kept = reaffirm ? { ...original, ...(expectedLook !== undefined && pictureLookChanged(original.look, current.look, kitLookLibrary(store.getBundle().referenceKits, current.look), original.lookReview) ? { lookReview: { hash: expectedLook, at: store.now() } } : {}) } : undefined;
-    const next: Record<string, AudiobookPicture> = picture === null ? rest : { ...rest, [block]: kept ?? { file: picture.file, source: picture.source, textHash: audiobookTextHash(planned.block.text), at: store.now(), ...(made.look !== undefined ? { look: made.look } : {}), ...(made.shot !== undefined ? { shot: made.shot } : {}) } };
+    // A new picture keeps the Tall the block had (design turn 235, the owner's call 3): made from an
+    // earlier picture, it is marked and still plays until it is made again, never dropped unasked.
+    const tall = shown(current)?.tall;
+    const next: Record<string, AudiobookPicture> = picture === null ? rest : { ...rest, [block]: kept ?? { file: picture.file, source: picture.source, textHash: audiobookTextHash(planned.block.text), at: store.now(), ...(made.look !== undefined ? { look: made.look } : {}), ...(made.shot !== undefined ? { shot: made.shot } : {}), ...(tall !== undefined ? { tall } : {}) } };
     const { pictures: _old, ownLooks: pending, ...without } = current;
     // What was held for this block's next picture is that picture's own now (R-146): on its stamp.
     const { [block]: _made, ...others } = pending ?? {};
@@ -318,4 +321,27 @@ export async function setAudiobookPicture(
     checkReview(fresh.record === "unreadable" ? null : fresh.record);
     if (reaffirm && picture !== null && !(await onShelf(store, picture.file))) throw new Error("that picture is not in this world");
   } });
+}
+
+/**
+ * A block's picture made Tall (design turn 235, SPEC-047 R-197), kept beside the picture it was
+ * made from, under that picture's own key, through the record's own lane. Refused when the block's
+ * picture is no longer the one it was made from, so a Tall never lands beside a picture it does not
+ * show; the new picture keeps its old Tall, marked, until this runs for it.
+ */
+export async function setAudiobookPictureTall(store: WorldStore, productionId: string, chapterFile: string, block: string, tall: string, from: string): Promise<ChapterAudiobook> {
+  const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
+  const summary = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
+  if (summary === undefined) throw new Error("that chapter is no longer in this production");
+  const listed = worldImageReferences(store.getBundle()).some((reference) => reference.file === tall);
+  if (!listed || !(await onShelf(store, tall))) throw new Error("that picture is not in this world");
+  const plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId) });
+  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+  const index = blocks.findIndex((candidate) => candidate.key === block);
+  if (index < 0) throw new Error("that block is no longer in the chapter");
+  return updateAudiobook(store, productionId, plan.chapter, (current) => {
+    const placed = placePictures(blocks, current.pictures).placed.find((entry) => entry.index === index);
+    if (placed === undefined || placed.picture.file !== from) throw new Error("The block's picture changed; make its Tall again.");
+    return { ...current, updatedAt: store.now(), pictures: { ...current.pictures, [placed.key]: { ...placed.picture, tall: { file: tall, at: store.now(), from } } } };
+  }, { requireReadable: true });
 }

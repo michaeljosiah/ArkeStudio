@@ -762,6 +762,18 @@ export function aspectOffered(model: ManifestModel, aspect: string): boolean {
 }
 
 /**
+ * Whether a picture can be asked of this model in that shape (design turn 235, SPEC-047 R-200). A
+ * row that lists its shapes makes those and no other, though `aspectOffered` also grants the
+ * portrait its derived default; a route that takes its size from the brief makes whatever the brief
+ * says; a row with no list falls back to `aspectOffered`.
+ */
+export function makesShape(model: ManifestModel, aspect: string): boolean {
+  if (model.limits.providerSelectedSize === true) return true;
+  const listed = model.limits.aspects;
+  return listed !== undefined && listed.length > 0 ? listed.includes(aspect) : aspectOffered(model, aspect);
+}
+
+/**
  * A row that curates nothing and declares no range has no opinion about shape (issue 389): the
  * routes behind it take real dimensions, and treating silence as refusal would unshape a
  * production's stills on exactly the models that could honour them. An unverified row is not

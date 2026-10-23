@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { audiobookTextHash } from "./audiobook.js";
-import { PICTURE_MIN_HOLD_SEC, type AudiobookPicture } from "./audiobook-pictures.js";
+import { PICTURE_MIN_HOLD_SEC, tallFromEarlier, type AudiobookPicture } from "./audiobook-pictures.js";
 import { SlugSchema } from "./ids.js";
 import { AudiobookMotionSchema } from "./audiobook-motion.js";
 import { AcousticWordSchema } from "./audiobook-word-timing.js";
@@ -76,6 +76,8 @@ export const ListeningPictureSchema = z
     motionProblem: z.string().optional(),
     /** The same moment made Tall for a phone (design turn 235, SPEC-047 R-197), when it has one that can be shown. */
     tall: z.string().min(1).optional(),
+    /** Its Tall was made from an earlier picture than this one (the owner's call 3): it plays, and Make tall remakes it. */
+    tallEarlier: z.literal(true).optional(),
   })
   .strict();
 export type ListeningPicture = z.infer<typeof ListeningPictureSchema>;
@@ -292,7 +294,7 @@ export function listeningChapter(input: {
     ...(entry.picture.motion?.active === true ? { motion: entry.picture.motion } : {}),
     // A Tall whose file is gone is left out, as a picture's own is (placePictures): the phone then
     // shows the Wide one, which is what a package without one does.
-    ...(entry.picture.tall !== undefined && (input.usable?.(entry.picture.tall.file) ?? true) ? { tall: entry.picture.tall.file } : {}),
+    ...(entry.picture.tall !== undefined && (input.usable?.(entry.picture.tall.file) ?? true) ? { tall: entry.picture.tall.file, ...(tallFromEarlier(entry.picture) ? { tallEarlier: true as const } : {}) } : {}),
   }));
   const first = pictures[0];
   const opening = first !== undefined && first.at === 0 ? first.file : (input.cover ?? first?.file ?? null);
