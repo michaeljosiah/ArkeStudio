@@ -183,10 +183,9 @@ export interface ChapterAudiobookInput {
 /** What a press asks for once the save lands: the chapter, these blocks alone, a direction, or a card's acceptance. */
 export type AudiobookIntent = { kind: "read"; blocks?: readonly string[]; fromExport?: boolean; /** The paragraphs left to cast, cast first (design turn 198). */ castFirst?: boolean } | { kind: "direct"; also?: DirectAlso } | { kind: "accept" } | { kind: "open-direct" };
 
-/** What the Direct sheet's `Also` asks for with the direction (design turn 184a, R-53, R-54). */
+/** What the Direct sheet's `Also` asks for with the direction (design turn 184a, R-54). */
 export interface DirectAlso {
   cast?: boolean;
-  chapterNote?: boolean;
   speakerNotes?: boolean;
 }
 
@@ -540,11 +539,11 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
           if (performed !== null) view = performedDirectionView(performed);
         } catch { view = null; }
       }
-      // Under the proposal: its direction, the speaker notes and the chapter note it drafted
-      // where none stands, as the coordinator would send them once it is accepted.
+      // Under the proposal: its direction and the speaker notes it drafted where none stands, as
+      // the coordinator would send them once it is accepted.
       const proposedInput = proposal?.proposed?.[block.key];
       const proposedNote = note ?? (reading === "performed" && block.speaker !== undefined ? proposal?.speakerNotes?.[block.sheet ?? block.speaker] : undefined);
-      const proposedReading = proposal?.chapterNote !== undefined ? { ...led, chapter: proposal.chapterNote } : led;
+      const proposedReading = led;
       let proposedView = proposedInput === undefined || speakerModel === null ? null : directionView(block.text, proposedInput, speakerModel, language, proposedNote, proposedReading);
       if (proposedInput !== undefined && speakerModel !== null) {
         try {
@@ -3155,11 +3154,9 @@ export function DirectionCard({ run, chapterOrder, blocks, onAccept, onDiscard }
           {run.state === "accepted" ? "✓ directed" : run.state === "accepting" ? "accepting…" : "proposed"} · {label}
           {version} · {blocks !== undefined ? `${blocks} blocks · ${moved} directed` : `${run.directed} block${run.directed === 1 ? "" : "s"}`}
           {run.cast !== undefined ? ` · ${run.cast.lines} line${run.cast.lines === 1 ? "" : "s"} cast` : ""}
-          {run.chapterNote !== undefined ? " · chapter note" : ""}
           {run.speakerNotes !== undefined ? ` · ${Object.keys(run.speakerNotes).length} speaker note${Object.keys(run.speakerNotes).length === 1 ? "" : "s"}` : ""} · {run.dropped} dropped · nothing spent
         </p>
       )}
-      {run.state === "directed" && run.chapterNote !== undefined && <p className="fy-ab__card-text" data-testid="direction-chapter-note"><span className="fy-vd__sent-k">Chapter note</span> {run.chapterNote}</p>}
       {run.state === "directed" && run.reason !== undefined && <p className="fy-mono fy-ch__who-where--warn">{run.reason}</p>}
       {run.state === "directed" && (
         <span className="fy-ab__control">
@@ -3295,9 +3292,11 @@ export function useProductionReading(worldId: string, productionId: string): boo
 
 /**
  * The book note and the chapter note behind one press (design turn 194, rule 5): `Notes · 2`
- * counts the notes set, `Notes` alone when none is. It opens a 520 sheet under the press, the two
- * fields with their counts as built, each written when it is left; Escape or a press outside closes
- * it. The fields hold, and so does the press, offline or while the book is read (codex on PR 1479).
+ * counts the notes set, `Notes` alone when none is. It opens a 520 sheet under the press, the book
+ * note's field with its count as built, written when it is left; Escape or a press outside closes
+ * it. A chapter note is no longer written (R-53): one a book already holds shows as it stands with
+ * `Remove`, since on Eleven v4 a chapter note before every block made each first line repeat. The
+ * fields hold, and so does the press, offline or while the book is read (codex on PR 1479).
  */
 export function NotesPress({ worldId, productionId, chapterFile, notes, disabled: off }: {
   worldId: string;
@@ -3329,7 +3328,12 @@ export function NotesPress({ worldId, productionId, chapterFile, notes, disabled
       {pop.open && (
         <div ref={pop.panel} className="fy-ab__notes" role="dialog" aria-label="Notes" data-testid="reading-notes" onKeyDown={pop.onKey}>
           <NoteRow label="Book note" value={notes.book} disabled={disabled} stacked area onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note)} />
-          <NoteRow label="Chapter note" value={notes.chapter} disabled={disabled} stacked area onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note, chapterFile)} />
+          {notes.chapter !== undefined && notes.chapter !== "" && (
+            <>
+              <NoteRow label="Chapter note" value={notes.chapter} disabled stacked area onCommit={() => {}} />
+              <Button variant="ghost" disabled={disabled} data-testid="chapter-note-remove" onClick={() => setAudiobookReadingNote(worldId, productionId, null, chapterFile)}>Remove</Button>
+            </>
+          )}
         </div>
       )}
     </span>
@@ -3379,15 +3383,13 @@ export function NoteRow({ label, value, disabled, onCommit, max = CADENCE_NOTE_M
  * each in a bordered list, label then value; what else to ask for; and `Direct`. Nothing spent:
  * the director is the writing service, and nothing it reads goes to a voice.
  */
-export function DirectSheet({ worldId, productionId, chapterFile, chapterOrder, blocks, reading, chapterNote, onCancel, onDirect }: {
+export function DirectSheet({ worldId, productionId, chapterFile, chapterOrder, blocks, reading, onCancel, onDirect }: {
   worldId: string;
   productionId: string;
   chapterFile: string;
   chapterOrder: number;
   blocks: number;
   reading: AudiobookReading;
-  /** A chapter note stands already: drafting one is not offered ticked. */
-  chapterNote: boolean;
   onCancel: () => void;
   onDirect: (also: DirectAlso) => void;
 }) {
@@ -3403,7 +3405,6 @@ export function DirectSheet({ worldId, productionId, chapterFile, chapterOrder, 
   const notesSet = reads?.speakerNotes;
   const allNotes = notesSet === undefined || (notesSet.of > 0 && notesSet.set === notesSet.of);
   const [cast, setCast] = useState(true);
-  const [draftChapter, setDraftChapter] = useState(!chapterNote);
   const [draftSpeakers, setDraftSpeakers] = useState(true);
   // Cast first, the speakers are the cast's, unknown until it runs and none of them noted yet as
   // far as Reads can say: drafting their notes is offered, and the coordinator asks only for the
@@ -3445,9 +3446,8 @@ export function DirectSheet({ worldId, productionId, chapterFile, chapterOrder, 
           {row("Before", reads.before === null ? "first chapter" : reads.before.blocks === 0 ? "nothing directed yet" : `chapter ${String(reads.before.order).padStart(2, "0")} · ${reads.before.blocks} directed`)}
         </div>
       )}
-      <span className="fy-ab__label">Also</span>
+      {(castNeeded || reading === "performed") && <span className="fy-ab__label">Also</span>}
       {castNeeded && check("Cast the lines first", cast, setCast, reads?.cast)}
-      {check("Draft the chapter note", draftChapter, setDraftChapter)}
       {reading === "performed" && check("Draft speaker notes", draftSpeakers, setDraftSpeakers, castFirst || notesSet === undefined ? undefined : allNotes ? `all ${notesSet.of} set` : `${notesSet.of - notesSet.set} of ${notesSet.of} missing`, speakersNoted)}
       <div className="fy-ab__control fy-ab__directsheet-foot">
         <span className="fy-mono">nothing spent</span>
@@ -3457,7 +3457,7 @@ export function DirectSheet({ worldId, productionId, chapterFile, chapterOrder, 
           variant="primary"
           data-testid="direct-sheet-direct"
           disabled={reads === null || (reading !== "narrator" && reads.cast !== undefined && !cast)}
-          onClick={() => onDirect({ ...(castFirst ? { cast: true } : {}), ...(draftChapter ? { chapterNote: true } : {}), ...(reading === "performed" && draftSpeakers && !speakersNoted ? { speakerNotes: true } : {}) })}
+          onClick={() => onDirect({ ...(castFirst ? { cast: true } : {}), ...(reading === "performed" && draftSpeakers && !speakersNoted ? { speakerNotes: true } : {}) })}
         >
           Direct
         </Button>

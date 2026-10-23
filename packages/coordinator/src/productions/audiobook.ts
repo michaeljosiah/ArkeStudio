@@ -561,13 +561,12 @@ export interface AudiobookPlan {
 
 /**
  * A chapter as a held proposal would read it (design turn 184, SPEC-047 R-54, R-55): the cast
- * it carries before it is written, the chapter note it drafted, the speaker notes it drafted
- * for speakers with none, and — for a run's preparation — the directions it would put in place
- * of the record's, whole. Nothing of it is on disk until the proposal is accepted.
+ * it carries before it is written, the speaker notes it drafted for speakers with none, and —
+ * for a run's preparation — the directions it would put in place of the record's, whole.
+ * Nothing of it is on disk until the proposal is accepted.
  */
 export interface ProposalOverride {
   cast?: ChapterVoices;
-  chapterNote?: string;
   speakerNotes?: Readonly<Record<string, string>>;
   directions?: Readonly<Record<string, AudiobookDirectionInput>>;
 }
@@ -604,10 +603,7 @@ export async function planAudiobook(
   const present = await presentTakes(store, record === "unreadable" ? null : record);
   // A drafted note stands only where the author has none (R-54): the author's always wins.
   const notes = { ...override?.speakerNotes, ...book?.notes };
-  const readingNotes = audiobookReadingNotes(
-    override?.chapterNote === undefined ? book : { ...book, chapterNotes: { ...book?.chapterNotes, [summary.id]: override.chapterNote } },
-    summary.id,
-  );
+  const readingNotes = audiobookReadingNotes(book, summary.id);
   const blocks = assignReaders(derived.blocks, reading, input.narrator, sheets, store.getBundle().clonedVoices ?? [], record === "unreadable" ? null : record, (artifactId) => present.has(artifactId), recorded, notes, readingNotes, store.getBundle().designedVoices ?? []);
   return {
     chapter: { id: summary.id, file: summary.file, title: summary.title, order: summary.order, version: opened.version, hash: sha256(opened.body) },

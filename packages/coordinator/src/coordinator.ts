@@ -15377,7 +15377,6 @@ export class Coordinator {
           }
           const result = await directChapter(store, msg.productionId, chapter.id, deriver, room, control.signal, {
             ...(castWith !== null ? { castWith } : {}),
-            ...(msg.chapterNote === true ? { chapterNote: true } : {}),
             ...(msg.speakerNotes === true ? { speakerNotes: true } : {}),
           });
           this.heldProposals.set(key, { ...(result.cast !== undefined ? { cast: result.cast.derived } : {}), heard: new Set() });
@@ -15388,7 +15387,6 @@ export class Coordinator {
             chapterVersion: result.chapterVersion,
             ...(result.summary !== undefined ? { summary: result.summary } : {}),
             ...(result.cast !== undefined ? { cast: { lines: result.cast.lines, speakers: result.cast.speakers }, castRecord: result.cast.record } : {}),
-            ...(result.chapterNote !== undefined ? { chapterNote: result.chapterNote } : {}),
             ...(result.speakerNotes !== undefined ? { speakerNotes: result.speakerNotes } : {}),
           });
         } catch (err) {
@@ -15431,10 +15429,9 @@ export class Coordinator {
           const held = same ? this.heldProposals.get(key) : undefined;
           const extras = {
             ...(held?.cast !== undefined ? { cast: held.cast } : {}),
-            ...(same && card.chapterNote !== undefined ? { chapterNote: card.chapterNote } : {}),
             ...(same && card.speakerNotes !== undefined ? { speakerNotes: card.speakerNotes } : {}),
           };
-          if ((extras.chapterNote !== undefined || extras.speakerNotes !== undefined) && this.audiobookBusy(msg.worldId, msg.productionId)) {
+          if (extras.speakerNotes !== undefined && this.audiobookBusy(msg.worldId, msg.productionId)) {
             this.emit({ at: at(), type: "audiobook.record", ...ids, requestId: msg.requestId, refused: "the book is being read" });
             return;
           }
@@ -15694,15 +15691,22 @@ export class Coordinator {
         return;
       }
       case "set-audiobook-reading-note": {
-        // The book note, or a chapter's note (design turn 184, SPEC-047 R-53): the book's, kept
-        // beside the reading, at most 300. Refused while the book is being read, as a speaker's
-        // note is: a run half way through would make blocks under a note that no longer stands.
+        // The book note, or taking a chapter's note away (design turn 184, SPEC-047 R-53): the
+        // book's, kept beside the reading, at most 300. Refused while the book is being read, as a
+        // speaker's note is: a run half way through would make blocks under a note that no longer
+        // stands. A chapter note is no longer written, only cleared: on Eleven v4 one led every
+        // block as a tag and the reader said each block's first line twice. One already on a book
+        // stays until cleared, so the takes made under it stay current.
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production) return;
         const chapter = msg.chapterFile === undefined ? undefined : production.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
         if (msg.chapterFile !== undefined && chapter === undefined) return;
+        if (chapter !== undefined && msg.note !== null && msg.note.trim() !== "") {
+          void this.appLog?.append({ kind: "audiobook.note-refused", production: msg.productionId, message: "a chapter note is only cleared" });
+          return;
+        }
         if (this.audiobookBusy(msg.worldId, msg.productionId)) {
           void this.appLog?.append({ kind: "audiobook.note-refused", production: msg.productionId, message: "the book is being read" });
           return;
@@ -15716,8 +15720,7 @@ export class Coordinator {
             const { note: _was, ...rest } = base;
             next = { ...rest, ...(note !== null && note !== "" ? { note } : {}) };
           } else {
-            const { [chapter.id]: _was, ...others } = base.chapterNotes ?? {};
-            const chapterNotes = note !== null && note !== "" ? { ...others, [chapter.id]: note } : others;
+            const { [chapter.id]: _was, ...chapterNotes } = base.chapterNotes ?? {};
             const { chapterNotes: _notes, ...rest } = base;
             next = { ...rest, ...(Object.keys(chapterNotes).length > 0 ? { chapterNotes } : {}) };
           }
@@ -15894,7 +15897,6 @@ export class Coordinator {
             override = {
               directions: card.proposed,
               ...(castRecord !== undefined ? { cast: castRecord } : {}),
-              ...(card.chapterNote !== undefined ? { chapterNote: card.chapterNote } : {}),
               ...(card.speakerNotes !== undefined ? { speakerNotes: card.speakerNotes } : {}),
             };
           }

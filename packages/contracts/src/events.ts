@@ -1882,8 +1882,6 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       cast: z.object({ lines: z.number().int().min(0), speakers: z.number().int().min(0) }).strict().optional(),
       /** The cast itself, so a window draws the proposal on the blocks that cast makes, not on the ones the record's cast makes (codex on PR 1479). */
       castRecord: ChapterVoicesSchema.optional(),
-      /** The chapter note the director drafted when asked (R-53); written on acceptance. */
-      chapterNote: z.string().min(1).max(CADENCE_NOTE_MAX).optional(),
       /** Speaker notes drafted from the sheets for speakers with none (R-54); written on acceptance, never over an author's. */
       speakerNotes: z.record(z.string().min(1).max(120), z.string().min(1).max(PERFORMANCE_NOTE_MAX)).optional(),
       reason: z.string().optional(),
