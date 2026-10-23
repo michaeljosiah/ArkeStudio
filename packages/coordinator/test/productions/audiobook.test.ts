@@ -2225,7 +2225,7 @@ describe("a chapter's own narrator (SPEC-047 R-195)", () => {
 
       await send({ kind: "set-audiobook-chapter-narrator", worldId: WORLD_ID, productionId: LEDGER, chapterId: INK, voice: HEART });
       assert.deepEqual(JSON.parse(await readFile(bookFile(worldDir), "utf8")).chapterNarrators, { [INK]: HEART });
-      assert.equal(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion, 106, "the new key fences the world past the builds that would drop it (R-49)");
+      assert.equal(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion, 107, "the new key fences the world past the builds that would drop it (R-49)");
 
       const door = await openDoor("01J8F3K2QW9VZX4N7M0RTYB6F2");
       const neap = door.rows.find((row) => row.chapterId === "neap")!;

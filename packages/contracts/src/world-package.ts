@@ -29,6 +29,14 @@ export const LISTENING_VERSION = 1;
 export const WORLD_BOOK_MEDIA_TYPES: readonly string[] = ["application/epub+zip"];
 export const WORLD_NARRATION_MEDIA_TYPES: readonly string[] = ["audio/mp4", "audio/x-m4b", "audio/mpeg"];
 export const WORLD_PICTURE_MEDIA_TYPES: readonly string[] = ["image/jpeg", "image/png"];
+
+/**
+ * The long side a package's narration pictures ship at (design turn 235d, SPEC-058 R-41): `full` is
+ * R-6's 2048, the default. Key art, the cover and the production's picture always ship at full.
+ */
+export const ARKE_PLAYER_PICTURE_SIZES = ["full", "1280", "960"] as const;
+export type ArkePlayerPictureSize = (typeof ARKE_PLAYER_PICTURE_SIZES)[number];
+export const arkePlayerPictureEdge = (size: ArkePlayerPictureSize | undefined): number | undefined => (size === "1280" ? 1280 : size === "960" ? 960 : undefined);
 export const LISTENING_AUDIO_MEDIA_TYPES: readonly string[] = ["audio/mp4"];
 export const LISTENING_MOTION_MEDIA_TYPES: readonly string[] = ["video/mp4"];
 
@@ -200,6 +208,8 @@ const ListeningPictureSchema = z.object({
   at: TicksSchema,
   hold: TicksSchema.optional(),
   picture: z.string(),
+  /** The same moment made Tall, 9:16 (R-37): a phone in portrait shows it over the whole screen (R-39). */
+  tall: z.string().optional(),
   focus: FocusSchema.optional(),
   motion: z.object({ video: z.string(), behavior: z.enum(["repeat", "hold"]), metadata: Ignorable }).strict().optional(),
   metadata: Ignorable,
@@ -282,6 +292,7 @@ export function readListening(source: string, assets: Readonly<Record<string, Wo
       }
       if (picture.motion !== undefined && !asset(picture.motion.video, LISTENING_MOTION_MEDIA_TYPES)) return notAPackage(`${where}: a motion`);
       if (!asset(picture.picture, WORLD_PICTURE_MEDIA_TYPES)) return notAPackage(`${where}: a picture`);
+      if (picture.tall !== undefined && !asset(picture.tall, WORLD_PICTURE_MEDIA_TYPES)) return notAPackage(`${where}: a tall picture`);
       before = picture;
     }
     let heard: ListeningDocumentPhrase | undefined;
@@ -314,6 +325,7 @@ export function listeningAssetIds(document: ListeningDocument): Set<string> {
     if (chapter.opening !== undefined) ids.add(chapter.opening);
     for (const picture of chapter.pictures ?? []) {
       ids.add(picture.picture);
+      if (picture.tall !== undefined) ids.add(picture.tall);
       if (picture.motion !== undefined) ids.add(picture.motion.video);
     }
   }

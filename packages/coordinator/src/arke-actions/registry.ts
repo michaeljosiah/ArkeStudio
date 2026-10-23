@@ -625,6 +625,12 @@ const CLIENT_COMMAND_METADATA = {
   "accept-illustration": action("production", "generation", "bench", "spend-and-compute", ["chapters", "sheets", "references", "artifacts", "bench"]),
   "stop-illustration": action("production", "command", "bench", "spend-and-compute", ["chapters"]),
   "make-audiobook-picture": action("production", "generation", "bench", "spend-and-compute", ["chapters", "sheets", "references", "artifacts", "bench"]),
+  // Picture shapes (design turn 235): the book's shapes are a command on its record; a Tall, one or
+  // the book's missing ones, is made through the Bench as any picture is, and stopping is a command.
+  "set-audiobook-picture-shapes": action("production", "command", "bench", "authored-change", ["chapters"]),
+  "make-audiobook-tall-picture": action("production", "generation", "bench", "spend-and-compute", ["chapters", "artifacts", "bench"]),
+  "make-audiobook-tall-pictures": action("production", "generation", "bench", "spend-and-compute", ["chapters", "artifacts", "bench"]),
+  "stop-audiobook-tall-pictures": action("production", "command", "bench", "spend-and-compute", ["chapters"]),
   // Update prompt (turn 193d): one person's clothing words rewritten by the writing service for the look chosen for one picture; nothing spent.
   "rewrite-audiobook-picture-prompt": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets", "references"]),
   // Timing on the blocks (turn 187): a command on the record, and the chapter's mix rendered into the cache.

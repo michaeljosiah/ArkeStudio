@@ -697,7 +697,8 @@ export function isLandscapeWorkflow(workflow: CharacterImageWorkflow): boolean {
  * and nano-banana defaulted to a 21:9 cinemascope crop because 21:9 happened to be listed first.
  */
 export function derivedAspect(model: ManifestModel, landscape: boolean): string {
-  return model.provider === "openai"
+  // GPT Image 2 behind fal is sized from OpenAI's own defaults (imageOutputFor), so it says theirs.
+  return model.provider === "openai" || gptImage2OnFal(model)
     ? landscape
       ? "3:2"
       : "2:3"
@@ -759,6 +760,18 @@ export function aspectOffered(model: ManifestModel, aspect: string): boolean {
   if (model.limits.providerSelectedSize) return false;
   if (curatedAspects(model).includes(aspect)) return true;
   return aspect === derivedAspect(model, true) || aspect === derivedAspect(model, false);
+}
+
+/**
+ * Whether a picture can be asked of this model in that shape (design turn 235, SPEC-047 R-200). A
+ * row that lists its shapes makes those and no other, though `aspectOffered` also grants the
+ * portrait its derived default; a route that takes its size from the brief makes whatever the brief
+ * says; a row with no list falls back to `aspectOffered`.
+ */
+export function makesShape(model: ManifestModel, aspect: string): boolean {
+  if (model.limits.providerSelectedSize === true) return true;
+  const listed = model.limits.aspects;
+  return listed !== undefined && listed.length > 0 ? listed.includes(aspect) : aspectOffered(model, aspect);
 }
 
 /**
@@ -855,7 +868,7 @@ export function imageOutputFor(
       ? options.aspect
       : undefined;
   const dimensions =
-    model.provider === "openai"
+    model.provider === "openai" || gptImage2OnFal(model)
       ? landscape
         ? { width: 1536, height: 1024 }
         : { width: 1024, height: 1536 }
@@ -882,7 +895,25 @@ export function imageOutputFor(
   // the picker said 4K. Per-megapixel estimates read these dimensions as well, so the figure
   // would have been wrong in the same direction.
   const scaled = tier !== undefined ? scaleToTier(shaped, tier, resolution) : shaped;
-  return { ...snapToAcceptedSize(model.provider, scaled), aspect, ...(resolution ? { resolution } : {}) };
+  const sized = gptImage2OnFal(model) ? sixteens(scaled) : snapToAcceptedSize(model.provider, scaled);
+  return { ...sized, aspect, ...(resolution ? { resolution } : {}) };
+}
+
+/**
+ * GPT Image 2 behind fal's gateway takes a width and a height (`image_size`) where OpenAI's own
+ * route takes a fixed list: OpenAI documents both sides as multiples of 16 and the long edge under
+ * 3840 (design turn 235, SPEC-047 R-200). Shaped from the 1536 long edge OpenAI's own sizes have,
+ * 9:16 is 864×1536 where the generic default made 720×1280, and 2:3 is 1024×1536 where it made
+ * 854×1280, which is not a multiple of 16.
+ */
+function gptImage2OnFal(model: ManifestModel): boolean {
+  return model.provider === "fal" && model.id.startsWith("gpt-image-2");
+}
+
+/** Each side to the nearest multiple of 16, as GPT Image 2's sizes must be. */
+function sixteens(dimensions: { width: number; height: number }): { width: number; height: number } {
+  const sixteen = (value: number) => Math.max(16, Math.round(value / 16) * 16);
+  return { width: sixteen(dimensions.width), height: sixteen(dimensions.height) };
 }
 
 /** The same long edge, at a different ratio. Absent ratio means the dimensions already agree. */

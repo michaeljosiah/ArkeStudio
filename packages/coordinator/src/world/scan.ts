@@ -205,8 +205,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 103: explicitly authored character identity aliases (#1944).
 // 104: immutable performance identities in shared agent media receipts (#2103).
 // 105: an explicit retained-picture look review on a chapter's pictures (#2126).
-// 106: a chapter's own audiobook narrator, `chapterNarrators` on the book (SPEC-047 R-195).
-export const SUPPORTED_SCHEMA_VERSION = 106;
+// 106: picture shapes — a picture's Tall and a book's shapes (design turn 235, #2164).
+// 107: a chapter's own audiobook narrator, `chapterNarrators` on the book (SPEC-047 R-195).
+export const SUPPORTED_SCHEMA_VERSION = 107;
 
 export class WorldOpenError extends Error {
   constructor(

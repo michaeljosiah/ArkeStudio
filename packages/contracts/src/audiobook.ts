@@ -870,9 +870,20 @@ export const AudiobookBookSchema = z
      * blocks a request; `per-paragraph` is one block a request, as every reader read before.
      */
     requests: z.literal("per-paragraph").optional(),
+    /**
+     * The shapes the book's pictures are made in (design turn 235a, SPEC-047 R-195): Wide 16:9 and
+     * Tall 9:16, at least one. Absent is Wide alone, as every book was before.
+     */
+    pictureShapes: z.array(z.enum(["wide", "tall"])).min(1).max(2).optional(),
   })
   .strict();
 export type AudiobookBook = z.infer<typeof AudiobookBookSchema>;
+
+/** A picture's shapes (design turn 235): Wide for desktop and tablet, Tall for a phone. */
+export const PICTURE_SHAPES = ["wide", "tall"] as const;
+export type PictureShape = (typeof PICTURE_SHAPES)[number];
+/** The shapes a book's pictures are made in, in their fixed order; Wide alone when it says none. */
+export const bookPictureShapes = (book: Pick<AudiobookBook, "pictureShapes"> | null | undefined): PictureShape[] => PICTURE_SHAPES.filter((shape) => (book?.pictureShapes ?? ["wide"]).includes(shape));
 
 /**
  * The reader a chapter's narration is chosen as (R-195): the chapter's own, else the book's,

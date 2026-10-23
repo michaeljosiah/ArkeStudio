@@ -18,6 +18,14 @@
 .fy-pcard__slot--pick:disabled { cursor: default; }
 .fy-pcard__pick:hover .fy-pcard__img { border-color: var(--neutral-400); }
 .fy-pcard__slot--pick:hover:not(:disabled) .fy-mono { color: var(--foreground); }
+/* Picture shapes (design turn 235b): Wide 182×102 beside Tall 58×102, one height so the two read
+   as one picture, each named under it in mono. */
+.fy-pcard__shapes { flex: none; display: flex; gap: 8px; }
+.fy-pcard__shapes figure { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.fy-pcard__shapes figcaption { font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-pcard__shapes .fy-pcard__img, .fy-pcard__shapes .fy-pcard__slot { width: 182px; height: 102px; }
+.fy-pcard__shapes .fy-pcard__img--tall, .fy-pcard__shapes .fy-pcard__slot--tall { width: 58px; }
+.fy-pcard__shapes .fy-pcard__slot--tall { justify-content: center; padding: 6px 0 0; }
 .fy-pcard__facts { display: flex; flex-direction: column; gap: 12px; min-width: 0; flex: 1; }
 .fy-pcard__fact { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .fy-pcard__fact .fy-mono { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }

@@ -1,4 +1,4 @@
-import type { SetGuideEntry } from "@arke-studio/contracts";
+import type { ArkePlayerPictureSize, SetGuideEntry } from "@arke-studio/contracts";
 import type { StoryPublishAction } from "@arke-studio/contracts";
 import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
 import type { AudiobookReader, PictureShot, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
@@ -807,6 +807,23 @@ const arkePlayerExportedListeners = new Set<(answer: ArkePlayerExported) => void
 export function subscribeArkePlayerExported(listener: (answer: ArkePlayerExported) => void): () => void {
   arkePlayerExportedListeners.add(listener);
   return () => arkePlayerExportedListeners.delete(listener);
+}
+/** `Make 290 tall` (design turn 235a): how many, how many landed, what was refused. */
+export type AudiobookTallProgress = Extract<DomainEvent, { type: "audiobook.tall-progress" }>;
+const audiobookTallProgressListeners = new Set<(progress: AudiobookTallProgress) => void>();
+export function subscribeAudiobookTallProgress(listener: (progress: AudiobookTallProgress) => void): () => void {
+  audiobookTallProgressListeners.add(listener);
+  return () => audiobookTallProgressListeners.delete(listener);
+}
+/**
+ * Each book's last run progress, kept beyond the sheet that shows it: a sheet closed and opened
+ * again while a picture is being made shows the run and Stop at once, rather than waiting for
+ * the next picture to land (codex on PR 2166). Cleared by every snapshot, which the replay of
+ * the runs still going follows.
+ */
+const lastTallProgress = new Map<string, AudiobookTallProgress>();
+export function lastAudiobookTallProgress(worldId: string, productionId: string): AudiobookTallProgress | null {
+  return lastTallProgress.get(`${worldId}/${productionId}`) ?? null;
 }
 /** The audiobook's video (design turn 197): what a render would make, and what one made. */
 export type AudiobookVideoExported = Extract<DomainEvent, { type: "audiobook.video-exported" }>;
@@ -1636,6 +1653,9 @@ function handleFrame(json: string): void {
     helloFallbackTimer = null;
     frameRunQuoteListeners.clear();
     frameRunStartResultListeners.clear();
+    // A run that ended while this window was away sent its end to no one: the coordinator replays
+    // only those still going, after this snapshot, so what was kept before it is stale (codex on PR 2166).
+    lastTallProgress.clear();
     // Prune notices for proposals the snapshot no longer carries — and "the studio is still
     // drafting" for any run the snapshot says has since ended. That refusal describes the run
     // rather than the proposal, so unlike its siblings it must not wait for a resolution to
@@ -1949,6 +1969,10 @@ function handleFrame(json: string): void {
     }
     if (event.type === "arke-player.exported") {
       for (const listener of arkePlayerExportedListeners) listener(event);
+    }
+    if (event.type === "audiobook.tall-progress") {
+      lastTallProgress.set(`${event.worldId}/${event.productionId}`, event);
+      for (const listener of audiobookTallProgressListeners) listener(event);
     }
     if (event.type === "character-look.imported") {
       for (const listener of characterLookImportListeners) listener(event);
@@ -6183,11 +6207,12 @@ export function suggestAudiobookPicture(worldId: string, productionId: string, c
 }
 
 /** A suggestion made (R-99): the prompt as the author left it and the price the press showed; made through the Bench and filed on the block. */
-export function makeAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, input: { prompt: string; who: readonly string[]; reuse?: import("@arke-studio/contracts").PictureReuse; frame?: string; shot?: PictureShot; looks?: Readonly<Record<string, string>>; confirmedMicroUsd: number }): string | null {
+export function makeAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, input: { prompt: string; who: readonly string[]; reuse?: import("@arke-studio/contracts").PictureReuse; frame?: string; shot?: PictureShot; looks?: Readonly<Record<string, string>>; confirmedMicroUsd: number; tall?: { requestId: string; confirmedMicroUsd: number } }): string | null {
   const requestId = ulid();
   // The looks chosen for this picture alone ride with it (design turn 193d, R-146), each in place of the chapter's for that person.
-  if (!send({ kind: "make-audiobook-picture", worldId, productionId, chapterFile, block, prompt: input.prompt, who: [...input.who], ...(input.reuse !== undefined ? { reuse: input.reuse } : {}), ...(input.frame !== undefined ? { frame: input.frame } : {}), ...(input.shot !== undefined ? { shot: input.shot } : {}), ...(input.looks !== undefined ? { looks: { ...input.looks } } : {}), confirmedMicroUsd: input.confirmedMicroUsd, requestId })) return null;
-  emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
+  // Its Tall rides with the request too (design turn 235): the coordinator makes it once the picture lands, under its own id.
+  if (!send({ kind: "make-audiobook-picture", worldId, productionId, chapterFile, block, prompt: input.prompt, who: [...input.who], ...(input.reuse !== undefined ? { reuse: input.reuse } : {}), ...(input.frame !== undefined ? { frame: input.frame } : {}), ...(input.shot !== undefined ? { shot: input.shot } : {}), ...(input.looks !== undefined ? { looks: { ...input.looks } } : {}), confirmedMicroUsd: input.confirmedMicroUsd, requestId, ...(input.tall !== undefined ? { tall: { ...input.tall } } : {}) })) return null;
+  emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" }, ...(input.tall !== undefined ? { [input.tall.requestId]: { state: "working" as const } } : {}) } });
   return requestId;
 }
 
@@ -6200,6 +6225,28 @@ export function rewriteAudiobookPicturePrompt(worldId: string, productionId: str
   if (!send({ kind: "rewrite-audiobook-picture-prompt", worldId, productionId, chapterFile, block, prompt, changes: changes.map((change) => ({ ...change })), requestId })) return null;
   emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
   return requestId;
+}
+
+/** The book's picture shapes (design turn 235a, SPEC-047 R-195): Wide, Tall or both; nothing is made or removed. */
+export function setAudiobookPictureShapes(worldId: string, productionId: string, shapes: readonly ("wide" | "tall")[]): boolean {
+  return send({ kind: "set-audiobook-picture-shapes", worldId, productionId, shapes: [...shapes] });
+}
+
+/** A block's picture made Tall from the picture it has (design turn 235, R-196); answered under the id returned, held in `audiobookAsks`. */
+export function makeAudiobookTallPicture(worldId: string, productionId: string, chapterFile: string, block: string, confirmedMicroUsd: number): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "make-audiobook-tall-picture", worldId, productionId, chapterFile, block, confirmedMicroUsd, requestId })) return null;
+  emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
+  return requestId;
+}
+
+/** `Make 290 tall` (235a, R-199): the book's missing Talls, one at a time, followed through `subscribeAudiobookTallProgress`. */
+export function makeAudiobookTallPictures(worldId: string, productionId: string, confirmedMicroUsd: number): boolean {
+  return send({ kind: "make-audiobook-tall-pictures", worldId, productionId, confirmedMicroUsd, requestId: ulid() });
+}
+
+export function stopAudiobookTallPictures(worldId: string, productionId: string): boolean {
+  return send({ kind: "stop-audiobook-tall-pictures", worldId, productionId });
 }
 
 export function useAudiobookAsks(): StoreState["audiobookAsks"] {
@@ -6486,7 +6533,7 @@ export function exportAudiobookPlayer(worldId: string, productionId: string, exp
 }
 
 /** The world package for Arke Player (design turn 233): answered as `arke-player.exported` for the export id given. */
-export function exportArkePlayer(worldId: string, productionId: string, exportId: string, options: { book: boolean; motion: boolean }): string | null {
+export function exportArkePlayer(worldId: string, productionId: string, exportId: string, options: { book: boolean; motion: boolean; size?: ArkePlayerPictureSize }): string | null {
   const requestId = ulid();
   return send({ kind: "export-arke-player", worldId, productionId, requestId, exportId, options }) ? requestId : null;
 }

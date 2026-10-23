@@ -15,7 +15,8 @@ const assets: Record<string, WorldAsset> = Object.fromEntries(Object.entries(JSO
 interface Case {
   file: string;
   expect: "ok" | "newerArke" | "notAPackage";
-  at?: Array<{ chapter: string; ms: number; picture: string | null; phrase: number | null }>;
+  /** `tall`, where a probe has it, is the Tall picture showing then (R-37). */
+  at?: Array<{ chapter: string; ms: number; picture: string | null; tall?: string | null; phrase: number | null }>;
 }
 
 describe("the shared listening cases (SPEC-058 R-13, R-15, R-16)", () => {
@@ -29,6 +30,7 @@ describe("the shared listening cases (SPEC-058 R-13, R-15, R-16)", () => {
           const chapter = chapters.find((candidate) => candidate.id === probe.chapter)!;
           // The fixtures keep a timescale of 1000, so a millisecond is a tick.
           assert.equal(listeningPictureAt(chapter, probe.ms)?.picture ?? null, probe.picture, `${probe.chapter} @ ${probe.ms}: picture`);
+          if (probe.tall !== undefined) assert.equal(listeningPictureAt(chapter, probe.ms)?.tall ?? null, probe.tall, `${probe.chapter} @ ${probe.ms}: tall`);
           const phrase = listeningPhraseAt(chapter, probe.ms);
           assert.equal(phrase === null ? null : chapter.phrases!.indexOf(phrase), probe.phrase, `${probe.chapter} @ ${probe.ms}: phrase`);
         }

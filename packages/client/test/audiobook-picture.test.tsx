@@ -91,6 +91,8 @@ const GPT_IMAGE: ManifestModel = {
 } as unknown as ManifestModel;
 /** Pictures a test adds to the world's artifacts: a made one with its Bench sidecar. */
 let extraArtifacts: ArtifactSidecar[] = [];
+/** The book's picture shapes a test sets (design turn 235): absent, Wide alone. */
+let bookShapes: Array<"wide" | "tall"> | undefined;
 
 function state(): ClientState {
   const world = FIXTURE_STATE.world!;
@@ -108,6 +110,7 @@ function state(): ClientState {
       ],
       // Maren's storm coat, with its close view (design turn 193c).
       referenceKits: world.referenceKits.map((kit) => (kit.sheetId === "maren-kest" ? ({ ...kit, looks: [STORM_LOOK, HARBOUR_LOOK] } as never) : kit)),
+      productions: world.productions.map((production) => (production.meta.id === "saltlight" && bookShapes !== undefined ? { ...production, audiobook: { schemaVersion: 1 as const, reading: "narrator" as const, ...production.audiobook, pictureShapes: bookShapes } } : production)),
     },
   };
 }
@@ -162,6 +165,7 @@ async function mount(selected: number, pictures?: ChapterAudiobook["pictures"], 
 }
 afterEach(async () => {
   extraArtifacts = [];
+  bookShapes = undefined;
   for (const mounted of open.splice(0)) {
     await act(async () => mounted.root.unmount());
     mounted.container.remove();
@@ -623,6 +627,47 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.deepEqual([make.block, make.prompt, make.who, make.frame, make.confirmedMicroUsd], ["p1.0", PROMPT, ["maren-kest", "the-vigil"], "Close-up, Maren's face", 55_000]);
     assert.deepEqual(make.shot, SHOT, "the shot rides on to the new picture");
     assert.equal(text(q(m, '[data-testid="suggest-generate"]')), "Generating…");
+  });
+
+  it("with Tall on, draws both shapes and makes the missing Tall, priced as one picture riding one reference (turn 235b, 235c)", async () => {
+    extraArtifacts = [madeArtifact()];
+    bookShapes = ["wide", "tall"];
+    const m = await mount(2, { "p1.0": made(SHOT) });
+    assert.ok(q(m, '[data-testid="picture-card-shapes"] [data-testid="picture-card-picture"]'), "the picture in the Wide slot");
+    assert.equal(text(q(m, '[data-testid="picture-card-tall-slot"]')), "9:16");
+    assert.deepEqual(all(m, '[data-testid="picture-card-shapes"] figcaption').map(text), ["Wide", "Tall"]);
+    assert.deepEqual(all(m, ".fy-abp__foot button").map(text), ["Remove", "Edit prompt", "Make tall · ~$0.05"]);
+    await press(q(m, '[data-testid="picture-card-make-tall"]'));
+    const tall = asked(m, "make-audiobook-tall-picture")[0]!;
+    assert.deepEqual([tall.block, tall.chapterFile, tall.confirmedMicroUsd], ["p1.0", "07-the-tenth-key", 50_000]);
+    assert.equal(text(q(m, '[data-testid="picture-card-make-tall"]')), "Making tall…");
+    assert.equal(asked(m, "make-audiobook-picture").length, 0, "the picture itself is not made again");
+  });
+
+  it("marks a Tall made from an earlier picture and offers Make tall again; a current one leaves Make again priced for both (call 3)", async () => {
+    extraArtifacts = [madeArtifact()];
+    bookShapes = ["wide", "tall"];
+    const earlier = await mount(2, { "p1.0": { ...made(SHOT), tall: { file: "world-art.png", at: AT, from: "artifacts/older.png" } } });
+    assert.ok(q(earlier, '[data-testid="picture-card-tall"]'), "it still shows, and plays");
+    assert.equal(text(q(earlier, '[data-testid="picture-card-tall-earlier"]')), "Tall · from an earlier picture");
+    assert.equal(text(q(earlier, '[data-testid="picture-card-make-tall"]')), "Make tall · ~$0.05");
+    const current = await mount(2, { "p1.0": { ...made(SHOT), tall: { file: "world-art.png", at: AT, from: "artifacts/made-maren.png" } } });
+    assert.equal(q(current, '[data-testid="picture-card-tall-earlier"]'), null);
+    assert.equal(text(q(current, '[data-testid="suggest-generate"]')), "Make again · ~$0.11", "the picture and its Tall");
+    // The Tall is asked with the picture, for the coordinator to make once it lands: a window closed
+    // meanwhile leaves no picture without its Tall (codex on PR 2166).
+    await press(q(current, '[data-testid="suggest-generate"]'));
+    const make = asked(current, "make-audiobook-picture")[0]!;
+    assert.equal(typeof make.tall?.requestId, "string");
+    assert.equal(make.tall?.confirmedMicroUsd, 50_000, "priced on the route the Tall is made on");
+    assert.equal(asked(current, "make-audiobook-tall-picture").length, 0, "no second ask from the window");
+  });
+
+  it("asks no Tall with Make again while the book is Wide only", async () => {
+    extraArtifacts = [madeArtifact()];
+    const m = await mount(2, { "p1.0": made(SHOT) });
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    assert.equal(asked(m, "make-audiobook-picture")[0]!.tall, undefined);
   });
 
   it("marks edited prompt checks as historical and keeps their original receipt when making again (#2011)", async () => {

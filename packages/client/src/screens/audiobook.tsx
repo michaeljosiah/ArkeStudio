@@ -12,6 +12,7 @@ import {
   characterLabels,
   formatRunningTime,
   mainPhotoFor,
+  bookPictureShapes,
   narratorLabelFor,
   providerName,
   readerPlace,
@@ -35,6 +36,7 @@ import { EmptyState } from "../components/layout.js";
 import { AudiobookPlayerView, bookHasTakes } from "../components/audiobook-player.js";
 import { keptPlace } from "../lib/audiobook-place.js";
 import { AudiobookExportSheet } from "../components/audiobook-export.js";
+import { PicturesSheet } from "../components/audiobook-pictures-sheet.js";
 import { useDockHost } from "../components/player.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { Button, cx } from "../components/ui.js";
@@ -313,6 +315,7 @@ export function AudiobookScreen() {
   const [narrating, setNarrating] = useState(false);
   // Reading (199e): everything that sets the reading up, in one sheet.
   const [sheet, setSheet] = useState(false);
+  const [picturing, setPicturing] = useState(false);
   const [menu, setMenu] = useState(false);
   const [barMenu, setBarMenu] = useState(false);
   // The player (186): `{}` opens the book where this device left it, a chapter starts there.
@@ -497,6 +500,8 @@ export function AudiobookScreen() {
     ...(chapters.length > 0 ? [{ label: "Audio Studio", data: [], warn: null, onPress: () => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(placeRow?.chapterId ?? chapters[0]!.id)}?view=audio-studio`), testId: "menu-audio-studio" }] : []),
     { label: "Reading", data: [READINGS.find(([value]) => value === reading)![1]], warn: warning, onPress: () => setSheet(true), testId: "menu-reading" },
     ...(narratorName !== null ? [{ label: "Narrator", data: [narratorName], warn: narratorUnavailable, onPress: () => setNarrating(true), testId: "menu-narrator" }] : []),
+    // The shapes the book's pictures are made in (design turn 235a), its data the shapes on.
+    { label: "Pictures", data: [bookPictureShapes(production.audiobook).map((shape) => (shape === "wide" ? "Wide" : "Tall")).join(" · ")], warn: null, onPress: () => setPicturing(true), testId: "menu-pictures" },
     // A world with no art: its cover is made where the world's look is (190).
     ...(!hasArt ? [{ label: "Make a cover", data: [], warn: null, onPress: () => navigate(`/w/${worldId}/art-direction`), testId: "menu-cover" }] : []),
   ];
@@ -657,6 +662,7 @@ export function AudiobookScreen() {
       )}
       {/* The player's place in the page's flow (rule 9): it docks here, under the page's scroll. */}
       <div ref={dock} className="fy-abshow__dock" />
+      {picturing && <PicturesSheet worldId={worldId} production={production} onClose={() => setPicturing(false)} />}
       {sheet && (
         <ReadingSheet
           worldId={worldId}

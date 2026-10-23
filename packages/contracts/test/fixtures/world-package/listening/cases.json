@@ -1,5 +1,5 @@
 {
-  "note": "SPEC-058 R-16: the listening-document cases both readers run, Arke Player arke_world (Dart) and ArkeStudio contracts (TypeScript). Each file is read against assets.json; \"at\" lists the picture (asset id) and phrase (index) showing at a time on a chapter clock.",
+  "note": "SPEC-058 R-16: the listening-document cases both readers run, Arke Player arke_world (Dart) and ArkeStudio contracts (TypeScript). Each file is read against assets.json; \"at\" lists the picture (asset id) and phrase (index) showing at a time on a chapter clock. \"tall\", where a probe has it, is the Tall picture showing then (SPEC-058 R-37).",
   "cases": [
     {
       "file": "valid.json",
@@ -111,6 +111,41 @@
     },
     {
       "file": "picture-after-end.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "tall.json",
+      "expect": "ok",
+      "at": [
+        {
+          "chapter": "neap",
+          "ms": 4999,
+          "picture": null,
+          "tall": null,
+          "phrase": 0
+        },
+        {
+          "chapter": "neap",
+          "ms": 5000,
+          "picture": "p001",
+          "tall": "p001-tall",
+          "phrase": 0
+        },
+        {
+          "chapter": "neap",
+          "ms": 20000,
+          "picture": "p002",
+          "tall": null,
+          "phrase": null
+        }
+      ]
+    },
+    {
+      "file": "tall-wrong-media.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "tall-missing.json",
       "expect": "notAPackage"
     }
   ]
