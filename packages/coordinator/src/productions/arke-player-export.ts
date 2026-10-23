@@ -45,8 +45,8 @@ export interface ArkePlayerExportOptions {
   signal?: AbortSignal;
   /** The book and the pictures' loops are each the author's to leave out (233a). */
   include: { book: boolean; motion: boolean };
-  /** Publish's title, author and language for the production, where it has them (R-2). */
-  publish?: { title?: string; author?: string; language?: string };
+  /** Publish's title, author, language and cover for the production, where it has them (R-2). */
+  publish?: { title?: string; author?: string; language?: string; cover?: string | null };
   studioVersion: string;
   /** What is in hand and how far through, for Activity (233b). */
   onStep?: (step: string, percent: number) => void;
@@ -164,6 +164,10 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
   if (cover !== null) await resolve(cover, "the cover is outside this world");
   const keyArt = bundle.keyArt ?? null;
   if (keyArt !== null) await resolve(keyArt, "the key art is outside this world");
+  // The production's own picture is Publish's cover (R-2). Without one the key art stands in, and
+  // the Player then shows the same picture for the world and for its Listen.
+  const picture = options.publish?.cover ?? null;
+  if (picture !== null) await resolve(picture, "Publish's cover is outside this world");
   if (outside.size > 0) return { ok: false, blockers: [...outside] };
 
   const staging = join(store.dir, ".staging", "arke-player-export", options.exportId);
@@ -217,7 +221,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
 
     // Pictures fitted for a phone (R-6): at most 2048 px, JPEG at quality 85 unless a PNG is
     // transparent, each once however many chapters show it, its original's digest kept.
-    const pictureFiles = [...new Set([...(keyArt !== null ? [keyArt] : []), ...(cover !== null ? [cover] : []), ...whole.flatMap((chapter) => [...(chapter.opening !== null ? [chapter.opening] : []), ...chapter.pictures.map((picture) => picture.file)])])];
+    const pictureFiles = [...new Set([...(keyArt !== null ? [keyArt] : []), ...(picture !== null ? [picture] : []), ...(cover !== null ? [cover] : []), ...whole.flatMap((chapter) => [...(chapter.opening !== null ? [chapter.opening] : []), ...chapter.pictures.map((picture) => picture.file)])])];
     const motionFiles = options.include.motion ? [...new Set(whole.flatMap((chapter) => chapter.pictures.flatMap((picture) => (picture.motion !== undefined ? [picture.motion.file] : []))))] : [];
     const pictureIds = new Map<string, string>();
     const motionIds = new Map<string, string>();
@@ -337,7 +341,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
         id: packageSlug(productionId),
         title: title.slice(0, 200),
         ...(author !== undefined ? { author: author.slice(0, 200) } : {}),
-        ...(keyArt !== null ? { picture: "key-art" } : {}),
+        ...(picture !== null ? { picture: pictureIds.get(picture)! } : keyArt !== null ? { picture: "key-art" } : {}),
         ...(bookId !== undefined ? { book: bookId } : {}),
         ...(listeningId !== undefined ? { listening: listeningId } : {}),
       }],

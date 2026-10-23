@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -171,6 +172,7 @@ describe("Export → Arke Player (turn 233, SPEC-058)", () => {
       assert.equal(opened.manifest.keyArt, "key-art");
       const production = opened.manifest.productions[0]!;
       assert.deepEqual([production.id, production.title, production.book, production.listening], [LEDGER, "The Ledger of Nights", "book", "listening"]);
+      assert.equal(production.picture, "key-art", "without Publish's cover the key art stands in (R-2)");
       // Nothing of the workshop and no host path rides along (R-5, R-8).
       assert.doesNotMatch(manifestText, /[A-Za-z]:\\|\/Users\/|\/tmp\/|artifacts\//);
       const provenance = JSON.parse(manifestText).provenance;
@@ -213,6 +215,31 @@ describe("Export → Arke Player (turn 233, SPEC-058)", () => {
       assert.ok(second.ok);
       assert.equal(second.manifest.productions[0]!.book, undefined, "the book left out");
       assert.equal(await readFile(file).then((bytes) => bytes.length), result.bytes, "the first package untouched");
+    }, recordingFfmpeg(calls));
+  });
+
+  it("shows the production by Publish's cover, not the world's key art (R-2)", () => {
+    const calls: string[][] = [];
+    return withHarness(async ({ worldDir, events, send }) => {
+      await read(send, "01-neap");
+      // Publish's cover is the production's own picture; the key art stays the world's. The Player
+      // shows a production by its picture, so with the key art in both it showed one picture twice.
+      await mkdir(join(worldDir, "covers"), { recursive: true });
+      const coverBytes = Buffer.concat([await readFile(join(worldDir, "world-art.png")), Buffer.from("the ledger's own cover")]);
+      await writeFile(join(worldDir, "covers", "ledger.png"), coverBytes);
+      await send({ kind: "publish-story", worldId: WORLD_ID, productionId: LEDGER, requestId: "01J00000000000000000000003", input: { action: "review", settings: {
+        title: "The Ledger of Nights", author: "A. Writer", language: "en", label: "", description: "", cover: "covers/ledger.png", chapterIds: ["neap"], outputs: ["epub"], avoidEmDashes: false,
+      } } });
+      const result = await exportPackage(send, events, 6, { book: false, motion: true });
+      assert.ok(result.ok, result.ok ? "" : result.blockers.join("; "));
+      const manifestText = await entry(join(worldDir, ...result.file.split("/")), "world.json");
+      const opened = readWorldManifest(manifestText);
+      assert.ok(opened.ok);
+      const picture = opened.manifest.productions[0]!.picture;
+      assert.ok(picture !== undefined && picture !== "key-art", `the production has its own picture, not ${picture}`);
+      assert.equal(opened.manifest.keyArt, "key-art", "the world keeps its key art");
+      assert.equal(JSON.parse(manifestText).provenance.originals[picture], createHash("sha256").update(coverBytes).digest("hex"), "it is Publish's cover");
+      assert.equal(opened.manifest.productions[0]!.author, "A. Writer");
     }, recordingFfmpeg(calls));
   });
 });
