@@ -14,7 +14,8 @@
 //
 // The other workspaces now run in their own job. On 2026-10-17 the Windows coordinator shard
 // took 15m54s and the client alone took 7m55s; stacking all workspaces on shard 2 exhausted
-// the 30-minute ceiling with no failed tests. Keep discovery automatic in both jobs.
+// the 30-minute ceiling with no failed tests. Keep discovery automatic in both jobs. The two
+// exceptions are named in ci-test-plan.mjs, each with the workflow that runs it instead.
 //
 // The other half of the job is telling a hung shard from a slow one. That is why the child's
 // output is relayed here rather than inherited — see SILENCE_LIMIT_MS.
@@ -206,12 +207,12 @@ const failures = [];
 
 // The shard of the big suite. `--test-shard` needs its flags before the pattern, and the pattern
 // stays quoted so node expands it identically on both platforms rather than the shell doing it
-// on one of them.
+// on one of them. Tests a job of their own runs are skipped by name (ci-test-plan.mjs).
 const coordinator = plan.coordinator;
 if (coordinator && !(await run(
   `${SHARDED} shard ${coordinator.shard}`,
   "node",
-  ["--import", "tsx", "--test", `--test-shard=${coordinator.shard}`, "test/**/*.test.ts"],
+  ["--import", "tsx", "--test", `--test-shard=${coordinator.shard}`, ...coordinator.skip.map((pattern) => `--test-skip-pattern=${pattern}`), "test/**/*.test.ts"],
   coordinator.dir,
 ))) {
   failures.push(`${SHARDED} shard ${coordinator.shard}`);

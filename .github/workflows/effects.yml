@@ -1,0 +1,82 @@
+# Procedural effects measured with real media: both benchmarks hold the shared renderer and the
+# prepared audio reaction to fixed digests, the native tests compose with FFmpeg, and on Linux the
+# browser worker is held to the Node raster byte for byte. These were steps of CI's film job and
+# made up nearly all of it (about 5–6 minutes a platform on every pull request); they run here on
+# main, and on pull requests that touch the code they measure. A change outside these paths that
+# still breaks an effect surfaces on main at the next merge.
+name: Effects
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "**/*editor-effect*"
+      - "**/*effect-raster*"
+      - "**/node-effect-*"
+      - "packages/client/src/screens/editor-picture-preview.tsx"
+      - "packages/client/src/screens/editor-preview.tsx"
+      - "scripts/benchmark-editor-effect*"
+      - "scripts/smoke-editor-effects-preview.mjs"
+      - ".github/workflows/effects.yml"
+      - ".github/actions/install-ffmpeg/**"
+      - "package-lock.json"
+
+concurrency:
+  group: effects-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  effects:
+    name: ${{ matrix.os }} · Effects
+    runs-on: ${{ matrix.os }}
+    # Measured on green main runs, 2026-10-19: Windows took about 14 minutes and Ubuntu about 10m30s
+    # for the film job, nearly all of it these steps. Twenty-five keeps a cancelled job meaning
+    # something is stuck rather than that FFmpeg's Windows feed was slow.
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/pause-defender
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: ./.github/actions/install-ffmpeg
+      - name: Measure shared procedural effects
+        # SPEC-055 adds 72 Air Particles fixtures. The 456 legacy fixtures retain their digest.
+        run: node --import tsx scripts/benchmark-editor-effects.ts --output "${{ runner.temp }}/arke-editor-effects/benchmark.json" --expect-pixels-sha256 5ed3c1cbf7b5498a624950134e6185d31b8f2bca9ddfdbe8088c3a70a4a041ad
+      - name: Verify native effect composition
+        env:
+          ARKE_EFFECT_NATIVE_REQUIRED: 1
+          ARKE_EFFECT_EVIDENCE_DIR: ${{ runner.temp }}/arke-editor-effects/native
+        run: node --import tsx --test --test-timeout=180000 packages/coordinator/test/media/editor-effect-native.test.ts
+      - name: Measure prepared audio reaction
+        run: node --expose-gc --import tsx scripts/benchmark-editor-effect-analysis.ts --output "${{ runner.temp }}/arke-editor-effects/analysis-benchmark.json" --expect-fixtures-sha256 58be9406a03f187bb479bc0f19ee639903671ff44e3e22513c18a7d2bdeadaca
+      - name: Verify canonical audible analysis
+        env:
+          ARKE_EFFECT_NATIVE_REQUIRED: 1
+          ARKE_EFFECT_EVIDENCE_DIR: ${{ runner.temp }}/arke-editor-effects/audio
+        run: node --import tsx --test --test-timeout=180000 packages/coordinator/test/media/editor-effect-audio-native.test.ts packages/coordinator/test/productions/editor-effect-analysis.test.ts
+      - name: Verify browser effect pixels
+        if: runner.os == 'Linux'
+        env:
+          ARKE_CHROME: /usr/bin/google-chrome
+          ARKE_EFFECT_EVIDENCE_DIR: ${{ runner.temp }}/arke-editor-effects/browser
+        run: node --import tsx scripts/smoke-editor-effects-preview.mjs
+      - name: Retain effect parity and performance measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-effects-${{ runner.os }}
+          path: ${{ runner.temp }}/arke-editor-effects
+          if-no-files-found: warn

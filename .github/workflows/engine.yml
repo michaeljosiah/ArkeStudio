@@ -1,0 +1,49 @@
+# The engine's package check: build the bundle, pack it, install the tarball into a fresh consumer
+# from the public registry and run a strict consumer journey (packages/engine/test/pack.test.mjs).
+# It took about two minutes a platform inside CI's other-workspaces job on every pull request
+# (233 s summed on main run 39831934448), for a package no workspace imports and no workflow
+# publishes, and its registry installs are one more thing that can fail for reasons of its own.
+# It runs here on main, and on pull requests that touch the package or the lockfile. Its bundle
+# is coordinator source, so a coordinator change can still break it; that surfaces on main at the
+# next merge, which is soon enough for an unpublished package.
+name: Engine package
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "packages/engine/**"
+      - "package-lock.json"
+      - "scripts/ci-test-plan.mjs"
+      - ".github/workflows/engine.yml"
+
+concurrency:
+  group: engine-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    name: ${{ matrix.os }} · Engine package
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/pause-defender
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Pack, install and use the engine
+        working-directory: packages/engine
+        run: npm test
