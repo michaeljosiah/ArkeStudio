@@ -19,6 +19,7 @@ import {
   speechPricePrefix,
   type AudiobookCastMember,
   type AudiobookDoor,
+  type AudiobookVoiceRow,
   type AudiobookPriceLine,
   type AudiobookRow,
   type ManifestModel,
@@ -257,8 +258,12 @@ function sheetPicture(world: WorldBundle | null, sheetId: string, prefer: "photo
 function narratorPicture(world: WorldBundle | null, door: AudiobookDoor, production: ProductionBundle, appNarrator: { provider: string; voiceId: string } | null, art: string | null): string | null {
   const narrator = door.voices[0];
   const reader = narrator?.book === true ? production.audiobook?.narrator : (appNarrator ?? DEFAULT_NARRATOR);
+  return readerPicture(world, narrator, reader, art);
+}
+
+function readerPicture(world: WorldBundle | null, row: AudiobookVoiceRow | undefined, reader: { provider: string; voiceId: string } | undefined, art: string | null): string | null {
   // A narrator the coordinator stood another voice in for is that other voice: no sheet's look.
-  if (reader !== undefined && narrator?.voice?.provider === reader.provider) {
+  if (reader !== undefined && row?.voice?.provider === reader.provider) {
     const sheet = world?.sheets.find((candidate) => candidate.voice?.provider === reader.provider && candidate.voice.voiceId === reader.voiceId);
     if (sheet !== undefined) {
       const picture = sheetPicture(world, sheet.id, "look");
@@ -266,6 +271,29 @@ function narratorPicture(world: WorldBundle | null, door: AudiobookDoor, product
     }
   }
   return art;
+}
+
+/**
+ * Who reads the book (SPEC-047 R-195): the book's narrator and each chapter narrator, in the order
+ * they first read, each with the chapters it reads. The book's narrator is left out only when
+ * every chapter has a narrator of its own.
+ */
+export function bookNarrators(door: Pick<AudiobookDoor, "voices" | "chapterNarrators" | "rows">): Array<{ row: AudiobookVoiceRow; chapters: string[]; book: boolean }> {
+  const own = door.chapterNarrators ?? [];
+  const taken = new Set(own.flatMap((row) => row.chapters ?? []));
+  const bookChapters = door.rows.filter((row) => !taken.has(row.chapterId)).map((row) => row.chapterId);
+  const first = (ids: readonly string[]) => Math.min(...ids.map((id) => door.rows.find((row) => row.chapterId === id)?.order ?? Infinity));
+  const book = door.voices[0];
+  return [
+    ...(book !== undefined && (bookChapters.length > 0 || own.length === 0) ? [{ row: book, chapters: bookChapters, book: true }] : []),
+    ...own.map((row) => ({ row, chapters: row.chapters ?? [], book: false })),
+  ].sort((a, b) => first(a.chapters) - first(b.chapters));
+}
+
+/** Names as a credit says them: `A`, `A and B`, `A, B and C`, each once. */
+export function namesCredit(names: readonly string[]): string {
+  const once = names.filter((name, at) => names.indexOf(name) === at);
+  return once.length > 1 ? `${once.slice(0, -1).join(", ")} and ${once.at(-1)}` : (once[0] ?? "");
 }
 
 function priceLineWords(line: AudiobookPriceLine, models: readonly ManifestModel[] | undefined): { who: string; how: string; cost: string; warn: boolean } {
@@ -381,6 +409,7 @@ export function AudiobookScreen() {
   const priceWord = speechPricePrefix(app?.manifest?.models, (price?.voices ?? []).map((voice) => voice.provider));
   const cost = price === null || price.estimatedMicroUsd === 0 ? null : `${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}`;
   const narratorName = door?.voices[0]?.name ?? null;
+  const narrators = door === null ? [] : bookNarrators(door);
   // The book's own narrator cannot read now (issue 1661): the door once said `Performed · George`
   // over a narrator a 402 had silenced. Read the book is held on it, and says why.
   // A chapter's own narrator holds it the same way (R-195).
@@ -413,7 +442,8 @@ export function AudiobookScreen() {
     `${door === null ? chapters.length : rows.length} chapter${(door === null ? chapters.length : rows.length) === 1 ? "" : "s"}`,
     ...(door !== null && bookSeconds > 0 && estimated ? [`~${formatBookLength(bookSeconds)} estimated total`] : []),
     ...(recordedSeconds > 0 ? [`${unmeasured ? "at least " : ""}${formatBookLength(recordedSeconds)} recorded`] : []),
-    ...(narratorName !== null ? [`Read by ${narratorName}`] : []),
+    // Every narrator of the book, as the video credits them (R-195).
+    ...(narrators.length > 0 ? [`Read by ${namesCredit(narrators.map(({ row }) => row.name))}`] : narratorName !== null ? [`Read by ${narratorName}`] : []),
   ].join(" · ");
 
   // Continue (186's word and kept place) when this device holds a place in a chapter that plays.
@@ -521,7 +551,6 @@ export function AudiobookScreen() {
             : `${book.chaptersRefused} chapters left to their rows`
           : null;
 
-  const narratorCard = door !== null && door.voices[0] !== undefined ? door.voices[0] : null;
   const cast: AudiobookCastMember[] = door?.cast ?? (door?.voices.slice(1).map((voice) => ({ ...(voice.sheet !== undefined ? { sheet: voice.sheet } : {}), name: voice.name })) ?? []);
 
   return (
@@ -572,17 +601,23 @@ export function AudiobookScreen() {
           </div>
         </section>
         <div className="fy-abshow__wrap fy-abshow__body">
-          {narratorCard !== null && (
+          {narrators.length > 0 && (
             <section aria-label="Cast">
               <h2 className="fy-abshow__h">Cast</h2>
               <CastRow>
-                <CastCard
-                  name={narratorCard.name}
-                  role="Narrator"
-                  slug={slug}
-                  picture={narratorPicture(world, door!, production, app?.narrator ?? null, hasArt ? art : null)}
-                  onPress={() => setNarrating(true)}
-                />
+                {/* A narrator to a part (R-195) names its chapters, and opens the first of them, where it is chosen. */}
+                {narrators.map(({ row, chapters: reads, book: isBook }) => (
+                  <CastCard
+                    key={isBook ? "narrator" : `narrator:${reads[0] ?? row.name}`}
+                    name={row.name}
+                    role={narrators.length > 1 ? `Narrator · ${chapterSpans(reads, door!.rows)}` : "Narrator"}
+                    slug={slug}
+                    picture={isBook
+                      ? narratorPicture(world, door!, production, app?.narrator ?? null, hasArt ? art : null)
+                      : readerPicture(world, row, reads[0] === undefined ? undefined : production.audiobook?.chapterNarrators?.[reads[0]], hasArt ? art : null)}
+                    onPress={isBook ? () => setNarrating(true) : () => openChapter(reads[0]!)}
+                  />
+                ))}
                 {cast.map((member) => (
                   <CastCard
                     key={member.sheet ?? `:${member.name}`}
@@ -791,7 +826,7 @@ function CastRow({ children }: { children: ReactNode }) {
 }
 
 /** A portrait and a name, and nothing else (rule 6); the narrator's says so, with a voice mark. */
-function CastCard({ name, role, slug, picture, onPress }: { name: string; role?: "Narrator"; slug: string | undefined; picture: string | null; onPress?: () => void }) {
+function CastCard({ name, role, slug, picture, onPress }: { name: string; role?: string; slug: string | undefined; picture: string | null; onPress?: () => void }) {
   return (
     <button type="button" className={cx("fy-abshow__card", role !== undefined && "fy-abshow__card--narrator")} disabled={onPress === undefined} onClick={onPress} data-testid="audiobook-card">
       <span className="fy-abshow__card-im">
