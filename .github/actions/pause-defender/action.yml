@@ -1,0 +1,20 @@
+name: Pause Windows Defender scanning
+description: Turns off real-time scanning on a Windows runner; does nothing elsewhere.
+# The runner is thrown away after the job, and the suites write and read thousands of small files
+# (a copied fixture world per test, journals flushed on every write). Windows CI runs the same
+# tests about 3.6 times slower than Linux, and a harness that only builds and refuses took 0.3 s
+# on Linux against 5–12 s on Windows (main run 39831934448, 2026-10-22), far beyond what the same
+# setup costs on a Windows desk (~0.25 s). Real-time scanning of every new file is the usual
+# cause of that gap. Kept only if the measured shard times show it pays.
+runs:
+  using: composite
+  steps:
+    - if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        try {
+          Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop
+          Write-Host "Defender real-time scanning: off"
+        } catch {
+          Write-Host "Defender real-time scanning left as it was: $($_.Exception.Message)"
+        }
