@@ -1621,6 +1621,24 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("audiobook.motion"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, block: z.string(), state: z.enum(["quoted", "making", "review", "chosen", "failed"]), quote: AudiobookMotionQuoteSchema.optional(), reason: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal("audiobook.word-timing"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, state: AudiobookWordTimingStateSchema }).strict(),
   z.object({ ...base, type: z.literal("audiobook.words"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, state: AudiobookWordsStateSchema }).strict(),
+  /**
+   * `Make 290 tall` (design turn 235a, SPEC-047 R-199): the book's missing Tall pictures made one at
+   * a time, how many, how many landed, what was refused and why, as Illustrate's run says it.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.tall-progress"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      state: z.enum(["making", "done", "stopped"]),
+      total: z.number().int().min(0),
+      made: z.number().int().min(0),
+      failed: z.array(z.object({ chapterId: SlugSchema, block: z.string().min(1).max(40), reason: z.string().min(1) }).strict()).max(500),
+      /** The run was refused before it began, in one clause. */
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
   /** An accepted proposal made one picture at a time (design turn 191d, R-102): how many, what has landed, what was held and why. */
   z
     .object({

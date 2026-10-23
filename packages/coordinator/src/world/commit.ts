@@ -435,6 +435,12 @@ export const AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION = 101;
 /** Explicit retained-picture look review: older strict chapter readers reject the added field. */
 export const AUDIOBOOK_PICTURE_LOOK_REVIEW_SCHEMA_VERSION = 105;
 /**
+ * Picture shapes (design turn 235): a picture's Tall and a book's shapes. Both records are read
+ * strictly by the builds before them, which would read a whole chapter or book as unreadable and
+ * then write defaults over it (codex on PR 2166), so the world is raised before the first of either.
+ */
+export const AUDIOBOOK_PICTURE_SHAPES_SCHEMA_VERSION = 106;
+/**
  * Where a picture's subject stands (design turn 197b): `focus` on a picture in the chapter's
  * strict audiobook record, which the video's vertical crop and Slow push follow. A build before
  * it reads such a record as unreadable, so the world is raised before the first. Sixty-two and

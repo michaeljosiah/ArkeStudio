@@ -10,7 +10,7 @@ import { audiobookPlaceKey } from "../src/lib/audiobook-place.js";
 import { PlayerDock } from "../src/components/player.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { dismissPlayback, playClip, setAudioFactoryForTest } from "../src/lib/audio.js";
-import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __handleFrameForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -52,7 +52,7 @@ const chapters = (takes: number): ChapterSummary[] => [
 ];
 
 /** The fixture world with a story production, Maren voiced by the narrator's voice and given a look. */
-function inkbound(takes: number, options: { narrator?: "maren" | "george"; art?: boolean; reading?: "narrator" | "performed" | "cast" } = {}): ClientState {
+function inkbound(takes: number, options: { narrator?: "maren" | "george"; art?: boolean; reading?: "narrator" | "performed" | "cast"; shapes?: Array<"wide" | "tall"> } = {}): ClientState {
   const world = FIXTURE_STATE.world!;
   const salt = world.productions.find((p) => p.meta.id === "saltlight")!;
   const look = { id: "lk_1", file: "takes/tk_1/look.png", kind: "costume" as const, prompt: "an oilskin coat", acceptedAt: AT };
@@ -70,7 +70,9 @@ function inkbound(takes: number, options: { narrator?: "maren" | "george"; art?:
           meta: { ...salt.meta, id: "inkbound", format: "story" as const, title: "Inkbound" },
           story: { ...(salt.story ?? { version: 1 }), version: 3 },
           chapters: chapters(takes),
-          ...(options.reading !== undefined ? { audiobook: { schemaVersion: 1 as const, reading: options.reading, note: "Harbour English, unhurried." } } : {}),
+          ...(options.reading !== undefined || options.shapes !== undefined
+            ? { audiobook: { schemaVersion: 1 as const, reading: options.reading ?? ("narrator" as const), ...(options.reading !== undefined ? { note: "Harbour English, unhurried." } : {}), ...(options.shapes !== undefined ? { pictureShapes: options.shapes } : {}) } }
+            : {}),
         },
       ],
     },
@@ -265,10 +267,10 @@ describe("the hero (199a, 199b, rule 4)", () => {
     assert.ok(q('[data-testid="audiobook-hero"] [data-testid="audiobook-note"]'), "under the presses, in the hero");
   });
 
-  it("the ⋯ holds Reading with its reading and warning word, and Narrator; a world with no art adds Make a cover", async () => {
+  it("the ⋯ holds Reading with its reading and warning word, Narrator and Pictures; a world with no art adds Make a cover", async () => {
     await mount(inkbound(91, { art: false }));
     await press(q('[data-testid="audiobook-more"]'));
-    assert.deepEqual(all('[role="menu"] [role="menuitem"]').map((item) => item.textContent), ["Audio Studio", "ReadingCast2 no voice", "NarratorLow tide", "Make a cover"]);
+    assert.deepEqual(all('[role="menu"] [role="menuitem"]').map((item) => item.textContent), ["Audio Studio", "ReadingCast2 no voice", "NarratorLow tide", "PicturesWide", "Make a cover"]);
     assert.equal(q('[data-testid="audiobook-hero"]')!.getAttribute("data-art"), "false", "the hero on the overlay colour alone");
     await press(q('[data-testid="menu-narrator"]'));
     assert.ok(dom.document.querySelector('[data-testid="narrator-dialog"]'), "Narrator opens 165c");
@@ -326,6 +328,72 @@ describe("the chapters as episodes (rule 7)", () => {
     const m = await mount(inkbound(91));
     await press(all('[data-testid="audiobook-row-open"]')[0]!);
     assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/chapter-1?view=audiobook`);
+  });
+});
+
+describe("Pictures, in one sheet (turn 235a)", () => {
+  const AT_ = "2026-10-23T09:00:00.000Z";
+  const sent = (m: Mounted, kind: ClientMessage["kind"]) => m.sent.filter((message) => message.kind === kind);
+  const openSheet = async () => {
+    await press(q('[data-testid="audiobook-more"]'));
+    await press(q('[data-testid="menu-pictures"]'));
+    return q('[data-testid="pictures-sheet"]')!;
+  };
+
+  it("the More menu says the shapes on, and the sheet turns Tall on and keeps one shape at least", async () => {
+    const m = await mount(inkbound(91));
+    await press(q('[data-testid="audiobook-more"]'));
+    assert.match(q('[data-testid="menu-pictures"]')!.textContent!, /^Pictures.*Wide$/);
+    await press(q('[data-testid="menu-pictures"]'));
+    const sheet = q('[data-testid="pictures-sheet"]')!;
+    assert.equal(sheet.getAttribute("role"), "dialog");
+    assert.match(sheet.querySelector('[data-testid="pictures-shape-wide"]')!.textContent!, /Wide.*16:9.*desktop · tablet/);
+    assert.match(sheet.querySelector('[data-testid="pictures-shape-tall"]')!.textContent!, /Tall.*9:16.*phone/);
+    await press(sheet.querySelector('[data-testid="pictures-shape-tall"] [role="checkbox"]'));
+    assert.deepEqual((sent(m, "set-audiobook-picture-shapes").at(-1) as Extract<ClientMessage, { kind: "set-audiobook-picture-shapes" }>).shapes, ["wide", "tall"]);
+    // Wide alone is on: turning it off would leave the book no shape, so nothing is sent.
+    const asked = sent(m, "set-audiobook-picture-shapes").length;
+    await press(sheet.querySelector('[data-testid="pictures-shape-wide"] [role="checkbox"]'));
+    assert.equal(sent(m, "set-audiobook-picture-shapes").length, asked);
+  });
+
+  it("offers Make N tall for the pictures without one or with one from an earlier picture, and follows the run in place", async () => {
+    const m = await mount(inkbound(91, { shapes: ["wide", "tall"] }));
+    const sheet = await openSheet();
+    const picture = (key: string, extra: Record<string, unknown> = {}) => ({ key, number: 1, file: `artifacts/${key}.png`, at: 0, seconds: 30, short: false, ...extra });
+    const listening = { productionId: "inkbound", title: "Inkbound", scope: { kind: "book" }, cover: null, chapters: [{ chapterId: "neap", order: 1, title: "Neap", state: "read", seconds: 90, blocks: [], gaps: [], opening: null, pictures: [picture("a"), picture("b", { tall: "artifacts/b-tall.png" }), picture("c", { tall: "artifacts/c-tall.png", tallEarlier: true })] }] };
+    // The page asks for its own plan too; each ask is answered with the book's.
+    for (const ask of sent(m, "open-audiobook-listening") as Array<Extract<ClientMessage, { kind: "open-audiobook-listening" }>>) {
+      await act(async () => __applyEventForTest({ at: AT_, type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening } as never));
+    }
+    assert.match(sheet.querySelector('[data-testid="pictures-shape-wide"]')!.textContent!, /3 made/);
+    assert.match(sheet.querySelector('[data-testid="pictures-shape-tall"]')!.textContent!, /2 made/);
+    assert.match(q('[data-testid="pictures-make-tall"]')!.textContent!, /^Tall · 2 to make.*Make 2 tall$/);
+    await press(q('[data-testid="pictures-start-tall"]'));
+    assert.equal(sent(m, "make-audiobook-tall-pictures").length, 1);
+    await act(async () => __applyEventForTest({ at: AT_, type: "audiobook.tall-progress", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", state: "making", total: 2, made: 1, failed: [] }));
+    assert.match(q('[data-testid="pictures-make-tall"]')!.textContent!, /^Tall · 1 of 2.*Stop$/);
+    await press(q('[data-testid="pictures-stop-tall"]'));
+    assert.equal(sent(m, "stop-audiobook-tall-pictures").length, 1);
+  });
+
+  it("shows a run that ended while the window was away as ended, once the snapshot comes back (codex on PR 2166)", async () => {
+    const m = await mount(inkbound(91, { shapes: ["wide", "tall"] }));
+    await openSheet();
+    const picture = (key: string) => ({ key, number: 1, file: `artifacts/${key}.png`, at: 0, seconds: 30, short: false });
+    const listening = { productionId: "inkbound", title: "Inkbound", scope: { kind: "book" }, cover: null, chapters: [{ chapterId: "neap", order: 1, title: "Neap", state: "read", seconds: 90, blocks: [], gaps: [], opening: null, pictures: [picture("a")] }] };
+    const answerPlans = async () => {
+      for (const ask of sent(m, "open-audiobook-listening") as Array<Extract<ClientMessage, { kind: "open-audiobook-listening" }>>) {
+        await act(async () => __applyEventForTest({ at: AT_, type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening } as never));
+      }
+    };
+    await act(async () => __applyEventForTest({ at: AT_, type: "audiobook.tall-progress", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", state: "making", total: 1, made: 0, failed: [] }));
+    await answerPlans();
+    assert.match(q('[data-testid="pictures-make-tall"]')!.textContent!, /^Tall · 0 of 1.*Stop$/);
+    // The run ends unheard; the window rejoins to a snapshot, and the coordinator replays no run.
+    await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 1, state: inkbound(91, { shapes: ["wide", "tall"] }) }));
+    await answerPlans();
+    assert.match(q('[data-testid="pictures-make-tall"]')!.textContent!, /^Tall · 1 to make.*Make 1 tall$/);
   });
 });
 

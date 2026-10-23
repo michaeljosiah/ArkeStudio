@@ -123,6 +123,14 @@
 .fy-abshow__mono { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-abshow__kv { display: flex; align-items: center; gap: 10px; min-height: 40px; font-size: var(--text-sm); }
 .fy-abshow__kv > b { width: var(--abshow-nw); flex: none; font: var(--type-label); font-weight: 500; color: var(--muted-foreground); }
+/* Pictures (design turn 235a): each shape a row of its box and name, its ratio, where it shows and
+   how many are made; then the Tall still to make with its press, as 235a draws it. */
+.fy-pics__grow { flex: 1; }
+.fy-pics__shape .fy-abv-chk { min-width: 96px; }
+.fy-pics__made { width: 72px; text-align: right; color: var(--foreground); }
+.fy-pics__make { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; font-size: var(--text-sm); }
+.fy-pics__make b { font-weight: 600; }
+.fy-pics__w { color: var(--warning); }
 /* The reading's seg, as 184's sheets draw it. */
 .fy-abshow__sheet .fy-seg { display: inline-flex; gap: 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: none; }
 .fy-abshow__sheet .fy-seg__item { height: 26px; min-height: 0; padding: 0 10px; display: inline-flex; align-items: center; border: 0; border-radius: 0; background: none; box-shadow: none; font: var(--type-label); color: var(--muted-foreground); }
