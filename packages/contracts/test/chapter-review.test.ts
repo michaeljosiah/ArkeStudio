@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { ReviewAnswerSchema, ChapterReviewSchema, verifiedReviewAnswer, ChapterReviewTargetSchema, chapterReviewSummary, sameReviewFinding, sameChapterReviewSource, validateReviewAssessments, validateReviewGroups, validateReviewConflicts, effectiveReviewVerdict, reviewHasNoCorrection, type ChapterReview } from "../src/chapter-review.js";
+import { ReviewAnswerSchema, ReviewAnswerReadSchema, ChapterReviewSchema, verifiedReviewAnswer, ChapterReviewTargetSchema, chapterReviewSummary, sameReviewFinding, sameChapterReviewSource, validateReviewAssessments, validateReviewGroups, validateReviewConflicts, effectiveReviewVerdict, reviewHasNoCorrection, type ChapterReview } from "../src/chapter-review.js";
 
 it("requires exact prose and supplied images while preserving uncertainty", () => {
   const finding = { category: "image" as const, certainty: "possible-confusion" as const, quote: "She turned the tablet toward him.", imageBlocks: ["p0.0"], observation: "Screen appears turned away.", impact: "The action is unclear.", correction: "Use a shared view behind the reader." };
@@ -14,6 +14,23 @@ it("requires exact prose and supplied images while preserving uncertainty", () =
 it("refuses oversized answers and unsafe target paths", () => {
   assert.equal(ReviewAnswerSchema.safeParse({ facts: [], findings: [], extra: "ignored?" }).success, false);
   assert.equal(ChapterReviewTargetSchema.safeParse({ worldId: "world", productionId: "../other", chapterId: "chapter" }).success, false);
+});
+
+it("reads a model's answer without the keys it added, but never without a field it owes", () => {
+  const finding = { category: "clarity" as const, certainty: "possible-confusion" as const, quote: "She left.", imageBlocks: [], observation: "Exit unclear", impact: "Reader loses her", correction: "Name the door" };
+  const assessment = { findingId: "00000000-0000-4000-a000-000000000001", verdict: "supported" as const, subject: "Door", rationale: "Shown", visibility: "visible" as const, basis: "reader-confusion" as const };
+  const clean = { facts: [{ quote: "She left.", claim: "She leaves", kind: "explicit" as const }], findings: [finding], assessments: [assessment],
+    groups: [{ representativeId: assessment.findingId, memberIds: [assessment.findingId, assessment.findingId], rationale: "Same" }],
+    conflicts: [{ memberIds: [assessment.findingId, assessment.findingId], rationale: "Opposed" }], tells: [{ kind: "pivot" as const, quote: "She left." }] };
+  const added = { summary: "x", facts: [{ ...clean.facts[0], confidence: 1 }], findings: [{ ...finding, claim: "c", certainty_note: "n" }], assessments: [{ ...assessment, note: "n" }],
+    groups: [{ ...clean.groups[0], why: "w" }], conflicts: [{ ...clean.conflicts[0], why: "w" }], tells: [{ ...clean.tells[0], why: "w" }] };
+  assert.deepEqual(ReviewAnswerReadSchema.parse(added), clean);
+  assert.equal(ReviewAnswerSchema.safeParse(added).success, false, "what is checked and stored stays strict");
+  const { impact: _impact, ...missing } = finding;
+  for (const findings of [[missing], [{ ...finding, certainty: "sure" }], [{ ...finding, quote: 4 }], Array(21).fill(finding)])
+    assert.equal(ReviewAnswerReadSchema.safeParse({ facts: [], findings }).success, false);
+  assert.equal(ReviewAnswerReadSchema.safeParse({ facts: [], findings: [], tells: [{ kind: "simile", quote: "x", why: "w" }] }).success, false, "only the six kinds");
+  assert.equal(ReviewAnswerReadSchema.safeParse({ facts: [] }).success, false);
 });
 
 it("bounds long findings to the chat receipt limit while retaining coverage disclosure", () => {

@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ReviewAnswer, ChapterReview } from "@arke-studio/contracts";
+import type { ReviewAnswer, ChapterReview, HarnessAdapter, MessagePart } from "@arke-studio/contracts";
 import { ChapterReviewService, captureReviewSource, readChapterReview, saveChapterReview, reviewPrompt, verificationPrompt, consolidationPrompt, tellsPrompt } from "../../src/productions/chapter-review.js";
 import { emptyAudiobook, writeAudiobook } from "../../src/productions/audiobook.js";
 import { saveChapter } from "../../src/productions/ops.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, makeTempWorld } from "../world/helpers.js";
-import { closeOnCleanup } from "../tmp.js";
-import type { ReviewTaskRunner } from "../../src/harness/review-task.js";
+import { closeOnCleanup, tempDir } from "../tmp.js";
+import { makeReviewTaskRunner, type ReviewTaskRunner } from "../../src/harness/review-task.js";
 
 const quote = "Maren has the 1820 volume open on the rail desk";
 const answer: ReviewAnswer = { facts: [{ quote, claim: "Maren holds an old ledger", kind: "explicit" }], findings: [{ category: "clarity", certainty: "possible-confusion", quote, imageBlocks: [], observation: "An unfamiliar date needs context.", impact: "A reader may mistake the era.", correction: "Establish the current year if relevant." }] };
@@ -378,4 +378,48 @@ it("asks only for kinds and exact quotations, never a count or a verdict", async
   assert.match(prompt, /"kind":"three\|list\|metaphor\|notxy\|pivot\|shorthand"/);
   assert.match(prompt, /Do not count, score, summarise or judge who wrote it/);
   assert.match(prompt, /SOURCE TEXT\n[\s\S]*\nEND SOURCE TEXT$/);
+});
+
+/** The real task runner over a harness that answers each reviewer's turns from its own queue. */
+async function harnessRunner(replies: Record<"chapter-script-reviewer" | "chapter-prose-reviewer", string[]>) {
+  const turns: Array<{ agent: string; text: string }> = [];
+  let agent = "", answer: (event: object) => void = () => {};
+  const adapter = { prepareSession: () => {},
+    createSession: async (input: { agent: keyof typeof replies }) => { agent = input.agent; return { sessionId: `${agent}-${turns.length}` }; },
+    dispatchAsync: async (input: { sessionId: string; parts: MessagePart[] }) => {
+      turns.push({ agent, text: input.parts.flatMap(p => p.type === "text" ? [p.text] : []).join("") });
+      answer({ type: "message.completed", sessionId: input.sessionId, text: replies[agent as keyof typeof replies].shift() });
+    },
+    streamEvents: () => { const event = new Promise<object>(resolve => { answer = resolve; }); return { [Symbol.asyncIterator]: async function* () { yield await event; } }; },
+    interrupt: async () => {},
+  } as unknown as HarnessAdapter;
+  const runner = makeReviewTaskRunner({ adapter, beforeDispatch: async () => {}, scratch: await tempDir("chapter-review-task-"), sessionInput: input => input, cloudAllowed: async () => true });
+  return { runner, turns: (of: string) => turns.filter(t => t.agent === of).length };
+}
+it("keeps a script review whose findings carry keys of the model's own, and saves none of them", async () => {
+  const f = await fixture();
+  const h = await harnessRunner({
+    "chapter-script-reviewer": [JSON.stringify({ facts: answer.facts, findings: [{ ...answer.findings[0]!, claim: "The date confuses", certainty_note: "Likely" }] })],
+    "chapter-prose-reviewer": ['{"facts":[],"findings":[],"tells":[]}'] });
+  const review = await f.service(h.runner, { prose: true }).start(f.target, "extra-keys");
+  assert.equal(review.status, "complete"); assert.equal(review.tasks.find(t => t.id === "script")?.state, "complete");
+  const { id: _id, taskId: _task, offset: _offset, decision: _decision, ...kept } = review.findings[0]!;
+  assert.deepEqual(kept, answer.findings[0]); assert.equal("certainty_note" in review.candidates![0]!, false);
+  const saved = await readFile(join(f.dir, "productions", f.target.productionId, ".reviews", "chapters", f.target.chapterId, `${review.id}.json`), "utf8");
+  assert.doesNotMatch(saved, /certainty_note|The date confuses/);
+  assert.deepEqual((await readChapterReview(f.store, f.target))?.findings, review.findings, "the strict review schema still reads it");
+});
+it("asks the prose reviewer once more when its answer is not JSON, and fails only that task when the resend is not either", async () => {
+  const f = await fixture(), script = JSON.stringify(answer);
+  const malformed = `{"facts":[],"findings":[],"tells":[{"kind":"metaphor","quote":"Maren has "the 1820 volume""}]}`;
+  const once = await harnessRunner({ "chapter-script-reviewer": [script], "chapter-prose-reviewer": [malformed, JSON.stringify({ facts: [], findings: [], tells: [{ kind: "metaphor", quote }] })] });
+  const resent = await f.service(once.runner, { prose: true }).start(f.target, "resent-tells");
+  assert.equal(resent.status, "complete"); assert.equal(resent.tells?.tells.length, 1);
+  assert.equal(once.turns("chapter-prose-reviewer"), 2); assert.equal(once.turns("chapter-script-reviewer"), 1);
+  const twice = await harnessRunner({ "chapter-script-reviewer": [script], "chapter-prose-reviewer": [malformed, malformed] });
+  const failed = await f.service(twice.runner, { prose: true }).start(f.target, "malformed-tells");
+  const prose = failed.tasks.find(t => t.specialist === "prose")!;
+  assert.equal(prose.state, "failed"); assert.match(prose.detail ?? "", /Expected ',' or '}' after property value in JSON at position/);
+  assert.equal(failed.status, "partial"); assert.equal(failed.tells, undefined); assert.equal(failed.findings.length, 1, "the script review is kept");
+  assert.equal(twice.turns("chapter-prose-reviewer"), 2, "one resend, never a third turn");
 });

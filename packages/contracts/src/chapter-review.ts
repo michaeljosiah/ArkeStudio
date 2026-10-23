@@ -35,14 +35,27 @@ export const ReviewGroupSchema = z.object({
 export const ReviewConflictSchema = z.object({
   memberIds: z.array(z.string().uuid()).min(2).max(60), rationale: z.string().min(1).max(1000),
 }).strict();
-export const ReviewAnswerSchema = z.object({
-  facts: z.array(ReviewFactSchema).max(40), findings: z.array(ReviewFindingDraftSchema).max(20),
-  assessments: z.array(ReviewAssessmentSchema).max(20).optional(),
-  groups: z.array(ReviewGroupSchema).max(200).optional(),
-  conflicts: z.array(ReviewConflictSchema).max(200).optional(),
-  // The prose specialist's tags (design turn 232): kinds and exact quotations, no counts.
-  tells: z.array(TellDraftSchema).max(TELL_ANSWER_MAX).optional(),
-}).strict();
+// One answer shape read two ways. `strip` drops keys the shape does not name; required fields
+// and their types are checked either way.
+const reviewAnswer = (strip: boolean) => {
+  const own = <T extends z.ZodRawShape>(schema: z.ZodObject<T, "strict">) => strip ? schema.strip() : schema;
+  return z.object({
+    facts: z.array(own(ReviewFactSchema)).max(40), findings: z.array(own(ReviewFindingDraftSchema)).max(20),
+    assessments: z.array(own(ReviewAssessmentSchema)).max(20).optional(),
+    groups: z.array(own(ReviewGroupSchema)).max(200).optional(),
+    conflicts: z.array(own(ReviewConflictSchema)).max(200).optional(),
+    // The prose specialist's tags (design turn 232): kinds and exact quotations, no counts.
+    tells: z.array(own(TellDraftSchema)).max(TELL_ANSWER_MAX).optional(),
+  });
+};
+export const ReviewAnswerSchema = reviewAnswer(false).strict();
+/**
+ * A reviewer model's answer as it arrives. Models add keys of their own: on 2026-10-23 about half
+ * of one model's script reviews put `claim` (once also `certainty_note`) on a finding, and the
+ * strict parse threw the whole task away for it. Those keys are dropped here, before anything is
+ * kept, so what is saved still passes the strict review schema below.
+ */
+export const ReviewAnswerReadSchema = reviewAnswer(true).strip();
 export type ReviewAnswer = z.infer<typeof ReviewAnswerSchema>;
 export const ReviewImageSchema = z.object({ block: z.string(), file: z.string(), hash: z.string(),
   shot: PictureShotSchema.optional(), textHash: z.string().optional(), error: z.string().optional() }).strict();
