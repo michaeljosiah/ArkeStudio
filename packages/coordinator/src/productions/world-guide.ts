@@ -126,9 +126,8 @@ export async function guideVoiceLines(store: WorldStore, characterId: string, si
     const numbers = new Map(production.chapters.map((chapter) => [chapter.id, chapter.number]));
     const listening = await audiobookListening(store, production.id, signal !== undefined ? { signal } : {}).catch(() => null);
     if (listening === null) continue;
-    const narrator = await anyNarrator(store, production.id);
     for (const chapter of listening.chapters.filter(readWhole)) {
-      const plan = await planAudiobook(store, production.id, chapter.chapterId, { narrator }).catch(() => null);
+      const plan = await planAudiobook(store, production.id, chapter.chapterId, { narrator: await anyNarrator(store, production.id, chapter.chapterId) }).catch(() => null);
       const record = plan === null || plan.record === "unreadable" ? null : plan.record;
       if (record === null) continue;
       lines.push(...chapterVoiceLines(chapter, record.takes, characterId, { id: production.id, title: production.title, number: numbers.get(chapter.chapterId) ?? chapter.order }));

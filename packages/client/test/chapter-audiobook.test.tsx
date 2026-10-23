@@ -1229,6 +1229,31 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(dom.document.querySelector('[data-testid="narrator-dialog"]'), "Narrator… opens the book's narrator");
   });
 
+  it("from a chapter the narrator may be the chapter's own, quoted and written for that chapter alone (R-195)", async () => {
+    const m = await mount(voiced(inkbound("performed")));
+    await answerOpen(m, { audiobook: record(NARRATION_KEYS, { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." }) });
+    const press = q(m, '[data-testid="audiobook-reading"]')!;
+    await act(async () => press.click());
+    await act(async () => all(m, '[role="menu"][aria-label="Reading"] [role="menuitem"]').find((item) => /Narrator…/.test(item.textContent ?? ""))!.click());
+    const dialog = dom.document.querySelector('[data-testid="narrator-dialog"]') as HTMLElement;
+    const seg = [...dialog.querySelectorAll('[aria-label="Narrator"] button')] as HTMLButtonElement[];
+    assert.deepEqual(seg.map((b) => b.textContent), ["App narrator · George", "This book", "This chapter"]);
+    await act(async () => __applyEventForTest({ at: AT, type: "voice.catalogue", worldId: FIXTURE_WORLD_ID, voices: [{ provider: "kokoro", model: "kokoro-82m", voiceId: "af_heart", label: "Heart", attributes: [], local: true, canClone: false, usedBy: [] }] }));
+    await act(async () => seg[2]!.click());
+    await act(async () => ([...dialog.querySelectorAll('[role="option"]')] as HTMLElement[])[0]!.click());
+    const ask = m.sent.findLast((message) => message.kind === "quote-audiobook-narrator") as Extract<ClientMessage, { kind: "quote-audiobook-narrator" }>;
+    assert.deepEqual([ask.chapterId, ask.voice?.voiceId], ["neap", "af_heart"], "the chapter's switch is quoted as the chapter's");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.narrator-quote", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: ask.requestId, stale: 4, held: 0, directed: 0, estimatedMicroUsd: 0, kept: 1 }));
+    const facts = ([...dialog.querySelectorAll('[data-testid="narrator-quote"] > div')] as HTMLElement[]).map((f) => f.textContent);
+    assert.ok(facts.includes("Read the chapterno charge"), facts.join(" | "));
+    const use = dialog.querySelector('[data-testid="narrator-use"]') as HTMLButtonElement;
+    assert.equal(use.textContent, "Use for this chapter");
+    await act(async () => use.click());
+    const set = m.sent.findLast((message) => message.kind === "set-audiobook-chapter-narrator") as Extract<ClientMessage, { kind: "set-audiobook-chapter-narrator" }>;
+    assert.deepEqual([set.chapterId, set.voice?.voiceId], ["neap", "af_heart"]);
+    assert.equal(m.sent.some((message) => message.kind === "set-audiobook-narrator"), false, "the book's narrator is left alone");
+  });
+
   it("the block panel names the block, who speaks and its reader in words, then Picture, Voice and Timing as tabs (design turns 165a, 194g)", async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m, { audiobook: record(NARRATION_KEYS, { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." }) });

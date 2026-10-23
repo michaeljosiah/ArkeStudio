@@ -204,7 +204,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 102: explicit chapter drafting intent survives queued turns and retries (#1928).
 // 103: explicitly authored character identity aliases (#1944).
 // 104: immutable performance identities in shared agent media receipts (#2103).
-export const SUPPORTED_SCHEMA_VERSION = 105;
+// 105: an explicit retained-picture look review on a chapter's pictures (#2126).
+// 106: a chapter's own audiobook narrator, `chapterNarrators` on the book (SPEC-047 R-195).
+export const SUPPORTED_SCHEMA_VERSION = 106;
 
 export class WorldOpenError extends Error {
   constructor(

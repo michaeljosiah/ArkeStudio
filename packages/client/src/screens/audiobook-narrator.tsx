@@ -7,7 +7,7 @@ import { DesignVoiceDialog } from "../components/design-voice-dialog.js";
 import { Button } from "../components/ui.js";
 import { playClip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
-import { requestVoiceCatalogue, hearAudiobookLine, quoteAudiobookNarrator, setAudiobookNarrator, useHeardLines, useNarratorQuotes, useStore, type ReadingVoice } from "../lib/store.js";
+import { requestVoiceCatalogue, hearAudiobookLine, quoteAudiobookNarrator, setAudiobookChapterNarrator, setAudiobookNarrator, useHeardLines, useNarratorQuotes, useStore, type ReadingVoice } from "../lib/store.js";
 
 const same = (a: AudiobookReader | null | undefined, b: AudiobookReader | null | undefined) =>
   a != null && b != null && a.provider === b.provider && a.model === b.model && a.voiceId === b.voiceId;
@@ -41,14 +41,19 @@ function matches(voice: ReadingVoice, row: ManifestModel | undefined, words: rea
  * Before the press the dialog states what the switch does, as data — the blocks that go stale,
  * the direction the new reader holds, the price of reading the book again, the takes kept —
  * and the press waits for that answer, writes the book record and makes nothing.
+ *
+ * Opened from a chapter, it offers that chapter a narrator of its own (R-195): a book told from
+ * more than one point of view reads each part in its narrator's voice.
  */
-export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarrator, appLabel, appProvider, castProviders, trial, slug, data, onClose }: {
+export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarrator, chapter, appLabel, appProvider, castProviders, trial, slug, data, onClose }: {
   worldId: string;
   productionId: string;
   /** The narrator the book reads in now, by name. */
   narratorLabel: string;
   /** The book's own, when it has one. */
   bookNarrator?: AudiobookReader;
+  /** The chapter it was opened from, and that chapter's own narrator when it has one (R-195). */
+  chapter?: { id: string; own?: AudiobookReader };
   /** The app's narrator by name, for the seg. */
   appLabel: string;
   /** The app narrator's provider and the cast's, for the book price's word; unknown says `~`. */
@@ -78,8 +83,10 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
         }),
     [voiceCatalogue, disabledModels],
   );
-  const [mode, setMode] = useState<"app" | "book">(bookNarrator !== undefined ? "book" : "app");
-  const [picked, setPicked] = useState<AudiobookReader | null>(bookNarrator ?? null);
+  const own = chapter?.own;
+  const [mode, setMode] = useState<"app" | "book" | "chapter">(own !== undefined ? "chapter" : bookNarrator !== undefined ? "book" : "app");
+  const [picked, setPicked] = useState<AudiobookReader | null>(own ?? bookNarrator ?? null);
+  const listed = mode !== "app";
   const [search, setSearch] = useState("");
   const [designing, setDesigning] = useState(false);
   const [where, setWhere] = useState<Where | "all">("all");
@@ -94,15 +101,20 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
   // What the switch would do, asked again whenever the choice changes (R-46).
   const [quoteId, setQuoteId] = useState<string | null>(null);
   const quote = useNarratorQuotes()[quoteId ?? ""];
-  const unchanged = mode === "app" ? bookNarrator === undefined : same(picked, bookNarrator);
+  // A chapter with its own narrator changes under any choice for the book: it follows the book's again.
+  const unchanged = mode === "chapter" ? same(picked, own) : own === undefined && (mode === "app" ? bookNarrator === undefined : same(picked, bookNarrator));
+  // The book's narrator kept and only the chapter's own let go is the chapter's switch to quote.
+  const backToBook = own !== undefined && (mode === "app" ? bookNarrator === undefined : mode === "book" && same(picked, bookNarrator));
   useEffect(() => {
-    if (unchanged || (mode === "book" && picked === null)) {
+    if (unchanged || (listed && picked === null)) {
       setQuoteId(null);
       return;
     }
-    setQuoteId(quoteAudiobookNarrator(worldId, productionId, target));
+    setQuoteId(mode === "chapter" ? quoteAudiobookNarrator(worldId, productionId, picked, chapter!.id)
+      : backToBook ? quoteAudiobookNarrator(worldId, productionId, null, chapter!.id)
+        : quoteAudiobookNarrator(worldId, productionId, target));
     // `target` is `picked` or null by mode; both are in the list.
-  }, [mode, picked?.provider, picked?.model, picked?.voiceId, unchanged]);
+  }, [mode, picked?.provider, picked?.model, picked?.voiceId, unchanged, backToBook]);
   // A voice tried on the block, as it would read it (R-46): heard, never a take.
   const [hearing, setHearing] = useState<{ id: string; voice: string; reader: AudiobookReader } | null>(null);
   const heard = useHeardLines()[hearing?.id ?? ""];
@@ -128,7 +140,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
   const searchBox = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (mode === "book") searchBox.current?.focus();
+    if (listed) searchBox.current?.focus();
   }, [mode]);
   const options = () => [...(list.current?.querySelectorAll<HTMLElement>('[role="option"]') ?? [])];
   const onListKey = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -151,7 +163,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
     const reader = readerOf(voice);
     const model = rowOf(voice);
     const on = same(picked, reader);
-    const current = same(bookNarrator, reader);
+    const current = same(mode === "chapter" ? own : bookNarrator, reader);
     return (
       <div
         key={`${voice.provider}/${voice.model}/${voice.voiceId}`}
@@ -244,7 +256,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
           ...(quote.directed > 0 ? [{ k: "Direction", v: quote.held === 0 ? `${quote.directed} · none held` : `${quote.held} of ${quote.directed} held`, warn: quote.held > 0 }] : []),
           // The whole book under the switch, its cast with it: `up to` only while every reader in
           // the book is priced by the character, else an estimate (SPEC-049 R-6).
-          { k: "Read the book", v: quote.estimatedMicroUsd === 0 ? "no charge" : `${bookPriceWord}${formatMicroUsd(quote.estimatedMicroUsd)}` },
+          { k: mode === "chapter" || backToBook ? "Read the chapter" : "Read the book", v: quote.estimatedMicroUsd === 0 ? "no charge" : `${bookPriceWord}${formatMicroUsd(quote.estimatedMicroUsd)}` },
           { k: "Takes", v: `kept · ${quote.kept.toLocaleString()}` },
         ]
       : quote?.state === "refused"
@@ -254,7 +266,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
           : [];
   const detail = (
     <div className="fy-abnarr__detail">
-      {mode === "book" && chosen !== undefined && (
+      {listed && chosen !== undefined && (
         <>
           <p className="fy-abnarr__chosen">
             <span className="fy-abnarr__name">{chosen.label}</span>
@@ -286,10 +298,10 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
       )}
     </div>
   );
-  if (designing) return <DesignVoiceDialog worldId={worldId} name="Book narrator" useLabel="Choose for this book"
-    onClose={() => setDesigning(false)} onUse={voice => { setPicked(readerOf({ ...voice, usedBy: [] })); setMode("book"); setDesigning(false); }} />;
+  if (designing) return <DesignVoiceDialog worldId={worldId} name={chapter !== undefined ? "Chapter narrator" : "Book narrator"} useLabel={chapter !== undefined ? "Choose for this chapter" : "Choose for this book"}
+    onClose={() => setDesigning(false)} onUse={voice => { setPicked(readerOf({ ...voice, usedBy: [] })); setMode(chapter !== undefined ? "chapter" : "book"); setDesigning(false); }} />;
   return (
-    <NarratorSurface data={data} onClose={onClose} width={mode === "book" ? 860 : 580}>
+    <NarratorSurface data={data} onClose={onClose} width={listed ? 860 : 580}>
       <div className="fy-abnarr" data-testid="narrator-dialog">
         {models.some(model => model.provider === "google" && model.capability === "voice-tts") && <Button onClick={() => setDesigning(true)}>Design a narrator</Button>}
         <span className="fy-seg" role="group" aria-label="Narrator">
@@ -299,8 +311,13 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
           <button type="button" className={`fy-seg__item${mode === "book" ? " fy-seg__item--active" : ""}`} aria-pressed={mode === "book"} onClick={() => setMode("book")}>
             This book
           </button>
+          {chapter !== undefined && (
+            <button type="button" className={`fy-seg__item${mode === "chapter" ? " fy-seg__item--active" : ""}`} aria-pressed={mode === "chapter"} onClick={() => setMode("chapter")} data-testid="narrator-chapter">
+              This chapter
+            </button>
+          )}
         </span>
-        {mode === "book" ? (
+        {listed ? (
           <div className="fy-abnarr__cols">
             {list_}
             {detail}
@@ -317,14 +334,16 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
           <Button
             // The press waits for what the switch costs (turn 165): a person sees the stale
             // blocks and the price before choosing, never after.
-            disabled={unchanged || (mode === "book" && picked === null) || quote?.state !== "done"}
+            disabled={unchanged || (listed && picked === null) || quote?.state !== "done"}
             onClick={() => {
-              setAudiobookNarrator(worldId, productionId, target);
+              if (mode === "chapter") setAudiobookChapterNarrator(worldId, productionId, chapter!.id, picked);
+              // A choice for the book from a chapter with its own lets the chapter's go (R-195).
+              else setAudiobookNarrator(worldId, productionId, target, own !== undefined ? chapter!.id : undefined);
               onClose();
             }}
             data-testid="narrator-use"
           >
-            {mode === "app" ? "Use the app narrator" : "Use for this book"}
+            {mode === "app" ? "Use the app narrator" : mode === "chapter" ? "Use for this chapter" : "Use for this book"}
           </Button>
         </div>
       </div>

@@ -581,6 +581,7 @@ const CLIENT_COMMAND_METADATA = {
   // narrator are commands on the book record; the quote reads; hearing a line may leave the machine.
   "set-audiobook-note": action("production", "command", "voice", "authored-change", ["chapters"]),
   "set-audiobook-narrator": action("production", "command", "voice", "external-network-action", ["chapters"]),
+  "set-audiobook-chapter-narrator": action("production", "command", "voice", "external-network-action", ["chapters"]),
   "quote-audiobook-narrator": readOnly(QUERY),
   "hear-audiobook-line": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
   "set-audiobook-block": action("production", "command", "voice", "external-network-action", ["chapters"]),

@@ -5,14 +5,13 @@ import {
   audiobookDirectionFor,
   audiobookRecordingKey,
   audiobookTextHash,
-  type AudiobookReader,
   type ChapterAudiobook,
 } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { castRefusal, planAudiobook } from "./audiobook.js";
-import { RecordedTakeRefusal, stageRecording, type RecordedTakeDeps, type StagedRecording } from "./audiobook-recorded.js";
+import { narratorOf, RecordedTakeRefusal, stageRecording, type NarratorOf, type RecordedTakeDeps, type StagedRecording } from "./audiobook-recorded.js";
 import { writeScriptPdf, type ScriptRun } from "./script-pdf.js";
 
 /**
@@ -74,7 +73,7 @@ export async function speakerLines(
   store: WorldStore,
   productionId: string,
   speaker: string,
-  narrator: AudiobookReader,
+  narrator: NarratorOf,
 ): Promise<{ lines: SpeakerLine[]; chapters: number; notCast: number }> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new RecordedTakeRefusal("that production is gone");
@@ -82,7 +81,7 @@ export async function speakerLines(
   const chapters = new Set<string>();
   let notCast = 0;
   for (const summary of [...production.chapters].filter((c) => !c.retired).sort((a, b) => a.order - b.order)) {
-    const plan = await planAudiobook(store, productionId, summary.id, { narrator });
+    const plan = await planAudiobook(store, productionId, summary.id, { narrator: narratorOf(narrator, summary.id) });
     if (plan.blocks.length === 0) continue;
     // A line is a speaker's only by a current cast (SPEC-047 R-12); the narrator's blocks need none.
     if (speaker !== "narrator" && castRefusal({ ...plan, reading: "cast" }) !== null) {
@@ -162,7 +161,7 @@ export async function exportScript(
   store: WorldStore,
   productionId: string,
   speaker: string,
-  input: { scope: "awaiting" | "all"; label: string; narrator: AudiobookReader; exportId: string; now: () => string },
+  input: { scope: "awaiting" | "all"; label: string; narrator: NarratorOf; exportId: string; now: () => string },
 ): Promise<ScriptExport> {
   const found = await speakerLines(store, productionId, speaker, input.narrator);
   const lines = input.scope === "all" ? found.lines : found.lines.filter((line) => line.state !== "made");

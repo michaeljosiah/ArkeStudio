@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import type { AudiobookDoor, ChapterSummary, ClientMessage, ClientState } from "@arke-studio/contracts";
-import { AudiobookScreen, chapterHeading, chapterSeconds, chapterStateWord, formatBookLength, readingWarning } from "../src/screens/audiobook.js";
+import { AudiobookScreen, chapterHeading, chapterSeconds, chapterSpans, chapterStateWord, formatBookLength, readingWarning } from "../src/screens/audiobook.js";
 import { audiobookPlaceKey } from "../src/lib/audiobook-place.js";
 import { PlayerDock } from "../src/components/player.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -175,6 +175,14 @@ describe("what the page says, as data (199)", () => {
     assert.equal(chapterStateWord({ ...ROWS[0]!, made: 171, notMade: 0 }, false), null, "read whole: nothing");
     assert.equal(chapterStateWord(ROWS[0]!, true), "reading…");
     assert.equal(chapterStateWord({ ...ROWS[1]!, castTrouble: "not cast · cast the lines first" }, false), "not cast");
+  });
+
+  it("names the chapters a narrator of their own reads by number and run (R-195)", () => {
+    const rows = Array.from({ length: 17 }, (_, at) => ({ chapterId: `c${at + 1}`, order: at + 1 }));
+    assert.equal(chapterSpans(["c9", "c10", "c11", "c12", "c13", "c14", "c15", "c16"], rows), "Ch 9–16");
+    assert.equal(chapterSpans(["c17", "c1", "c2", "c3"], rows), "Ch 1–3, 17", "in the book's order, whatever order they were kept in");
+    assert.equal(chapterSpans(["c5"], rows), "Ch 5");
+    assert.equal(chapterSpans(["gone"], rows), "Chapters", "a chapter no longer on the door is not counted");
   });
 
   it("counts one warning word under Cast, never under the narrator's reading", () => {

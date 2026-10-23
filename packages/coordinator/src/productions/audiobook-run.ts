@@ -340,6 +340,31 @@ export interface ReadingRoom {
   transcriber?: boolean;
   /** Why the book's own narrator cannot read now (issue 1661), as the door says it; absent while it can. */
   unavailable?: string;
+  /** The chapters read by a narrator of their own (R-195), by chapter id; `chapterRoom` reads one in. */
+  chapterNarrators?: Readonly<Record<string, ChapterNarration>>;
+}
+
+/**
+ * A chapter's own narrator as a room carries it (SPEC-047 R-195): who reads, the designed binding
+ * the read rides on where it has one, why it cannot read now, and its description for the director.
+ */
+export interface ChapterNarration {
+  narrator: AudiobookReader;
+  designedBinding?: { target: string; remoteId: string; expiresAt: string };
+  unavailable?: string;
+  narratorDescription?: string;
+}
+
+/**
+ * The room as one chapter reads it (R-195): a book's room carries the book's narrator, and a
+ * chapter with its own reads in that one instead — its binding, its availability and its
+ * description with it, so nothing of the book's narrator is left behind to speak for it.
+ */
+export function chapterRoom<R extends { narrator: AudiobookReader; chapterNarrators?: Readonly<Record<string, ChapterNarration>> }>(room: R, chapterId: string): R {
+  const own = room.chapterNarrators?.[chapterId];
+  if (own === undefined) return room;
+  const { designedBinding: _binding, unavailable: _unavailable, narratorDescription: _description, ...rest } = room as R & ChapterNarration;
+  return { ...rest, ...own } as unknown as R;
 }
 
 /**

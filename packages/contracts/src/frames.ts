@@ -3429,18 +3429,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   /**
    * The book's own narrator (design turn 155h, SPEC-047 R-46), or null for the app's. Written
    * on the book record and nothing made; the takes a switch leaves current are the record's
-   * choice again without a call (R-48).
+   * choice again without a call (R-48). With `chapterId` (R-195), that chapter's own narrator is
+   * cleared in the same write, so a chapter switched back to the book's narrator follows it:
+   * one write, because two frames racing on the book record could keep either.
    */
   z
-    .object({ kind: z.literal("set-audiobook-narrator"), worldId: UlidSchema, productionId: SlugSchema, voice: AudiobookReaderSchema.nullable() })
+    .object({ kind: z.literal("set-audiobook-narrator"), worldId: UlidSchema, productionId: SlugSchema, voice: AudiobookReaderSchema.nullable(), chapterId: SlugSchema.optional() })
+    .strict(),
+  /**
+   * A chapter's own narrator (SPEC-047 R-195), or null to read it in the book's narrator again.
+   * Written on the book record and nothing made, as the book's narrator is (R-46, R-48).
+   */
+  z
+    .object({ kind: z.literal("set-audiobook-chapter-narrator"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, voice: AudiobookReaderSchema.nullable() })
     .strict(),
   /**
    * What a narrator switch would do, before it is made (R-46): the blocks that go stale across
    * the book, the direction the new reader cannot express, the price of reading the book
-   * again, and the takes kept. Answered by `audiobook.narrator-quote`; nothing written.
+   * again, and the takes kept. Answered by `audiobook.narrator-quote`; nothing written. With a
+   * chapter it is that chapter's switch (R-195): its blocks, its direction, its price, and
+   * `voice: null` is the book's narrator rather than the app's.
    */
   z
-    .object({ kind: z.literal("quote-audiobook-narrator"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, voice: AudiobookReaderSchema.nullable() })
+    .object({ kind: z.literal("quote-audiobook-narrator"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, voice: AudiobookReaderSchema.nullable(), chapterId: SlugSchema.optional() })
     .strict(),
   /**
    * A block heard as it would be read (R-45, R-46): its words with its direction and, under

@@ -26,11 +26,10 @@ export function chapterReferenceCoverage(store: WorldStore, productionId: string
 /** Sequential reads keep large books bounded in memory; an unreadable chapter remains a row. */
 export async function bookReferenceCoverage(store: WorldStore, productionId: string, pictures: ReadonlyMap<string, readonly { block: string; who: readonly PictureWho[] }[]> = new Map()): Promise<ChapterReferenceCoverage[]> {
   const chapters = [...(store.getBundle().productions.find(production => production.meta.id === productionId)?.chapters ?? [])].filter(chapter => !chapter.retired).sort((a, b) => a.order - b.order);
-  const narrator = await anyNarrator(store, productionId);
   const rows: ChapterReferenceCoverage[] = [];
   for (const chapter of chapters) {
     try {
-      const plan = await planAudiobook(store, productionId, chapter.id, { narrator });
+      const plan = await planAudiobook(store, productionId, chapter.id, { narrator: await anyNarrator(store, productionId, chapter.id) });
       rows.push(chapterReferenceCoverage(store, productionId, plan, pictures.get(chapter.file)));
     } catch {
       rows.push({ chapterId: chapter.id, file: chapter.file, title: chapter.title, order: chapter.order, preparation: "unavailable", rows: [],

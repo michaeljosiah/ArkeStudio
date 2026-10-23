@@ -45,6 +45,7 @@ import {
   PASSAGE_SPAN_MAX,
   readerPlace,
   audiobookReadingNotes,
+  chapterNarratorChoice,
   voiceDisplayLabel,
   mainPhotoFor,
   CHAPTER_PLAN_LIMITS,
@@ -1367,7 +1368,8 @@ export function ChapterWorkspace({
     reading: production.audiobook?.reading ?? "narrator",
     ...(production.audiobook?.recorded !== undefined ? { recorded: production.audiobook.recorded } : {}),
     ...(production.audiobook?.notes !== undefined ? { notes: production.audiobook.notes } : {}),
-    ...(production.audiobook?.narrator !== undefined ? { bookNarrator: production.audiobook.narrator } : {}),
+    // The chapter reads in its own narrator where it has one, else the book's (R-195).
+    ...(chapterNarratorChoice(production.audiobook, chapter.id) !== undefined ? { bookNarrator: chapterNarratorChoice(production.audiobook, chapter.id)! } : {}),
     readingNotes: audiobookReadingNotes(production.audiobook, chapter.id),
     ...(production.audiobook?.requests !== undefined ? { requests: production.audiobook.requests } : {}),
     connection,
@@ -2473,6 +2475,7 @@ export function ChapterWorkspace({
                   productionId={prodId}
                   narratorLabel={audiobook.narrator.label ?? narratorName}
                   {...(production?.audiobook?.narrator !== undefined ? { bookNarrator: production.audiobook.narrator } : {})}
+                  chapter={{ id: chapter.id, ...(production?.audiobook?.chapterNarrators?.[chapter.id] !== undefined ? { own: production.audiobook.chapterNarrators[chapter.id]! } : {}) }}
                   appLabel={narratorName}
                   trial={{ chapterFile: chapter.file, block: audiobook.selected ?? "title" }}
                   slug={worldSlug}
@@ -2616,7 +2619,7 @@ export function ChapterWorkspace({
                     <div className="fy-ch__who-head">
                       <span className="fy-ch__who-name"><i className="fy-ab__speaker-dot fy-voice--narrator" aria-hidden="true" /><span>Narration</span></span>
                       <button type="button" className="fy-ch__who-where fy-mono fy-ab__narrator-press" onClick={() => setNarratorOpen(true)} data-testid="voices-narrator">
-                        {audiobook.narrator.label ?? narratorName} · {production?.audiobook?.narrator !== undefined ? "this book" : "narrator"}
+                        {audiobook.narrator.label ?? narratorName} · {production?.audiobook?.chapterNarrators?.[chapter.id] !== undefined ? "this chapter" : production?.audiobook?.narrator !== undefined ? "this book" : "narrator"}
                       </button>
                       <span className="fy-ch__who-count fy-mono">{narrationBlocks} blocks</span>
                     </div>

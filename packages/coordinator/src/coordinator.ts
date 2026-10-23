@@ -201,6 +201,7 @@ import {
   type ManifestModel,
   CADENCE_NOTE_MAX,
   DEFAULT_AUDIOBOOK_BOOK,
+  chapterNarratorChoice,
   narratorFor,
   bookNarratorUnavailable,
   narratorAppliesTo,
@@ -382,7 +383,7 @@ import { guideVoiceLines, setGuideEntry } from "./productions/world-guide.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
 import { checkDirection, directionPlan, heldKey } from "./voice/direction.js";
-import { keepSplitTake, prepareChapter, runAudiobookChapter } from "./productions/audiobook-run.js";
+import { chapterRoom, keepSplitTake, prepareChapter, runAudiobookChapter, type ChapterNarration } from "./productions/audiobook-run.js";
 import { timeWords, type TimedWord } from "./voice/word-times.js";
 import { exportManuscript, importManuscript, readManuscript } from "./productions/manuscript.js";
 import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";
@@ -1654,27 +1655,44 @@ export class Coordinator {
    * A book keeps its chosen narrator even when unavailable; only an explicit reset inherits the
    * app's. `unavailable` says why the book's own narrator cannot read now, in the author's words
    * (issue 1661): Read refuses with it before pricing, Direct holds on it, and the door shows it.
+   *
+   * `chapter` (its id or file) answers for that chapter, whose own narrator comes first (R-195).
+   * Without it the room is the book's, and carries each chapter's own narrator for `chapterRoom`
+   * to read in, so a run across the book reads every part in its own voice.
    */
-  private async audiobookNarrator(store: WorldStore, voice: VoiceService | null, productionId?: string, requireAvailable = false): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[]; designedBinding?: DesignedBinding; unavailable?: string }> {
+  private async audiobookNarrator(store: WorldStore, voice: VoiceService | null, productionId?: string, requireAvailable = false, chapter?: string): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[]; designedBinding?: DesignedBinding; unavailable?: string; chapterNarrators?: Record<string, ChapterNarration> }> {
     const { chosen, narrationCatalogue, catalogue, designedBinding } = await this.appNarrator(store, voice);
-    const book = productionId === undefined ? null : await readAudiobookBook(store, productionId).catch(() => null);
-    // A book's own narrator is written into the world, so it resolves against the world's
-    // voices only — never the app narrator's copy of another world's (SPEC-049 R-12).
-    const own = book === null || book === "unreadable" || book.narrator === undefined ? null : narratorFor(book.narrator, narrationCatalogue.filter((candidate) => candidate.narratorCopy !== true));
-    const saved = book === null || book === "unreadable" ? undefined : book.narrator;
-    // One rule with the window's: a narrator the catalogue cannot resolve, an empty one included,
-    // cannot read, so Read refuses it and Direct and the door hold on it (codex on PR 1869).
-    const unavailable = bookNarratorUnavailable(saved, catalogue, this.providerService.list());
-    if (requireAvailable && saved !== undefined && unavailable !== null) {
-      throw new Error(`The book narrator ${saved.label ?? saved.voiceId} is unavailable · ${unavailable}. Choose another narrator for the book, or read once it is back.`);
-    }
-    const narrator = own !== null && !own.fallback ? own : saved ?? chosen;
-    return {
-      narrator: { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, ...(narrator.label !== undefined ? { label: narrator.label } : {}) },
-      catalogue,
-      ...(designedBinding !== undefined && narrator.voiceId === designedBinding.target ? { designedBinding } : {}),
-      ...(unavailable !== null ? { unavailable } : {}),
+    const read = productionId === undefined ? null : await readAudiobookBook(store, productionId).catch(() => null);
+    const book = read === null || read === "unreadable" ? null : read;
+    const chapters = store.getBundle().productions.find((p) => p.meta.id === productionId)?.chapters ?? [];
+    // A book's or a chapter's own narrator is written into the world, so it resolves against the
+    // world's voices only — never the app narrator's copy of another world's (SPEC-049 R-12).
+    const worldVoices = narrationCatalogue.filter((candidate) => candidate.narratorCopy !== true);
+    const providers = this.providerService.list();
+    const resolve = (saved: AudiobookReader | undefined, ownChapter?: string): ChapterNarration => {
+      const own = saved === undefined ? null : narratorFor(saved, worldVoices);
+      // One rule with the window's: a narrator the catalogue cannot resolve, an empty one included,
+      // cannot read, so Read refuses it and Direct and the door hold on it (codex on PR 1869).
+      const unavailable = bookNarratorUnavailable(saved, catalogue, providers);
+      if (requireAvailable && saved !== undefined && unavailable !== null) {
+        throw new Error(ownChapter !== undefined
+          ? `The narrator of ${ownChapter}, ${saved.label ?? saved.voiceId}, is unavailable · ${unavailable}. Choose another narrator for the chapter, or read once it is back.`
+          : `The book narrator ${saved.label ?? saved.voiceId} is unavailable · ${unavailable}. Choose another narrator for the book, or read once it is back.`);
+      }
+      const narrator = own !== null && !own.fallback ? own : saved ?? chosen;
+      return {
+        narrator: { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, ...(narrator.label !== undefined ? { label: narrator.label } : {}) },
+        ...(designedBinding !== undefined && narrator.voiceId === designedBinding.target ? { designedBinding } : {}),
+        ...(unavailable !== null ? { unavailable } : {}),
+      };
     };
+    const summary = chapter === undefined ? undefined : chapters.find((c) => c.id === chapter || c.file === chapter);
+    const title = (id: string) => chapters.find((c) => c.id === id)?.title || id;
+    const room = resolve(chapterNarratorChoice(book, summary?.id), summary !== undefined && book?.chapterNarrators?.[summary.id] !== undefined ? title(summary.id) : undefined);
+    const chapterNarrators = chapter !== undefined ? {} : Object.fromEntries(Object.entries(book?.chapterNarrators ?? {})
+      .filter(([id]) => chapters.some((c) => c.id === id && !c.retired))
+      .map(([id, saved]) => [id, resolve(saved, title(id))]));
+    return { ...room, catalogue, ...(Object.keys(chapterNarrators).length > 0 ? { chapterNarrators } : {}) };
   }
 
   /**
@@ -1903,10 +1921,17 @@ export class Coordinator {
     return imageModelFor(settings, this.opts.manifest, undefined, store.getBundle().meta.models);
   }
 
-  private async directionRoom(store: WorldStore, productionId: string): Promise<{ narrator: AudiobookReader; models: readonly ManifestModel[]; catalogue: VoiceCandidate[]; narratorDescription?: string; designedBinding?: DesignedBinding; unavailable?: string }> {
-    const room = await this.audiobookNarrator(store, this.voiceService, productionId);
+  private async directionRoom(store: WorldStore, productionId: string, chapter?: string): Promise<{ narrator: AudiobookReader; models: readonly ManifestModel[]; catalogue: VoiceCandidate[]; narratorDescription?: string; designedBinding?: DesignedBinding; unavailable?: string; chapterNarrators?: Record<string, ChapterNarration> }> {
+    const { chapterNarrators, ...room } = await this.audiobookNarrator(store, this.voiceService, productionId, false, chapter);
     const narratorDescription = await this.narratorDescription(store, room.narrator);
-    return { ...room, models: this.opts.manifest?.models ?? [], ...(narratorDescription !== undefined ? { narratorDescription } : {}) };
+    // Each part's director reads its own narrator's description (R-51, R-195).
+    const described: Record<string, ChapterNarration> = {};
+    for (const [id, own] of Object.entries(chapterNarrators ?? {})) {
+      const description = await this.narratorDescription(store, own.narrator);
+      described[id] = { ...own, ...(description !== undefined ? { narratorDescription: description } : {}) };
+    }
+    return { ...room, models: this.opts.manifest?.models ?? [], ...(narratorDescription !== undefined ? { narratorDescription } : {}),
+      ...(Object.keys(described).length > 0 ? { chapterNarrators: described } : {}) };
   }
 
   /**
@@ -13977,7 +14002,7 @@ export class Coordinator {
         const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
         if (!chapter) return answer({ outcome: "refused", reason: "no such chapter" });
         try {
-          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId, true)), models: this.opts.manifest?.models ?? [] };
+          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId, true, chapter.id)), models: this.opts.manifest?.models ?? [] };
           const reader = room.narrator;
           const plan = await planAudiobook(store, msg.productionId, chapter.id, { narrator: reader });
           const keys = probeWindow(plan.blocks.map((planned) => ({ key: planned.block.key, ...(planned.block.speaker !== undefined ? { speaker: planned.block.speaker } : {}) })), msg.count ?? 4, msg.from);
@@ -14252,17 +14277,22 @@ export class Coordinator {
         }
         // A book's own narrator is the same kind of reference (SPEC-046 R-41, SPEC-047 R-46): a
         // book reading with a deleted clone would fall to the app narrator, and the next clone
-        // given the freed id would narrate it without being chosen.
+        // given the freed id would narrate it without being chosen. A chapter's own narrator
+        // (R-195) is held the same way.
         for (const productionId of this.storyProductionIds(store)) {
           const book = await readAudiobookBook(store, productionId).catch(() => null);
-          const own = book === null || book === "unreadable" ? undefined : book.narrator;
-          if (own === undefined) continue;
-          const model = own.model ?? legacyVoiceModel(own.provider, own.voiceId, bundle.clonedVoices);
-          const source = model === null ? null : voiceSourceFor(bundle.clonedVoices, own.provider, model, own.voiceId);
-          if (source?.kind === "cloned" && source.voice.id === voice.id) {
-            const title = bundle.productions.find((production) => production.meta.id === productionId)?.meta.title ?? productionId;
-            answer("refused", { reason: `${title}'s narrator still reads with this voice — choose another for the book first.` });
-            return;
+          if (book === null || book === "unreadable") continue;
+          const held = [...(book.narrator !== undefined ? [{ own: book.narrator, chapter: false }] : []), ...Object.values(book.chapterNarrators ?? {}).map((own) => ({ own, chapter: true }))];
+          for (const { own, chapter } of held) {
+            const model = own.model ?? legacyVoiceModel(own.provider, own.voiceId, bundle.clonedVoices);
+            const source = model === null ? null : voiceSourceFor(bundle.clonedVoices, own.provider, model, own.voiceId);
+            if (source?.kind === "cloned" && source.voice.id === voice.id) {
+              const title = bundle.productions.find((production) => production.meta.id === productionId)?.meta.title ?? productionId;
+              answer("refused", { reason: chapter
+                ? `A chapter of ${title} still reads with this voice — choose another narrator for it first.`
+                : `${title}'s narrator still reads with this voice — choose another for the book first.` });
+              return;
+            }
           }
         }
         const removed = await deleteVoice(store, msg.voiceId, { requestId: msg.requestId });
@@ -15028,7 +15058,7 @@ export class Coordinator {
         try {
           const [chosen] = await this.opts.pickFiles({ accept: [...RECORDED_TAKE_EXTENSIONS] });
           if (chosen === undefined) return;
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId, false, chapter.id);
           const voice = this.voiceService;
           const recording = await stageRecording(
             store,
@@ -15068,7 +15098,7 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId || held === undefined || held.worldId !== msg.worldId) return;
         const ids = { worldId: msg.worldId, productionId: held.staged.productionId, chapterId: held.staged.chapterId, requestId: msg.requestId };
         try {
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService, held.staged.productionId);
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService, held.staged.productionId, false, held.staged.chapterId);
           const record = await keepRecording(store, held.staged, {
             basis: msg.basis,
             ...(msg.performer !== undefined ? { performer: msg.performer } : {}),
@@ -15093,7 +15123,9 @@ export class Coordinator {
         const answer = (extra: Omit<Extract<DomainEvent, { type: "audiobook.script" }>, "at" | "type" | "worldId" | "productionId" | "requestId">) =>
           this.emit({ at: new Date().toISOString(), type: "audiobook.script", worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId, ...extra });
         try {
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          // A speaker's lines across the book, each chapter planned in its own narrator (R-195).
+          const room = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const narrator = (chapterId: string) => chapterRoom(room, chapterId).narrator;
           if (msg.kind === "preview-audiobook-script") {
             const found = await speakerLines(store, msg.productionId, msg.speaker, narrator);
             answer({ lines: found.lines.length, chapters: found.chapters, notCast: found.notCast,
@@ -15127,7 +15159,8 @@ export class Coordinator {
         try {
           const chosen = await this.opts.pickFiles({ accept: [...RECORDED_TAKE_EXTENSIONS] });
           if (chosen.length === 0) return;
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const room = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const narrator = (chapterId: string) => chapterRoom(room, chapterId).narrator;
           const voice = this.voiceService;
           const matched = await matchFiles(store, msg.productionId, msg.speaker, chosen.slice(0, 400), {
             tools: this.opts.audioMediaTools,
@@ -15170,7 +15203,8 @@ export class Coordinator {
         let kept = 0;
         let refused: string | undefined;
         try {
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService, held.productionId);
+          const room = await this.audiobookNarrator(store, this.voiceService, held.productionId);
+          const narrator = (chapterId: string) => chapterRoom(room, chapterId).narrator;
           for (const row of held.matched) {
             if (row.staged === undefined) continue;
             if (!wanted.has(row.file)) {
@@ -15225,7 +15259,7 @@ export class Coordinator {
         const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
         const at = () => new Date().toISOString();
         try {
-          const { narrator, catalogue } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const { narrator, catalogue } = await this.audiobookNarrator(store, this.voiceService, msg.productionId, false, chapter.id);
           const { chapter: opened, blocks, planned } = await directableBlocks(store, msg.productionId, chapter.id, { narrator, models: this.opts.manifest?.models ?? [], catalogue });
           const block = blocks.find((candidate) => candidate.key === msg.block);
           if (block === undefined) {
@@ -15319,11 +15353,13 @@ export class Coordinator {
             finished("failed", none, { reason: "casting… · wait for the cast" });
             return;
           }
-          const room = await this.directionRoom(store, msg.productionId);
+          const book = await this.directionRoom(store, msg.productionId);
+          const room = chapterRoom(book, chapter.id);
           // Directing for a narrator who cannot read writes direction for a voice that will not
           // read it; held, as Read is, until the narrator is back or another is chosen (issue 1661).
           if (room.unavailable !== undefined) {
-            finished("unavailable", none, { reason: `the book narrator is unavailable · ${room.unavailable}` });
+            const whose = book.chapterNarrators?.[chapter.id] !== undefined ? "the chapter narrator" : "the book narrator";
+            finished("unavailable", none, { reason: `${whose} is unavailable · ${room.unavailable}` });
             return;
           }
           const result = await directChapter(store, msg.productionId, chapter.id, deriver, room, control.signal, {
@@ -15389,7 +15425,7 @@ export class Coordinator {
             this.emit({ at: at(), type: "audiobook.record", ...ids, requestId: msg.requestId, refused: "the book is being read" });
             return;
           }
-          const room = await this.directionRoom(store, msg.productionId);
+          const room = await this.directionRoom(store, msg.productionId, chapter.id);
           const accepted = await acceptDirections(store, msg.productionId, chapter.id, { hash: msg.hash, directions: msg.directions }, room, extras);
           if (accepted.outcome === "refused") {
             this.emit({ at: at(), type: "audiobook.record", ...ids, requestId: msg.requestId, refused: accepted.reason });
@@ -15492,7 +15528,7 @@ export class Coordinator {
         if (!chapter) return;
         const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
         try {
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId, false, chapter.id);
           const record = await keepSplitTake(store, msg.productionId, chapter.id, msg.block, narrator, () => store.now());
           this.refreshIfStillOpen(store);
           this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record });
@@ -15517,7 +15553,7 @@ export class Coordinator {
           return;
         }
         try {
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId, false, chapter.id);
           const record = msg.kind === "reset-audiobook-seams"
             ? await resetAudiobookSeams(store, msg.productionId, chapter.id, { narrator })
             : await setAudiobookSeam(store, msg.productionId, chapter.id, { press: msg.press, anchor: msg.anchor }, { narrator });
@@ -15560,7 +15596,7 @@ export class Coordinator {
         // Every window shows the press as grouping until the answer (design turn 201, rule 3).
         this.emit({ at: at(), type: "audiobook.beats", ...ids, outcome: "grouping" });
         try {
-          const room = await this.directionRoom(store, msg.productionId);
+          const room = await this.directionRoom(store, msg.productionId, chapter.id);
           const grouped = await groupChapterByBeats(store, msg.productionId, chapter.id, deriver, room, control.signal);
           // A proposal made for the blocks before the grouping names other blocks now.
           this.heldDirections.delete(key);
@@ -15722,7 +15758,7 @@ export class Coordinator {
         if (!chapter) return;
         const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, requestId: msg.requestId };
         try {
-          const room = await this.directionRoom(store, msg.productionId);
+          const room = await this.directionRoom(store, msg.productionId, chapter.id);
           const reads = await directionReads(store, msg.productionId, chapter.id, room);
           this.emit({ at: new Date().toISOString(), type: "direction.reads", ...ids, reads });
         } catch (err) {
@@ -15750,8 +15786,42 @@ export class Coordinator {
         try {
           const held = await readAudiobookBook(store, msg.productionId);
           const base = held === null || held === "unreadable" ? DEFAULT_AUDIOBOOK_BOOK : held;
-          const { narrator: _was, ...rest } = base;
-          await writeAudiobookBookRaised(store, msg.productionId, { ...rest, ...(msg.voice !== null ? { narrator: msg.voice } : {}) });
+          const { narrator: _was, chapterNarrators, ...rest } = base;
+          // From a chapter (R-195): that chapter follows the book's narrator again.
+          const { [msg.chapterId ?? ""]: _chapter, ...others } = chapterNarrators ?? {};
+          const keptChapters = msg.chapterId === undefined ? chapterNarrators : others;
+          await writeAudiobookBookRaised(store, msg.productionId, { ...rest, ...(msg.voice !== null ? { narrator: msg.voice } : {}),
+            ...(keptChapters !== undefined && Object.keys(keptChapters).length > 0 ? { chapterNarrators: keptChapters } : {}) });
+          await this.conformAudiobookDirections(store, msg.worldId, [msg.productionId]);
+          this.refreshIfStillOpen(store);
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.narrator-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+      case "set-audiobook-chapter-narrator": {
+        // A chapter's own narrator (SPEC-047 R-195): a book told from two points of view reads each
+        // part in its own voice. Written on the book record and nothing made, under the same rules
+        // as the book's narrator: a designed voice must be this world's, and never mid-read.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        // Only a chapter of this book; a key for no chapter would be a narrator nothing reads.
+        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId && p.chapters.some((c) => c.id === msg.chapterId))) return;
+        if (msg.voice !== null && isDesignedVoiceTarget(msg.voice.voiceId) && resolveDesignedVoice(store.getBundle().designedVoices ?? [], msg.voice.voiceId) === undefined) {
+          void this.appLog?.append({ kind: "audiobook.narrator-refused", production: msg.productionId, message: "a designed voice this world does not hold" });
+          return;
+        }
+        if (this.audiobookBusy(msg.worldId, msg.productionId)) {
+          void this.appLog?.append({ kind: "audiobook.narrator-refused", production: msg.productionId, message: "the book is being read" });
+          return;
+        }
+        try {
+          const held = await readAudiobookBook(store, msg.productionId);
+          const base = held === null || held === "unreadable" ? DEFAULT_AUDIOBOOK_BOOK : held;
+          const { [msg.chapterId]: _was, ...others } = base.chapterNarrators ?? {};
+          const chapterNarrators = msg.voice !== null ? { ...others, [msg.chapterId]: msg.voice } : others;
+          const { chapterNarrators: _old, ...rest } = base;
+          await writeAudiobookBookRaised(store, msg.productionId, { ...rest, ...(Object.keys(chapterNarrators).length > 0 ? { chapterNarrators } : {}) });
           await this.conformAudiobookDirections(store, msg.worldId, [msg.productionId]);
           this.refreshIfStillOpen(store);
         } catch (err) {
@@ -15766,9 +15836,16 @@ export class Coordinator {
         const ids = { worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId };
         try {
           const now = { ...(await this.audiobookNarrator(store, this.voiceService, msg.productionId)), models: this.opts.manifest?.models ?? [] };
-          const app = await this.audiobookNarrator(store, this.voiceService);
-          const next = { ...now, narrator: msg.voice ?? app.narrator };
-          const quote = await quoteNarrator(store, msg.productionId, now, next, () => store.now());
+          let next: typeof now;
+          if (msg.chapterId !== undefined) {
+            // A chapter's own switch (R-195): its own narrator, or none, to read in the book's.
+            const { [msg.chapterId]: _was, ...others } = now.chapterNarrators ?? {};
+            next = { ...now, chapterNarrators: msg.voice === null ? others : { ...others, [msg.chapterId]: { narrator: msg.voice } } };
+          } else {
+            const app = await this.audiobookNarrator(store, this.voiceService);
+            next = { ...now, narrator: msg.voice ?? app.narrator };
+          }
+          const quote = await quoteNarrator(store, msg.productionId, now, next, () => store.now(), msg.chapterId);
           this.emit({ at: new Date().toISOString(), type: "audiobook.narrator-quote", ...ids, ...quote });
         } catch (err) {
           this.emit({ at: new Date().toISOString(), type: "audiobook.narrator-quote", ...ids, refused: describeCoordinatorError(err) });
@@ -15784,7 +15861,7 @@ export class Coordinator {
         const refuse = (refused: string) => this.emit({ at: new Date().toISOString(), type: "audiobook.heard", ...ids, refused });
         if (voice === null) return refuse("no voice service");
         try {
-          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId, msg.voice === undefined)), models: this.opts.manifest?.models ?? [] };
+          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId, msg.voice === undefined, msg.chapterFile)), models: this.opts.manifest?.models ?? [] };
           if ((msg.voice ?? room.narrator).provider === "kokoro" && !voice.localSpeechConfigured) return refuse("Local narration is unavailable on this host. Choose a configured cloud narrator.");
           // Heard as the chapter's held proposal would send it (design turn 184b, R-55): its
           // directions whole, and the cast and notes it carries — the coordinator's copy, never
@@ -15864,7 +15941,7 @@ export class Coordinator {
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         let ended = false;
         try {
-          const room = await this.audiobookNarrator(store, voice, msg.productionId, true);
+          const room = await this.audiobookNarrator(store, voice, msg.productionId, true, chapter.id);
           await this.readAudiobookChapter(store, voice, room, ids, requestId, msg.kind, control.signal, {
             ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
             ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
@@ -16147,7 +16224,7 @@ export class Coordinator {
             if (control.signal.aborted) break;
             if (!block.ready) {
               try {
-                const plan = await planAudiobook(store, msg.productionId, block.chapterId, { narrator: await anyNarrator(store, msg.productionId) });
+                const plan = await planAudiobook(store, msg.productionId, block.chapterId, { narrator: await anyNarrator(store, msg.productionId, block.chapterId) });
                 await prepareAudiobookWordTiming(store, msg.productionId, plan, block.key, (audio, signal) => this.voiceService!.transcribeWords(audio, signal), control.signal, this.opts.ffmpeg);
               } catch (error) { failures.set(`${block.chapterId}/${block.key}`, control.signal.aborted ? "stopped" : describeCoordinatorError(error)); }
             }
@@ -16381,7 +16458,7 @@ export class Coordinator {
         const total = illustrationTotal(rows, new Set(), without).microUsd;
         // One confirm of the total (R-102): the price Accept showed is the most the run may spend.
         if (total > msg.confirmedMicroUsd) return refuse(`the price moved · ${priceLabel(total)}`);
-        const current = await planAudiobook(store, msg.productionId, chapter.id, { narrator: await anyNarrator(store, msg.productionId) }).catch(() => null);
+        const current = await planAudiobook(store, msg.productionId, chapter.id, { narrator: await anyNarrator(store, msg.productionId, chapter.id) }).catch(() => null);
         if (current === null || current.chapter.hash !== proposal.hash) return refuse("the prose moved · illustrate again");
         if (this.heldIllustrations.get(key) !== held || this.makingIllustrations.has(key)) return refuse("that proposal changed · reopen its review");
         const control = new AbortController();
@@ -16532,7 +16609,7 @@ export class Coordinator {
         const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
         const at = () => new Date().toISOString();
         try {
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId, false, chapter.id);
           const record = await setBlockTiming(store, msg.productionId, chapter.file, msg.block, msg.timing, narrator);
           this.refreshIfStillOpen(store);
           this.emit({ at: at(), type: "audiobook.record", ...ids, record });
@@ -16555,7 +16632,7 @@ export class Coordinator {
         const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
         const at = () => new Date().toISOString();
         try {
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId, false, chapter.id);
           const record = msg.kind === "set-audiobook-reaction"
             ? await setReaction(store, msg.productionId, chapter.file, msg.key, msg.reaction, narrator)
             : msg.kind === "set-audiobook-bed"
@@ -16578,7 +16655,7 @@ export class Coordinator {
         if (!chapter) return;
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
         try {
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId, false, chapter.id);
           const proposal = await proposeChapterTiming(store, msg.productionId, chapter.file, narrator);
           this.emit({ at: new Date().toISOString(), type: "audiobook.timing-proposal", ...ids, proposal });
         } catch (err) {
@@ -16595,7 +16672,7 @@ export class Coordinator {
         if (!chapter) return;
         const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
         try {
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId, false, chapter.id);
           const record = await acceptTimingProposal(store, msg.productionId, chapter.file, msg.proposal, narrator);
           this.refreshIfStillOpen(store);
           this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record });
@@ -16630,7 +16707,7 @@ export class Coordinator {
         if (!chapter) return;
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
         try {
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId, false, chapter.id);
           const plan = await planAudiobook(store, msg.productionId, chapter.id, { narrator });
           if (plan.record !== "unreadable" && plan.record?.arrangement) {
             const opened = await openAudioStudio(store, msg.productionId, chapter.id, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {});
@@ -16713,7 +16790,8 @@ export class Coordinator {
               this.readingAudiobooks.set(chapterKey, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId });
               this.audiobookRequests.set(chapterKey, requestId);
               try {
-                return await this.readAudiobookChapter(store, voice, room, { ...ids, chapterId }, requestId, msg.kind, control.signal, {
+                // Each chapter in its own narrator's voice where it has one (R-195).
+                return await this.readAudiobookChapter(store, voice, chapterRoom(room, chapterId), { ...ids, chapterId }, requestId, msg.kind, control.signal, {
                   priced,
                   ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
                 });
