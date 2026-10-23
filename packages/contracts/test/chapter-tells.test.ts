@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { verifiedTells, tellStretches, crowded, readTells, readTellsOutsideDialogue, tellsPerThousand, tellsByKind, TELL_KINDS, TELL_LINE, TELL_KIND_LINE, type TellDraft } from "../src/chapter-tells.js";
+import { verifiedTells, tellStretches, crowded, readTells, readTellsOutsideDialogue, readingLeavesOutDialogue, tellsPerThousand, tellsByKind, TELL_KINDS, TELL_LINE, TELL_KIND_LINE, type TellDraft } from "../src/chapter-tells.js";
 import { ChapterReviewSchema, ReviewAnswerSchema, chapterReviewSummary } from "../src/chapter-review.js";
 
 // Paragraphs of numbered words, each closed so none is inside another ("w10" is in "w100";
@@ -63,6 +63,34 @@ it("records whether a tell sits inside spoken words", () => {
   const body = "“You have a flight,” Tunde said, as if the night owed him one.";
   const { tells } = verifiedTells(body, [{ kind: "three", quote: "You have a flight" }, { kind: "metaphor", quote: "as if the night owed him one" }]);
   assert.deepEqual(tells.map((t) => t.inDialogue), [true, false]);
+});
+
+it("tells spoken lines from quoted narration", () => {
+  // Codex on PR 2161: quotation marks also hold up a phrase in narration, and a figure in one
+  // must still count once dialogue tells are dropped.
+  const body = [
+    "The city was “a wolf in a dinner jacket”, all polished teeth and hunger.",
+    "What the colonists called “the hush” lay over the hold.",
+    "“Night,” she says, and closes the channel.",
+    "Bode says, “That’s the name, then.”",
+    "He looked up. “Quiet out there” she whispered, to nobody.",
+    "He looked at the board. “It sounds like somebody breathing.” Nobody laughed.",
+  ].join("\n\n");
+  const at = (quote: string) => verifiedTells(body, [{ kind: "metaphor", quote }]).tells[0]!.inDialogue;
+  assert.equal(at("a wolf in a dinner jacket"), false, "a held-up phrase, closed outside its marks");
+  assert.equal(at("the hush"), false, "named, not said");
+  assert.equal(at("Night,"), true, "it opens its paragraph");
+  assert.equal(at("That’s the name, then."), true, "a speech verb before it");
+  assert.equal(at("Quiet out there"), true, "a speech verb after it");
+  assert.equal(at("It sounds like somebody breathing."), true, "an utterance that closes on its own punctuation");
+});
+
+it("knows from the pinned skill whether a reading left dialogue out", () => {
+  assert.equal(readingLeavesOutDialogue("chapter-prose-review@v1"), false, "v1 readings counted dialogue");
+  assert.equal(readingLeavesOutDialogue("chapter-prose-review@v2"), true);
+  assert.equal(readingLeavesOutDialogue("chapter-prose-review@v12"), true);
+  assert.equal(readingLeavesOutDialogue("chapter-script-review@v3"), false);
+  assert.equal(readingLeavesOutDialogue(undefined), false);
 });
 
 it("leaves tells in dialogue out of the reading, and says how many", () => {

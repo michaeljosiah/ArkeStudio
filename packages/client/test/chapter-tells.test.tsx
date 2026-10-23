@@ -12,7 +12,7 @@ afterEach(async () => { if (root) await act(async () => root!.unmount()); dom.do
 
 // Twenty paragraphs of fifty numbered words, each closed so none is inside another: a quote names one place.
 const body = Array.from({ length: 20 }, (_, p) => Array.from({ length: 50 }, (_, w) => `w${p * 50 + w}x`).join(" ")).join("\n\n");
-const prose: ReviewTask = { id: "prose", specialist: "prose", state: "complete", images: [], skill: "chapter-prose-review@v1" };
+const prose: ReviewTask = { id: "prose", specialist: "prose", state: "complete", images: [], skill: "chapter-prose-review@v2" };
 const review = (tasks: ReviewTask[], drafts?: TellDraft[]): ChapterReview => ({ worldId: "world", productionId: "book", chapterId: "one", schemaVersion: 1, id: "11111111-1111-4111-a111-111111111111",
   requestId: "request", title: "One", createdAt: "now", updatedAt: "now", status: "complete", sourceHash: "hash", contextHash: "context", body, images: [], tasks, facts: [], findings: [],
   checks: [], rejectedFindings: 0, stale: false, staleReasons: [], audioListened: false, ...(drafts ? { tells: readTells(body, drafts) } : {}) });
@@ -40,6 +40,14 @@ it("says none crowded when the tells are spread out", async () => {
   const container = await render(review([prose], [{ kind: "metaphor", quote: "w10x" }, { kind: "pivot", quote: "w600x" }]));
   assert.match(container.textContent ?? "", /None crowded\. 2 in 1,000 words, spread out\./);
   assert.equal(container.querySelectorAll(".fy-tells__bar--crowded").length, 0);
+});
+
+it("says an older saved reading counts dialogue, not that it leaves it out", async () => {
+  // Codex on PR 2161: a v1 reading still holds its dialogue tells, so it must not be labelled narration only.
+  const container = await render(review([{ ...prose, skill: "chapter-prose-review@v1" }], [{ kind: "metaphor", quote: "w10x" }]));
+  const text = container.textContent ?? "";
+  assert.match(text, /This older reading counts dialogue\./);
+  assert.doesNotMatch(text, /Dialogue is not counted/);
 });
 
 it("says when the check did not run, and stays silent for reviews from before it existed", async () => {

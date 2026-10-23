@@ -50,9 +50,9 @@ export const PlacedTellSchema = z.object({
   quote: z.string().min(1).max(600),
   start: z.number().int().nonnegative(),
   end: z.number().int().positive(),
-  // Tells in dialogue are dropped before a reading is made (see readTells), so this is false in
-  // every reading since 2026-10-23. It stays in the schema because readings made before still
-  // carry dialogue tells, and an older build must still parse a newer review.
+  // Tells in spoken dialogue are dropped before a reading is made (see readTells), so this is
+  // false in every reading made under skill v2. It stays in the schema because readings made
+  // before still carry dialogue tells, and an older build must still parse a newer review.
   inDialogue: z.boolean(),
 }).strict();
 export type PlacedTell = z.infer<typeof PlacedTellSchema>;
@@ -162,14 +162,39 @@ export function verifiedTells(body: string, drafts: readonly TellDraft[]): { tel
   return { tells, unplaced, repeated, ambiguous, merged };
 }
 
-/** Whether an offset sits inside spoken words, by the cast's own quote rule. Splits the chapter once. */
+/**
+ * Whether an offset sits inside spoken words. The cast's quote rule finds every quoted span, but
+ * quotation marks also wrap narration: a phrase held up for effect, such as the city was
+ * "a wolf in a dinner jacket", all teeth. Since dialogue tells are dropped, counting such a span
+ * as speech would quietly take a real figure out of the count (codex on PR 2161). A span is
+ * speech only when it reads as said:
+ * - it opens its paragraph
+ * - a speech verb sits right before or after it
+ * - or it is an utterance of three or more words that closes on its own punctuation, as in
+ *   "You have a flight," Tunde said
+ * A held-up phrase usually ends outside its marks, and when it doesn't, it is short.
+ * Splits the chapter once.
+ */
 function dialogueOf(body: string): (offset: number) => boolean {
   const spoken = paragraphSpans(body).flatMap((paragraph) => {
     const raw = body.slice(paragraph.start, paragraph.end);
     const at = paragraph.start + raw.length - raw.trimStart().length;
-    return quoteSpans(paragraph.text).map((span) => ({ start: at + span.start, end: at + span.end }));
+    return quoteSpans(paragraph.text).filter((span) => isSpoken(paragraph.text, span))
+      .map((span) => ({ start: at + span.start, end: at + span.end }));
   });
   return (offset) => spoken.some((span) => offset >= span.start && offset < span.end);
+}
+
+// Not "called": in narration it names more often than it shouts (what the colonists called "the hush").
+const SPEECH_VERB = "(?:said|says|say|asked|asks|ask|replied|replies|answered|answers|whispered|whispers|shouted|shouts|told|tells|added|adds|murmured|murmurs|cried|cries|yelled|yells|muttered|mutters|snapped|snaps|sang|sings)";
+const verbAfter = new RegExp(`^[^“”"«»]{0,40}?\\b${SPEECH_VERB}\\b`, "i");
+const verbBefore = new RegExp(`\\b${SPEECH_VERB}\\b[^“”"«»]{0,20}$`, "i");
+
+function isSpoken(paragraph: string, span: { start: number; end: number }): boolean {
+  if (paragraph.slice(0, span.start).trim() === "") return true;
+  if (verbAfter.test(paragraph.slice(span.end)) || verbBefore.test(paragraph.slice(Math.max(0, span.start - 60), span.start))) return true;
+  const inside = paragraph.slice(span.start + 1, span.end - 1).trim();
+  return /[.,!?…—–-]$/.test(inside) && inside.split(/\s+/).length >= 3;
 }
 
 const wordsOf = (body: string) => [...body.matchAll(/\S+/g)].map((m) => ({ start: m.index, end: m.index + m[0].length }));
@@ -269,6 +294,17 @@ export function readTellsOutsideDialogue(body: string, drafts: readonly TellDraf
     },
     dialogue: verified.tells.length - tells.length,
   };
+}
+
+/**
+ * Whether a reading left dialogue out. The reading kept its shape when dialogue stopped counting,
+ * so an older build can still parse it, and that means the reading itself can't say. The prose
+ * task's pinned skill can: v1 readings counted dialogue, and v2 onwards drop it (codex on PR
+ * 2161: a saved v1 reading must not be labelled as narration only).
+ */
+export function readingLeavesOutDialogue(skill: string | undefined): boolean {
+  const version = /^chapter-prose-review@v(\d+)$/.exec(skill ?? "");
+  return version !== null && Number(version[1]) >= 2;
 }
 
 /** Tells per 1,000 words, for the report. A figure, never a pass or fail. */
