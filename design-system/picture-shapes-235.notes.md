@@ -1,6 +1,6 @@
 # Turn 235 · Picture shapes
 
-Drawn 23 October 2026; not approved.
+Drawn and approved as drawn by the owner on 23 October 2026, with the three calls below. Not built.
 
 ## Asked
 
@@ -34,7 +34,7 @@ trimmed at its sides, so the focus can't lift the subject out from under the con
 pair the open ledger sits under the scrub bar. Hence rule 4: the Tall instruction asks for the subject
 in the upper two-thirds.
 
-## Calls for the owner
+## Calls (approved 23 October 2026)
 
 1. The two shapes and their names (Wide 16:9, Tall 9:16), with Wide alone the default.
 2. Size's choices: Full, 1280 px and 960 px on the long side, Full the default.
