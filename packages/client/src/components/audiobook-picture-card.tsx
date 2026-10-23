@@ -15,6 +15,7 @@ import {
   pictureQuote,
   priceLabel,
   referenceBudget,
+  ulid,
   type AudiobookLook,
   type BudgetCandidate,
   type ManifestModel,
@@ -27,6 +28,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
+import { pictureRouteModel } from "./audiobook-pictures-sheet.js";
 import { chooseAudiobookLook, makeAudiobookTallPicture, rewriteAudiobookPicturePrompt, useAudiobookAsks, useStore } from "../lib/store.js";
 import type { PictureSuggestionState } from "./audiobook-suggest.js";
 import { NewLookSheet } from "./audiobook-new-look.js";
@@ -386,22 +388,11 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   }, [drafted]);
   const answered = updating === null ? null : (asks[updating.id] ?? null);
   // The Tall (design turn 235): a press of its own when it is missing or from an earlier picture,
-  // and after Generate or Make again, made by this window from the picture that lands (R-196).
-  const [tallAsk, setTallAsk] = useState<string | null>(null);
-  const tallAnswer = tallAsk === null ? null : (asks[tallAsk] ?? null);
-  const [chainTall, setChainTall] = useState(false);
-  const makeTall = useRef<(() => void) | null>(null);
-  const landed = useRef(picture);
-  useEffect(() => {
-    if (chainTall && picture !== null && picture !== landed.current) {
-      setChainTall(false);
-      makeTall.current?.();
-    }
-    landed.current = picture;
-  }, [picture, chainTall]);
-  useEffect(() => {
-    if (state.making?.state === "failed") setChainTall(false);
-  }, [state.making?.state]);
+  // and with Generate or Make again, asked of the coordinator with the picture, which makes it once
+  // the picture lands (R-196). The request is the block's it was asked on: the panel is drawn again
+  // for another block without being remounted, so another block never shows it (codex on PR 2166).
+  const [tallAsk, setTallAsk] = useState<{ id: string; block: string } | null>(null);
+  const routeModel = pictureRouteModel(useStore().state);
   const setPrompt = state.setPrompt;
   useEffect(() => {
     if (updating === null || answered?.state !== "prompt") return;
@@ -466,12 +457,27 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   // press says what it makes, and on the ChatGPT plan only `ChatGPT plan`, the Model fact keeping
   // the whole label (the long one pushed the press past a 520 panel, 235 rule 5).
   const tallOn = shapes.includes("tall") && chapter !== undefined;
-  const tallQuote = model === undefined ? 0 : pictureQuote(model, 1, "9:16");
-  const pressPrice = (microUsd: number) => (suggestion.model.plan === "included-plan" ? "ChatGPT plan" : priceLabel(microUsd));
+  // Priced on the route that will make it, which need not be the model the Wide was made with.
+  const tallQuote = routeModel === null ? 0 : pictureQuote(routeModel, 1, "9:16");
+  const tallIncluded = routeModel?.pricing.kind === "included-plan";
+  const wideIncluded = suggestion.model.plan === "included-plan";
+  const tallAnswer = tallAsk === null || tallAsk.block !== suggestion.block ? null : (asks[tallAsk.id] ?? null);
   const tallWanted = tallOn && picture !== null && (tall === null || tall.earlier);
   const tallBusy = tallAnswer?.state === "working";
   const tallFailed = tallAnswer?.state === "failed" ? tallAnswer.reason : null;
-  makeTall.current = chapter === undefined ? null : () => setTallAsk(makeAudiobookTallPicture(worldId, chapter.productionId, chapter.chapterFile, suggestion.block, tallQuote));
+  const makeTall = () => {
+    if (chapter === undefined) return;
+    const id = makeAudiobookTallPicture(worldId, chapter.productionId, chapter.chapterFile, suggestion.block, tallQuote);
+    if (id !== null) setTallAsk({ id, block: suggestion.block });
+  };
+  const makeBoth = () => {
+    const tallId = tallOn ? ulid() : null;
+    state.generate(suggestion, prompt, chapter !== undefined ? own : undefined, quote, tallId === null ? undefined : { requestId: tallId, confirmedMicroUsd: tallQuote });
+    if (tallId !== null) setTallAsk({ id: tallId, block: suggestion.block });
+  };
+  const tallPrice = tallIncluded ? "ChatGPT plan" : priceLabel(tallQuote);
+  // Both shapes: on the plan only when both are, else what the two cost together.
+  const bothPrice = wideIncluded && tallIncluded ? "ChatGPT plan" : priceLabel((wideIncluded ? 0 : quote) + (tallIncluded ? 0 : tallQuote));
   // Whose look is not the one the prompt was written for (rule 8): their clothing words are marked
   // until Update prompt rewrites them. The prompt was written for what the card was drafted or made
   // with, and since an Update prompt, for what it rewrote it for.
@@ -723,20 +729,17 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
           Edit prompt
         </Button>
         {tallWanted && !busy ? (
-          <Button variant="primary" disabled={offline || tallBusy} onClick={() => makeTall.current?.()} data-testid="picture-card-make-tall">
-            {tallBusy ? "Making tall…" : `Make tall · ${pressPrice(tallQuote)}`}
+          <Button variant="primary" disabled={offline || tallBusy} onClick={makeTall} data-testid="picture-card-make-tall">
+            {tallBusy ? "Making tall…" : `Make tall · ${tallPrice}`}
           </Button>
         ) : (
           <Button
             variant="primary"
             disabled={offline || busy || tallBusy || updatingNow || prompt.trim() === ""}
-            onClick={() => {
-              setChainTall(tallOn);
-              state.generate(suggestion, prompt, chapter !== undefined ? own : undefined, quote);
-            }}
+            onClick={makeBoth}
             data-testid="suggest-generate"
           >
-            {busy ? "Generating…" : tallBusy ? "Making tall…" : `${picture !== null ? "Make again" : "Generate"} · ${tallOn ? pressPrice(quote + tallQuote) : priceLabel(quote, suggestion.model.plan)}`}
+            {busy ? "Generating…" : tallBusy ? "Making tall…" : `${picture !== null ? "Make again" : "Generate"} · ${tallOn ? bothPrice : priceLabel(quote, suggestion.model.plan)}`}
           </Button>
         )}
       </div>

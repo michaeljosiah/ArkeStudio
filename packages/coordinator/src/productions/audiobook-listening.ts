@@ -82,6 +82,11 @@ async function onShelf(store: WorldStore, file: string): Promise<boolean> {
  * picture's Tall (design turn 235) is held to the same test, so one whose file has gone is left
  * out and the phone shows the Wide picture instead.
  */
+/** Whether a picture file can be shown: in the world's image catalogue now, and on the shelf. */
+export async function pictureFileUsable(store: WorldStore, file: string): Promise<boolean> {
+  return worldImageReferences(store.getBundle()).some((reference) => reference.file === file) && (await onShelf(store, file));
+}
+
 async function usablePictures(store: WorldStore, pictures: Readonly<Record<string, AudiobookPicture>>): Promise<Set<string>> {
   const listed = new Set(worldImageReferences(store.getBundle()).map((reference) => reference.file));
   const usable = new Set<string>();

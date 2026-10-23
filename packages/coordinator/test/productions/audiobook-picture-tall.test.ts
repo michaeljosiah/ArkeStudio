@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { TALL_PICTURE_BRIEF, type ChapterAudiobook, type ClientMessage, type DomainEvent } from "@arke-studio/contracts";
 import { readAudiobook, readAudiobookBook } from "../../src/productions/audiobook.js";
@@ -75,6 +77,26 @@ describe("a block's picture made Tall (turn 235, R-196, R-197)", () => {
       assert.equal(h.enqueued.length, jobs, "nothing was asked for");
     }));
 
+  it("makes the Tall asked with the picture once the picture lands, with no second ask from a window (codex on PR 2166)", () =>
+    withHarness(async (h) => {
+      const tallId = nextId();
+      await h.send({ kind: "make-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, block: "p0.0", prompt: "Maren on the rail at dawn.", who: [], confirmedMicroUsd: 45_000, requestId: nextId(), tall: { requestId: tallId, confirmedMicroUsd: 45_000 } });
+      const tall = h.events.filter((event): event is MadeEvent => event.type === "audiobook.picture-made" && event.requestId === tallId).at(-1);
+      assert.equal(tall?.state, "made", tall?.reason);
+      const picture = (await held(h)).pictures!["p0.0"]!;
+      assert.equal(picture.tall?.from, picture.file, "made from the picture that landed");
+      assert.deepEqual((h.enqueued.at(-1)!.params as { references?: string[] }).references, [picture.file]);
+    }, { model: TALL_IMAGE }));
+
+  it("raises the world to the picture-shapes schema before the first Tall or shapes is written, so an older build refuses it whole", () =>
+    withHarness(async (h) => {
+      await make(h.send);
+      assert.ok(h.schemaVersion() < 106, "a picture alone needs no raise");
+      await makeTall(h.send);
+      assert.equal(answer(h.events).state, "made");
+      assert.equal(h.schemaVersion(), 106);
+    }, { model: TALL_IMAGE }));
+
   it("takes the shape from the brief on the ChatGPT route, whose image tool takes no size", () =>
     withHarness(async (h) => {
       await make(h.send);
@@ -94,9 +116,22 @@ describe("the book's shapes and its missing Talls (turn 235a, R-195, R-199)", ()
       };
       await h.send({ kind: "set-audiobook-picture-shapes", worldId: WORLD_ID, productionId: LEDGER, shapes: ["tall", "wide"] });
       assert.deepEqual(await shapes(), ["wide", "tall"], "in their fixed order");
+      assert.equal(h.schemaVersion(), 106, "an older build would refuse the book's record");
       await h.send({ kind: "set-audiobook-picture-shapes", worldId: WORLD_ID, productionId: LEDGER, shapes: ["wide"] });
       assert.equal(await shapes(), undefined);
     }));
+
+  it("makes again a Tall whose file is gone, which the Player would be shipped without (codex on PR 2166)", () =>
+    withHarness(async (h) => {
+      await make(h.send);
+      await makeTall(h.send);
+      const before = (await held(h)).pictures!["p0.0"]!.tall!;
+      await rm(join(h.worldDir, before.file));
+      const progress = () => h.events.filter((event): event is TallProgress => event.type === "audiobook.tall-progress").at(-1)!;
+      await h.send({ kind: "make-audiobook-tall-pictures", worldId: WORLD_ID, productionId: LEDGER, confirmedMicroUsd: 100_000, requestId: nextId() });
+      assert.deepEqual([progress().state, progress().total, progress().made], ["done", 1, 1]);
+      assert.notEqual((await held(h)).pictures!["p0.0"]!.tall!.file, before.file);
+    }, { model: TALL_IMAGE }));
 
   it("makes a Tall for every picture without one, and none again for one that has it", () =>
     withHarness(async (h) => {

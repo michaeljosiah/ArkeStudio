@@ -24,7 +24,7 @@ export interface PictureSuggestionState {
    * the chapter's for that person. `confirmedMicroUsd`: the price the press showed, where the card
    * priced what rides now rather than what the suggestion was drafted with (issue 1876).
    */
-  generate: (suggestion: PictureSuggestion, prompt: string, looks?: Readonly<Record<string, string>>, confirmedMicroUsd?: number) => void;
+  generate: (suggestion: PictureSuggestion, prompt: string, looks?: Readonly<Record<string, string>>, confirmedMicroUsd?: number, tall?: { requestId: string; confirmedMicroUsd: number }) => void;
   /** Put the card away: a suggestion not wanted, or one made and standing on its block. */
   dismiss: () => void;
 }
@@ -58,9 +58,9 @@ export function usePictureSuggestion(worldId: string, productionId: string, chap
       setPrompt(null);
       setSuggestId(suggestAudiobookPicture(worldId, productionId, chapterFile, blockKey));
     },
-    generate: (suggestion, words, looks, confirmedMicroUsd) => {
+    generate: (suggestion, words, looks, confirmedMicroUsd, tall) => {
       // The shot goes with it, kept on the picture so the block's card still shows it once made (194g).
-      setMakeId(makeAudiobookPicture(worldId, productionId, chapterFile, blockKey, { prompt: words, who: suggestion.who.map((who) => who.key), ...(suggestion.reuse !== undefined ? { reuse: suggestion.reuse } : {}), ...(suggestion.shot?.frame ? { frame: suggestion.shot.frame } : {}), ...(suggestion.shot !== undefined ? { shot: suggestion.shot } : {}), ...(looks !== undefined ? { looks } : {}), confirmedMicroUsd: confirmedMicroUsd ?? suggestion.estimatedMicroUsd }));
+      setMakeId(makeAudiobookPicture(worldId, productionId, chapterFile, blockKey, { prompt: words, who: suggestion.who.map((who) => who.key), ...(suggestion.reuse !== undefined ? { reuse: suggestion.reuse } : {}), ...(suggestion.shot?.frame ? { frame: suggestion.shot.frame } : {}), ...(suggestion.shot !== undefined ? { shot: suggestion.shot } : {}), ...(looks !== undefined ? { looks } : {}), confirmedMicroUsd: confirmedMicroUsd ?? suggestion.estimatedMicroUsd, ...(tall !== undefined ? { tall } : {}) }));
     },
     dismiss: () => {
       setSuggestId(null);

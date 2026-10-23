@@ -3705,6 +3705,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       looks: PictureOwnLooksSchema.optional(),
       confirmedMicroUsd: z.number().int().min(0),
       requestId: UlidSchema,
+      /**
+       * Its Tall too (design turn 235, R-196): made from the picture once it lands, answered as
+       * `audiobook.picture-made` under this id. Held by the coordinator with the request, never by
+       * a window, so another block opened meanwhile cannot take it (codex on PR 2166).
+       */
+      tall: z.object({ requestId: UlidSchema, confirmedMicroUsd: z.number().int().min(0) }).strict().optional(),
     })
     .strict(),
   /**

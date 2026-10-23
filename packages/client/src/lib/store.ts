@@ -815,6 +815,15 @@ export function subscribeAudiobookTallProgress(listener: (progress: AudiobookTal
   audiobookTallProgressListeners.add(listener);
   return () => audiobookTallProgressListeners.delete(listener);
 }
+/**
+ * Each book's last run progress, kept beyond the sheet that shows it: a sheet closed and opened
+ * again while a picture is being made shows the run and Stop at once, rather than waiting for
+ * the next picture to land (codex on PR 2166).
+ */
+const lastTallProgress = new Map<string, AudiobookTallProgress>();
+export function lastAudiobookTallProgress(worldId: string, productionId: string): AudiobookTallProgress | null {
+  return lastTallProgress.get(`${worldId}/${productionId}`) ?? null;
+}
 /** The audiobook's video (design turn 197): what a render would make, and what one made. */
 export type AudiobookVideoExported = Extract<DomainEvent, { type: "audiobook.video-exported" }>;
 const audiobookVideoExportedListeners = new Set<(answer: AudiobookVideoExported) => void>();
@@ -1958,6 +1967,7 @@ function handleFrame(json: string): void {
       for (const listener of arkePlayerExportedListeners) listener(event);
     }
     if (event.type === "audiobook.tall-progress") {
+      lastTallProgress.set(`${event.worldId}/${event.productionId}`, event);
       for (const listener of audiobookTallProgressListeners) listener(event);
     }
     if (event.type === "character-look.imported") {
@@ -6181,11 +6191,12 @@ export function suggestAudiobookPicture(worldId: string, productionId: string, c
 }
 
 /** A suggestion made (R-99): the prompt as the author left it and the price the press showed; made through the Bench and filed on the block. */
-export function makeAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, input: { prompt: string; who: readonly string[]; reuse?: import("@arke-studio/contracts").PictureReuse; frame?: string; shot?: PictureShot; looks?: Readonly<Record<string, string>>; confirmedMicroUsd: number }): string | null {
+export function makeAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, input: { prompt: string; who: readonly string[]; reuse?: import("@arke-studio/contracts").PictureReuse; frame?: string; shot?: PictureShot; looks?: Readonly<Record<string, string>>; confirmedMicroUsd: number; tall?: { requestId: string; confirmedMicroUsd: number } }): string | null {
   const requestId = ulid();
   // The looks chosen for this picture alone ride with it (design turn 193d, R-146), each in place of the chapter's for that person.
-  if (!send({ kind: "make-audiobook-picture", worldId, productionId, chapterFile, block, prompt: input.prompt, who: [...input.who], ...(input.reuse !== undefined ? { reuse: input.reuse } : {}), ...(input.frame !== undefined ? { frame: input.frame } : {}), ...(input.shot !== undefined ? { shot: input.shot } : {}), ...(input.looks !== undefined ? { looks: { ...input.looks } } : {}), confirmedMicroUsd: input.confirmedMicroUsd, requestId })) return null;
-  emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
+  // Its Tall rides with the request too (design turn 235): the coordinator makes it once the picture lands, under its own id.
+  if (!send({ kind: "make-audiobook-picture", worldId, productionId, chapterFile, block, prompt: input.prompt, who: [...input.who], ...(input.reuse !== undefined ? { reuse: input.reuse } : {}), ...(input.frame !== undefined ? { frame: input.frame } : {}), ...(input.shot !== undefined ? { shot: input.shot } : {}), ...(input.looks !== undefined ? { looks: { ...input.looks } } : {}), confirmedMicroUsd: input.confirmedMicroUsd, requestId, ...(input.tall !== undefined ? { tall: { ...input.tall } } : {}) })) return null;
+  emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" }, ...(input.tall !== undefined ? { [input.tall.requestId]: { state: "working" as const } } : {}) } });
   return requestId;
 }
 

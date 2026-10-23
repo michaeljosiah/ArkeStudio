@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { bookPictureShapes, modelForCapability, pictureQuote, priceLabel, type AudiobookListening, type PictureShape, type ProductionBundle } from "@arke-studio/contracts";
-import { makeAudiobookTallPictures, openAudiobookListening, setAudiobookPictureShapes, stopAudiobookTallPictures, subscribeAudiobookListening, subscribeAudiobookTallProgress, useStore, type AudiobookTallProgress } from "../lib/store.js";
+import { bookPictureShapes, modelForCapability, pictureQuote, priceLabel, type AudiobookListening, type ManifestModel, type PictureShape, type ProductionBundle } from "@arke-studio/contracts";
+import { lastAudiobookTallProgress, makeAudiobookTallPictures, openAudiobookListening, setAudiobookPictureShapes, stopAudiobookTallPictures, subscribeAudiobookListening, subscribeAudiobookTallProgress, useStore, type AudiobookTallProgress } from "../lib/store.js";
 import { Toggle } from "./audiobook-video.js";
 import { X } from "./icons.js";
 import { Button } from "./ui.js";
@@ -16,6 +16,16 @@ const SHAPES: ReadonlyArray<{ shape: PictureShape; name: string; ratio: string; 
   { shape: "tall", name: "Tall", ratio: "9:16", shows: "phone" },
 ];
 
+/**
+ * The model a book's pictures are made with now, as the coordinator resolves it: the world's own
+ * choice, else Settings' route. A Tall is made on it whatever its Wide was made on, so it is priced
+ * on it too (codex on PR 2166).
+ */
+export function pictureRouteModel(state: ReturnType<typeof useStore>["state"]): ManifestModel | null {
+  const manifest = state?.app.manifest;
+  return manifest ? modelForCapability(manifest, { ...state?.app.routing.defaults, ...state?.world?.meta.models }, "image") : null;
+}
+
 /** What the book's plan holds: its pictures, the Talls made from them, and those still to make. */
 export function pictureCounts(plan: AudiobookListening): { pictures: number; tall: number; toMake: number } {
   const pictures = plan.chapters.flatMap((chapter) => chapter.pictures);
@@ -28,7 +38,7 @@ export function PicturesSheet({ worldId, production, onClose }: { worldId: strin
   const connection = store.connection;
   const shapes = bookPictureShapes(production.audiobook);
   const [plan, setPlan] = useState<AudiobookListening | null>(null);
-  const [run, setRun] = useState<AudiobookTallProgress | null>(null);
+  const [run, setRun] = useState<AudiobookTallProgress | null>(() => lastAudiobookTallProgress(worldId, production.meta.id));
   const asked = useRef<string | null>(null);
   const shell = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -58,9 +68,7 @@ export function PicturesSheet({ worldId, production, onClose }: { worldId: strin
   }, [worldId, production.meta.id]);
 
   const counts = plan === null ? null : pictureCounts(plan);
-  // The model as the book's pictures are made with it: the world's own choice, else Settings'.
-  const manifest = store.state?.app.manifest;
-  const model = manifest ? modelForCapability(manifest, { ...store.state?.app.routing.defaults, ...store.state?.world?.meta.models }, "image") : null;
+  const model = pictureRouteModel(store.state);
   const plan_ = model?.pricing.kind === "included-plan" ? ("included-plan" as const) : undefined;
   const tallQuote = model === null ? 0 : pictureQuote(model, 1, "9:16");
   const making = run?.state === "making";

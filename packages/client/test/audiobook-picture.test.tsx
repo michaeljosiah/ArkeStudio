@@ -654,6 +654,20 @@ describe("a made picture on its block (turn 194g)", () => {
     const current = await mount(2, { "p1.0": { ...made(SHOT), tall: { file: "world-art.png", at: AT, from: "artifacts/made-maren.png" } } });
     assert.equal(q(current, '[data-testid="picture-card-tall-earlier"]'), null);
     assert.equal(text(q(current, '[data-testid="suggest-generate"]')), "Make again · ~$0.11", "the picture and its Tall");
+    // The Tall is asked with the picture, for the coordinator to make once it lands: a window closed
+    // meanwhile leaves no picture without its Tall (codex on PR 2166).
+    await press(q(current, '[data-testid="suggest-generate"]'));
+    const make = asked(current, "make-audiobook-picture")[0]!;
+    assert.equal(typeof make.tall?.requestId, "string");
+    assert.equal(make.tall?.confirmedMicroUsd, 50_000, "priced on the route the Tall is made on");
+    assert.equal(asked(current, "make-audiobook-tall-picture").length, 0, "no second ask from the window");
+  });
+
+  it("asks no Tall with Make again while the book is Wide only", async () => {
+    extraArtifacts = [madeArtifact()];
+    const m = await mount(2, { "p1.0": made(SHOT) });
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    assert.equal(asked(m, "make-audiobook-picture")[0]!.tall, undefined);
   });
 
   it("marks edited prompt checks as historical and keeps their original receipt when making again (#2011)", async () => {
