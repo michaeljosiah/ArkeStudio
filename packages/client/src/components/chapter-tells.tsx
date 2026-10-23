@@ -85,7 +85,7 @@ export function ChapterTellsReport({ review }: { review: ChapterReview }) {
         </section>
       </div>
       <p className="fy-tells__cover">
-        Flagged at {reading.line} in any {reading.stretchWords} words, or {reading.kindLine} of one kind. The line is provisional.
+        Flagged at {reading.line} in any {reading.stretchWords} words, or {reading.kindLine} of one kind. Dialogue is not counted. The line is provisional.
         Counts are the model’s reading, checked against your words. Not an AI detector.
         {uncounted(reading)}
       </p>

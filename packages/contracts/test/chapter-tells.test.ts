@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { verifiedTells, tellStretches, crowded, readTells, tellsPerThousand, tellsByKind, TELL_KINDS, TELL_LINE, TELL_KIND_LINE, type TellDraft } from "../src/chapter-tells.js";
+import { verifiedTells, tellStretches, crowded, readTells, readTellsOutsideDialogue, tellsPerThousand, tellsByKind, TELL_KINDS, TELL_LINE, TELL_KIND_LINE, type TellDraft } from "../src/chapter-tells.js";
 import { ChapterReviewSchema, ReviewAnswerSchema, chapterReviewSummary } from "../src/chapter-review.js";
 
 // Paragraphs of numbered words, each closed so none is inside another ("w10" is in "w100";
@@ -65,6 +65,20 @@ it("records whether a tell sits inside spoken words", () => {
   assert.deepEqual(tells.map((t) => t.inDialogue), [true, false]);
 });
 
+it("leaves tells in dialogue out of the reading, and says how many", () => {
+  // A run of short replies crowded a passage on its own on 2026-10-23. Narration around them
+  // still counts, and the strip, the passages and the tells must agree once they are gone.
+  const lines = Array.from({ length: 12 }, (_, i) => `“Reply number ${i}.”`);
+  const body = `${lines.join(" ")}\n\nShe looked at the door as if it owed her something.`;
+  const drafts: TellDraft[] = [...lines.map((line) => ({ kind: "pivot" as const, quote: line.slice(1, -1) })), { kind: "metaphor", quote: "as if it owed her something" }];
+  const { reading, dialogue } = readTellsOutsideDialogue(body, drafts);
+  assert.equal(dialogue, 12);
+  assert.deepEqual(reading.tells.map((t) => t.kind), ["metaphor"]);
+  assert.equal(reading.passages.length, 0, "twelve spoken pivots are not a crowded passage");
+  assert.equal(reading.strip.reduce((sum, bar) => sum + bar.count, 0), reading.tells.length);
+  assert.deepEqual(readTells(body, drafts), reading);
+});
+
 it("starts a stretch at each tell, running to the chapter's end at most", () => {
   const body = chapter(20, 50);
   const { tells } = verifiedTells(body, [{ kind: "pivot", quote: word(10) }, { kind: "metaphor", quote: word(60) }, { kind: "three", quote: `${word(60)} ${word(61)}` }, { kind: "list", quote: word(900) }]);
@@ -82,21 +96,21 @@ it("starts a stretch at each tell, running to the chapter's end at most", () => 
 it("reads the tail of a paragraph longer than a stretch", () => {
   // One 1,000-word paragraph, as a chapter written with single line breaks splits.
   const body = Array.from({ length: 1000 }, (_, w) => word(w)).join(" ");
-  const drafts: TellDraft[] = Array.from({ length: 8 }, (_, i) => ({ kind: (["three", "list", "pivot", "notxy"] as const)[i % 4]!, quote: word(880 + i * 10) }));
+  const drafts: TellDraft[] = Array.from({ length: TELL_LINE }, (_, i) => ({ kind: (["three", "list", "pivot", "notxy"] as const)[i % 4]!, quote: word(880 + i * 10) }));
   const reading = readTells(body, drafts);
-  assert.equal(reading.passages.length, 1, "eight tells in words 880..950 are found");
-  assert.equal(reading.passages[0]!.densest.count, 8);
+  assert.equal(reading.passages.length, 1, "a line's worth of tells in words 880..970 is found");
+  assert.equal(reading.passages[0]!.densest.count, TELL_LINE);
 });
 
 it("finds a run that falls between any two sampled starts", () => {
-  // Codex on PR 1956: one tell at word 140 and seven at 500..580 fit in 450 words that neither a
-  // window from word 0 nor one from word 150 holds.
+  // Codex on PR 1956: one tell at word 140 and the rest at 500..580 fit in 450 words that neither
+  // a window from word 0 nor one from word 150 holds.
   const body = Array.from({ length: 1000 }, (_, w) => word(w)).join(" ");
-  const kinds = ["three", "list", "metaphor", "notxy", "pivot", "shorthand", "three", "list"] as const;
-  const at = [140, 500, 510, 520, 540, 560, 570, 580];
+  const kinds = ["three", "list", "metaphor", "notxy", "pivot", "shorthand", "three", "list", "metaphor", "notxy"] as const;
+  const at = [140, 500, 510, 520, 530, 540, 550, 560, 570, 580];
   const reading = readTells(body, at.map((n, i) => ({ kind: kinds[i]!, quote: word(n) })));
   assert.equal(reading.passages.length, 1);
-  assert.equal(reading.passages[0]!.densest.count, 8);
+  assert.equal(reading.passages[0]!.densest.count, TELL_LINE);
   assert.equal(reading.passages[0]!.start, body.indexOf(word(140)));
 });
 
@@ -125,7 +139,17 @@ it("is crowded at the line, or at the kind line for one kind", () => {
   const byKind = { three: 0, list: 0, metaphor: 0, notxy: 0, pivot: 0, shorthand: 0 };
   assert.equal(crowded({ count: TELL_LINE - 1, byKind: { ...byKind, metaphor: 3, pivot: 2, three: 2 } }), false);
   assert.equal(crowded({ count: TELL_LINE, byKind: { ...byKind, metaphor: 3, pivot: 3, three: 2 } }), true);
-  assert.equal(crowded({ count: TELL_KIND_LINE, byKind: { ...byKind, metaphor: TELL_KIND_LINE } }), true, "four metaphors stack");
+  assert.equal(crowded({ count: TELL_KIND_LINE, byKind: { ...byKind, metaphor: TELL_KIND_LINE } }), true, "five metaphors stack");
+  assert.equal(crowded({ count: TELL_KIND_LINE - 1, byKind: { ...byKind, metaphor: TELL_KIND_LINE - 1 } }), false, "four images on a page is writing");
+});
+
+it("still crosses the line at the source's AI samples", () => {
+  // The lines were raised on 2026-10-23; the two samples they were drawn from must still trip
+  // them: the thriller at about 16 with 8 metaphors, the romance at 21 with 5 metaphors and 5 pivots.
+  const byKind = { three: 0, list: 0, metaphor: 0, notxy: 0, pivot: 0, shorthand: 0 };
+  assert.equal(crowded({ count: 16, byKind: { ...byKind, three: 2, list: 4, metaphor: 8, notxy: 2 } }), true);
+  assert.equal(crowded({ count: 21, byKind: { three: 3, list: 3, metaphor: 5, notxy: 2, pivot: 5, shorthand: 3 } }), true);
+  assert.equal(crowded({ count: 9, byKind: { ...byKind, metaphor: 4, pivot: 4, three: 1 } }), false);
 });
 
 it("finds a crowded run that straddles two fixed blocks", () => {
@@ -144,19 +168,19 @@ it("finds a crowded run that straddles two fixed blocks", () => {
 it("merges overlapping crowded stretches into one passage reporting its densest", () => {
   const body = chapter(40, 50);
   const dense = (from: number, n: number, kind: TellDraft["kind"] = "metaphor") => Array.from({ length: n }, (_, i) => ({ kind, quote: word(from + i * 5) }));
-  const reading = readTells(body, [...dense(100, 9, "pivot"), ...dense(300, 3, "three"), ...dense(1500, 4)]);
+  const reading = readTells(body, [...dense(100, 9, "pivot"), ...dense(300, 3, "three"), ...dense(1500, TELL_KIND_LINE)]);
   assert.equal(reading.passages.length, 2);
   assert.deepEqual(reading.passages.map((p) => p.id), ["p1", "p2"]);
   assert.equal(reading.passages[0]!.densest.count, 12, "the densest 450 words hold both runs");
-  assert.equal(reading.passages[1]!.densest.byKind.metaphor, 4, "four of one kind is crowded on its own");
+  assert.equal(reading.passages[1]!.densest.byKind.metaphor, TELL_KIND_LINE, "the kind line of one kind is crowded on its own");
   assert.ok(reading.passages[0]!.end <= reading.passages[1]!.start);
   assert.equal(reading.strip.reduce((sum, bar) => sum + bar.count, 0), reading.tells.length, "the strip's bars add up to every tell");
 });
 
 it("marks nothing when the tells are spread out", () => {
   const body = chapter(40, 50);
-  // One every 100 words, the kinds taking turns. Every 100 words of one kind would be four or
-  // five in any 450, which is the kind line doing its job.
+  // One every 100 words, the kinds taking turns. Every 100 words of one kind would be five in
+  // some 450, which is the kind line doing its job.
   const kinds = ["metaphor", "three", "pivot", "list", "notxy", "shorthand"] as const;
   const spread = Array.from({ length: 19 }, (_, i) => ({ kind: kinds[i % kinds.length]!, quote: word(i * 100) }));
   const reading = readTells(body, spread);
@@ -175,6 +199,6 @@ it("pins the reading in the review and summarises it for chat", () => {
   assert.equal(ChapterReviewSchema.safeParse(review).success, true, "a review from before turn 232 still reads");
   const pinned = ChapterReviewSchema.parse({ ...review, tells });
   assert.equal(pinned.tells?.line, TELL_LINE);
-  assert.match(chapterReviewSummary(pinned), /AI tells: 0 crowded passages \(line 8 in 450 words\)/);
+  assert.match(chapterReviewSummary(pinned), new RegExp(`AI tells: 0 crowded passages \\(line ${TELL_LINE} in 450 words\\)`));
   assert.equal(ReviewAnswerSchema.safeParse({ facts: [], findings: [], tells: [{ kind: "simile", quote: "x" }] }).success, false, "only the six kinds");
 });

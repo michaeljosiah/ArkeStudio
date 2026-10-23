@@ -28,11 +28,11 @@ it("shows the chapter's tells, the strip against the line and each crowded passa
   const container = await render(review([prose], [...crowded, { kind: "list", quote: "w900x" }, { kind: "list", quote: "w900x" }, { kind: "pivot", quote: "not in the chapter" }]));
   const text = container.textContent ?? "";
   assert.match(text, /11 tells/); assert.match(text, /1,000 words/); assert.match(text, /11 per 1,000 words/);
-  assert.match(container.querySelector('[role="img"]')?.getAttribute("aria-label") ?? "", /start to end: 10, 0, 1\. The line is 8\./);
+  assert.match(container.querySelector('[role="img"]')?.getAttribute("aria-label") ?? "", /start to end: 10, 0, 1\. The line is 10\./);
   assert.equal(container.querySelectorAll(".fy-tells__bar--crowded").length, 1);
   assert.match(text, /10 in 450 words · Metaphor 5 · Pivot sentence 3 · Rule of three 1 · Not X but Y 1/);
   assert.match(container.querySelector(".fy-tells__passage q")?.textContent ?? "", /^w300x w301x/);
-  assert.match(text, /Not an AI detector/); assert.match(text, /The line is provisional/);
+  assert.match(text, /Not an AI detector/); assert.match(text, /The line is provisional/); assert.match(text, /Dialogue is not counted/);
   assert.match(text, /Not counted: 1 not in the chapter, 1 repeated\./);
 });
 

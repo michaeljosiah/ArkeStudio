@@ -123,6 +123,23 @@ The provisional line of 8 is roughly half of either, chosen only so the drawing 
    it sits in dialogue, so calibration can test leaving dialogue out. A character who talks in
    triads is characterisation.
 
+**Amended 2026-10-23, at the owner's request.** A 17-chapter novel driven through the check
+showed it far stricter than intended. The tagger tagged:
+
+- short dialogue as pivots
+- a first-person narrator's own words for things as metaphor on every use
+- plain opening lines as pivots
+
+Clearing every flag under 8 and 4 stripped chapters to 1 to 8 tells per 1,000 words. The owner
+wants some artistry kept, just not at high density. So, ahead of the calibration above:
+
+- the lines are 10 and 5
+- dialogue is not counted, which settles step 5
+- skill v2 excludes vocabulary, scene-setting lines and needed description, and asks the
+  tagger to leave out anything it is unsure of
+
+Both source samples still cross both lines. Steps 1 to 4 are still owed.
+
 Until the line is calibrated, every screen that shows it also shows its number.
 
 ## Frames

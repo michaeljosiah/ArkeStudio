@@ -25,12 +25,18 @@ export const TELL_LABELS: Record<TellKind, string> = {
 
 /*
  * Provisional (issue 1952 S-6): the source counted two AI samples of about 450 words, 21 and
- * about 16 tells, and no human one. 8 sits near half of either so the screens have a number;
- * it is reset from the author's own unaided chapters before the check is promoted.
+ * about 16 tells, and no human one. The first line, 8 and 4 of one kind, sat near half of
+ * either. Driving a 17-chapter novel under it on 2026-10-23 showed it was too tight for prose
+ * meant to have some craft in it: four images or four hard short lines on a page of horror is
+ * ordinary writing, and clearing every flag stripped chapters to 1 to 8 tells per 1,000 words.
+ * The owner asked for a more lenient check, so the lines are 10 and 5. Both of the source's
+ * samples still cross both: 16 and 21 against 10, and the thriller's 8 metaphors and the
+ * romance's 5 metaphors and 5 pivots against 5. They are still reset from the author's own
+ * unaided chapters before the check is promoted.
  */
 export const TELL_STRETCH_WORDS = 450;
-export const TELL_LINE = 8;
-export const TELL_KIND_LINE = 4;
+export const TELL_LINE = 10;
+export const TELL_KIND_LINE = 5;
 
 /** What the prose specialist returns for one tell. Short spans keep a long chapter's answer bounded. */
 export const TellDraftSchema = z.object({ kind: TellKindSchema, quote: z.string().min(1).max(600) }).strict();
@@ -44,7 +50,9 @@ export const PlacedTellSchema = z.object({
   quote: z.string().min(1).max(600),
   start: z.number().int().nonnegative(),
   end: z.number().int().positive(),
-  // Recorded, not yet used: calibration tests whether dialogue should count (S-6).
+  // Tells in dialogue are dropped before a reading is made (see readTells), so this is false in
+  // every reading since 2026-10-23. It stays in the schema because readings made before still
+  // carry dialogue tells, and an older build must still parse a newer review.
   inDialogue: z.boolean(),
 }).strict();
 export type PlacedTell = z.infer<typeof PlacedTellSchema>;
@@ -237,11 +245,29 @@ export function tellStrip(body: string, tells: readonly PlacedTell[], passages: 
 
 /** The whole reading for one chapter, pinned in its review with the line it used. */
 export function readTells(body: string, drafts: readonly TellDraft[], line = TELL_LINE, kindLine = TELL_KIND_LINE): ReviewTells {
-  const { tells, unplaced, repeated, ambiguous, merged } = verifiedTells(body, drafts);
+  return readTellsOutsideDialogue(body, drafts, line, kindLine).reading;
+}
+
+/**
+ * The reading, and how many tells were left out of it for sitting in dialogue. The skill already
+ * says short dialogue isn't a pivot and a figure a character says isn't a metaphor, and a
+ * character who talks in triads is characterisation; yet the tagger tagged spoken lines anyway,
+ * and on 2026-10-23 a cluster of short replies crowded a passage on their own. They are dropped
+ * whole rather than kept and skipped, so a reading's tells, strip and passages always agree,
+ * and readings made before, which counted dialogue, still read as they were made. Placement
+ * runs first, so a quotation inside dialogue still settles whether a narration tag is ambiguous.
+ */
+export function readTellsOutsideDialogue(body: string, drafts: readonly TellDraft[], line = TELL_LINE, kindLine = TELL_KIND_LINE): { reading: ReviewTells; dialogue: number } {
+  const verified = verifiedTells(body, drafts);
+  const tells = verified.tells.filter((tell) => !tell.inDialogue);
   const passages = crowdedPassages(tellStretches(body, tells), tells, line, kindLine);
+  const { unplaced, repeated, ambiguous, merged } = verified;
   return {
-    version: 1, line, kindLine, stretchWords: TELL_STRETCH_WORDS, words: wordsOf(body).length,
-    tells, passages, strip: tellStrip(body, tells, passages), unplaced, repeated, ambiguous, merged,
+    reading: {
+      version: 1, line, kindLine, stretchWords: TELL_STRETCH_WORDS, words: wordsOf(body).length,
+      tells, passages, strip: tellStrip(body, tells, passages), unplaced, repeated, ambiguous, merged,
+    },
+    dialogue: verified.tells.length - tells.length,
   };
 }
 
