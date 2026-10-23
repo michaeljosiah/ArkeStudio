@@ -1,0 +1,77 @@
+/* Turn 235 · Picture shapes. The sheet is 233's (the audiobook's Export), the card 194g's and 209's
+   picture card from the client's audiobook-picture-card.css, copied here under .ap235 so the turn's
+   review page stands alone; additions follow. Type through the tokens only (turn 139). */
+.ap235{position:relative;overflow:hidden;background:var(--background);color:var(--foreground);font:var(--type-body)}
+.ap235-dim{position:absolute;inset:0;background:color-mix(in srgb,var(--background) 60%,transparent);z-index:2}
+.ap235-page{position:absolute;inset:0;padding:30px 44px;display:flex;flex-direction:column;gap:14px;opacity:.6}
+.ap235-page i{display:block;height:12px;border-radius:6px;background:var(--secondary)}
+.ap235-sheet{position:absolute;z-index:3;left:50%;transform:translateX(-50%);border:1px solid var(--border);border-radius:16px;background:var(--popover,var(--background));box-shadow:var(--shadow-lg,0 18px 50px color-mix(in srgb,var(--foreground) 16%,transparent));padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.ap235-sheet h3{margin:0;font:var(--type-ui);font-weight:600;font-size:var(--text-md)}
+.ap235-sheet .sub{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);margin-top:-8px}
+.ap235-opts{border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.ap235-opt{display:flex;align-items:center;gap:14px;min-height:44px;padding:6px 14px;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.ap235-opt:first-child{border-top:0}
+.ap235-opt .ap235-k{width:96px;flex:none;font-weight:500;color:var(--muted-foreground)}
+.ap235-opt .grow{flex:1}
+.ap235-opt i,.ap235-opt em{font-style:normal;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);white-space:nowrap}
+.ap235-opt em{width:72px;text-align:right;color:var(--foreground)}
+.ap235-art{width:44px;height:25px;object-fit:cover;border-radius:4px;flex:none}
+.ap235-field{height:28px;padding:0 10px;border:1px solid var(--border);border-radius:8px;display:inline-flex;align-items:center;font:var(--type-label);min-width:150px}
+.ap235-chk{display:inline-flex;align-items:center;gap:8px;font-size:var(--text-sm);white-space:nowrap;width:96px;flex:none}
+.ap235-chk b{font-weight:600}
+.ap235-box{width:15px;height:15px;border-radius:4px;border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;flex:none;color:var(--background)}
+.ap235-box.on{background:var(--foreground);border-color:transparent}
+.ap235-box svg{width:11px;height:11px}
+.ap235-est{display:flex;align-items:center;gap:12px;font-size:var(--text-sm)}
+.ap235-est .m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap235-btn{height:32px;padding:0 13px;border:1px solid var(--border);border-radius:8px;display:inline-flex;align-items:center;gap:7px;font:var(--type-label);background:var(--background);color:var(--foreground);white-space:nowrap}
+.ap235-btn.pri{background:var(--foreground);color:var(--background);border-color:transparent;font-weight:600}
+.ap235-foot{display:flex;align-items:center;gap:8px}
+.ap235-foot .grow{flex:1}
+
+/* Additions. The shape's ratio as data beside its name; the batch line; Size as a segmented choice. */
+.ap235-ratio{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap235-make{display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:12px;font-size:var(--text-sm)}
+.ap235-make b{font-weight:600}
+.ap235-make .grow{flex:1}
+.ap235-seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.ap235-seg span{height:28px;padding:0 12px;display:inline-flex;align-items:center;font:var(--type-label);border-left:1px solid var(--border)}
+.ap235-seg span:first-child{border-left:0}
+.ap235-seg span.on{background:var(--foreground);color:var(--background);font-weight:600}
+
+/* The chapter with its picture panel (194's Picture tab), 520 wide at the right. */
+.ap235-chapter{position:absolute;inset:0}
+.ap235-chapter .ap235-page{right:520px}
+.ap235-panel{position:absolute;top:0;right:0;bottom:0;width:520px;box-sizing:border-box;border-left:1px solid var(--border);background:var(--background);padding:16px 20px;display:flex;flex-direction:column;gap:14px}
+.ap235-tabs{display:flex;gap:20px;border-bottom:1px solid var(--border)}
+.ap235-tabs span{padding:0 0 10px;font-size:var(--text-sm);color:var(--muted-foreground)}
+.ap235-tabs span.on{color:var(--foreground);font-weight:500;box-shadow:inset 0 -2px 0 var(--foreground)}
+
+/* The picture card (client .fy-pcard): the slot is now one per shape on, Wide 182×102 beside Tall
+   58×102, one height so the two read as one picture; each is the press that picks another. */
+.ap235-card{display:flex;flex-direction:column;gap:13px}
+.ap235-top{display:flex;gap:14px;align-items:flex-start}
+.ap235-shapes{display:flex;gap:8px;flex:none}
+.ap235-shapes figure{margin:0;display:flex;flex-direction:column;gap:4px}
+.ap235-shapes figcaption{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap235-wide,.ap235-tall{display:block;box-sizing:border-box;height:102px;border-radius:9px;border:1px solid var(--border);object-fit:cover}
+.ap235-wide{width:182px}
+.ap235-tall{width:58px}
+.ap235-slot{border:1px dashed var(--neutral-400);display:flex;align-items:flex-start;justify-content:center;padding-top:6px;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap235-facts{display:flex;flex-direction:column;gap:10px;min-width:0;flex:1}
+.ap235-fact{display:flex;flex-direction:column;gap:2px;min-width:0}
+.ap235-fact span{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap235-fact b{font-weight:400;font-size:var(--text-sm);overflow-wrap:anywhere}
+.ap235-sec{display:flex;flex-direction:column;gap:7px}
+.ap235-h{font:var(--type-label);color:var(--muted-foreground)}
+.ap235-who{display:flex;align-items:center;gap:10px;min-height:56px;padding:0 10px 0 6px;box-sizing:border-box;border:1px solid var(--border);border-radius:10px;font-size:var(--text-sm)}
+.ap235-who img{width:28px;height:44px;box-sizing:border-box;border-radius:5px;object-fit:cover;object-position:top;border:1px solid var(--border);outline:2px solid var(--foreground);outline-offset:1px}
+.ap235-who div{display:flex;flex-direction:column;flex:1;min-width:0}
+.ap235-who b{font-weight:600}
+.ap235-who div span{font-size:var(--text-xs);color:var(--muted-foreground)}
+.ap235-view{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap235-who svg{width:14px;height:14px;color:var(--muted-foreground)}
+.ap235-prompt{margin:0;font-size:var(--text-sm);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.ap235-mark{display:flex;align-items:center;gap:8px;font-size:var(--text-sm)}
+.ap235-mark i{width:16px;height:16px;border-radius:50%;background:var(--warning);color:var(--background);font-style:normal;font-weight:700;font-size:var(--text-2xs);display:inline-flex;align-items:center;justify-content:center}
+.ap235-card .ap235-foot{margin-top:4px}

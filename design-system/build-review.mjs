@@ -28,6 +28,13 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN PICTURE SHAPES 235
+  { group: "Picture shapes · turn 235", screen: "Pictures: the shapes a production’s pictures are made in", frame: "235a", route: "Story / Audiobook", status: "drawn", checked: "2026-10-23", controls: [], notes: ["Drawn 23 October 2026; not approved. Player half: P14 (ArkePlayer PR #7)."] },
+  { group: "Picture shapes · turn 235", screen: "A block’s picture in both shapes", frame: "235b", route: "Story / Audiobook", status: "drawn", checked: "2026-10-23", controls: [], notes: ["Drawn 23 October 2026; not approved. Player half: P14 (ArkePlayer PR #7)."] },
+  { group: "Picture shapes · turn 235", screen: "Tall not made yet", frame: "235c", route: "Story / Audiobook", status: "drawn", checked: "2026-10-23", controls: [], notes: ["Drawn 23 October 2026; not approved. Player half: P14 (ArkePlayer PR #7)."] },
+  { group: "Picture shapes · turn 235", screen: "Export → Arke Player: both shapes, and the picture size", frame: "235d", route: "Story / Audiobook", status: "drawn", checked: "2026-10-23", controls: [], notes: ["Drawn 23 October 2026; not approved. Player half: P14 (ArkePlayer PR #7)."] },
+  // END PICTURE SHAPES 235
+
   // BEGIN WORLD GUIDE 234
   { group: "Guide · turn 234", screen: "A world’s Guide", frame: "234a", route: "World / Guide", status: "drawn", checked: "2026-10-22", controls: [], notes: ["Approved 22 October 2026; Player P11 is its other half; to be specified in SPEC-059."] },
   { group: "Guide · turn 234", screen: "A character’s entry, with the Player’s page beside it", frame: "234b", route: "World / Guide", status: "drawn", checked: "2026-10-22", controls: [], notes: ["Approved 22 October 2026; Player P11 is its other half; to be specified in SPEC-059."] },
@@ -862,6 +869,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "picture-shapes-235.review.html", what: "Turn 235: Picture shapes — the Pictures sheet (Wide and Tall), a block’s picture in both shapes, Tall not made yet, and Export → Arke Player with both shapes and the picture size.", state: "drawn; not approved" },
   { file: "world-guide-234.review.html", what: "Turn 234: a world’s Guide — what Arke Player shows of a world, its characters, places and settled lore, each public from the start or after a chapter; an entry with its sections, a voice line and the Player’s page beside it; Export → Arke Player carrying the guide; and from a phone.", state: "approved; to be specified in SPEC-059 (Player P11)" },
   { file: "arke-player-export-233.review.html", what: "Turn 233: Export → Arke Player — the sheet with Arke Player chosen, making it in Activity, the package made with its size and SHA-256, blockers in one clause, Publications’ Other exports, and from a phone with Download and Share.", state: "approved; implementation tracked in #2037 (SPEC-058)" },
   { file: "prose-review-232.review.html", what: "Turn 232 revision 2: AI tells in the chapter review — choosing checks, a crowded passage marked in the page with its note and the chapter strip, a tell hovered, a kind lit, What counts, Check again after the writer’s rewrite, the report, a chapter with nothing crowded, phone, and Rewrite with Arke checked before it is shown (still crowded, kept and versioned).", state: "approved; implementation tracked in #1952" },
@@ -1033,6 +1041,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="stage-231.css">
 <link rel="stylesheet" href="arke-player-export-233.css">
 <link rel="stylesheet" href="world-guide-234.css">
+<link rel="stylesheet" href="picture-shapes-235.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">
