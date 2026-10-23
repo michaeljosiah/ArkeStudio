@@ -38,7 +38,10 @@ export function PicturesSheet({ worldId, production, onClose }: { worldId: strin
   const connection = store.connection;
   const shapes = bookPictureShapes(production.audiobook);
   const [plan, setPlan] = useState<AudiobookListening | null>(null);
-  const [run, setRun] = useState<AudiobookTallProgress | null>(() => lastAudiobookTallProgress(worldId, production.meta.id));
+  // The run as the store keeps it, read each render: a snapshot clears it and the coordinator's
+  // replay sets it again, so a reconnect never leaves a finished run showing Stop.
+  const [, setHeard] = useState(0);
+  const run: AudiobookTallProgress | null = lastAudiobookTallProgress(worldId, production.meta.id);
   const asked = useRef<string | null>(null);
   const shell = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -56,7 +59,7 @@ export function PicturesSheet({ worldId, production, onClose }: { worldId: strin
     });
     const offRun = subscribeAudiobookTallProgress((progress) => {
       if (progress.productionId !== production.meta.id) return;
-      setRun(progress);
+      setHeard((count) => count + 1);
       // Each Tall landed shows in the counts: the plan is read again as the run goes and when it ends.
       asked.current = openAudiobookListening(worldId, production.meta.id);
     });

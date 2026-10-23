@@ -88,6 +88,16 @@ describe("a block's picture made Tall (turn 235, R-196, R-197)", () => {
       assert.deepEqual((h.enqueued.at(-1)!.params as { references?: string[] }).references, [picture.file]);
     }, { model: TALL_IMAGE }));
 
+  it("answers the Tall asked with a picture that is not made, so the card is never left waiting (codex on PR 2166)", () =>
+    withHarness(async (h) => {
+      const tallId = nextId();
+      await h.send({ kind: "make-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, block: "p0.0", prompt: "Maren on the rail at dawn.", who: [], confirmedMicroUsd: 45_000, requestId: nextId(), tall: { requestId: tallId, confirmedMicroUsd: 45_000 } });
+      assert.equal(answer(h.events).state, "failed");
+      const tall = h.events.filter((event): event is MadeEvent => event.type === "audiobook.picture-made" && event.requestId === tallId);
+      assert.deepEqual(tall.map((event) => [event.state, event.reason]), [["failed", "not made"]]);
+      assert.equal(h.enqueued.length, 1, "no Tall was asked of the provider");
+    }, { model: TALL_IMAGE, land: "fail" }));
+
   it("raises the world to the picture-shapes schema before the first Tall or shapes is written, so an older build refuses it whole", () =>
     withHarness(async (h) => {
       await make(h.send);

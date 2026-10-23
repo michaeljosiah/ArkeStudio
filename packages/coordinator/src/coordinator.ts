@@ -16187,7 +16187,14 @@ export class Coordinator {
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, block: msg.block };
         const at = () => new Date().toISOString();
         const key = `${msg.worldId}/${msg.productionId}/${chapter.file}/${msg.block}`;
-        const fail = (reason: string, sessionId?: string) => this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "failed", reason, ...(sessionId !== undefined ? { sessionId } : {}) });
+        // A Tall asked with the picture is answered whenever the picture is not made: the card
+        // waits on its id, and would say "Making tall…" until remounted (codex on PR 2166).
+        let tallWaiting = msg.tall !== undefined;
+        const fail = (reason: string, sessionId?: string) => {
+          this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "failed", reason, ...(sessionId !== undefined ? { sessionId } : {}) });
+          if (tallWaiting) this.emit({ at: at(), type: "audiobook.picture-made", ...ids, requestId: msg.tall!.requestId, state: "failed", reason: "not made" });
+          tallWaiting = false;
+        };
         if (this.makingPictures.has(key)) return fail("making a picture here already");
         const control = new AbortController();
         this.makingPictures.set(key, control);
@@ -16242,6 +16249,7 @@ export class Coordinator {
           // Its Tall (design turn 235, R-196), from the picture that just landed and under this
           // block's lock, answered under the Tall's own id: the picture stays made if it fails.
           if (msg.tall !== undefined) {
+            tallWaiting = false;
             const tallIds = { ...ids, requestId: msg.tall.requestId };
             try {
               const tall = await this.makeTallPicture(store, { productionId: msg.productionId, chapter, block: msg.block, ceilingMicroUsd: msg.tall.confirmedMicroUsd, requestId: msg.tall.requestId, signal: control.signal, onMaking: () => this.emit({ at: at(), type: "audiobook.picture-made", ...tallIds, state: "making" }) });

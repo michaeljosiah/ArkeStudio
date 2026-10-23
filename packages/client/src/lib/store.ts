@@ -818,7 +818,8 @@ export function subscribeAudiobookTallProgress(listener: (progress: AudiobookTal
 /**
  * Each book's last run progress, kept beyond the sheet that shows it: a sheet closed and opened
  * again while a picture is being made shows the run and Stop at once, rather than waiting for
- * the next picture to land (codex on PR 2166).
+ * the next picture to land (codex on PR 2166). Cleared by every snapshot, which the replay of
+ * the runs still going follows.
  */
 const lastTallProgress = new Map<string, AudiobookTallProgress>();
 export function lastAudiobookTallProgress(worldId: string, productionId: string): AudiobookTallProgress | null {
@@ -1652,6 +1653,9 @@ function handleFrame(json: string): void {
     helloFallbackTimer = null;
     frameRunQuoteListeners.clear();
     frameRunStartResultListeners.clear();
+    // A run that ended while this window was away sent its end to no one: the coordinator replays
+    // only those still going, after this snapshot, so what was kept before it is stale (codex on PR 2166).
+    lastTallProgress.clear();
     // Prune notices for proposals the snapshot no longer carries — and "the studio is still
     // drafting" for any run the snapshot says has since ended. That refusal describes the run
     // rather than the proposal, so unlike its siblings it must not wait for a resolution to
