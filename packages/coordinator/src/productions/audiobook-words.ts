@@ -33,7 +33,7 @@ const reason = (error: unknown): string => {
 /** Every check starts from the currently selected take, not a historical artifact with a similar title. */
 async function currentSource(store: WorldStore, productionId: string, chapterId: string, key: string, signal: AbortSignal) {
   signal.throwIfAborted();
-  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId) });
+  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId, chapterId) });
   const block = plan.blocks.find(entry => entry.block.key === key)?.block;
   const take = plan.record !== "unreadable" ? plan.record?.takes[key] : undefined;
   const artifact = take ? store.getBundle().artifacts.find(entry => entry.id === take.artifactId) : undefined;
@@ -58,7 +58,7 @@ export async function readAudiobookWords(store: WorldStore, scope: AudiobookWord
   for (const chapter of chapters) {
     signal.throwIfAborted();
     try {
-      const plan = await planAudiobook(store, scope.productionId, chapter.id, { narrator: await anyNarrator(store, scope.productionId) });
+      const plan = await planAudiobook(store, scope.productionId, chapter.id, { narrator: await anyNarrator(store, scope.productionId, chapter.id) });
       if (plan.record === "unreadable") throw new Error("this chapter could not be read");
       for (const [index, planned] of plan.blocks.entries()) {
         const key = planned.block.key;

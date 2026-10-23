@@ -360,7 +360,7 @@ export interface DerivedChapterLook {
  * direction, asked of the deriver once and verified. Nothing is written here.
  */
 export async function deriveChapterLook(store: WorldStore, productionId: string, chapterId: string, deriver: LookDeriver, signal?: AbortSignal): Promise<DerivedChapterLook> {
-  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId) });
+  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId, chapterId) });
   const people = chapterPeople(store, plan, productionId);
   const sheets = store.getBundle().sheets;
   const blocks = plan.blocks.map((planned) => {
@@ -401,7 +401,7 @@ export interface WrittenLook {
  * other words is not this chapter's — and left alone when nothing changed.
  */
 export async function writeDerivedLook(store: WorldStore, productionId: string, chapterId: string, derived: DerivedChapterLook): Promise<WrittenLook | "moved"> {
-  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId) });
+  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId, chapterId) });
   if (plan.chapter.hash !== derived.hash) return "moved";
   let kept = 0;
   const at = store.now();
@@ -417,7 +417,7 @@ export async function writeDerivedLook(store: WorldStore, productionId: string, 
 export async function linkChapterCharacter(store: WorldStore, productionId: string, chapterId: string, input: {
   key: string; expectedName: string; expectedHash: string; sheetId: string;
 }): Promise<ChapterAudiobook> {
-  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId) });
+  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId, chapterId) });
   return updateAudiobook(store, productionId, plan.chapter, current => {
     if (current.look?.chapterHash !== plan.chapter.hash) throw new Error("The chapter words changed. Read Chapter details again before linking.");
     const sheet = store.getBundle().sheets.find(candidate => candidate.type === "character" && candidate.id === input.sheetId && candidate.retired !== true);
@@ -433,7 +433,7 @@ export async function linkChapterCharacter(store: WorldStore, productionId: stri
  * The same words change nothing. Refused for a name no one gave a new character.
  */
 export async function setChapterLook(store: WorldStore, productionId: string, chapterId: string, target: LookTarget, text: string | null): Promise<ChapterAudiobook> {
-  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId) });
+  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId, chapterId) });
   const at = store.now();
   return updateAudiobook(store, productionId, plan.chapter, (current) => {
     const next = editLook(current.look, target, text, { chapterHash: plan.chapter.hash, at });
@@ -464,7 +464,7 @@ export async function chooseChapterLook(
    */
   picture?: { block: string; only: boolean },
 ): Promise<ChapterAudiobook> {
-  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId) });
+  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId, chapterId) });
   const at = store.now();
   const held = lookOf(plan.record);
   const sheetId = who.sheet ?? held?.characters[who.key]?.sheet;

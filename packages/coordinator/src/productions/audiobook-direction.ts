@@ -58,6 +58,7 @@ import {
 } from "./audiobook.js";
 import { CONTINUITY_BOUNDS, makeAdapterJsonDeriver } from "./continuity.js";
 import { openChapter } from "./ops.js";
+import type { ChapterNarration } from "./audiobook-run.js";
 import { composeCast, deriveCast, readVoices, writeCast, type DerivedCast, type VoicesDeriver } from "./voices.js";
 
 /**
@@ -542,6 +543,8 @@ export interface DirectionRoom {
   catalogue: readonly VoiceCandidate[];
   /** The narrator's own description — a designed voice's brief, a clone's label (R-51). Read by the director only. */
   narratorDescription?: string;
+  /** The chapters read by a narrator of their own (R-195); `chapterRoom` reads one in. */
+  chapterNarrators?: Readonly<Record<string, ChapterNarration>>;
 }
 
 /**

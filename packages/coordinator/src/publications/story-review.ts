@@ -61,7 +61,7 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
     for (const problem of publicationTextProblems(chapter.body)) blockers.push(`${chapter.title}: ${problem}`);
     if (publicationTextProblems(chapter.title).length) blockers.push(`${chapter.title}: check the chapter heading.`);
     const plan = settings.outputs.includes("m4b") || settings.avoidEmDashes || settings.includeIllustrations
-      ? await planAudiobook(view, productionId, summary.id, { narrator: await anyNarrator(view, productionId) }).catch(() => null) : null;
+      ? await planAudiobook(view, productionId, summary.id, { narrator: await anyNarrator(view, productionId, summary.id) }).catch(() => null) : null;
     const audioProblems: string[] = [];
     let studio: StoryAudioStudio | null = null;
     if (!plan || plan.record === "unreadable" || plan.cast === "unreadable") {
@@ -78,7 +78,7 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
       } catch (error) { audioProblems.push(error instanceof Error ? error.message : "The arrangement could not be read."); }
     }
     else if (settings.outputs.includes("m4b")) {
-      for (const block of [...plan.blocks, ...plannedReactions(view, plan, await anyNarrator(view, productionId))]) {
+      for (const block of [...plan.blocks, ...plannedReactions(view, plan, await anyNarrator(view, productionId, summary.id))]) {
         if (block.state !== "made") audioProblems.push(`Block ${block.block.key}: ${block.state === "stale" ? "needs updating" : block.state}.`);
         const flag = plan.record?.flags[block.block.key], take = plan.record?.takes[block.block.key];
         const artifact = scan.bundle.artifacts.find(row => row.id === take?.artifactId);

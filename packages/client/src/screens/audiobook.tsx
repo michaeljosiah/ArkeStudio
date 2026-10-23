@@ -194,6 +194,19 @@ export function chapterHeading(row: Pick<AudiobookRow, "order" | "title">): stri
   return `${row.order} · ${row.title.trim() === "" ? "Untitled" : row.title}`;
 }
 
+/** The chapters a narrator of their own reads (R-195), by number and run: `Ch 9–16`, `Ch 1–8, 17`. */
+export function chapterSpans(ids: readonly string[], rows: readonly Pick<AudiobookRow, "chapterId" | "order">[]): string {
+  const numbers = ids.map((id) => rows.find((row) => row.chapterId === id)?.order).filter((n): n is number => n !== undefined).sort((a, b) => a - b);
+  const runs: string[] = [];
+  for (let at = 0; at < numbers.length; ) {
+    let end = at;
+    while (end + 1 < numbers.length && numbers[end + 1] === numbers[end]! + 1) end += 1;
+    runs.push(end === at ? `${numbers[at]}` : `${numbers[at]}–${numbers[end]}`);
+    at = end + 1;
+  }
+  return runs.length === 0 ? "Chapters" : `Ch ${runs.join(", ")}`;
+}
+
 /**
  * One quiet word, only when the chapter is not simply ready (rule 7): `planned`, `not read`,
  * `80 to read`, `reading…`; the cast's trouble under Cast by its first words. Nothing for a
@@ -370,7 +383,8 @@ export function AudiobookScreen() {
   const narratorName = door?.voices[0]?.name ?? null;
   // The book's own narrator cannot read now (issue 1661): the door once said `Performed · George`
   // over a narrator a 402 had silenced. Read the book is held on it, and says why.
-  const narratorUnavailable = door?.voices[0]?.unavailable ?? null;
+  // A chapter's own narrator holds it the same way (R-195).
+  const narratorUnavailable = door?.voices[0]?.unavailable ?? door?.chapterNarrators?.find((row) => row.unavailable !== undefined)?.unavailable ?? null;
   const warning = readingWarning(door);
   const made = bookHasTakes(production);
   const left = price !== null && price.chapters > 0;
@@ -893,6 +907,18 @@ function ReadingSheet({ worldId, productionId, production, door, reading, runnin
               <span className="fy-abshow__c"><ChevronRight size={16} stroke={1.9} /></span>
             </button>
           )}
+          {/* The chapters read by a narrator of their own (R-195), set from the chapter. */}
+          {(door?.chapterNarrators ?? []).map((row) => (
+            <div key={`${row.voice?.provider ?? ""}/${row.name}`} className="fy-abshow__sp" data-testid="reading-chapter-narrator">
+              <b>{chapterSpans(row.chapters ?? [], door?.rows ?? [])}</b>
+              <span className="fy-abshow__v">
+                {row.name}
+                {row.voice !== undefined && <small>{readerPlace(row.voice.provider, row.voice.local)}</small>}
+                {row.unavailable !== undefined && <small className="fy-abshow__w">{row.unavailable}</small>}
+              </span>
+              <span className="fy-abshow__mono">{blocks(row.blocks)}</span>
+            </div>
+          ))}
           {(speakers.length > 0 || (door?.unattributed ?? 0) > 0) && (
             <>
               <div className="fy-abshow__lbl">

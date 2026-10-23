@@ -56,9 +56,16 @@ export interface RecordedTakeDeps {
   tools: AudioMediaTools;
   /** The local transcriber, when one runs; the words are then checked, and said `unchecked` otherwise. */
   transcribe: ((bytes: Uint8Array, contentType: string) => Promise<string>) | null;
-  narrator: import("@arke-studio/contracts").AudiobookReader;
+  narrator: NarratorOf;
   signal: AbortSignal;
 }
+
+/**
+ * Who narrates: one reader for the book, or a chapter's own (SPEC-047 R-195) by its id, for the
+ * helpers that plan a chapter on the way to a recorded take.
+ */
+export type NarratorOf = import("@arke-studio/contracts").AudiobookReader | ((chapterId: string) => import("@arke-studio/contracts").AudiobookReader);
+export const narratorOf = (narrator: NarratorOf, chapterId: string) => (typeof narrator === "function" ? narrator(chapterId) : narrator);
 
 /** The QC codes a kept take says it was kept with (R-35): every check that warned. */
 export function recordingWarnings(qc: AudioQcAnalysis): string[] {
@@ -79,7 +86,7 @@ export async function stageRecording(
   deps: RecordedTakeDeps,
   input: { productionId: string; chapterId: string; block: string; sourcePath: string },
 ): Promise<StagedRecording> {
-  const plan = await planAudiobook(store, input.productionId, input.chapterId, { narrator: deps.narrator });
+  const plan = await planAudiobook(store, input.productionId, input.chapterId, { narrator: narratorOf(deps.narrator, input.chapterId) });
   const refusal = castRefusal(plan);
   if (refusal !== null) throw new RecordedTakeRefusal(refusal);
   const planned = plan.blocks.find((candidate) => candidate.block.key === input.block);
@@ -154,9 +161,9 @@ export async function discardRecording(staged: StagedRecording): Promise<void> {
 export async function keepRecording(
   store: WorldStore,
   staged: StagedRecording,
-  input: { basis: "self" | "authorized" | "licensed"; performer?: string; narrator: import("@arke-studio/contracts").AudiobookReader; ackId: string; now: () => string; mediaProbe?: MediaProbe },
+  input: { basis: "self" | "authorized" | "licensed"; performer?: string; narrator: NarratorOf; ackId: string; now: () => string; mediaProbe?: MediaProbe },
 ): Promise<ChapterAudiobook> {
-  const plan = await planAudiobook(store, staged.productionId, staged.chapterId, { narrator: input.narrator });
+  const plan = await planAudiobook(store, staged.productionId, staged.chapterId, { narrator: narratorOf(input.narrator, staged.chapterId) });
   const planned = plan.blocks.find((candidate) => candidate.block.key === staged.block);
   if (planned === undefined || audiobookTextHash(planned.block.text) !== audiobookTextHash(staged.text)) {
     throw new RecordedTakeRefusal("the words changed · upload again");

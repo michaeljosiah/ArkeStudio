@@ -847,6 +847,11 @@ export const AudiobookBookSchema = z
      */
     narrator: AudiobookReaderSchema.optional(),
     /**
+     * A chapter's own narrator (R-195), keyed by chapter id: a book told from more than one point
+     * of view reads each part in its narrator's voice. A chapter with none reads in the book's.
+     */
+    chapterNarrators: z.record(z.string().min(1).max(120), AudiobookReaderSchema).optional(),
+    /**
      * The book note (design turn 184, SPEC-047 R-53): accent, register and pronunciation for the
      * whole book, at most 300 characters, sent with every block before the block's own direction
      * so a chapter of separate requests sounds like one reader. The author's; never drafted
@@ -879,6 +884,16 @@ export const PICTURE_SHAPES = ["wide", "tall"] as const;
 export type PictureShape = (typeof PICTURE_SHAPES)[number];
 /** The shapes a book's pictures are made in, in their fixed order; Wide alone when it says none. */
 export const bookPictureShapes = (book: Pick<AudiobookBook, "pictureShapes"> | null | undefined): PictureShape[] => PICTURE_SHAPES.filter((shape) => (book?.pictureShapes ?? ["wide"]).includes(shape));
+
+/**
+ * The reader a chapter's narration is chosen as (R-195): the chapter's own, else the book's,
+ * else undefined, which is the app's narrator. One rule for every place a chapter's narrator is
+ * resolved, so the door, the chapter and a read never name different voices. Without a chapter
+ * it is the book's.
+ */
+export function chapterNarratorChoice(book: Pick<AudiobookBook, "narrator" | "chapterNarrators"> | null | undefined, chapterId?: string): AudiobookReader | undefined {
+  return (chapterId === undefined ? undefined : book?.chapterNarrators?.[chapterId]) ?? book?.narrator;
+}
 
 /**
  * What a block is read under besides its own direction and its speaker's note (design turn 184,
@@ -1189,6 +1204,8 @@ export const AudiobookVoiceRowSchema = z
      * issue 1661). Read and Direct are held until it can, or another narrator is chosen.
      */
     unavailable: z.string().min(1).max(NARRATOR_UNAVAILABLE_MAX).optional(),
+    /** On a chapter narrator's row (R-195): the chapters it reads, by id, in the book's order. */
+    chapters: z.array(SlugSchema).min(1).optional(),
   })
   .strict();
 export type AudiobookVoiceRow = z.infer<typeof AudiobookVoiceRowSchema>;
@@ -1214,6 +1231,11 @@ export const AudiobookDoorSchema = z
   .object({
     reading: AudiobookReadingSchema,
     voices: z.array(AudiobookVoiceRowSchema),
+    /**
+     * The narrators of chapters of their own (R-195), one row a voice with the chapters it reads
+     * and the blocks that fall to it there; `voices[0]` counts the rest of the book.
+     */
+    chapterNarrators: z.array(AudiobookVoiceRowSchema).optional(),
     /** Lines a current cast counts ambiguous, read in the narrator's voice (R-12); summed over the chapters. */
     unattributed: z.number().int().min(0),
     rows: z.array(AudiobookRowSchema),

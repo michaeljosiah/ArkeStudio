@@ -48,7 +48,7 @@ import { clipFor } from "../voice/library.js";
 import { AUDIOBOOK_MOTION_SCHEMA_VERSION, AUDIO_STUDIO_SCHEMA_VERSION, AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION, AUDIOBOOK_PICTURE_LOOK_REVIEW_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHAPES_SCHEMA_VERSION } from "../world/commit.js";
 import { directionPlan } from "../voice/direction.js";
 import { atomicWriteFile } from "../world/atomic.js";
-import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_LOOKS_SCHEMA_VERSION, AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION, AUDIOBOOK_TIMING_SCHEMA_VERSION, AUDIOBOOK_BEATS_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIOBOOK_CHAPTER_NARRATOR_SCHEMA_VERSION, AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_LOOKS_SCHEMA_VERSION, AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION, AUDIOBOOK_TIMING_SCHEMA_VERSION, AUDIOBOOK_BEATS_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
@@ -332,16 +332,19 @@ export async function effectiveReader(
  * without them is written in the shape the earlier build reads.
  */
 export async function writeAudiobookBookRaised(store: WorldStore, productionId: string, book: AudiobookBook): Promise<void> {
-  const { notes, narrator, chapterNotes, noteSources, ...rest } = book;
+  const { notes, narrator, chapterNarrators, chapterNotes, noteSources, ...rest } = book;
   // A source names a note that stands, or nothing (R-54): a note taken away takes its source.
   const sources = Object.fromEntries(Object.entries(noteSources ?? {}).filter(([key]) => notes?.[key] !== undefined));
   const kept: AudiobookBook = {
     ...rest,
     ...(notes !== undefined && Object.keys(notes).length > 0 ? { notes } : {}),
     ...(narrator !== undefined ? { narrator } : {}),
+    ...(chapterNarrators !== undefined && Object.keys(chapterNarrators).length > 0 ? { chapterNarrators } : {}),
     ...(chapterNotes !== undefined && Object.keys(chapterNotes).length > 0 ? { chapterNotes } : {}),
     ...(Object.keys(sources).length > 0 ? { noteSources: sources } : {}),
   };
+  // A chapter's own narrator (R-195): the builds before it read the whole record as unreadable.
+  if (kept.chapterNarrators !== undefined) await store.ensureSchemaVersion(AUDIOBOOK_CHAPTER_NARRATOR_SCHEMA_VERSION, "audiobook-chapter-narrator");
   if (Object.values(kept.notes ?? {}).some((note) => note.length > 60)) await store.ensureSchemaVersion(EXPRESSIVE_DIRECTION_SCHEMA_VERSION, "audiobook-expressive-direction");
   if (kept.reading === "performed" || kept.notes !== undefined || kept.narrator !== undefined) await store.ensureSchemaVersion(AUDIOBOOK_PERFORMED_SCHEMA_VERSION, "audiobook-performed");
   // The book note, the chapter notes and a note's source (design turn 184) are fields the builds

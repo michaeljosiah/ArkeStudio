@@ -4,6 +4,7 @@ import {
   chapterMix,
   hasTiming,
   audiobookTextHash,
+  chapterNarratorChoice,
   DEFAULT_NARRATOR,
   ESTIMATED_CHARACTERS_PER_SECOND,
   isWorldImagePath,
@@ -119,13 +120,16 @@ export async function bookCover(store: WorldStore): Promise<string | null> {
 }
 
 /**
- * Who `planAudiobook` assigns the blocks to: the book's own narrator as written, else the
- * shipped one. Only the blocks, their words and the record are read from the plan, never its
- * states, so this asks no catalogue and needs none to be up.
+ * Who `planAudiobook` assigns the blocks to: the chapter's own narrator (R-195), else the book's
+ * as written, else the shipped one. Only the blocks, their words and the record are read from
+ * the plan, never its states, so this asks no catalogue and needs none to be up. `chapter` is
+ * its id or its file, as `planAudiobook` takes either.
  */
-export async function anyNarrator(store: WorldStore, productionId: string): Promise<AudiobookReader> {
+export async function anyNarrator(store: WorldStore, productionId: string, chapter?: string): Promise<AudiobookReader> {
   const book = await readAudiobookBook(store, productionId).catch(() => null);
-  return book !== null && book !== "unreadable" && book.narrator !== undefined ? book.narrator : { ...DEFAULT_NARRATOR };
+  if (book === null || book === "unreadable") return { ...DEFAULT_NARRATOR };
+  const id = chapter === undefined ? undefined : store.getBundle().productions.find((p) => p.meta.id === productionId)?.chapters.find((c) => c.id === chapter || c.file === chapter)?.id;
+  return chapterNarratorChoice(book, id) ?? { ...DEFAULT_NARRATOR };
 }
 
 /**
@@ -161,12 +165,11 @@ export async function audiobookListening(store: WorldStore, productionId: string
   const selected = production.chapters.filter((chapter) => !chapter.retired && (scope.kind === "book" ? chapter.status !== "outlined" : chapter.id === scope.chapterId));
   if (scope.kind === "chapter" && selected.length === 0) throw new Error("That chapter is no longer in this production.");
   const cover = await bookCover(store);
-  const narrator = await anyNarrator(store, productionId);
   const chapters: ListeningChapter[] = [];
   for (const summary of selected.sort((a, b) => a.order - b.order)) {
     let plan: AudiobookPlan;
     try {
-      plan = await planAudiobook(store, productionId, summary.id, { narrator });
+      plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId, summary.id) });
     } catch {
       // A chapter that cannot be read is listed and held, never skipped (R-67).
       chapters.push({ chapterId: summary.id, order: summary.order, title: summary.title, state: "not read", seconds: 0, blocks: [], gaps: [], pictures: [], opening: cover });
@@ -205,7 +208,7 @@ export async function setAudiobookPictureFocus(store: WorldStore, productionId: 
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   const summary = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
   if (summary === undefined) throw new Error("that chapter is no longer in this production");
-  const plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId) });
+  const plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId, summary.id) });
   const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
   const index = blocks.findIndex((candidate) => candidate.key === block);
   if (index < 0) throw new Error("that block is no longer in the chapter");
@@ -283,7 +286,7 @@ export async function setAudiobookPicture(
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   const summary = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
   if (summary === undefined) throw new Error("that chapter is no longer in this production");
-  const narrator = await anyNarrator(store, productionId);
+  const narrator = await anyNarrator(store, productionId, summary.id);
   const plan = await planAudiobook(store, productionId, summary.id, { narrator });
   const planned = plan.blocks.find((candidate) => candidate.block.key === block);
   if (planned === undefined) throw new Error("that block is no longer in the chapter");

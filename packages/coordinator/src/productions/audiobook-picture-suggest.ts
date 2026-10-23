@@ -248,7 +248,7 @@ export function blockOwnLooks(plan: Pick<AudiobookPlan, "blocks" | "record">, bl
 }
 
 export async function pictureRoom(store: WorldStore, productionId: string, chapterId: string, look: AudiobookLook | null): Promise<PictureRoom> {
-  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId) });
+  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId, chapterId) });
   const summary = store.getBundle().productions.find((p) => p.meta.id === productionId)?.chapters.find((c) => c.id === plan.chapter.id);
   const book = await readAudiobookBook(store, productionId).catch(() => null);
   const note = book === null || book === "unreadable" ? undefined : clip(book.chapterNotes?.[plan.chapter.id], PICTURE_BOUNDS.note);

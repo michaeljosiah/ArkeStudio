@@ -441,6 +441,13 @@ export const AUDIOBOOK_PICTURE_LOOK_REVIEW_SCHEMA_VERSION = 105;
  */
 export const AUDIOBOOK_PICTURE_SHAPES_SCHEMA_VERSION = 106;
 /**
+ * A chapter's own narrator (SPEC-047 R-195): `chapterNarrators` on the strict book record. A
+ * build before it reads such a record as unreadable, and every chapter then loses the book's
+ * narrator and notes along with it, so the world is raised before the first write (R-49).
+ * Picture shapes took 106 first, so this is 107.
+ */
+export const AUDIOBOOK_CHAPTER_NARRATOR_SCHEMA_VERSION = 107;
+/**
  * Where a picture's subject stands (design turn 197b): `focus` on a picture in the chapter's
  * strict audiobook record, which the video's vertical crop and Slow push follow. A build before
  * it reads such a record as unreadable, so the world is raised before the first. Sixty-two and

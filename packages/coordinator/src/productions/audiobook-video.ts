@@ -126,8 +126,14 @@ async function fileStamp(store: WorldStore, file: string | null): Promise<string
 async function planBook(store: WorldStore, productionId: string, options: AudiobookVideoOptions, ffmpeg: FfmpegRunner | undefined): Promise<Book> {
   const scope = options.scope ?? { kind: "book" };
   const listening = await audiobookListening(store, productionId, { ...(ffmpeg !== undefined ? { ffmpeg } : {}), mixAll: true, scope, finalAudio: true });
-  const narrator = await anyNarrator(store, productionId);
-  const readBy = `Read by ${narrator.label ?? narrator.voiceId}’s voice`;
+  // A book with a narrator to a part (R-195) credits each of them, in the order they first read.
+  const voices: string[] = [];
+  for (const chapter of listening.chapters.length > 0 ? listening.chapters : [undefined]) {
+    const narrator = await anyNarrator(store, productionId, chapter?.chapterId);
+    const name = `${narrator.label ?? narrator.voiceId}’s voice`;
+    if (!voices.includes(name)) voices.push(name);
+  }
+  const readBy = `Read by ${voices.length > 1 ? `${voices.slice(0, -1).join(", ")} and ${voices.at(-1)}` : voices[0]}`;
   const blockers: string[] = [];
   const chapters: PlannedChapter[] = [];
   for (const chapter of listening.chapters) {

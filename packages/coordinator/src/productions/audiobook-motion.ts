@@ -42,7 +42,7 @@ async function context(store: WorldStore, productionId: string, chapterFile: str
     ?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
   if (summary === undefined) throw new Error("that chapter is no longer in this production");
   const plan = await planAudiobook(store, productionId, summary.id, {
-    narrator: await anyNarrator(store, productionId),
+    narrator: await anyNarrator(store, productionId, summary.id),
   });
   const blocks = plan.blocks.map((p) => p.block);
   const index = blocks.findIndex((p) => p.key === block);

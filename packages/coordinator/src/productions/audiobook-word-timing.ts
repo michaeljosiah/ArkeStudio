@@ -80,7 +80,7 @@ export async function prepareAudiobookWordTiming(
   if (audiobookAudioHash(await currentBytes(store, file)) !== hash)
     throw new Error("the reading changed · prepare timing again");
   const fresh = await planAudiobook(store, productionId, plan.chapter.file, {
-    narrator: await anyNarrator(store, productionId),
+    narrator: await anyNarrator(store, productionId, plan.chapter.file),
   });
   if (fresh.blocks.find((entry) => entry.block.key === blockKey)?.block.text !== block.text)
     throw new Error("the words changed · prepare timing again");

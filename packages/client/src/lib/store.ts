@@ -5862,15 +5862,27 @@ export function setAudiobookNote(worldId: string, productionId: string, speaker:
   return send({ kind: "set-audiobook-note", worldId, productionId, speaker, note });
 }
 
-/** The book's own narrator, or null for the app's (R-46). */
-export function setAudiobookNarrator(worldId: string, productionId: string, voice: AudiobookReader | null): boolean {
-  return send({ kind: "set-audiobook-narrator", worldId, productionId, voice });
+/**
+ * The book's own narrator, or null for the app's (R-46). From a chapter (R-195), that chapter's
+ * own narrator goes in the same write, so it reads in the book's again.
+ */
+export function setAudiobookNarrator(worldId: string, productionId: string, voice: AudiobookReader | null, chapterId?: string): boolean {
+  return send({ kind: "set-audiobook-narrator", worldId, productionId, voice, ...(chapterId !== undefined ? { chapterId } : {}) });
 }
 
-/** What a narrator switch would do, before it is made (R-46); answered under the returned id. */
-export function quoteAudiobookNarrator(worldId: string, productionId: string, voice: AudiobookReader | null): string | null {
+/** A chapter's own narrator, or null to read it in the book's (R-195). */
+export function setAudiobookChapterNarrator(worldId: string, productionId: string, chapterId: string, voice: AudiobookReader | null): boolean {
+  return send({ kind: "set-audiobook-chapter-narrator", worldId, productionId, chapterId, voice });
+}
+
+/**
+ * What a narrator switch would do, before it is made (R-46); answered under the returned id. With
+ * a chapter it is that chapter's switch (R-195), and null is the book's narrator. `clears` is a
+ * book's switch that also lets that chapter's own narrator go, as the write will.
+ */
+export function quoteAudiobookNarrator(worldId: string, productionId: string, voice: AudiobookReader | null, chapterId?: string, clears?: string): string | null {
   const requestId = ulid();
-  if (!send({ kind: "quote-audiobook-narrator", worldId, productionId, requestId, voice })) return null;
+  if (!send({ kind: "quote-audiobook-narrator", worldId, productionId, requestId, voice, ...(chapterId !== undefined ? { chapterId } : {}), ...(clears !== undefined ? { clears } : {}) })) return null;
   emitChange({ ...current, narratorQuotes: { ...current.narratorQuotes, [requestId]: { state: "working" } } });
   return requestId;
 }
