@@ -77,8 +77,13 @@ kinds and what counts as one are defined in [AI tells](../research/ai-tells.md).
   - it builds the report's strip of consecutive 450-word blocks.
 
   The reading is pinned in the review as `tells`, with the line it was read against.
-- **The line is provisional.** It is 8 tells in a stretch, or 4 of one kind, until it is
-  calibrated against the author's own unaided chapters (S-6 of the issue).
+- **The line is provisional.** It is 10 tells in a stretch, or 5 of one kind, until it is
+  calibrated against the author's own unaided chapters (S-6 of the issue). It was 8 and 4
+  until 2026-10-23, when the owner asked for a more lenient check: under 8 and 4, prose with
+  ordinary craft in it was flagged so often that clearing it stripped the writing bare.
+- **Dialogue is not counted.** Tells inside dialogue are dropped before the reading is made,
+  and the task's detail line says how many. Skill v2 also asks the tagger to leave dialogue
+  alone and not to tag a narrator's own vocabulary as metaphor.
 - **The report.** It shows the chapter's figures, the strip, the counts by kind and the crowded
   passages. It calls the counts the model's reading, never a detector.
 - **Failure.** A prose answer without a tags list fails only its own task. The review is then
