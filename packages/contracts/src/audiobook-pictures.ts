@@ -51,9 +51,18 @@ export const AudiobookPictureSchema = z
     /** The source still stays in file. A candidate never changes the visual until explicitly chosen. */
     motion: AudiobookMotionSchema.optional(),
     motionCandidate: AudiobookMotionSchema.optional(),
+    /**
+     * The same moment made Tall, 9:16, for a phone (design turn 235, SPEC-047 R-197), made from
+     * this picture: `from` is this picture's `file` when it was made, so one made from an earlier
+     * picture is marked and still plays until it is made again (the owner's call 3).
+     */
+    tall: z.object({ file: z.string().min(1).max(1000), at: IsoDateTimeSchema, from: z.string().min(1).max(1000) }).strict().optional(),
   })
   .strict();
 export type AudiobookPicture = z.infer<typeof AudiobookPictureSchema>;
+
+/** A picture's Tall, made from an earlier picture than the one it has now (SPEC-047 R-197). */
+export const tallFromEarlier = (picture: Pick<AudiobookPicture, "file" | "tall">): boolean => picture.tall !== undefined && picture.tall.from !== picture.file;
 
 /** A picture stays at least this long (turn 186): a shorter hold is flagged in the chapter's view, never dropped. */
 export const PICTURE_MIN_HOLD_SEC = 20;

@@ -105,6 +105,8 @@ export function documentChapter(
         at,
         ...(until < natural && until > at ? { hold: until - at } : {}),
         picture: ids.picture(picture.file),
+        // The same moment made Tall (SPEC-058 R-37): a phone in portrait shows it over the whole screen.
+        ...(picture.tall !== undefined ? { tall: ids.picture(picture.tall) } : {}),
         ...(picture.focus !== undefined ? { focus: picture.focus } : {}),
         ...(video !== undefined && picture.motion !== undefined ? { motion: { video, behavior: picture.motion.behavior } } : {}),
       };

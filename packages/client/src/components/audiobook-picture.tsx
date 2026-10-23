@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import {
   audiobookTextHash,
+  bookPictureShapes,
   formatRunningTime,
+  tallFromEarlier,
   kitLookLibrary,
   pictureBench,
   pictureDetailSkins,
@@ -243,6 +245,8 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
           onEdit={editInBench}
           offline={connection !== "open"}
           picture={here === null ? null : mediaUrl(world.meta.slug, here.file)}
+          shapes={bookPictureShapes(production.audiobook)}
+          tall={here?.entry.tall === undefined ? null : { url: mediaUrl(world.meta.slug, here.entry.tall.file), earlier: tallFromEarlier(here.entry) }}
           mediaActions={motionControl}
           {...(here !== null ? { onRemove: remove } : {})}
           {...(choosePicture !== undefined ? { onChoose: choosePicture } : {})}

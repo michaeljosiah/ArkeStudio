@@ -180,6 +180,9 @@ import {
   pictureDetailSkins,
   type PictureDetailSkin,
   priceLabel,
+  PICTURE_SHAPES,
+  TALL_PICTURE_BRIEF,
+  makesShape,
   type BenchSession,
   type BenchTake,
   type SessionId,
@@ -357,7 +360,7 @@ import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiob
 import { resetAudiobookSeams, SeamRefusal, setAudiobookSeam } from "./productions/audiobook-seams.js";
 import { BeatRefusal, groupChapterByBeats, makeAdapterBeatsDeriver, type BeatsDeriver } from "./productions/audiobook-beats.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
-import { anyNarrator, audiobookListening, setAudiobookPicture, setAudiobookPictureFocus } from "./productions/audiobook-listening.js";
+import { anyNarrator, audiobookListening, pictureFileUsable, setAudiobookPicture, setAudiobookPictureFocus, setAudiobookPictureTall } from "./productions/audiobook-listening.js";
 import { chooseAudiobookMotion, quoteAudiobookMotion, saveAudiobookMotionCandidate, quotedMotionSource } from "./productions/audiobook-motion.js";
 import type { AudiobookWordTimingState } from "@arke-studio/contracts";
 import { prepareAudiobookWordTiming } from "./productions/audiobook-word-timing.js";
@@ -1338,6 +1341,12 @@ export class Coordinator {
   private readonly derivingLooks = new Map<string, AbortController>();
   /** A picture being made for a block (turn 191a): one at a time a block, ended with the world. */
   private readonly makingPictures = new Map<string, AbortController>();
+  /**
+   * A book's `Make 290 tall` run (design turn 235a), by world and production: one at a time,
+   * stoppable, and its last progress replayed to a window that connects, so a paid run going on
+   * is never hidden by a reload (codex on PR 2166).
+   */
+  private readonly makingTallPictures = new Map<string, { control: AbortController; last?: Extract<DomainEvent, { type: "audiobook.tall-progress" }> }>();
   /** `Illustrate this chapter` reading a chapter (turn 191b): one at a time, ended with the world. */
   private readonly illustrating = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /** A proposal not yet accepted (R-101): held by chapter and replayed to a window that connects. Nothing on disk. */
@@ -3861,6 +3870,7 @@ export class Coordinator {
         for (const run of this.illustrating.values()) replayed.push({ at: new Date().toISOString(), type: "illustration.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId });
         for (const held of this.heldIllustrations.values()) replayed.push({ ...held, at: new Date().toISOString() });
         for (const run of this.makingIllustrations.values()) replayed.push({ at: new Date().toISOString(), type: "illustration.progress", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId, progress: run.progress });
+        for (const run of this.makingTallPictures.values()) if (run.last !== undefined) replayed.push({ ...run.last, at: new Date().toISOString() });
         // The counts a run has reached ride on its register (codex on PR 1187), so a window
         // that rejoins is told how far the book and the chapter are; what a reload must never
         // hide is that a paid run is going and can be stopped.
@@ -14780,7 +14790,8 @@ export class Coordinator {
           ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}),
           exportId: msg.exportId,
           signal: control.signal,
-          include: msg.options,
+          include: { book: msg.options.book, motion: msg.options.motion },
+          ...(msg.options.size !== undefined ? { pictureSize: msg.options.size } : {}),
           ...(publish !== undefined ? { publish: { title: publish.title, author: publish.author, language: publish.language, cover: publish.cover } } : {}),
           studioVersion: this.opts.appVersion,
           // Each step said at once, the percent within it at most twice a second.
@@ -16176,7 +16187,14 @@ export class Coordinator {
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, block: msg.block };
         const at = () => new Date().toISOString();
         const key = `${msg.worldId}/${msg.productionId}/${chapter.file}/${msg.block}`;
-        const fail = (reason: string, sessionId?: string) => this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "failed", reason, ...(sessionId !== undefined ? { sessionId } : {}) });
+        // A Tall asked with the picture is answered whenever the picture is not made: the card
+        // waits on its id, and would say "Making tall…" until remounted (codex on PR 2166).
+        let tallWaiting = msg.tall !== undefined;
+        const fail = (reason: string, sessionId?: string) => {
+          this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "failed", reason, ...(sessionId !== undefined ? { sessionId } : {}) });
+          if (tallWaiting) this.emit({ at: at(), type: "audiobook.picture-made", ...ids, requestId: msg.tall!.requestId, state: "failed", reason: "not made" });
+          tallWaiting = false;
+        };
         if (this.makingPictures.has(key)) return fail("making a picture here already");
         const control = new AbortController();
         this.makingPictures.set(key, control);
@@ -16228,6 +16246,25 @@ export class Coordinator {
           // The record the picture now stands in goes to every window as any record write does: the margin's chip and the panel read it from there, and the card's own word is only that it is done.
           this.emit({ at: at(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, requestId: msg.requestId, record });
           this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "made", sessionId: made.sessionId, record });
+          // Its Tall (design turn 235, R-196), from the picture that just landed and under this
+          // block's lock, answered under the Tall's own id: the picture stays made if it fails.
+          if (msg.tall !== undefined) {
+            tallWaiting = false;
+            const tallIds = { ...ids, requestId: msg.tall.requestId };
+            try {
+              const tall = await this.makeTallPicture(store, { productionId: msg.productionId, chapter, block: msg.block, ceilingMicroUsd: msg.tall.confirmedMicroUsd, requestId: msg.tall.requestId, signal: control.signal, onMaking: () => this.emit({ at: at(), type: "audiobook.picture-made", ...tallIds, state: "making" }) });
+              if (tall.ok) {
+                this.refreshIfStillOpen(store);
+                this.emit({ at: at(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, requestId: msg.tall.requestId, record: tall.record });
+                this.emit({ at: at(), type: "audiobook.picture-made", ...tallIds, state: "made", sessionId: tall.sessionId, record: tall.record });
+              } else {
+                this.emit({ at: at(), type: "audiobook.picture-made", ...tallIds, state: "failed", reason: tall.reason, ...(tall.sessionId !== undefined ? { sessionId: tall.sessionId } : {}) });
+              }
+            } catch (err) {
+              void this.appLog?.append({ kind: "audiobook.picture-failed", chapter: chapter.file, block: msg.block, message: err instanceof Error ? err.message : String(err) });
+              this.emit({ at: at(), type: "audiobook.picture-made", ...tallIds, state: "failed", reason: control.signal.aborted ? "stopped" : describeCoordinatorError(err) });
+            }
+          }
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.picture-failed", chapter: chapter.file, block: msg.block, message: err instanceof Error ? err.message : String(err) });
           fail(control.signal.aborted ? "stopped" : describeCoordinatorError(err));
@@ -16235,6 +16272,131 @@ export class Coordinator {
           store.closingSignal.removeEventListener("abort", onClose);
           this.makingPictures.delete(key);
         }
+        return;
+      }
+      case "set-audiobook-picture-shapes": {
+        // The book's picture shapes (design turn 235a, SPEC-047 R-195), on the book's record; Wide
+        // alone is written as no field at all, as every book was before. Nothing is made or removed.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        try {
+          const held = await readAudiobookBook(store, msg.productionId);
+          const base = held === null || held === "unreadable" ? DEFAULT_AUDIOBOOK_BOOK : held;
+          const { pictureShapes: _was, ...rest } = base;
+          const shapes = PICTURE_SHAPES.filter((shape) => msg.shapes.includes(shape));
+          await writeAudiobookBookRaised(store, msg.productionId, { ...rest, ...(shapes.length === 1 && shapes[0] === "wide" ? {} : { pictureShapes: shapes }) });
+          this.refreshIfStillOpen(store);
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.picture-shapes-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+      case "make-audiobook-tall-picture": {
+        // A block's picture made Tall (design turn 235, R-196), from the card: one at a time per
+        // block, as its picture is, on the price the press showed.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, block: msg.block };
+        const at = () => new Date().toISOString();
+        const key = `${msg.worldId}/${msg.productionId}/${chapter.file}/${msg.block}`;
+        const fail = (reason: string, sessionId?: string) => this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "failed", reason, ...(sessionId !== undefined ? { sessionId } : {}) });
+        if (this.makingPictures.has(key)) return fail("making a picture here already");
+        const control = new AbortController();
+        this.makingPictures.set(key, control);
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        try {
+          const made = await this.makeTallPicture(store, { productionId: msg.productionId, chapter, block: msg.block, ceilingMicroUsd: msg.confirmedMicroUsd, requestId: msg.requestId, signal: control.signal, onMaking: () => this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "making" }) });
+          if (!made.ok) return fail(made.reason, made.sessionId);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: at(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, requestId: msg.requestId, record: made.record });
+          this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "made", sessionId: made.sessionId, record: made.record });
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.picture-failed", chapter: chapter.file, block: msg.block, message: err instanceof Error ? err.message : String(err) });
+          fail(control.signal.aborted ? "stopped" : describeCoordinatorError(err));
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+          this.makingPictures.delete(key);
+        }
+        return;
+      }
+      case "make-audiobook-tall-pictures": {
+        // `Make 290 tall` (design turn 235a, R-199): every picture of the book without a Tall, or
+        // with one from an earlier picture, made Tall from the picture it has now, one at a time.
+        // What was made stays when it is stopped; a refusal is kept per picture and the run goes on.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+        if (!production) return;
+        const key = `${msg.worldId}/${msg.productionId}`;
+        const at = () => new Date().toISOString();
+        const failed: Array<{ chapterId: string; block: string; reason: string }> = [];
+        const progress = (state: "making" | "done" | "stopped", total: number, made: number, refused?: string) => {
+          const event: Extract<DomainEvent, { type: "audiobook.tall-progress" }> = { at: at(), type: "audiobook.tall-progress", worldId: msg.worldId, productionId: msg.productionId, state, total, made, failed: failed.slice(-500), ...(refused !== undefined ? { refused } : {}) };
+          const run = this.makingTallPictures.get(key);
+          if (run !== undefined && run.control === control) run.last = event;
+          this.emit(event);
+        };
+        const control = new AbortController();
+        if (this.makingTallPictures.has(key)) return progress("done", 0, 0, "making Tall pictures already");
+        this.makingTallPictures.set(key, { control });
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        try {
+          const narrator = await anyNarrator(store, msg.productionId);
+          const todo: Array<{ chapter: { id: string; file: string; order: number }; block: string }> = [];
+          for (const chapter of [...production.chapters].filter((c) => c.retired !== true).sort((a, b) => a.order - b.order)) {
+            const plan = await planAudiobook(store, msg.productionId, chapter.id, { narrator }).catch(() => null);
+            if (plan === null || plan.record === "unreadable" || plan.record === null) continue;
+            const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+            for (const placed of placePictures(blocks, plan.record.pictures).placed) {
+              // A Tall made from this picture and still showable is done; one whose file is gone is
+              // left out of the plan, so the sheet counts it to make and so must this (codex on PR 2166).
+              if (placed.picture.tall !== undefined && placed.picture.tall.from === placed.picture.file && (await pictureFileUsable(store, placed.picture.tall.file))) continue;
+              todo.push({ chapter: { id: chapter.id, file: chapter.file, order: chapter.order }, block: blocks[placed.index]!.key });
+            }
+          }
+          let made = 0;
+          let spent = 0;
+          progress("making", todo.length, 0);
+          for (const [n, item] of todo.entries()) {
+            if (control.signal.aborted) break;
+            const blockKey = `${msg.worldId}/${msg.productionId}/${item.chapter.file}/${item.block}`;
+            if (this.makingPictures.has(blockKey)) {
+              failed.push({ chapterId: item.chapter.id, block: item.block, reason: "making a picture here already" });
+              continue;
+            }
+            this.makingPictures.set(blockKey, control);
+            try {
+              const result = await this.makeTallPicture(store, { productionId: msg.productionId, chapter: item.chapter, block: item.block, ceilingMicroUsd: Math.max(0, msg.confirmedMicroUsd - spent), requestId: `${msg.requestId}/${n + 1}`, signal: control.signal });
+              if (result.ok) {
+                made += 1;
+                spent += result.estimatedMicroUsd;
+                this.emit({ at: at(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: item.chapter.id, record: result.record });
+              } else if (!control.signal.aborted) failed.push({ chapterId: item.chapter.id, block: item.block, reason: result.reason });
+            } catch (err) {
+              if (!control.signal.aborted) failed.push({ chapterId: item.chapter.id, block: item.block, reason: describeCoordinatorError(err) });
+            } finally {
+              this.makingPictures.delete(blockKey);
+            }
+            progress("making", todo.length, made);
+          }
+          this.refreshIfStillOpen(store);
+          progress(control.signal.aborted ? "stopped" : "done", todo.length, made);
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.tall-pictures-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+          progress("done", 0, 0, describeCoordinatorError(err));
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+          this.makingTallPictures.delete(key);
+        }
+        return;
+      }
+      case "stop-audiobook-tall-pictures": {
+        this.makingTallPictures.get(`${msg.worldId}/${msg.productionId}`)?.control.abort();
         return;
       }
       case "rewrite-audiobook-picture-prompt": {
@@ -20419,9 +20581,55 @@ export class Coordinator {
    * `ceilingMicroUsd` is the price shown on it, and a plan that costs more is refused, not spent.
    * The window the author is in is left where it is: nothing here opens or changes the Bench view.
    */
+  /**
+   * A block's picture made Tall (design turn 235, SPEC-047 R-196): the picture it shows now rides
+   * as the only reference and is recomposed at 9:16, then filed beside it. A model that makes no
+   * 9:16 is refused in one clause (R-200) rather than given another shape; the ChatGPT route takes
+   * its shape from the brief, which says it.
+   */
+  private async makeTallPicture(
+    store: WorldStore,
+    input: { productionId: string; chapter: { id: string; file: string; order: number }; block: string; ceilingMicroUsd: number; requestId: string; signal: AbortSignal; onMaking?: () => void },
+  ): Promise<{ ok: true; record: Awaited<ReturnType<typeof setAudiobookPictureTall>>; sessionId: SessionId; estimatedMicroUsd: number } | { ok: false; reason: string; sessionId?: SessionId }> {
+    const model = await this.pictureModel(store);
+    if (!model) return { ok: false, reason: "no picture model is on" };
+    if (!makesShape(model, "9:16")) return { ok: false, reason: `${model.displayName} makes no 9:16` };
+    // A route that takes its size from the brief is sent none; the Tall brief says the shape.
+    const offered = model.limits.providerSelectedSize !== true;
+    const plan = await planAudiobook(store, input.productionId, input.chapter.id, { narrator: await anyNarrator(store, input.productionId) });
+    const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+    const index = blocks.findIndex((candidate) => candidate.key === input.block);
+    if (index < 0) return { ok: false, reason: "that block is no longer in the chapter" };
+    const shown = placePictures(blocks, plan.record === "unreadable" ? undefined : plan.record?.pictures).placed.find((entry) => entry.index === index)?.picture;
+    if (shown === undefined) return { ok: false, reason: "that block has no picture" };
+    input.onMaking?.();
+    const made = await this.makeBenchPicture(store, {
+      title: `Chapter ${input.chapter.order} · ${input.block === "title" ? "title" : `block ${index + 1}`} · Tall`,
+      prompt: TALL_PICTURE_BRIEF,
+      model,
+      ...(offered ? { aspect: "9:16" } : {}),
+      who: [],
+      recompose: shown.file,
+      requestId: input.requestId,
+      ceilingMicroUsd: input.ceilingMicroUsd,
+      signal: input.signal,
+    });
+    if (!made.ok) return made;
+    const record = await setAudiobookPictureTall(store, input.productionId, input.chapter.file, input.block, `artifacts/${made.artifact.file}`, shown.file);
+    return { ok: true, record, sessionId: made.sessionId, estimatedMicroUsd: made.estimatedMicroUsd };
+  }
+
   private async makeBenchPicture(
     store: WorldStore,
-    input: { saved?: SavedPicture; title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; detailed?: readonly PictureDetailSkin[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal; motion?: { params: import("@arke-studio/contracts").BenchVideoParams; startFrame: string; sourceHash: string } },
+    input: {
+      saved?: SavedPicture; title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; detailed?: readonly PictureDetailSkin[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal; motion?: { params: import("@arke-studio/contracts").BenchVideoParams; startFrame: string; sourceHash: string };
+      /**
+       * A picture made from another (design turn 235): this world file rides as the only reference
+       * and `prompt` is the brief as it is sent, never wrapped in the cast's closing lines, because
+       * the picture it recomposes already fixes who is in it.
+       */
+      recompose?: string;
+    },
   ): Promise<{ ok: true; sessionId: SessionId; artifact: { id: string; file: string }; costMicroUsd: number | null; estimatedMicroUsd: number } | { ok: false; reason: string; sessionId?: SessionId; provider?: true }> {
     if (input.signal?.aborted) return { ok: false, reason: "stopped" };
     const worldId = store.worldId;
@@ -20442,6 +20650,14 @@ export class Coordinator {
       const start = await addBenchReference(bench, store.getBundle(), input.model, { source: { source: "world-file", path: input.motion.startFrame }, worldFile: { read: (file) => quotedMotionSource(store, file, input.motion!.sourceHash) }, lane: "keyframe", requestId: `motion-frame:${input.requestId}`, at: this.nowIso() });
       if (start.outcome === "refused") return fail(start.reason);
     }
+    // A recomposition's one reference is the picture itself: without it there is nothing to
+    // recompose, so a refusal fails the picture rather than drawing it from the words alone.
+    if (input.recompose !== undefined) {
+      const bench = await this.benchFor(worldId, sessionId);
+      if (bench === null) return fail("the Bench session is gone");
+      const from = await addBenchReference(bench, store.getBundle(), input.model, { source: { source: "world-file", path: input.recompose }, worldFile: worldFileReader(store.dir), requestId: `pic-from:${input.requestId}`, at: this.nowIso() });
+      if (from.outcome === "refused") return fail(from.reason);
+    }
     // The pictures that ride, each by the name the Bench gives it; a picture it refuses is left
     // off and the take is made without it — the refusal is the Bench's own and is logged.
     const cited: Array<{ name: string; kind: "character" | "place"; token: string }> = [];
@@ -20458,7 +20674,7 @@ export class Coordinator {
       else cited.push({ name: entry.name, kind: entry.kind, token: outcome.token });
     }
     if (input.signal?.aborted) return fail("stopped");
-    const brief = input.saved?.brief ?? (input.motion === undefined ? pictureBench(input.prompt, cited, input.mood, input.detailed ?? []) : input.prompt);
+    const brief = input.saved?.brief ?? (input.recompose !== undefined || input.motion !== undefined ? input.prompt : pictureBench(input.prompt, cited, input.mood, input.detailed ?? []));
     const composed = await this.benchFor(worldId, sessionId);
     if (composed === null) return fail("the Bench session is gone");
     if (input.saved === undefined) await composed.store.append({ type: "composer-set", mode, provider: input.model.provider, model: input.model.id, params, brief }, { at: this.nowIso(), requestId: `pic-brief:${input.requestId}` });
@@ -22292,6 +22508,7 @@ export class Coordinator {
       for (const run of this.checkingAudiobookWords.values()) run.control.abort();
       for (const run of this.illustrating.values()) run.control.abort();
       for (const run of this.makingIllustrations.values()) run.control.abort();
+      for (const run of this.makingTallPictures.values()) run.control.abort();
       for (const run of this.readingBooks.values()) run.control.abort();
       for (const run of this.readingAudiobooks.values()) run.control.abort();
       await this.storyPublications.stop();

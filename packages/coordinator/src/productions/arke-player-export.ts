@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { LISTENING_MEDIA_TYPE, manuscriptDocument, packageSlug, SlugSchema, WORLD_PACKAGE_FORMAT, type GuideDocument, type ListeningChapter, type ListeningDocumentChapter, type WorldAsset } from "@arke-studio/contracts";
+import { arkePlayerPictureEdge, LISTENING_MEDIA_TYPE, manuscriptDocument, packageSlug, SlugSchema, WORLD_PACKAGE_FORMAT, type ArkePlayerPictureSize, type GuideDocument, type ListeningChapter, type ListeningDocumentChapter, type WorldAsset } from "@arke-studio/contracts";
 import type { FfmpegRunner } from "../takes/export.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -45,6 +45,8 @@ export interface ArkePlayerExportOptions {
   signal?: AbortSignal;
   /** The book and the pictures' loops are each the author's to leave out (233a). */
   include: { book: boolean; motion: boolean };
+  /** The long side the narration's pictures ship at (235d, SPEC-058 R-41); full when absent. */
+  pictureSize?: ArkePlayerPictureSize;
   /** Publish's title, author, language and cover for the production, where it has them (R-2). */
   publish?: { title?: string; author?: string; language?: string; cover?: string | null };
   studioVersion: string;
@@ -156,6 +158,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
     if (chapter.mix !== undefined) await resolve(chapter.mix.file, `Chapter ${chapter.order} · its mix outside this world`);
     for (const picture of chapter.pictures) {
       await resolve(picture.file, where);
+      if (picture.tall !== undefined) await resolve(picture.tall, where);
       if (options.include.motion && picture.motion !== undefined) await resolve(picture.motion.file, where);
     }
     if (chapter.opening !== null) await resolve(chapter.opening, where);
@@ -220,8 +223,14 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
     }
 
     // Pictures fitted for a phone (R-6): at most 2048 px, JPEG at quality 85 unless a PNG is
-    // transparent, each once however many chapters show it, its original's digest kept.
-    const pictureFiles = [...new Set([...(keyArt !== null ? [keyArt] : []), ...(picture !== null ? [picture] : []), ...(cover !== null ? [cover] : []), ...whole.flatMap((chapter) => [...(chapter.opening !== null ? [chapter.opening] : []), ...chapter.pictures.map((picture) => picture.file)])])];
+    // transparent, each once however many chapters show it, its original's digest kept. Each
+    // moment's Tall goes in beside its picture (R-42). The narration's pictures ship at the chosen
+    // Size (R-41); the key art, the cover and the production's picture stay full, as the world's
+    // card and the book's cover show them larger than a moment.
+    const narration = whole.flatMap((chapter) => [...(chapter.opening !== null ? [chapter.opening] : []), ...chapter.pictures.flatMap((moment) => [moment.file, ...(moment.tall !== undefined ? [moment.tall] : [])])]);
+    const keptFull = new Set([...(keyArt !== null ? [keyArt] : []), ...(picture !== null ? [picture] : []), ...(cover !== null ? [cover] : [])]);
+    const pictureFiles = [...new Set([...keptFull, ...narration])];
+    const edge = arkePlayerPictureEdge(options.pictureSize);
     const motionFiles = options.include.motion ? [...new Set(whole.flatMap((chapter) => chapter.pictures.flatMap((picture) => (picture.motion !== undefined ? [picture.motion.file] : []))))] : [];
     const pictureIds = new Map<string, string>();
     const motionIds = new Map<string, string>();
@@ -235,7 +244,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
       const assetId = file === keyArt ? "key-art" : `p${pad(++numbered, 3)}`;
       const path = assetId === "key-art" ? `key-art.${keepsAlpha ? "png" : "jpg"}` : `pictures/${assetId}.${keepsAlpha ? "png" : "jpg"}`;
       try {
-        await fitReadingImage(real.get(file)!, at(path), keepsAlpha, ffmpeg, signal);
+        await fitReadingImage(real.get(file)!, at(path), keepsAlpha, ffmpeg, signal, keptFull.has(file) ? undefined : edge);
       } catch {
         if (signal.aborted) return cancelled();
         return { ok: false, blockers: [`${file.split("/").pop()} could not be fitted for a phone`] };
@@ -366,7 +375,8 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
 
     // What the narration shows, each picture once: the count the sheet and Publications say.
     const shown = new Set([...(cover !== null ? [cover] : []), ...whole.flatMap((chapter) => [...(chapter.opening !== null ? [chapter.opening] : []), ...chapter.pictures.map((picture) => picture.file)])]).size;
-    const holds = [whole.length > 0 ? `${whole.length} chapter${whole.length === 1 ? "" : "s"}` : null, shown > 0 ? `${shown} picture${shown === 1 ? "" : "s"}` : null, bookId !== undefined ? "the book" : null, guideId !== undefined ? "the guide" : null].filter((part) => part !== null).join(" · ");
+    const tall = new Set(whole.flatMap((chapter) => chapter.pictures.flatMap((moment) => (moment.tall !== undefined ? [moment.tall] : [])))).size;
+    const holds = [whole.length > 0 ? `${whole.length} chapter${whole.length === 1 ? "" : "s"}` : null, shown > 0 ? `${shown} picture${shown === 1 ? "" : "s"}` : null, tall > 0 ? `${tall} tall` : null, bookId !== undefined ? "the book" : null, guideId !== undefined ? "the guide" : null].filter((part) => part !== null).join(" · ");
 
     // Under the gate, everything the package was made from is read again: a take made, a
     // sentence or a chapter's prose edited, a picture moved, a focus changed or a loop set to

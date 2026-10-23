@@ -463,6 +463,19 @@ export const PICTURE_TEXT_DIRECTION = "No added captions, subtitles or text over
  * stand. `mood` is the Mood line (design turn 193, rule 9; R-117), never the art direction's free
  * text, which named clothes and dressed everyone in them.
  */
+/**
+ * The brief for a picture's Tall (design turn 235, SPEC-047 R-196): the made picture rides as the
+ * only reference and is recomposed, never redrawn from the prompt, so a phone and a tablet show one
+ * moment. The subject is asked for above the lowest third, which the Player's transport covers
+ * (turn 235 rule 4). The shape is said in words too, for the ChatGPT route, whose image tool takes
+ * no size (verified 2026-10-23: 1672 × 941 came back 941 × 1672 with the same people and room).
+ */
+export const TALL_PICTURE_BRIEF = [
+  "Recompose the attached picture as a tall 9:16 portrait: the same moment, the same people with the same faces, hair and clothes, the same place, light and painterly style.",
+  "Reframe the scene around them vertically. Keep the subject in the upper two-thirds of the frame; the lowest third holds nothing that matters.",
+  PICTURE_TEXT_DIRECTION,
+].join("\n\n");
+
 export function pictureBench(
   prompt: string,
   cited: ReadonlyArray<{ name: string; kind: "character" | "place"; token: string }>,

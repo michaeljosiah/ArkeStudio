@@ -1,4 +1,5 @@
 import { GuideVoiceLinesRequestSchema, SetGuideEntrySchema } from "./world-guide.js";
+import { ARKE_PLAYER_PICTURE_SIZES } from "./world-package.js";
 import { ChapterReviewDecisionSchema } from "./chapter-review.js";
 import { StoryPublishActionSchema } from "./story-publication.js";
 import { valueSchema } from "./value-schema.js";
@@ -3399,6 +3400,27 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("set-audiobook-reading"), worldId: UlidSchema, productionId: SlugSchema, reading: AudiobookReadingSchema })
     .strict(),
+  /** The shapes the book's pictures are made in (design turn 235a, SPEC-047 R-195): turning one on or off makes and removes nothing. */
+  z
+    .object({ kind: z.literal("set-audiobook-picture-shapes"), worldId: UlidSchema, productionId: SlugSchema, shapes: z.array(z.enum(["wide", "tall"])).min(1).max(2) })
+    .strict(),
+  /**
+   * A block's picture made Tall (design turn 235, SPEC-047 R-196): recomposed from the picture it
+   * has now, which rides as the reference, on the price the press showed. Answered as
+   * `audiobook.picture-made` under the same id.
+   */
+  z
+    .object({ kind: z.literal("make-audiobook-tall-picture"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1).max(40), confirmedMicroUsd: z.number().int().min(0), requestId: UlidSchema })
+    .strict(),
+  /**
+   * `Make 290 tall` (235a, R-199): a Tall for every picture of the book without one, or with one
+   * from an earlier picture, each from its current picture, one at a time. Followed through
+   * `audiobook.tall-progress`, stopped by `stop-audiobook-tall-pictures`.
+   */
+  z
+    .object({ kind: z.literal("make-audiobook-tall-pictures"), worldId: UlidSchema, productionId: SlugSchema, confirmedMicroUsd: z.number().int().min(0), requestId: UlidSchema })
+    .strict(),
+  z.object({ kind: z.literal("stop-audiobook-tall-pictures"), worldId: UlidSchema, productionId: SlugSchema }).strict(),
   /** The book's requests for a groupable reader (design turn 185d): several blocks a request, or one. */
   z
     .object({ kind: z.literal("set-audiobook-requests"), worldId: UlidSchema, productionId: SlugSchema, requests: z.enum(["grouped", "per-paragraph"]) })
@@ -3683,6 +3705,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       looks: PictureOwnLooksSchema.optional(),
       confirmedMicroUsd: z.number().int().min(0),
       requestId: UlidSchema,
+      /**
+       * Its Tall too (design turn 235, R-196): made from the picture once it lands, answered as
+       * `audiobook.picture-made` under this id. Held by the coordinator with the request, never by
+       * a window, so another block opened meanwhile cannot take it (codex on PR 2166).
+       */
+      tall: z.object({ requestId: UlidSchema, confirmedMicroUsd: z.number().int().min(0) }).strict().optional(),
     })
     .strict(),
   /**
@@ -3973,8 +4001,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
       /** Chosen by the window, so it can find the package again after a reconnect lost the answer. */
       exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/),
-      /** The book and the pictures' loops are each the author's to leave out (233a). */
-      options: z.object({ book: z.boolean(), motion: z.boolean() }).strict(),
+      /** The book and the pictures' loops are each the author's to leave out (233a); the pictures' Size (235d), full when absent. */
+      options: z.object({ book: z.boolean(), motion: z.boolean(), size: z.enum(ARKE_PLAYER_PICTURE_SIZES).optional() }).strict(),
     })
     .strict(),
   /**

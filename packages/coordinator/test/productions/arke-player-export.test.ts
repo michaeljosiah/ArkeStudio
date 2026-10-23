@@ -12,6 +12,8 @@ import type { FfmpegRunner } from "../../src/takes/export.js";
 import { phrasesOf } from "../../src/productions/arke-player-listening.js";
 import { listArkePlayerPackages, packageSlug, pngHasAlpha, webpHasAlpha } from "../../src/productions/arke-player-export.js";
 import { checkWorldPackageZip } from "../../src/productions/world-package.js";
+import { planAudiobook, updateAudiobook } from "../../src/productions/audiobook.js";
+import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 /**
@@ -61,7 +63,7 @@ type Exported = Extract<DomainEvent, { type: "arke-player.exported" }>;
 type Progress = Extract<DomainEvent, { type: "export.progress" }>;
 type Listed = Extract<DomainEvent, { type: "web-packages.listed" }>;
 
-async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; send: (message: ClientMessage) => Promise<void> }) => Promise<void>, ffmpeg?: FfmpegRunner): Promise<void> {
+async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; send: (message: ClientMessage) => Promise<void>; store: () => WorldStore }) => Promise<void>, ffmpeg?: FfmpegRunner): Promise<void> {
   const { root, worldDir } = await makeTempRoot();
   await mkdir(join(worldDir, "productions", LEDGER, ".voices"), { recursive: true });
   const provider = new FsWorldProvider(root, { clock: () => "2026-10-21T09:00:00.000Z" });
@@ -94,7 +96,7 @@ async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; s
   const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
-    await run({ worldDir, events, send });
+    await run({ worldDir, events, send, store: () => provider.openStore!()! });
   } finally {
     await provider.close();
   }
@@ -102,7 +104,7 @@ async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; s
 
 const read = (send: (message: ClientMessage) => Promise<void>, chapterFile: string) => send({ kind: "read-audiobook-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile });
 const exportId = (n: number) => `ap_01J8G00000000000000000000${n}`;
-async function exportPackage(send: (message: ClientMessage) => Promise<void>, events: DomainEvent[], n: number, options = { book: true, motion: true }): Promise<Exported["result"]> {
+async function exportPackage(send: (message: ClientMessage) => Promise<void>, events: DomainEvent[], n: number, options: { book: boolean; motion: boolean; size?: "full" | "1280" | "960" } = { book: true, motion: true }): Promise<Exported["result"]> {
   await send({ kind: "export-arke-player", worldId: WORLD_ID, productionId: LEDGER, requestId: "01J00000000000000000000001", exportId: exportId(n), options });
   const answer = events.filter((event): event is Exported => event.type === "arke-player.exported" && event.exportId === exportId(n)).at(-1);
   assert.ok(answer, "the export is answered");
@@ -325,6 +327,37 @@ describe("the package's parts", () => {
       // Its pictures are fitted for a phone's page: no longer than 1024 px on a side (R-13).
       assert.ok(calls.some((args) => args.includes("-vf") && args[args.indexOf("-vf") + 1]!.includes("min(1024,iw)")));
       assert.match(JSON.parse(await readFile(`${file}.json`, "utf8")).holds, /the guide/);
+    }, recordingFfmpeg(calls));
+  });
+
+  it("carries a moment's Tall beside its picture, and fits the narration's pictures to the chosen Size (turn 235, SPEC-058 R-37, R-41, R-42)", () => {
+    const calls: string[][] = [];
+    return withHarness(async ({ worldDir, events, send, store }) => {
+      await read(send, "01-neap");
+      await send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p1.0", picture: { file: "world-art.png", source: "world" }, requestId: "01J00000000000000000000003" });
+      // The Tall is made in the next slice; here it is written as that slice will write it.
+      const { chapter } = await planAudiobook(store(), LEDGER, "neap", { narrator: { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george" } });
+      await updateAudiobook(store(), LEDGER, chapter, (current) => ({ ...current, pictures: { ...current.pictures, "p1.0": { ...current.pictures!["p1.0"]!, tall: { file: "references/maren-kest/body-full.png", at: "2026-10-23T09:00:00.000Z", from: "world-art.png" } } } }));
+
+      const result = await exportPackage(send, events, 8, { book: false, motion: true, size: "960" });
+      assert.ok(result.ok, result.ok ? "" : result.blockers.join("; "));
+      const file = join(worldDir, ...result.file.split("/"));
+      const opened = readWorldManifest(await entry(file, "world.json"));
+      assert.ok(opened.ok);
+      const listening = readListening(await entry(file, "listening.json"), opened.manifest.assets);
+      assert.ok(listening.ok, listening.ok ? "" : listening.reason);
+      const shown = listening.document.chapters[0]!.pictures!.find((picture) => picture.tall !== undefined);
+      assert.ok(shown, "the moment names its Tall");
+      assert.notEqual(shown.tall, shown.picture);
+      assert.equal(opened.manifest.assets[shown.tall!]?.mediaType.startsWith("image/"), true);
+
+      // The narration's pictures at 960 on the long side; the key art stays full (R-41).
+      const fits = calls.filter((args) => args.includes("-vf") && args[args.indexOf("-vf") + 1]!.startsWith("scale='min("));
+      assert.ok(fits.some((args) => args[args.indexOf("-vf") + 1]!.includes("min(960,iw)")), "the moments at 960");
+      assert.ok(fits.some((args) => args[args.indexOf("-vf") + 1]!.includes("min(2048,iw)")), "the key art at full");
+      await send({ kind: "list-web-packages", worldId: WORLD_ID, requestId: "01J00000000000000000000004" });
+      const listed = events.filter((event): event is Listed => event.type === "web-packages.listed").at(-1)!;
+      assert.match(listed.packages.find((entry) => entry.exportId === exportId(8))?.holds ?? "", /· 1 tall/);
     }, recordingFfmpeg(calls));
   });
 

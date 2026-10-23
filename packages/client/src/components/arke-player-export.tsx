@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { guideCounts, guideLiving, ulid, type AudiobookListening, type GuideCounts, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
+import { ARKE_PLAYER_PICTURE_SIZES, arkePlayerPictureEdge, guideCounts, guideLiving, ulid, type ArkePlayerPictureSize, type AudiobookListening, type GuideCounts, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
 import { downloadMedia } from "../lib/download.js";
 import { mediaUrl } from "../lib/media.js";
 import { listWebPackages, openExportsFolder, subscribeArkePlayerExported, subscribeWebPackages, exportArkePlayer, useStore, useWorld, type ArkePlayerExported } from "../lib/store.js";
 import { Folder, megabytes, Toggle } from "./audiobook-video.js";
+import { cx } from "./ui.js";
 
 /**
  * Export → Arke Player (design turn 233, SPEC-058 R-1 – R-8): the world package a person adds by
@@ -16,6 +17,8 @@ import { Folder, megabytes, Toggle } from "./audiobook-video.js";
 // this machine joins audio and fits pictures. An estimate, said with `~`.
 const AUDIO_BYTES_PER_SECOND = 16_000;
 const PICTURE_BYTES = 450_000;
+/** The long side a full picture ships at (SPEC-058 R-6); Size's smaller ones are measured against it. */
+const FULL_EDGE = 2048;
 const LOOP_BYTES = 2_500_000;
 const BOOK_BYTES = 600_000;
 /** A guide's portrait or place fitted to 1024 px, and its text and voice lines, roughly. */
@@ -29,6 +32,8 @@ export interface ArkePlayerCounts {
   /** `Chapters 1–12`, or how many where they do not run on. */
   range: string;
   pictures: number;
+  /** The moments made Tall as well (design turn 235, SPEC-058 R-42). */
+  tall: number;
   loops: number;
   /** Chapters whose every block has validated word timing. */
   wordsTimed: number;
@@ -42,11 +47,15 @@ export interface ArkePlayerCounts {
  */
 const carried = (plan: AudiobookListening) => plan.chapters.filter((chapter) => chapter.state === "read" && (chapter.blocks.length > 0 || (chapter.audioStudio !== undefined && chapter.mix !== undefined)));
 
-export function arkePlayerCounts(plan: AudiobookListening, options: { book: boolean; motion: boolean }): ArkePlayerCounts {
+export function arkePlayerCounts(plan: AudiobookListening, options: { book: boolean; motion: boolean; size?: ArkePlayerPictureSize }): ArkePlayerCounts {
   const whole = carried(plan);
   // The cover ships with the narration only: a package of the book alone shows no pictures.
   const pictures = new Set<string>(whole.length === 0 ? [] : [...(plan.cover !== null ? [plan.cover] : []), ...whole.flatMap((chapter) => [...chapter.pictures.map((picture) => picture.file), ...(chapter.opening !== null ? [chapter.opening] : [])])]);
+  const tall = new Set(whole.flatMap((chapter) => chapter.pictures.flatMap((picture) => (picture.tall !== undefined ? [picture.tall] : []))));
   const loops = new Set(whole.flatMap((chapter) => chapter.pictures.flatMap((picture) => (picture.motion !== undefined ? [picture.motion.file] : []))));
+  // A smaller Size shrinks a picture by its area (235d); the estimate's picture is a full one.
+  const edge = arkePlayerPictureEdge(options.size) ?? FULL_EDGE;
+  const pictureBytes = PICTURE_BYTES * Math.min(1, (edge / FULL_EDGE) ** 2);
   const orders = whole.map((chapter) => chapter.order);
   const runsOn = orders.every((order, index) => index === 0 || order === orders[index - 1]! + 1);
   const seconds = whole.reduce((sum, chapter) => sum + chapter.seconds, 0);
@@ -56,10 +65,11 @@ export function arkePlayerCounts(plan: AudiobookListening, options: { book: bool
     of: plan.chapters.length,
     range: orders.length === 0 ? "none" : orders.length === 1 ? `Chapter ${orders[0]}` : runsOn ? `Chapters ${orders[0]}–${orders[orders.length - 1]}` : `${orders.length} chapters`,
     pictures: pictures.size,
+    tall: tall.size,
     loops: loops.size,
     wordsTimed: whole.filter((chapter) => chapter.blocks.every((block) => (block.words?.length ?? 0) > 0)).length,
-    bytes: seconds * AUDIO_BYTES_PER_SECOND + pictures.size * PICTURE_BYTES + shipped * LOOP_BYTES + (options.book ? BOOK_BYTES : 0),
-    minutes: Math.max(1, Math.ceil((seconds / AUDIO_SECONDS_PER_SECOND + (pictures.size + shipped * 10) * SECONDS_PER_PICTURE) / 60)),
+    bytes: seconds * AUDIO_BYTES_PER_SECOND + (pictures.size + tall.size) * pictureBytes + shipped * LOOP_BYTES + (options.book ? BOOK_BYTES : 0),
+    minutes: Math.max(1, Math.ceil((seconds / AUDIO_SECONDS_PER_SECOND + (pictures.size + tall.size + shipped * 10) * SECONDS_PER_PICTURE) / 60)),
   };
 }
 
@@ -108,7 +118,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
 }): { rows: ReactNode; lines: ReactNode; foot: ReactNode; made: boolean; sub: string | null } {
   const connection = useStore().connection;
   const world = useWorld();
-  const [options, setOptions] = useState({ book: committed > 0, motion: true });
+  const [options, setOptions] = useState<{ book: boolean; motion: boolean; size: ArkePlayerPictureSize }>({ book: committed > 0, motion: true, size: "full" });
   const [result, setResult] = useState<ArkePlayerExported["result"] | null>(null);
   const [making, setMaking] = useState<string | null>(null);
   const [madeAt, setMadeAt] = useState<Date | null>(null);
@@ -203,7 +213,19 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       )}
       {opt("Book", committed === 0 ? <span>None</span> : <Toggle on={options.book} onChange={(book) => setOptions({ ...options, book })}>The book</Toggle>, committed === 0 ? "no chapter has prose" : `${committed} chapter${committed === 1 ? "" : "s"} · EPUB`)}
       {opt("Narration", <span>{counts === null ? "…" : `${counts.chapters} of ${counts.of}${phone ? "" : " · read whole"}`}</span>, counts?.range)}
-      {opt("Pictures", <span>{counts === null ? "…" : `${counts.pictures}${phone ? "" : " · fitted for a phone"}`}</span>, "2048 px · cover before the first")}
+      {opt("Pictures", <span data-testid="arke-player-pictures">{counts === null ? "…" : counts.tall > 0 ? `${counts.pictures} wide · ${counts.tall} tall` : `${counts.pictures}${phone ? "" : " · fitted for a phone"}`}</span>, "cover before the first")}
+      {/* 235d: the long side every picture of the narration ships at; Full is R-6's 2048. */}
+      {opt(
+        "Size",
+        <span className="fy-seg" role="radiogroup" aria-label="Picture size" data-testid="arke-player-size">
+          {ARKE_PLAYER_PICTURE_SIZES.map((size) => (
+            <button key={size} type="button" role="radio" aria-checked={options.size === size} className={cx("fy-seg__item", options.size === size && "fy-seg__item--active")} onClick={() => setOptions({ ...options, size })}>
+              {size === "full" ? "Full" : `${size} px`}
+            </button>
+          ))}
+        </span>,
+        "long side",
+      )}
       {opt("Text", <span>{phone ? "Timed" : "Phrases, timed"}</span>, counts === null || counts.chapters === 0 ? undefined : `words timed in ${counts.wordsTimed} of ${counts.chapters}`)}
       {opt("Motion", counts !== null && counts.loops === 0 ? <span>None</span> : <Toggle on={options.motion} onChange={(motion) => setOptions({ ...options, motion })}>Loops</Toggle>, counts === null || counts.loops === 0 ? undefined : `${counts.loops} · each with its still`)}
       {!phone && opt("Edition", <span className="fy-abv-field">{edition()}</span>)}
@@ -214,7 +236,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       {made === null && (
         <div className="fy-abv-est" data-testid="arke-player-estimate">
           <b>{counts === null ? "…" : `~${megabytes(counts.bytes)} · ~${counts.minutes} min ${remote ? "on the desktop" : "on this machine"}`}</b>
-          {!phone && counts !== null && <span className="m">{[`${counts.chapters} chapter${counts.chapters === 1 ? "" : "s"}`, `${counts.pictures} picture${counts.pictures === 1 ? "" : "s"}`, options.book ? "the book" : null, guided ? "the guide" : null].filter(Boolean).join(" · ")}</span>}
+          {!phone && counts !== null && <span className="m">{[`${counts.chapters} chapter${counts.chapters === 1 ? "" : "s"}`, `${counts.pictures + counts.tall} picture${counts.pictures + counts.tall === 1 ? "" : "s"}`, options.book ? "the book" : null, guided ? "the guide" : null].filter(Boolean).join(" · ")}</span>}
         </div>
       )}
       {making !== null && <div className="fy-abv-note" data-testid="arke-player-making">Making package · follow it in Activity</div>}
