@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import * as nodeModule from "node:module";
 import { test } from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { Worker } from "node:worker_threads";
 import { DEFAULT_STORY_PDF_SETTINGS, type ManuscriptDocument } from "@arke-studio/contracts";
 import { createStoryPdfRunner } from "../src/publications/story-pdf-runner.js";
 
@@ -13,6 +16,23 @@ test("the development worker generates and independently validates actual PDF by
   assert.equal(Buffer.from(result.bytes).subarray(0, 5).toString(), "%PDF-");
   assert.equal(result.receipt.checks.text, true);
   assert.equal(result.chapters[0]?.id, "one");
+});
+
+// Path2D and ImageData are what PDF.js takes from @napi-rs/canvas; Node has neither. A worker
+// that loads the addon can crash the whole test process on Windows when it exits.
+test("PDF.js in the PDF worker loads no native canvas addon", { skip: typeof nodeModule.registerHooks !== "function" && "needs module.registerHooks (Node 22.15+)" }, async () => {
+  const require = nodeModule.createRequire(import.meta.url);
+  const source = `require(${JSON.stringify(require.resolve("tsx/cjs"))});
+    require(${JSON.stringify(fileURLToPath(new URL("../src/publications/story-pdf.ts", import.meta.url)))}).refuseCanvasAddon();
+    globalThis.DOMMatrix = function ExtractionOnlyMatrix() {};
+    import(${JSON.stringify(pathToFileURL(require.resolve("pdfjs-dist/legacy/build/pdf.mjs")).href)})
+      .then(() => require("node:worker_threads").parentPort.postMessage([typeof Path2D, typeof ImageData]));`;
+  const probe = new Worker(source, { eval: true, stdout: true, stderr: true });
+  probe.stdout.resume(); probe.stderr.resume();
+  try {
+    const seen = await new Promise((resolve, reject) => { probe.once("message", resolve); probe.once("error", reject); });
+    assert.deepEqual(seen, ["undefined", "undefined"]);
+  } finally { await probe.terminate(); }
 });
 
 test("an unresponsive PDF renderer is terminated at the host deadline", async () => {

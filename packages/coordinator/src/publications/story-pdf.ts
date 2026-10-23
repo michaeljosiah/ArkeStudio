@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import * as nodeModule from "node:module";
 import { setImmediate } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import PDFDocument from "pdfkit";
@@ -415,6 +416,24 @@ function verifyPlanSource(document: ManuscriptDocument, plan: Plan): void {
     }
     if (position !== text.length) throw new Error(`${source.context}: PDF planning omitted manuscript text.`);
   }
+}
+
+/**
+ * PDF.js requires its optional @napi-rs/canvas addon whenever it loads in Node, before it looks
+ * for the matrix validatePdf supplies, although this parser never draws. The packaged worker
+ * cannot resolve the addon; a source checkout can. Each PDF gets a fresh worker, and on Windows
+ * the addon's DLL is freed when the worker that loaded it exits: an unload that intermittently
+ * faults (0xC0000005) and takes the whole process with it, after the PDF is already made.
+ * Refusing it keeps tests and development on the path that ships. The hook is per-thread, so
+ * install it only inside the PDF worker.
+ */
+export function refuseCanvasAddon(): void {
+  // registerHooks arrived in Node 22.15; an older 22.x simply loads the addon as before.
+  if (typeof nodeModule.registerHooks !== "function") return;
+  nodeModule.registerHooks({ resolve: (specifier, context, next) => {
+    if (specifier === "@napi-rs/canvas") throw Object.assign(new Error("Cannot find module '@napi-rs/canvas'"), { code: "MODULE_NOT_FOUND" });
+    return next(specifier, context);
+  } });
 }
 
 async function validatePdf(bytes: Uint8Array, plan: Plan, frame: ReturnType<typeof storyPdfFrame>, checkpoint: () => Promise<void>): Promise<number> {

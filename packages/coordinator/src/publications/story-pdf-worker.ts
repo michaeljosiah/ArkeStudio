@@ -1,5 +1,8 @@
 import { parentPort, workerData } from "node:worker_threads";
-import { renderStoryPdf } from "./story-pdf.js";
+import { refuseCanvasAddon, renderStoryPdf } from "./story-pdf.js";
+
+// Before either PDF.js entry loads; refuseCanvasAddon says which Windows crash this prevents.
+refuseCanvasAddon();
 
 // The separately bundled PDF.js worker is loaded locally, never by a network URL. This is the
 // parser's in-process worker shim, already isolated inside our terminable Node worker.
