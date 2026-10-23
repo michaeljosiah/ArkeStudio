@@ -1,4 +1,5 @@
 import { GuideVoiceLinesRequestSchema, SetGuideEntrySchema } from "./world-guide.js";
+import { ARKE_PLAYER_PICTURE_SIZES } from "./world-package.js";
 import { ChapterReviewDecisionSchema } from "./chapter-review.js";
 import { StoryPublishActionSchema } from "./story-publication.js";
 import { valueSchema } from "./value-schema.js";
@@ -3973,8 +3974,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
       /** Chosen by the window, so it can find the package again after a reconnect lost the answer. */
       exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/),
-      /** The book and the pictures' loops are each the author's to leave out (233a). */
-      options: z.object({ book: z.boolean(), motion: z.boolean() }).strict(),
+      /** The book and the pictures' loops are each the author's to leave out (233a); the pictures' Size (235d), full when absent. */
+      options: z.object({ book: z.boolean(), motion: z.boolean(), size: z.enum(ARKE_PLAYER_PICTURE_SIZES).optional() }).strict(),
     })
     .strict(),
   /**

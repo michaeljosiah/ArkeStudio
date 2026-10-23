@@ -78,12 +78,16 @@ async function onShelf(store: WorldStore, file: string): Promise<boolean> {
 
 /**
  * The pictures a chapter may show: in the world's image catalogue now — a retired or superseded
- * artifact leaves it though its bytes stay on disk (codex on PR 1491) — and on the shelf.
+ * artifact leaves it though its bytes stay on disk (codex on PR 1491) — and on the shelf. A
+ * picture's Tall (design turn 235) is held to the same test, so one whose file has gone is left
+ * out and the phone shows the Wide picture instead.
  */
 async function usablePictures(store: WorldStore, pictures: Readonly<Record<string, AudiobookPicture>>): Promise<Set<string>> {
   const listed = new Set(worldImageReferences(store.getBundle()).map((reference) => reference.file));
   const usable = new Set<string>();
-  for (const picture of Object.values(pictures)) if (listed.has(picture.file) && (await onShelf(store, picture.file))) usable.add(picture.file);
+  for (const picture of Object.values(pictures)) {
+    for (const file of [picture.file, ...(picture.tall !== undefined ? [picture.tall.file] : [])]) if (listed.has(file) && (await onShelf(store, file))) usable.add(file);
+  }
   return usable;
 }
 

@@ -1,4 +1,4 @@
-import type { SetGuideEntry } from "@arke-studio/contracts";
+import type { ArkePlayerPictureSize, SetGuideEntry } from "@arke-studio/contracts";
 import type { StoryPublishAction } from "@arke-studio/contracts";
 import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
 import type { AudiobookReader, PictureShot, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
@@ -6474,7 +6474,7 @@ export function exportAudiobookPlayer(worldId: string, productionId: string, exp
 }
 
 /** The world package for Arke Player (design turn 233): answered as `arke-player.exported` for the export id given. */
-export function exportArkePlayer(worldId: string, productionId: string, exportId: string, options: { book: boolean; motion: boolean }): string | null {
+export function exportArkePlayer(worldId: string, productionId: string, exportId: string, options: { book: boolean; motion: boolean; size?: ArkePlayerPictureSize }): string | null {
   const requestId = ulid();
   return send({ kind: "export-arke-player", worldId, productionId, requestId, exportId, options }) ? requestId : null;
 }

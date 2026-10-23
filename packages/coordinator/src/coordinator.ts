@@ -14780,7 +14780,8 @@ export class Coordinator {
           ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}),
           exportId: msg.exportId,
           signal: control.signal,
-          include: msg.options,
+          include: { book: msg.options.book, motion: msg.options.motion },
+          ...(msg.options.size !== undefined ? { pictureSize: msg.options.size } : {}),
           ...(publish !== undefined ? { publish: { title: publish.title, author: publish.author, language: publish.language, cover: publish.cover } } : {}),
           studioVersion: this.opts.appVersion,
           // Each step said at once, the percent within it at most twice a second.

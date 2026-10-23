@@ -74,6 +74,8 @@ export const ListeningPictureSchema = z
     focus: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).strict().optional(),
     motion: AudiobookMotionSchema.optional(),
     motionProblem: z.string().optional(),
+    /** The same moment made Tall for a phone (design turn 235, SPEC-047 R-197), when it has one that can be shown. */
+    tall: z.string().min(1).optional(),
   })
   .strict();
 export type ListeningPicture = z.infer<typeof ListeningPictureSchema>;
@@ -288,6 +290,9 @@ export function listeningChapter(input: {
     short: entry.short,
     ...(entry.picture.focus !== undefined ? { focus: entry.picture.focus } : {}),
     ...(entry.picture.motion?.active === true ? { motion: entry.picture.motion } : {}),
+    // A Tall whose file is gone is left out, as a picture's own is (placePictures): the phone then
+    // shows the Wide one, which is what a package without one does.
+    ...(entry.picture.tall !== undefined && (input.usable?.(entry.picture.tall.file) ?? true) ? { tall: entry.picture.tall.file } : {}),
   }));
   const first = pictures[0];
   const opening = first !== undefined && first.at === 0 ? first.file : (input.cover ?? first?.file ?? null);

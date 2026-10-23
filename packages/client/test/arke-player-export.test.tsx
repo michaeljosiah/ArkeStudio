@@ -94,6 +94,29 @@ describe("Export → Arke Player (turn 233)", () => {
     assert.equal(arkePlayerCounts(mixed, { book: true, motion: true }).chapters, 2);
   });
 
+  it("counts each moment's Tall, and a smaller Size makes a smaller package (turn 235, SPEC-058 R-41, R-42)", async () => {
+    const tall: AudiobookListening = { ...PLAN, chapters: PLAN.chapters.map((chapter) => ({ ...chapter, pictures: chapter.pictures.map((picture) => ({ ...picture, tall: "artifacts/stair-tall.png" })) })) };
+    const counts = arkePlayerCounts(tall, { book: true, motion: true });
+    assert.deepEqual([counts.pictures, counts.tall], [2, 1]);
+    assert.ok(counts.bytes > arkePlayerCounts(PLAN, { book: true, motion: true }).bytes, "the Tall pictures have their size");
+    assert.ok(arkePlayerCounts(tall, { book: true, motion: true, size: "960" }).bytes < counts.bytes, "960 is smaller than Full");
+
+    const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
+    const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} />);
+    const ask = lastAsk(m, "open-audiobook-listening")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...tall, scope: { kind: "book" } } }));
+    await press(q('[data-testid="audiobook-export-arke-player"]'));
+    assert.match(row("Pictures"), /2 wide · 1 tall/);
+    const estimate = () => text(q('[data-testid="arke-player-estimate"]'));
+    const full = estimate();
+    assert.match(full, /3 pictures/);
+    await press([...q('[data-testid="arke-player-size"]')!.querySelectorAll("button")].find((button) => text(button) === "960 px")!);
+    assert.equal(q('[data-testid="arke-player-size"] [aria-checked="true"]')?.textContent, "960 px");
+    assert.notEqual(estimate(), full, "the estimate follows the Size");
+    await press(q('[data-testid="arke-player-start"]'));
+    assert.deepEqual(lastAsk(m, "export-arke-player")!.options, { book: true, motion: true, size: "960" });
+  });
+
   it("offers Arke Player as a fourth kind, with its rows, and makes the package on the desktop", async () => {
     const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
     const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} />);
@@ -113,7 +136,7 @@ describe("Export → Arke Player (turn 233)", () => {
     await press(q('[data-testid="arke-player-start"]'));
     const asked = lastAsk(m, "export-arke-player")!;
     assert.match(asked.exportId, /^ap_[0-9A-HJKMNP-TV-Z]{26}$/);
-    assert.deepEqual(asked.options, { book: false, motion: true });
+    assert.deepEqual(asked.options, { book: false, motion: true, size: "full" });
     assert.ok(q('[data-testid="arke-player-making"]'));
 
     // Made (233c): its file and size, and its SHA-256 in full to copy.
