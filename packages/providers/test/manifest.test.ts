@@ -492,6 +492,22 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
     assert.ok(["1024x1024", "1536x1024", "1024x1536"].includes(`${out.width}x${out.height}`));
   });
 
+  it("sends GPT Image 2 through fal only sizes it accepts: each side a multiple of 16, from a 1536 long edge (turn 235, R-200)", () => {
+    const gpt = model("gpt-image-2-fal");
+    const sizes = Object.fromEntries(offeredAspects(gpt).map((aspect) => {
+      const out = imageOutputFor(gpt, { landscape: !/^(9:16|2:3)$/.test(aspect), aspect });
+      assert.equal(out.aspect, aspect);
+      assert.equal(out.width % 16, 0, `${aspect} width ${out.width}`);
+      assert.equal(out.height % 16, 0, `${aspect} height ${out.height}`);
+      assert.ok(out.width * out.height >= 655_360 && Math.max(out.width, out.height) < 3840, `${aspect} within OpenAI's documented bounds`);
+      return [aspect, `${out.width}x${out.height}`];
+    }));
+    // The two a phone and a tablet are made in: no longer 720×1280, and no 854-wide 2:3.
+    assert.equal(sizes["16:9"], "1536x864");
+    assert.equal(sizes["9:16"], "864x1536");
+    assert.equal(sizes["2:3"], "1024x1536");
+  });
+
   it("prices the shape, not only the size, on a row billed by area", () => {
     const flux = model("flux-2-pro");
     const square = estimateCharacterImageMicroUsd(flux, "main-photo", 1, 0, "2K", "1:1");
