@@ -6522,6 +6522,12 @@ export function readAudiobookVideo(worldId: string, productionId: string, option
   return send({ kind: "read-audiobook-video", worldId, productionId, requestId, options }) ? requestId : null;
 }
 
+/** A picture moved along the words to another sentence's start (design turn 237, R-205), by picture keys: answered as `audiobook.record`. */
+export function moveAudiobookPicture(worldId: string, productionId: string, chapterFile: string, from: string, to: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "move-audiobook-picture", worldId, productionId, chapterFile, from, to, requestId }) ? requestId : null;
+}
+
 /** Where a block's picture's subject stands (197b), or null for the centre: answered as `audiobook.record`. */
 export function setAudiobookPictureFocus(worldId: string, productionId: string, chapterFile: string, block: string, focus: { x: number; y: number } | null): string | null {
   const requestId = ulid();

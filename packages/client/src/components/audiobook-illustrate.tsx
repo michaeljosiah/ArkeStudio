@@ -22,13 +22,14 @@ export function useIllustration(worldId: string, productionId: string, chapter: 
   const run = useIllustrationRuns()[`${worldId}/${productionId}/${chapter.id}`];
   // What the blocks draw dashed: each proposed row, until it is accepted and made — or skipped.
   const proposed = useMemo(() => {
-    const marks = new Map<string, { title: string }>();
+    // By picture key, a mark's for a sentence inside its block (design turn 237), with when it would start.
+    const marks = new Map<string, { title: string; at: number }>();
     if (run?.proposal === undefined || (run.state !== "proposed" && run.state !== "making")) return marks;
     const made = new Set(run.progress?.made ?? []);
     for (const row of run.proposal.rows) {
       // While they are made, a row held — for a missing reference, or refused last time — or skipped is not on its way.
       const held = run.state === "making" && !illustrationRowGoes(row, new Set(), new Set(run.without));
-      if (!made.has(row.block) && !run.skipped.includes(row.block) && !held) marks.set(row.block, { title: row.title });
+      if (!made.has(row.block) && !run.skipped.includes(row.block) && !held) marks.set(row.block, { title: row.title, at: row.at });
     }
     return marks;
   }, [run]);

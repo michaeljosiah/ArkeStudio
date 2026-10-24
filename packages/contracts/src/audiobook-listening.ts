@@ -353,6 +353,40 @@ export function pictureWords(
 }
 
 /**
+ * Where each of a block's sentences starts in its words as written (design turn 237): the view
+ * draws a mark, and offers `+ Picture`, before a sentence's first character, so it needs the place
+ * in the text it shows rather than in the flattened text `sentencesOf` cuts.
+ */
+export function sentenceOffsets(text: string): number[] {
+  // The flattened text's characters, each with where it came from in the text as written.
+  const from: number[] = [];
+  let flat = "";
+  let space = false;
+  for (let index = 0; index < text.length; index += 1) {
+    if (/\s/.test(text[index]!)) {
+      space = flat !== "";
+      continue;
+    }
+    if (space) {
+      flat += " ";
+      from.push(index);
+      space = false;
+    }
+    flat += text[index]!;
+    from.push(index);
+  }
+  const offsets: number[] = [];
+  let at = 0;
+  for (const sentence of sentencesOf(text)) {
+    const found = flat.indexOf(sentence, at);
+    const start = found < 0 ? at : found;
+    offsets.push(from[start] ?? text.length);
+    at = start + sentence.length;
+  }
+  return offsets;
+}
+
+/**
  * A block's sentences, at sentence ends; a text with none is one sentence. What closes after the
  * stop stays with it — a quote, a bracket, emphasis's `*` or `_` — or the next sentence, and the
  * mark set at it (design turn 237), would open on a stray `**`.
@@ -515,7 +549,13 @@ export function pictureSpans(
   >,
   pictures: Readonly<Record<string, AudiobookPicture>> | undefined,
   usable?: (file: string) => boolean,
-): { spans: Array<PlacedPicture & { at: number; seconds: number; until: number | null; startEstimated: boolean }>; lost: string[]; estimated: boolean } {
+): {
+  spans: Array<PlacedPicture & { at: number; seconds: number; until: number | null; startEstimated: boolean }>;
+  lost: string[];
+  estimated: boolean;
+  /** Where a sentence of a block starts on the clock, as a picture there would (design turn 237): for a mark not yet made. */
+  startOf: (index: number, sentence: number) => { at: number; estimated: boolean };
+} {
   const starts: number[] = [];
   const lengths: number[] = [];
   /** Whether each block's start leans on an estimate: some block before it had no measured length. */
@@ -537,11 +577,17 @@ export function pictureSpans(
     const block = blocks[entry.index]!;
     return block.seconds !== null && block.seconds > 0 ? block.words?.[sentenceStart(block.text, entry.sentence).word] : undefined;
   };
-  const held = pictureHolds(placed, starts, round(clock), (entry) => timedAt(entry) ?? sentenceStart(blocks[entry.index]!.text, entry.sentence).share * lengths[entry.index]!);
+  const within = (entry: Pick<PlacedPicture, "index" | "sentence">) => timedAt(entry as PlacedPicture) ?? sentenceStart(blocks[entry.index]!.text, entry.sentence).share * lengths[entry.index]!;
+  const held = pictureHolds(placed, starts, round(clock), within);
   return {
     spans: held.map((entry, index) => ({ ...entry, until: held[index + 1]?.index ?? null, startEstimated: (guessed[entry.index] ?? estimated) || (entry.sentence > 0 && timedAt(entry) === undefined) })),
     lost,
     estimated,
+    startOf: (index, sentence) => {
+      if (blocks[index] === undefined) return { at: round(clock), estimated: true };
+      const offset = sentence > 0 ? within({ index, sentence }) : 0;
+      return { at: round((starts[index] ?? 0) + offset), estimated: (guessed[index] ?? estimated) || (sentence > 0 && timedAt({ index, sentence } as PlacedPicture) === undefined) };
+    },
   };
 }
 

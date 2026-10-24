@@ -13,6 +13,7 @@ import {
   pictureKeyParts,
   pictureMarkKey,
   pictureSlot,
+  placedKey,
   retimePictureMarks,
   sentenceHashes,
   kitLookLibrary,
@@ -361,6 +362,50 @@ export async function setAudiobookPicture(
     if (JSON.stringify(currentBlocks) !== JSON.stringify(blocks)) throw new Error("The chapter's blocks changed; choose the picture again.");
     checkReview(fresh.record === "unreadable" ? null : fresh.record);
     if (reaffirm && picture !== null && !(await onShelf(store, picture.file))) throw new Error("that picture is not in this world");
+  } });
+}
+
+/**
+ * A picture moved along the words (design turn 237, SPEC-047 R-205): from where it stands to the
+ * start of another sentence, through the record's lane. It keeps everything it holds — its file,
+ * Tall, look, shot, focus and motion — and takes the new place's key and words: a block's key at a
+ * block's first sentence, else a mark's with the sentence's hash. A place that holds a picture, and
+ * one whose words are gone, are refused; nothing is written.
+ */
+export async function moveAudiobookPicture(store: WorldStore, productionId: string, chapterFile: string, from: string, to: string): Promise<ChapterAudiobook> {
+  const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
+  const summary = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
+  if (summary === undefined) throw new Error("that chapter is no longer in this production");
+  const narrator = await anyNarrator(store, productionId, summary.id);
+  const plan = await planAudiobook(store, productionId, summary.id, { narrator });
+  const layout = (planned: AudiobookPlan) => planned.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+  const blocks = layout(plan);
+  return updateAudiobook(store, productionId, plan.chapter, (current) => {
+    const source = pictureSlot(blocks, current.pictures, from);
+    const target = pictureSlot(blocks, current.pictures, to);
+    if (source?.placed === undefined) throw new Error("that picture is no longer here");
+    if (target === null) throw new Error("that sentence is no longer in the block");
+    if (target.placed !== undefined) throw new Error(target.placed.key === source.placed.key ? "it is there already" : "a picture stands there");
+    const block = blocks[target.index]!;
+    const sentence = target.sentence > 0 ? sentenceHashes(block.text)[target.sentence]! : undefined;
+    const { mark: _was, ...picture } = source.placed.picture;
+    const { [source.placed.key]: _moved, ...rest } = current.pictures ?? {};
+    const key = sentence === undefined ? block.key : pictureMarkKey(block.key, sentence);
+    // A picture kept under that key though shown nowhere (one a join took off) is never written over.
+    if (rest[key] !== undefined) throw new Error("a picture stands there");
+    // Looks held for the picture's next making go with it (R-146). They are held under the key it is
+    // shown at, which a picture that followed its words to another block no longer shares with the key
+    // it is kept under (codex on PR 2179).
+    const shownAt = placedKey(blocks, source.placed);
+    const heldAt = current.ownLooks?.[shownAt] !== undefined ? shownAt : source.placed.key;
+    const { [heldAt]: held, ...looks } = current.ownLooks ?? {};
+    const ownLooks = held === undefined ? current.ownLooks : { ...looks, [key]: held };
+    return { ...current, updatedAt: store.now(), pictures: { ...rest, [key]: { ...picture, textHash: audiobookTextHash(block.text), ...(sentence !== undefined ? { mark: { sentence } } : {}) } }, ...(ownLooks !== undefined ? { ownLooks } : {}) };
+  }, { requireReadable: true, beforeWrite: async () => {
+    // Both places were found in the blocks as they were read: a Join, Split or edit since would move
+    // the picture to a sentence that is no longer there (codex on PR 2179), so it is refused, untouched.
+    const fresh = await planAudiobook(store, productionId, summary.id, { narrator });
+    if (JSON.stringify(layout(fresh)) !== JSON.stringify(blocks)) throw new Error("The chapter's blocks changed; move the picture again.");
   } });
 }
 

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import {
   AUDIOBOOK_DELIVERIES,
   CADENCE_NOTE_MAX,
@@ -131,7 +131,7 @@ export interface TurnBreak { at: number; label: string; tone: string; /** The fu
  * (design turn 181), a delivery marker's span underlined, a held control struck (R-47). A press
  * on a plate opens the menu to change or remove it.
  */
-export function DirectedText({ raw, cues, held, onPlate, turns = [], gap }: {
+export function DirectedText({ raw, cues, held, onPlate, turns = [], gap, marks = [] }: {
   raw: string;
   cues: readonly CadenceCue[];
   held: ReadonlySet<number>;
@@ -139,14 +139,22 @@ export function DirectedText({ raw, cues, held, onPlate, turns = [], gap }: {
   turns?: readonly TurnBreak[];
   /** What sits on the rule before each later turn, by its index in `turns`: the Split a fine pointer finds there (design turn 198). */
   gap?: (index: number) => ReactNode;
+  /**
+   * What stands before a sentence's first character (design turn 237): a picture's mark, or the
+   * `+ Picture` a fine pointer finds there, by its place in the text as written. It holds no
+   * words, so a selection's offsets still count the words alone.
+   */
+  marks?: ReadonlyArray<{ at: number; node: ReactNode }>;
 }) {
-  if (cues.length === 0 && turns.length === 0) return <>{raw}</>;
+  if (cues.length === 0 && turns.length === 0 && marks.length === 0) return <>{raw}</>;
   const map = normalisedToRaw(raw);
   // Where each later turn of a block begins, in the normalised words the cues use.
   const turnAt = turns.map((turn) => ({ ...turn, at: rawToNormalised(raw, turn.at) }));
+  const markAt = marks.map((mark) => ({ ...mark, at: rawToNormalised(raw, mark.at) }));
   const at = (normalised: number) => map[Math.min(Math.max(normalised, 0), map.length - 1)]!;
   const cuts = new Set<number>([0, map.length - 1]);
   for (const turn of turnAt) cuts.add(turn.at);
+  for (const mark of markAt) cuts.add(mark.at);
   for (const cue of cues) {
     cuts.add(cueStart(cue));
     if (cue.kind === "emphasis" || cue.kind === "delivery") cuts.add(cue.span.to);
@@ -184,6 +192,10 @@ export function DirectedText({ raw, cues, held, onPlate, turns = [], gap }: {
           {on}
         </span>,
       );
+    });
+    // A sentence's mark after the turn's rule, so it stands on the row its words are on (design turn 237).
+    markAt.forEach((mark, markIndex) => {
+      if (mark.at === from) out.push(<Fragment key={`pin${markIndex}`}>{mark.node}</Fragment>);
     });
     cues.forEach((cue, cueIndex) => {
       if (cueStart(cue) === from) out.push(plate(cue, cueIndex));

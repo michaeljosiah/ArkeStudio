@@ -1026,7 +1026,7 @@ describe("picture block opener (issue 1688)", () => {
     const played: string[] = [], selected: string[] = [];
     await act(async () => m.root.render(<AudiobookBlocks rows={rows} sounding={null} selected={null}
       onSelect={key => selected.push(key)} onPlayOne={row => played.push(row.block.key)} slug="the-undersong"
-      pictures={{ byKey: new Map([["p0.0", { file: "artifacts/harbour-upload.png", index: 1, at: 4, seconds: 80, until: null, estimated: false, entry: picture(1, "artifacts/harbour-upload.png") }]]), estimated: false }} />));
+      pictures={{ byKey: new Map([["p0.0", { key: "p0.0", file: "artifacts/harbour-upload.png", index: 1, sentence: 0, at: 4, seconds: 80, until: null, estimated: false, entry: picture(1, "artifacts/harbour-upload.png") }]]), estimated: false }} />));
     await press(q(m, '[data-block="p0.0"] [data-testid="audiobook-picture-chip"]'));
     await press(q(m, '[data-block="p0.0"] .fy-ab__text'));
     assert.deepEqual(selected, ["p0.0", "p0.0"], "chip and text click select exactly once each");

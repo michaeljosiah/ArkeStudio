@@ -8,7 +8,10 @@ import {
   audiobookSeamHash,
   audiobookTextHash,
   castParagraphHashes,
+  pictureMarkKey,
+  sentencesOf,
   type ArtifactSidecar,
+  type AudiobookPicture,
   type AudiobookDirection,
   type CadencePlan,
   type ChapterAudiobook,
@@ -185,7 +188,7 @@ async function menuItem(m: Mounted, testId: string): Promise<HTMLElement | null>
   return q(m, `[data-testid="${testId}"]`);
 }
 
-async function answerOpen(m: Mounted, extra: { audiobook?: ChapterAudiobook; audiobookMissing?: string[]; voices?: ChapterVoices } = {}): Promise<void> {
+async function answerOpen(m: Mounted, extra: { audiobook?: ChapterAudiobook; audiobookMissing?: string[]; voices?: ChapterVoices; body?: string } = {}): Promise<void> {
   const ask = m.sent.findLast((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
   assert.ok(ask, "opening asks for the body");
   await act(async () => {
@@ -197,7 +200,7 @@ async function answerOpen(m: Mounted, extra: { audiobook?: ChapterAudiobook; aud
       productionId: "inkbound",
       chapterId: "neap",
       disposition: "opened",
-      body: BODY,
+      body: extra.body ?? BODY,
       version: 4,
       hash: HASH,
       versions: [1, 2, 3],
@@ -2666,21 +2669,13 @@ describe("block seams (design turn 198)", () => {
     assert.equal(q(n, '[data-testid="audiobook-blocks-press"]')!.textContent, "Blocks 1 changed");
   });
 
-  it("a join that would take a picture off asks once, in one plain line; Cancel sends nothing", async () => {
+  it("joins at once even where both blocks have a picture: the join keeps the second as a mark (design turn 237, R-203)", async () => {
     const m = await mount(inkbound());
     const picture = (text: string) => ({ file: "world-art.png", source: "generated" as const, textHash: audiobookTextHash(text), at: AT });
     await answerOpen(m, { audiobook: { ...record([], {}), pictures: { "p0.0": picture(P0), "p1.0": picture(LINE) } } });
-    const join = q(m, '[data-block="p1.0"] [data-testid="audiobook-join"]')!;
-    await act(async () => join.click());
-    assert.deepEqual(seamSent(m), [], "it asks first");
-    const ask = q(m, '[data-testid="audiobook-join-confirm"]')!;
-    assert.equal(ask.querySelector("span")!.textContent, "Block 3’s picture comes off. It stays in the world.");
-    await act(async () => ([...ask.querySelectorAll("button")].find((button) => button.textContent === "Cancel") as HTMLElement).click());
-    assert.equal(q(m, '[data-testid="audiobook-join-confirm"]') === null, true);
-    assert.deepEqual(seamSent(m), []);
-    await act(async () => join.click());
-    await act(async () => ([...q(m, '[data-testid="audiobook-join-confirm"]')!.querySelectorAll("button")].find((button) => button.textContent === "Join") as HTMLElement).click());
-    assert.equal(seamSent(m).length, 1, "Join in the confirm joins");
+    await act(async () => q(m, '[data-block="p1.0"] [data-testid="audiobook-join"]')!.click());
+    assert.equal(seamSent(m).length, 1, "no question: nothing comes off");
+    assert.equal(q(m, '[data-testid="audiobook-join-confirm"]'), null);
   });
 
   it("holds while a read runs", async () => {
@@ -2948,5 +2943,76 @@ describe("retained chapter passage (issues 1688 and 1692)", () => {
     await act(async () => direct.dispatchEvent(new Event("cancel", { cancelable: true })));
     assert.ok(row.classList.contains("fy-ab__block--selected"));
     assert.equal(m.sent.filter(message => message.kind === "direct-chapter").length, 0, "opening the editor never runs direction");
+  });
+});
+
+/**
+ * Picture marks (design turn 237, 237a – 237c): a picture at a sentence inside its block, drawn as a
+ * bar before its first word with its chip on that line; `+ Picture` at a sentence's start opens the
+ * block's Picture tab for a mark there; a made bar drags to another sentence's start.
+ */
+describe("picture marks (turn 237)", () => {
+  const FIRST = "Tunde was telling the goat story again. Tunde widened his eyes and lowered his chin. Around them the club pressed on.";
+  // HTML in the body mounts the source editor, the one linkedom can run (as BODY does).
+  const STORY = `${FIRST}\n\nSix, and the tide <br> not yet called.`;
+  const sentences = sentencesOf(FIRST);
+  const markAt = (sentence: number) => pictureMarkKey("p0.0", audiobookTextHash(sentences[sentence]!));
+  const picture = (extra: Partial<AudiobookPicture> = {}): AudiobookPicture => ({ file: "world-art.png", source: "world", textHash: audiobookTextHash(FIRST), at: AT, ...extra });
+
+  it("draws a mark's bar before its first word and its chip, beside the block's own picture", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { body: STORY, audiobook: { ...record([], {}), pictures: { "p0.0": picture(), [markAt(1)]: picture({ mark: { sentence: audiobookTextHash(sentences[1]!) } }) } } });
+    const block = q(m, '[data-block="p0.0"]')!;
+    assert.deepEqual([...block.querySelectorAll('[data-testid="audiobook-pin"]')].map((pin) => pin.getAttribute("data-mark")), ["p0.0", markAt(1)], "a bar before each picture's first word");
+    assert.equal(block.querySelectorAll('[data-testid="audiobook-mark-chip"]').length, 1, "the mark's chip; the block's own keeps the margin's");
+    const chip = block.querySelector('[data-testid="audiobook-mark-chip"]')!;
+    assert.match(chip.querySelector(".fy-ab__picchip-at")?.getAttribute("data-label") ?? "", /^~?\d+:\d\d$/);
+    assert.equal(chip.textContent, "", "drawn from its data: the block's words, which a selection counts, are only the words (codex on PR 2179)");
+    assert.ok(block.textContent!.includes("Tunde widened his eyes"), "the words are as written");
+  });
+
+  it("opens the Picture tab for a mark placed with + Picture, and files the picture chosen there at the mark", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { body: STORY, audiobook: record([], {}) });
+    const here = all(m, '[data-block="p0.0"] [data-testid="audiobook-picture-here"]');
+    assert.equal(here.length, 2, "one at each sentence after the first");
+    await act(async () => here[1]!.click());
+    assert.match(q(m, ".fy-abp__title")?.textContent ?? q(m, '[data-testid="block-panel-title"]')?.textContent ?? "", /^Picture at ~?\d+:\d\d$/);
+    assert.match(q(m, ".fy-abp__sub")?.textContent ?? "", /^holds \d+ s · to ~\d+:\d\d$/, "how long it would hold, to the chapter's end with no picture after it");
+    assert.equal(q(m, '[data-block="p0.0"] .fy-ab__pin--on')?.getAttribute("data-mark"), markAt(2), "the placed mark, dashed and pressed");
+    await act(async () => q(m, '[data-testid="audiobook-picture-open"]')!.click());
+    await act(async () => q(m, '.fy-ab__pickitem[aria-label="Key art"]')!.click());
+    const set = m.sent.findLast((message): message is Extract<ClientMessage, { kind: "set-audiobook-picture" }> => message.kind === "set-audiobook-picture");
+    assert.equal(set?.block, markAt(2), "filed at the mark");
+  });
+
+  it("takes the author's tab with a mark open: Voice leaves the mark for its block (codex on PR 2179)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { body: STORY, audiobook: record([], {}) });
+    await act(async () => all(m, '[data-block="p0.0"] [data-testid="audiobook-picture-here"]')[0]!.click());
+    assert.match(q(m, ".fy-abp__title")?.textContent ?? "", /^Picture at/);
+    const voice = all(m, '.fy-abp__tabs [role="tab"]').find((tab) => tab.textContent?.startsWith("Voice"))!;
+    await act(async () => voice.click());
+    assert.ok(voice.classList.contains("fy-abp__tab--on"), "the tab chosen is the tab shown");
+    assert.doesNotMatch(q(m, ".fy-abp__title")?.textContent ?? "", /^Picture at/, "the block's panel, its own head");
+    assert.equal(q(m, '[data-block="p0.0"] .fy-ab__pin--on'), null, "the placed mark, never made, is gone");
+  });
+
+  it("offers + Picture at a sentence a block says twice only where it first comes (codex on PR 2178)", async () => {
+    const twice = "The bell rang over the water. She checked the date. The tide turned under the rail. She checked the date.";
+    const m = await mount(inkbound());
+    await answerOpen(m, { body: `${twice}\n\nSix, and the tide <br> not yet called.`, audiobook: record([], {}) });
+    assert.equal(all(m, '[data-block="p0.0"] [data-testid="audiobook-picture-here"]').length, 2, "the second and third sentences; the fourth repeats the second");
+  });
+
+  it("moves a made picture by dragging its bar to another sentence's start (R-205)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { body: STORY, audiobook: { ...record([], {}), pictures: { "p0.0": picture() } } });
+    const pin = q(m, '[data-block="p0.0"] [data-testid="audiobook-pin"]')!;
+    await act(async () => pin.dispatchEvent(new Event("dragstart", { bubbles: true })));
+    const places = all(m, '[data-block="p0.0"] [data-testid="audiobook-place"]');
+    await act(async () => places.at(-1)!.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true })));
+    const move = m.sent.find((message): message is Extract<ClientMessage, { kind: "move-audiobook-picture" }> => message.kind === "move-audiobook-picture");
+    assert.deepEqual([move?.from, move?.to], ["p0.0", markAt(2)]);
   });
 });

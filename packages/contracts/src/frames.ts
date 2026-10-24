@@ -3669,6 +3669,23 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * A picture moved along the words (design turn 237, SPEC-047 R-205): from where it stands to the
+   * start of another sentence, by their picture keys — a block's own or a mark's. It keeps its
+   * picture, shapes, look, shot, focus and motion. A place with a picture already, or words no
+   * longer there, is refused. Answered as `audiobook.record`.
+   */
+  z
+    .object({
+      kind: z.literal("move-audiobook-picture"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      from: z.string().min(1).max(40),
+      to: z.string().min(1).max(40),
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /**
    * Where a block's picture's subject stands (design turn 197b): dragged in the video's preview,
    * kept on the picture, `null` back to the centre. Answered as `audiobook.record`.
    */

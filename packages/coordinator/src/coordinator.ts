@@ -364,7 +364,7 @@ import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiob
 import { resetAudiobookSeams, SeamRefusal, setAudiobookSeam } from "./productions/audiobook-seams.js";
 import { BeatRefusal, groupChapterByBeats, makeAdapterBeatsDeriver, type BeatsDeriver } from "./productions/audiobook-beats.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
-import { anyNarrator, audiobookListening, pictureFileUsable, setAudiobookPicture, setAudiobookPictureFocus, setAudiobookPictureTall } from "./productions/audiobook-listening.js";
+import { anyNarrator, audiobookListening, moveAudiobookPicture, pictureFileUsable, setAudiobookPicture, setAudiobookPictureFocus, setAudiobookPictureTall } from "./productions/audiobook-listening.js";
 import { chooseAudiobookMotion, quoteAudiobookMotion, saveAudiobookMotionCandidate, quotedMotionSource } from "./productions/audiobook-motion.js";
 import type { AudiobookWordTimingState } from "@arke-studio/contracts";
 import { prepareAudiobookWordTiming } from "./productions/audiobook-word-timing.js";
@@ -16076,6 +16076,24 @@ export class Coordinator {
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.picture-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
           this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "move-audiobook-picture": {
+        // A picture dragged along the words to another sentence (design turn 237, R-205): it keeps
+        // everything it holds and takes the new place, through the record's lane.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
+        try {
+          const record = await moveAudiobookPicture(store, msg.productionId, chapter.file, msg.from, msg.to);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: this.nowIso(), type: "audiobook.record", ...ids, record });
+          if (pictureKeyParts(msg.to).sentence !== undefined) void this.timeMarkedTakes(store, msg.productionId, chapter.id);
+        } catch (err) {
+          this.emit({ at: this.nowIso(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
         }
         return;
       }

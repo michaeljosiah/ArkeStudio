@@ -20,7 +20,7 @@ import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { planAudiobook, readAudiobook, writeAudiobook } from "../../src/productions/audiobook.js";
 import { followChapterTakes } from "../../src/productions/audiobook-book.js";
-import { setAudiobookPicture, setAudiobookPictureFocus } from "../../src/productions/audiobook-listening.js";
+import { moveAudiobookPicture, setAudiobookPicture, setAudiobookPictureFocus } from "../../src/productions/audiobook-listening.js";
 import { AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_PICTURE_MARKS_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION, CAST_PARAGRAPHS_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta, SUPPORTED_SCHEMA_VERSION } from "../../src/world/scan.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -247,6 +247,49 @@ describe("picture marks (turn 237)", () => {
     assert.deepEqual(await shown(store), [["p0.0", 0, "world-art.png"], ["p0.0", 2, "artifacts/board-v2.png"]]);
     const removed = await setAudiobookPicture(store, LEDGER, "01-neap", at("p0.0", "The third lamp waits."), null);
     assert.deepEqual(Object.keys(removed.pictures ?? {}), ["p0.0"], "Remove at the mark takes that picture alone");
+  }));
+
+  it("moves a picture along the words, keeping all it holds, and refuses a place that has one (R-205)", () => withHarness(async ({ store, send }) => {
+    await save(send, body);
+    await setAudiobookPicture(store, LEDGER, "01-neap", "p0.0", { file: "artifacts/board-v2.png", source: "generated" }, { shot: { frame: "Close-up", inFrame: [], notInFrame: [], expressions: {}, details: [], checks: [] } });
+    await setAudiobookPictureFocus(store, LEDGER, "01-neap", "p0.0", { x: 0.3, y: 0.7 });
+    const moved = await moveAudiobookPicture(store, LEDGER, "01-neap", "p0.0", at("p0.0", "The third lamp waits."));
+    const kept = moved.pictures?.[at("p0.0", "The third lamp waits.")];
+    assert.deepEqual([kept?.file, kept?.shot?.frame, kept?.focus, kept?.mark], ["artifacts/board-v2.png", "Close-up", { x: 0.3, y: 0.7 }, { sentence: audiobookTextHash("The third lamp waits.") }]);
+    assert.equal(moved.pictures?.["p0.0"], undefined);
+    const back = await moveAudiobookPicture(store, LEDGER, "01-neap", at("p0.0", "The third lamp waits."), "p0.0");
+    assert.deepEqual(Object.keys(back.pictures ?? {}), ["p0.0"]);
+    assert.equal(back.pictures?.["p0.0"]?.mark, undefined, "at the block's first word it is the block's own again");
+    await setAudiobookPicture(store, LEDGER, "01-neap", "p1.0", { file: "world-art.png", source: "world" });
+    await assert.rejects(moveAudiobookPicture(store, LEDGER, "01-neap", "p0.0", "p1.0"), /a picture stands there/);
+  }));
+
+  it("carries the looks held for a picture that followed its words from where it is shown (codex on PR 2179)", () => withHarness(async ({ store, send }) => {
+    await save(send, body);
+    await setAudiobookPicture(store, LEDGER, "01-neap", "p1.0", { file: "world-art.png", source: "world" });
+    await save(send, "A new warning arrives.\n\n" + body);
+    const record = (await readAudiobook(store, LEDGER, "01-neap")) as ChapterAudiobook;
+    assert.ok(record.pictures?.["p1.0"] !== undefined, "kept under the key it was set on, shown at the bell's p2.0");
+    record.ownLooks = { "p2.0": { "maren-kest": "main-photo" } };
+    await writeAudiobook(store, LEDGER, "01-neap", record);
+    const moved = await moveAudiobookPicture(store, LEDGER, "01-neap", "p2.0", at("p1.0", "The third lamp waits."));
+    assert.deepEqual(moved.ownLooks, { [at("p1.0", "The third lamp waits.")]: { "maren-kest": "main-photo" } }, "the author's choice goes with it, none left at the place it left");
+  }));
+
+  it("refuses a move when the blocks change before it is written, and changes nothing (codex on PR 2179)", () => withHarness(async ({ store, send, worldDir }) => {
+    await save(send, body);
+    await setAudiobookPicture(store, LEDGER, "01-neap", "p0.0", { file: "world-art.png", source: "world" });
+    const before = await readAudiobook(store, LEDGER, "01-neap");
+    const chapterPath = join(worldDir, "productions", LEDGER, "chapters", "01-neap.md");
+    const raw = await readFile(chapterPath, "utf8"), write = store.ownedWrite.bind(store);
+    const boundary = mock.method(store, "ownedWrite", async (operation: () => Promise<unknown>) => {
+      await writeFile(chapterPath, raw.replace("The third lamp waits.", "The third lamp is gone."), "utf8");
+      return write(operation);
+    });
+    try {
+      await assert.rejects(moveAudiobookPicture(store, LEDGER, "01-neap", "p0.0", at("p0.0", "The third lamp waits.")), /blocks changed/);
+      assert.deepEqual(await readAudiobook(store, LEDGER, "01-neap"), before);
+    } finally { boundary.mock.restore(); }
   }));
 
   it("refuses a mark at a sentence the block no longer says", () => withHarness(async ({ store, send }) => {
