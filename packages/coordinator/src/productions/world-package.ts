@@ -5,7 +5,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { openPromise, type Entry } from "yauzl";
 import { ZipFile } from "yazl";
-import { guideAssetIds, listeningAssetIds, readGuide, readListening, readWorldManifest, WORLD_MANIFEST_FILE, type WorldManifest } from "@arke-studio/contracts";
+import { guideAssetIds, listeningAssetIds, musicAssetIds, readGuide, readListening, readMusic, readWorldManifest, WORLD_MANIFEST_FILE, type WorldManifest } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
 
 /**
@@ -94,8 +94,8 @@ export async function readWorldPackageRelease(file: string): Promise<{ manifest:
 export type WorldPackageCheck = { ok: true; manifest: WorldManifest; sha256: string; bytes: number } | { ok: false; problems: string[] };
 
 /**
- * Reads a written package back as Arke Player will (SPEC-058 R-5, R-13; SPEC-059 R-14): world.json,
- * each listening document and the guide through the shared readers, nothing in the ZIP the manifest does not name,
+ * Reads a written package back as Arke Player will (SPEC-058 R-5, R-13, R-70; SPEC-059 R-14): world.json,
+ * each listening or music document and the guide through the shared readers, nothing in the ZIP the manifest does not name,
  * nothing compressed, every file at its declared length and digest, and every file used.
  */
 export async function checkWorldPackageZip(file: string, signal?: AbortSignal): Promise<WorldPackageCheck> {
@@ -131,7 +131,15 @@ export async function checkWorldPackageZip(file: string, signal?: AbortSignal): 
       else for (const assetId of guideAssetIds(guide.guide)) used.add(assetId);
     }
     for (const production of manifest.productions) {
-      for (const assetId of [production.picture, production.book, production.narration, production.listening]) if (assetId !== undefined) used.add(assetId);
+      for (const assetId of [production.picture, production.book, production.narration, production.listening, production.music]) if (assetId !== undefined) used.add(assetId);
+      if (production.music !== undefined) {
+        const entry = entries.get(manifest.assets[production.music]!.path.toLowerCase());
+        if (entry === undefined) continue;
+        const music = readMusic((await bytesOf(entry)).toString("utf8"), manifest.assets);
+        if (!music.ok) problems.push(`${production.id} music: ${music.reason}`);
+        else for (const assetId of musicAssetIds(music.document)) used.add(assetId);
+        continue;
+      }
       if (production.listening === undefined) continue;
       const entry = entries.get(manifest.assets[production.listening]!.path.toLowerCase());
       if (entry === undefined) continue;

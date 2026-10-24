@@ -2,7 +2,7 @@ import { z } from "zod";
 import { CanonIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { mainPhotoFor, orderedLocationViews, type ReferenceKit } from "./reference.js";
 import type { CanonEntry, Sheet } from "./world.js";
-import { GUIDE_FORMAT, MAX_GUIDE_TEASERS, packageSlug, type GuideCharacter, type GuideDocument, type GuideLore, type GuidePlace, type GuideSection, type GuideTeaser, type GuideVoice } from "./world-package.js";
+import { GUIDE_FORMAT, MAX_GUIDE_TEASERS, packageSlug, type GuideCharacter, type GuideDocument, type GuideLore, type GuidePlace, type GuideSection, type GuideTeaserV2, type GuideVoice } from "./world-package.js";
 
 /**
  * A world's Guide (SPEC-059 R-1 – R-8): which of the world's characters, places and settled lore a
@@ -408,7 +408,7 @@ export function guideDocument(record: GuideRecord, material: GuideMaterial): Gui
   // Teasers (R-26 – R-28) show to anyone in Discover: a sheet's only while its entry ships public
   // from the start, a moment's only when the exporter could make it; anything else stays in the
   // Guide, marked, and out of the package.
-  const teasers: GuideTeaser[] = [];
+  const teasers: GuideTeaserV2[] = [];
   for (const choice of record.teasers ?? []) {
     if (choice.kind === "picture" || choice.kind === "clip") {
       const made = material.moment?.(choice);

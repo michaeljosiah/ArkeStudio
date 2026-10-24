@@ -57,7 +57,12 @@
       "expect": "newerArke"
     },
     {
-      "file": "schema-5.json",
+      "file": "part-in-schema-5.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "schema-6.json",
       "reader": "manifest",
       "expect": "newerArke"
     },
