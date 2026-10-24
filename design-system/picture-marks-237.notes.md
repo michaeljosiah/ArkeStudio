@@ -1,6 +1,7 @@
 # Turn 237 · Picture marks
 
-Drawn on 24 October 2026 for the owner's review. Not built.
+Drawn on 24 October 2026, revised twice, and approved by the owner the same day ("Yes approved")
+with the six calls below. Not built.
 
 ## Asked
 
@@ -96,7 +97,7 @@ Also ruled out:
   do.
 - The cap of 61 is Chapter 1's 20:28 at one per 20 s.
 
-## Calls (for the owner)
+## Calls (approved 24 October 2026)
 
 1. The cap: one picture per 20 s of narration at most, counting those already there, with no setting.
    The proposal's count and price before Accept, and Skip, are the author's control.
