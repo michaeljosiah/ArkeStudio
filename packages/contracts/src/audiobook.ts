@@ -174,14 +174,22 @@ export function audiobookSeamLabel(view: Pick<AudiobookSeamView, "changed" | "he
   ].join(" · ");
 }
 
+const NUMBER_WORD = "(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?";
+const ROMAN = "(?=[mdclxvi])m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})";
+const OWN_PLACE = new RegExp(`^(?:chapter\\s+(?:\\d+|${ROMAN}|${NUMBER_WORD})|prologue|epilogue|interlude|preface|foreword|afterword)(?![\\p{L}\\p{N}])`, "iu");
+
 /**
- * What the narrator reads at the head of a chapter file (R-24): the number the door shows, then the
+ * What the narrator reads at the head of a chapter file (R-2): the number the door shows, then the
  * title. A chapter titled only by its number is read once — "Chapter 1 · Chapter 1" was the number
- * twice, on the screen and in the narrator's mouth (turn 188).
+ * twice, on the screen and in the narrator's mouth (turn 188). A title that already names its own
+ * place in the book is read alone: the door counts a prologue as Chapter 1, so Legend of Dumah's
+ * "Chapter 3 — Nightfall Breach" was read "Chapter 4 · Chapter 3 — Nightfall Breach", and its
+ * prologue "Chapter 1 · Prologue — Whispers from the Void" (2026-10-24).
  */
 export function audiobookHeading(order: number, title: string): string {
   const number = `Chapter ${order}`;
-  return title.trim().toLowerCase() === number.toLowerCase() ? number : `${number} · ${title}`;
+  if (title.trim().toLowerCase() === number.toLowerCase()) return number;
+  return OWN_PLACE.test(title.trim()) ? title.trim() : `${number} · ${title}`;
 }
 
 /**

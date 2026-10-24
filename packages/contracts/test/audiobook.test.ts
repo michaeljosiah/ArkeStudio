@@ -65,8 +65,23 @@ describe("audiobook blocks (R-2)", () => {
   it("reads a chapter titled only by its number once (turn 188)", () => {
     assert.equal(audiobookHeading(1, "Chapter 1"), "Chapter 1");
     assert.equal(audiobookHeading(1, " chapter 1 "), "Chapter 1");
-    assert.equal(audiobookHeading(1, "Chapter 12"), "Chapter 1 · Chapter 12");
     assert.equal(audiobookHeading(3, "Neap"), "Chapter 3 · Neap");
+  });
+
+  it("reads a title that names its own place alone, never two numbers", () => {
+    assert.equal(audiobookHeading(4, "Chapter 3 — Nightfall Breach"), "Chapter 3 — Nightfall Breach");
+    assert.equal(audiobookHeading(1, " Prologue — Whispers from the Void "), "Prologue — Whispers from the Void");
+    assert.equal(audiobookHeading(46, "Epilogue"), "Epilogue");
+    assert.equal(audiobookHeading(1, "Chapter 12"), "Chapter 12");
+    assert.equal(audiobookHeading(5, "Chapter IV: The Ford"), "Chapter IV: The Ford");
+    assert.equal(audiobookHeading(22, "Chapter Twenty-One"), "Chapter Twenty-One");
+    assert.equal(audiobookHeading(2, "INTERLUDE"), "INTERLUDE");
+    // A title that only starts with such a word keeps the door's number.
+    assert.equal(audiobookHeading(2, "Chapters of Ash"), "Chapter 2 · Chapters of Ash");
+    assert.equal(audiobookHeading(2, "Chapter and Verse"), "Chapter 2 · Chapter and Verse");
+    assert.equal(audiobookHeading(2, "Chapter Mid"), "Chapter 2 · Chapter Mid");
+    assert.equal(audiobookHeading(3, "Prologues end"), "Chapter 3 · Prologues end");
+    assert.equal(audiobookHeading(3, "The Prologue"), "Chapter 3 · The Prologue");
   });
 
   it("puts the title first, keys blocks by paragraph and split, and drops a scene break", () => {
