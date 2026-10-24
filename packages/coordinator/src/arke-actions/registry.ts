@@ -609,6 +609,7 @@ const CLIENT_COMMAND_METADATA = {
   "audiobook-word-timing": action("production", "command", "voice", "spend-and-compute", ["chapters", "artifacts"]),
   "audiobook-words": action("production", "command", "voice", "spend-and-compute", ["chapters", "artifacts"]),
   "set-audiobook-picture": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
+  "move-audiobook-picture": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   "set-audiobook-picture-focus": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   // The chapter's look (turn 191c): read by the writing service (no picture provider, nothing spent), then the author's lines.
   "derive-audiobook-look": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),

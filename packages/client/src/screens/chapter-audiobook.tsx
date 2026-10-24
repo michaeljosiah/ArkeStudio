@@ -2,7 +2,7 @@ import { chapterNarrator } from "../lib/audiobook-narrator.js";
 import { AudiobookWordsControl } from "../components/audiobook-words.js";
 export { chapterNarrator } from "../lib/audiobook-narrator.js";
 import { bookNarratorUnavailable, readerUnavailableWords, soloTurns, compileAudiobookPerformance, castStanding, chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type SpeechTurn, type BlockTurns } from "@arke-studio/contracts";
-import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import {
   AUDIOBOOK_DELIVERIES,
@@ -69,10 +69,10 @@ import { ChevronDown, ChevronRight, GroupMark, LoaderCircle, Mic, More, PlaySoli
 import { EditorDialog } from "../components/editor-dialog.js";
 import { Button } from "../components/ui.js";
 import { clearQueue, dismissPlayback, enqueueClip, jumpQueue, playClip, playbackSnapshot, usePlayback, useQueueAt } from "../lib/audio.js";
-import { PictureChip, type PictureSpan } from "../components/audiobook-picture.js";
+import { PictureChip, pictureStart, type PictureSpan } from "../components/audiobook-picture.js";
 import { ProposedChip } from "../components/audiobook-illustrate.js";
 import { mediaUrl } from "../lib/media.js";
-import { reactionsToRead } from "@arke-studio/contracts";
+import { formatRunningTime, pictureKeyParts, pictureMarkKey, reactionsToRead, sentenceHashes, sentenceOffsets } from "@arke-studio/contracts";
 import { barAt, chapterTimingOf, hasTiming, useMixPlayer } from "./chapter-timing.js";
 import {
   acceptDirection,
@@ -1370,11 +1370,6 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   };
 }
 
-/** One press's place among the gaps, for the confirm it may open. */
-function seamKey(gap: Pick<AudiobookGap, "press" | "block" | "row">): string {
-  return `${gap.press}:${gap.block}:${gap.row ?? ""}`;
-}
-
 /** A block as it was made: its key and its words, the two a take is found by. */
 function blockIdentity(row: Pick<BlockRow, "block">): string {
   return `${row.block.key}\n${audiobookTextHash(row.block.text)}`;
@@ -1580,7 +1575,16 @@ function SpeakerMenu({ row, choices, onPick, onClose }: {
   );
 }
 
-export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, onSelect, onPlayOne, slug, filter = null, choices, onPin, marker = null, onMarker, modelOf, onDirect, brackets = [], onReRead, reReadPrice, pictures, seams, madeAgain }: {
+export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, onSelect, onPlayOne, slug, filter = null, choices, onPin, marker = null, onMarker, modelOf, onDirect, brackets = [], onReRead, reReadPrice, pictures, seams, madeAgain, pictureKey = null, onPicture, onMove }: {
+  /**
+   * The picture the block's panel shows (design turn 237c): a mark's key, drawn pressed, or one
+   * `+ Picture` placed that has no picture yet, drawn dashed until it has.
+   */
+  pictureKey?: string | null;
+  /** A mark pressed, or `+ Picture` at a sentence (237b): its block, and the mark's key. */
+  onPicture?: (block: string, key: string) => void;
+  /** A picture dragged along the words to another sentence's start (R-205), by their keys. */
+  onMove?: (from: string, to: string) => void;
   /**
    * Block seams (design turn 198): the gaps a fine pointer can press, a Join on the bracket line
    * between two blocks and a Split between two rows of one, drawn on hover. Absent while a read
@@ -1613,27 +1617,66 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
   modelOf?: (reader: AudiobookReader) => ManifestModel | null;
   /** A block's direction written with its markers changed (R-42). */
   onDirect?: (key: string, direction: AudiobookDirectionInput | null) => void;
-  /** The pictures set on blocks (design turn 186c): a chip in the margin with when each starts. */
-  pictures?: { byKey: ReadonlyMap<string, PictureSpan>; estimated: boolean; /** Proposed by Arke and not yet accepted (191b): a dashed chip with a short title. */ proposed?: ReadonlyMap<string, { title: string }> };
+  /**
+   * The pictures set on blocks (design turn 186c): a chip in the margin with when each starts; a
+   * block's marks inside it (design turn 237), each drawn at its sentence; and when a sentence would
+   * start, for a mark placed or proposed and not yet made.
+   */
+  pictures?: {
+    byKey: ReadonlyMap<string, PictureSpan>;
+    estimated: boolean;
+    marks?: ReadonlyMap<string, readonly PictureSpan[]>;
+    startOf?: (index: number, sentence: number) => { at: number; estimated: boolean };
+    /** Proposed by Arke and not yet accepted (191b): a dashed chip with a short title, by picture key. */
+    proposed?: ReadonlyMap<string, { title: string; at?: number }>;
+  };
 }) {
   const coarse = useMediaQuery("(pointer: coarse)");
   const pressedSelection = useRef<BlockSelection | null>(null);
   const [menu, setMenu] = useState<{ key: string; selection?: { from: number; to: number } } | null>(null);
-  // The join that would take a picture off, asking (design turn 198d); closed by Cancel, Escape or a press elsewhere.
-  const [confirming, setConfirming] = useState<string | null>(null);
-  useEffect(() => {
-    if (confirming === null) return;
-    const close = () => setConfirming(null);
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
+  // The picture being dragged along the words (design turn 237, R-205), by its key.
+  const [dragging, setDragging] = useState<string | null>(null);
+  // A mark's chip stands level with its words at the block's end (237a); one whose sentence starts
+  // on a line the row's own chip, state and play — or an earlier mark's chip — already holds steps
+  // down just below them, so no chip covers another. Measured after every layout, and again when
+  // the list's width rewraps the words. The stylesheet's lift of 3 is undone in the step.
+  const listRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (list === null) return;
+    const place = () => {
+      for (const block of list.querySelectorAll<HTMLElement>(".fy-ab__block")) {
+        const chips = [...block.querySelectorAll<HTMLElement>(".fy-ab__picchip--mark")];
+        if (chips.length === 0) continue;
+        for (const chip of chips) chip.style.marginTop = "";
+        const ends = block.querySelector<HTMLElement>(".fy-ab__marks");
+        const held = ends === null || ends.childElementCount === 0 ? null : ends.getBoundingClientRect();
+        let floor = held === null || held.height === 0 ? -Infinity : held.bottom + 4;
+        for (const chip of chips) {
+          const at = chip.getBoundingClientRect();
+          if (at.height === 0) continue;
+          if (at.top < floor) {
+            chip.style.marginTop = `${Math.round(floor - at.top - 3)}px`;
+            floor += at.height + 4;
+          } else floor = at.bottom + 4;
+        }
+      }
     };
-    document.addEventListener("click", close);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("click", close);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [confirming]);
+    place();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(place);
+    observer?.observe(list);
+    return () => observer?.disconnect();
+  });
+  // The `+ Picture` a pointer is on (237b): it opens in the line, moving the words aside so the
+  // sentence it starts stays readable. One at a line's end would wrap to the next line, off the
+  // pointer that opened it, and close and reopen without end; that one opens over the words
+  // instead, where it was found. `top` is where the press was when the pointer found it.
+  const [offered, setOffered] = useState<{ key: string; top: number; over: boolean } | null>(null);
+  useLayoutEffect(() => {
+    if (offered === null || offered.over) return;
+    const press = listRef.current?.querySelector<HTMLElement>(`[data-place="${offered.key}"] .fy-ab__place-press`);
+    if (press && Math.abs(press.getBoundingClientRect().top - offered.top) > 10) setOffered({ ...offered, over: true });
+  }, [offered]);
   useEffect(() => {
     const changed = () => {
       const captured = audiobookSelection(rows);
@@ -1679,16 +1722,13 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
   const hovers = seams !== undefined && !coarse;
   const joinAbove = new Map((hovers ? seams.gaps : []).filter((gap) => gap.press === "join").map((gap) => [gap.block, gap] as const));
   const splitsIn = (key: string) => (hovers ? seams.gaps : []).filter((gap) => gap.press === "split" && gap.block === key);
-  const seamPress = (gap: AudiobookGap, row: BlockRow) => {
+  const seamPress = (gap: AudiobookGap) => {
     const off = gap.press === "join" && gap.limit !== undefined;
     const word = gap.press === "join" ? "Join" : "Split";
-    const id = seamKey(gap);
-    // A join that would take a picture off its block asks once, in one plain line (rule 6, 198d):
-    // the block above shows its own picture, so the one below comes off. Every other is at once.
-    const above = rows[rows.indexOf(row) - 1];
-    const losing = gap.press === "join" && above !== undefined && pictures?.byKey.has(above.block.key) === true && pictures.byKey.has(row.block.key);
+    // A join never takes a picture off now: it keeps it at its words as a mark (design turn 237,
+    // R-203), so 198d's question is retired and every press is at once.
     return (
-      <span className={`fy-ab__seam${gap.press === "split" ? " fy-ab__seam--in" : ""}${off ? " fy-ab__seam--off" : ""}${confirming === id ? " fy-ab__seam--open" : ""}`} data-testid="audiobook-seam" onClick={(event) => event.stopPropagation()}>
+      <span className={`fy-ab__seam${gap.press === "split" ? " fy-ab__seam--in" : ""}${off ? " fy-ab__seam--off" : ""}`} data-testid="audiobook-seam" onClick={(event) => event.stopPropagation()}>
         {/* The word is drawn from its data, never written in the page: a Split sits in the block's
             words, and a selection's offsets there must count the words alone. */}
         <button
@@ -1699,22 +1739,139 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
           data-label={off ? `${word} · ${gap.limit}` : word}
           data-testid={`audiobook-${gap.press}`}
           onClick={() => {
-            if (off) return;
-            if (losing) setConfirming(id);
-            else seams!.onPress(gap);
+            if (!off) seams!.onPress(gap);
           }}
         />
-        {confirming === id && (
-          <span className="fy-ab__seam-confirm" role="dialog" aria-label="Join" data-testid="audiobook-join-confirm">
-            <span>Block {rows.indexOf(row) + 1}’s picture comes off. It stays in the world.</span>
-            <span className="fy-ab__seam-confirm-foot">
-              <Button variant="ghost" onClick={() => setConfirming(null)}>Cancel</Button>
-              <Button variant="primary" onClick={() => { setConfirming(null); seams!.onPress(gap); }}>Join</Button>
-            </span>
-          </span>
-        )}
       </span>
     );
+  };
+  // A picture's mark in its block's words (design turn 237, 237a – 237c): a short bar before its
+  // first word, solid once made and dashed while proposed or placed; a mark inside the block also
+  // draws its chip, at the block's end on the line the mark is on. A made bar drags along the
+  // words to another sentence's start (R-205), where each start is a place to drop it.
+  const pin = (key: string, made: boolean, on: boolean) => (
+    <span
+      className={`fy-ab__pin${made ? "" : " fy-ab__pin--prop"}${on ? " fy-ab__pin--on" : ""}`}
+      data-testid="audiobook-pin"
+      data-mark={key}
+      aria-hidden="true"
+      draggable={made && onMove !== undefined && !coarse}
+      onDragStart={(event) => {
+        event.stopPropagation();
+        event.dataTransfer?.setData("text/plain", key);
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+        setDragging(key);
+      }}
+      onDragEnd={() => setDragging(null)}
+    />
+  );
+  const markChip = (row: BlockRow, key: string, content: ReactNode, made: boolean, on: boolean) => (
+    <button
+      type="button"
+      className={`fy-ab__picchip fy-ab__picchip--mark${made ? "" : " fy-ab__picchip--prop"}${on ? " fy-ab__picchip--on" : ""}`}
+      data-testid="audiobook-mark-chip"
+      data-mark={key}
+      aria-label={`Picture in block ${rows.indexOf(row) + 1}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onPicture?.(row.block.key, key);
+      }}
+    >
+      {content}
+    </button>
+  );
+  const marksFor = (row: BlockRow): Array<{ at: number; node: ReactNode }> => {
+    if (pictures === undefined) return [];
+    const offsets = sentenceOffsets(row.block.text);
+    const hashes = sentenceHashes(row.block.text);
+    const keyAt = (sentence: number) => (sentence > 0 ? pictureMarkKey(row.block.key, hashes[sentence]!) : row.block.key);
+    const index = rows.indexOf(row);
+    const out: Array<{ at: number; node: ReactNode }> = [];
+    const taken = new Set<number>();
+    const own = pictures.byKey.get(row.block.key);
+    const ownProposed = own === undefined ? pictures.proposed?.get(row.block.key) : undefined;
+    if (own !== undefined || ownProposed !== undefined) {
+      taken.add(0);
+      out.push({ at: offsets[0] ?? 0, node: pin(row.block.key, own !== undefined, pictureKey === row.block.key) });
+    }
+    for (const mark of pictures.marks?.get(row.block.key) ?? []) {
+      if (offsets[mark.sentence] === undefined) continue;
+      taken.add(mark.sentence);
+      const on = pictureKey === mark.key;
+      out.push({ at: offsets[mark.sentence]!, node: <>{pin(mark.key, true, on)}{markChip(row, mark.key, <><img src={slug === undefined ? undefined : mediaUrl(slug, mark.file)} alt="" />{pictureStart(mark)}</>, true, on)}</> });
+    }
+    for (const [key, proposal] of pictures.proposed ?? []) {
+      const parts = pictureKeyParts(key);
+      if (parts.block !== row.block.key || parts.sentence === undefined) continue;
+      const sentence = hashes.indexOf(parts.sentence);
+      if (sentence <= 0 || taken.has(sentence)) continue;
+      taken.add(sentence);
+      const at = proposal.at ?? pictures.startOf?.(index, sentence).at;
+      out.push({ at: offsets[sentence]!, node: <>{pin(key, false, pictureKey === key)}{markChip(row, key, <><i aria-hidden="true" />{at !== undefined ? `~${formatRunningTime(at)} · ` : ""}<b>{proposal.title}</b></>, false, pictureKey === key)}</> });
+    }
+    // One `+ Picture` placed and not yet made, dashed and pressed while its panel is open (237c).
+    if (pictureKey !== null && !pictures.byKey.has(pictureKey) && pictureKeyParts(pictureKey).block === row.block.key) {
+      const parts = pictureKeyParts(pictureKey);
+      const sentence = parts.sentence === undefined ? 0 : hashes.indexOf(parts.sentence);
+      if (sentence > 0 && !taken.has(sentence)) {
+        taken.add(sentence);
+        const start = pictures.startOf?.(index, sentence);
+        out.push({ at: offsets[sentence]!, node: <>{pin(pictureKey, false, true)}{markChip(row, pictureKey, <><i aria-hidden="true" />{start !== undefined ? pictureStart(start) : ""}</>, false, true)}</> });
+      }
+    }
+    // Each sentence start with no picture is a place: `+ Picture` on a fine pointer (237b), and a
+    // place to drop a dragged picture. A block's first sentence is its own picture's, found by
+    // pressing the block, so it is only a place to drop one.
+    if (onPicture !== undefined && !coarse) {
+      offsets.forEach((offset, sentence) => {
+        if (taken.has(sentence)) return;
+        const key = keyAt(sentence);
+        const first = sentence === 0;
+        const open = offered?.key === key ? (offered.over ? "over" : "open") : null;
+        const offer = (event: { currentTarget: HTMLElement }) => setOffered({ key, top: event.currentTarget.getBoundingClientRect().top, over: false });
+        const withdraw = () => setOffered((at) => (at?.key === key ? null : at));
+        out.push({
+          at: offset,
+          node: (
+            <span
+              className={`fy-ab__place${first ? " fy-ab__place--first" : ""}${dragging !== null ? " fy-ab__place--drop" : ""}${open === "open" ? " fy-ab__place--open" : ""}`}
+              data-testid="audiobook-place"
+              data-place={key}
+              onClick={(event) => event.stopPropagation()}
+              onDragOver={(event) => {
+                if (dragging === null) return;
+                event.preventDefault();
+                if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                const from = event.dataTransfer?.getData("text/plain") || dragging;
+                setDragging(null);
+                if (from !== null && from !== "" && from !== key) onMove?.(from, key);
+              }}
+            >
+              {!first && (
+                <button
+                  type="button"
+                  className={`fy-ab__place-press${open === null ? "" : ` fy-ab__place-press--${open}`}`}
+                  data-label="+ Picture"
+                  aria-label="Picture here"
+                  data-testid="audiobook-picture-here"
+                  onPointerEnter={(event) => {
+                    if (event.pointerType !== "touch") offer(event);
+                  }}
+                  onPointerLeave={withdraw}
+                  onFocus={offer}
+                  onBlur={withdraw}
+                  onClick={() => onPicture(row.block.key, key)}
+                />
+              )}
+            </span>
+          ),
+        });
+      });
+    }
+    return out.sort((a, b) => a.at - b.at);
   };
   const renderRow = (row: BlockRow) => {
         // The margin names who speaks (R-33): a colour a speaker with a sheet, grey for the
@@ -1750,6 +1907,11 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
               <span className="fy-ab__beathead" data-testid="audiobook-beat-head">
                 {row.beat.name !== undefined && <b>{row.beat.name}</b>}
                 <span>{[...(row.beat.whose !== undefined ? [row.beat.whose] : []), `${row.beat.paragraphs} paragraph${row.beat.paragraphs === 1 ? "" : "s"}`, clock(row.beat.seconds)].join(" · ")}</span>
+                {/* How many pictures the beat holds, made and proposed (design turn 237a). */}
+                {(() => {
+                  const held = (pictures?.byKey.has(row.block.key) === true || pictures?.proposed?.has(row.block.key) === true ? 1 : 0) + (pictures?.marks?.get(row.block.key)?.length ?? 0) + [...(pictures?.proposed?.keys() ?? [])].filter((key) => key.startsWith(`${row.block.key}@`)).length;
+                  return held > 0 ? <em data-testid="audiobook-beat-pictures">{held} picture{held === 1 ? "" : "s"}</em> : null;
+                })()}
               </span>
             )}
             {(() => {
@@ -1797,7 +1959,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
             >
               {/* A held proposal is drawn in the direction's place, dashed, until it is accepted (design turn 184b). */}
               {row.proposed !== null ? (
-                <DirectedText raw={row.block.text} cues={row.proposed.input.cues} held={new Set(row.proposed.held.flatMap((control) => (control.cueIndex !== undefined ? [control.cueIndex] : [])))} {...(laterTurns !== undefined ? { turns: laterTurns } : {})} />
+                <DirectedText raw={row.block.text} cues={row.proposed.input.cues} held={new Set(row.proposed.held.flatMap((control) => (control.cueIndex !== undefined ? [control.cueIndex] : [])))} {...(laterTurns !== undefined ? { turns: laterTurns } : {})} marks={marksFor(row)} />
               ) : (
                 <DirectedText
                   raw={row.block.text}
@@ -1807,8 +1969,9 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
                   {...(markable ? { onPlate: (index: number) => onMarker({ key: row.block.key, span: { from: 0, to: 0 }, edit: index }) } : {})}
                   {...(laterTurns !== undefined && hovers ? { gap: (index: number) => {
                     const gap = splitsIn(row.block.key).find((candidate) => candidate.row === index);
-                    return gap === undefined ? null : seamPress(gap, row);
+                    return gap === undefined ? null : seamPress(gap);
                   } } : {})}
+                  marks={marksFor(row)}
                 />
               )}
             </span>
@@ -1868,7 +2031,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
               )}
             </span>
             {(picture === undefined || slug === undefined) && <button type="button" className="fy-ab__open" aria-label={`Open block ${rows.indexOf(row) + 1}`} />}
-            {joinAbove.has(row.block.key) && seamPress(joinAbove.get(row.block.key)!, row)}
+            {joinAbove.has(row.block.key) && seamPress(joinAbove.get(row.block.key)!)}
           </div>
           {split !== null && (
             <div className="fy-ab__split" data-testid="audiobook-split">
@@ -1893,7 +2056,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
     else segments.push({ bracket, rows: [row] });
   }
   return (
-    <div className="fy-ab__blocks" data-testid="audiobook-blocks">
+    <div className="fy-ab__blocks" data-testid="audiobook-blocks" ref={listRef}>
       {segments.map((segment) =>
         segment.bracket === null ? (
           segment.rows.map(renderRow)
@@ -2380,7 +2543,8 @@ export function BlocksPress({ label, count, changed, resettable, held, grouping,
  * sheet's head, one line of presses. Join next joins the block with the one after it. Split on a
  * block of two lines splits it at its one gap; on one of three or more it shows the block's lines
  * in the sheet with a Split at each gap between them. A press that would break a limit is drawn
- * off with its reason, as on the desktop; a join that takes a picture off asks, as there.
+ * off with its reason, as on the desktop. A join never takes a picture off now (design turn 237,
+ * R-203): it keeps it at its words as a mark, so it asks nothing.
  */
 export function useBlockSeamActs(input: {
   row: BlockRow | null;
@@ -2389,16 +2553,12 @@ export function useBlockSeamActs(input: {
   /** A read runs, or the window is offline: the presses hold. */
   held: boolean;
   onPress: (gap: AudiobookGap) => void;
-  /** The blocks that show a picture now, by key. */
-  pictured?: ReadonlySet<string>;
 }): { bar: ReactNode; lines: ReactNode | null } {
-  const { row, rows, gaps, held, onPress, pictured } = input;
+  const { row, rows, gaps, held, onPress } = input;
   const [open, setOpen] = useState(false);
-  const [asking, setAsking] = useState(false);
   const key = row?.block.key ?? null;
   useEffect(() => {
     setOpen(false);
-    setAsking(false);
   }, [key, gaps]);
   if (row === null) return { bar: null, lines: null };
   const at = rows.indexOf(row);
@@ -2407,7 +2567,6 @@ export function useBlockSeamActs(input: {
   const splits = gaps.filter((gap) => gap.press === "split" && gap.block === row.block.key);
   if (joinNext === undefined && splits.length === 0) return { bar: null, lines: null };
   const joinOff = joinNext?.limit !== undefined;
-  const losing = next !== undefined && pictured?.has(row.block.key) === true && pictured.has(next.block.key);
   const bar = (
     <>
       <div className="fy-abp__acts" data-testid="audiobook-seam-acts">
@@ -2418,9 +2577,7 @@ export function useBlockSeamActs(input: {
             disabled={held}
             aria-disabled={joinOff}
             onClick={() => {
-              if (joinOff) return;
-              if (losing) setAsking(true);
-              else onPress(joinNext);
+              if (!joinOff) onPress(joinNext);
             }}
             data-testid="audiobook-join-next"
           >
@@ -2440,15 +2597,6 @@ export function useBlockSeamActs(input: {
           </button>
         )}
       </div>
-      {asking && joinNext !== undefined && next !== undefined && (
-        <div className="fy-ab__seam-confirm fy-ab__seam-confirm--sheet" role="dialog" aria-label="Join" data-testid="audiobook-join-confirm">
-          <span>Block {at + 2}’s picture comes off. It stays in the world.</span>
-          <span className="fy-ab__seam-confirm-foot">
-            <Button variant="ghost" onClick={() => setAsking(false)}>Cancel</Button>
-            <Button variant="primary" onClick={() => { setAsking(false); onPress(joinNext); }}>Join</Button>
-          </span>
-        </div>
-      )}
     </>
   );
   if (!open || splits.length < 2) return { bar, lines: null };

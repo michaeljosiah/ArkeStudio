@@ -494,12 +494,39 @@
 /* Between two rows of one block: the rule the row before draws, from the bracket across. */
 .fy-ab__seam--in { top: -1px; left: -12px; }
 .fy-ab__block:has(.fy-ab__seam--open, .fy-ab__seam:focus-within) { z-index: 7; }
-/* The one join that asks (198d): a picture would come off. One line over Cancel and Join, 300 wide, under the press. */
-.fy-ab__seam-confirm { position: absolute; z-index: 6; top: 16px; left: -22px; width: 300px; display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover, var(--background)); color: var(--foreground); box-shadow: var(--shadow-lg); box-sizing: border-box; font: var(--type-ui); font-size: var(--text-sm); line-height: 1.5; cursor: default; }
-.fy-ab__seam-confirm-foot { display: flex; gap: 8px; justify-content: flex-end; }
-.fy-ab__seam-confirm .ui-btn { height: 30px; min-height: 0; padding: 0 11px; border-radius: 8px; font: var(--type-label); box-shadow: none; }
-.fy-ab__seam-confirm .ui-btn--primary { background: var(--foreground); color: var(--background); }
-.fy-ab__seam-confirm--sheet { position: static; width: auto; margin: 10px 22px 0; box-shadow: none; }
+/*
+ * Picture marks (design turn 237, 237a – 237c). A picture's bar stands before its first word: solid
+ * once made, dashed while proposed or placed, ringed while its panel is open; a made bar drags. A
+ * mark inside a block draws its chip at the block's end on the line the bar is on: placed where the
+ * bar is, with no top, it keeps that line, and the block's inline size (its container) puts its
+ * right edge at the block's, past the 134 the margin and its gap take. `+ Picture` waits at each
+ * sentence's start as 198's seams wait between lines, its word its data, never the page's.
+ */
+.fy-ab__pin { display: inline-block; width: 3px; height: 1.05em; margin: 0 5px 0 1px; vertical-align: -2px; border-radius: 2px; background: var(--foreground); }
+.fy-ab__pin[draggable="true"] { cursor: grab; }
+.fy-ab__pin--prop { width: 4px; background: transparent; border: 1px dashed var(--muted-foreground); box-sizing: border-box; }
+.fy-ab__pin--on { box-shadow: 0 0 0 2px color-mix(in srgb, var(--foreground) 25%, transparent); }
+.fy-ab__picchip--mark { position: absolute; z-index: 2; left: calc(100cqw - 134px); margin-top: -3px; transform: translateX(-100%); cursor: pointer; }
+.fy-ab__picchip--mark b { font-weight: 500; color: var(--foreground); }
+.fy-ab__picchip--mark.fy-ab__picchip--prop i { width: 28px; height: 18px; border-radius: 4px; border: 1px dashed var(--neutral-400); display: inline-block; box-sizing: border-box; }
+.fy-ab__picchip--on { border-color: var(--foreground); box-shadow: 0 0 0 1px var(--foreground); }
+.fy-ab__place { position: relative; display: inline-block; width: 0; height: 1em; vertical-align: -2px; }
+.fy-ab__place--first { display: none; }
+.fy-ab__place--first.fy-ab__place--drop { display: inline-block; }
+.fy-ab__place--drop { width: 6px; margin: 0 2px; border-left: 2px dotted var(--muted-foreground); }
+.fy-ab__place-press { position: absolute; z-index: 3; top: -3px; left: -7px; width: 14px; height: calc(100% + 6px); padding: 0; border: 0; background: transparent; cursor: pointer; }
+.fy-ab__place-press::after { content: attr(data-label); position: absolute; top: 0; left: 0; height: 20px; padding: 0 7px; border: 1px dashed var(--foreground); border-radius: 6px; background: var(--background); color: var(--foreground); font: var(--type-mono); font-size: var(--text-2xs); line-height: 1; display: inline-flex; align-items: center; white-space: nowrap; box-sizing: border-box; opacity: 0; pointer-events: none; }
+/* Open in the line as 237b draws it, the words moved aside; the bar before it keeps the press under
+   the pointer that opened it. Over the words at a line's end, where in the line it would wrap. */
+.fy-ab__place--open { width: auto; height: auto; vertical-align: 1px; }
+.fy-ab__place-press--open { position: relative; top: auto; left: auto; width: auto; height: auto; margin: 0 5px 0 0; display: inline-block; vertical-align: top; }
+.fy-ab__place-press--open::before { content: ""; position: absolute; top: 0; bottom: 0; left: -8px; width: 8px; }
+.fy-ab__place-press--open::after { position: static; }
+.fy-ab__place-press--over::after { left: 7px; }
+.fy-ab__place-press:is(.fy-ab__place-press--open, .fy-ab__place-press--over)::after { opacity: 1; pointer-events: auto; }
+.fy-ab__place-press:focus-visible { outline: none; }
+.fy-ab__beathead em { font-style: normal; color: var(--foreground); }
+.fy-ab__markwords { margin: 0; font-size: var(--text-sm); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 /* A block put back and found made again (198g): `made` with a green dot until the author leaves the view. */
 .fy-ab__state--again::before { background: var(--success); }
 /* On touch, in the block's sheet (198j): Join next and Split under the head, 30 high on one line. */

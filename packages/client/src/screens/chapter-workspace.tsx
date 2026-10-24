@@ -58,6 +58,7 @@ import {
   pictureKeyParts,
   sentenceHashes,
   sentencesOf,
+  formatRunningTime,
   type ChapterReview,
 } from "@arke-studio/contracts";
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
@@ -142,6 +143,7 @@ import {
   useGateNotices,
   gateAnswered,
   forgetGateRequest,
+  moveAudiobookPicture,
 } from "../lib/store.js";
 
 /**
@@ -2368,25 +2370,42 @@ export function ChapterWorkspace({
   // What the margin draws: the pictures set, and — dashed — those Arke proposes until they are accepted (191b).
   const chapterPictures = useMemo(() => ({ ...placedPictures, proposed: illustration.proposed }), [placedPictures, illustration.proposed]);
   const pictureRow = audiobook.rows.find((row) => row.block.key === audiobook.selected) ?? null;
+  // The picture the panel is for, inside the block (design turn 237c): a mark pressed, or one
+  // `+ Picture` placed and not yet made. Null is the block's own; choosing another block clears it.
+  const [markKey, setMarkKey] = useState<string | null>(null);
+  const pictureKey = markKey !== null && pictureRow !== null && pictureKeyParts(markKey).block === pictureRow.block.key ? markKey : null;
   // The block panel's tab (design turn 194, rule 12): Picture when the block has a picture or one
   // proposed, Voice otherwise; a tab the author chooses holds from block to block until they leave
-  // the view.
+  // the view. A mark always opens on Picture.
   const [chosenTab, setChosenTab] = useState<PanelTab | null>(null);
   useEffect(() => setChosenTab(null), [view, chapter.id]);
-  const shownPicture = pictureRow === null ? undefined : placedPictures.byKey.get(pictureRow.block.key);
-  const panelTab: PanelTab = chosenTab ?? (shownPicture !== undefined || (pictureRow !== null && illustration.proposed.has(pictureRow.block.key)) ? "picture" : "voice");
-  const panelHead = pictureRow === null ? null : blockPanelHead(pictureRow, audiobook.rows, audiobookRecord.record === "unreadable" ? null : audiobookRecord.record, chapter.title, world);
+  const shownPicture = pictureRow === null ? undefined : placedPictures.byKey.get(pictureKey ?? pictureRow.block.key);
+  const panelTab: PanelTab = pictureKey !== null ? "picture" : (chosenTab ?? (shownPicture !== undefined || (pictureRow !== null && illustration.proposed.has(pictureRow.block.key)) ? "picture" : "voice"));
+  const blockHead = pictureRow === null ? null : blockPanelHead(pictureRow, audiobook.rows, audiobookRecord.record === "unreadable" ? null : audiobookRecord.record, chapter.title, world);
+  // A mark's panel is headed by the picture (237c): when it starts, its beat, how long it holds and to when.
+  const panelHead = blockHead === null || pictureRow === null || pictureKey === null ? blockHead : (() => {
+    const start = shownPicture ?? (() => {
+      const sentence = sentenceHashes(pictureRow.block.text).indexOf(pictureKeyParts(pictureKey).sentence ?? "");
+      return placedPictures.startOf(audiobook.rows.indexOf(pictureRow), Math.max(0, sentence));
+    })();
+    // One placed and not yet made holds, once made, to the next picture after it, or the chapter's end.
+    const later = [...placedPictures.byKey.values()].map((span) => span.at).filter((at) => at > start.at);
+    const until = shownPicture !== undefined ? shownPicture.at + shownPicture.seconds : later.length > 0 ? Math.min(...later) : placedPictures.startOf(audiobook.rows.length, 0).at;
+    const sub = [
+      ...(pictureRow.beat?.name !== undefined ? [pictureRow.beat.name] : []),
+      ...(until > start.at ? [`holds ${Math.round(until - start.at)} s`, `to ${start.estimated ? "~" : ""}${formatRunningTime(until)}`] : []),
+    ].join(" · ");
+    return { title: `Picture at ${pictureStart(start)}`, sub: sub === "" ? blockHead.sub : sub, flag: null };
+  })();
   const panelTakes = pictureRow === null ? 0 : blockTakes(world.artifacts, prodId, chapter.id, pictureRow.block.key, pictureRow.block.shaped === true ? pictureRow.block.text : undefined).length;
   // The block's seams on touch (design turn 198j): Join next and Split under the sheet's head; a
   // fine pointer finds them on the list's lines instead.
-  const pictured = useMemo(() => new Set(placedPictures.byKey.keys()), [placedPictures]);
   const seamActs = useBlockSeamActs({
     row: coarse || phone ? pictureRow : null,
     rows: audiobook.rows,
     gaps: audiobook.seams.gaps,
     held: audiobook.seams.held,
     onPress: audiobook.seams.press,
-    pictured,
   });
   // A block panel opens only after a block is chosen; entering a chapter leaves paid actions put away.
   // The block's panel, beside the blocks or, on a phone, in a sheet (turn 165): one set of props.
@@ -3610,10 +3629,19 @@ export function ChapterWorkspace({
                   onSelectionChange={setBlockSelection}
                   onSelect={(key) => {
                     blockOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+                    setMarkKey(null);
                     selectBlock(key);
                   }}
                   slug={worldSlug}
                   pictures={chapterPictures}
+                  // A mark pressed, or `+ Picture` at a sentence (design turn 237b, 237c): its block, its Picture tab.
+                  pictureKey={pictureKey}
+                  onPicture={(block, key) => {
+                    blockOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+                    selectBlock(block);
+                    setMarkKey(key);
+                  }}
+                  onMove={(from, to) => moveAudiobookPicture(worldId, prodId, chapter.file, from, to)}
                   // Join and Split on hover (design turn 198); none while a read runs.
                   {...(!audiobook.seams.held ? { seams: { gaps: audiobook.seams.gaps, onPress: audiobook.seams.press } } : {})}
                   madeAgain={audiobook.seams.madeAgain}
@@ -4052,7 +4080,7 @@ export function ChapterWorkspace({
                     onClose={closeBlock}
                   >
                     {{
-                      picture: <BlockPicturePanel worldId={worldId} production={production} chapterFile={chapter.file} chapterOrder={chapter.order} row={pictureRow} rows={audiobook.rows} pictures={chapterPictures} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} />,
+                      picture: <BlockPicturePanel worldId={worldId} production={production} chapterFile={chapter.file} chapterOrder={chapter.order} row={pictureRow} rows={audiobook.rows} pictures={chapterPictures} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} {...(pictureKey !== null ? { pictureKey } : {})} />,
                       voice: <AudiobookSide {...blockPanel} />,
                       timing: timingPanel,
                     }}

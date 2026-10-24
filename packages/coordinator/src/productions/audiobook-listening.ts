@@ -365,6 +365,39 @@ export async function setAudiobookPicture(
 }
 
 /**
+ * A picture moved along the words (design turn 237, SPEC-047 R-205): from where it stands to the
+ * start of another sentence, through the record's lane. It keeps everything it holds — its file,
+ * Tall, look, shot, focus and motion — and takes the new place's key and words: a block's key at a
+ * block's first sentence, else a mark's with the sentence's hash. A place that holds a picture, and
+ * one whose words are gone, are refused; nothing is written.
+ */
+export async function moveAudiobookPicture(store: WorldStore, productionId: string, chapterFile: string, from: string, to: string): Promise<ChapterAudiobook> {
+  const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
+  const summary = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
+  if (summary === undefined) throw new Error("that chapter is no longer in this production");
+  const plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId, summary.id) });
+  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+  return updateAudiobook(store, productionId, plan.chapter, (current) => {
+    const source = pictureSlot(blocks, current.pictures, from);
+    const target = pictureSlot(blocks, current.pictures, to);
+    if (source?.placed === undefined) throw new Error("that picture is no longer here");
+    if (target === null) throw new Error("that sentence is no longer in the block");
+    if (target.placed !== undefined) throw new Error(target.placed.key === source.placed.key ? "it is there already" : "a picture stands there");
+    const block = blocks[target.index]!;
+    const sentence = target.sentence > 0 ? sentenceHashes(block.text)[target.sentence]! : undefined;
+    const { mark: _was, ...picture } = source.placed.picture;
+    const { [source.placed.key]: _moved, ...rest } = current.pictures ?? {};
+    const key = sentence === undefined ? block.key : pictureMarkKey(block.key, sentence);
+    // A picture kept under that key though shown nowhere (one a join took off) is never written over.
+    if (rest[key] !== undefined) throw new Error("a picture stands there");
+    // Looks held for the picture's next making go with it (R-146).
+    const { [source.placed.key]: held, ...looks } = current.ownLooks ?? {};
+    const ownLooks = held === undefined ? current.ownLooks : { ...looks, [key]: held };
+    return { ...current, updatedAt: store.now(), pictures: { ...rest, [key]: { ...picture, textHash: audiobookTextHash(block.text), ...(sentence !== undefined ? { mark: { sentence } } : {}) } }, ...(ownLooks !== undefined ? { ownLooks } : {}) };
+  }, { requireReadable: true });
+}
+
+/**
  * A block's picture made Tall (design turn 235, SPEC-047 R-197), kept beside the picture it was
  * made from, under that picture's own key, through the record's own lane. Refused when the block's
  * picture is no longer the one it was made from, so a Tall never lands beside a picture it does not

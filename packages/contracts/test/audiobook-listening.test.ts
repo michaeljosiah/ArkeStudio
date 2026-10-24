@@ -13,6 +13,7 @@ import {
   placePictures,
   retimePictureMarks,
   sentenceHashes,
+  sentenceOffsets,
   sentenceStart,
   sentencesOf,
   type ListeningInputBlock,
@@ -285,5 +286,17 @@ describe("picture marks (turn 237)", () => {
     const guessed = pictureSpans([{ key: "p0.0", text: GOAT, seconds: 40 }], pictures).spans[0]!;
     assert.equal(guessed.startEstimated, true);
     assert.equal(sentenceHashes(GOAT)[2], audiobookTextHash(widened!));
+  });
+
+  it("finds each sentence's start in the words as written, for the view to draw its mark", () => {
+    const written = "  “Ade, I am telling you.”\n\nTunde widened his eyes.   The goat was in the boot.";
+    const offsets = sentenceOffsets(written);
+    assert.deepEqual(offsets.map((at) => written.slice(at, at + 5)), ["“Ade,", "Tunde", "The g"]);
+  });
+
+  it("keeps emphasis closed after a stop with its sentence, so a mark never opens on a stray `**`", () => {
+    const written = "Written above it: **a hand-span high.** Under it, smaller: *called it back. paid.* Then _the line._";
+    assert.deepEqual(sentencesOf(written), ["Written above it: **a hand-span high.**", "Under it, smaller: *called it back.", "paid.*", "Then _the line._"]);
+    assert.deepEqual(sentenceOffsets(written).map((at) => written.slice(at, at + 5)), ["Writt", "Under", "paid.", "Then "]);
   });
 });

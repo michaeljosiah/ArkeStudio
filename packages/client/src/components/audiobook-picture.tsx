@@ -11,6 +11,10 @@ import {
   pictureLookChanged,
   pictureMood,
   pictureSpans,
+  pictureKeyParts,
+  placedKey,
+  sentenceHashes,
+  sentencesOf,
   productionStyleFor,
   worldImageReferences,
   type AudiobookPicture,
@@ -70,9 +74,13 @@ export function picturesByTab(world: WorldBundle): Record<PictureTab, WorldImage
 }
 
 export interface PictureSpan {
+  /** Its picture key as the block now names it: the block's own, or a mark's (design turn 237). */
+  key: string;
   file: string;
   /** The block it is set on, where it is kept (a picture that followed its words keeps its old key). */
   index: number;
+  /** The sentence of its block it starts at: 0 for the block's own, more for a mark (design turn 237). */
+  sentence: number;
   at: number;
   /** How long it holds, to the next picture however soon (design turn 237, R-207). */
   seconds: number;
@@ -100,11 +108,19 @@ export function useChapterPictures(world: WorldBundle | null, rows: readonly Blo
       const words = timing !== undefined && timing.artifactId === take?.artifactId && timing.textHash === take.textHash ? timing.words.map((word) => word.startSec) : undefined;
       return { key: row.block.key, text: row.block.text, seconds, ...(words !== undefined ? { words } : {}) };
     });
-    const { spans, lost, estimated } = pictureSpans(blocks, record?.pictures, (file) => listed.has(file));
+    const { spans, lost, estimated, startOf } = pictureSpans(blocks, record?.pictures, (file) => listed.has(file));
+    // Every picture by its key as the blocks now name it: a block's own under the block's key, a
+    // mark under its own (design turn 237); and each block's marks in reading order, for its words.
     const byKey = new Map<string, PictureSpan>();
-    for (const span of spans) if (span.sentence === 0) byKey.set(rows[span.index]!.block.key, { file: span.picture.file, index: span.index, at: span.at, seconds: span.seconds, until: span.until, estimated: span.startEstimated, entry: span.picture });
+    const marks = new Map<string, PictureSpan[]>();
+    for (const span of spans) {
+      const key = placedKey(blocks, span);
+      const entry: PictureSpan = { key, file: span.picture.file, index: span.index, sentence: span.sentence, at: span.at, seconds: span.seconds, until: span.until, estimated: span.startEstimated, entry: span.picture };
+      byKey.set(key, entry);
+      if (span.sentence > 0) marks.set(rows[span.index]!.block.key, [...(marks.get(rows[span.index]!.block.key) ?? []), entry]);
+    }
     const first = spans[0];
-    return { byKey, lost, estimated, count: spans.length, coverAtStart: first === undefined || first.at > 0 };
+    return { byKey, marks, startOf, lost, estimated, count: spans.length, coverAtStart: first === undefined || first.at > 0 };
   }, [world, rows, record]);
 }
 
@@ -138,7 +154,7 @@ export function pictureBrief(words: string, production: Pick<ProductionBundle, "
   return [`A picture for an audiobook, showing this moment: ${words.replace(/\s+/g, " ").trim()}`, ...(mood !== undefined ? [`Light and mood: ${mood}`] : [])].join("\n\n");
 }
 
-export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrder, row, rows, pictures, record = null }: {
+export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrder, row, rows, pictures, record = null, pictureKey }: {
   worldId: string;
   production: ProductionBundle;
   chapterFile: string;
@@ -148,8 +164,22 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   pictures: ReturnType<typeof useChapterPictures>;
   /** The chapter's record, for its look (design turn 191c): the sheet opens from here. */
   record?: ChapterAudiobook | null;
+  /**
+   * The picture this tab is for (design turn 237c): a mark's key inside the block, or the block's
+   * own when absent. A mark with no picture yet is one `+ Picture` placed: the tab makes or chooses it.
+   */
+  pictureKey?: string;
 }) {
-  const suggestion = usePictureSuggestion(worldId, production.meta.id, chapterFile, row.block.key);
+  const key = pictureKey ?? row.block.key;
+  // Its words (R-205): from its sentence to the next picture in the block, which its brief starts from.
+  const words = useMemo(() => {
+    const sentences = sentencesOf(row.block.text);
+    const parts = pictureKeyParts(key);
+    const from = parts.sentence === undefined ? 0 : Math.max(0, sentenceHashes(row.block.text).indexOf(parts.sentence));
+    const next = Math.min(sentences.length, ...(pictures.marks.get(row.block.key) ?? []).map((mark) => mark.sentence).filter((sentence) => sentence > from));
+    return from === 0 && next === sentences.length ? row.block.text : sentences.slice(from, next).join(" ");
+  }, [key, row.block.key, row.block.text, pictures.marks]);
+  const suggestion = usePictureSuggestion(worldId, production.meta.id, chapterFile, key);
   const store = useStore();
   const world = store.state?.world ?? null;
   const connection = store.connection;
@@ -160,15 +190,15 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   useEffect(() => {
     setOpen(false);
     setBrief(null);
-  }, [row.block.key]);
+  }, [key]);
   const index = rows.indexOf(row);
-  const here = pictures.byKey.get(row.block.key) ?? null;
+  const here = pictures.byKey.get(key) ?? null;
   const offered = useMemo(() => (world === null ? null : picturesByTab(world)), [world]);
   const blockName = row.block.key === "title" ? "title" : `block ${index + 1}`;
   const until = here === null ? null : here.until === null ? "end of chapter" : `until block ${here.until + 1}`;
   const choose = (file: string) => {
     const source: AudiobookPictureSource = tab;
-    setAudiobookPicture(worldId, production.meta.id, chapterFile, row.block.key, { file, source });
+    setAudiobookPicture(worldId, production.meta.id, chapterFile, key, { file, source });
   };
 
   // Generate (R-69): a new Bench session in image mode with the brief written in, then the Bench —
@@ -193,7 +223,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
     void navigate(`/w/${worldId}/artifacts/bench/${session.id}`);
   }, [bench, worldId, navigate, store.state]);
   const generate = () => {
-    pending.current = { before: bench?.session.id ?? null, brief: brief ?? pictureBrief(row.block.text, production, world, record?.look) };
+    pending.current = { before: bench?.session.id ?? null, brief: brief ?? pictureBrief(words, production, world, record?.look) };
     sendBenchNewSession(worldId);
   };
 
@@ -218,18 +248,18 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   const lookChanged = pictureLookChanged(here?.entry.look, record?.look, kitLookLibrary(world?.referenceKits ?? [], record?.look), here?.entry.lookReview);
 
   const pad = String(chapterOrder).padStart(2, "0");
-  const remove = () => setAudiobookPicture(worldId, production.meta.id, chapterFile, row.block.key, null);
+  const remove = () => setAudiobookPicture(worldId, production.meta.id, chapterFile, key, null);
   // A picture Arke made reads back as the card it was made from (194a, 194g): the prompt, model and
   // what rode from the Bench's sidecar, who was in it from its stamp, the shot where it was kept.
   const manifest = store.state?.app.manifest?.models;
   const made = useMemo(
-    () => (here === null || world === null ? null : madePicture(world, manifest, here.entry, record?.look, row.block.key)),
-    [here, world, manifest, record?.look, row.block.key],
+    () => (here === null || world === null ? null : madePicture(world, manifest, here.entry, record?.look, key)),
+    [here, world, manifest, record?.look, key],
   );
   // The card in hand: a suggestion being drafted or made stands over the picture's own.
   const card: PictureSuggestionState = suggestion.ask === null && made !== null ? { ...suggestion, ask: { state: "suggested", suggestion: made } } : suggestion;
   const choosePicture = connection === "open" ? () => setOpen(true) : undefined;
-  const motionControl = here !== null && world !== null ? <AudiobookMotionControl key={row.block.key} worldId={worldId} productionId={production.meta.id} chapterFile={chapterFile} block={row.block.key} picture={here.entry} slug={world.meta.slug} label={blockName} chapterLabel={`Chapter ${chapterOrder}`} holdLabel={until ?? undefined} /> : undefined;
+  const motionControl = here !== null && world !== null ? <AudiobookMotionControl key={key} worldId={worldId} productionId={production.meta.id} chapterFile={chapterFile} block={key} picture={here.entry} slug={world.meta.slug} label={blockName} chapterLabel={`Chapter ${chapterOrder}`} holdLabel={until ?? undefined} /> : undefined;
   // The Picture tab (design turn 194, rule 12; 194a, 194g): 193's card — the picture beside Frame,
   // Rides and the model, In frame, Not in frame, the prompt, the checks; Remove, Edit prompt and
   // Make again at the foot. When it shows and how long it holds are the chip's and the tab's, not
@@ -253,7 +283,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
           mediaActions={motionControl}
           {...(here !== null ? { onRemove: remove } : {})}
           {...(choosePicture !== undefined ? { onChoose: choosePicture } : {})}
-          chapter={{ productionId: production.meta.id, chapterFile, order: chapterOrder, look: record?.look ?? null, ...(record?.ownLooks?.[row.block.key] !== undefined ? { own: record.ownLooks[row.block.key] } : {}) }}
+          chapter={{ productionId: production.meta.id, chapterFile, order: chapterOrder, look: record?.look ?? null, ...(record?.ownLooks?.[key] !== undefined ? { own: record.ownLooks[key] } : {}) }}
         />
       ) : !open ? (
         <>
@@ -293,6 +323,13 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
               )}
             </div>
           </div>
+          {/* A mark's own words, its sentence to the next picture (design turn 237c): what its brief starts from. */}
+          {pictureKeyParts(key).sentence !== undefined && (
+            <div className="fy-pcard__sec" data-testid="picture-mark-words">
+              <span className="fy-pcard__h">Words</span>
+              <p className="fy-ab__markwords">{words}</p>
+            </div>
+          )}
           {motionControl}
           <div className="fy-abp__foot">
             {here !== null && (
@@ -317,7 +354,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
           </nav>
           {tab === "generated" && (
             <div className="fy-ab__picgen">
-              <Textarea aria-label="Brief" rows={4} value={brief ?? pictureBrief(row.block.text, production, world, record?.look)} onChange={(event) => setBrief(event.target.value)} />
+              <Textarea aria-label="Brief" rows={4} value={brief ?? pictureBrief(words, production, world, record?.look)} onChange={(event) => setBrief(event.target.value)} />
               <Button variant="primary" disabled={connection !== "open"} onClick={generate} data-testid="audiobook-picture-generate">
                 Generate
               </Button>
