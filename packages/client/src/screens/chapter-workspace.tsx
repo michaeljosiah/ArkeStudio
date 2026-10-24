@@ -4016,7 +4016,6 @@ export function ChapterWorkspace({
                   chapterOrder={chapter.order}
                   blocks={audiobook.rows.length}
                   reading={production.audiobook?.reading ?? "narrator"}
-                  chapterNote={production.audiobook?.chapterNotes?.[chapter.id] !== undefined}
                   onCancel={closeChapterDirect}
                   // The proposal comes back as the dock's card, Accept and Discard on it (turn 184b):
                   // with the dock put away by default here (194), Direct opens it to show the run.

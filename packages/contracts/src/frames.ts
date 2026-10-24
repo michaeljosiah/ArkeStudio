@@ -3609,20 +3609,19 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       chapterFile: z.string().min(1),
       /**
        * What the sheet's `Also` asks for (design turn 184a, SPEC-047 R-52, R-54): the lines cast
-       * first, under `performed` or `cast`, so the one proposal carries who speaks and how; the
-       * chapter note drafted; and the missing speaker notes drafted from the sheets.
+       * first, under `performed` or `cast`, so the one proposal carries who speaks and how; and the
+       * missing speaker notes drafted from the sheets. A chapter note is no longer drafted (R-53).
        */
       cast: z.literal(true).optional(),
-      chapterNote: z.literal(true).optional(),
       speakerNotes: z.literal(true).optional(),
     })
     .strict(),
   /** What `Direct this chapter` would read (design turn 184a, R-51), answered as `direction.reads`; nothing run. */
   z.object({ kind: z.literal("preview-direction"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema }).strict(),
   /**
-   * The book note, or with `chapterFile` that chapter's note (design turn 184, SPEC-047 R-53): at
-   * most 300 characters on the book record; null takes it away. Changing either makes the blocks
-   * it leads stale.
+   * The book note, or with `chapterFile` that chapter's note taken away (design turn 184, SPEC-047
+   * R-53): at most 300 characters on the book record; null takes it away. A chapter note is only
+   * cleared now, never written. Changing either makes the blocks it leads stale.
    */
   z
     .object({

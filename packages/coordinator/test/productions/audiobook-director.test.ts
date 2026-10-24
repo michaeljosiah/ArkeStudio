@@ -395,7 +395,10 @@ describe("the director writes turn 181's direction (R-52)", () => {
     assert.equal(verified.directed, 10, "a held block keeps its direction, at the delivery before");
     const prompt = directionPromptFor({ title: "Neap", blocks: [], pass: { index: 1, of: 1 } } as unknown as Parameters<typeof directionPromptFor>[0]);
     assert.match(prompt, /about one block in four/);
-    assert.match(prompt, /no note is better than one that restates the chapter note/);
+    assert.match(prompt, /no note is better than one that restates the delivery/);
+    assert.doesNotMatch(prompt, /chapterNote/, "a chapter note is never asked for");
+    const noted = directionPromptFor({ title: "Neap", blocks: [], pass: { index: 1, of: 1 }, context: { chapter: { order: 1, title: "Neap", version: 1 }, speakers: [], narrator: { label: "Kore" }, chapterNote: "night", before: null } } as unknown as Parameters<typeof directionPromptFor>[0]);
+    assert.match(noted, /no note is better than one that restates the chapter note/, "one a book still holds is read as the chapter's mood");
   });
 
   it("the words are never changed: an anchor that is not in the block, or is in it twice, is dropped", () => {
@@ -414,36 +417,51 @@ describe("the director writes turn 181's direction (R-52)", () => {
 });
 
 describe("the book note and the chapter note (R-53)", () => {
-  it("are written to the book record, raise the world first, lead Gemini's style before the block's own, and a tag reader holds a long one and tags a short one", () =>
+  it("the book note is written to the book record, raises the world first and leads Gemini's style; a chapter note is no longer written", () =>
     withDirector({}, async ({ worldDir, store, send }) => {
       const before = await schemaOf(worldDir);
       await send({ kind: "set-audiobook-reading-note", worldId: WORLD_ID, productionId: LEDGER, note: BOOK_NOTE });
       await send({ kind: "set-audiobook-reading-note", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", note: CHAPTER_NOTE });
       const book = await readBook(worldDir);
       assert.equal(book.note, BOOK_NOTE);
-      assert.equal(book.chapterNotes?.["neap"], CHAPTER_NOTE, "keyed by the chapter's id");
+      assert.equal(book.chapterNotes, undefined, "a chapter note is only cleared now, never written");
       assert.ok((await schemaOf(worldDir)) >= 45 && before < 45, "a build that cannot read the notes refuses the world rather than losing them");
 
-      // Gemini: both notes as sentences in the style, before the delivery's own sentence.
+      // Gemini: the note as a sentence in the style, before the delivery's own sentence.
       const gemini = { narrator: { provider: "google", model: GEMINI.id, voiceId: "Kore", label: "Kore" }, models: [GEMINI], catalogue: [] };
       const prepared = await prepareChapter(store, LEDGER, "neap", gemini, () => CLOCK, ["title"], { directions: { title: { delivery: "warm", speed: 1, cues: [] } } });
       assert.equal(prepared.kind, "ready");
       if (prepared.kind !== "ready") return;
       const title = prepared.prepared.speaking.find((block) => block.block.key === "title")!;
       const style = title.direction?.perPart[0]?.instructions ?? "";
-      assert.ok(style.startsWith(`${BOOK_NOTE} ${CHAPTER_NOTE}`), `the book note, then the chapter note, lead the style: ${style}`);
+      assert.ok(style.startsWith(BOOK_NOTE), `the book note leads the style: ${style}`);
       assert.ok(style.endsWith("Warm and gentle."), "then the block's own direction");
       assert.ok(!title.parts[0]!.includes(BOOK_NOTE), "never in the words a reader speaks");
+    }));
 
-      // A tag reader: the 94-character book note held; a chapter note short enough is a tag.
-      await send({ kind: "set-audiobook-reading-note", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", note: "night, the rail desk, quiet" });
-      const v3 = { narrator: { provider: "elevenlabs", model: V3.id, voiceId: "Rachel", label: "Rachel" }, models: [V3], catalogue: [] };
-      const tagged = await prepareChapter(store, LEDGER, "neap", v3, () => CLOCK, ["title"], { directions: { title: { delivery: "warm", speed: 1, cues: [] } } });
+  // 2026-10-24: Eleven v4 takes a 160-character tag on a line, and a 101-character chapter note
+  // before every block made it say each block's first line twice.
+  it("a chapter note a book already holds still leads: whole on Gemini, held on a tag reader past 60 however long its tags may be, and Remove clears it", () =>
+    withDirector({ book: { reading: "narrator", chapterNotes: { neap: CHAPTER_NOTE } } }, async ({ worldDir, store, send }) => {
+      const title = { directions: { title: { delivery: "warm" as const, speed: 1, cues: [] } } };
+      const gemini = { narrator: { provider: "google", model: GEMINI.id, voiceId: "Kore", label: "Kore" }, models: [GEMINI], catalogue: [] };
+      const styled = await prepareChapter(store, LEDGER, "neap", gemini, () => CLOCK, ["title"], title);
+      assert.equal(styled.kind, "ready");
+      if (styled.kind !== "ready") return;
+      assert.ok((styled.prepared.speaking[0]!.direction?.perPart[0]?.instructions ?? "").startsWith(CHAPTER_NOTE), "an instruction reader takes it whole");
+
+      const V4 = SHIPPED_MANIFEST.models.find((model) => model.id === "eleven_v4")!;
+      assert.ok(CHAPTER_NOTE.length > 60 && CHAPTER_NOTE.length <= (V4.cadence?.tagChars ?? 0), "short enough for a v4 line tag, too long to lead a block");
+      const v4 = { narrator: { provider: "elevenlabs", model: V4.id, voiceId: "Ife", label: "Ife" }, models: [V4], catalogue: [] };
+      const tagged = await prepareChapter(store, LEDGER, "neap", v4, () => CLOCK, ["title"], title);
       assert.equal(tagged.kind, "ready");
       if (tagged.kind !== "ready") return;
       const part = tagged.prepared.speaking[0]!.parts[0]!;
-      assert.ok(part.startsWith("[night, the rail desk, quiet] [warmly] "), `the short note as a tag, before the block's own: ${part}`);
-      assert.ok(!part.includes("harbour"), "the long book note is held, never spoken");
+      assert.ok(part.startsWith("[warmly] "), `held, so the block's own direction leads: ${part}`);
+      assert.ok(!part.includes("rail desk"), "the held note is never sent");
+
+      await send({ kind: "set-audiobook-reading-note", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", note: null });
+      assert.equal((await readBook(worldDir)).chapterNotes, undefined, "Remove takes it away");
     }));
 
   it("are part of a take's direction: a block made under them goes stale when either changes", () =>
@@ -513,7 +531,7 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
         },
       },
       async ({ events, send }) => {
-        await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", cast: true, speakerNotes: true, chapterNote: true });
+        await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", cast: true, speakerNotes: true });
         const directed = events.find((e): e is Directed => e.type === "direction.finished");
         assert.equal(directed?.outcome, "directed", directed?.reason);
         assert.deepEqual(directed.cast, { lines: 1, speakers: 1 });
@@ -541,14 +559,15 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
         direction: async (input) => ({
           blocks: input.blocks.map((block) => ({ block: block.key, delivery: "measured" })),
           speakerNotes: Object.fromEntries((input.asks?.speakerNotes ?? []).map((speaker) => [speaker.key, "dry, exact, unhurried"])),
-          ...(input.asks?.chapterNote === true ? { chapterNote: "Night at the rail desk." } : {}),
+          // A model that offers a chapter note unasked: nothing of it is kept.
+          ...({ chapterNote: "Night at the rail desk." } as Record<string, unknown>),
         }),
       },
       async ({ worldDir, events, send }) => {
-        await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", speakerNotes: true, chapterNote: true });
+        await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", speakerNotes: true });
         const directed = events.find((e): e is Directed => e.type === "direction.finished")!;
         assert.deepEqual(directed.speakerNotes, { "maren-kest": "dry, exact, unhurried" });
-        assert.equal(directed.chapterNote, "Night at the rail desk.");
+        assert.equal("chapterNote" in directed, false, "no chapter note is proposed");
         assert.ok(!existsSync(bookPath(worldDir)) || (await readBook(worldDir)).notes === undefined, "nothing written before acceptance");
         await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST, hash: directed.hash!, directions: directed.proposed!, proposalId: directed.proposalId });
         const book = await readBook(worldDir);
@@ -557,7 +576,7 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
         assert.equal(await readNarration(worldDir, "maren-kest"), "dry, exact, unhurried");
         assert.equal(book.notes?.["maren-kest"], undefined);
         assert.equal(book.noteSources, undefined);
-        assert.equal(book.chapterNotes?.["neap"], "Night at the rail desk.");
+        assert.equal(book.chapterNotes, undefined, "nor written on acceptance");
 
         // The author writes the book's own: it wins for this book, and a later draft replaces neither.
         await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note: "low, clipped" });
@@ -732,27 +751,24 @@ describe("a card's extras go only with that card (codex on PR 1476)", () => {
         direction: async (input) => ({
           blocks: input.blocks.map((block) => ({ block: block.key, delivery: "measured" })),
           speakerNotes: Object.fromEntries((input.asks?.speakerNotes ?? []).map((speaker) => [speaker.key, "dry, exact"])),
-          ...(input.asks?.chapterNote === true ? { chapterNote: "Night at the rail desk." } : {}),
         }),
       },
       async ({ worldDir, events, send }) => {
-        await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", speakerNotes: true, chapterNote: true });
+        await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", speakerNotes: true });
         const directed = events.find((e): e is Directed => e.type === "direction.finished")!;
         assert.ok(directed.proposalId);
         await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST, hash: directed.hash!, directions: directed.proposed!, proposalId: "an-older-card" });
         assert.ok(events.find((e): e is Recorded => e.type === "audiobook.record")?.record, "the directions it named are written");
         const book = await readBook(worldDir);
         assert.equal(book.notes, undefined, "not the held card's speaker notes");
-        assert.equal(book.chapterNotes, undefined, "nor its chapter note");
       },
     ));
 
   it("a card refused for prose that moved writes neither its cast nor its notes", () =>
     withDirector({ uncast: true, book: { reading: "performed" } }, async ({ worldDir, store }) => {
       const narrator = { provider: "kokoro", model: KOKORO.id, voiceId: "bm_george", label: "George" };
-      const accepted = await acceptDirections(store, LEDGER, "neap", { hash: `sha256:${"0".repeat(64)}`, directions: {} }, { narrator, models: [KOKORO], catalogue: [] }, { chapterNote: "Night.", speakerNotes: { "maren-kest": "dry" } });
+      const accepted = await acceptDirections(store, LEDGER, "neap", { hash: `sha256:${"0".repeat(64)}`, directions: {} }, { narrator, models: [KOKORO], catalogue: [] }, { speakerNotes: { "maren-kest": "dry" } });
       assert.deepEqual(accepted, { outcome: "refused", reason: "not cast · cast the lines first" });
-      assert.equal((await readBook(worldDir)).chapterNotes, undefined, "nothing of the card is written");
-      assert.equal((await readBook(worldDir)).notes, undefined);
+      assert.equal((await readBook(worldDir)).notes, undefined, "nothing of the card is written");
     }));
 });

@@ -421,7 +421,6 @@ interface StoreState {
       moved?: number;
       /** The card's own name, echoed on acceptance (codex on PR 1476). */
       proposalId?: string;
-      chapterNote?: string;
       speakerNotes?: Record<string, string>;
       reason?: string;
     }
@@ -2611,7 +2610,6 @@ function handleFrame(json: string): void {
             ...(event.castRecord !== undefined ? { castRecord: event.castRecord } : {}),
             ...(event.proposalId !== undefined ? { proposalId: event.proposalId } : {}),
             ...(event.proposed !== undefined ? { moved: Object.values(event.proposed).filter((input) => (input.delivery !== undefined && input.delivery !== "measured") || input.note !== undefined || input.speed !== 1 || input.cues.length > 0).length } : {}),
-            ...(event.chapterNote !== undefined ? { chapterNote: event.chapterNote } : {}),
             ...(event.speakerNotes !== undefined ? { speakerNotes: event.speakerNotes } : {}),
             ...(event.reason !== undefined ? { reason: event.reason } : {}),
           },
@@ -6165,14 +6163,13 @@ export function renderAudiobookMix(worldId: string, productionId: string, chapte
 }
 
 /** `Direct this chapter` (SPEC-047 R-10): the model asked for a direction per block; the card comes back as a run's result. */
-export function directChapter(worldId: string, productionId: string, chapterFile: string, also: { cast?: boolean; chapterNote?: boolean; speakerNotes?: boolean } = {}): boolean {
+export function directChapter(worldId: string, productionId: string, chapterFile: string, also: { cast?: boolean; speakerNotes?: boolean } = {}): boolean {
   return send({
     kind: "direct-chapter",
     worldId,
     productionId,
     chapterFile,
     ...(also.cast === true ? { cast: true as const } : {}),
-    ...(also.chapterNote === true ? { chapterNote: true as const } : {}),
     ...(also.speakerNotes === true ? { speakerNotes: true as const } : {}),
   });
 }

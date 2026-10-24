@@ -613,11 +613,19 @@ export interface HeldReadingNote {
 }
 
 /**
+ * The longest book or chapter note that leads every block as a tag (R-53). It is not the row's own
+ * tag cap: Eleven v4 takes 160 on a line, but its 101-character chapter note before every block
+ * made it say each block's first line twice (3 of 3 reads, 2026-10-24), where tags up to ten words
+ * on the lines inside the block read clean.
+ */
+export const READING_NOTE_TAG_MAX = 60;
+
+/**
  * How a row takes the book note and the chapter note (design turn 184, SPEC-047 R-53): sent with
  * every block, before the block's own direction. Whole as sentences beside the words on a row
  * that takes an instruction (Gemini's `style`, Breeze's `instructions`); each as one tag on a
- * row that writes tags, while it is short enough to be one; held otherwise, with the reason —
- * never rendered into words a reader would speak. The block's note rule, applied twice.
+ * row that writes tags, while it is at most `READING_NOTE_TAG_MAX`; held otherwise, with the
+ * reason — never rendered into words a reader would speak. The block's note rule, applied twice.
  */
 export function readingNotesLead(notes: { book?: string; chapter?: string }, model: CadenceRow, language?: string): { tags: string[]; instructions?: string; held: HeldReadingNote[] } {
   const tags: string[] = [];
@@ -627,7 +635,8 @@ export function readingNotesLead(notes: { book?: string; chapter?: string }, mod
     const note = notes[which];
     if (note === undefined) continue;
     const how = noteMode(note, model, language);
-    if (how.mode === "tag") tags.push(how.tag);
+    if (how.mode === "tag" && note.length > READING_NOTE_TAG_MAX) held.push({ which, length: note.length, reason: `a tag takes ${READING_NOTE_TAG_MAX} characters` });
+    else if (how.mode === "tag") tags.push(how.tag);
     else if (how.mode === "instruction") sentences.push(noteSentence(note));
     else held.push({ which, length: note.length, reason: how.reason });
   }

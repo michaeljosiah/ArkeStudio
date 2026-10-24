@@ -24,7 +24,7 @@ import { ChapterReferenceCoverageSchema } from "./audiobook-reference-coverage-s
 import { IllustrationProgressSchema, IllustrationProposalSchema, PICTURE_PROMPT_MAX, PictureSuggestionSchema } from "./audiobook-illustrate.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { AudioHeardSchema, AudioWaveformSchema, AudioSourceSchema, AudioStudioSnapshotSchema } from "./audio-arrangement-schema.js";
-import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX } from "./cadence.js";
+import { PERFORMANCE_NOTE_MAX } from "./cadence.js";
 import { FreePlanShortSchema } from "./provider-plans.js";
 import { z } from "zod";
 import { EffectAnalysisProjectionSchema } from "./editor-effect-analysis.js";
@@ -1882,8 +1882,6 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       cast: z.object({ lines: z.number().int().min(0), speakers: z.number().int().min(0) }).strict().optional(),
       /** The cast itself, so a window draws the proposal on the blocks that cast makes, not on the ones the record's cast makes (codex on PR 1479). */
       castRecord: ChapterVoicesSchema.optional(),
-      /** The chapter note the director drafted when asked (R-53); written on acceptance. */
-      chapterNote: z.string().min(1).max(CADENCE_NOTE_MAX).optional(),
       /** Speaker notes drafted from the sheets for speakers with none (R-54); written on acceptance, never over an author's. */
       speakerNotes: z.record(z.string().min(1).max(120), z.string().min(1).max(PERFORMANCE_NOTE_MAX)).optional(),
       reason: z.string().optional(),
