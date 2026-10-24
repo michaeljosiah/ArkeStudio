@@ -23,11 +23,12 @@ const after = (n) => `<span class="ap236-tag">${EYEOFF}After Chapter ${n}</span>
 const root = (label, width, height, inner) => `<div class="ap236" data-screen-label="${label}" style="width:${width}px;height:${height}px">${inner}</div>`;
 const opt = (label, middle, tail = '') => `<div class="ap236-opt"><b>${label}</b>${middle}<span class="grow"></span>${tail ? `<i>${tail}</i>` : ''}</div>`;
 
-// A teaser card: its picture, its place in the order, its name and what it is.
-const tz = ({ img, pos = 'center', name, what, n, pc = false, clip = false, cls = '' }) => `<div class="ap236-tz${pc ? ' pc' : ''}${cls ? ' ' + cls : ''}"><div class="im"><img src="${A}${img}" alt="" style="object-position:${pos}">${clip ? `<span class="play">${PLAY}</span>` : ''}${n ? `<span class="n">${n}</span>` : ''}</div><b>${name}</b><span class="m">${what}</span></div>`;
+// A teaser card, one shape whatever it holds (a character too, so a row of teasers lines up): its
+// picture, its place in the order, its name and what it is.
+const tz = ({ img, pos = 'center', name, what, n, clip = false, cls = '' }) => `<div class="ap236-tz${cls ? ' ' + cls : ''}"><div class="im"><img src="${A}${img}" alt="" style="object-position:${pos}">${clip ? `<span class="play">${PLAY}</span>` : ''}${n ? `<span class="n">${n}</span>` : ''}</div><b>${name}</b><span class="m">${what}</span></div>`;
 const add = (w = 168) => `<div class="ap236-tz add" style="width:${w}px"><div class="im">${PLUS}Add</div></div>`;
 const TEASERS = [
-  { img: 'char-maren.png', pos: '50% 18%', name: 'Maren Kest', what: 'Character', pc: true },
+  { img: 'char-maren.png', pos: '50% 18%', name: 'Maren Kest', what: 'Character' },
   { img: 'scene4-shot14b.png', name: 'Saltmouth bells', what: 'Clip &#183; 0:24 &#183; Chapter 1', clip: true },
   { img: 'scene4-shot13.png', pos: '70% 30%', name: 'The Vigil', what: 'Place' },
 ];
@@ -82,10 +83,10 @@ export const FRAMES = [
     '236c Add teaser, Characters: one not public and one after a chapter are dimmed, each said in one clause',
     1360, 720,
     `${guidePage}<div class="ap236-dim"></div><div class="ap236-pick"><h3>Add teaser &#183; The Undersong</h3><div class="sub">3 of 6</div><div class="ap236-tabs"><span class="on">Characters</span><span>Places</span><span>Pictures</span><span>Clips</span></div><div class="ap236-grid">${[
-      { img: 'char-maren.png', pos: '50% 18%', name: 'Maren Kest', what: 'Teaser 1', pc: true, cls: 'no' },
-      { img: 'char-bray.png', pos: '50% 20%', name: 'Bray Half-Hitch', what: 'Rigger', pc: true, cls: 'on' },
-      { img: 'char-chorister.png', pos: '50% 20%', name: 'The Chorister', what: 'After Chapter 9', pc: true, cls: 'no' },
-      { img: 'char-odile.png', pos: '50% 18%', name: 'Odile', what: 'Not public', pc: true, cls: 'no' },
+      { img: 'char-maren.png', pos: '50% 18%', name: 'Maren Kest', what: 'Teaser 1', cls: 'no' },
+      { img: 'char-bray.png', pos: '50% 20%', name: 'Bray Half-Hitch', what: 'Rigger', cls: 'on' },
+      { img: 'char-chorister.png', pos: '50% 20%', name: 'The Chorister', what: 'After Chapter 9', cls: 'no' },
+      { img: 'char-odile.png', pos: '50% 18%', name: 'Odile', what: 'Not public', cls: 'no' },
     ].map(tz).join('')}</div><div class="ap236-foot"><span class="grow"></span><span class="ap236-btn">Cancel</span><span class="ap236-btn pri">Add</span></div></div>`,
   )],
 

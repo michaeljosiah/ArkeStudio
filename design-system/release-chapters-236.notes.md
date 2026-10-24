@@ -33,6 +33,9 @@ releasing chapters from Export → Arke Player (233, 235).
 - **Teasers are spoilers only by the author's choice.** A character or place uses the Guide's own
   gate, so one that waits for a chapter can't be a teaser. A picture or clip shows its chapter as
   data, and the author judges it; the Studio hides nothing on the author's behalf.
+- **One card shape.** On first review the owner found mixed sizes unkempt. A character teaser was a
+  portrait card beside 16:9 ones; now every teaser, and every card in the picker, is the same 16:9
+  card, as P15 makes the Player's rows one tile.
 - **Publishing stays manual.** Arke's list is published by the owner's four steps (CLAUDE.md,
   "Publishing a world to Arke Player"). A part is pinned and listed the same way; nothing here
   uploads.
