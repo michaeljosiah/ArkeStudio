@@ -23,7 +23,7 @@ import {
   type GuideRecord,
   type GuideRecordMoment,
   type GuideRecordVoice,
-  type GuideTeaser,
+  type GuideTeaserV2,
   type GuideVoiceLine,
   type ListeningChapter,
   type SetGuideEntry,
@@ -370,7 +370,8 @@ export async function packGuide(drafted: GuideDraft, store: WorldStore, packing:
     }
     const places: GuideDocument["places"] = [];
     for (const place of draft.places) places.push({ ...place, ...(place.picture !== undefined ? { picture: await fit(place.picture) } : {}) });
-    const teasers: GuideTeaser[] = [];
+    // The draft is version 1 or 2 (`guideDocument` writes no songs yet), so its teasers are too.
+    const teasers: GuideTeaserV2[] = [];
     const drafts = guideTeasers(draft);
     if (drafts.some((teaser) => teaser.kind === "picture" || teaser.kind === "clip")) await mkdir(toExtendedLength(packing.at("guide/teasers")), { recursive: true });
     for (const teaser of drafts) {
@@ -380,7 +381,7 @@ export async function packGuide(drafted: GuideDraft, store: WorldStore, packing:
         const audio = await clip(teaser.audio);
         const { motion: _motion, ...still } = teaser;
         teasers.push({ ...still, picture, audio, ...(teaser.motion !== undefined ? { motion: await loop(teaser.motion) } : {}) });
-      } else teasers.push(teaser);
+      } else if (teaser.kind !== "song") teasers.push(teaser);
     }
     const document: GuideDocument = draft.version === 2 ? { ...draft, characters, places, teasers } : { ...draft, characters, places };
     await writeFile(toExtendedLength(packing.at("guide/guide.json")), `${JSON.stringify(document, null, 2)}\n`, "utf8");

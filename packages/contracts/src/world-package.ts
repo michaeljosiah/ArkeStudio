@@ -8,7 +8,9 @@ import { PUBLICATION_MANIFEST_FILE, PublicationAssetPathSchema } from "./publica
  * narration as data, a file a chapter with its pictures and phrases. Schema 3 (SPEC-059 R-9, R-10)
  * adds the world's guide, and lets a package carry the guide alone, so a world can be explored
  * before it is installed. Schema 4 (SPEC-058 R-46) is a part: the chapters released since an
- * edition, naming that edition, so a serial's listener never downloads the world again.
+ * edition, naming that edition, so a serial's listener never downloads the world again. Schema 5
+ * (R-68 – R-70) is a production package: one production published alone, beside the world's
+ * edition, which may be a music production with its music document.
  *
  * One reader in two languages (R-16): this one and Arke Player's `arke_world` (Dart) read the same
  * shared fixtures to the same verdicts. Both are strict as SPEC-048 R-17 asks: a key, schema or
@@ -21,10 +23,20 @@ import { PUBLICATION_MANIFEST_FILE, PublicationAssetPathSchema } from "./publica
 
 export const WORLD_MANIFEST_FILE = "world.json";
 export const WORLD_PACKAGE_FORMAT = "arke-world-package";
-export const WORLD_SCHEMA_VERSION = 4;
+export const WORLD_SCHEMA_VERSION = 5;
 export const LISTENING_MEDIA_TYPE = "application/vnd.arke.listening+json";
 export const LISTENING_FORMAT = "arke-listening";
 export const LISTENING_VERSION = 1;
+export const MUSIC_MEDIA_TYPE = "application/vnd.arke.music+json";
+export const MUSIC_FORMAT = "arke-music";
+export const MUSIC_VERSION = 1;
+/** A music production's kinds (SPEC-060 R-1): tracks in order, one song, or tracks for one production. */
+export const MUSIC_KINDS = ["album", "single", "soundtrack"] as const;
+export type MusicKind = (typeof MUSIC_KINDS)[number];
+export const MUSIC_AUDIO_MEDIA_TYPES: readonly string[] = ["audio/mp4"];
+export const MAX_MUSIC_TRACKS = 64;
+/** A track is a song, not an hour (R-70). */
+export const MAX_MUSIC_TRACK_MS = 15 * 60_000;
 
 /** A world's media, by the role it plays. */
 export const WORLD_BOOK_MEDIA_TYPES: readonly string[] = ["application/epub+zip"];
@@ -81,7 +93,9 @@ const productionShape = {
 };
 const ProductionV1Schema = z.object(productionShape).strict();
 const ProductionV2Schema = z.object({ ...productionShape, listening: z.string().optional() }).strict();
-export type WorldProduction = z.infer<typeof ProductionV2Schema>;
+// Schema 5 lets a production be music: its music document in place of a book or a narration (R-69).
+const ProductionV5Schema = z.object({ ...productionShape, listening: z.string().optional(), music: z.string().optional() }).strict();
+export type WorldProduction = z.infer<typeof ProductionV5Schema>;
 
 const manifestFields = {
   format: z.literal(WORLD_PACKAGE_FORMAT),
@@ -126,6 +140,15 @@ export type WorldPart = z.infer<typeof WorldPartSchema>;
 // A part says so; that it carries one production and no guide is checked once read, as not an Arke
 // package rather than newer.
 const ManifestV4Schema = z.object({ ...manifestFields, productions: z.array(ProductionV2Schema).max(64), guide: z.string().optional(), part: WorldPartSchema.optional() }).strict();
+// A production package says so with `alone`; that it carries one production, and no guide, key art
+// or part, is checked once read, as not an Arke package rather than newer.
+const ManifestV5Schema = z.object({
+  ...manifestFields,
+  productions: z.array(ProductionV5Schema).max(64),
+  guide: z.string().optional(),
+  part: WorldPartSchema.optional(),
+  alone: z.boolean().optional(),
+}).strict();
 
 export interface WorldManifest {
   schemaVersion: number;
@@ -139,6 +162,8 @@ export interface WorldManifest {
   guide?: string;
   /** Present on a part, schema 4 (SPEC-058 R-46). */
   part?: WorldPart;
+  /** True on a production package, schema 5: one production published alone (SPEC-058 R-68). */
+  alone?: boolean;
   assets: Record<string, WorldAsset>;
 }
 
@@ -172,19 +197,28 @@ export function readWorldManifest(source: string): WorldManifestRead {
   if (!Array.isArray(requires)) return notAPackage("requires is not a list");
   if (requires.length > 0) return newer(`requires ${requires.join(", ")}`);
 
-  const parsed = (version >= 4 ? ManifestV4Schema : version === 3 ? ManifestV3Schema : version === 2 ? ManifestV2Schema : ManifestV1Schema).safeParse(raw);
+  const parsed = (version >= 5 ? ManifestV5Schema : version === 4 ? ManifestV4Schema : version === 3 ? ManifestV3Schema : version === 2 ? ManifestV2Schema : ManifestV1Schema).safeParse(raw);
   if (!parsed.success) return refusedBy(parsed.error, "world.json");
-  // Every older manifest is a schema 4 one with less in it.
-  const manifest: z.infer<typeof ManifestV4Schema> = parsed.data;
+  // Every older manifest is a schema 5 one with less in it.
+  const manifest: z.infer<typeof ManifestV5Schema> = parsed.data;
   const guide = manifest.guide;
   if (manifest.productions.length === 0 && guide === undefined) return notAPackage("productions");
-  if (version >= 4) {
+  if (version === 4) {
     // Schema 4 exists for parts (R-46); an edition is still made at 2 or 3.
     if (manifest.part === undefined) return notAPackage("a schema 4 package is a part");
     if (guide !== undefined) return notAPackage("a part carries no guide");
     if (manifest.productions.length !== 1) return notAPackage("a part extends one production");
     // A single narration file cannot be added to: a part's chapters come as a listening document.
     if (manifest.productions[0]!.narration !== undefined) return notAPackage("a part names no narration");
+  }
+  if (version >= 5) {
+    // Schema 5 exists for production packages (R-68): one production published alone, beside the
+    // world's edition, which carries the world's guide and key art; a part is still made at 4.
+    if (manifest.alone !== true) return notAPackage("a schema 5 package is a production published alone");
+    if (manifest.part !== undefined) return notAPackage("a production package is not a part");
+    if (guide !== undefined) return notAPackage("a production package carries no guide");
+    if (manifest.keyArt !== undefined) return notAPackage("a production package carries no key art");
+    if (manifest.productions.length !== 1) return notAPackage("a production package holds one production");
   }
 
   const assetIds = Object.keys(manifest.assets);
@@ -212,28 +246,115 @@ export function readWorldManifest(source: string): WorldManifestRead {
     if (productionIds.has(production.id)) return notAPackage("production id or title");
     productionIds.add(production.id);
     const listening = "listening" in production ? production.listening : undefined;
+    const music = "music" in production ? production.music : undefined;
     if (
       !role(production.picture, WORLD_PICTURE_MEDIA_TYPES) ||
       !role(production.book, WORLD_BOOK_MEDIA_TYPES) ||
       !role(production.narration, WORLD_NARRATION_MEDIA_TYPES) ||
-      !role(listening, [LISTENING_MEDIA_TYPE])
+      !role(listening, [LISTENING_MEDIA_TYPE]) ||
+      !role(music, [MUSIC_MEDIA_TYPE])
     ) {
       return notAPackage(`production ${production.id} names an asset it cannot use`);
     }
     if (production.narration !== undefined && listening !== undefined) return notAPackage(`production ${production.id} names a narration and a listening document`);
-    if (production.book === undefined && production.narration === undefined && listening === undefined) return notAPackage(`production ${production.id} has nothing to play`);
+    // Music is heard on its own terms (R-69): its document in place of a book and a narration.
+    if (music !== undefined && (production.book !== undefined || production.narration !== undefined || listening !== undefined)) return notAPackage(`production ${production.id} names music beside a book or a narration`);
+    if (production.book === undefined && production.narration === undefined && listening === undefined && music === undefined) return notAPackage(`production ${production.id} has nothing to play`);
   }
-  // Every file is one the world uses (SPEC-048 R-13). A listening document's or a guide's files are
-  // known only once it is read, so with one the package check makes this check instead.
-  if (guide === undefined && manifest.productions.every((production) => !("listening" in production) || production.listening === undefined)) {
+  // Every file is one the world uses (SPEC-048 R-13). A listening document's, a music document's or a
+  // guide's files are known only once it is read, so with one the package check makes this check instead.
+  if (guide === undefined && manifest.productions.every((production) => production.listening === undefined && production.music === undefined)) {
     const unused = assetIds.filter((assetId) => !used.has(assetId));
     if (unused.length > 0) return notAPackage(`unused assets ${unused.join(", ")}`);
   }
-  const { metadata: _metadata, provenance: _provenance, requires: _requires, format: _format, ...kept } = manifest;
+  const { metadata: _metadata, provenance: _provenance, requires: _requires, format: _format, alone, ...kept } = manifest;
   return {
     ok: true,
-    manifest: { ...kept, productions: manifest.productions.map(({ metadata: _m, ...production }) => production) },
+    manifest: { ...kept, ...(alone === true ? { alone: true } : {}), productions: manifest.productions.map(({ metadata: _m, ...production }) => production) },
   };
+}
+
+// ---- The music document (SPEC-058 R-70) -----------------------------------------------------------
+
+const MusicSectionSchema = z.object({ label: text(100), at: TicksSchema, metadata: Ignorable }).strict();
+const MusicLyricsSchema = z.object({ text: text(20_000), sections: z.array(MusicSectionSchema).max(200).optional(), metadata: Ignorable }).strict();
+const MusicHeardInSchema = z.object({ production: SlugSchema, chapter: SlugSchema, at: TicksSchema, metadata: Ignorable }).strict();
+const MusicTrackSchema = z.object({
+  id: SlugSchema,
+  title: text(200),
+  audio: z.string(),
+  /** Milliseconds. */
+  duration: z.number().int().min(1).max(MAX_MUSIC_TRACK_MS),
+  lyrics: MusicLyricsSchema.optional(),
+  heardIn: z.array(MusicHeardInSchema).max(200).optional(),
+  metadata: Ignorable,
+}).strict();
+const MusicDocumentSchema = z.object({
+  format: z.literal(MUSIC_FORMAT),
+  version: z.literal(MUSIC_VERSION),
+  requires: z.array(z.unknown()).max(0).optional(),
+  kind: z.enum(MUSIC_KINDS),
+  for: SlugSchema.optional(),
+  tracks: z.array(MusicTrackSchema).min(1).max(MAX_MUSIC_TRACKS),
+  metadata: Ignorable,
+}).strict();
+
+/** The music document as written: times in milliseconds on each track's own clock. */
+export type MusicDocument = z.infer<typeof MusicDocumentSchema>;
+export type MusicTrack = MusicDocument["tracks"][number];
+export type MusicRead = { ok: true; document: MusicDocument } | { ok: false; refusal: WorldRefusal; reason: string };
+
+/**
+ * Reads a music document against its package's inventory (SPEC-058 R-70), as strictly as the listening
+ * document: an id that repeats, an asset missing or not audio, a section outside its track or out of
+ * order, a single with more than one track, or a `for` on anything but a soundtrack is not an Arke
+ * package. `heardIn` names the world's productions, not only the package's, so it is not checked
+ * against the package: the Player shows a row only when its production is installed.
+ */
+export function readMusic(source: string, assets: Readonly<Record<string, WorldAsset>>): MusicRead {
+  const notAPackage = (reason: string) => ({ ok: false as const, refusal: "not-a-package" as const, reason });
+  let json: unknown;
+  try {
+    json = JSON.parse(source);
+  } catch {
+    return notAPackage("the music document is not JSON");
+  }
+  if (typeof json !== "object" || json === null || Array.isArray(json) || (json as Record<string, unknown>)["format"] !== MUSIC_FORMAT) return notAPackage(`not an ${MUSIC_FORMAT}`);
+  const raw = json as Record<string, unknown>;
+  const version = raw["version"];
+  if (typeof version !== "number" || !Number.isInteger(version)) return notAPackage("no version");
+  if (version > MUSIC_VERSION) return { ok: false, refusal: "newer-arke", reason: `music version ${version}` };
+  if (version !== MUSIC_VERSION) return notAPackage(`music version ${version}`);
+  const requires = raw["requires"] ?? [];
+  if (!Array.isArray(requires)) return notAPackage("requires is not a list");
+  if (requires.length > 0) return { ok: false, refusal: "newer-arke", reason: `requires ${requires.join(", ")}` };
+
+  const parsed = MusicDocumentSchema.safeParse(raw);
+  if (!parsed.success) return refusedBy(parsed.error, "the music document");
+  const document = parsed.data;
+  if (document.kind === "single" && document.tracks.length !== 1) return notAPackage("a single holds one track");
+  if (document.kind === "soundtrack" && document.for === undefined) return notAPackage("a soundtrack names the production it is for");
+  if (document.kind !== "soundtrack" && document.for !== undefined) return notAPackage(`an ${document.kind} is for no production`);
+  const ids = new Set<string>();
+  for (const track of document.tracks) {
+    const where = `track ${track.id}`;
+    if (ids.has(track.id)) return notAPackage(`${where} repeats`);
+    ids.add(track.id);
+    const audio = assets[track.audio];
+    if (audio === undefined || !MUSIC_AUDIO_MEDIA_TYPES.includes(audio.mediaType)) return notAPackage(`${where} audio`);
+    let before = -1;
+    for (const section of track.lyrics?.sections ?? []) {
+      if (section.at >= track.duration) return notAPackage(`${where}: a section after its end`);
+      if (section.at <= before) return notAPackage(`${where}: sections out of order`);
+      before = section.at;
+    }
+  }
+  return { ok: true, document };
+}
+
+/** Every asset a music document names, so a package can be checked for files nothing uses. */
+export function musicAssetIds(document: MusicDocument): Set<string> {
+  return new Set(document.tracks.map((track) => track.audio));
 }
 
 /** The point Slow push keeps still, 0 to 1 across and down. */
@@ -395,10 +516,11 @@ export function listeningPhraseAt(chapter: ListeningDocumentChapter, time: numbe
 export const GUIDE_MEDIA_TYPE = "application/vnd.arke.guide+json";
 export const GUIDE_FORMAT = "arke-guide";
 /**
- * Version 2 adds teasers (SPEC-059 R-28). A writer still writes version 1 when there are none, so a
- * guide without teasers reads in every Player.
+ * Version 2 adds teasers (SPEC-059 R-28); version 3 (R-37) a character's or place's theme and a song
+ * teaser. A writer writes the lowest version that holds what it carries, so a guide without them
+ * reads in every Player that reads the rest.
  */
-export const GUIDE_VERSION = 2;
+export const GUIDE_VERSION = 3;
 /** At most six teasers a world (turn 236 call 2). */
 export const MAX_GUIDE_TEASERS = 6;
 /** A clip is a moment, not a scene: at most 30 seconds of its narration (R-25). */
@@ -438,6 +560,13 @@ const GuideCharacterSchema = z.object({
   metadata: Ignorable,
 }).strict();
 const GuidePlaceSchema = z.object({ id: SlugSchema, name: text(200), role: text(200).optional(), picture: z.string().optional(), after, sections, links, metadata: Ignorable }).strict();
+/**
+ * A character's or place's theme (R-35, R-37): a track of the world's music, named with its title and
+ * length so a guide alone can show it before the music is installed. No audio rides with it.
+ */
+const GuideThemeSchema = z.object({ production: SlugSchema, track: SlugSchema, title: text(200), duration: z.number().int().min(1).max(MAX_MUSIC_TRACK_MS), metadata: Ignorable }).strict();
+const GuideCharacterV3Schema = GuideCharacterSchema.extend({ theme: GuideThemeSchema.optional() }).strict();
+const GuidePlaceV3Schema = GuidePlaceSchema.extend({ theme: GuideThemeSchema.optional() }).strict();
 const GuideLoreSchema = z.object({ id: SlugSchema, kind: z.enum(GUIDE_LORE_KINDS), title: text(200), text: text(20_000), after, links, metadata: Ignorable }).strict();
 // What an `after` or a voice line names: a production's chapters in manuscript order, each with the
 // number a reader knows it by. The guide carries them because a guide alone has no production to
@@ -446,7 +575,7 @@ const GuideChapterSchema = z.object({ id: SlugSchema, number: z.number().int().m
 const GuideProductionSchema = z.object({ id: SlugSchema, title: text(200), chapters: z.array(GuideChapterSchema).max(MAX_CHAPTERS), metadata: Ignorable }).strict();
 // A teaser (R-28): an entry public from the start, by id, or a picture or clip with its own files and
 // the chapter it comes from, which the Player shows on its card.
-const GuideTeaserSchema = z.discriminatedUnion("kind", [
+const teaserKinds = [
   z.object({ kind: z.literal("character"), id: SlugSchema, metadata: Ignorable }).strict(),
   z.object({ kind: z.literal("place"), id: SlugSchema, metadata: Ignorable }).strict(),
   z.object({ kind: z.literal("picture"), title: text(200), picture: z.string(), production: SlugSchema, chapter: SlugSchema, metadata: Ignorable }).strict(),
@@ -461,7 +590,23 @@ const GuideTeaserSchema = z.discriminatedUnion("kind", [
     chapter: SlugSchema,
     metadata: Ignorable,
   }).strict(),
-]);
+] as const;
+const GuideTeaserSchema = z.discriminatedUnion("kind", [...teaserKinds]);
+/**
+ * A song (R-36, R-37, version 3): a track's excerpt of at most 30 seconds, rendered at the export,
+ * with its music production's square cover. It names its track, not a chapter: music has none.
+ */
+const GuideSongTeaserSchema = z.object({
+  kind: z.literal("song"),
+  title: text(200),
+  picture: z.string(),
+  audio: z.string(),
+  duration: z.number().int().min(1).max(MAX_TEASER_CLIP_MS),
+  production: SlugSchema,
+  track: SlugSchema,
+  metadata: Ignorable,
+}).strict();
+const GuideTeaserV3Schema = z.discriminatedUnion("kind", [...teaserKinds, GuideSongTeaserSchema]);
 const guideFields = {
   format: z.literal(GUIDE_FORMAT),
   requires: z.array(z.unknown()).max(0).optional(),
@@ -471,21 +616,36 @@ const guideFields = {
   lore: z.array(GuideLoreSchema).max(MAX_GUIDE_ENTRIES),
   metadata: Ignorable,
 };
-// A version 1 guide does not know teasers, so one naming them is newer, never skipped.
+// A version 1 guide does not know teasers, so one naming them is newer, never skipped; a version 2
+// guide does not know a theme, so one naming it is newer too.
 const GuideDocumentV1Schema = z.object({ ...guideFields, version: z.literal(1) }).strict();
 const GuideDocumentV2Schema = z.object({ ...guideFields, version: z.literal(2), teasers: z.array(GuideTeaserSchema).max(MAX_GUIDE_TEASERS).optional() }).strict();
+const GuideDocumentV3Schema = z.object({
+  ...guideFields,
+  characters: z.array(GuideCharacterV3Schema).max(MAX_GUIDE_ENTRIES),
+  places: z.array(GuidePlaceV3Schema).max(MAX_GUIDE_ENTRIES),
+  version: z.literal(3),
+  teasers: z.array(GuideTeaserV3Schema).max(MAX_GUIDE_TEASERS).optional(),
+}).strict();
 
-export type GuideDocument = z.infer<typeof GuideDocumentV1Schema> | z.infer<typeof GuideDocumentV2Schema>;
-export type GuideTeaser = z.infer<typeof GuideTeaserSchema>;
+export type GuideDocument = z.infer<typeof GuideDocumentV1Schema> | z.infer<typeof GuideDocumentV2Schema> | z.infer<typeof GuideDocumentV3Schema>;
+export type GuideTeaser = z.infer<typeof GuideTeaserV3Schema>;
+/** The teasers a version 2 guide may carry: everything but a song. */
+export type GuideTeaserV2 = z.infer<typeof GuideTeaserSchema>;
 export type GuideTeaserKind = GuideTeaser["kind"];
+export type GuideSongTeaser = z.infer<typeof GuideSongTeaserSchema>;
+export type GuideTheme = z.infer<typeof GuideThemeSchema>;
 
 /** A guide's teasers in the author's order; a version 1 guide has none. */
-export const guideTeasers = (guide: GuideDocument): GuideTeaser[] => (guide.version === 2 ? (guide.teasers ?? []) : []);
+export const guideTeasers = (guide: GuideDocument): GuideTeaser[] => (guide.version === 1 ? [] : (guide.teasers ?? []));
+
+/** An entry's theme, which only a version 3 guide carries. */
+export const guideTheme = (entry: GuideCharacter | GuidePlace): GuideTheme | undefined => ("theme" in entry ? entry.theme : undefined);
 export type GuideAfter = z.infer<typeof GuideAfterSchema>;
 export type GuideSection = z.infer<typeof GuideSectionSchema>;
 export type GuideVoice = z.infer<typeof GuideVoiceSchema>;
-export type GuideCharacter = z.infer<typeof GuideCharacterSchema>;
-export type GuidePlace = z.infer<typeof GuidePlaceSchema>;
+export type GuideCharacter = z.infer<typeof GuideCharacterV3Schema>;
+export type GuidePlace = z.infer<typeof GuidePlaceV3Schema>;
 export type GuideLore = z.infer<typeof GuideLoreSchema>;
 export type GuideLoreKind = (typeof GUIDE_LORE_KINDS)[number];
 export type GuideProduction = z.infer<typeof GuideProductionSchema>;
@@ -516,7 +676,7 @@ export function readGuide(source: string, assets: Readonly<Record<string, WorldA
   if (!Array.isArray(requires)) return notAPackage("requires is not a list");
   if (requires.length > 0) return { ok: false, refusal: "newer-arke", reason: `requires ${requires.join(", ")}` };
 
-  const parsed = (version === 2 ? GuideDocumentV2Schema : GuideDocumentV1Schema).safeParse(raw);
+  const parsed = (version === 3 ? GuideDocumentV3Schema : version === 2 ? GuideDocumentV2Schema : GuideDocumentV1Schema).safeParse(raw);
   if (!parsed.success) return refusedBy(parsed.error, "the guide");
   const guide: GuideDocument = parsed.data;
 
@@ -572,6 +732,12 @@ export function readGuide(source: string, assets: Readonly<Record<string, WorldA
       if (entry.after != null) return notAPackage(`${where} waits for a chapter`);
       continue;
     }
+    // A song names its track, which is the world's music and need not be in this package; its files are its own.
+    if (teaser.kind === "song") {
+      if (!asset(teaser.picture, WORLD_PICTURE_MEDIA_TYPES)) return notAPackage(`${where}: picture`);
+      if (!asset(teaser.audio, GUIDE_VOICE_MEDIA_TYPES)) return notAPackage(`${where}: audio`);
+      continue;
+    }
     if (!names(teaser)) return notAPackage(`${where} names no chapter of the guide`);
     if (!asset(teaser.picture, WORLD_PICTURE_MEDIA_TYPES)) return notAPackage(`${where}: picture`);
     if (teaser.kind === "clip" && (!asset(teaser.audio, GUIDE_VOICE_MEDIA_TYPES) || !asset(teaser.motion, LISTENING_MOTION_MEDIA_TYPES))) return notAPackage(`${where}: audio or motion`);
@@ -588,12 +754,10 @@ export function guideAssetIds(guide: GuideDocument): Set<string> {
   }
   for (const place of guide.places) if (place.picture !== undefined) ids.add(place.picture);
   for (const teaser of guideTeasers(guide)) {
-    if (teaser.kind !== "picture" && teaser.kind !== "clip") continue;
+    if (teaser.kind !== "picture" && teaser.kind !== "clip" && teaser.kind !== "song") continue;
     ids.add(teaser.picture);
-    if (teaser.kind === "clip") {
-      ids.add(teaser.audio);
-      if (teaser.motion !== undefined) ids.add(teaser.motion);
-    }
+    if (teaser.kind === "clip" || teaser.kind === "song") ids.add(teaser.audio);
+    if (teaser.kind === "clip" && teaser.motion !== undefined) ids.add(teaser.motion);
   }
   return ids;
 }

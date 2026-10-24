@@ -1,0 +1,186 @@
+{
+  "note": "SPEC-058 R-68 – R-70: the music cases both readers run, Arke Player arke_world (Dart) and ArkeStudio contracts (TypeScript). A \"music\" case is a music document read against assets.json: \"kind\" and \"tracks\" list what an ok case reads, \"sections\" the first track's sections. A \"manifest\" case is a world.json: \"alone\" and \"music\" are what an ok one names.",
+  "cases": [
+    {
+      "file": "album.json",
+      "reader": "music",
+      "expect": "ok",
+      "kind": "album",
+      "tracks": [
+        "the-drowned-verse",
+        "slack-water",
+        "saltmouth-bells"
+      ],
+      "sections": 4
+    },
+    {
+      "file": "single.json",
+      "reader": "music",
+      "expect": "ok",
+      "kind": "single",
+      "tracks": [
+        "the-drowned-verse"
+      ],
+      "sections": 4
+    },
+    {
+      "file": "soundtrack.json",
+      "reader": "music",
+      "expect": "ok",
+      "kind": "soundtrack",
+      "tracks": [
+        "the-drowned-verse",
+        "slack-water",
+        "saltmouth-bells"
+      ]
+    },
+    {
+      "file": "metadata.json",
+      "reader": "music",
+      "expect": "ok"
+    },
+    {
+      "file": "single-two-tracks.json",
+      "reader": "music",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "soundtrack-without-for.json",
+      "reader": "music",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "album-with-for.json",
+      "reader": "music",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "section-past-end.json",
+      "reader": "music",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "sections-out-of-order.json",
+      "reader": "music",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "audio-not-audio.json",
+      "reader": "music",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "audio-missing.json",
+      "reader": "music",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "track-repeats.json",
+      "reader": "music",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "track-too-long.json",
+      "reader": "music",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "no-tracks.json",
+      "reader": "music",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "kind-unknown.json",
+      "reader": "music",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "heard-in-at.json",
+      "reader": "music",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "unknown-key.json",
+      "reader": "music",
+      "expect": "newerArke"
+    },
+    {
+      "file": "newer-version.json",
+      "reader": "music",
+      "expect": "newerArke"
+    },
+    {
+      "file": "requires.json",
+      "reader": "music",
+      "expect": "newerArke"
+    },
+    {
+      "file": "world-album.json",
+      "reader": "manifest",
+      "expect": "ok",
+      "alone": true,
+      "music": "music"
+    },
+    {
+      "file": "world-alone-listening.json",
+      "reader": "manifest",
+      "expect": "ok",
+      "alone": true
+    },
+    {
+      "file": "world-music-beside-book.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-music-wrong-media.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-alone-with-guide.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-alone-with-key-art.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-alone-with-part.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-alone-two-productions.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-schema-5-not-alone.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-alone-false.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-schema-6.json",
+      "reader": "manifest",
+      "expect": "newerArke"
+    },
+    {
+      "file": "world-music-in-schema-3.json",
+      "reader": "manifest",
+      "expect": "newerArke"
+    },
+    {
+      "file": "world-alone-in-schema-4.json",
+      "reader": "manifest",
+      "expect": "newerArke"
+    }
+  ]
+}

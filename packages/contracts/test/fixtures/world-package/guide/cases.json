@@ -162,6 +162,60 @@
       "expect": "ok"
     },
     {
+      "file": "themes.json",
+      "expect": "ok",
+      "counts": {
+        "characters": 3,
+        "places": 1,
+        "lore": 2
+      },
+      "teasers": [
+        "character",
+        "clip",
+        "place",
+        "picture",
+        "song"
+      ],
+      "themes": [
+        {
+          "entry": "the-chorister",
+          "track": "the-drowned-verse"
+        },
+        {
+          "entry": "the-vigil",
+          "track": "the-vigil"
+        }
+      ]
+    },
+    {
+      "file": "themes-version-2.json",
+      "expect": "newerArke"
+    },
+    {
+      "file": "song-in-version-2.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "song-long.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "song-wrong-media.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "song-unknown-key.json",
+      "expect": "newerArke"
+    },
+    {
+      "file": "theme-unknown-key.json",
+      "expect": "newerArke"
+    },
+    {
+      "file": "theme-too-long.json",
+      "expect": "notAPackage"
+    },
+    {
       "file": "world-guide-alone.json",
       "reader": "manifest",
       "expect": "ok"
