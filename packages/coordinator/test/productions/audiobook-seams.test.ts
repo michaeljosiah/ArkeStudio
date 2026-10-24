@@ -7,6 +7,7 @@ import {
   audiobookBlockPlan,
   audiobookSeamHash,
   audiobookTextHash,
+  pictureMarkKey,
   placePictures,
   type AudiobookSeamAnchor,
   type ChapterAudiobook,
@@ -20,7 +21,7 @@ import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { planAudiobook, readAudiobook, writeAudiobook } from "../../src/productions/audiobook.js";
 import { followChapterTakes } from "../../src/productions/audiobook-book.js";
 import { setAudiobookPicture, setAudiobookPictureFocus } from "../../src/productions/audiobook-listening.js";
-import { AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION, CAST_PARAGRAPHS_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_PICTURE_MARKS_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION, CAST_PARAGRAPHS_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta, SUPPORTED_SCHEMA_VERSION } from "../../src/world/scan.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import type { WorldStore } from "../../src/world/store.js";
@@ -195,10 +196,14 @@ describe("picture choices after paragraph shifts (#2120)", () => {
     assert.deepEqual(cleared.pictures, original.pictures, "clearing an unillustrated insertion cannot delete its old-key neighbour");
     await save(send, oldBody);
     await seam(send, "join", await gapAt(store, "join", "p1.0"));
+    // The join files the later paragraph's picture as a mark at its first sentence in the joined
+    // block (design turn 237, R-203): choosing the block's own picture replaces that one alone.
     const replaced = await choose(store, "p0.0");
-    assert.deepEqual(Object.keys(replaced.pictures ?? {}), ["p0.0"], "a real joined replacement removes the hidden later image as before");
+    const kept = Object.keys(replaced.pictures ?? {});
+    assert.equal(kept.length, 2);
+    assert.ok(kept.includes("p0.0") && kept.some((key) => key.startsWith("p0.0@")), "the block's own picture and the mark beside it");
     const removed = await setAudiobookPicture(store, LEDGER, "01-neap", "p0.0", null);
-    assert.equal(removed.pictures, undefined);
+    assert.deepEqual(Object.keys(removed.pictures ?? {}).map((key) => key.split("@")[0]), ["p0.0"], "Remove takes the block's own picture, never the mark");
   }));
 
   it("refuses changed manuscript at the owned-write boundary before relocating pictures", () => withHarness(async ({ store, send, worldDir }) => {
@@ -215,6 +220,47 @@ describe("picture choices after paragraph shifts (#2120)", () => {
       await assert.rejects(choose(store, "p0.0"), /blocks changed/);
       assert.deepEqual(await readAudiobook(store, LEDGER, "01-neap"), before);
     } finally { boundary.mock.restore(); }
+  }));
+});
+
+/**
+ * Picture marks (design turn 237, SPEC-047 R-202, R-203): a picture set at a sentence inside its
+ * block, kept under the mark's key with the sentence's hash, and a join that files the picture it
+ * would take off as a mark instead.
+ */
+describe("picture marks (turn 237)", () => {
+  const body = "The first lamp stays lit. The second lamp stays dark. The third lamp waits.\n\nThe harbour bell rings twice.";
+  const save = (send: (message: ClientMessage) => Promise<void>, text: string) => send({ kind: "save-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", body: text });
+  const at = (block: string, sentence: string) => pictureMarkKey(block, audiobookTextHash(sentence));
+  const shown = async (store: WorldStore) => {
+    const current = await plan(store);
+    return placePictures(current.blocks.map((row) => row.block), (current.record as ChapterAudiobook).pictures).placed.map((entry) => [current.blocks[entry.index]!.block.key, entry.sentence, entry.picture.file]);
+  };
+
+  it("sets a picture at a sentence beside its block's own, raises the world before the first, and removes it alone", () => withHarness(async ({ store, send, worldDir }) => {
+    await save(send, body);
+    await setAudiobookPicture(store, LEDGER, "01-neap", "p0.0", { file: "world-art.png", source: "world" });
+    const marked = await setAudiobookPicture(store, LEDGER, "01-neap", at("p0.0", "The third lamp waits."), { file: "artifacts/board-v2.png", source: "generated" });
+    assert.deepEqual(marked.pictures?.[at("p0.0", "The third lamp waits.")]?.mark, { sentence: audiobookTextHash("The third lamp waits.") });
+    assert.ok(ChapterAudiobookSchema.safeParse(marked).success);
+    assert.equal((await readWorldMeta(worldDir)).schemaVersion >= AUDIOBOOK_PICTURE_MARKS_SCHEMA_VERSION, true, "raised before the first mark is written");
+    assert.deepEqual(await shown(store), [["p0.0", 0, "world-art.png"], ["p0.0", 2, "artifacts/board-v2.png"]]);
+    const removed = await setAudiobookPicture(store, LEDGER, "01-neap", at("p0.0", "The third lamp waits."), null);
+    assert.deepEqual(Object.keys(removed.pictures ?? {}), ["p0.0"], "Remove at the mark takes that picture alone");
+  }));
+
+  it("refuses a mark at a sentence the block no longer says", () => withHarness(async ({ store, send }) => {
+    await save(send, body);
+    await assert.rejects(setAudiobookPicture(store, LEDGER, "01-neap", at("p0.0", "The fourth lamp is gone."), { file: "world-art.png", source: "world" }), /no longer in the block/);
+  }));
+
+  it("files the picture a join would take off as a mark at its first sentence in the joined block (R-203)", () => withHarness(async ({ store, send }) => {
+    await save(send, body);
+    await setAudiobookPicture(store, LEDGER, "01-neap", "p1.0", { file: "artifacts/board-v2.png", source: "generated" });
+    await seam(send, "join", await gapAt(store, "join", "p1.0"));
+    const record = (await readAudiobook(store, LEDGER, "01-neap")) as ChapterAudiobook;
+    assert.deepEqual(Object.keys(record.pictures ?? {}), [at("p0.0", "The harbour bell rings twice.")]);
+    assert.deepEqual(await shown(store), [["p0.0", 3, "artifacts/board-v2.png"]], "shown at the bell, inside the one block");
   }));
 });
 

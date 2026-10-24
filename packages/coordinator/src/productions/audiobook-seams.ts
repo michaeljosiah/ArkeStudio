@@ -2,6 +2,7 @@ import {
   audiobookBlockOptions,
   audiobookBlocks,
   audiobookHeading,
+  picturesKeptOnJoin,
   type AudiobookGap,
   type AudiobookSeam,
   type AudiobookSeamAnchor,
@@ -24,6 +25,21 @@ import type { ReadingRoom } from "./audiobook-run.js";
 export class SeamRefusal extends Error {}
 
 const samePlace = (a: AudiobookSeamAnchor["before"], b: AudiobookSeamAnchor["before"]) => a.paragraph === b.paragraph && a.turn === b.turn;
+
+/** The chapter's blocks under a record's seams, as placement reads them. */
+function blocksUnder(plan: Pick<AudiobookPlan, "body" | "cast" | "chapter" | "book">, record: Pick<ChapterAudiobook, "seams"> & Partial<ChapterAudiobook>) {
+  return audiobookBlocks(plan.body, plan.cast === "unreadable" ? null : plan.cast, audiobookHeading(plan.chapter.order, plan.chapter.title), audiobookBlockOptions(plan.book, record as ChapterAudiobook)).blocks.map((block) => ({ key: block.key, text: block.text, ...(block.starts !== undefined ? { starts: block.starts } : {}) }));
+}
+
+/**
+ * A record with new seams, its pictures kept (design turn 237, R-203): a picture the seams would
+ * take off its block is filed, in the same write, as a mark at its first sentence in the block
+ * that now holds it.
+ */
+export function withSeamsKeepingPictures(plan: Pick<AudiobookPlan, "body" | "cast" | "chapter" | "book">, current: ChapterAudiobook, next: ChapterAudiobook): ChapterAudiobook {
+  const pictures = picturesKeptOnJoin(blocksUnder(plan, current), blocksUnder(plan, next), next.pictures);
+  return pictures === null ? next : { ...next, pictures };
+}
 
 /** The gap a press names, in the blocks the record's seams make now. */
 function gapFor(plan: Pick<AudiobookPlan, "body" | "cast" | "chapter" | "book">, record: ChapterAudiobook, anchor: AudiobookSeamAnchor): { gap: AudiobookGap | null; dropped: number[] } {
@@ -70,7 +86,7 @@ export async function setAudiobookSeam(
     // A join is needed only where the reading cuts on its own, a split only where it does not.
     if (gap.auto === (input.press === "join")) seams.push({ kind: input.press, before: input.anchor.before, after: input.anchor.after, textHash: input.anchor.textHash, at: store.now() });
     const { seams: _was, ...rest } = current;
-    return { ...rest, updatedAt: store.now(), ...(seams.length > 0 ? { seams } : {}) };
+    return withSeamsKeepingPictures(plan, current, { ...rest, updatedAt: store.now(), ...(seams.length > 0 ? { seams } : {}) });
   });
   if (refusal !== null) throw new SeamRefusal(refusal);
   await followChapterTakes(store, productionId, plan.chapter, room);

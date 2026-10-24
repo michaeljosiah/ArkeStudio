@@ -45,7 +45,7 @@ import {
   type WorldDesignedVoice,
 } from "@arke-studio/contracts";
 import { clipFor } from "../voice/library.js";
-import { AUDIOBOOK_MOTION_SCHEMA_VERSION, AUDIO_STUDIO_SCHEMA_VERSION, AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION, AUDIOBOOK_PICTURE_LOOK_REVIEW_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHAPES_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIOBOOK_MOTION_SCHEMA_VERSION, AUDIO_STUDIO_SCHEMA_VERSION, AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION, AUDIOBOOK_PICTURE_LOOK_REVIEW_SCHEMA_VERSION, AUDIOBOOK_PICTURE_MARKS_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHAPES_SCHEMA_VERSION } from "../world/commit.js";
 import { directionPlan } from "../voice/direction.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { AUDIOBOOK_CHAPTER_NARRATOR_SCHEMA_VERSION, AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_LOOKS_SCHEMA_VERSION, AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION, AUDIOBOOK_TIMING_SCHEMA_VERSION, AUDIOBOOK_BEATS_SCHEMA_VERSION } from "../world/commit.js";
@@ -177,6 +177,8 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
   if (Object.values(pictures ?? {}).some(picture => picture.lookReview !== undefined)) await store.ensureSchemaVersion(AUDIOBOOK_PICTURE_LOOK_REVIEW_SCHEMA_VERSION, "audiobook-picture-look-review");
   // A picture's Tall (design turn 235): a field the builds before it refuse.
   if (Object.values(pictures ?? {}).some((picture) => picture.tall !== undefined)) await store.ensureSchemaVersion(AUDIOBOOK_PICTURE_SHAPES_SCHEMA_VERSION, "audiobook-picture-shapes");
+  // A picture set at a sentence inside its block (design turn 237, R-202): one more field the builds before it refuse.
+  if (Object.values(pictures ?? {}).some((picture) => picture.mark !== undefined)) await store.ensureSchemaVersion(AUDIOBOOK_PICTURE_MARKS_SCHEMA_VERSION, "audiobook-picture-marks");
   if (record.look !== undefined || Object.values(pictures ?? {}).some((picture) => picture.look !== undefined)) await store.ensureSchemaVersion(AUDIOBOOK_LOOK_SCHEMA_VERSION, "audiobook-look");
   // A look chosen for a character, the mood line, or the look a picture rode (design turn 193,
   // R-112): more fields the builds before it read as unreadable, so the world is raised first.

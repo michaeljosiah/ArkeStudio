@@ -390,7 +390,7 @@ describe("Pictures, in one sheet (turn 235a)", () => {
   it("offers Make N tall for the pictures without one or with one from an earlier picture, and follows the run in place", async () => {
     const m = await mount(inkbound(91, { shapes: ["wide", "tall"] }));
     const sheet = await openSheet();
-    const picture = (key: string, extra: Record<string, unknown> = {}) => ({ key, number: 1, file: `artifacts/${key}.png`, at: 0, seconds: 30, short: false, ...extra });
+    const picture = (key: string, extra: Record<string, unknown> = {}) => ({ key, number: 1, file: `artifacts/${key}.png`, at: 0, seconds: 30, ...extra });
     const listening = { productionId: "inkbound", title: "Inkbound", scope: { kind: "book" }, cover: null, chapters: [{ chapterId: "neap", order: 1, title: "Neap", state: "read", seconds: 90, blocks: [], gaps: [], opening: null, pictures: [picture("a"), picture("b", { tall: "artifacts/b-tall.png" }), picture("c", { tall: "artifacts/c-tall.png", tallEarlier: true })] }] };
     // The page asks for its own plan too; each ask is answered with the book's.
     for (const ask of sent(m, "open-audiobook-listening") as Array<Extract<ClientMessage, { kind: "open-audiobook-listening" }>>) {
@@ -410,7 +410,7 @@ describe("Pictures, in one sheet (turn 235a)", () => {
   it("shows a run that ended while the window was away as ended, once the snapshot comes back (codex on PR 2166)", async () => {
     const m = await mount(inkbound(91, { shapes: ["wide", "tall"] }));
     await openSheet();
-    const picture = (key: string) => ({ key, number: 1, file: `artifacts/${key}.png`, at: 0, seconds: 30, short: false });
+    const picture = (key: string) => ({ key, number: 1, file: `artifacts/${key}.png`, at: 0, seconds: 30 });
     const listening = { productionId: "inkbound", title: "Inkbound", scope: { kind: "book" }, cover: null, chapters: [{ chapterId: "neap", order: 1, title: "Neap", state: "read", seconds: 90, blocks: [], gaps: [], opening: null, pictures: [picture("a")] }] };
     const answerPlans = async () => {
       for (const ask of sent(m, "open-audiobook-listening") as Array<Extract<ClientMessage, { kind: "open-audiobook-listening" }>>) {

@@ -18,6 +18,7 @@ import type { SessionInput } from "../harness/session-files.js";
 import type { WorldStore } from "../world/store.js";
 import { planAudiobook, updateAudiobook } from "./audiobook.js";
 import { followChapterTakes } from "./audiobook-book.js";
+import { withSeamsKeepingPictures } from "./audiobook-seams.js";
 import { directionContext, renderDirectionContext, type DirectionRoom } from "./audiobook-direction.js";
 import { CONTINUITY_BOUNDS, makeAdapterJsonDeriver } from "./continuity.js";
 
@@ -200,7 +201,8 @@ export async function groupChapterByBeats(
   });
   const record = await updateAudiobook(store, productionId, plan.chapter, (current) => {
     const { seams: _replaced, beats: _was, ...rest } = current;
-    return { ...rest, updatedAt: store.now(), ...(joins.seams.length > 0 ? { seams: joins.seams } : {}), ...(named.length > 0 ? { beats: named } : {}) };
+    // A picture the beats would take off its block becomes a mark in its beat (design turn 237, R-203).
+    return withSeamsKeepingPictures(plan, current, { ...rest, updatedAt: store.now(), ...(joins.seams.length > 0 ? { seams: joins.seams } : {}), ...(named.length > 0 ? { beats: named } : {}) });
   });
   await followChapterTakes(store, productionId, plan.chapter, room);
   const after = (await planAudiobook(store, productionId, chapterId, { narrator: room.narrator })).blocks.length;
