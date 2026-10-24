@@ -562,10 +562,11 @@ export function readGuide(source: string, assets: Readonly<Record<string, WorldA
   const teasers = new Set<string>();
   for (const [index, teaser] of guideTeasers(guide).entries()) {
     const where = `teaser ${index + 1}`;
-    const key = `${teaser.kind} ${"id" in teaser ? teaser.id : teaser.picture}`;
-    if (teasers.has(key)) return notAPackage(`${where} repeats`);
-    teasers.add(key);
     if (teaser.kind === "character" || teaser.kind === "place") {
+      // An entry is one teaser at most. Two moments may share a still, and a package ships that
+      // file once (codex on PR 2173), so a picture or clip is never a repeat by its picture.
+      if (teasers.has(teaser.id)) return notAPackage(`${where} repeats`);
+      teasers.add(teaser.id);
       const entry = (teaser.kind === "character" ? guide.characters : guide.places).find((candidate) => candidate.id === teaser.id);
       if (entry === undefined) return notAPackage(`${where} names no ${teaser.kind} of the guide`);
       if (entry.after != null) return notAPackage(`${where} waits for a chapter`);

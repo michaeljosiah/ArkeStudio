@@ -158,6 +158,10 @@
       "expect": "ok"
     },
     {
+      "file": "teaser-same-picture.json",
+      "expect": "ok"
+    },
+    {
       "file": "world-guide-alone.json",
       "reader": "manifest",
       "expect": "ok"

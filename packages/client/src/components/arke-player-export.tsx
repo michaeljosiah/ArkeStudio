@@ -9,6 +9,7 @@ import {
   guideLiving,
   PART_SCHEDULE_DAYS,
   ulid,
+  withUnplannedChapters,
   type ArkePlayerPictureSize,
   type AudiobookListening,
   type GuideCounts,
@@ -199,7 +200,8 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
   // Release (236d): a production with an edition may release the chapters read whole since, as a
   // part. They run on from the last release and stop at the first not read whole (R-44).
   const releaseState = listed === null ? null : arkePlayerReleaseState(listed, production.meta.id);
-  const after = plan !== null && releaseState !== null ? arkePlayerPartChapters(plan.chapters, releaseState) : null;
+  // Every chapter still in the manuscript, an outlined one as not read, so a part never runs past it.
+  const after = plan !== null && releaseState !== null ? arkePlayerPartChapters(withUnplannedChapters(plan.chapters, production.chapters), releaseState) : null;
   const unready = after === null ? -1 : after.ready.findIndex((chapter) => !readWhole(chapter));
   const ready = after === null ? [] : unready === -1 ? after.ready : after.ready.slice(0, unready);
   const waiting = after === null ? [] : [...after.ready.slice(ready.length), ...after.waiting];
@@ -228,7 +230,8 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
     const id = `ap_${ulid()}`;
     setResult(null);
     setCopied(false);
-    const part = parting ? { chapters: ticked.map((chapter) => chapter.chapterId), ...(kept.day !== undefined || kept.next !== undefined ? { schedule: kept } : {}) } : undefined;
+    // A schedule the author cleared is sent empty, so the next part keeps it cleared (codex on PR 2173).
+    const part = parting ? { chapters: ticked.map((chapter) => chapter.chapterId), ...(schedule !== null || releaseState?.schedule !== undefined ? { schedule: kept } : {}) } : undefined;
     if (exportArkePlayer(worldId, production.meta.id, id, { ...options, ...(part !== undefined ? { part } : {}) }) !== null) setMaking(id);
   };
   const made = result?.ok === true ? result : null;

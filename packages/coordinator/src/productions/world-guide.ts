@@ -194,13 +194,15 @@ const momentKey = (teaser: GuideRecordMoment) => `${teaser.kind}\n${teaser.produ
  * start and never past its hold — from a chapter read whole. A moment that is gone, a picture the
  * world does not hold, or a clip whose chapter is no longer read whole is left out.
  */
-export async function guideMoments(store: WorldStore, choices: GuideRecord["teasers"], signal?: AbortSignal): Promise<{ made: Map<string, GuideMadeMoment>; clips: Map<string, GuideClipCut> }> {
+export async function guideMoments(store: WorldStore, choices: GuideRecord["teasers"], signal?: AbortSignal, ffmpeg?: FfmpegRunner): Promise<{ made: Map<string, GuideMadeMoment>; clips: Map<string, GuideClipCut> }> {
   const made = new Map<string, GuideMadeMoment>();
   const clips = new Map<string, GuideClipCut>();
   const plans = new Map<string, AudiobookListening | null>();
   for (const choice of choices ?? []) {
     if (choice.kind !== "picture" && choice.kind !== "clip") continue;
-    if (!plans.has(choice.production)) plans.set(choice.production, await audiobookListening(store, choice.production, signal !== undefined ? { signal } : {}).catch(() => null));
+    // With the export's own ffmpeg, so a chapter arranged from a compressed source reads here as it
+    // does in the package (codex on PR 2173).
+    if (!plans.has(choice.production)) plans.set(choice.production, await audiobookListening(store, choice.production, { ...(signal !== undefined ? { signal } : {}), ...(ffmpeg !== undefined ? { ffmpeg } : {}) }).catch(() => null));
     const chapter = plans.get(choice.production)?.chapters.find((candidate) => candidate.chapterId === choice.chapter);
     const moment = chapter?.pictures.find((picture) => picture.key === choice.block);
     if (chapter === undefined || moment === undefined || (await containedWorldFile(store.dir, moment.file)) === null) continue;
@@ -227,7 +229,9 @@ export async function guideMoments(store: WorldStore, choices: GuideRecord["teas
     // Named by what it is cut from, so a take made again changes the draft the gate compares.
     const audio = `clip-${createHash("sha256").update(JSON.stringify(segments)).digest("hex").slice(0, 16)}`;
     clips.set(audio, { segments });
-    const loop = moment.motion !== undefined && (await containedWorldFile(store.dir, moment.motion.file)) !== null ? moment.motion.file : undefined;
+    // A loop with a problem (a retired artifact, a picture changed under it) ships its still, as
+    // the narration's export does (codex on PR 2173).
+    const loop = moment.motion !== undefined && moment.motionProblem === undefined && (await containedWorldFile(store.dir, moment.motion.file)) !== null ? moment.motion.file : undefined;
     made.set(momentKey(choice), { title, picture: moment.file, audio, duration: Math.max(1, Math.round(seconds * 1000)), ...(loop !== undefined ? { motion: loop } : {}) });
   }
   return { made, clips };
@@ -240,7 +244,7 @@ export async function guideMoments(store: WorldStore, choices: GuideRecord["teas
  * nothing is public and there are no teasers. `places` gives the packaged production's chapters
  * their EPUB documents.
  */
-export async function guideDraft(store: WorldStore, places?: { production: string; book: ReadonlyMap<string, string> }, signal?: AbortSignal): Promise<GuideDraft | null> {
+export async function guideDraft(store: WorldStore, places?: { production: string; book: ReadonlyMap<string, string> }, signal?: AbortSignal, ffmpeg?: FfmpegRunner): Promise<GuideDraft | null> {
   const bundle = store.getBundle();
   const record = bundle.guide;
   const world = {
@@ -273,7 +277,7 @@ export async function guideDraft(store: WorldStore, places?: { production: strin
   const productions = guideProductionsOf(bundle.productions).map((production) =>
     places?.production !== production.id ? production : { ...production, chapters: production.chapters.map((chapter) => (places.book.has(chapter.id) ? { ...chapter, book: places.book.get(chapter.id)! } : chapter)) },
   );
-  const moments = await guideMoments(store, record.teasers, signal);
+  const moments = await guideMoments(store, record.teasers, signal, ffmpeg);
   const document = guideDocument(record, {
     ...world,
     productions,

@@ -1,0 +1,162 @@
+{
+  "format": "arke-guide",
+  "version": 2,
+  "productions": [
+    {
+      "id": "the-ledger-of-nights",
+      "title": "The Ledger of Nights",
+      "chapters": [
+        {
+          "id": "neap",
+          "number": 1,
+          "book": "OEBPS/chapter-1.xhtml"
+        },
+        {
+          "id": "the-rail-book",
+          "number": 2,
+          "book": "OEBPS/chapter-2.xhtml"
+        },
+        {
+          "id": "independent-record",
+          "number": 6
+        }
+      ]
+    }
+  ],
+  "characters": [
+    {
+      "id": "maren-kest",
+      "name": "Maren Kest",
+      "role": "Tide-caller",
+      "portrait": "g-maren",
+      "after": null,
+      "sections": [
+        {
+          "heading": "Essence",
+          "text": "Tide-caller. She hears the verse under the harbour and pulls the water where it needs to go."
+        },
+        {
+          "heading": "Relationships",
+          "text": "Trusts Bray with her life, not her secrets.",
+          "after": {
+            "production": "the-ledger-of-nights",
+            "chapter": "independent-record"
+          }
+        }
+      ],
+      "voice": {
+        "audio": "g-maren-voice",
+        "text": "I hear it. I always hear it.",
+        "duration": 8000,
+        "production": "the-ledger-of-nights",
+        "chapter": "the-rail-book"
+      },
+      "links": [
+        "bray-half-hitch",
+        "the-vigil"
+      ]
+    },
+    {
+      "id": "bray-half-hitch",
+      "name": "Bray Half-Hitch",
+      "role": "Rigger",
+      "portrait": "g-bray",
+      "sections": [
+        {
+          "heading": "Essence",
+          "text": "Rigger on the Vigil’s night crew."
+        }
+      ],
+      "links": [
+        "maren-kest"
+      ]
+    },
+    {
+      "id": "the-chorister",
+      "name": "The Chorister",
+      "after": {
+        "production": "the-ledger-of-nights",
+        "chapter": "independent-record"
+      },
+      "sections": [
+        {
+          "heading": "Essence",
+          "text": "Keeper of the drowned verse."
+        }
+      ]
+    }
+  ],
+  "places": [
+    {
+      "id": "the-vigil",
+      "name": "The Vigil",
+      "role": "Harbour mouth",
+      "picture": "g-vigil",
+      "sections": [
+        {
+          "heading": "Look",
+          "text": "A watchtower of black stone at the harbour mouth."
+        }
+      ],
+      "links": [
+        "maren-kest"
+      ]
+    }
+  ],
+  "lore": [
+    {
+      "id": "canon-001",
+      "kind": "lore",
+      "title": "The Undersong",
+      "text": "Beneath the harbour lies a drowned god, and it is still singing.",
+      "links": [
+        "maren-kest",
+        "the-vigil"
+      ]
+    },
+    {
+      "id": "canon-031",
+      "kind": "timeline",
+      "title": "The drowning of the god",
+      "text": "The god went under in the year of the long neap.",
+      "after": {
+        "production": "the-ledger-of-nights",
+        "chapter": "independent-record"
+      }
+    }
+  ],
+  "teasers": [
+    {
+      "kind": "character",
+      "id": "maren-kest"
+    },
+    {
+      "kind": "clip",
+      "title": "Saltmouth bells",
+      "picture": "t-bells",
+      "audio": "t-bells-audio",
+      "duration": 24000,
+      "motion": "t-bells-loop",
+      "production": "the-ledger-of-nights",
+      "chapter": "neap"
+    },
+    {
+      "kind": "place",
+      "id": "the-vigil"
+    },
+    {
+      "kind": "picture",
+      "title": "The weir at low water",
+      "picture": "t-weir",
+      "production": "the-ledger-of-nights",
+      "chapter": "independent-record"
+    },
+    {
+      "kind": "picture",
+      "title": "The weir again",
+      "picture": "t-weir",
+      "production": "the-ledger-of-nights",
+      "chapter": "neap"
+    }
+  ]
+}

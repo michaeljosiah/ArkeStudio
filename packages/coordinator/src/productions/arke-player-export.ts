@@ -12,6 +12,7 @@ import {
   packageSlug,
   SlugSchema,
   WORLD_PACKAGE_FORMAT,
+  withUnplannedChapters,
   type ArkePlayerPartRequest,
   type ArkePlayerPictureSize,
   type ArkePlayerRelease,
@@ -82,7 +83,10 @@ export interface ArkePlayerExportOptions {
 async function partOf(store: WorldStore, productionId: string, chapters: readonly ListeningChapter[], request: ArkePlayerPartRequest): Promise<{ ok: true; chosen: ListeningChapter[]; state: ArkePlayerReleaseState } | { ok: false; blockers: string[] }> {
   const state = arkePlayerReleaseState(await listArkePlayerPackages(store), productionId);
   if (state === null) return { ok: false, blockers: ["Release the whole world first · a part follows an edition"] };
-  const { ready, waiting } = arkePlayerPartChapters(chapters, state);
+  // Every chapter still in the manuscript counts, an outlined one too: the plan leaves those out,
+  // and a part that ran past one would leave it behind for good (codex on PR 2173).
+  const manuscript = store.getBundle().productions.find((entry) => entry.meta.id === productionId)?.chapters ?? [];
+  const { ready, waiting } = arkePlayerPartChapters(withUnplannedChapters(chapters, manuscript), state);
   const wanted = new Set(request.chapters);
   const chosen = ready.filter((chapter) => wanted.has(chapter.chapterId));
   // Only chapters read whole go to a listener (R-3), and a part never skips one (R-44): the
@@ -180,7 +184,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
   const bookChapters = await bookOf();
   // The world's guide as it would ship (SPEC-059 R-15): nothing when nothing is public. A part
   // carries none (R-45): a guide reaches phones alone, or in the next edition.
-  const drafted = part !== null ? null : await guideDraft(store, { production: productionId, book: bookPlaces(bookChapters) }, signal);
+  const drafted = part !== null ? null : await guideDraft(store, { production: productionId, book: bookPlaces(bookChapters) }, signal, ffmpeg);
   if (signal.aborted) return cancelled();
   // A part sends no cover, key art or production picture: the edition it follows has them.
   const coverOf = (plan: { cover: string | null }) => (part === null ? plan.cover : null);
@@ -394,7 +398,8 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
     const schedule = options.part?.schedule;
     const partKey: WorldPart | undefined =
       part !== null
-        ? { follows: part.state.edition.label, fingerprint: part.state.edition.fingerprint, number: part.state.nextNumber, ...(schedule !== undefined && (schedule.day !== undefined || schedule.next !== undefined) ? { schedule } : {}) }
+        ? // An empty schedule is one the author cleared, kept so the next part does not go back to an older one.
+          { follows: part.state.edition.label, fingerprint: part.state.edition.fingerprint, number: part.state.nextNumber, ...(schedule !== undefined ? { schedule } : {}) }
         : undefined;
     const manifest = {
       format: WORLD_PACKAGE_FORMAT,
@@ -458,7 +463,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
         return { ok: false as const, blockers: ["another release was made meanwhile · make it again"] };
       }
       const book = await bookOf();
-      const guide = part !== null ? null : await guideDraft(store, { production: productionId, book: bookPlaces(book) }, signal);
+      const guide = part !== null ? null : await guideDraft(store, { production: productionId, book: bookPlaces(book) }, signal, ffmpeg);
       if (fingerprint(again !== null && again.ok ? again.chosen : plan.chapters.filter(readWhole), coverOf(plan), book, guide?.document ?? null, store, productionId) !== madeFrom) return { ok: false as const, blockers: ["the book changed while the package was made · make it again"] };
       const destination = join(store.dir, "exports", name);
       // Never over an earlier export (SPEC-048 R-10).

@@ -57,6 +57,8 @@ export function arkePlayerReleaseState(packages: ReadonlyArray<{ productionId: s
   const newest = all[all.length - 1]!;
   const chapters = all.flatMap((entry) => entry.release.chapters);
   const lastChapter = newest.release.chapters.reduce<{ order: number; title: string } | null>((best, chapter) => (best === null || chapter.order > best.order ? { order: chapter.order, title: chapter.title } : best), null);
+  // A part carries the schedule the author left it with; an empty one is a schedule cleared, which
+  // the next part keeps rather than going back to an older one (codex on PR 2173).
   const schedule = [...parts].reverse().find((entry) => entry.release.part?.schedule !== undefined)?.release.part?.schedule;
   return {
     edition: { label: edition.release.edition, fingerprint: edition.release.fingerprint, exportedAt: edition.exportedAt },
@@ -66,6 +68,19 @@ export function arkePlayerReleaseState(packages: ReadonlyArray<{ productionId: s
     nextNumber: (parts.at(-1)?.release.part?.number ?? 0) + 1,
     ...(schedule !== undefined ? { schedule } : {}),
   };
+}
+
+/**
+ * The listening plan with every other chapter still in the manuscript, as not read: the plan leaves
+ * out a chapter outlined or with no prose, and a part that ran on past one would leave it behind
+ * for good (codex on PR 2173), since the next part starts after the last chapter released.
+ */
+export function withUnplannedChapters(plan: readonly ListeningChapter[], manuscript: ReadonlyArray<{ id: string; order: number; title: string; retired?: boolean }>): ListeningChapter[] {
+  const planned = new Set(plan.map((chapter) => chapter.chapterId));
+  const unplanned: ListeningChapter[] = manuscript
+    .filter((chapter) => chapter.retired !== true && !planned.has(chapter.id))
+    .map((chapter) => ({ chapterId: chapter.id, order: chapter.order, title: chapter.title, state: "not read", seconds: 0, blocks: [], gaps: [], pictures: [], opening: null }));
+  return [...plan, ...unplanned].sort((a, b) => a.order - b.order);
 }
 
 /** How far a chapter is read, for one that cannot go in a part yet: `read 6 of 31 blocks` (236d). */

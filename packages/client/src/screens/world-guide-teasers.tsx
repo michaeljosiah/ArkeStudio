@@ -18,7 +18,7 @@ import { characterPortraitPath, locationPortraitPath, Portrait } from "../compon
 import { Button, IconButton, cx } from "../components/ui.js";
 import { PlaySolid, Plus, X } from "../components/icons.js";
 import { mediaUrl } from "../lib/media.js";
-import { openAudiobookListening, setGuideTeasers, subscribeAudiobookListening } from "../lib/store.js";
+import { openAudiobookListening, setGuideTeasers, subscribeAudiobookListening, useStore } from "../lib/store.js";
 
 /**
  * A world's teasers (design turn 236a – 236c, SPEC-059 R-24 – R-27): up to six things from the
@@ -66,24 +66,36 @@ function momentsOf(plan: AudiobookListening, productions: readonly GuideProducti
   });
 }
 
-/** Each production's listening plan, asked once while `wanted`: where its pictures and clips are. */
+/**
+ * Each production's listening plan while `wanted`: where its pictures and clips are. A request
+ * whose answer a dropped connection lost is asked again once it is back (codex on PR 2173).
+ */
 function usePlans(worldId: string, productionIds: readonly string[], wanted: boolean): ReadonlyMap<string, AudiobookListening> {
+  const connection = useStore().connection;
   const [plans, setPlans] = useState<ReadonlyMap<string, AudiobookListening>>(new Map());
   const asked = useRef(new Map<string, string>());
+  // The productions asked on this connection whose answer may still come; a drop forgets them.
+  const waiting = useRef(new Set<string>());
+  useEffect(() => {
+    if (connection !== "open") waiting.current.clear();
+  }, [connection]);
   useEffect(() => subscribeAudiobookListening((answer) => {
     const production = asked.current.get(answer.requestId);
     if (production === undefined || answer.listening === null) return;
+    waiting.current.delete(production);
     setPlans((was) => new Map(was).set(production, answer.listening!));
   }), []);
   const key = productionIds.join("\n");
   useEffect(() => {
-    if (!wanted) return;
+    if (!wanted || connection !== "open") return;
     for (const production of productionIds) {
-      if ([...asked.current.values()].includes(production)) continue;
+      if (plans.has(production) || waiting.current.has(production)) continue;
       const requestId = openAudiobookListening(worldId, production);
-      if (requestId !== null) asked.current.set(requestId, production);
+      if (requestId === null) continue;
+      asked.current.set(requestId, production);
+      waiting.current.add(production);
     }
-  }, [worldId, key, wanted]);
+  }, [worldId, key, wanted, connection, plans]);
   return plans;
 }
 
