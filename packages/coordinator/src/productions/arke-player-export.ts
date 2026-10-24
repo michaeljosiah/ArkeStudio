@@ -2,7 +2,27 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { arkePlayerPictureEdge, LISTENING_MEDIA_TYPE, manuscriptDocument, packageSlug, SlugSchema, WORLD_PACKAGE_FORMAT, type ArkePlayerPictureSize, type GuideDocument, type ListeningChapter, type ListeningDocumentChapter, type WorldAsset } from "@arke-studio/contracts";
+import {
+  arkePlayerPartChapters,
+  arkePlayerPictureEdge,
+  ArkePlayerReleaseSchema,
+  arkePlayerReleaseState,
+  LISTENING_MEDIA_TYPE,
+  manuscriptDocument,
+  packageSlug,
+  SlugSchema,
+  WORLD_PACKAGE_FORMAT,
+  withUnplannedChapters,
+  type ArkePlayerPartRequest,
+  type ArkePlayerPictureSize,
+  type ArkePlayerRelease,
+  type ArkePlayerReleaseState,
+  type GuideDocument,
+  type ListeningChapter,
+  type ListeningDocumentChapter,
+  type WorldAsset,
+  type WorldPart,
+} from "@arke-studio/contracts";
 import type { FfmpegRunner } from "../takes/export.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -11,7 +31,7 @@ import { audiobookListening } from "./audiobook-listening.js";
 import { containedWorldFile } from "./interactive.js";
 import { writeEpub } from "./manuscript.js";
 import { openChapter } from "./ops.js";
-import { checkWorldPackageZip, writeWorldPackageZip } from "./world-package.js";
+import { checkWorldPackageZip, editionFingerprint, readWorldPackageRelease, writeWorldPackageZip } from "./world-package.js";
 import { guideDraft, packGuide } from "./world-guide.js";
 import { fitReadingImage, pngHasAlpha } from "../references/reading-image.js";
 export { pngHasAlpha } from "../references/reading-image.js";
@@ -35,7 +55,7 @@ const COMPILER_VERSION = 1;
 const MOTION_SIDE = 1080;
 
 export type ArkePlayerExportResult =
-  | { ok: true; file: string; bytes: number; sha256: string; edition: string; chapters: number; pictures: number; book: boolean; guide: boolean }
+  | { ok: true; file: string; bytes: number; sha256: string; edition: string; chapters: number; pictures: number; book: boolean; guide: boolean; part?: number }
   | { ok: false; blockers: string[] };
 
 export interface ArkePlayerExportOptions {
@@ -52,6 +72,30 @@ export interface ArkePlayerExportOptions {
   studioVersion: string;
   /** What is in hand and how far through, for Activity (233b). */
   onStep?: (step: string, percent: number) => void;
+  /**
+   * Release · New chapters (turn 236d, SPEC-058 R-43 – R-46): a part of these chapters, which must
+   * run on from the last release, every one read whole. Absent for the whole world.
+   */
+  part?: ArkePlayerPartRequest;
+}
+
+/** The part a request makes: its chapters, in order, and what it follows; or why it cannot be made. */
+async function partOf(store: WorldStore, productionId: string, chapters: readonly ListeningChapter[], request: ArkePlayerPartRequest): Promise<{ ok: true; chosen: ListeningChapter[]; state: ArkePlayerReleaseState } | { ok: false; blockers: string[] }> {
+  const state = arkePlayerReleaseState(await listArkePlayerPackages(store), productionId);
+  if (state === null) return { ok: false, blockers: ["Release the whole world first · a part follows an edition"] };
+  // Every chapter still in the manuscript counts, an outlined one too: the plan leaves those out,
+  // and a part that ran past one would leave it behind for good (codex on PR 2173).
+  const manuscript = store.getBundle().productions.find((entry) => entry.meta.id === productionId)?.chapters ?? [];
+  const { ready, waiting } = arkePlayerPartChapters(withUnplannedChapters(chapters, manuscript), state);
+  const wanted = new Set(request.chapters);
+  const chosen = ready.filter((chapter) => wanted.has(chapter.chapterId));
+  // Only chapters read whole go to a listener (R-3), and a part never skips one (R-44): the
+  // chapters asked for are the first of those ready, in order.
+  if (waiting.some((chapter) => wanted.has(chapter.chapterId))) return { ok: false, blockers: waiting.filter((chapter) => wanted.has(chapter.chapterId)).map((chapter) => `Chapter ${chapter.order} · ${chapter.title} · not read whole yet`) };
+  if (chosen.length !== wanted.size) return { ok: false, blockers: ["a chapter asked for was released already or is not in this production · choose again"] };
+  if (chosen.some((chapter, index) => ready[index]!.chapterId !== chapter.chapterId)) return { ok: false, blockers: [`Chapter ${ready[0]!.order} · ${ready[0]!.title} · comes first`] };
+  if (chosen.some((chapter) => !readWhole(chapter))) return { ok: false, blockers: chosen.filter((chapter) => !readWhole(chapter)).map((chapter) => `Chapter ${chapter.order} · ${chapter.title} · not read whole yet`) };
+  return { ok: true, chosen, state };
 }
 
 const pad = (value: number, width: number) => String(value).padStart(width, "0");
@@ -126,14 +170,25 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
   if (signal.aborted) return cancelled();
   const listeningOptions = { ffmpeg, signal, scope: { kind: "book" as const }, finalAudio: true };
   const listening = await audiobookListening(store, productionId, listeningOptions);
-  const whole = listening.chapters.filter(readWhole);
+  // A part holds only the chapters asked for, which run on from the last release (R-44); the
+  // whole world holds every chapter read whole.
+  const parting = options.part !== undefined ? await partOf(store, productionId, listening.chapters, options.part) : null;
+  if (parting !== null && !parting.ok) return parting;
+  const part = parting;
+  const whole = part !== null ? part.chosen : listening.chapters.filter(readWhole);
   if (signal.aborted) return cancelled();
 
-  const bookChapters = options.include.book ? await readBook(store, productionId) : [];
-  // The world's guide as it would ship (SPEC-059 R-15): nothing when nothing is public.
-  const drafted = await guideDraft(store, { production: productionId, book: bookPlaces(bookChapters) }, signal);
+  // A part's book holds its chapters alone (R-45): nothing released is sent again.
+  const inPart = (chapterId: string) => part === null || part.chosen.some((chapter) => chapter.chapterId === chapterId);
+  const bookOf = async () => (options.include.book ? (await readBook(store, productionId)).filter((chapter) => inPart(chapter.id)) : []);
+  const bookChapters = await bookOf();
+  // The world's guide as it would ship (SPEC-059 R-15): nothing when nothing is public. A part
+  // carries none (R-45): a guide reaches phones alone, or in the next edition.
+  const drafted = part !== null ? null : await guideDraft(store, { production: productionId, book: bookPlaces(bookChapters) }, signal, ffmpeg);
   if (signal.aborted) return cancelled();
-  const madeFrom = fingerprint(whole, listening.cover, bookChapters, drafted?.document ?? null, store, productionId);
+  // A part sends no cover, key art or production picture: the edition it follows has them.
+  const coverOf = (plan: { cover: string | null }) => (part === null ? plan.cover : null);
+  const madeFrom = fingerprint(whole, coverOf(listening), bookChapters, drafted?.document ?? null, store, productionId);
   if (whole.length === 0 && bookChapters.length === 0) return { ok: false, blockers: [options.include.book ? "no chapter is read whole and the book has no prose yet" : "no chapter is read whole yet"] };
 
   // A loop that will not play holds the package back, as R-72's does (R-11) — unless loops are
@@ -163,13 +218,13 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
     }
     if (chapter.opening !== null) await resolve(chapter.opening, where);
   }
-  const cover = whole.length > 0 ? listening.cover : null;
+  const cover = whole.length > 0 ? coverOf(listening) : null;
   if (cover !== null) await resolve(cover, "the cover is outside this world");
-  const keyArt = bundle.keyArt ?? null;
+  const keyArt = part === null ? (bundle.keyArt ?? null) : null;
   if (keyArt !== null) await resolve(keyArt, "the key art is outside this world");
   // The production's own picture is Publish's cover (R-2). Without one the key art stands in, and
   // the Player then shows the same picture for the world and for its Listen.
-  const picture = options.publish?.cover ?? null;
+  const picture = part === null ? (options.publish?.cover ?? null) : null;
   if (picture !== null) await resolve(picture, "Publish's cover is outside this world");
   if (outside.size > 0) return { ok: false, blockers: [...outside] };
 
@@ -317,7 +372,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
       step("Fitting the guide", 88);
       let packed: Awaited<ReturnType<typeof packGuide>>;
       try {
-        packed = await packGuide(drafted.document, drafted.lines, store, { ffmpeg, signal, at, add, original: async (assetId, file) => { originals[assetId] = sha256(await readFile(toExtendedLength(file))); } });
+        packed = await packGuide(drafted, store, { ffmpeg, signal, at, add, original: async (assetId, file) => { originals[assetId] = sha256(await readFile(toExtendedLength(file))); } });
       } catch (error) {
         if (signal.aborted) return cancelled();
         throw error;
@@ -333,14 +388,24 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
     const slug = packageSlug(bundle.meta.slug);
     await mkdir(toExtendedLength(join(store.dir, "exports")), { recursive: true });
     const taken = new Set(await readdir(toExtendedLength(join(store.dir, "exports"))).catch(() => [] as string[]));
+    // A part is named apart from the editions (R-47): `the-undersong-part-2026-10-30.zip`.
+    const named = part !== null ? "part" : "player";
     let edition = day;
-    for (let counter = 2; taken.has(`${slug}-player-${edition}.zip`) || taken.has(`${slug}-player-${edition}.zip.json`); counter++) edition = `${day}-${counter}`;
-    const name = `${slug}-player-${edition}.zip`;
+    for (let counter = 2; taken.has(`${slug}-${named}-${edition}.zip`) || taken.has(`${slug}-${named}-${edition}.zip.json`); counter++) edition = `${day}-${counter}`;
+    const name = `${slug}-${named}-${edition}.zip`;
+    // What the part follows (R-46): the edition by label and the Player's own fingerprint, its
+    // number after it, and the author's schedule when there is one.
+    const schedule = options.part?.schedule;
+    const partKey: WorldPart | undefined =
+      part !== null
+        ? // An empty schedule is one the author cleared, kept so the next part does not go back to an older one.
+          { follows: part.state.edition.label, fingerprint: part.state.edition.fingerprint, number: part.state.nextNumber, ...(schedule !== undefined ? { schedule } : {}) }
+        : undefined;
     const manifest = {
       format: WORLD_PACKAGE_FORMAT,
       // The oldest schema that says it all, so a Player that predates a guide still reads a
-      // package without one.
-      schemaVersion: guideId !== undefined ? 3 : listeningId !== undefined ? 2 : 1,
+      // package without one. A part is the only schema 4 package.
+      schemaVersion: partKey !== undefined ? 4 : guideId !== undefined ? 3 : listeningId !== undefined ? 2 : 1,
       id: slug,
       edition,
       name: bundle.meta.name.slice(0, 200),
@@ -355,6 +420,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
         ...(listeningId !== undefined ? { listening: listeningId } : {}),
       }],
       ...(guideId !== undefined ? { guide: guideId } : {}),
+      ...(partKey !== undefined ? { part: partKey } : {}),
       assets,
       provenance: {
         compiler: COMPILER,
@@ -381,18 +447,31 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
     // Under the gate, everything the package was made from is read again: a take made, a
     // sentence or a chapter's prose edited, a picture moved, a focus changed or a loop set to
     // hold meanwhile refuses the package rather than shipping it beside the snapshot's (R-4).
+    // What this release held, beside it, so the next part knows what it follows (R-43, R-46).
+    const release: ArkePlayerRelease = {
+      edition,
+      fingerprint: editionFingerprint({ edition, assets }),
+      chapters: whole.map((chapter) => ({ id: chapter.chapterId, order: chapter.order, title: chapter.title.trim() === "" ? `Chapter ${chapter.order}` : chapter.title.slice(0, 200) })),
+      ...(partKey !== undefined ? { part: partKey } : {}),
+    };
+
     return await store.gateOp(async () => {
       const plan = await audiobookListening(store, productionId, listeningOptions);
-      const book = options.include.book ? await readBook(store, productionId) : [];
-      const guide = await guideDraft(store, { production: productionId, book: bookPlaces(book) }, signal);
-      if (fingerprint(plan.chapters.filter(readWhole), plan.cover, book, guide?.document ?? null, store, productionId) !== madeFrom) return { ok: false as const, blockers: ["the book changed while the package was made · make it again"] };
+      // A part made meanwhile, or an edition, would leave this one following the wrong release.
+      const again = options.part !== undefined ? await partOf(store, productionId, plan.chapters, options.part) : null;
+      if (again !== null && (!again.ok || part === null || again.state.edition.fingerprint !== part.state.edition.fingerprint || again.state.nextNumber !== part.state.nextNumber)) {
+        return { ok: false as const, blockers: ["another release was made meanwhile · make it again"] };
+      }
+      const book = await bookOf();
+      const guide = part !== null ? null : await guideDraft(store, { production: productionId, book: bookPlaces(book) }, signal, ffmpeg);
+      if (fingerprint(again !== null && again.ok ? again.chosen : plan.chapters.filter(readWhole), coverOf(plan), book, guide?.document ?? null, store, productionId) !== madeFrom) return { ok: false as const, blockers: ["the book changed while the package was made · make it again"] };
       const destination = join(store.dir, "exports", name);
       // Never over an earlier export (SPEC-048 R-10).
       const exists = (path: string) => stat(toExtendedLength(path)).then(() => true, () => false);
       if ((await exists(destination)) || (await exists(`${destination}.json`))) return { ok: false as const, blockers: [`exports/${name} already exists · make it again`] };
       // What Publications lists, written before the package is named (233e): a record without
       // its package is never listed, and a package is never left without its record.
-      const listed: ArkePlayerListed = { kind: "arke-player", exportId: options.exportId, exportedAt: stamp, productionId, title: bundle.meta.name, bytes: checked.bytes, sha256: checked.sha256, holds, chapters: whole.length, pictures: shown, book: bookId !== undefined, guide: guideId !== undefined };
+      const listed: ArkePlayerListed = { kind: "arke-player", exportId: options.exportId, exportedAt: stamp, productionId, title: bundle.meta.name, bytes: checked.bytes, sha256: checked.sha256, holds, chapters: whole.length, pictures: shown, book: bookId !== undefined, guide: guideId !== undefined, release };
       await writeFile(toExtendedLength(`${destination}.json`), `${JSON.stringify(listed, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
       try {
         await rename(toExtendedLength(zip), toExtendedLength(destination));
@@ -401,7 +480,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
         throw error;
       }
       step("Done", 100);
-      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: whole.length, pictures: shown, book: bookId !== undefined, guide: guideId !== undefined };
+      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: whole.length, pictures: shown, book: bookId !== undefined, guide: guideId !== undefined, ...(partKey !== undefined ? { part: partKey.number } : {}) };
     });
   } finally {
     await rm(toExtendedLength(staging), { recursive: true, force: true }).catch(() => {});
@@ -424,16 +503,36 @@ const ArkePlayerListedSchema = z.object({
   book: z.boolean(),
   /** Absent in a record made before the guide (SPEC-059 R-15). */
   guide: z.boolean().optional(),
+  /** What it released (SPEC-058 R-43); absent in a record made before releases, and then read from the package. */
+  release: ArkePlayerReleaseSchema.optional(),
 }).strict();
 type ArkePlayerListed = z.infer<typeof ArkePlayerListedSchema>;
 
+// What a package made before releases holds, read from the package once: its records are written
+// once and never again, and a 400 MB package is not reread each time Publications opens.
+const releasesRead = new Map<string, ArkePlayerRelease | null>();
+
+async function releaseOfPackage(file: string, bytes: number): Promise<ArkePlayerRelease | undefined> {
+  const key = `${file}\n${bytes}`;
+  if (!releasesRead.has(key)) {
+    const read = await readWorldPackageRelease(file).catch(() => null);
+    releasesRead.set(
+      key,
+      read === null
+        ? null
+        : { edition: read.manifest.edition, fingerprint: editionFingerprint(read.manifest), chapters: read.chapters, ...(read.manifest.part !== undefined ? { part: read.manifest.part } : {}) },
+    );
+  }
+  return releasesRead.get(key) ?? undefined;
+}
+
 /**
- * The world's Arke Player packages for Publications (233e), newest first: each by the record
- * written beside it, and only while the package is there at the length it records.
+ * The world's Arke Player packages and parts for Publications (233e, 236e), newest first: each by
+ * the record written beside it, and only while the package is there at the length it records.
  */
 export async function listArkePlayerPackages(store: WorldStore): Promise<Array<ArkePlayerListed & { dir: string; file: string }>> {
   const exportsDir = join(store.dir, "exports");
-  const names = (await readdir(toExtendedLength(exportsDir)).catch(() => [] as string[])).filter((name) => /-player-\d{4}-\d{2}-\d{2}(?:-\d+)?\.zip$/.test(name));
+  const names = (await readdir(toExtendedLength(exportsDir)).catch(() => [] as string[])).filter((name) => /-(?:player|part)-\d{4}-\d{2}-\d{2}(?:-\d+)?\.zip$/.test(name));
   const out: Array<ArkePlayerListed & { dir: string; file: string }> = [];
   for (const name of names) {
     try {
@@ -441,7 +540,8 @@ export async function listArkePlayerPackages(store: WorldStore): Promise<Array<A
       if (!parsed.success) continue;
       const listed = parsed.data;
       if ((await stat(toExtendedLength(join(exportsDir, name)))).size !== listed.bytes) continue;
-      out.push({ ...listed, dir: `exports/${name}`, file: `exports/${name}` });
+      const release = listed.release ?? (await releaseOfPackage(join(exportsDir, name), listed.bytes));
+      out.push({ ...listed, ...(release !== undefined ? { release } : {}), dir: `exports/${name}`, file: `exports/${name}` });
     } catch {
       // A package with no readable record is not listed.
     }

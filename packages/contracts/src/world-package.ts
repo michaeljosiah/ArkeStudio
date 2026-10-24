@@ -7,7 +7,8 @@ import { PUBLICATION_MANIFEST_FILE, PublicationAssetPathSchema } from "./publica
  * inventory of every file. Schema 2 adds a production's listening document: the illustrated
  * narration as data, a file a chapter with its pictures and phrases. Schema 3 (SPEC-059 R-9, R-10)
  * adds the world's guide, and lets a package carry the guide alone, so a world can be explored
- * before it is installed.
+ * before it is installed. Schema 4 (SPEC-058 R-46) is a part: the chapters released since an
+ * edition, naming that edition, so a serial's listener never downloads the world again.
  *
  * One reader in two languages (R-16): this one and Arke Player's `arke_world` (Dart) read the same
  * shared fixtures to the same verdicts. Both are strict as SPEC-048 R-17 asks: a key, schema or
@@ -20,7 +21,7 @@ import { PUBLICATION_MANIFEST_FILE, PublicationAssetPathSchema } from "./publica
 
 export const WORLD_MANIFEST_FILE = "world.json";
 export const WORLD_PACKAGE_FORMAT = "arke-world-package";
-export const WORLD_SCHEMA_VERSION = 3;
+export const WORLD_SCHEMA_VERSION = 4;
 export const LISTENING_MEDIA_TYPE = "application/vnd.arke.listening+json";
 export const LISTENING_FORMAT = "arke-listening";
 export const LISTENING_VERSION = 1;
@@ -100,6 +101,32 @@ const ManifestV2Schema = z.object({ ...manifestFields, productions: z.array(Prod
 // A guide alone carries no production (R-10); that it carries something is checked once read.
 const ManifestV3Schema = z.object({ ...manifestFields, productions: z.array(ProductionV2Schema).max(64), guide: z.string().optional() }).strict();
 
+/** The days an author's schedule may name (SPEC-058 R-48): a weekday, or every day. */
+export const PART_SCHEDULE_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "daily"] as const;
+export type PartScheduleDay = (typeof PART_SCHEDULE_DAYS)[number];
+/** A calendar day, `2026-11-06`, that exists. */
+export const CalendarDaySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((day) => {
+  const parsed = new Date(`${day}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(day);
+});
+/** The author's word on when new chapters come (R-48), never a promise the Studio keeps. */
+export const PartScheduleSchema = z.object({ day: z.enum(PART_SCHEDULE_DAYS).optional(), next: CalendarDaySchema.optional() }).strict();
+export type PartSchedule = z.infer<typeof PartScheduleSchema>;
+/**
+ * What makes a package a part (R-46): the edition it was made after, by label and fingerprint, so
+ * it can never land on another world's edition, and its place among the parts after that edition.
+ */
+export const WorldPartSchema = z.object({
+  follows: text(64),
+  fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  number: z.number().int().min(1),
+  schedule: PartScheduleSchema.optional(),
+}).strict();
+export type WorldPart = z.infer<typeof WorldPartSchema>;
+// A part says so; that it carries one production and no guide is checked once read, as not an Arke
+// package rather than newer.
+const ManifestV4Schema = z.object({ ...manifestFields, productions: z.array(ProductionV2Schema).max(64), guide: z.string().optional(), part: WorldPartSchema.optional() }).strict();
+
 export interface WorldManifest {
   schemaVersion: number;
   id: string;
@@ -110,6 +137,8 @@ export interface WorldManifest {
   productions: WorldProduction[];
   /** The guide document's asset id (SPEC-059 R-9). */
   guide?: string;
+  /** Present on a part, schema 4 (SPEC-058 R-46). */
+  part?: WorldPart;
   assets: Record<string, WorldAsset>;
 }
 
@@ -143,12 +172,20 @@ export function readWorldManifest(source: string): WorldManifestRead {
   if (!Array.isArray(requires)) return notAPackage("requires is not a list");
   if (requires.length > 0) return newer(`requires ${requires.join(", ")}`);
 
-  const parsed = (version >= 3 ? ManifestV3Schema : version === 2 ? ManifestV2Schema : ManifestV1Schema).safeParse(raw);
+  const parsed = (version >= 4 ? ManifestV4Schema : version === 3 ? ManifestV3Schema : version === 2 ? ManifestV2Schema : ManifestV1Schema).safeParse(raw);
   if (!parsed.success) return refusedBy(parsed.error, "world.json");
-  // Every older manifest is a schema 3 one with less in it.
-  const manifest: z.infer<typeof ManifestV3Schema> = parsed.data;
+  // Every older manifest is a schema 4 one with less in it.
+  const manifest: z.infer<typeof ManifestV4Schema> = parsed.data;
   const guide = manifest.guide;
   if (manifest.productions.length === 0 && guide === undefined) return notAPackage("productions");
+  if (version >= 4) {
+    // Schema 4 exists for parts (R-46); an edition is still made at 2 or 3.
+    if (manifest.part === undefined) return notAPackage("a schema 4 package is a part");
+    if (guide !== undefined) return notAPackage("a part carries no guide");
+    if (manifest.productions.length !== 1) return notAPackage("a part extends one production");
+    // A single narration file cannot be added to: a part's chapters come as a listening document.
+    if (manifest.productions[0]!.narration !== undefined) return notAPackage("a part names no narration");
+  }
 
   const assetIds = Object.keys(manifest.assets);
   if (assetIds.length === 0 || assetIds.length > MAX_WORLD_ASSETS) return notAPackage("assets");
@@ -357,7 +394,15 @@ export function listeningPhraseAt(chapter: ListeningDocumentChapter, time: numbe
 
 export const GUIDE_MEDIA_TYPE = "application/vnd.arke.guide+json";
 export const GUIDE_FORMAT = "arke-guide";
-export const GUIDE_VERSION = 1;
+/**
+ * Version 2 adds teasers (SPEC-059 R-28). A writer still writes version 1 when there are none, so a
+ * guide without teasers reads in every Player.
+ */
+export const GUIDE_VERSION = 2;
+/** At most six teasers a world (turn 236 call 2). */
+export const MAX_GUIDE_TEASERS = 6;
+/** A clip is a moment, not a scene: at most 30 seconds of its narration (R-25). */
+export const MAX_TEASER_CLIP_MS = 30_000;
 /** Canon's entry types; the Player files them under Lore, Rules and Timeline, the rest under All. */
 export const GUIDE_LORE_KINDS = ["lore", "rule", "timeline", "location", "faction", "tone", "thread"] as const;
 export const GUIDE_VOICE_MEDIA_TYPES: readonly string[] = ["audio/mp4"];
@@ -399,18 +444,43 @@ const GuideLoreSchema = z.object({ id: SlugSchema, kind: z.enum(GUIDE_LORE_KINDS
 // read them from, and After Chapter 6 needs the 6.
 const GuideChapterSchema = z.object({ id: SlugSchema, number: z.number().int().min(1), book: z.string().min(1).max(512).optional(), metadata: Ignorable }).strict();
 const GuideProductionSchema = z.object({ id: SlugSchema, title: text(200), chapters: z.array(GuideChapterSchema).max(MAX_CHAPTERS), metadata: Ignorable }).strict();
-const GuideDocumentSchema = z.object({
+// A teaser (R-28): an entry public from the start, by id, or a picture or clip with its own files and
+// the chapter it comes from, which the Player shows on its card.
+const GuideTeaserSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("character"), id: SlugSchema, metadata: Ignorable }).strict(),
+  z.object({ kind: z.literal("place"), id: SlugSchema, metadata: Ignorable }).strict(),
+  z.object({ kind: z.literal("picture"), title: text(200), picture: z.string(), production: SlugSchema, chapter: SlugSchema, metadata: Ignorable }).strict(),
+  z.object({
+    kind: z.literal("clip"),
+    title: text(200),
+    picture: z.string(),
+    audio: z.string(),
+    duration: z.number().int().min(1).max(MAX_TEASER_CLIP_MS),
+    motion: z.string().optional(),
+    production: SlugSchema,
+    chapter: SlugSchema,
+    metadata: Ignorable,
+  }).strict(),
+]);
+const guideFields = {
   format: z.literal(GUIDE_FORMAT),
-  version: z.literal(GUIDE_VERSION),
   requires: z.array(z.unknown()).max(0).optional(),
   productions: z.array(GuideProductionSchema).max(64),
   characters: z.array(GuideCharacterSchema).max(MAX_GUIDE_ENTRIES),
   places: z.array(GuidePlaceSchema).max(MAX_GUIDE_ENTRIES),
   lore: z.array(GuideLoreSchema).max(MAX_GUIDE_ENTRIES),
   metadata: Ignorable,
-}).strict();
+};
+// A version 1 guide does not know teasers, so one naming them is newer, never skipped.
+const GuideDocumentV1Schema = z.object({ ...guideFields, version: z.literal(1) }).strict();
+const GuideDocumentV2Schema = z.object({ ...guideFields, version: z.literal(2), teasers: z.array(GuideTeaserSchema).max(MAX_GUIDE_TEASERS).optional() }).strict();
 
-export type GuideDocument = z.infer<typeof GuideDocumentSchema>;
+export type GuideDocument = z.infer<typeof GuideDocumentV1Schema> | z.infer<typeof GuideDocumentV2Schema>;
+export type GuideTeaser = z.infer<typeof GuideTeaserSchema>;
+export type GuideTeaserKind = GuideTeaser["kind"];
+
+/** A guide's teasers in the author's order; a version 1 guide has none. */
+export const guideTeasers = (guide: GuideDocument): GuideTeaser[] => (guide.version === 2 ? (guide.teasers ?? []) : []);
 export type GuideAfter = z.infer<typeof GuideAfterSchema>;
 export type GuideSection = z.infer<typeof GuideSectionSchema>;
 export type GuideVoice = z.infer<typeof GuideVoiceSchema>;
@@ -441,14 +511,14 @@ export function readGuide(source: string, assets: Readonly<Record<string, WorldA
   const version = raw["version"];
   if (typeof version !== "number" || !Number.isInteger(version)) return notAPackage("no version");
   if (version > GUIDE_VERSION) return { ok: false, refusal: "newer-arke", reason: `guide version ${version}` };
-  if (version !== GUIDE_VERSION) return notAPackage(`guide version ${version}`);
+  if (version < 1) return notAPackage(`guide version ${version}`);
   const requires = raw["requires"] ?? [];
   if (!Array.isArray(requires)) return notAPackage("requires is not a list");
   if (requires.length > 0) return { ok: false, refusal: "newer-arke", reason: `requires ${requires.join(", ")}` };
 
-  const parsed = GuideDocumentSchema.safeParse(raw);
+  const parsed = (version === 2 ? GuideDocumentV2Schema : GuideDocumentV1Schema).safeParse(raw);
   if (!parsed.success) return refusedBy(parsed.error, "the guide");
-  const guide = parsed.data;
+  const guide: GuideDocument = parsed.data;
 
   const chapters = new Map<string, Set<string>>();
   for (const production of guide.productions) {
@@ -486,6 +556,26 @@ export function readGuide(source: string, assets: Readonly<Record<string, WorldA
     }
   }
   for (const place of guide.places) if (!asset(place.picture, WORLD_PICTURE_MEDIA_TYPES)) return notAPackage(`entry ${place.id}: picture`);
+
+  // Teasers show to anyone in Discover, before a world is installed (R-26, R-29), so a character or
+  // place among them must be public from the start; a picture's or clip's chapter is the author's call.
+  const teasers = new Set<string>();
+  for (const [index, teaser] of guideTeasers(guide).entries()) {
+    const where = `teaser ${index + 1}`;
+    if (teaser.kind === "character" || teaser.kind === "place") {
+      // An entry is one teaser at most. Two moments may share a still, and a package ships that
+      // file once (codex on PR 2173), so a picture or clip is never a repeat by its picture.
+      if (teasers.has(teaser.id)) return notAPackage(`${where} repeats`);
+      teasers.add(teaser.id);
+      const entry = (teaser.kind === "character" ? guide.characters : guide.places).find((candidate) => candidate.id === teaser.id);
+      if (entry === undefined) return notAPackage(`${where} names no ${teaser.kind} of the guide`);
+      if (entry.after != null) return notAPackage(`${where} waits for a chapter`);
+      continue;
+    }
+    if (!names(teaser)) return notAPackage(`${where} names no chapter of the guide`);
+    if (!asset(teaser.picture, WORLD_PICTURE_MEDIA_TYPES)) return notAPackage(`${where}: picture`);
+    if (teaser.kind === "clip" && (!asset(teaser.audio, GUIDE_VOICE_MEDIA_TYPES) || !asset(teaser.motion, LISTENING_MOTION_MEDIA_TYPES))) return notAPackage(`${where}: audio or motion`);
+  }
   return { ok: true, guide };
 }
 
@@ -497,6 +587,14 @@ export function guideAssetIds(guide: GuideDocument): Set<string> {
     if (character.voice !== undefined) ids.add(character.voice.audio);
   }
   for (const place of guide.places) if (place.picture !== undefined) ids.add(place.picture);
+  for (const teaser of guideTeasers(guide)) {
+    if (teaser.kind !== "picture" && teaser.kind !== "clip") continue;
+    ids.add(teaser.picture);
+    if (teaser.kind === "clip") {
+      ids.add(teaser.audio);
+      if (teaser.motion !== undefined) ids.add(teaser.motion);
+    }
+  }
   return ids;
 }
 

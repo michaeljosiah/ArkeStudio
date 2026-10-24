@@ -51,6 +51,46 @@ export async function writeWorldPackageZip(manifestText: string, files: Readonly
   }
 }
 
+/**
+ * Arke Player's edition fingerprint (P10 rule 2, SPEC-058 R-30): two packages are one edition when
+ * their labels and every file's SHA-256 agree, as one digest. It must be the Player's to the byte —
+ * a part names its edition by it (R-46) and a phone compares — so it is `editionFingerprint` in
+ * arke_world: the label, then each `path sha256` sorted, joined by newlines.
+ */
+export function editionFingerprint(manifest: Pick<WorldManifest, "edition" | "assets">): string {
+  const lines = [manifest.edition, ...Object.values(manifest.assets).map((asset) => `${asset.path} ${asset.sha256}`).sort()];
+  return createHash("sha256").update(lines.join("\n"), "utf8").digest("hex");
+}
+
+/** What a written package released (SPEC-058 R-43): its manifest, and its one production's chapters as the listening document has them. */
+export async function readWorldPackageRelease(file: string): Promise<{ manifest: WorldManifest; chapters: Array<{ id: string; order: number; title: string }> } | null> {
+  const zip = await openPromise(toExtendedLength(file), { autoClose: false, strictFileNames: true, validateEntrySizes: true });
+  try {
+    const entries = new Map<string, Entry>();
+    for await (const entry of zip.eachEntry()) entries.set(entry.fileName.toLowerCase(), entry);
+    const text = async (name: string) => {
+      const entry = entries.get(name.toLowerCase());
+      if (entry === undefined) return null;
+      const chunks: Buffer[] = [];
+      for await (const chunk of await zip.openReadStreamPromise(entry)) chunks.push(chunk as Buffer);
+      return Buffer.concat(chunks).toString("utf8");
+    };
+    const manifestText = await text(WORLD_MANIFEST_FILE);
+    const read = manifestText === null ? null : readWorldManifest(manifestText);
+    if (read === null || !read.ok) return null;
+    const chapters: Array<{ id: string; order: number; title: string }> = [];
+    for (const production of read.manifest.productions) {
+      if (production.listening === undefined) continue;
+      const source = await text(read.manifest.assets[production.listening]!.path);
+      const listening = source === null ? null : readListening(source, read.manifest.assets);
+      if (listening?.ok) chapters.push(...listening.document.chapters.map((chapter) => ({ id: chapter.id, order: chapter.order, title: chapter.title })));
+    }
+    return { manifest: read.manifest, chapters };
+  } finally {
+    await new Promise<void>((resolve, reject) => { zip.once("close", resolve); zip.once("error", reject); zip.close(); });
+  }
+}
+
 export type WorldPackageCheck = { ok: true; manifest: WorldManifest; sha256: string; bytes: number } | { ok: false; problems: string[] };
 
 /**

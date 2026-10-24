@@ -1,4 +1,5 @@
 import { GuideVoiceLineSchema } from "./world-guide.js";
+import { ArkePlayerReleaseSchema } from "./arke-player-release.js";
 import { DramaEditionSchema } from "./audio-drama-edition.js";
 import { ChapterReviewSchema } from "./chapter-review.js";
 import { DramaRequestSchema } from "./audio-drama.js";
@@ -1691,7 +1692,19 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       productionId: SlugSchema,
       exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/),
       result: z.union([
-        z.object({ ok: z.literal(true), file: z.string().min(1), bytes: z.number().int().min(0), sha256: z.string().regex(/^[0-9a-f]{64}$/), edition: z.string().min(1), chapters: z.number().int().min(0), pictures: z.number().int().min(0), book: z.boolean(), guide: z.boolean().optional() }).strict(),
+        z.object({
+          ok: z.literal(true),
+          file: z.string().min(1),
+          bytes: z.number().int().min(0),
+          sha256: z.string().regex(/^[0-9a-f]{64}$/),
+          edition: z.string().min(1),
+          chapters: z.number().int().min(0),
+          pictures: z.number().int().min(0),
+          book: z.boolean(),
+          guide: z.boolean().optional(),
+          /** A part's number after the edition it follows (236e). */
+          part: z.number().int().min(1).optional(),
+        }).strict(),
         z.object({ ok: z.literal(false), blockers: z.array(z.string().min(1)).min(1) }).strict(),
       ]),
     })
@@ -1741,6 +1754,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
         book: z.boolean().optional(),
         /** Whether it carries the world's guide (SPEC-059 R-15). */
         guide: z.boolean().optional(),
+        /** What an Arke Player release held, so Release knows what the next part follows (SPEC-058 R-43). */
+        release: ArkePlayerReleaseSchema.optional(),
       }).strict()),
     })
     .strict(),

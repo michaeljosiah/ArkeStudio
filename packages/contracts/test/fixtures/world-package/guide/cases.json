@@ -95,6 +95,73 @@
       "expect": "notAPackage"
     },
     {
+      "file": "teasers.json",
+      "expect": "ok",
+      "counts": {
+        "characters": 3,
+        "places": 1,
+        "lore": 2
+      },
+      "teasers": [
+        "character",
+        "clip",
+        "place",
+        "picture"
+      ]
+    },
+    {
+      "file": "teasers-version-1.json",
+      "expect": "newerArke"
+    },
+    {
+      "file": "teaser-seven.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "teaser-repeat.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "teaser-gated.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "teaser-no-entry.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "teaser-wrong-kind.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "teaser-long-clip.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "teaser-no-chapter.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "teaser-wrong-media.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "teaser-unknown-kind.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "teaser-unknown-key.json",
+      "expect": "newerArke"
+    },
+    {
+      "file": "teaser-picture-only.json",
+      "expect": "ok"
+    },
+    {
+      "file": "teaser-same-picture.json",
+      "expect": "ok"
+    },
+    {
       "file": "world-guide-alone.json",
       "reader": "manifest",
       "expect": "ok"

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { CanonIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { mainPhotoFor, orderedLocationViews, type ReferenceKit } from "./reference.js";
 import type { CanonEntry, Sheet } from "./world.js";
-import { GUIDE_FORMAT, GUIDE_VERSION, packageSlug, type GuideCharacter, type GuideDocument, type GuideLore, type GuidePlace, type GuideSection, type GuideVoice } from "./world-package.js";
+import { GUIDE_FORMAT, MAX_GUIDE_TEASERS, packageSlug, type GuideCharacter, type GuideDocument, type GuideLore, type GuidePlace, type GuideSection, type GuideTeaser, type GuideVoice } from "./world-package.js";
 
 /**
  * A world's Guide (SPEC-059 R-1 – R-8): which of the world's characters, places and settled lore a
@@ -47,6 +47,25 @@ export const GuideRecordEntrySchema = z
   .strict();
 export type GuideRecordEntry = z.infer<typeof GuideRecordEntrySchema>;
 
+/**
+ * A teaser as the Guide keeps it (SPEC-059 R-27): a choice by reference, never a copy. A sheet by its
+ * id; a picture or clip by the moment it is — the production, the chapter and the block whose
+ * picture it is — so a picture remade ships the new one and a moment that is gone drops out.
+ */
+export const GuideRecordTeaserSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("character"), sheet: SlugSchema }).strict(),
+  z.object({ kind: z.literal("location"), sheet: SlugSchema }).strict(),
+  z.object({ kind: z.literal("faction"), sheet: SlugSchema }).strict(),
+  z.object({ kind: z.literal("picture"), production: SlugSchema, chapter: SlugSchema, block: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("clip"), production: SlugSchema, chapter: SlugSchema, block: z.string().min(1) }).strict(),
+]);
+export type GuideRecordTeaser = z.infer<typeof GuideRecordTeaserSchema>;
+export type GuideRecordMoment = Extract<GuideRecordTeaser, { kind: "picture" | "clip" }>;
+
+/** Two choices are one teaser when they name the same thing the same way. */
+export const sameGuideTeaser = (a: GuideRecordTeaser, b: GuideRecordTeaser) =>
+  a.kind === b.kind && ("sheet" in a ? "sheet" in b && a.sheet === b.sheet : !("sheet" in b) && a.production === b.production && a.chapter === b.chapter && a.block === b.block);
+
 export const GuideRecordSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -56,9 +75,18 @@ export const GuideRecordSchema = z
     locations: z.record(SlugSchema, GuideRecordEntrySchema),
     factions: z.record(SlugSchema, GuideRecordEntrySchema),
     lore: z.record(CanonIdSchema, GuideRecordEntrySchema.pick({ public: true, after: true })),
+    /** Up to six, in the author's order (R-24). A build before teasers reads the key as unreadable, so the world is raised first. */
+    teasers: z.array(GuideRecordTeaserSchema).max(MAX_GUIDE_TEASERS).optional(),
   })
   .strict();
 export type GuideRecord = z.infer<typeof GuideRecordSchema>;
+
+/** The Guide's teasers, replaced whole: Add, remove and reorder are each a new list. */
+export const SetGuideTeasersSchema = z
+  .object({ teasers: z.array(GuideRecordTeaserSchema).max(MAX_GUIDE_TEASERS) })
+  .strict()
+  .refine((value) => value.teasers.every((teaser, index) => value.teasers.findIndex((other) => sameGuideTeaser(teaser, other)) === index), { message: "a teaser repeats" });
+export type SetGuideTeasers = z.infer<typeof SetGuideTeasersSchema>;
 export type GuideKind = "characters" | "locations" | "factions" | "lore";
 export type GuideSheetKind = Exclude<GuideKind, "lore">;
 
@@ -217,8 +245,9 @@ export function guideChapterOf(productions: readonly GuideProductionChapters[], 
   return production !== undefined && chapter !== undefined ? { production, number: chapter.number, title: chapter.title } : null;
 }
 
-/** What the Guide's head counts (R-1): `4 of 5 characters · 3 of 6 places · 7 of 16 lore · 4 after a chapter`. */
+/** What the Guide's head counts (R-1, R-24): `3 of 6 teasers · 4 of 5 characters · 3 of 6 places · 7 of 16 lore · 4 after a chapter`. */
 export interface GuideCounts {
+  teasers: { chosen: number; of: number };
   characters: { public: number; of: number };
   places: { public: number; of: number };
   lore: { public: number; of: number };
@@ -242,6 +271,7 @@ export function guideCounts(record: GuideRecord, world: GuideWorld): GuideCounts
   const places = [...guideLiving(world.locations).map((sheet) => ["locations", sheet.id] as const), ...guideLiving(world.factions).map((sheet) => ["factions", sheet.id] as const)];
   const lore = guideLiving(world.canon).filter(guideLoreChoosable);
   return {
+    teasers: { chosen: record.teasers?.length ?? 0, of: MAX_GUIDE_TEASERS },
     characters: { public: characters.filter((sheet) => on("characters", sheet.id)).length, of: characters.length },
     places: { public: places.filter(([kind, id]) => on(kind, id)).length, of: places.length },
     lore: { public: lore.filter((entry) => on("lore", entry.id)).length, of: lore.length },
@@ -252,11 +282,24 @@ export function guideCounts(record: GuideRecord, world: GuideWorld): GuideCounts
   };
 }
 
+/** A picture or clip teaser as the exporter made it: its files as assets, and the name it is shown by. */
+export interface GuideMadeMoment {
+  title: string;
+  picture: string;
+  /** A clip's narration and its length in milliseconds, at most 30 seconds (R-25). */
+  audio?: string;
+  duration?: number;
+  /** A clip's loop, where the moment has one. */
+  motion?: string;
+}
+
 /** What a package needs that only the exporter has: each picture as an asset, and each voice line cut. */
 export interface GuideMaterial extends GuideWorld {
   productions: readonly GuideProductionChapters[];
   picture: (kind: GuideSheetKind, sheet: Sheet) => string | undefined;
   voice: (sheet: Sheet, voice: GuideRecordVoice) => GuideVoice | undefined;
+  /** A picture or clip teaser made, or undefined when its moment is gone or no longer read whole (R-27). */
+  moment?: (teaser: GuideRecordMoment) => GuideMadeMoment | undefined;
 }
 
 /**
@@ -359,7 +402,28 @@ export function guideDocument(record: GuideRecord, material: GuideMaterial): Gui
       links: canon.links,
     });
   }
-  if (characters.length + places.length + lore.length === 0) return null;
+
+  // Teasers (R-26 – R-28) show to anyone in Discover: a sheet's only while its entry ships public
+  // from the start, a moment's only when the exporter could make it; anything else stays in the
+  // Guide, marked, and out of the package.
+  const teasers: GuideTeaser[] = [];
+  for (const choice of record.teasers ?? []) {
+    if (choice.kind === "picture" || choice.kind === "clip") {
+      const made = material.moment?.(choice);
+      const from = made !== undefined ? resolve({ production: choice.production, chapter: choice.chapter }) : false;
+      if (made === undefined || from === false || from === null) continue;
+      const title = made.title.slice(0, 200);
+      if (choice.kind === "picture") teasers.push({ kind: "picture", title, picture: made.picture, ...from });
+      else if (made.audio !== undefined && made.duration !== undefined) teasers.push({ kind: "clip", title, picture: made.picture, audio: made.audio, duration: made.duration, ...(made.motion !== undefined ? { motion: made.motion } : {}), ...from });
+      continue;
+    }
+    const kind = choice.kind === "character" ? "characters" : choice.kind === "location" ? "locations" : "factions";
+    const id = ids.get(`${kind}:${choice.sheet}`);
+    const shipped = [...characters, ...places].find((pending) => pending.entry.id === id)?.entry;
+    if (id === undefined || shipped === undefined || shipped.after !== undefined) continue;
+    teasers.push({ kind: choice.kind === "character" ? "character" : "place", id });
+  }
+  if (characters.length + places.length + lore.length + teasers.length === 0) return null;
 
   // A sheet's link is a slug, a canon entry's a slug or a CANON id: each names the entry that ships
   // under it, a character first, then a place, then a faction.
@@ -369,9 +433,8 @@ export function guideDocument(record: GuideRecord, material: GuideMaterial): Gui
     const kept = [...new Set(links.map(target).filter((id): id is string => id !== undefined && id !== entry.id))];
     return kept.length > 0 ? { ...entry, links: kept.slice(0, 200) } : entry;
   };
-  return {
+  const document = {
     format: GUIDE_FORMAT,
-    version: GUIDE_VERSION,
     productions: [...named.values()].map((production) => ({
       id: packageSlug(production.id),
       title: production.title.slice(0, 200),
@@ -380,5 +443,7 @@ export function guideDocument(record: GuideRecord, material: GuideMaterial): Gui
     characters: characters.map(linked),
     places: places.map(linked),
     lore: lore.map(linked),
-  };
+  } as const;
+  // Version 2 only with teasers, so a guide without them reads in every Player (R-28).
+  return teasers.length > 0 ? { ...document, version: 2, teasers } : { ...document, version: 1 };
 }

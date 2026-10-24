@@ -1,0 +1,120 @@
+{
+  "note": "SPEC-058 R-46: the part cases both readers run, Arke Player arke_world (Dart) and ArkeStudio contracts (TypeScript). Each file is a world.json. \"part\" lists what an ok case reads: follows, number, and the schedule's day and next.",
+  "days": [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+    "daily"
+  ],
+  "cases": [
+    {
+      "file": "part.json",
+      "reader": "manifest",
+      "expect": "ok",
+      "part": {
+        "follows": "2026-10-22",
+        "number": 1,
+        "day": "friday",
+        "next": "2026-11-06"
+      }
+    },
+    {
+      "file": "part-no-schedule.json",
+      "reader": "manifest",
+      "expect": "ok",
+      "part": {
+        "follows": "2026-10-22",
+        "number": 1
+      }
+    },
+    {
+      "file": "part-daily.json",
+      "reader": "manifest",
+      "expect": "ok",
+      "part": {
+        "follows": "2026-10-22",
+        "number": 2,
+        "day": "daily"
+      }
+    },
+    {
+      "file": "part-book-alone.json",
+      "reader": "manifest",
+      "expect": "ok"
+    },
+    {
+      "file": "part-missing.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "part-in-schema-3.json",
+      "reader": "manifest",
+      "expect": "newerArke"
+    },
+    {
+      "file": "schema-5.json",
+      "reader": "manifest",
+      "expect": "newerArke"
+    },
+    {
+      "file": "part-with-guide.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "part-two-productions.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "part-no-production.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "part-narration.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "part-fingerprint.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "part-number.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "part-follows.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "part-day.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "part-next.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "part-unknown-key.json",
+      "reader": "manifest",
+      "expect": "newerArke"
+    },
+    {
+      "file": "part-schedule-unknown-key.json",
+      "reader": "manifest",
+      "expect": "newerArke"
+    }
+  ]
+}

@@ -90,6 +90,28 @@
 .fy-abv-btn svg { width: 13px; height: 13px; }
 .fy-abv-foot { display: flex; align-items: center; gap: 8px; }
 .fy-abv-foot .grow { flex: 1; }
+/* Release (design turn 236d, 236e): the chapters a part may hold, each ticked or saying how far it
+   is read, the author's schedule, and the world's releases in order once a part is made. */
+.fy-abv-opt--top { align-items: flex-start; padding-top: 10px; padding-bottom: 10px; }
+.fy-abv-chs { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.fy-abv-ch { display: flex; align-items: center; gap: 10px; min-height: 30px; cursor: pointer; }
+.fy-abv-ch input { margin: 0; flex: none; accent-color: var(--foreground); }
+.fy-abv-ch .t { font-size: var(--text-sm); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-abv-ch.no { cursor: default; }
+.fy-abv-ch.no .t { color: var(--muted-foreground); }
+.fy-abv-ch i { margin-left: auto; }
+.fy-abv-sched { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.fy-abv-sched .fy-abv-field { min-width: 120px; gap: 6px; background: transparent; color: var(--foreground); }
+.fy-abv-sched select.fy-abv-field { height: 28px; min-height: 0; padding: 0 8px; line-height: normal; }
+.fy-abv-sched input { border: 0; background: transparent; color: inherit; font: inherit; min-width: 0; }
+.fy-abv-rel { display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 6px 14px; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+.fy-abv-rel:first-child { border-top: 0; }
+.fy-abv-rel .d { width: 96px; flex: none; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abv-rel .k { width: 64px; flex: none; font-weight: 500; }
+.fy-abv-rel .w { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-abv-rel .grow { flex: 1; }
+.fy-abv-rel .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abv-rel.now { background: color-mix(in srgb, var(--foreground) 4%, transparent); }
 .fy-abv-warn { font: var(--type-mono); font-size: var(--text-2xs); color: var(--destructive, var(--muted-foreground)); }
 
 /* A frame of the video, as it will render. */

@@ -4,14 +4,14 @@ import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { openPromise } from "yauzl";
-import { guideChapterNumber, readGuide, readListening, readWorldManifest, type ClientMessage, type DomainEvent, type ListeningBlock, type ManifestModel } from "@arke-studio/contracts";
+import { guideChapterNumber, guideTeasers, readGuide, readListening, readWorldManifest, type ClientMessage, type DomainEvent, type ListeningBlock, type ManifestModel } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
 import { phrasesOf } from "../../src/productions/arke-player-listening.js";
 import { listArkePlayerPackages, packageSlug, pngHasAlpha, webpHasAlpha } from "../../src/productions/arke-player-export.js";
-import { checkWorldPackageZip } from "../../src/productions/world-package.js";
+import { checkWorldPackageZip, editionFingerprint } from "../../src/productions/world-package.js";
 import { planAudiobook, updateAudiobook } from "../../src/productions/audiobook.js";
 import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
@@ -103,9 +103,17 @@ async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; s
 }
 
 const read = (send: (message: ClientMessage) => Promise<void>, chapterFile: string) => send({ kind: "read-audiobook-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile });
-const exportId = (n: number) => `ap_01J8G00000000000000000000${n}`;
+const exportId = (n: number) => `ap_01J8G${String(n).padStart(21, "0")}`;
 async function exportPackage(send: (message: ClientMessage) => Promise<void>, events: DomainEvent[], n: number, options: { book: boolean; motion: boolean; size?: "full" | "1280" | "960" } = { book: true, motion: true }): Promise<Exported["result"]> {
   await send({ kind: "export-arke-player", worldId: WORLD_ID, productionId: LEDGER, requestId: "01J00000000000000000000001", exportId: exportId(n), options });
+  const answer = events.filter((event): event is Exported => event.type === "arke-player.exported" && event.exportId === exportId(n)).at(-1);
+  assert.ok(answer, "the export is answered");
+  return answer.result;
+}
+
+/** Release · New chapters (turn 236d): a part of these chapters, with the author's schedule. */
+async function exportPart(send: (message: ClientMessage) => Promise<void>, events: DomainEvent[], n: number, chapters: string[], schedule?: { day?: "friday" | "daily"; next?: string }): Promise<Exported["result"]> {
+  await send({ kind: "export-arke-player", worldId: WORLD_ID, productionId: LEDGER, requestId: "01J00000000000000000000001", exportId: exportId(n), options: { book: true, motion: true, part: { chapters, ...(schedule !== undefined ? { schedule } : {}) } } });
   const answer = events.filter((event): event is Exported => event.type === "arke-player.exported" && event.exportId === exportId(n)).at(-1);
   assert.ok(answer, "the export is answered");
   return answer.result;
@@ -242,6 +250,117 @@ describe("Export → Arke Player (turn 233, SPEC-058)", () => {
       assert.equal(opened.manifest.keyArt, "key-art", "the world keeps its key art");
       assert.equal(JSON.parse(manifestText).provenance.originals[picture], createHash("sha256").update(coverBytes).digest("hex"), "it is Publish's cover");
       assert.equal(opened.manifest.productions[0]!.author, "A. Writer");
+    }, recordingFfmpeg(calls));
+  });
+});
+
+describe("Release · New chapters (turn 236, SPEC-058 R-43 – R-47)", () => {
+  it("makes a part of the chapters read whole since the edition, naming the edition by the Player's fingerprint", () => {
+    const calls: string[][] = [];
+    return withHarness(async ({ worldDir, events, send }) => {
+      await read(send, "01-neap");
+      // With no edition yet, a part has nothing to follow (R-43).
+      assert.deepEqual(await exportPart(send, events, 10, ["the-same-ink"]), { ok: false, blockers: ["Release the whole world first · a part follows an edition"] });
+      const edition = await exportPackage(send, events, 11);
+      assert.ok(edition.ok, edition.ok ? "" : edition.blockers.join("; "));
+      const editionFile = join(worldDir, ...edition.file.split("/"));
+      const editionManifest = readWorldManifest(await entry(editionFile, "world.json"));
+      assert.ok(editionManifest.ok);
+
+      await read(send, "02-the-same-ink");
+      await send({ kind: "read-audiobook-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "03-nothing-wrong-with-it", blocks: ["title"] });
+      // Only chapters read whole go to a listener (R-3, R-44): chapter 3 is read in part.
+      const early3 = await exportPart(send, events, 12, ["the-same-ink", "nothing-wrong-with-it"]);
+      assert.deepEqual(early3, { ok: false, blockers: ["Chapter 3 · Nothing wrong with it · not read whole yet"] });
+
+      const part = await exportPart(send, events, 13, ["the-same-ink"], { day: "friday", next: "2026-11-06" });
+      assert.ok(part.ok, part.ok ? "" : part.blockers.join("; "));
+      assert.match(part.file, /^exports\/the-undersong-part-\d{4}-\d{2}-\d{2}\.zip$/);
+      assert.equal(part.part, 1);
+      assert.equal(part.chapters, 1);
+      const file = join(worldDir, ...part.file.split("/"));
+      const checked = await checkWorldPackageZip(file);
+      assert.ok(checked.ok, checked.ok ? "" : checked.problems.join("; "));
+      const opened = readWorldManifest(await entry(file, "world.json"));
+      assert.ok(opened.ok, opened.ok ? "" : opened.reason);
+      assert.equal(opened.manifest.schemaVersion, 4);
+      assert.deepEqual(opened.manifest.part, { follows: edition.edition, fingerprint: editionFingerprint(editionManifest.manifest), number: 1, schedule: { day: "friday", next: "2026-11-06" } });
+      // Nothing released before is sent again: no key art, cover or guide, and only its chapter (R-45).
+      assert.equal(opened.manifest.keyArt, undefined);
+      assert.equal(opened.manifest.guide, undefined);
+      assert.equal(opened.manifest.productions[0]!.picture, undefined);
+      const listening = readListening(await entry(file, "listening.json"), opened.manifest.assets);
+      assert.ok(listening.ok, listening.ok ? "" : listening.reason);
+      assert.deepEqual(listening.document.chapters.map((chapter) => [chapter.id, chapter.order, chapter.book]), [["the-same-ink", 2, "OEBPS/chapter-1.xhtml"]]);
+      assert.equal(listening.document.cover, undefined);
+      const progress = events.filter((event): event is Progress => event.type === "export.progress" && event.exportId === exportId(13));
+      assert.equal(progress[0]?.label, "Arke Player · part · The Ledger of Nights");
+
+      // Publications keeps what each release held (R-47).
+      await send({ kind: "list-web-packages", worldId: WORLD_ID, requestId: "01J00000000000000000000005" });
+      const listed = events.filter((event): event is Listed => event.type === "web-packages.listed").at(-1)!;
+      const found = listed.packages.find((entry) => entry.exportId === exportId(13));
+      assert.deepEqual(found?.release?.part?.number, 1);
+      assert.deepEqual(found?.release?.chapters.map((chapter) => chapter.id), ["the-same-ink"]);
+      assert.equal(listed.packages.find((entry) => entry.exportId === exportId(11))?.release?.part, undefined);
+
+      // The next part follows the same edition, numbered 2; a chapter released already is refused.
+      await read(send, "03-nothing-wrong-with-it");
+      assert.equal((await exportPart(send, events, 14, ["the-same-ink"])).ok, false);
+      const second = await exportPart(send, events, 15, ["nothing-wrong-with-it"]);
+      assert.ok(second.ok, second.ok ? "" : second.blockers.join("; "));
+      assert.equal(second.part, 2);
+      const secondManifest = readWorldManifest(await entry(join(worldDir, ...second.file.split("/")), "world.json"));
+      assert.ok(secondManifest.ok);
+      assert.equal(secondManifest.manifest.part?.fingerprint, editionFingerprint(editionManifest.manifest));
+      assert.equal(secondManifest.manifest.part?.schedule, undefined, "a schedule is the request's, kept by the sheet");
+    }, recordingFfmpeg(calls));
+  });
+});
+
+describe("a world's teasers (turn 236, SPEC-059 R-24 – R-29)", () => {
+  it("carries them in the guide: an entry public from the start, a picture, and a clip cut from its moment", () => {
+    const calls: string[][] = [];
+    return withHarness(async ({ worldDir, events, send, store }) => {
+      await read(send, "01-neap");
+      await send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p1.0", picture: { file: "world-art.png", source: "world" }, requestId: "01J00000000000000000000003" });
+      await send({ kind: "set-guide-entry", worldId: WORLD_ID, change: { entryKind: "characters", id: "maren-kest", entry: { public: true, sections: { Essence: { public: true } } } } });
+      // A place that waits for a chapter is in the Guide, but never a teaser (R-25).
+      await send({ kind: "set-guide-entry", worldId: WORLD_ID, change: { entryKind: "locations", id: "the-vigil", entry: { public: true, after: { production: LEDGER, chapter: "neap" } } } });
+      const before = store().getBundle().meta.schemaVersion;
+      await send({ kind: "set-guide-teasers", worldId: WORLD_ID, change: { teasers: [
+        { kind: "character", sheet: "maren-kest" },
+        { kind: "clip", production: LEDGER, chapter: "neap", block: "p1.0" },
+        { kind: "location", sheet: "the-vigil" },
+        { kind: "picture", production: LEDGER, chapter: "neap", block: "p1.0" },
+      ] } });
+      // A build before teasers reads the record as unreadable, so the world is raised first.
+      assert.ok(before < 108);
+      assert.equal(store().getBundle().meta.schemaVersion, 108);
+      assert.equal(store().getBundle().guide.teasers?.length, 4, "the Guide keeps every choice, marked or not (R-27)");
+
+      const result = await exportPackage(send, events, 9);
+      assert.ok(result.ok, result.ok ? "" : result.blockers.join("; "));
+      const file = join(worldDir, ...result.file.split("/"));
+      const checked = await checkWorldPackageZip(file);
+      assert.ok(checked.ok, checked.ok ? "" : checked.problems.join("; "));
+      const opened = readWorldManifest(await entry(file, "world.json"));
+      assert.ok(opened.ok);
+      const readBack = readGuide(await entry(file, "guide/guide.json"), opened.manifest.assets);
+      assert.ok(readBack.ok, readBack.ok ? "" : readBack.reason);
+      const guide = readBack.guide;
+      assert.equal(guide.version, 2);
+      const teasers = guideTeasers(guide);
+      assert.deepEqual(teasers.map((teaser) => teaser.kind), ["character", "clip", "picture"], "the waiting place is left out");
+      const clip = teasers[1]!;
+      assert.ok(clip.kind === "clip");
+      assert.equal(opened.manifest.assets[clip.audio]?.mediaType, "audio/mp4");
+      assert.ok(clip.duration > 0 && clip.duration <= 30_000);
+      assert.equal(clip.title, "Neap");
+      assert.deepEqual([clip.production, clip.chapter], [LEDGER, "neap"]);
+      // Cut from the moment's start and joined as one file; its picture fitted to 1280 for a full screen.
+      assert.ok(calls.some((args) => args.includes("-filter_complex") && /concat=n=\d+:v=0:a=1/.test(args[args.indexOf("-filter_complex") + 1]!)));
+      assert.ok(calls.some((args) => args.includes("-vf") && args[args.indexOf("-vf") + 1]!.includes("min(1280,iw)")));
     }, recordingFfmpeg(calls));
   });
 });

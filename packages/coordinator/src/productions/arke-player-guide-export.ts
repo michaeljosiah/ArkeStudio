@@ -48,7 +48,7 @@ export async function exportGuideAlone(store: WorldStore, options: GuideAloneOpt
   const bundle = store.getBundle();
 
   step("Reading the guide", 5);
-  const drafted = await guideDraft(store, undefined, signal);
+  const drafted = await guideDraft(store, undefined, signal, ffmpeg);
   if (drafted === null) return { ok: false, blockers: ["nothing in the Guide is public"] };
   const keyArt = bundle.keyArt ?? null;
   // What the package shows of the world as well as its guide: a rename, a new logline or new key
@@ -91,7 +91,7 @@ export async function exportGuideAlone(store: WorldStore, options: GuideAloneOpt
     step("Fitting the guide", 30);
     let packed: Awaited<ReturnType<typeof packGuide>>;
     try {
-      packed = await packGuide(drafted.document, drafted.lines, store, { ffmpeg, signal, at, add, original: async (assetId, file) => { originals[assetId] = sha256(await readFile(toExtendedLength(file))); } });
+      packed = await packGuide(drafted, store, { ffmpeg, signal, at, add, original: async (assetId, file) => { originals[assetId] = sha256(await readFile(toExtendedLength(file))); } });
     } catch (error) {
       if (signal.aborted) return cancelled();
       throw error;
@@ -130,7 +130,7 @@ export async function exportGuideAlone(store: WorldStore, options: GuideAloneOpt
     // world renamed meanwhile refuses the package rather than shipping beside what it was made
     // from (SPEC-058 R-4).
     return await store.gateOp(async () => {
-      const again = await guideDraft(store, undefined, signal);
+      const again = await guideDraft(store, undefined, signal, ffmpeg);
       if (again === null || madeFrom(again.document) !== made) return { ok: false as const, blockers: ["the world or its Guide changed while the package was made · make it again"] };
       const destination = join(store.dir, "exports", name);
       if (await stat(toExtendedLength(destination)).then(() => true, () => false)) return { ok: false as const, blockers: [`exports/${name} already exists · make it again`] };
