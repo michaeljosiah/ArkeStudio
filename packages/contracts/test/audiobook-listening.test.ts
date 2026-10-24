@@ -235,6 +235,11 @@ describe("picture marks (turn 237)", () => {
     assert.ok(key.length <= 40, "a mark's key fits every command that names a picture by its block");
   });
 
+  it("cuts emphasis closed after a stop with its sentence, as a mark names it from the first (codex on PR 2179)", () => {
+    const written = "Written above it: **a hand-span high.** Under it, smaller: *called it back. paid.* Then _the line._";
+    assert.deepEqual(sentencesOf(written), ["Written above it: **a hand-span high.**", "Under it, smaller: *called it back.", "paid.*", "Then _the line._"]);
+  });
+
   it("places marks at their sentences beside the block's own picture, in reading order", () => {
     const pictures = Object.fromEntries([mark(around!, "artifacts/club.png"), ["p0.0", picture(GOAT, "artifacts/booth.png")], mark(widened!, "artifacts/goat-face.png")]);
     const { placed, lost } = placePictures([beat], pictures);
