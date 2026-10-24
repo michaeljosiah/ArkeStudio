@@ -565,9 +565,17 @@ export class FsWorldProvider implements WorldProvider {
     return this.store?.worldId === worldId || this.backgroundStores.has(worldId);
   }
 
-  async withBackgroundWorldStore<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T> {
+  /**
+   * `signal` lets a caller stop waiting for its turn (2026-10-24): acquisition queues behind
+   * every opening, closing and store-scoped write, and a read that waits there without limit
+   * answers nothing at all. A turn reached after the caller left retains nothing.
+   */
+  async withBackgroundWorldStore<T>(worldId: string, fn: (store: WorldStore) => Promise<T>, options: { signal?: AbortSignal } = {}): Promise<T> {
     if (this.closing) throw new Error("the world provider is closing");
-    const retained = await this.accessWorld(async () => {
+    const { signal } = options;
+    signal?.throwIfAborted();
+    const acquiring = this.accessWorld(async () => {
+      if (signal?.aborted) return null;
       if (this.closing) throw new Error("the world provider is closing");
       if (this.archivingWorlds.has(worldId)) throw new Error("This world is being archived.");
       let held = this.backgroundStores.get(worldId);
@@ -582,20 +590,33 @@ export class FsWorldProvider implements WorldProvider {
       held.users++;
       return held;
     });
+    let retained: { store: WorldStore; users: number } | null;
+    try {
+      retained = signal === undefined ? await acquiring : await untilAborted(acquiring, signal);
+    } catch (error) {
+      // Given up on while the turn was being taken: whatever it took is let go again.
+      void acquiring.then((held) => (held === null ? undefined : this.releaseBackgroundStore(worldId, held)), () => {});
+      throw error;
+    }
+    if (retained === null) throw signal?.reason ?? new Error("the wait for this world was abandoned");
     // The operation runs outside the selection queue. Only acquisition and release serialize
     // with navigation; holding that queue during synthesis would merely turn cancellation into a frozen UI.
     try {
       await retained.store.assertOwnership();
       return await fn(retained.store);
     } finally {
-      await this.accessWorld(async () => {
-        if (this.backgroundStores.get(worldId) !== retained) return;
-        if (--retained.users > 0) return;
-        this.backgroundStores.delete(worldId);
-        this.refreshRegistry(retained.store.getBundle());
-        if (this.store !== retained.store) await retained.store.close();
-      });
+      await this.releaseBackgroundStore(worldId, retained);
     }
+  }
+
+  private releaseBackgroundStore(worldId: string, retained: { store: WorldStore; users: number }): Promise<void> {
+    return this.accessWorld(async () => {
+      if (this.backgroundStores.get(worldId) !== retained) return;
+      if (--retained.users > 0) return;
+      this.backgroundStores.delete(worldId);
+      this.refreshRegistry(retained.store.getBundle());
+      if (this.store !== retained.store) await retained.store.close();
+    });
   }
 
   /**
@@ -926,4 +947,17 @@ export class FsWorldProvider implements WorldProvider {
   static scanDirectory(dir: string) {
     return scanWorld(dir);
   }
+}
+
+/** `work`'s outcome, or the signal's reason as soon as it aborts; `work` itself carries on. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    work.then(
+      (value) => { signal.removeEventListener("abort", abort); resolve(value); },
+      (error: unknown) => { signal.removeEventListener("abort", abort); reject(error); },
+    );
+  });
 }

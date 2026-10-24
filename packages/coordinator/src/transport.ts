@@ -23,6 +23,12 @@ import {
  */
 
 
+/** The job and ledger history a snapshot was measured against: what the window held before it. */
+interface HistoryBase {
+  jobs?: ClientState["app"]["jobs"];
+  ledger?: ClientState["app"]["ledger"];
+}
+
 interface Connection {
   writer: SocketWriter;
   retainHistory: boolean;
@@ -292,23 +298,35 @@ export class Transport {
     });
   }
 
-  private sendFrame(conn: Connection, frame: Frame): void {
+  /**
+   * `supersede`: a later snapshot of the same world may replace this one while it waits (see
+   * SocketWriter). Only refreshes are sent so; the snapshot answering a hello never is, since
+   * every event behind it would otherwise reach a window that has no state yet.
+   */
+  private sendFrame(conn: Connection, frame: Frame, options: { supersede?: boolean } = {}): void {
     // Validate on the way out — a frame that fails its own schema must never reach a client.
     let outgoing = frame;
+    let snapshot: { key: string; base: HistoryBase; keep?: true } | undefined;
     if (frame.kind === "snapshot") {
       const { jobs, ledger } = frame.state.app;
+      const key = `world:${frame.state.world?.meta.worldId ?? ""}`;
+      // History is left out only when the window already holds it. A waiting snapshot this one
+      // replaces never arrives, so what the window holds is what that one was measured against.
+      const replaced = options.supersede ? conn.writer.unsentSnapshot(key)?.base as HistoryBase | undefined : undefined;
+      const base: HistoryBase = replaced ?? { jobs: conn.jobs, ledger: conn.ledger };
       const retainedHistory: ("jobs" | "ledger")[] = [];
-      if (conn.retainHistory && conn.jobs === jobs) retainedHistory.push("jobs");
-      if (conn.retainHistory && conn.ledger === ledger) retainedHistory.push("ledger");
+      if (conn.retainHistory && base.jobs === jobs) retainedHistory.push("jobs");
+      if (conn.retainHistory && base.ledger === ledger) retainedHistory.push("ledger");
       outgoing = { ...frame, state: { ...frame.state, app: { ...frame.state.app,
         jobs: retainedHistory.includes("jobs") ? [] : conn.retainHistory ? jobs.map(jobSummary) : jobs,
         ledger: retainedHistory.includes("ledger") ? [] : ledger,
       } }, ...(retainedHistory.length ? { retainedHistory } : {}) };
       conn.jobs = jobs; conn.ledger = ledger;
+      snapshot = { key, base, ...(options.supersede ? {} : { keep: true as const }) };
     } else if (conn.retainHistory && (frame.event.type === "job.updated" || frame.event.type === "job.ready")) {
       outgoing = { ...frame, event: { ...frame.event, job: jobSummary(frame.event.job) } };
     }
-    conn.writer.send(JSON.stringify(FrameSchema.parse(outgoing)));
+    conn.writer.send(JSON.stringify(FrameSchema.parse(outgoing)), snapshot !== undefined ? { snapshot } : {});
   }
 
   /** Push one event to every helloed connection, sequenced per connection. */
@@ -324,7 +342,7 @@ export class Transport {
     const state = this.opts.getSnapshot();
     for (const conn of this.connections) {
       if (!conn.helloed) continue;
-      this.sendFrame(conn, { kind: "snapshot", seq: ++conn.seq, state });
+      this.sendFrame(conn, { kind: "snapshot", seq: ++conn.seq, state }, { supersede: true });
       for (const event of this.opts.getInitialEvents?.() ?? []) {
         this.sendFrame(conn, { kind: "event", seq: ++conn.seq, event });
       }

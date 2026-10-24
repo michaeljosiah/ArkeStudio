@@ -11,11 +11,35 @@ export interface SocketWriterOptions {
   closeTimeoutMs?: number;
 }
 
+/** A snapshot frame, so that a newer one may replace it while it waits: `key` names what it is a snapshot of. */
+export interface SupersedableSnapshot {
+  key: string;
+  /** Whatever the sender needs back to build a frame that replaces this one. */
+  base?: unknown;
+  /** Never replaced, and nothing queued before it is either. */
+  keep?: boolean;
+}
+
+interface Queued {
+  text: string;
+  bytes: number;
+  snapshot?: SupersedableSnapshot;
+}
+
 /** Ordered delivery with bounded memory. Never discard an event to make room for a snapshot:
- * transient permissions and command replies cannot be reconstructed from that snapshot. */
+ * transient permissions and command replies cannot be reconstructed from that snapshot.
+ *
+ * A snapshot still waiting is a different matter once a newer snapshot of the same thing is
+ * sent behind it: the newer one holds everything the older did. On a large world a snapshot
+ * is 11 MB or more, and a long picture run asks for several a picture; a window busy applying
+ * one fell behind, the waiting copies passed the byte limit, and the socket was closed about
+ * ten times in ten minutes (2026-10-24). The older one is dropped from the queue and every
+ * event between them is kept, in order. Only the last snapshot waiting can be replaced, so the
+ * snapshot before it, which the reader will have applied, is always the replacement's `base`. */
 export class SocketWriter {
-  private queue: string[] = [];
+  private queue: Queued[] = [];
   private queuedBytes = 0;
+  private supersededSnapshots = 0;
   private sending = false;
   private stopped = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -31,28 +55,50 @@ export class SocketWriter {
   stats(): Record<string, unknown> {
     return { lastFrameBytes: this.lastFrameBytes, queuedBytes: this.queuedBytes,
       queuedFrames: this.queue.length, bufferedBytes: this.socket.bufferedAmount,
-      peakBufferedBytes: this.peakBufferedBytes, sentFrames: this.sentFrames, localCloseReason: this.localCloseReason };
+      peakBufferedBytes: this.peakBufferedBytes, sentFrames: this.sentFrames,
+      supersededSnapshots: this.supersededSnapshots, localCloseReason: this.localCloseReason };
   }
 
-  send(text: string): void {
+  /** The waiting snapshot a newer snapshot of `key` would replace: the last one queued, of `key`, not kept. */
+  unsentSnapshot(key: string): SupersedableSnapshot | undefined {
+    const index = this.replaceable(key);
+    return index === -1 ? undefined : this.queue[index]!.snapshot;
+  }
+
+  private replaceable(key: string): number {
+    const index = this.queue.findLastIndex((entry) => entry.snapshot !== undefined);
+    const snapshot = index === -1 ? undefined : this.queue[index]!.snapshot;
+    return snapshot !== undefined && snapshot.key === key && snapshot.keep !== true ? index : -1;
+  }
+
+  send(text: string, options: { snapshot?: SupersedableSnapshot } = {}): void {
     if (this.stopped || this.socket.readyState !== 1) return;
     const bytes = Buffer.byteLength(text);
     if (bytes > (this.options.maxFrameBytes ?? 100 * 1024 * 1024)) {
       this.fail("outbound frame limit", bytes); return;
+    }
+    const snapshot = options.snapshot;
+    if (snapshot !== undefined && snapshot.keep !== true) {
+      const older = this.replaceable(snapshot.key);
+      if (older !== -1) {
+        this.queuedBytes -= this.queue[older]!.bytes;
+        this.queue.splice(older, 1);
+        this.supersededSnapshots++;
+      }
     }
     // One large frame may start immediately; subsequent frames must fit the waiting budget.
     if (this.sending && (this.queuedBytes + bytes > (this.options.maxQueuedBytes ?? 32 * 1024 * 1024)
       || this.queue.length >= (this.options.maxQueuedFrames ?? 256))) {
       this.fail("outbound queue limit", bytes); return;
     }
-    this.queue.push(text); this.queuedBytes += bytes;
+    this.queue.push({ text, bytes, ...(snapshot !== undefined ? { snapshot } : {}) }); this.queuedBytes += bytes;
     this.pump();
   }
 
   private pump(): void {
     if (this.stopped || this.sending || !this.queue.length || this.socket.readyState !== 1) return;
-    const text = this.queue.shift()!;
-    this.lastFrameBytes = Buffer.byteLength(text); this.queuedBytes -= this.lastFrameBytes;
+    const { text, bytes } = this.queue.shift()!;
+    this.lastFrameBytes = bytes; this.queuedBytes -= bytes;
     this.sending = true; this.options.busy?.(true);
     this.timer = setTimeout(() => this.fail("outbound send timeout"), this.options.sendTimeoutMs ?? 30_000);
     this.timer.unref();

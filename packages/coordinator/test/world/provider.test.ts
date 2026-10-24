@@ -634,6 +634,33 @@ describe("retained background world ownership", () => {
     assert.equal(provider.openStore(), null);
   });
 
+  it("a wait given up on fails at once, and the turn it was waiting for retains nothing (2026-10-24)", async () => {
+    // A store-scoped call holds the world's queue, as a job's finalization does; a window's read
+    // queued behind it used to wait as long as that did, with nothing said.
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root);
+    const first = (await provider.listWorlds())[0]!;
+    let release!: () => void, holding!: () => void;
+    const held = new Promise<void>(resolve => { holding = resolve; });
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    const scoped = provider.withWorldStore(first.worldId, async () => { holding(); await barrier; });
+    try {
+      await held;
+      const control = new AbortController();
+      let ran = false;
+      const waiting = provider.withBackgroundWorldStore(first.worldId, async () => { ran = true; }, { signal: control.signal });
+      control.abort(new Error("the read stalled"));
+      await assert.rejects(waiting, /the read stalled/);
+      release(); await scoped;
+      // The queue moved on past the abandoned turn: nothing ran, nothing is held, the lock is free.
+      await provider.withBackgroundWorldStore(first.worldId, async () => {});
+      assert.equal(ran, false);
+      assert.equal(provider.isWorldLoaded(first.worldId), false);
+      await provider.loadWorld(first.worldId);
+      await assert.rejects(provider.withBackgroundWorldStore(first.worldId, async () => {}, { signal: AbortSignal.abort(new Error("already gone")) }), /already gone/);
+    } finally { release(); await scoped; await provider.close(); }
+  });
+
   it("a failed background callback releases its lock and never changes selection", async () => {
     const { root } = await makeTempRoot();
     const provider = new FsWorldProvider(root);

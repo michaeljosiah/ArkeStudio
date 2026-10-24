@@ -83,3 +83,52 @@ it("preserves the bounded forced close while the coordinator drains a stalled pe
   await new Promise(resolve => setTimeout(resolve, 30));
   assert.equal(g.terminated(), false, "the close event still cancels the deadline");
 });
+
+it("lets a newer snapshot of the same world replace one still waiting, keeping every event between them in order", () => {
+  const f = fixture();
+  const world = { key: "world:a" };
+  f.writer.send("in flight");
+  f.writer.send("snapshot 1", { snapshot: { ...world, base: "before 1" } });
+  f.writer.send("permission 2");
+  assert.equal(f.writer.unsentSnapshot("world:a")?.base, "before 1");
+  assert.equal(f.writer.unsentSnapshot("world:b"), undefined, "another world's snapshot is not this one's to replace");
+  f.writer.send("snapshot 3", { snapshot: world });
+  f.writer.send("reply 4");
+  for (let i = 0; i < 4; i++) f.callbacks.shift()?.();
+  assert.deepEqual(f.sent, ["in flight", "permission 2", "snapshot 3", "reply 4"]);
+  assert.equal(f.writer.stats().supersededSnapshots, 1);
+  assert.equal(f.writer.stats().queuedBytes, 0);
+  f.writer.dispose();
+});
+
+it("survives the picture run that closed the window: two waiting snapshots no longer pass the byte limit (2026-10-24)", () => {
+  // Scaled down from the log: an 11 MB snapshot waiting, events behind it, then more snapshots, a 32 MB cap.
+  // Without the replacement the second snapshot is refused: 11 + 15 + 11 is past 32.
+  const f = fixture({ maxQueuedBytes: 32 });
+  const snapshot = (n: number) => `${n}`.repeat(11);
+  f.writer.send("in flight");
+  f.writer.send(snapshot(1), { snapshot: { key: "world:a" } });
+  for (let i = 0; i < 3; i++) f.writer.send("event");
+  f.writer.send(snapshot(2), { snapshot: { key: "world:a" } });
+  f.writer.send(snapshot(3), { snapshot: { key: "world:a" } });
+  assert.deepEqual(f.closed, [], "the window is kept");
+  assert.equal(f.writer.stats().queuedBytes, 3 * 5 + 11);
+  while (f.callbacks.length) f.callbacks.shift()!();
+  assert.deepEqual(f.sent, ["in flight", "event", "event", "event", snapshot(3)]);
+  f.writer.dispose();
+});
+
+it("never replaces a kept snapshot, nor a snapshot queued before one, nor another world's", () => {
+  const f = fixture();
+  f.writer.send("in flight");
+  f.writer.send("refresh 1", { snapshot: { key: "world:a" } });
+  f.writer.send("hello 2", { snapshot: { key: "world:a", keep: true } });
+  assert.equal(f.writer.unsentSnapshot("world:a"), undefined);
+  f.writer.send("refresh 3", { snapshot: { key: "world:a" } });
+  f.writer.send("other world 4", { snapshot: { key: "world:b" } });
+  f.writer.send("refresh 5", { snapshot: { key: "world:a" } });
+  while (f.callbacks.length) f.callbacks.shift()!();
+  assert.deepEqual(f.sent, ["in flight", "refresh 1", "hello 2", "refresh 3", "other world 4", "refresh 5"]);
+  assert.equal(f.writer.stats().supersededSnapshots, 0);
+  f.writer.dispose();
+});

@@ -55,8 +55,9 @@ export interface WorldProvider {
   withWorldStore?<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T>;
   /** Retain one owned store for a background operation without pinning renderer selection.
    * Navigation and scoped writes reuse this store; release closes it when no reader owns it.
-   * Shutdown still closes retained stores. Archiving a retained world is refused. */
-  withBackgroundWorldStore?<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T>;
+   * Shutdown still closes retained stores. Archiving a retained world is refused. An aborted
+   * `signal` stops the wait for the store; a turn reached after that retains nothing. */
+  withBackgroundWorldStore?<T>(worldId: string, fn: (store: WorldStore) => Promise<T>, options?: { signal?: AbortSignal }): Promise<T>;
   /** True for selected or retained worlds, so reopening does not recover live work as abandoned. */
   isWorldLoaded?(worldId: string): boolean;
   /**
