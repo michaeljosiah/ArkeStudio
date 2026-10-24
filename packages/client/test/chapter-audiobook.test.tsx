@@ -1508,7 +1508,7 @@ describe("the director reads the book (design turn 184)", () => {
     await act(async () => q(m, '[data-testid="reading-notes-press"]')!.click());
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "slack-water", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H2", toMake: 3, blocks: 3 }));
     const inputs = [...q(m, '[data-testid="reading-notes"]')!.querySelectorAll("input, textarea")] as HTMLInputElement[];
-    assert.deepEqual(inputs.map((input) => input.disabled), [true, true], "another chapter being read holds both notes");
+    assert.deepEqual(inputs.map((input) => input.disabled), [true], "another chapter being read holds the book note");
     assert.equal((q(m, '[data-testid="reading-notes-press"]') as HTMLButtonElement).disabled, true, "and their press");
   });
 
@@ -2212,7 +2212,7 @@ describe("grouped reads (design turn 185)", () => {
       limits: { audioFormat: "wav", maxPromptChars: 10000 }, cadence: { ...GEMINI.cadence!, phrase: "best-effort-tag", tagSyntax: "bracket", tagChars: 160 } };
     const reader = { provider: "elevenlabs" as const, model: v4.id, voiceId: "calen", label: "Calen" };
     state.app.manifest = { ...state.app.manifest!, models: [...state.app.manifest!.models, v4] };
-    state.world = { ...state.world!, productions: state.world!.productions.map(p => p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1, reading: "performed", ...(requests ? { requests } : {}), narrator: reader, note: "measured American narration, deliberate pacing, restrained tension, with clear articulation and unhurried transitions", notes: { "maren-kest": "slight pitch lift" } } } : p) };
+    state.world = { ...state.world!, productions: state.world!.productions.map(p => p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1, reading: "performed", ...(requests ? { requests } : {}), narrator: reader, note: "measured American narration, deliberate, restrained tension", notes: { "maren-kest": "slight pitch lift" } } } : p) };
     const m = await mount(state);
     await answerOpen(m);
     await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...reader, attributes: [], local: false, canClone: false, usedBy: [] }] }));
