@@ -1,0 +1,264 @@
+/* Turn 238 · Music as a production. The door is 113's and 230's, the world's pages 234's and the
+   Guide's picker 236's, the Export sheet 233's: copied here under .ap238 so the turn's review page
+   stands alone; additions follow. Type through the tokens only (turn 139). */
+.ap238{position:relative;overflow:hidden;background:var(--background);color:var(--foreground);font:var(--type-body);text-align:left}
+.ap238 *{box-sizing:border-box}
+.ap238 svg{flex:none}
+.ap238 .grow{flex:1}
+.ap238 .m{font:var(--type-meta);color:var(--muted-foreground)}
+.ap238-dim{position:absolute;inset:0;background:color-mix(in srgb,var(--background) 60%,transparent);z-index:2}
+.ap238-page{position:absolute;inset:0;padding:30px 44px;display:flex;flex-direction:column;gap:14px;opacity:.6}
+.ap238-page i{display:block;height:12px;border-radius:6px;background:var(--secondary)}
+.ap238-btn{height:32px;padding:0 13px;border:1px solid var(--border);border-radius:8px;display:inline-flex;align-items:center;gap:7px;font:var(--type-label);background:var(--background);color:var(--foreground);white-space:nowrap}
+.ap238-btn.pri{background:var(--foreground);color:var(--background);border-color:transparent;font-weight:600}
+.ap238-btn.ghost{border-color:transparent;background:none}
+.ap238-btn svg{width:13px;height:13px}
+.ap238-ib{width:30px;height:30px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground)}
+.ap238-ib svg{width:15px;height:15px}
+.ap238-play{width:28px;height:28px;border-radius:99px;display:inline-flex;align-items:center;justify-content:center;background:var(--foreground);color:var(--background);flex:none}
+.ap238-play svg{width:11px;height:11px;margin-left:1px}
+.ap238-tag{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:6px;background:var(--secondary);font:var(--type-label);font-size:var(--text-2xs);color:var(--foreground);white-space:nowrap}
+.ap238-tag svg{width:12px;height:12px}
+
+/* The world's pages (234a): the top bar, the pill nav, the head, the groups and their rows. */
+.ap238-top{height:52px;display:flex;align-items:center;gap:14px;padding:0 24px;border-bottom:1px solid var(--border);font:var(--type-ui)}
+.ap238-top .crumb{color:var(--muted-foreground)}
+.ap238-top b{font-weight:600}
+.ap238-pills{display:flex;gap:6px;padding:14px 40px 0}
+.ap238-pills span{height:32px;padding:0 13px;border-radius:99px;display:inline-flex;align-items:center;font:var(--type-ui);color:var(--muted-foreground)}
+.ap238-pills span.on{background:var(--secondary);color:var(--foreground);font-weight:600}
+.ap238-head{display:flex;align-items:flex-end;gap:16px;padding:22px 40px 0}
+.ap238-head h1{margin:0;font:var(--type-ui);font-weight:650;font-size:var(--text-3xl);letter-spacing:-.02em;line-height:1.1}
+.ap238-head .m{font:var(--type-mono);font-size:var(--text-2xs);margin-top:6px}
+.ap238-group{border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px}
+.ap238-gh{display:flex;align-items:center;gap:10px;height:40px;padding:0 14px;background:var(--secondary);font:var(--type-ui);font-weight:600}
+.ap238-gh .m{font:var(--type-mono);font-size:var(--text-2xs);font-weight:400}
+.ap238-row{display:flex;align-items:center;gap:12px;min-height:46px;padding:6px 14px;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.ap238-row:first-of-type{border-top:0}
+.ap238-row .who{display:flex;align-items:center;gap:10px;min-width:0;flex:1.2}
+.ap238-row .who b{display:block;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap238-row .who div>span{display:block;font:var(--type-meta);color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap238-row .col{flex:1;min-width:0;font:var(--type-meta);color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap238-row .col.ink{color:var(--foreground)}
+.ap238-face{width:32px;height:32px;border-radius:8px;flex:none;object-fit:cover;background:var(--secondary)}
+.ap238-sw{width:34px;height:20px;border-radius:99px;background:var(--neutral-300,var(--border));position:relative;flex:none}
+.ap238-sw::after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:99px;background:var(--background)}
+.ap238-sw.on{background:var(--foreground)}
+.ap238-sw.on::after{left:16px}
+
+/* The door (113, 230a) with a fourth card, Listen, and step two's kinds (230b). */
+.ap238-door{position:absolute;inset:0;overflow:hidden;background:var(--background);display:grid;place-items:center}
+.ap238-door.blur{background:color-mix(in srgb,var(--neutral-950) 18%,var(--muted))}
+.ap238-door .bg{position:absolute;inset:-20px;background-size:cover;background-position:center;filter:blur(14px);opacity:.38}
+.ap238-eyebrow{font:var(--type-meta);letter-spacing:var(--tracking-label);color:var(--muted-foreground)}
+.ap238-doors{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;width:100%}
+.ap238-dcard{padding:12px;border-radius:16px;display:flex;flex-direction:column;gap:6px;border:1px solid var(--border);box-shadow:0 8px 24px rgba(0,0,0,.06);background:var(--background)}
+.ap238-dcard.on{border-color:var(--foreground);box-shadow:inset 0 0 0 1px var(--foreground),0 8px 24px rgba(0,0,0,.06)}
+.ap238-dcard .pl{height:196px;border-radius:12px;background-size:cover;background-position:center;background-color:var(--muted)}
+.ap238-dcard b{font:var(--type-h3)}
+.ap238-dcard small{font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ap238-dcard small.aff{margin-top:auto;padding-top:22px;color:var(--foreground);font-weight:var(--weight-medium)}
+.ap238-card{position:relative;width:760px;background:var(--background);border-radius:var(--radius-2xl,18px);box-shadow:0 20px 60px rgba(0,0,0,.18);padding:24px;display:flex;flex-direction:column;gap:16px}
+.ap238 .ap238-card h2{margin:0;font:var(--type-title);display:flex;align-items:baseline}
+.ap238 .ap238-card h2 small{margin-left:auto;font:var(--type-meta);color:var(--muted-foreground)}
+.ap238-kinds{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.ap238-kind{border:1px solid var(--border);border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:8px;font:var(--type-ui)}
+.ap238-kind.on{border-color:var(--foreground);box-shadow:inset 0 0 0 1px var(--foreground);background:color-mix(in srgb,var(--muted) 60%,transparent)}
+.ap238-kind .pl{height:120px;border-radius:9px;background-size:cover;background-position:center;background-color:var(--muted)}
+.ap238-kind label{display:flex;align-items:center;gap:8px}
+.ap238-kind label i{width:14px;height:14px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--muted-foreground)}
+.ap238-kind.on label i{box-shadow:inset 0 0 0 4px var(--foreground)}
+.ap238-kind small{font:var(--type-meta);color:var(--muted-foreground)}
+.ap238-field{height:40px;border:1px solid var(--border);border-radius:10px;display:flex;align-items:center;gap:10px;padding:0 12px;font:var(--type-ui);font-weight:var(--weight-regular)}
+.ap238-field small{margin-left:auto;font:var(--type-meta);color:var(--muted-foreground)}
+.ap238-field svg{width:13px;height:13px;color:var(--muted-foreground)}
+.ap238-field img{width:24px;height:24px;border-radius:5px;object-fit:cover}
+.ap238-fl{display:flex;flex-direction:column;gap:5px}
+.ap238-fl>span{font:var(--type-label);color:var(--muted-foreground)}
+
+/* A music production's page: its square cover and what it is on the left, its tracks on the right.
+   A cover is 1:1, the fourth picture shape (2:3 story covers, 9:16 Tall moments, 16:9 wide). */
+.ap238-prod{display:grid;grid-template-columns:300px minmax(0,1fr);gap:36px;padding:28px 40px}
+.ap238-side{display:flex;flex-direction:column;gap:12px}
+.ap238-cover{position:relative;width:300px;aspect-ratio:1/1;border-radius:14px;overflow:hidden;border:1px solid var(--border);background:var(--secondary)}
+.ap238-cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.ap238-side h1{margin:4px 0 0;font:var(--type-ui);font-weight:650;font-size:var(--text-2xl);letter-spacing:-.02em;line-height:1.15}
+.ap238-side .acts{display:flex;gap:8px;flex-wrap:wrap}
+.ap238-th{display:flex;align-items:center;gap:12px;height:30px;padding:0 14px;border-top:1px solid var(--border);font:var(--type-meta);color:var(--muted-foreground)}
+.ap238-tr{display:flex;align-items:center;gap:12px;min-height:52px;padding:6px 14px;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.ap238-tr.on{background:color-mix(in srgb,var(--foreground) 5%,transparent)}
+.ap238-tr .grip,.ap238-th .grip{width:14px;color:var(--muted-foreground);display:flex}
+.ap238-tr .grip svg{width:14px;height:14px}
+.ap238-tr .n,.ap238-th .n{width:20px;text-align:right;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap238-tr .t,.ap238-th .t{flex:1.5;min-width:0}
+.ap238-tr .t b{display:block;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap238-tr .t span{display:block;font:var(--type-meta);color:var(--muted-foreground)}
+.ap238-tr .src,.ap238-th .src{flex:1.1;min-width:0;font:var(--type-meta);color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap238-tr .heard,.ap238-th .heard{flex:1.3;min-width:0;font:var(--type-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap238-tr .heard{color:var(--foreground)}
+.ap238-tr .heard.none{color:var(--muted-foreground)}
+.ap238-tr .len,.ap238-th .len{width:44px;text-align:right;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap238-tr .ap238-ib{width:28px;height:28px}
+.ap238-addrow{display:flex;align-items:center;gap:8px;min-height:44px;padding:6px 14px;border-top:1px dashed var(--border);font:var(--type-label);color:var(--muted-foreground)}
+.ap238-addrow svg{width:14px;height:14px}
+
+/* Waveform art, as Add a sound (230e) draws a take. */
+.ap238-wv{display:flex;align-items:center;gap:2px;height:44px}
+.ap238-wv i{display:block;width:2px;border-radius:1px;background:color-mix(in srgb,var(--foreground) 42%,transparent)}
+.ap238-wv i.in{background:var(--foreground)}
+
+/* A dialog over the page (230e): its head, body and foot; Add track's tiles. */
+.ap238-dlg{position:absolute;z-index:3;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--popover,var(--background));border:1px solid var(--border);border-radius:var(--radius-2xl,18px);box-shadow:0 30px 80px rgba(0,0,0,.3);display:flex;flex-direction:column;overflow:hidden}
+.ap238-dlg>header{display:flex;align-items:center;gap:10px;padding:18px 20px 10px}
+.ap238-dlg>header h3{margin:0;font:var(--type-title);font-size:var(--text-xl)}
+.ap238-dlg>header small{font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ap238-dlg .bd{padding:4px 20px 16px;display:flex;flex-direction:column;gap:14px}
+.ap238-dlg>footer{display:flex;align-items:center;gap:8px;padding:14px 20px;border-top:1px solid var(--border)}
+.ap238-dlg>footer small{font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ap238-search{height:32px;border:1px solid var(--border);border-radius:99px;display:flex;align-items:center;gap:8px;padding:0 12px;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground);min-width:220px}
+.ap238-search svg{width:13px;height:13px}
+.ap238-chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:99px;border:1px solid var(--border);font:var(--type-label);color:var(--muted-foreground);white-space:nowrap}
+.ap238-chip.on{background:var(--foreground);color:var(--background);border-color:transparent}
+.ap238-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.ap238-tile{position:relative;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--background);display:flex;flex-direction:column}
+.ap238-tile.on{border-color:var(--foreground);box-shadow:inset 0 0 0 1px var(--foreground)}
+.ap238-tile.no{opacity:.45}
+.ap238-tile .art{height:76px;background:var(--muted);display:flex;align-items:center;justify-content:center;position:relative}
+.ap238-tile .art .ap238-play{position:absolute;left:8px;bottom:8px;width:24px;height:24px}
+.ap238-tile .art .rad{position:absolute;right:8px;top:8px;width:16px;height:16px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--muted-foreground);background:var(--background)}
+.ap238-tile.on .art .rad{box-shadow:inset 0 0 0 5px var(--foreground)}
+.ap238-tile .nm{padding:8px 10px 10px;display:flex;flex-direction:column;gap:2px;font:var(--type-label)}
+.ap238-tile .nm small{font:var(--type-meta);color:var(--muted-foreground)}
+.ap238-tile.dash{border-style:dashed;background:none;align-items:center;justify-content:center;gap:6px;min-height:130px;font:var(--type-label);text-align:center;padding:10px}
+.ap238-tile.dash svg{width:16px;height:16px;color:var(--muted-foreground)}
+.ap238-tile.dash small{font:var(--type-meta);color:var(--muted-foreground)}
+
+/* A track open, in a panel at the page's side: its player, where it came from, its lyrics, where
+   it is heard and whose theme it is. */
+.ap238-panel{position:absolute;z-index:3;top:52px;right:0;bottom:0;width:460px;background:var(--popover,var(--background));border-left:1px solid var(--border);box-shadow:-20px 0 50px rgba(0,0,0,.12);display:flex;flex-direction:column}
+.ap238-panel>header{display:flex;align-items:flex-start;gap:10px;padding:18px 20px 12px}
+.ap238-panel>header h3{margin:2px 0 0;font:var(--type-title);font-size:var(--text-xl)}
+.ap238-panel .bd{padding:0 20px 16px;display:flex;flex-direction:column;gap:14px;overflow:hidden}
+.ap238-panel>footer{margin-top:auto;display:flex;align-items:center;gap:8px;padding:14px 20px;border-top:1px solid var(--border)}
+.ap238-player{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:12px}
+.ap238-player .ap238-wv{flex:1;height:36px;overflow:hidden}
+.ap238-kv{display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px 12px;align-items:start;font-size:var(--text-sm)}
+.ap238-kv>span:nth-child(odd){font:var(--type-label);color:var(--muted-foreground);padding-top:2px}
+.ap238-lyrics{border:1px solid var(--border);border-radius:10px;padding:10px 12px;font:var(--type-body);line-height:1.55;white-space:pre-line;max-height:300px;overflow:hidden}
+.ap238-lyrics .sec{font:var(--type-meta);color:var(--muted-foreground)}
+.ap238-link{display:flex;align-items:center;gap:8px;min-height:36px;padding:0 10px;border:1px solid var(--border);border-radius:10px;font-size:var(--text-sm)}
+.ap238-link .m{margin-left:auto}
+.ap238-link svg{width:13px;height:13px;color:var(--muted-foreground)}
+.ap238-who{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 10px 0 4px;border:1px solid var(--border);border-radius:99px;font:var(--type-label)}
+.ap238-who img{width:26px;height:26px;border-radius:99px;object-fit:cover}
+
+/* The Guide's Theme column, and the menu that names a theme from the world's music. */
+.ap238-cols{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:28px;padding:18px 40px 0}
+.ap238-theme{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px;border-radius:99px;border:1px solid var(--border);font:var(--type-label);white-space:nowrap;max-width:100%;overflow:hidden}
+.ap238-theme svg{width:12px;height:12px;color:var(--muted-foreground)}
+.ap238-theme.on{border-color:var(--foreground);box-shadow:inset 0 0 0 1px var(--foreground)}
+.ap238-theme.none{color:var(--muted-foreground);border-style:dashed}
+.ap238-menu{position:absolute;z-index:3;width:320px;background:var(--popover,var(--background));border:1px solid var(--border);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.22);padding:8px;display:flex;flex-direction:column;gap:2px}
+.ap238-menu .h{padding:8px 10px 6px;font:var(--type-ui);font-weight:600}
+.ap238-menu .sec{padding:8px 10px 4px;font:var(--type-meta);color:var(--muted-foreground);display:flex;align-items:center;gap:8px}
+.ap238-menu .sec img{width:18px;height:18px;border-radius:4px;object-fit:cover}
+.ap238-menu .it{display:flex;align-items:center;gap:10px;min-height:34px;padding:0 10px;border-radius:8px;font-size:var(--text-sm)}
+.ap238-menu .it.on{background:var(--secondary)}
+.ap238-menu .it .ck{width:14px;display:flex}
+.ap238-menu .it .ck svg{width:13px;height:13px}
+.ap238-menu .it .m{margin-left:auto}
+.ap238-menu hr{border:0;border-top:1px solid var(--border);margin:4px 0}
+
+/* Add teaser's Songs (236b): a song's card is the teaser card's one shape, 16:9, its square cover
+   whole over its own blur; under the grid, the excerpt: where it starts and how long, at most 30 s. */
+.ap238-pick{position:absolute;z-index:3;top:28px;left:50%;transform:translateX(-50%);width:800px;border:1px solid var(--border);border-radius:16px;background:var(--popover,var(--background));box-shadow:0 18px 50px color-mix(in srgb,var(--foreground) 16%,transparent);padding:20px 22px;display:flex;flex-direction:column;gap:14px}
+.ap238-pick h3,.ap238-sheet h3{margin:0;font:var(--type-ui);font-weight:600;font-size:var(--text-md)}
+.ap238-pick .sub,.ap238-sheet .sub{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);margin-top:-8px}
+.ap238-tabs{display:flex;gap:20px;border-bottom:1px solid var(--border)}
+.ap238-tabs span{padding:0 0 10px;font-size:var(--text-sm);color:var(--muted-foreground)}
+.ap238-tabs span.on{color:var(--foreground);font-weight:500;box-shadow:inset 0 -2px 0 var(--foreground)}
+.ap238-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 12px}
+.ap238-tz{display:flex;flex-direction:column;gap:6px;min-width:0}
+.ap238-tz .im{position:relative;width:100%;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:var(--media-overlay-bg);border:1px solid var(--border)}
+.ap238-tz .im img.bl{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:blur(14px) brightness(.6);transform:scale(1.3)}
+.ap238-tz .im img.sq{position:absolute;top:0;bottom:0;left:50%;height:100%;aspect-ratio:1/1;transform:translateX(-50%);object-fit:cover}
+.ap238-tz .im .play{position:absolute;left:8px;bottom:8px;width:26px;height:26px;border-radius:99px;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--media-overlay-bg) 55%,transparent);color:var(--media-overlay-fg)}
+.ap238-tz .im .play svg{width:11px;height:11px;margin-left:1px}
+.ap238-tz b{font-weight:500;font-size:var(--text-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap238-tz span.m{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:-4px}
+.ap238-grid .ap238-tz.on .im{outline:2px solid var(--foreground);outline-offset:2px}
+.ap238-grid .ap238-tz.no .im img{opacity:.35}
+.ap238-excerpt{display:flex;align-items:center;gap:14px;border:1px solid var(--border);border-radius:12px;padding:10px 14px}
+.ap238-excerpt>b{width:64px;flex:none;font:var(--type-label);color:var(--muted-foreground)}
+.ap238-excerpt .track{position:relative;flex:1;min-width:0}
+.ap238-excerpt .ap238-wv{height:40px;overflow:hidden;justify-content:space-between}
+.ap238-excerpt .win{position:absolute;top:-4px;bottom:-4px;border:2px solid var(--foreground);border-radius:6px;background:color-mix(in srgb,var(--foreground) 8%,transparent)}
+.ap238-excerpt .f{height:30px;padding:0 10px;border:1px solid var(--border);border-radius:8px;display:inline-flex;align-items:center;gap:6px;font:var(--type-mono);font-size:var(--text-2xs)}
+.ap238-excerpt .f span{color:var(--muted-foreground)}
+.ap238-foot{display:flex;align-items:center;gap:8px}
+
+/* A track's composer (238i): Bench's music engine inside the track, its fields, the route and its
+   quote, and a strip of the track's takes. A field the route cannot take is shown, disabled. */
+.ap238-seg{display:inline-flex;padding:3px;border-radius:10px;background:var(--muted);gap:2px}
+.ap238-seg span{height:26px;padding:0 11px;border-radius:7px;display:inline-flex;align-items:center;font:var(--type-label);color:var(--muted-foreground);white-space:nowrap}
+.ap238-seg span.on{background:var(--background);color:var(--foreground);box-shadow:0 1px 2px rgba(0,0,0,.18)}
+.ap238-in{height:34px;border:1px solid var(--border);border-radius:8px;display:flex;align-items:center;gap:8px;padding:0 10px;font-size:var(--text-sm);min-width:0}
+.ap238-in svg{width:13px;height:13px;color:var(--muted-foreground);margin-left:auto}
+.ap238-in img{width:22px;height:22px;border-radius:99px;object-fit:cover}
+.ap238-in.off{opacity:.42}
+.ap238-btn.off{opacity:.42}
+.ap238-takes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.ap238-take{border:1px solid var(--border);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.ap238-take.on{border-color:var(--foreground);box-shadow:inset 0 0 0 1px var(--foreground)}
+.ap238-take .hd{display:flex;align-items:center;gap:8px;min-height:24px;font:var(--type-label)}
+.ap238-take .ft{min-height:28px}
+.ap238-take .ap238-wv{height:34px;overflow:hidden;justify-content:space-between}
+.ap238-take .ft{display:flex;align-items:center;gap:8px}
+
+/* The track editor (238j): sections over the waveform, trim and fade handles on it, each lyric line
+   under its section, and the controls; one light editor, no multitrack. */
+.ap238-ed{position:relative;margin-top:4px}
+.ap238-ruler{position:relative;height:18px;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap238-ruler span{position:absolute;top:0;transform:translateX(-50%)}
+.ap238-secs{position:relative;height:26px}
+.ap238-secs span{position:absolute;top:0;bottom:4px;border-radius:6px;background:var(--secondary);display:flex;align-items:center;padding:0 8px;font:var(--type-label);white-space:nowrap;overflow:hidden}
+.ap238-wave{position:relative;height:120px;border-radius:10px;background:color-mix(in srgb,var(--foreground) 4%,transparent);overflow:hidden}
+.ap238-wave .ap238-wv{position:absolute;inset:0;height:auto;justify-content:space-between}
+.ap238-wave .ap238-wv i{transform:scaleY(2.6)}
+.ap238-seq .ap238-wv i{transform:scaleY(.62)}
+.ap238-wave .cut{position:absolute;top:0;bottom:0;right:0;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--foreground) 10%,transparent) 0 6px,transparent 6px 12px);border-left:1px solid var(--border)}
+.ap238-wave .fade{position:absolute;top:0;bottom:0;background:linear-gradient(to right,color-mix(in srgb,var(--background) 85%,transparent),transparent)}
+.ap238-wave .fade.out{background:linear-gradient(to left,color-mix(in srgb,var(--background) 85%,transparent),transparent)}
+.ap238-wave .trim{position:absolute;top:0;bottom:0;width:10px;margin-left:-5px;border-radius:4px;background:var(--foreground)}
+.ap238-wave .trim::after{content:"";position:absolute;left:4px;top:42%;width:2px;height:16%;border-radius:1px;background:var(--background)}
+.ap238-wave .fh{position:absolute;top:6px;width:12px;height:12px;margin-left:-6px;border-radius:99px;background:var(--background);border:2px solid var(--foreground)}
+.ap238-wave .div{position:absolute;top:0;bottom:0;border-left:1px dashed color-mix(in srgb,var(--foreground) 30%,transparent)}
+.ap238-lines{position:relative;height:66px;margin-top:8px}
+.ap238-lines div{position:absolute;top:0;padding:0 8px;font:var(--type-meta);color:var(--foreground);line-height:1.5;overflow:hidden}
+.ap238-lines div.none{color:var(--muted-foreground)}
+.ap238-ctrls{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.ap238-ctrls .ap238-fl{min-width:0}
+.ap238-ctrls .ap238-in{min-width:110px;font:var(--type-mono);font-size:var(--text-2xs)}
+
+/* The album's sequence (238k): the tracks in order, and between each pair a gap or a crossfade. */
+.ap238-seq{display:flex;align-items:center;gap:12px;min-height:44px;padding:6px 14px;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.ap238-seq .n{width:20px;text-align:right;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap238-seq b{flex:1;min-width:0;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap238-seq .ap238-wv{width:220px;height:26px;overflow:hidden;justify-content:space-between}
+.ap238-seq .len{width:44px;text-align:right;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap238-join{display:flex;align-items:center;gap:10px;min-height:34px;padding:2px 14px 2px 46px;border-top:1px dashed var(--border);background:color-mix(in srgb,var(--foreground) 2.5%,transparent)}
+.ap238-join .ap238-seg span{height:22px;padding:0 9px}
+.ap238-join .v{height:24px;min-width:48px;padding:0 8px;border:1px solid var(--border);border-radius:6px;display:inline-flex;align-items:center;font:var(--type-mono);font-size:var(--text-2xs)}
+.ap238-join .line{flex:1;border-top:1px solid var(--border)}
+
+/* The Export sheet (233a) for a music production: its tracks, cover, lyrics and Heard in. */
+.ap238-sheet{position:absolute;z-index:3;left:50%;transform:translateX(-50%);border:1px solid var(--border);border-radius:16px;background:var(--popover,var(--background));box-shadow:0 18px 50px color-mix(in srgb,var(--foreground) 16%,transparent);padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.ap238-opts{border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.ap238-opt{display:flex;align-items:center;gap:14px;min-height:44px;padding:6px 14px;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.ap238-opt:first-child{border-top:0}
+.ap238-opt>b{width:96px;flex:none;font-weight:500;color:var(--muted-foreground)}
+.ap238-opt i{font-style:normal;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);white-space:nowrap}
+.ap238-opt img{width:44px;height:25px;object-fit:cover;border-radius:4px;flex:none}
+.ap238-opt img.sq{width:30px;height:30px}
+.ap238-est{display:flex;align-items:center;gap:12px;font-size:var(--text-sm)}
+.ap238-est .m{font:var(--type-mono);font-size:var(--text-2xs)}
