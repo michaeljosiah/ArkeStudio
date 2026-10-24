@@ -1,5 +1,6 @@
-import { GuideVoiceLinesRequestSchema, SetGuideEntrySchema } from "./world-guide.js";
+import { GuideVoiceLinesRequestSchema, SetGuideEntrySchema, SetGuideTeasersSchema } from "./world-guide.js";
 import { ARKE_PLAYER_PICTURE_SIZES } from "./world-package.js";
+import { ArkePlayerPartRequestSchema } from "./arke-player-release.js";
 import { ChapterReviewDecisionSchema } from "./chapter-review.js";
 import { StoryPublishActionSchema } from "./story-publication.js";
 import { valueSchema } from "./value-schema.js";
@@ -4013,8 +4014,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
       /** Chosen by the window, so it can find the package again after a reconnect lost the answer. */
       exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/),
-      /** The book and the pictures' loops are each the author's to leave out (233a); the pictures' Size (235d), full when absent. */
-      options: z.object({ book: z.boolean(), motion: z.boolean(), size: z.enum(ARKE_PLAYER_PICTURE_SIZES).optional() }).strict(),
+      /**
+       * The book and the pictures' loops are each the author's to leave out (233a); the pictures' Size
+       * (235d), full when absent; and Release (236d): absent for the whole world, else a part of the
+       * chapters named, with the author's schedule.
+       */
+      options: z.object({ book: z.boolean(), motion: z.boolean(), size: z.enum(ARKE_PLAYER_PICTURE_SIZES).optional(), part: ArkePlayerPartRequestSchema.optional() }).strict(),
     })
     .strict(),
   /**
@@ -4039,6 +4044,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("list-web-packages"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
   /** One entry of the world's Guide (SPEC-059 R-4, R-8): what is public and when, written to `guide.json`. */
   z.object({ kind: z.literal("set-guide-entry"), worldId: UlidSchema, change: SetGuideEntrySchema }).strict(),
+  /** The Guide's teasers (SPEC-059 R-24, R-27), replaced whole in the author's order. */
+  z.object({ kind: z.literal("set-guide-teasers"), worldId: UlidSchema, change: SetGuideTeasersSchema }).strict(),
   /** The sentences a character speaks in takes of chapters read whole (R-6), answered as `guide.voice-lines`. */
   z.object({ kind: z.literal("list-guide-voice-lines"), ...GuideVoiceLinesRequestSchema.shape }).strict(),
   z.object({ kind: z.literal("pick-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),

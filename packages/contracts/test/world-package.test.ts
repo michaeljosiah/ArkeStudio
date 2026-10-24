@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { guideChapterNumber, listeningPhraseAt, listeningPictureAt, readGuide, readListening, readWorldManifest, WorldAssetSchema, type GuideDocument, type ListeningDocumentChapter, type WorldAsset } from "../src/index.js";
+import { guideChapterNumber, guideTeasers, listeningPhraseAt, listeningPictureAt, readGuide, readListening, readWorldManifest, WorldAssetSchema, type GuideDocument, type ListeningDocumentChapter, type WorldAsset } from "../src/index.js";
 
 // SPEC-058 R-16: one reader in two languages. These fixtures are Arke Player's own
 // (`packages/arke_world/test/fixtures/listening`, made by its tool/make_listening_fixtures.py) and
@@ -94,7 +94,7 @@ describe("world.json (Player ADR 0005; SPEC-058 R-9, R-15)", () => {
   });
 
   it("refuses what it does not know as made with a newer Arke", () => {
-    assert.equal(verdict({ ...base, schemaVersion: 4 }), "newer-arke");
+    assert.equal(verdict({ ...base, schemaVersion: 5 }), "newer-arke");
     // A schema 2 reader does not know a guide (SPEC-059 R-9).
     assert.equal(verdict({ ...base, guide: "listening" }), "newer-arke");
     assert.equal(verdict({ ...base, requires: ["video-v1"] }), "newer-arke");
@@ -127,6 +127,8 @@ describe("the shared guide cases (SPEC-059 R-9 – R-14, R-16)", () => {
     expect: "ok" | "newerArke" | "notAPackage";
     counts?: { characters: number; places: number; lore: number };
     after?: Array<{ entry: string; section?: number; number: number | null }>;
+    /** The teasers' kinds in order (revision 5). */
+    teasers?: string[];
   }
   const afterOf = (guide: GuideDocument, entryId: string, section: number | undefined) => {
     const entry = [...guide.characters, ...guide.places, ...guide.lore].find((candidate) => candidate.id === entryId)!;
@@ -142,6 +144,7 @@ describe("the shared guide cases (SPEC-059 R-9 – R-14, R-16)", () => {
         const guide = result.guide;
         if (entry.counts !== undefined) assert.deepEqual({ characters: guide.characters.length, places: guide.places.length, lore: guide.lore.length }, entry.counts);
         for (const probe of entry.after ?? []) assert.equal(guideChapterNumber(guide, afterOf(guide, probe.entry, probe.section)), probe.number, `${probe.entry} ${probe.section ?? ""}`);
+        if (entry.teasers !== undefined) assert.deepEqual(guideTeasers(guide).map((teaser) => teaser.kind), entry.teasers);
       } else {
         assert.equal(result.ok, false);
         if (!result.ok) assert.equal(result.refusal, entry.expect === "newerArke" ? "newer-arke" : "not-a-package", result.reason);
@@ -155,4 +158,32 @@ describe("the shared guide cases (SPEC-059 R-9 – R-14, R-16)", () => {
     assert.equal(result.manifest.guide, "guide");
     assert.deepEqual(result.manifest.productions, []);
   });
+});
+
+// SPEC-058 R-46: a part's cases, Arke Player's own (`packages/arke_world/test/fixtures/part`, made by
+// its tool/make_part_fixtures.py), which arke_world runs too.
+describe("the shared part cases (SPEC-058 R-46)", () => {
+  const parts = join(import.meta.dirname, "fixtures", "world-package", "part");
+  const readPartFixture = (name: string) => readFileSync(join(parts, name), "utf8");
+  interface PartCase {
+    file: string;
+    expect: "ok" | "newerArke" | "notAPackage";
+    part?: { follows: string; number: number; day?: string; next?: string };
+  }
+  for (const entry of (JSON.parse(readPartFixture("cases.json")) as { cases: PartCase[] }).cases) {
+    it(entry.file, () => {
+      const result = readWorldManifest(readPartFixture(entry.file));
+      if (entry.expect === "ok") {
+        if (!result.ok) assert.fail(result.reason);
+        const part = result.manifest.part!;
+        assert.ok(part !== undefined);
+        if (entry.part !== undefined) {
+          assert.deepEqual({ follows: part.follows, number: part.number, day: part.schedule?.day, next: part.schedule?.next }, { day: undefined, next: undefined, ...entry.part });
+        }
+      } else {
+        assert.equal(result.ok, false);
+        if (!result.ok) assert.equal(result.refusal, entry.expect === "newerArke" ? "newer-arke" : "not-a-package", result.reason);
+      }
+    });
+  }
 });

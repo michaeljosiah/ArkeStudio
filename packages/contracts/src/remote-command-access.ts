@@ -109,7 +109,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "create-chapter": "studio", "open-chapter": "studio", "read-chapter-version": "studio", "save-chapter": "studio", "save-episode-script": "studio", "hear-drama-lines": "studio", "generate-drama-sound": "studio", "decide-drama-take": "studio", "set-drama-role": "studio", "set-drama-verdict": "studio", "read-drama-source": "studio", "publish-drama-edition": "studio", "list-drama-editions": "studio", "decide-drama-note": "studio",
   "retire-chapter": "studio", "restore-chapter-retired": "studio", "edit-chapter-plan": "studio",
   "restore-chapter": "studio", "save-bible": "studio", "restore-bible": "studio",
-  "set-guide-entry": "studio", "list-guide-voice-lines": "studio",
+  "set-guide-entry": "studio", "set-guide-teasers": "studio", "list-guide-voice-lines": "studio",
   "reorder-chapters": "studio", "reorder-scenes": "studio", "set-production-aspect": "studio",
   "set-world-model": "studio", "set-world-image-inspection": "studio", "set-image-inspection": "studio", "set-production-model": "studio", "frame-run-quote": "studio",
   "frame-run-start": "studio", "frame-run-pause": "studio", "frame-run-resume": "studio",
