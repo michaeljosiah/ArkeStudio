@@ -56,8 +56,8 @@ import {
   designatedVoiceSample,
   shortNameOf,
   pictureKeyParts,
+  pictureWords,
   sentenceHashes,
-  sentencesOf,
   formatRunningTime,
   type ChapterReview,
 } from "@arke-studio/contracts";
@@ -4171,12 +4171,10 @@ export function ChapterWorkspace({
           chapterOrder={chapter.order}
           slug={worldSlug}
           wordsOf={(block) => {
-            // A row at a mark shows its words from its sentence on (design turn 237).
-            const parts = pictureKeyParts(block);
-            const text = audiobook.rows.find((row) => row.block.key === parts.block)?.block.text;
-            if (text === undefined || parts.sentence === undefined) return text;
-            const at = sentenceHashes(text).indexOf(parts.sentence);
-            return at < 0 ? undefined : sentencesOf(text).slice(at).join(" ");
+            // A row shows the words its picture would: from its sentence to the next picture, one
+            // standing or another row's (design turn 237, as the coordinator checks them).
+            const record = audiobookRecord.record === "unreadable" ? null : audiobookRecord.record;
+            return pictureWords(audiobook.rows.map((row) => row.block), record?.pictures, block, illustration.run?.proposal?.rows.map((row) => row.block) ?? [])?.text;
           }}
           beatOf={(block) => audiobook.rows.find((row) => row.block.key === pictureKeyParts(block).block)?.beat?.name}
           offline={connection !== "open"}

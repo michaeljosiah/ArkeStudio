@@ -2984,6 +2984,13 @@ describe("picture marks (turn 237)", () => {
     assert.equal(set?.block, markAt(2), "filed at the mark");
   });
 
+  it("offers + Picture at a sentence a block says twice only where it first comes (codex on PR 2178)", async () => {
+    const twice = "The bell rang over the water. She checked the date. The tide turned under the rail. She checked the date.";
+    const m = await mount(inkbound());
+    await answerOpen(m, { body: `${twice}\n\nSix, and the tide <br> not yet called.`, audiobook: record([], {}) });
+    assert.equal(all(m, '[data-block="p0.0"] [data-testid="audiobook-picture-here"]').length, 2, "the second and third sentences; the fourth repeats the second");
+  });
+
   it("moves a made picture by dragging its bar to another sentence's start (R-205)", async () => {
     const m = await mount(inkbound());
     await answerOpen(m, { body: STORY, audiobook: { ...record([], {}), pictures: { "p0.0": picture() } } });

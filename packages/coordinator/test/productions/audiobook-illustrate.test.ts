@@ -17,6 +17,8 @@ import { CHAPTER, IMAGE, LEDGER, WORLD_ID, withHarness, type Harness } from "./p
  * under ONE confirm of the total, each filed on its block as it lands.
  */
 const LOOK_ID = "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2K3";
+/** A paragraph that says one sentence twice: its marks can name only the first. */
+const TWICE = "The bell rang over the water for a long while. She checked the date against the column. The tide turned under the rail and kept turning. She checked the date against the column.";
 type FinishedEvent =Extract<DomainEvent, { type: "illustration.finished" }>;
 type ProgressEvent = Extract<DomainEvent, { type: "illustration.progress" }>;
 type RecordEvent = Extract<DomainEvent, { type: "audiobook.record" }>;
@@ -122,6 +124,27 @@ describe("Illustrate this chapter: the proposal (R-101)", () => {
             { at: `${input.blocks[0]!.key}#0`, reason: "something else", title: "The rail", prompt: "Maren at the rail, grey light.", who: ["maren-kest"], place: null },
             { at: long.sentences![1]!.id, reason: "Arrives", title: "Someone comes", prompt: "Maren turns as someone comes up the steps.", who: ["maren-kest"], place: null },
           ] };
+        },
+      },
+    ));
+
+  it("takes a sentence a block says twice only where it first comes, where its mark can name it (codex on PR 2178)", () =>
+    withHarness(
+      async ({ events, send }) => {
+        await illustrate(send);
+        const proposal = finished(events).proposal!;
+        const twice = proposal.rows.filter((row) => row.title.startsWith("Twice"));
+        assert.deepEqual(twice.map((row) => row.title), ["Twice, first"], "the later one would be made at the first: left out");
+        assert.equal(twice[0]!.block, pictureMarkKey(twice[0]!.block.split("@")[0]!, sentenceHashes(TWICE)[1]!));
+      },
+      {
+        prepare: async (worldDir) => {
+          const file = join(worldDir, "productions", LEDGER, "chapters", `${CHAPTER}.md`);
+          await writeFile(file, `${await readFile(file, "utf8")}\n\n${TWICE}\n`);
+        },
+        illustrate: async (input) => {
+          const block = input.blocks.find((candidate) => candidate.text.startsWith("The bell rang over the water"))!;
+          return { pictures: [1, 3].map((at) => ({ at: `${block.key}#${at}`, title: at === 1 ? "Twice, first" : "Twice, again", prompt: "Maren checks the date at the rail.", who: ["maren-kest"], place: null })) };
         },
       },
     ));

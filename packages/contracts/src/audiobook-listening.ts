@@ -332,17 +332,21 @@ export function pictureSlot(
 /**
  * A picture's words (design turn 237, R-205): from the sentence it stands at to the next picture in
  * its block, or the block's end — the moment it shows, which its brief starts from — with the
- * block's words either side of them. Null when its place is no longer in the chapter.
+ * block's words either side of them. Null when its place is no longer in the chapter. `also` are
+ * pictures not set yet that end it as well: a proposal's other rows, so a row is checked against
+ * its own moment and not the next one's (codex on PR 2178).
  */
 export function pictureWords(
   blocks: readonly Pick<ListeningInputBlock, "key" | "text" | "starts">[],
   pictures: Readonly<Record<string, AudiobookPicture>> | undefined,
   key: string,
+  also: readonly string[] = [],
 ): { text: string; before?: string; after?: string } | null {
   const slot = pictureSlot(blocks, pictures, key);
   if (slot === null) return null;
   const sentences = sentencesOf(blocks[slot.index]!.text);
-  const next = Math.min(sentences.length, ...placePictures(blocks, pictures).placed.filter((entry) => entry.index === slot.index && entry.sentence > slot.sentence).map((entry) => entry.sentence));
+  const proposed = also.map((other) => pictureSlot(blocks, pictures, other)).filter((other) => other !== null && other.index === slot.index).map((other) => other!.sentence);
+  const next = Math.min(sentences.length, ...[...placePictures(blocks, pictures).placed.filter((entry) => entry.index === slot.index).map((entry) => entry.sentence), ...proposed].filter((sentence) => sentence > slot.sentence));
   const before = sentences.slice(0, slot.sentence).join(" ");
   const after = sentences.slice(next).join(" ");
   return { text: sentences.slice(slot.sentence, next).join(" "), ...(before !== "" ? { before } : {}), ...(after !== "" ? { after } : {}) };

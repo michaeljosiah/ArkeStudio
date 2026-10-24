@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { IllustrationProposalSchema, disagreementsNotSentAsIs, illustrationRowGoes, illustrationTotal, paceLabel, pacePhrase, pictureBench, pictureCap, pictureDetailSkins, sheetSkin, pictureStarts, priceLabel, referenceBriefLine, thinPictures } from "../src/audiobook-illustrate.js";
+import { ILLUSTRATION_ROWS_MAX, IllustrationProposalSchema, disagreementsNotSentAsIs, illustrationRowGoes, illustrationTotal, paceLabel, pacePhrase, pictureBench, pictureCap, pictureDetailSkins, sheetSkin, pictureStarts, priceLabel, referenceBriefLine, thinPictures } from "../src/audiobook-illustrate.js";
 import { sheetReferencePicture } from "../src/world-image-references.js";
 
 /**
@@ -27,6 +27,14 @@ describe("the cap and the five-second rule (R-101, design turn 237 R-207)", () =
     assert.equal(pictureCap(1228, 15), 46, "Na love or Juju's Chapter 1, 20:28 with fifteen standing: 61 at most");
     assert.equal(pictureCap(10, 0), 1);
     assert.equal(pictureCap(10, 1), 0);
+  });
+
+  it("never proposes more rows than a proposal carries, and offers the rest to Illustrate again (codex on PR 2178)", () => {
+    assert.equal(pictureCap(3600, 0), ILLUSTRATION_ROWS_MAX, "an hour's chapter is proposed one proposal's worth");
+    assert.equal(pictureCap(3600, ILLUSTRATION_ROWS_MAX), ILLUSTRATION_ROWS_MAX, "then the next, counting those made");
+    const row = { block: "p0.0", textHash: "t", at: 0, title: "T", prompt: "P", who: [], estimatedMicroUsd: 0 };
+    const proposal = { proposalId: "p", hash: "h", rows: Array.from({ length: pictureCap(3600, 0) }, (_, at) => ({ ...row, at })), model: { provider: "fal", id: "m", name: "M", references: 0 }, seconds: 3600, estimated: false, standing: 0 };
+    assert.ok(IllustrationProposalSchema.safeParse(proposal).success, "the most the cap allows still reads on the wire");
   });
 
   it("keeps a proposal at least five seconds from every picture standing and every one kept before it", () => {

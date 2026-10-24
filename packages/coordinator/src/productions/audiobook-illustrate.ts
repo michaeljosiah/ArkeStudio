@@ -15,6 +15,7 @@ import {
   pictureCap,
   pictureLookFor,
   pictureMarkKey,
+  pictureWords,
   placePictures,
   pictureStarts,
   ridingPicks,
@@ -201,7 +202,10 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
     const sentence = hash < 0 ? -1 : Number(named.slice(hash + 1));
     const prompt = clipPrompt(entry.prompt, maxChars);
     const slot = `${index}:${sentence}`;
-    if (index < 0 || !Number.isInteger(sentence) || sentence < 0 || sentence >= sentencesOf(plan.blocks[index]!.block.text).length || seen.has(slot) || occupied.has(slot) || prompt === "") {
+    // A mark names its sentence by its words, so a sentence a block says twice can be named only
+    // where it first comes: a later one would be made at the first (codex on PR 2178).
+    const hashes = index < 0 ? [] : sentenceHashes(plan.blocks[index]!.block.text);
+    if (index < 0 || !Number.isInteger(sentence) || sentence < 0 || sentence >= hashes.length || hashes.indexOf(hashes[sentence]!) !== sentence || seen.has(slot) || occupied.has(slot) || prompt === "") {
       dropped += 1;
       continue;
     }
@@ -227,6 +231,7 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
     const planned = plan.blocks[candidate.index]!;
     return candidate.sentence > 0 ? pictureMarkKey(planned.block.key, sentenceHashes(planned.block.text)[candidate.sentence]!) : planned.block.key;
   };
+  const keptKeys = kept.map((position) => keyOf(candidates[position]!));
   if (rewrite !== undefined) {
     for (const position of kept) {
       const candidate = candidates[position]!;
@@ -258,8 +263,9 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
     const keys = held.inFrame.map((person) => person.key);
     const stamp = pictureLookFor(room.look, who.filter((person) => person.kind === "character").map((person) => person.key), picks, library);
     const used = lookLinesFor(room.look, [...keys, ...held.details.map((detail) => detail.of)], { ...ownLookPicks(own), ...picks }, library);
-    // Checked against the picture's own words, from its sentence on (R-205).
-    const words = sentencesOf(planned.block.text).slice(candidate.sentence).join(" ");
+    // Checked against the picture's own words, from its sentence to the next picture, standing or
+    // proposed with it (R-205): a garment the next moment brings is not this one's.
+    const words = pictureWords(inputs, pictures, key, keptKeys)?.text ?? "";
     const checks = pictureChecks({ held, who, people: visible, lines: used, block: words, mood: room.mood });
     const shot = { frame: held.frame, inFrame: keys, notInFrame: held.notInFrame, expressions: held.expressions, details: held.details, checks, checkedPrompt: held.prompt };
     return {

@@ -1824,7 +1824,9 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
     // pressing the block, so it is only a place to drop one.
     if (onPicture !== undefined && !coarse) {
       offsets.forEach((offset, sentence) => {
-        if (taken.has(sentence)) return;
+        // A mark names its sentence by its words: one the block says twice is a place only where it
+        // first comes, or the picture set at the later one would be made at the first.
+        if (taken.has(sentence) || hashes.indexOf(hashes[sentence]!) !== sentence) return;
         const key = keyAt(sentence);
         const first = sentence === 0;
         const open = offered?.key === key ? (offered.over ? "over" : "open") : null;
