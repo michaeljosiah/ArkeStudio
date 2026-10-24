@@ -55,6 +55,9 @@ import {
   defaultShortName,
   designatedVoiceSample,
   shortNameOf,
+  pictureKeyParts,
+  sentenceHashes,
+  sentencesOf,
   type ChapterReview,
 } from "@arke-studio/contracts";
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
@@ -4139,7 +4142,15 @@ export function ChapterWorkspace({
           run={illustration.run}
           chapterOrder={chapter.order}
           slug={worldSlug}
-          wordsOf={(block) => audiobook.rows.find((row) => row.block.key === block)?.block.text}
+          wordsOf={(block) => {
+            // A row at a mark shows its words from its sentence on (design turn 237).
+            const parts = pictureKeyParts(block);
+            const text = audiobook.rows.find((row) => row.block.key === parts.block)?.block.text;
+            if (text === undefined || parts.sentence === undefined) return text;
+            const at = sentenceHashes(text).indexOf(parts.sentence);
+            return at < 0 ? undefined : sentencesOf(text).slice(at).join(" ");
+          }}
+          beatOf={(block) => audiobook.rows.find((row) => row.block.key === pictureKeyParts(block).block)?.beat?.name}
           offline={connection !== "open"}
           onAccept={() => {
             illustration.accept();

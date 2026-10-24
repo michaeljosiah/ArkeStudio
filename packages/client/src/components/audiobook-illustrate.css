@@ -42,6 +42,9 @@
 .fy-ills__meta { display: none; font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-ills__hd .ui-btn { flex: none; height: auto; min-height: 0; padding: 0 2px; font: var(--type-label); color: var(--muted-foreground); background: transparent; }
 .fy-ills__hd .ui-btn:hover:not(:disabled) { color: var(--foreground); background: transparent; }
+/* Why the story wants a picture there, in one word, and the beat it falls in (design turn 237d). */
+.fy-ills__why { margin: -4px 0 0; display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-ills__reason { display: inline-block; padding: 0 6px; border: 1px solid var(--border); border-radius: 5px; color: var(--foreground); }
 .fy-ills__wh { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; font-size: var(--text-xs); color: var(--muted-foreground); }
 .fy-ills__who { display: inline-flex; align-items: center; gap: 6px; }
 .fy-ills__note { font: 400 var(--text-2xs) var(--font-mono); color: var(--muted-foreground); }

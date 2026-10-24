@@ -1798,6 +1798,17 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.ok(document.body.querySelector('[data-testid="look-sheet"]'), "Looks from the Voices panel");
   });
 
+  it("says where the story changes, both shapes and the pictures already there, and each card's reason (design turn 237d)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    await openArke(m);
+    const story: IllustrationProposal = { ...PROPOSAL, standing: 15, rows: [row("p0.0", { title: "The bell", at: 0, reason: "place", tallMicroUsd: 45_000 }), row("p3.0", { title: "The tide", at: 150, reason: "arrives", tallMicroUsd: 45_000 })] };
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: story }));
+    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "2 pictures · where the story changes · 2 to make, Wide and Tall · 15 already there");
+    assert.deepEqual(all(m, '[data-testid="illustration-why"]').map((why) => why.textContent), ["place", "arrives"]);
+    assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.17", "priced for the Wide and the Tall of each");
+  });
+
   it("opens the proposal as the active modal above the dock: its pace, what needs a look, the dashed chips on the blocks, one Accept", async () => {
     const m = await proposedMount();
     assert.deepEqual(all(m, '[data-testid="illustration-chip"]').map((chip) => chip.textContent), ["The bell", "The line", "The tide"], "a dashed chip on each block it would go on");
@@ -1806,7 +1817,7 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(sheet.closest("dialog")?.hasAttribute("open"), true, "the proposal owns a native modal above the chapter and dock");
     assert.equal(sheet.closest(".fy-arke"), null);
     assert.equal(q(m, ".fy-ills__head h3")!.textContent, "Illustrate · Chapter 2");
-    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 2 to make · 1 needs a reference");
+    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · where the story changes · 2 to make · 1 needs a reference");
     assert.deepEqual(all(m, '[data-testid="illustration-row"]').map((r) => [r.dataset.block, r.dataset.state]), [["p0.0", "ready"], ["p1.0", "held"], ["p3.0", "ready"]]);
     const first = all(m, '[data-testid="illustration-row"]')[0]!;
     assert.match(first.textContent!, /~0:00/, "times are estimated until the chapter is read");
@@ -1852,7 +1863,7 @@ describe("Illustrate this chapter (turn 191)", () => {
     await act(async () => (all(m, '[data-testid="illustration-skip"]')[0] as HTMLButtonElement).click());
     assert.deepEqual(all(m, '[data-testid="illustration-chip"]').map((chip) => chip.textContent), ["The line", "The tide"]);
     assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.04");
-    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 1 to make · 1 skipped · 1 needs a reference");
+    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · where the story changes · 1 to make · 1 skipped · 1 needs a reference");
     assert.equal(all(m, '[data-testid="illustration-row"]')[0]!.dataset.state, "skipped");
     assert.equal(all(m, '[data-testid="illustration-skip"]')[0]!.textContent, "Put back");
     await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
@@ -2019,11 +2030,11 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(tide.dataset.state, "refused", "not an ordinary proposed picture");
     assert.ok(tide.className.includes("fy-ills__card--held"));
     assert.equal(tide.querySelector('[data-testid="illustration-row-reason"]')?.textContent, "refused by the image safety check");
-    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 1 to make · 1 needs a reference · 1 refused");
+    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · where the story changes · 1 to make · 1 needs a reference · 1 refused");
     assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.04", "the total is what will be made");
     await act(async () => (tide.querySelector('[data-testid="illustration-retry"]') as HTMLButtonElement).click());
     assert.equal(q(m, '[data-testid="illustration-row"][data-block="p3.0"]')!.dataset.state, "ready", "Try again puts it back in the run");
-    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 2 to make · 1 needs a reference");
+    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · where the story changes · 2 to make · 1 needs a reference");
     assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.08");
     await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
     const sent = sentOf(m, "accept-illustration")[0]!;
