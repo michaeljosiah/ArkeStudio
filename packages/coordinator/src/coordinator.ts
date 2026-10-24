@@ -1827,7 +1827,7 @@ export class Coordinator {
             progress.failed.push({ block: row.block, reason: "a picture stands here now" });
             continue;
           }
-          const fresh = refreshIllustrationRow(store, room, model, row);
+          const fresh = refreshIllustrationRow(store, room, model, row, proposal.rows.map((other) => other.block));
           if (model.id !== proposal.model.id || model.provider !== proposal.model.provider || illustrationReferencesChanged(row, fresh)) {
             progress.failed.push({ block: row.block, reason: "references or price changed · refresh references before accepting" });
             continue;

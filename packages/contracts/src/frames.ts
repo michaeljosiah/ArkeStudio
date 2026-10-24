@@ -20,7 +20,7 @@ import { AudiobookScopeSchema } from "./audiobook-listening.js";
 import { AudiobookVideoOptionsSchema } from "./audiobook-video.js";
 import { AudiobookMotionQuoteSchema } from "./audiobook-motion-quote.js";
 import { LOOK_LINE_MAX, LookTargetSchema, PictureOwnLooksSchema } from "./audiobook-look.js";
-import { PICTURE_PROMPT_MAX, PictureShotSchema, PictureReuseSchema } from "./audiobook-illustrate.js";
+import { ILLUSTRATION_ROWS_MAX, PICTURE_PROMPT_MAX, PictureShotSchema, PictureReuseSchema } from "./audiobook-illustrate.js";
 import { BedInputSchema, BlockSoundInputSchema, BlockTimingInputSchema, ReactionInputSchema } from "./audiobook-timing.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { AudioArrangementEditSchema } from "./audio-arrangement-schema.js";
@@ -3770,8 +3770,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       chapterFile: z.string().min(1),
       proposalId: z.string().min(1).max(64),
-      blocks: z.array(z.string().min(1).max(40)).max(60),
-      without: z.array(z.string().min(1).max(40)).max(60).optional(),
+      blocks: z.array(z.string().min(1).max(40)).max(ILLUSTRATION_ROWS_MAX),
+      without: z.array(z.string().min(1).max(40)).max(ILLUSTRATION_ROWS_MAX).optional(),
       confirmedMicroUsd: z.number().int().min(0),
     })
     .strict(),

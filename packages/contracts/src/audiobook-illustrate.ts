@@ -261,6 +261,12 @@ export function referenceBriefLine(cited: ReadonlyArray<{ name: string; kind: "c
 export const PICTURE_CAP_SEC = 20;
 /** Illustrate keeps its own proposals this far apart (R-207), so each outlasts its one-second crossfade; the author's are never held to it. */
 export const PICTURE_PROPOSAL_GAP_SEC = 5;
+/**
+ * The most rows one proposal carries, and so one accept and its progress: twenty minutes at the cap.
+ * The cap is held to it (codex on PR 2178): a longer chapter's proposal was dropped as a malformed
+ * frame, and the review never came. Illustrate again counts what was made and proposes the rest.
+ */
+export const ILLUSTRATION_ROWS_MAX = 60;
 
 /** Why the story wants a picture there (design turn 237, R-206): what we would see that changes. */
 export const PICTURE_REASONS = ["place", "arrives", "leaves", "action", "object", "time", "feeling"] as const;
@@ -288,7 +294,7 @@ export function pictureStarts(blocks: ReadonlyArray<{ text: string; seconds: num
  * at most, counting those already there — the author's are never moved and never crowded.
  */
 export function pictureCap(totalSeconds: number, existing: number): number {
-  return Math.max(0, Math.max(1, Math.round(totalSeconds / PICTURE_CAP_SEC)) - existing);
+  return Math.min(ILLUSTRATION_ROWS_MAX, Math.max(0, Math.max(1, Math.round(totalSeconds / PICTURE_CAP_SEC)) - existing));
 }
 
 /**
@@ -386,10 +392,10 @@ export const IllustrationProposalSchema = z
     proposalId: z.string().min(1).max(64),
     /** The prose the proposal was made for: written onto only while the chapter still says it. */
     hash: z.string().min(1),
-    rows: z.array(IllustrationRowSchema).max(60),
+    rows: z.array(IllustrationRowSchema).max(ILLUSTRATION_ROWS_MAX),
     coverage: ChapterReferenceCoverageSchema.optional(),
     refreshed: z.literal(true).optional(),
-    refreshedBlocks: z.array(z.string().min(1).max(40)).max(60).optional(),
+    refreshedBlocks: z.array(z.string().min(1).max(40)).max(ILLUSTRATION_ROWS_MAX).optional(),
     model: PictureModelSchema,
     aspect: z.string().min(1).optional(),
     /** The chapter's length on the proposal's clock, in seconds, and whether any block's time is estimated. */
@@ -459,9 +465,9 @@ export const IllustrationProgressSchema = z
     state: z.enum(["making", "done", "stopped"]),
     /** Pictures asked for, made so far, and spent against the confirmed total. */
     total: z.number().int().min(0),
-    made: z.array(z.string().min(1).max(40)).max(60),
+    made: z.array(z.string().min(1).max(40)).max(ILLUSTRATION_ROWS_MAX),
     /** A picture that was not made and why: held, and offered again. */
-    failed: z.array(z.object({ block: z.string().min(1).max(40), reason: z.string().min(1) }).strict()).max(60),
+    failed: z.array(z.object({ block: z.string().min(1).max(40), reason: z.string().min(1) }).strict()).max(ILLUSTRATION_ROWS_MAX),
     current: z.string().min(1).max(40).optional(),
     spentMicroUsd: z.number().int().min(0),
     confirmedMicroUsd: z.number().int().min(0),

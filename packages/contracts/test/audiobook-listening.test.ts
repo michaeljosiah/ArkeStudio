@@ -10,6 +10,7 @@ import {
   bookPlace,
   listeningChapter,
   pictureSpans,
+  pictureWords,
   placePictures,
   retimePictureMarks,
   sentenceHashes,
@@ -285,5 +286,14 @@ describe("picture marks (turn 237)", () => {
     const guessed = pictureSpans([{ key: "p0.0", text: GOAT, seconds: 40 }], pictures).spans[0]!;
     assert.equal(guessed.startEstimated, true);
     assert.equal(sentenceHashes(GOAT)[2], audiobookTextHash(widened!));
+  });
+
+  it("ends a picture's words at the next picture, standing or proposed beside it (codex on PR 2178)", () => {
+    const blocks = [{ key: "p0.0", text: GOAT }];
+    const ending = Object.fromEntries([mark(around!, "c.png")]);
+    assert.equal(pictureWords(blocks, ending, "p0.0")?.text, sentencesOf(GOAT).slice(0, 3).join(" "), "to the mark that stands");
+    const proposed = pictureMarkKey("p0.0", audiobookTextHash(widened!));
+    assert.equal(pictureWords(blocks, {}, "p0.0", [proposed])?.text, sentencesOf(GOAT).slice(0, 2).join(" "), "to the row proposed with it");
+    assert.equal(pictureWords(blocks, {}, proposed, ["p0.0", proposed])?.text, sentencesOf(GOAT).slice(2).join(" "), "an earlier row and itself end nothing");
   });
 });
