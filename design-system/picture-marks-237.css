@@ -1,0 +1,135 @@
+/* Turn 237 · Picture marks. The block list is the client's chapter audiobook view (fidelity.css
+   .fy-ab__*), the picture card 235's, the proposal 193's Illustrate sheet (audiobook-illustrate.css),
+   copied here under .ap237 so the turn's review page stands alone; additions follow. Type through the
+   tokens only (turn 139). */
+.ap237{position:relative;overflow:hidden;background:var(--background);color:var(--foreground);font:var(--type-body)}
+.ap237 .grow{flex:1}
+.ap237-dim{position:absolute;inset:0;background:color-mix(in srgb,var(--background) 60%,transparent);z-index:2}
+.ap237-mono{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+
+/* The chapter's bar, as built: the view's tabs, then the presses. */
+.ap237-bar{display:flex;align-items:center;gap:10px;height:56px;padding:0 24px;border-bottom:1px solid var(--border);box-sizing:border-box}
+.ap237-tabs{display:inline-flex;border:1px solid var(--border);border-radius:9px;overflow:hidden}
+.ap237-tabs span{height:32px;padding:0 13px;display:inline-flex;align-items:center;font:var(--type-label);color:var(--muted-foreground)}
+.ap237-tabs span.on{background:var(--secondary);color:var(--foreground);font-weight:600}
+.ap237-press{height:32px;padding:0 11px;border:1px solid var(--border);border-radius:8px;display:inline-flex;align-items:center;gap:6px;font:var(--type-label);white-space:nowrap;box-sizing:border-box}
+.ap237-press i{font-style:normal;color:var(--muted-foreground)}
+.ap237-press svg{width:12px;height:12px;color:var(--muted-foreground)}
+.ap237-press.plain{border-color:transparent;padding:0 4px}
+.ap237-press.pri{background:var(--foreground);color:var(--background);border-color:transparent;font-weight:600}
+
+/* The blocks (client .fy-ab__block): a margin for who speaks, the words, then the row's end. */
+.ap237-blocks{padding:10px 24px 0;display:flex;flex-direction:column}
+.ap237-block{--ab-measure:780px;position:relative;margin:2px 0;padding:7px 0 7px 12px;border-bottom:1px solid var(--border);box-sizing:border-box}
+.ap237-block::before{content:"";position:absolute;left:0;top:7px;bottom:7px;width:3px;border-radius:2px;background:var(--border)}
+.ap237-block.sel{background:color-mix(in srgb,var(--secondary) 70%,transparent);border-radius:10px}
+.ap237-block.sel::before{background:var(--foreground)}
+.ap237-row{display:grid;grid-template-columns:120px minmax(0,var(--ab-measure)) minmax(16px,1fr) auto;column-gap:14px;align-items:start;padding:5px 0}
+.ap237-row + .ap237-row{border-top:1px solid color-mix(in srgb,var(--border) 70%,transparent)}
+.ap237-beat{display:flex;align-items:baseline;gap:8px;padding:1px 0 4px 134px;font:var(--type-label);color:var(--muted-foreground);white-space:nowrap}
+.ap237-beat b{font-weight:600;font-size:var(--text-sm);color:var(--foreground)}
+.ap237-beat em{font-style:normal;color:var(--foreground)}
+.ap237-who{display:inline-flex;align-items:center;gap:7px;padding-top:3px;font:var(--type-label);color:var(--muted-foreground);white-space:nowrap}
+.ap237-who i{width:7px;height:7px;border-radius:50%;background:var(--neutral-400);flex:none}
+.ap237-who.tunde i{background:var(--voice-1)}
+.ap237-who.ade i{background:var(--voice-2)}
+.ap237-text{margin:0;font:400 var(--text-base)/1.6 var(--font-sans)}
+.ap237-text .plate{display:inline-block;padding:0 5px;margin:0 2px;border:1px solid var(--border);border-radius:5px;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);line-height:1.6}
+.ap237-ends{grid-column:4;display:flex;flex-direction:column;align-items:flex-end;gap:6px;padding-top:1px}
+
+/* The picture chip (client .fy-ab__picchip), now on the row where its mark is, with its start. A
+   proposed mark (191b's dashed chip) keeps its title. */
+.ap237-chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 8px 0 3px;border:1px solid var(--border);border-radius:7px;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);background:var(--background);white-space:nowrap;box-sizing:border-box}
+.ap237-chip img{width:34px;height:20px;object-fit:cover;border-radius:4px;display:block}
+.ap237-chip.prop{border-style:dashed;border-color:var(--neutral-400)}
+.ap237-chip.prop i{width:28px;height:18px;border-radius:4px;border:1px dashed var(--neutral-400);display:inline-block;box-sizing:border-box}
+.ap237-chip b{font-weight:500;color:var(--foreground)}
+.ap237-chip.on{border-color:var(--foreground);box-shadow:0 0 0 1px var(--foreground)}
+
+/* Additions. The mark in the words: a short bar before the first word the picture shows from,
+   solid when made, dotted when proposed; the words it covers are not tinted. */
+.ap237-pin{display:inline-block;width:3px;height:1.05em;margin:0 5px 0 1px;vertical-align:-2px;border-radius:2px;background:var(--foreground)}
+.ap237-pin.prop{background:transparent;border:1px dashed var(--muted-foreground);box-sizing:border-box;width:4px}
+.ap237-pin.on{box-shadow:0 0 0 2px color-mix(in srgb,var(--foreground) 25%,transparent)}
+/* Hovering a sentence's start offers a picture there, drawn like 198's seam presses. */
+.ap237-place{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;margin:0 5px 0 0;vertical-align:1px;border:1px dashed var(--foreground);border-radius:6px;font:var(--type-mono);font-size:var(--text-2xs);color:var(--foreground);background:var(--background);line-height:1}
+.ap237-hl{background:color-mix(in srgb,var(--secondary) 90%,transparent);border-radius:4px;box-shadow:0 0 0 2px color-mix(in srgb,var(--secondary) 90%,transparent)}
+
+/* The side panel (194's Picture tab), 520 wide at the right. */
+.ap237-split{position:absolute;inset:56px 520px 0 0;overflow:hidden}
+.ap237-panel{position:absolute;top:56px;right:0;bottom:0;width:520px;box-sizing:border-box;border-left:1px solid var(--border);background:var(--background);padding:16px 20px;display:flex;flex-direction:column;gap:14px}
+.ap237-ph{display:flex;flex-direction:column;gap:2px}
+.ap237-ph b{font:var(--type-ui);font-weight:600;font-size:var(--text-md)}
+.ap237-ph span{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap237-ptabs{display:flex;gap:20px;border-bottom:1px solid var(--border)}
+.ap237-ptabs span{padding:0 0 10px;font-size:var(--text-sm);color:var(--muted-foreground)}
+.ap237-ptabs span.on{color:var(--foreground);font-weight:500;box-shadow:inset 0 -2px 0 var(--foreground)}
+.ap237-card{display:flex;flex-direction:column;gap:13px}
+.ap237-top{display:flex;gap:14px;align-items:flex-start}
+.ap237-shapes{display:flex;gap:8px;flex:none}
+.ap237-shapes figure{margin:0;display:flex;flex-direction:column;gap:4px}
+.ap237-shapes figcaption{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap237-slot{display:flex;box-sizing:border-box;height:102px;border-radius:9px;border:1px dashed var(--neutral-400);align-items:flex-start;justify-content:center;padding-top:6px;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap237-slot.wide{width:182px}
+.ap237-slot.tall{width:58px}
+.ap237-facts{display:flex;flex-direction:column;gap:10px;min-width:0;flex:1}
+.ap237-fact{display:flex;flex-direction:column;gap:2px}
+.ap237-fact span{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap237-fact b{font-weight:400;font-size:var(--text-sm)}
+.ap237-sec{display:flex;flex-direction:column;gap:7px}
+.ap237-h{font:var(--type-label);color:var(--muted-foreground)}
+.ap237-cast{display:flex;gap:8px}
+.ap237-person{flex:1;display:flex;align-items:center;gap:10px;min-height:56px;padding:0 10px 0 6px;box-sizing:border-box;border:1px solid var(--border);border-radius:10px;font-size:var(--text-sm)}
+.ap237-person img{width:28px;height:44px;box-sizing:border-box;border-radius:5px;object-fit:cover;object-position:top;border:1px solid var(--border)}
+.ap237-person div{display:flex;flex-direction:column}
+.ap237-person b{font-weight:600}
+.ap237-person div span{font-size:var(--text-xs);color:var(--muted-foreground)}
+.ap237-prompt{margin:0;font-size:var(--text-sm);display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.ap237-foot{display:flex;align-items:center;gap:8px}
+.ap237-btn{height:32px;padding:0 13px;border:1px solid var(--border);border-radius:8px;display:inline-flex;align-items:center;gap:7px;font:var(--type-label);background:var(--background);color:var(--foreground);white-space:nowrap;box-sizing:border-box}
+.ap237-btn.pri{background:var(--foreground);color:var(--background);border-color:transparent;font-weight:600}
+.ap237-btn.ghost{border-color:transparent}
+
+/* The Pictures sheet (235a), with Pace added. */
+.ap237-page{position:absolute;inset:0;padding:30px 44px;display:flex;flex-direction:column;gap:14px;opacity:.6}
+.ap237-page i{display:block;height:12px;border-radius:6px;background:var(--secondary)}
+.ap237-sheet{position:absolute;z-index:3;left:50%;transform:translateX(-50%);border:1px solid var(--border);border-radius:16px;background:var(--popover,var(--background));box-shadow:var(--shadow-lg,0 18px 50px color-mix(in srgb,var(--foreground) 16%,transparent));padding:20px 22px;display:flex;flex-direction:column;gap:12px;box-sizing:border-box}
+.ap237-sheet h3{margin:0;font:var(--type-ui);font-weight:600;font-size:var(--text-md)}
+.ap237-sheet .sub{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);margin-top:-8px}
+.ap237-opts{border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.ap237-opt{display:flex;align-items:center;gap:14px;min-height:44px;padding:6px 14px;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.ap237-opt:first-child{border-top:0}
+.ap237-opt .k{width:96px;flex:none;font-weight:500;color:var(--muted-foreground)}
+.ap237-opt i,.ap237-opt em{font-style:normal;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);white-space:nowrap}
+.ap237-opt em{width:72px;text-align:right;color:var(--foreground)}
+.ap237-opt.new{background:color-mix(in srgb,var(--secondary) 55%,transparent)}
+.ap237-chk{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;width:96px;flex:none}
+.ap237-chk b{font-weight:600}
+.ap237-box{width:15px;height:15px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;flex:none;background:var(--foreground);color:var(--background)}
+.ap237-box svg{width:11px;height:11px}
+.ap237-ratio{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap237-seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.ap237-seg span{height:28px;padding:0 12px;display:inline-flex;align-items:center;font:var(--type-label);border-left:1px solid var(--border)}
+.ap237-seg span:first-child{border-left:0}
+.ap237-seg span.on{background:var(--foreground);color:var(--background);font-weight:600}
+
+/* Illustrate's proposal (193's sheet): a grid of cards, four across. */
+.ap237-ills{position:absolute;z-index:3;inset:20px 24px;border:1px solid var(--border);border-radius:16px;background:var(--background);box-shadow:var(--shadow-lg,0 18px 50px color-mix(in srgb,var(--foreground) 16%,transparent));padding:20px 26px;display:flex;flex-direction:column;gap:16px;box-sizing:border-box}
+.ap237-ills header{display:flex;align-items:center;gap:12px}
+.ap237-ills h3{margin:0;font:var(--type-ui);font-weight:600;font-size:var(--text-md);white-space:nowrap}
+.ap237-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 16px}
+.ap237-ic{display:flex;flex-direction:column;gap:9px;min-width:0}
+.ap237-th{position:relative;aspect-ratio:16/9;box-sizing:border-box;padding:8px 10px;display:flex;align-items:flex-end;overflow:hidden;border:1px dashed var(--neutral-400);border-radius:10px}
+.ap237-th .tm{position:absolute;right:8px;top:8px}
+.ap237-th .fr{position:absolute;left:8px;top:8px;padding:1px 6px;border-radius:6px;border:1px solid var(--border);background:var(--background);font:var(--type-mono);font-size:var(--text-2xs)}
+.ap237-th p{margin:0;font-size:var(--text-xs);line-height:1.5;color:var(--muted-foreground);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.ap237-th.moved{border-style:solid;border-color:var(--border);padding:0}
+.ap237-th.moved img{width:100%;height:100%;object-fit:cover;display:block}
+.ap237-ihd{display:flex;align-items:baseline;gap:8px;font-size:var(--text-sm)}
+.ap237-ihd b{font-weight:600;flex:1;min-width:0}
+.ap237-ihd span{font:var(--type-label);color:var(--muted-foreground)}
+.ap237-iwh{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;font-size:var(--text-xs);color:var(--muted-foreground)}
+.ap237-iwh span{display:inline-flex;align-items:center;gap:6px}
+.ap237-iwh img{width:22px;height:30px;box-sizing:border-box;border-radius:6px;border:1px solid var(--border);object-fit:cover;object-position:top}
+.ap237-in{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap237-ifoot{margin-top:auto;display:flex;align-items:center;gap:8px;padding-top:14px;border-top:1px solid var(--border)}
