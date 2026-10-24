@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { guideCounts, guideDocument, type GuideDocument, type GuideRecord, type ListeningChapter } from "@arke-studio/contracts";
-import { chapterVoiceLines, guideProductions, packGuide, setGuideEntry } from "../../src/productions/world-guide.js";
+import { DEFAULT_NARRATOR, guideCounts, guideDocument, pictureMarkKey, sentenceHashes, type GuideDocument, type GuideRecord, type ListeningChapter } from "@arke-studio/contracts";
+import { planAudiobook } from "../../src/productions/audiobook.js";
+import { setAudiobookPicture } from "../../src/productions/audiobook-listening.js";
+import { chapterVoiceLines, guideMoments, guideProductions, packGuide, setGuideEntry } from "../../src/productions/world-guide.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
 import { WorldStore } from "../../src/world/store.js";
 import { sha256 } from "../../src/world/text-files.js";
@@ -146,6 +148,29 @@ describe("a world's Guide record (SPEC-059 R-8)", () => {
     assert.deepEqual(lines.map((line) => [line.block, line.sentence, line.file, line.start, line.seconds]), [["b1", 0, "artifacts/b1.wav", 0, 2], ["b1", 1, "artifacts/b1.wav", 2, 4]]);
     // A chapter arranged in Audio Studio sits on another clock, so none of its lines is offered.
     assert.deepEqual(chapterVoiceLines({ ...chapter, audioStudio: { revision: 1, issues: [], omissions: [] }, mix: { file: "cache/mix.m4a", seconds: 30 } }, takes, "maren-kest", production), []);
+  });
+
+  it("finds a picture teaser by its own key: a mark beside its block's own, and a bare block key as its first (R-27)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      const production = "the-ledger-of-nights";
+      const plan = await planAudiobook(store, production, "neap", { narrator: DEFAULT_NARRATOR });
+      const text = plan.blocks.find((row) => row.block.key === "p1.0")!.block.text;
+      const mark = pictureMarkKey("p1.0", sentenceHashes(text)[1]!);
+      await setAudiobookPicture(store, production, "neap", "p1.0", { file: "world-art.png", source: "world" });
+      await setAudiobookPicture(store, production, "neap", mark, { file: "references/maren-kest/head-front.png", source: "cast" });
+      const moment = (block: string) => ({ kind: "picture" as const, production, chapter: "neap", block });
+      const both = await guideMoments(store, [moment("p1.0"), moment(mark)]);
+      assert.deepEqual([...both.made.values()].map((made) => made.picture), ["world-art.png", "references/maren-kest/head-front.png"]);
+      // A choice made before marks named themselves kept its block's key: with the block's own
+      // picture gone, that names the mark, as it did when the mark went by its block's key.
+      await setAudiobookPicture(store, production, "neap", "p1.0", null);
+      const bare = await guideMoments(store, [moment("p1.0")]);
+      assert.deepEqual([...bare.made.values()].map((made) => made.picture), ["references/maren-kest/head-front.png"]);
+    } finally {
+      await store.close();
+    }
   });
 
   it("numbers each production's chapters as the Studio calls them", async () => {

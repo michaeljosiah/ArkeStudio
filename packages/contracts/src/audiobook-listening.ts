@@ -74,6 +74,12 @@ export const ListeningPictureSchema = z
      * spoken. The Studio's own; the package writes the time alone.
      */
     word: z.number().int().min(0).optional(),
+    /**
+     * A mark's own picture key (design turn 237, R-202), `block@sentence` as its block names it now:
+     * `key` is its block's, which a block's own picture shares, so only this tells the two apart.
+     * Absent for a picture at its block's first word, and in a plan made before marks were named.
+     */
+    markKey: z.string().min(1).optional(),
     /** Where its subject stands (design turn 197): the video's vertical crop and Slow push follow it. */
     focus: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).strict().optional(),
     motion: AudiobookMotionSchema.optional(),
@@ -85,6 +91,19 @@ export const ListeningPictureSchema = z
   })
   .strict();
 export type ListeningPicture = z.infer<typeof ListeningPictureSchema>;
+
+/** A picture's own key in the plan (design turn 237, R-202): a mark's `block@sentence`, else its block's. */
+export const listeningPictureKey = (picture: Pick<ListeningPicture, "key" | "markKey">): string => picture.markKey ?? picture.key;
+
+/**
+ * The picture a key names in a chapter as it plays: the one whose own key it is. A bare block key
+ * no picture owns names the block's first picture, so a choice stored before marks carried their
+ * own key — a Guide teaser (SPEC-059 R-27) kept its block's — still finds its moment. A mark's key
+ * that no picture owns names nothing: its sentence is gone, and another picture is not it.
+ */
+export function listeningPictureNamed<T extends Pick<ListeningPicture, "key" | "markKey">>(pictures: readonly T[], key: string): T | undefined {
+  return pictures.find((picture) => listeningPictureKey(picture) === key) ?? (pictureKeyParts(key).sentence === undefined ? pictures.find((picture) => picture.key === key) : undefined);
+}
 
 export const ListeningChapterSchema = z
   .object({
@@ -518,7 +537,7 @@ export function listeningChapter(input: {
     file: entry.picture.file,
     at: entry.at,
     seconds: entry.seconds,
-    ...(entry.sentence > 0 ? { word: starting(entry).word } : {}),
+    ...(entry.sentence > 0 ? { word: starting(entry).word, markKey: placedKey(input.blocks, entry) } : {}),
     ...(entry.picture.focus !== undefined ? { focus: entry.picture.focus } : {}),
     ...(entry.picture.motion?.active === true ? { motion: entry.picture.motion } : {}),
     // A Tall whose file is gone is left out, as a picture's own is (placePictures): the phone then

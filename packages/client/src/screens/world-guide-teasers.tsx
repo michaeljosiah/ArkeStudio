@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   guideChapterOf,
   guideLiving,
+  listeningPictureKey,
+  listeningPictureNamed,
   MAX_GUIDE_TEASERS,
   MAX_TEASER_CLIP_MS,
   sameGuideTeaser,
@@ -9,6 +11,7 @@ import {
   type GuideProductionChapters,
   type GuideRecord,
   type GuideRecordEntry,
+  type GuideRecordMoment,
   type GuideRecordTeaser,
   type ListeningChapter,
   type Sheet,
@@ -41,12 +44,16 @@ interface Card {
   mark?: string;
 }
 
-/** A moment a picture or clip teaser can be: a block's picture in a chapter. */
+/** A moment a picture or clip teaser can be: a picture in a chapter, a block's own or a mark's. */
 interface Moment {
   production: string;
   chapter: string;
   title: string;
   number: number;
+  /** Its block's key in the plan, which a block's own picture and its marks share. */
+  key: string;
+  markKey?: string;
+  /** What a choice stores (design turn 237, R-202): the picture's own key, a block's or a mark's `block@sentence`. */
   block: string;
   file: string;
   /** How long its clip would be: its hold, at most 30 seconds (R-25). */
@@ -62,7 +69,18 @@ function momentsOf(plan: AudiobookListening, productions: readonly GuideProducti
   return plan.chapters.flatMap((chapter) => {
     const number = numbered?.chapters.find((candidate) => candidate.id === chapter.chapterId)?.number ?? chapter.order;
     const title = chapter.title.trim() === "" ? `Chapter ${number}` : chapter.title.trim();
-    return chapter.pictures.map((picture) => ({ production: plan.productionId, chapter: chapter.chapterId, title, number, block: picture.key, file: picture.file, seconds: Math.min(MAX_TEASER_CLIP_MS / 1000, picture.seconds), whole: readWhole(chapter) }));
+    return chapter.pictures.map((picture) => ({
+      production: plan.productionId,
+      chapter: chapter.chapterId,
+      title,
+      number,
+      key: picture.key,
+      ...(picture.markKey !== undefined ? { markKey: picture.markKey } : {}),
+      block: listeningPictureKey(picture),
+      file: picture.file,
+      seconds: Math.min(MAX_TEASER_CLIP_MS / 1000, picture.seconds),
+      whole: readWhole(chapter),
+    }));
   });
 }
 
@@ -132,8 +150,13 @@ export function GuideTeasers({ world, worldId, record, productions }: { world: W
     const mark = sheet === undefined || sheet.retired === true ? "Not in the world" : sheetMark(record[kind][teaser.sheet], productions);
     return { picture: { kind: "sheet", path, label: sheet?.name ?? teaser.sheet }, name: sheet?.name ?? teaser.sheet, what: kind === "characters" ? "Character" : "Place", clip: false, ...(mark !== undefined ? { mark } : {}) };
   };
-  const momentCard = (teaser: Extract<GuideRecordTeaser, { block: string }>): Card => {
-    const moment = moments.find((candidate) => candidate.production === teaser.production && candidate.chapter === teaser.chapter && candidate.block === teaser.block);
+  // A choice finds its moment as the package does: by the picture's own key, a bare block key from
+  // before marks named themselves by its block's first picture.
+  const momentOf = (teaser: GuideRecordMoment) => listeningPictureNamed(moments.filter((candidate) => candidate.production === teaser.production && candidate.chapter === teaser.chapter), teaser.block);
+  // A choice is taken by any teaser that finds the same moment, however it was stored.
+  const sameTeaser = (a: GuideRecordTeaser, b: GuideRecordTeaser) => sameGuideTeaser(a, b) || (a.kind === b.kind && "block" in a && "block" in b && momentOf(a) !== undefined && momentOf(a) === momentOf(b));
+  const momentCard = (teaser: GuideRecordMoment): Card => {
+    const moment = momentOf(teaser);
     const clip = teaser.kind === "clip";
     if (moment === undefined) return { picture: null, name: plans.has(teaser.production) ? "Moment removed" : "…", what: clip ? "Clip" : "Picture", clip, ...(plans.has(teaser.production) ? { mark: "Moment removed" } : {}) };
     const mark = clip && !moment.whole ? "Not read whole" : undefined;
@@ -192,6 +215,7 @@ export function GuideTeasers({ world, worldId, record, productions }: { world: W
           moments={moments}
           loading={storyIds.some((id) => !plans.has(id))}
           cardOf={cardOf}
+          sameTeaser={sameTeaser}
           onAdd={(teaser) => {
             save([...teasers, teaser]);
             setPicking(false);
@@ -225,6 +249,7 @@ function TeaserPicker({
   moments,
   loading,
   cardOf,
+  sameTeaser,
   onAdd,
   onClose,
 }: {
@@ -233,6 +258,7 @@ function TeaserPicker({
   moments: readonly Moment[];
   loading: boolean;
   cardOf: (teaser: GuideRecordTeaser) => Card;
+  sameTeaser: (a: GuideRecordTeaser, b: GuideRecordTeaser) => boolean;
   onAdd: (teaser: GuideRecordTeaser) => void;
   onClose: () => void;
 }) {
@@ -268,7 +294,7 @@ function TeaserPicker({
         <div className="fy-guide-pick__grid" data-testid="guide-teaser-options">
           {options.length === 0 && <span className="fy-guide-muted">{loading && (tab === "pictures" || tab === "clips") ? "…" : "None"}</span>}
           {options.map((option) => {
-            const at = teasers.findIndex((teaser) => sameGuideTeaser(teaser, option));
+            const at = teasers.findIndex((teaser) => sameTeaser(teaser, option));
             const card = cardOf(option);
             // Already a teaser, or not one it can be: said in one clause, never offered and refused (R-25).
             const clause = at !== -1 ? `Teaser ${at + 1}` : card.mark;
