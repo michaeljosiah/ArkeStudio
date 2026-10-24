@@ -275,6 +275,15 @@ upload.**
    and `gh release upload arke-player-worlds apps/arke_player/assets/worlds/catalogue.json --clobber
    --repo michaeljosiah/ArkeStudio`. Installed phones show `Update` within a day.
 
+**New chapters as a part** (SPEC-058 R-43 – R-56, turn 236): the same four steps with `--part
+<chapter ids, comma separated>` (and `--day`/`--next` for the author's schedule) in place of a whole
+export. A part follows the newest edition in the copy's `exports/`, so copy the published edition's
+ZIP and its `.zip.json` record — and any parts already after it — into the copy first. It makes
+`exports/<slug>-part-<UTC date>.zip`; upload it under that name, pin it as a part with ArkePlayer's
+`pin_world` (its docs say how), add the pin to the world's `parts`, raise the `serial`, and publish
+the list. Installed phones fetch a part on their own over Wi-Fi; a new whole edition gathers the
+parts and empties the entry's `parts`.
+
 ## Pull requests
 
 Branch, push, raise the PR, then comment `@codex review` on it. Fix every P1 and re-request until a

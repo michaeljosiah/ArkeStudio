@@ -1,4 +1,4 @@
-import type { ArkePlayerPictureSize, SetGuideEntry } from "@arke-studio/contracts";
+import type { ArkePlayerPartRequest, ArkePlayerPictureSize, SetGuideEntry, SetGuideTeasers } from "@arke-studio/contracts";
 import type { StoryPublishAction } from "@arke-studio/contracts";
 import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
 import type { AudiobookReader, PictureShot, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
@@ -5135,6 +5135,11 @@ export function setGuideEntry(worldId: string, change: SetGuideEntry): void {
   send({ kind: "set-guide-entry", worldId, change });
 }
 
+/** The Guide's teasers, replaced whole in the author's order (SPEC-059 R-24, R-27). */
+export function setGuideTeasers(worldId: string, change: SetGuideTeasers): void {
+  send({ kind: "set-guide-teasers", worldId, change });
+}
+
 /** A character's lines to choose a voice line from (R-6): answered as `guide.voice-lines` under the id returned. */
 export function listGuideVoiceLines(worldId: string, character: string): string | null {
   const requestId = ulid();
@@ -6530,7 +6535,7 @@ export function exportAudiobookPlayer(worldId: string, productionId: string, exp
 }
 
 /** The world package for Arke Player (design turn 233): answered as `arke-player.exported` for the export id given. */
-export function exportArkePlayer(worldId: string, productionId: string, exportId: string, options: { book: boolean; motion: boolean; size?: ArkePlayerPictureSize }): string | null {
+export function exportArkePlayer(worldId: string, productionId: string, exportId: string, options: { book: boolean; motion: boolean; size?: ArkePlayerPictureSize; part?: ArkePlayerPartRequest }): string | null {
   const requestId = ulid();
   return send({ kind: "export-arke-player", worldId, productionId, requestId, exportId, options }) ? requestId : null;
 }

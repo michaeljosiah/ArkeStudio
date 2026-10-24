@@ -29,6 +29,7 @@ import { EyeOff, PauseSolid, PlaySolid, Smartphone, X } from "../components/icon
 import { mediaUrl } from "../lib/media.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import { listGuideVoiceLines, setGuideEntry, subscribeGuideVoiceLines } from "../lib/store.js";
+import { GuideTeasers } from "./world-guide-teasers.js";
 
 /**
  * A world's Guide (design turn 234, SPEC-059 R-1 – R-8): what Arke Player may show of the world,
@@ -119,12 +120,16 @@ export function GuideScreen() {
         <div>
           <h1 className="fy-guide-title">Guide</h1>
           <div className="fy-guide-meta" data-testid="guide-counts">
-            {counts.characters.public} of {counts.characters.of} characters · {counts.places.public} of {counts.places.of} places · {counts.lore.public} of {counts.lore.of} lore
+            {counts.teasers.chosen} of {counts.teasers.of} teasers · {counts.characters.public} of {counts.characters.of} characters · {counts.places.public} of {counts.places.of} places · {counts.lore.public} of {counts.lore.of} lore
             {counts.after > 0 ? ` · ${counts.after} after a chapter` : ""}
           </div>
         </div>
         <span className="fy-guide-grow" />
         <Button onClick={() => setPreviewing(true)} data-testid="guide-preview"><Smartphone /> Preview</Button>
+      </div>
+      {/* Teasers first on the page (236a): what anyone sees of the world before installing it. */}
+      <div className="fy-guide-tzwrap">
+        <GuideTeasers world={world} worldId={worldId} record={record} productions={productions} />
       </div>
       <div className="fy-guide-cols">
         <div>

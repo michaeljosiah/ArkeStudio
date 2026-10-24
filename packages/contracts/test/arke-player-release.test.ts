@@ -56,6 +56,6 @@ describe("the chapters a part may hold (R-44)", () => {
   });
 
   it("says how far a chapter read in part has got", () => {
-    assert.deepEqual(chapterBlocksRead({ blocks: new Array(6).fill(null) as never, gaps: [{ at: 0, from: 7, to: 31 }] }), { read: 6, of: 31 });
+    assert.deepEqual(chapterBlocksRead({ blocks: Array.from({ length: 6 }) as never, gaps: [{ at: 0, from: 7, to: 31 }] }), { read: 6, of: 31 });
   });
 });

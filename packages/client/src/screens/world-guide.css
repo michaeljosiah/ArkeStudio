@@ -125,3 +125,36 @@
   .fy-guide-line{flex-direction:column;align-items:stretch;gap:6px}
   .fy-guide-line>b{width:auto;padding-top:0}
 }
+
+/* Teasers (design turn 236a - 236c): up to six cards first on the page, every card one shape,
+   16:9 and 168 wide whatever it holds, and the picker that adds one, four to a row. */
+.fy-guide-tzwrap{padding:18px 0 0}
+.fy-guide-tzwrap .fy-guide-group{margin-bottom:0}
+.fy-guide-tzs{display:flex;flex-wrap:wrap;gap:12px;padding:14px}
+.fy-guide-tz{position:relative;width:168px;flex:none;display:flex;flex-direction:column;gap:6px;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left}
+.fy-guide-tz .im{position:relative;display:flex;align-items:center;justify-content:center;gap:6px;width:100%;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:var(--secondary);border:1px solid var(--border)}
+.fy-guide-tz .im>img,.fy-guide-tz .im>*:first-child:not(.play):not(.n){position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.fy-guide-tz .play{position:absolute;inset:0;margin:auto;width:34px;height:34px;border-radius:99px;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--media-overlay-bg) 55%,transparent);color:var(--media-overlay-fg)}
+.fy-guide-tz .n{position:absolute;left:6px;top:6px;min-width:20px;height:20px;padding:0 6px;border-radius:99px;display:inline-flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--media-overlay-bg) 62%,transparent);color:var(--media-overlay-fg);font:var(--type-label);font-size:var(--text-2xs)}
+.fy-guide-tz>b{font-weight:500;font-size:var(--text-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fy-guide-tz>.m{font:var(--type-meta);color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:-4px}
+.fy-guide-tz.no .im{opacity:.45}
+.fy-guide-tz.no>b{color:var(--muted-foreground)}
+.fy-guide-tz.drag{opacity:.5}
+.fy-guide-tz[draggable="true"]{cursor:grab}
+.fy-guide-tz__x{position:absolute;right:4px;top:4px;opacity:0}
+.fy-guide-tz:hover .fy-guide-tz__x,.fy-guide-tz:focus-within .fy-guide-tz__x{opacity:1}
+.fy-guide-tz--add{cursor:pointer}
+.fy-guide-tz--add .im{border:1px dashed var(--border);background:transparent;color:var(--muted-foreground);font:var(--type-label)}
+.fy-guide-tz--add:hover .im{color:var(--foreground);border-color:var(--foreground)}
+.fy-guide-pick{width:min(760px,calc(100vw - 32px));max-height:calc(100vh - 80px);display:flex;flex-direction:column;gap:14px;padding:20px 22px;border:1px solid var(--border);border-radius:16px;background:var(--popover);box-shadow:var(--shadow-lg)}
+.fy-guide-pick h3{margin:0;font:var(--type-ui);font-weight:650;font-size:var(--text-lg)}
+.fy-guide-pick>.fy-guide-mono{margin-top:-10px}
+.fy-guide-pick__tabs{display:flex;gap:18px;border-bottom:1px solid var(--border)}
+.fy-guide-pick__tabs button{height:32px;padding:0;border:0;border-bottom:2px solid transparent;background:none;color:var(--muted-foreground);font:var(--type-ui);cursor:pointer}
+.fy-guide-pick__tabs button.on{color:var(--foreground);border-bottom-color:var(--foreground);font-weight:600}
+.fy-guide-pick__grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;overflow:auto;min-height:120px}
+.fy-guide-pick__grid .fy-guide-tz{width:auto;cursor:pointer}
+.fy-guide-pick__grid .fy-guide-tz:disabled{cursor:default}
+.fy-guide-pick__grid .fy-guide-tz.on .im{outline:2px solid var(--foreground);outline-offset:1px}
+.fy-guide-pick__foot{display:flex;align-items:center;gap:8px}

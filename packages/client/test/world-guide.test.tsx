@@ -76,7 +76,7 @@ describe("a world's Guide (design turn 234)", () => {
     const pills = [...container.querySelectorAll(".fy-pillnav__item")].map((pill) => pill.textContent);
     assert.equal(pills.at(-1), "Guide");
     assert.equal(pills.at(-2), "Productions");
-    assert.equal(container.querySelector("[data-testid=guide-counts]")?.textContent, "0 of 1 characters · 0 of 2 places · 0 of 1 lore");
+    assert.equal(container.querySelector("[data-testid=guide-counts]")?.textContent, "0 of 6 teasers · 0 of 1 characters · 0 of 2 places · 0 of 1 lore");
   });
 
   it("gives an open thread no switch (R-3)", async () => {
@@ -109,7 +109,7 @@ describe("a world's Guide (design turn 234)", () => {
       lore: {},
     };
     const { container } = await mount(state);
-    assert.equal(container.querySelector("[data-testid=guide-counts]")?.textContent, "1 of 1 characters · 1 of 2 places · 0 of 1 lore · 1 after a chapter");
+    assert.equal(container.querySelector("[data-testid=guide-counts]")?.textContent, "0 of 6 teasers · 1 of 1 characters · 1 of 2 places · 0 of 1 lore · 1 after a chapter");
     assert.match(container.querySelector("[data-testid=guide-row-the-vigil] .fy-guide-col--shows")?.textContent ?? "", /After Chapter 6/);
     await click(container.querySelector("[data-testid=guide-row-maren-kest] .fy-guide-row__open"));
     const panel = container.querySelector("[data-testid=guide-entry]");
@@ -124,5 +124,47 @@ describe("a world's Guide (design turn 234)", () => {
     const { container } = await mount(withChapters());
     await click(container.querySelector("[data-testid=guide-preview]"));
     assert.match(container.querySelector("[data-testid=guide-preview-sheet]")?.textContent ?? "", /Nothing public/);
+  });
+});
+
+describe("a world's teasers (design turn 236a - 236c, SPEC-059 R-24 - R-27)", () => {
+  it("adds a character public from the start, and never offers one that waits for a chapter", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = withChapters();
+    state.world!.guide = {
+      schemaVersion: 1,
+      characters: { "maren-kest": { public: true } },
+      locations: { "the-vigil": { public: true, after: { production: "saltlight", chapter: "chapter-6" } } },
+      factions: {},
+      lore: {},
+    };
+    const { container } = await mount(state);
+    // Teasers come first, six places to fill (236a).
+    assert.equal(container.querySelectorAll(".fy-guide-tz--add").length, 6);
+    await click(container.querySelector("[data-testid=guide-teaser-add]"));
+    const options = () => [...container.querySelectorAll("[data-testid=guide-teaser-options] .fy-guide-tz")];
+    const named = (name: string) => options().find((el) => el.querySelector("b")?.textContent === name) ?? null;
+    const tab = (label: string) => [...container.querySelectorAll(".fy-guide-pick__tabs button")].find((button) => button.textContent === label) ?? null;
+    // A place that waits for a chapter is dimmed and says so in one clause, never offered (236c).
+    await click(tab("Places"));
+    assert.equal(named("The Vigil")?.hasAttribute("disabled"), true);
+    assert.equal(named("The Vigil")?.querySelector(".m")?.textContent, "After Chapter 6");
+    await click(tab("Characters"));
+    assert.equal(named("Maren Kest")?.hasAttribute("disabled"), false);
+    await click(named("Maren Kest"));
+    await click(container.querySelector("[data-testid=guide-teaser-confirm]"));
+    assert.deepEqual(sent.filter((message) => message.kind === "set-guide-teasers").at(-1), { kind: "set-guide-teasers", worldId: FIXTURE_WORLD_ID, change: { teasers: [{ kind: "character", sheet: "maren-kest" }] } });
+    assert.equal(container.querySelector("[data-testid=guide-teaser-1] b")?.textContent, "Maren Kest");
+    assert.equal(container.querySelectorAll(".fy-guide-tz--add").length, 5);
+  });
+
+  it("marks a teaser that no longer qualifies, and keeps it (R-27)", async () => {
+    const state = withChapters();
+    state.world!.guide = { schemaVersion: 1, characters: { "maren-kest": { public: false } }, locations: {}, factions: {}, lore: {}, teasers: [{ kind: "character", sheet: "maren-kest" }] };
+    const { container } = await mount(state);
+    assert.equal(container.querySelector("[data-testid=guide-teaser-1] .m")?.textContent, "Not public");
+    assert.ok(container.querySelector("[data-testid=guide-teaser-1]")?.classList.contains("no"));
+    assert.equal(container.querySelector("[data-testid=guide-counts]")?.textContent?.startsWith("1 of 6 teasers"), true);
   });
 });

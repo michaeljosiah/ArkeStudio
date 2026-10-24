@@ -162,6 +162,52 @@ describe("Export → Arke Player (turn 233)", () => {
     assert.equal(q('[data-testid="arke-player-start"]')?.hasAttribute("disabled"), false, "Make package again once they are cleared");
   });
 
+  it("releases the chapters read whole since the last release as a part, with the author's schedule (turn 236d, 236e)", async () => {
+    const plan: AudiobookListening = {
+      ...PLAN,
+      chapters: [
+        PLAN.chapters[0]!,
+        { ...PLAN.chapters[0]!, chapterId: "neap", order: 2, title: "Neap" },
+        { ...PLAN.chapters[0]!, chapterId: "weir", order: 3, title: "The Weir" },
+        { chapterId: "empty", order: 4, title: "Empty", state: "part", seconds: 4, blocks: [block("t4", 0)], gaps: [{ at: 4, from: 2, to: 6 }], pictures: [], opening: null },
+      ],
+    };
+    const edition = { kind: "arke-player" as const, productionId: "inkbound", title: "The Undersong", dir: "exports/the-undersong-player-2026-10-22.zip", file: "exports/the-undersong-player-2026-10-22.zip", exportedAt: "2026-10-22T09:00:00.000Z", bytes: 360 * 1024 ** 2, sha256: SHA, holds: "1 chapter · 1 picture · the book", release: { edition: "2026-10-22", fingerprint: "a".repeat(64), chapters: [{ id: "slack-water", order: 1, title: "Slack water" }] } };
+    const part = { ...edition, dir: "exports/the-undersong-part-2026-10-30.zip", file: "exports/the-undersong-part-2026-10-30.zip", exportedAt: "2026-10-30T09:00:00.000Z", bytes: 24 * 1024 ** 2, holds: "1 chapter · 1 picture", release: { edition: "2026-10-30", fingerprint: "b".repeat(64), chapters: [{ id: "neap", order: 2, title: "Neap" }], part: { follows: "2026-10-22", fingerprint: "a".repeat(64), number: 1, schedule: { day: "friday" as const } } } };
+    const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
+    const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} />);
+    const ask = lastAsk(m, "open-audiobook-listening")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...plan, scope: { kind: "book" } } }));
+    const answerLists = async (packages: Array<typeof edition>) => {
+      for (const asked of m.sent.filter((message) => message.kind === "list-web-packages")) await act(async () => __applyEventForTest({ at: AT, type: "web-packages.listed", requestId: (asked as { requestId: string }).requestId, worldId: FIXTURE_WORLD_ID, packages }));
+    };
+    await answerLists([part, edition]);
+    await press(q('[data-testid="audiobook-export-arke-player"]'));
+    // Since names the newest release, its day and its last chapter (R-43).
+    assert.match(row("Release"), /Whole world.*New chapters.*since 30 Oct 2026 · Chapter 2/);
+    await press([...q('[data-testid="arke-player-release"]')!.querySelectorAll("button")].find((button) => text(button) === "New chapters")!);
+    // After the last release: chapter 3 read whole and ticked; chapter 4 says how far it is read (R-44).
+    const chapters = text(q('[data-testid="arke-player-chapters"]'));
+    assert.match(chapters, /3 · The Weir.*read whole · 1 min · 1 picture.*4 · Empty.*read 1 of 6 blocks/);
+    assert.equal((q('[data-testid="arke-player-chapters"] label.no input') as HTMLInputElement | null)?.disabled, true);
+    // The newest part's schedule carries on (R-48).
+    assert.equal((q('[data-testid="arke-player-day"]') as HTMLSelectElement | null)?.value, "friday");
+    // Its own pictures, its opening's among them, and its chapter of the book; no guide (R-45).
+    assert.match(text(q('[data-testid="arke-player-estimate"]')), /1 chapter · 2 pictures · the book$/);
+    assert.equal(text(q('[data-testid="arke-player-start"]')), "Make part");
+    await press(q('[data-testid="arke-player-start"]'));
+    const asked = lastAsk(m, "export-arke-player")!;
+    assert.deepEqual(asked.options, { book: true, motion: true, size: "full", part: { chapters: ["weir"], schedule: { day: "friday" } } });
+
+    // Made (236e): the part, and the releases in order, the new one marked.
+    await act(async () => __applyEventForTest({ at: AT, type: "arke-player.exported", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", exportId: asked.exportId, result: { ok: true, file: "exports/the-undersong-part-2026-11-06.zip", bytes: 24 * 1024 ** 2, sha256: SHA, edition: "2026-11-06", chapters: 1, pictures: 1, book: true, part: 2 } }));
+    const made = { ...part, dir: "exports/the-undersong-part-2026-11-06.zip", file: "exports/the-undersong-part-2026-11-06.zip", exportedAt: "2026-11-06T09:00:00.000Z", release: { ...part.release, edition: "2026-11-06", chapters: [{ id: "weir", order: 3, title: "The Weir" }], part: { ...part.release.part, number: 2 } } };
+    await answerLists([made, part, edition]);
+    assert.match(text(q('[data-testid="arke-player-done"]')), /^1 part · 24 MB/);
+    const releases = [...dom.document.querySelectorAll('[data-testid="arke-player-releases"] .fy-abv-rel')].map((el) => [text(el.querySelector(".d")), text(el.querySelector(".k")), el.classList.contains("now")]);
+    assert.deepEqual(releases, [["22 Oct 2026", "Edition", false], ["30 Oct 2026", "Part", false], ["6 Nov 2026", "Part", true]]);
+  });
+
   it("lists the package in Publications with its size and Copy SHA-256 (233e)", async () => {
     const m = await mount(<WebPackages worldId={FIXTURE_WORLD_ID} />);
     const ask = lastAsk(m, "list-web-packages")!;

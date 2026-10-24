@@ -498,7 +498,8 @@ export function WebPackages({ worldId }: { worldId: string }) {
       {packages.map((entry) => (
         <div key={entry.dir} className="fy-publication-job" data-testid="web-package">
           <strong>{entry.title}</strong>
-          <span className="fy-mono">{[KIND[entry.kind], entry.exportedAt.slice(0, 10), entry.holds, entry.bytes !== undefined ? megabytes(entry.bytes) : undefined].filter(Boolean).join(" · ")}</span>
+          {/* A part says which, after the edition it follows (236e): `Arke Player part 2`. */}
+          <span className="fy-mono">{[entry.release?.part !== undefined ? `${KIND[entry.kind]} part ${entry.release.part.number}` : KIND[entry.kind], entry.exportedAt.slice(0, 10), entry.holds, entry.bytes !== undefined ? megabytes(entry.bytes) : undefined].filter(Boolean).join(" · ")}</span>
           <div className="fy-publication-actions">
             {entry.sha256 !== undefined && (
               <Button variant="ghost" onClick={() => void navigator.clipboard?.writeText(entry.sha256!)}>
