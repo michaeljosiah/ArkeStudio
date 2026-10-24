@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ComfyUiSettings, DomainEvent, Job, LedgerEntry, RecipeReadiness, RuntimeProbes } from "@arke-studio/contracts";
+import type { ComfyUiSettings, DomainEvent, Job, LedgerEntry, RuntimeProbes } from "@arke-studio/contracts";
 import { comfyUiRecoveryDecision } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { until } from "../wait.js";
@@ -327,7 +327,6 @@ const FACTS: ComfyUiRecipeFacts[] = [
     capability: "image",
     version: 1,
     minVramMb: 6000,
-    minFreeVramMb: 6000,
     recommendedVramMb: 8000,
     checkpoints: [
       {
@@ -706,14 +705,7 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     });
     world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
     world.hashes.set("C:/models/checkpoints/sd_xl_base_1.0.safetensors", "a".repeat(64));
-    let freeReads = 0;
-    const service = new ComfyUiEngineService({
-      ...engineDeps(world, "C:/app"),
-      freeVramMb: async () => {
-        freeReads += 1;
-        return 360;
-      },
-    });
+    const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));
     await service.applySettings({
       enginePath: null,
       engineUrl: "http://10.0.0.4:8188",
@@ -723,7 +715,6 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     assert.equal(recipe.state, "unknown");
     assert.match(recipe.reason ?? "", /Remote engine VRAM could not be measured/);
     assert.doesNotMatch(recipe.reason ?? "", /This machine has/);
-    assert.equal(freeReads, 0, "neither local GPU reading is applied to a remote engine");
   });
 
   it("a user path with the portable layout is spawned and supervised with metadata disabled", async () => {
@@ -743,64 +734,6 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     assert.equal(spec.env?.["OPENAI_API_KEY"], undefined);
     assert.equal(service.engineStatus().state, "ready");
     assert.equal(service.baseUrl(), "http://127.0.0.1:51999");
-  });
-
-  it("publishes when a supervised engine's reclaimable reservation changes", async () => {
-    const world = fakeWorld();
-    world.files.add("C:/AI/ComfyUI/python_embeded/python.exe");
-    world.files.add("C:/AI/ComfyUI/ComfyUI/main.py");
-    world.files.add("C:/AI/ComfyUI/ComfyUI/models/checkpoints/sd_xl_base_1.0.safetensors");
-    world.hashes.set(
-      "C:/AI/ComfyUI/ComfyUI/models/checkpoints/sd_xl_base_1.0.safetensors",
-      "a".repeat(64),
-    );
-    let holdFreeReading = false;
-    let announceFreeReading!: () => void;
-    const freeReadingStarted = new Promise<void>((resolve) => {
-      announceFreeReading = resolve;
-    });
-    let releaseFreeReading!: () => void;
-    const freeReadingHeld = new Promise<void>((resolve) => {
-      releaseFreeReading = resolve;
-    });
-    const service = new ComfyUiEngineService({
-      ...engineDeps(world, "C:/app"),
-      freeVramMb: async () => {
-        if (holdFreeReading) {
-          announceFreeReading();
-          await freeReadingHeld;
-        }
-        return 360;
-      },
-    });
-    await service.applySettings({ enginePath: "C:/AI/ComfyUI", engineUrl: null, modelsDir: null });
-    const validateHealth = world.spawned[0]!.validateHealth!;
-    let publications = 0;
-    service.subscribe(() => {
-      publications += 1;
-    });
-
-    await validateHealth(new Response(JSON.stringify({
-      system: { comfyui_version: "0.33.1" },
-      devices: [{ type: "cuda", vram_total: 10240 * 1024 * 1024, torch_vram_total: 8002 * 1024 * 1024 }],
-    })));
-    assert.equal((await service.status(PROBES)).recipes[0]!.state, "ready");
-
-    holdFreeReading = true;
-    const statusDuringChange = service.status(PROBES);
-    await freeReadingStarted;
-    await validateHealth(new Response(JSON.stringify({
-      system: { comfyui_version: "0.33.1" },
-      devices: [{ type: "cuda", vram_total: 10240 * 1024 * 1024, torch_vram_total: 0 }],
-    })));
-    holdFreeReading = false;
-    releaseFreeReading();
-    assert.equal(publications, 1, "healthy-to-healthy measurement changes are observable");
-    assert.equal(
-      (await statusDuringChange).recipes[0]!.state,
-      "disabled",
-      "an older in-flight snapshot cannot overwrite the changed reading",
-    );
   });
 
   it("changes process identity when a spawned child restarts at the same filesystem location", async () => {
@@ -1344,142 +1277,23 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
     );
   });
 
-  /**
-   * A card big enough and busy anyway (SPEC-022 §2.6).
-   *
-   * Checking only the total is what let a 10 GB machine read "ready" and then page to disk for
-   * half an hour. But raw free memory counts the engine's own resident model against us, and
-   * dispatch unloads that before giving up — so readiness measures that reclaim where the engine
-   * reports it, retaining the old allowance only as a compatibility fallback.
-   */
-  async function readiness(freeMb: number | null, devices?: unknown[]): Promise<string> {
-    const world = fakeWorld();
-    world.urls.set("http://127.0.0.1:8188", { devices });
-    world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
-    world.hashes.set("C:/models/checkpoints/sd_xl_base_1.0.safetensors", "a".repeat(64));
-    const service = new ComfyUiEngineService({
-      ...engineDeps(world, "C:/app"),
-      freeVramMb: async () => freeMb,
-    });
-    await service.applySettings({
-      enginePath: null,
-      engineUrl: "http://127.0.0.1:8188",
-      modelsDir: "C:/models",
-    });
-    const status = await service.status({ vramMb: 10240, memMb: 32000, diskFreeMb: 1000 });
-    return `${status.recipes[0]!.state}|${status.recipes[0]!.reason ?? ""}`;
-  }
-
-  it("uses the local engine's measured PyTorch reservation instead of understating its reclaim (#775)", async () => {
-    const warmEngine = [{
-      type: "cuda",
-      vram_total: 10240 * 1024 * 1024,
-      torch_vram_total: 8002 * 1024 * 1024,
-    }];
-    assert.equal((await readiness(360, warmEngine)).startsWith("ready|"), true);
-  });
-
-  it("keeps a measured zero authoritative when another program really owns the card (#775)", async () => {
-    const coldEngine = [{ type: "cuda", vram_total: 10240 * 1024 * 1024, torch_vram_total: 0 }];
-    const busy = await readiness(360, coldEngine);
-    assert.equal(busy.startsWith("disabled|"), true);
-    assert.match(busy, /Needs 6 GB free/);
-  });
-
-  it("reads only the primary CUDA device and falls back for malformed measurements", async () => {
-    const primaryCold = [
-      { type: "cuda", vram_total: 10240 * 1024 * 1024, torch_vram_total: 0 },
-      { type: "cuda", vram_total: 10240 * 1024 * 1024, torch_vram_total: 8002 * 1024 * 1024 },
-    ];
-    assert.equal((await readiness(360, primaryCold)).startsWith("disabled|"), true);
-    assert.equal(
-      (await readiness(2048, [{ type: "cuda", torch_vram_total: -1 }])).startsWith("ready|"),
-      true,
-      "a malformed field retains the compatibility allowance",
-    );
-    const unsafe = Number.MAX_SAFE_INTEGER + 1;
-    assert.equal(
-      (await readiness(0, [{ type: "cuda", vram_total: unsafe, torch_vram_total: unsafe }])).startsWith("disabled|"),
-      true,
-      "implausible counters cannot advertise unlimited reclaim",
-    );
-  });
-
-  it("converts the engine's byte count to whole MiB without rounding up", async () => {
-    const total = 10240 * 1024 * 1024;
-    const justUnderOneMiB = [{ type: "cuda", vram_total: total, torch_vram_total: 1024 * 1024 - 1 }];
-    const exactlyOneMiB = [{ type: "cuda", vram_total: total, torch_vram_total: 1024 * 1024 }];
-    assert.equal((await readiness(5999, justUnderOneMiB)).startsWith("disabled|"), true);
-    assert.equal((await readiness(5999, exactlyOneMiB)).startsWith("ready|"), true);
-  });
-
-  it("refuses only a card no amount of unloading could rescue", async () => {
-    // The 6 GB floor with a 4 GB reclaim allowance: under 2 GB free is hopeless, over it is not.
-    const hopeless = await readiness(1024);
-    assert.equal(hopeless.startsWith("disabled|"), true);
-    assert.match(hopeless, /Needs 6 GB free\. This machine has 1 GB free of 10 GB/);
-    assert.match(hopeless, /close other programs using the graphics card/);
-    // Not the too-small sentence: that card is fine, it is the machine that is busy.
-    assert.equal(/This machine has 10 GB\./.test(hopeless), false);
-  });
-
-  it("stays ready where unloading the engine would plausibly be enough", async () => {
-    // 2 GB free against a 6 GB floor used to disable. Dispatch would have unloaded a resident
-    // model and succeeded, so readiness no longer takes the feature away on a guess — it defers
-    // to the dispatch check, which frees first and refuses in a quarter of a second if it must.
-    assert.equal((await readiness(2048)).startsWith("ready|"), true);
-    assert.equal((await readiness(9000)).startsWith("ready|"), true);
-  });
-
-  it("takes one free-memory snapshot for every recipe in a status result", async () => {
-    const world = fakeWorld();
-    world.urls.set("http://127.0.0.1:8188", {});
-    world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
-    world.hashes.set("C:/models/checkpoints/sd_xl_base_1.0.safetensors", "a".repeat(64));
-    let freeReads = 0;
-    const second = {
-      ...FACTS[0]!,
-      id: "comfyui-second-image",
-      identity: { ...FACTS[0]!.identity, id: "comfyui-second-image" },
-    };
-    const service = new ComfyUiEngineService({
-      ...engineDeps(world, "C:/app", [FACTS[0]!, second]),
-      freeVramMb: async () => {
-        freeReads += 1;
-        return 2048;
-      },
-    });
-    await service.applySettings({ enginePath: null, engineUrl: "http://127.0.0.1:8188", modelsDir: "C:/models" });
-
-    const status = await service.status(PROBES);
-
-    assert.deepEqual(status.recipes.map((recipe) => recipe.state), ["ready", "ready"]);
-    assert.equal(freeReads, 1);
-  });
-
-  it("a streaming recipe's small free floor still has a sayable busy state", async () => {
-    // H3's shape: a 4 GB free floor sitting under the 4 GB reclaim allowance. Unbounded, the
-    // busy inequality could never hold for any nonnegative reading — a slammed card advertised
-    // ready, and Generate bought the dependency verification walk before dispatch refused. The
-    // allowance caps at half the floor, so under 2 GB free is busy and the verified ~4 GB is not.
-    const streaming = async (freeMb: number): Promise<string> => {
+  it("a card big enough is ready however much of it, or of the machine, is free right now", async () => {
+    // Free memory is the engine's to judge (2026-10-24): readiness used to disable a recipe as
+    // busy below its free floor, and refused Qwen Image 2.1 at 9.7 GB free on a machine the
+    // engine made the picture on. A warm engine and a cold one read the same.
+    for (const torch of [0, 8002 * 1024 * 1024]) {
       const world = fakeWorld();
-      world.urls.set("http://127.0.0.1:8188", {});
+      world.urls.set("http://127.0.0.1:8188", { devices: [{ type: "cuda", vram_total: 10240 * 1024 * 1024, torch_vram_total: torch }] });
       world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
       world.hashes.set("C:/models/checkpoints/sd_xl_base_1.0.safetensors", "a".repeat(64));
-      const service = new ComfyUiEngineService({
-        ...engineDeps(world, "C:/app"),
-        recipes: [{ ...FACTS[0]!, minVramMb: 10000, minFreeVramMb: 4000 }],
-        freeVramMb: async () => freeMb,
-      });
-      await service.applySettings({ enginePath: null, engineUrl: "http://127.0.0.1:8188", modelsDir: "C:/models" });
-      const status = await service.status({ vramMb: 10240, memMb: 32000, diskFreeMb: 1000 });
-      return `${status.recipes[0]!.state}|${status.recipes[0]!.reason ?? ""}`;
-    };
-    const slammed = await streaming(500);
-    assert.equal(slammed.startsWith("disabled|"), true);
-    assert.match(slammed, /Needs 4 GB free/);
-    assert.equal((await streaming(4100)).startsWith("ready|"), true);
+      const service = new ComfyUiEngineService({ ...engineDeps(world, "C:/app"), recipes: [{ ...FACTS[0]!, minMemMb: 30720 }] });
+      try {
+        await service.applySettings({ enginePath: null, engineUrl: "http://127.0.0.1:8188", modelsDir: "C:/models" });
+        const recipe = (await service.status({ vramMb: 10240, memMb: 32000, diskFreeMb: 1000 })).recipes[0]!;
+        assert.equal(recipe.state, "ready");
+        assert.equal(recipe.reason, undefined);
+      } finally { await service.dispose(); }
+    }
   });
 
   it("mapped CUDA weights cannot borrow another accelerator's VRAM", async () => {
@@ -1505,8 +1319,7 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
   it("a declared memory floor is a readiness rung, because mapped weights never meet the setup gate", async () => {
     // The manifest gate only steers setup: weights already sitting in a mapped models folder
     // reach dispatch admission through this walk alone, and the H3 workload that measured 32 GB
-    // would exhaust a 16 GB machine. Memory is not VRAM's problem — /free reclaims nothing —
-    // so there is no busy tier, just the floor and the same cloud alternative.
+    // would exhaust a 16 GB machine: the floor, and the same cloud alternative.
     const withMemFloor = async (memMb: number | null): Promise<string> => {
       const world = fakeWorld();
       world.urls.set("http://127.0.0.1:8188", {});
@@ -1515,7 +1328,6 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
       const service = new ComfyUiEngineService({
         ...engineDeps(world, "C:/app"),
         recipes: [{ ...FACTS[0]!, minMemMb: 30720 }],
-        freeVramMb: async () => 9000,
       });
       await service.applySettings({ enginePath: null, engineUrl: "http://127.0.0.1:8188", modelsDir: "C:/models" });
       const status = await service.status({ vramMb: 10240, memMb, diskFreeMb: 1000 });
@@ -1529,45 +1341,6 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
     const unmeasured = await withMemFloor(null);
     assert.equal(unmeasured.startsWith("unknown|"), true);
     assert.match(unmeasured, /Memory could not be measured/);
-  });
-
-  it("a declared free-memory floor is a busy rung beside the card's, advisory and optimistic (issue 846)", async () => {
-    // The total floor above admits a 32 GB machine with 3 GB of it free, and offloading spends
-    // free RAM. Same doctrine as vram-busy: a measured shortfall disables with the machine's own
-    // figures and the cloud alternative; unmeasured dispatches; a remote engine is never judged
-    // by this machine's memory.
-    const withFreeFloor = async (freeMemMb: number | null, engineUrl = "http://127.0.0.1:8188"): Promise<RecipeReadiness> => {
-      const world = fakeWorld();
-      world.urls.set(engineUrl, {});
-      world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
-      world.hashes.set("C:/models/checkpoints/sd_xl_base_1.0.safetensors", "a".repeat(64));
-      const service = new ComfyUiEngineService({
-        ...engineDeps(world, "C:/app"),
-        recipes: [{ ...FACTS[0]!, minMemMb: 30720, minFreeMemMb: 20000 }],
-        freeVramMb: async () => 9000,
-        freeMemMb: async () => freeMemMb,
-      });
-      await service.applySettings({ enginePath: null, engineUrl, modelsDir: "C:/models" });
-      return (await service.status({ vramMb: 10240, memMb: 32000, diskFreeMb: 1000 })).recipes[0]!;
-    };
-    const short = await withFreeFloor(3000);
-    assert.equal(short.state, "disabled");
-    assert.equal(short.reasonKind, "memory-busy");
-    assert.match(short.reason ?? "", /Needs 20 GB memory free\. This machine has 3 GB free of 31 GB — close other programs/);
-    assert.equal(short.cloudAlternative, "Cloud image still works.");
-    assert.equal((await withFreeFloor(24000)).state, "ready");
-    assert.equal((await withFreeFloor(null)).state, "ready", "unmeasured free memory dispatches (D15)");
-    // A remote engine never reaches this rung — the walk stops at the card it cannot measure —
-    // and this machine's 3 GB must not become the reason either way.
-    const remote = await withFreeFloor(3000, "http://10.0.0.7:8188");
-    assert.notEqual(remote.state, "disabled");
-    assert.notEqual(remote.reasonKind, "memory-busy");
-  });
-
-  it("a card that cannot be asked how much is free is not refused for it", async () => {
-    // D15 again: unknown stays unknown. A build with no way to ask must not disable local work
-    // on every machine, so a null free reading falls back to the total the probe did measure.
-    assert.equal((await readiness(null)).startsWith("ready|"), true);
   });
 
   it("missing weights: the count, not a generic unavailable", async () => {
@@ -2469,14 +2242,14 @@ describe("a local take carries local-zero and its recipe version (§2.9)", () =>
 });
 
 describe("engine version compatibility is per recipe (SPEC-021 R-18, R-19; issue 592)", () => {
-  const devices = [{ type: "cuda", vram_total: 10240 * 1024 * 1024, torch_vram_total: 0 }];
+  const devices = [{ type: "cuda", vram_total: 10240 * 1024 * 1024 }];
   const above: ComfyUiRecipeFacts = { ...FACTS[0]!, id: "needs-newer", displayName: "Needs newer", checkpoints: [], minEngineVersion: "0.40.0" };
   const within: ComfyUiRecipeFacts = { ...FACTS[0]!, id: "runs-here", displayName: "Runs here", checkpoints: [], exercisedThroughVersion: "0.30.0" };
 
   it("disables exactly the recipe above the engine, naming its own requirement, and states an untested pairing without refusing", async () => {
     const world = fakeWorld();
     world.urls.set("http://127.0.0.1:8188", { version: "0.33.1", devices });
-    const service = new ComfyUiEngineService({ ...engineDeps(world, "C:/app", [above, within]), freeVramMb: async () => 8000 });
+    const service = new ComfyUiEngineService({ ...engineDeps(world, "C:/app", [above, within]) });
     await service.applySettings({ enginePath: null, engineUrl: "http://127.0.0.1:8188", modelsDir: null });
     const { recipes } = await service.status(PROBES);
     const newer = recipes.find((r) => r.recipeId === "needs-newer")!;

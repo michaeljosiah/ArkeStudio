@@ -62,10 +62,6 @@ export interface ProviderClientDeps {
     preflight: ComfyUiPreflight;
     /** Opens the engine's progress socket (SPEC-021 D16); omitted, jobs simply report no figure. */
     openSocket?: (url: string) => ProgressSocket;
-    /** Free graphics memory right now, in MB, or null where the device cannot be asked. */
-      freeVramMb?: (model?: string) => Promise<number | null>;
-    /** Free system memory right now, in MB, or null where it cannot be asked (issue 846). */
-    freeMemMb?: () => Promise<number | null>;
     locality?: EngineLocality;
     adapterGuard?: (recipeId: string, selections: unknown) => Promise<void>;
   };
@@ -164,11 +160,7 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
                 deps.comfyui!.baseUrl,
                 deps.comfyui!.preflight,
                 deps.comfyui!.openSocket,
-                deps.comfyui!.freeVramMb,
-                deps.comfyui!.freeMemMb,
                 deps.comfyui!.locality,
-                undefined,
-                undefined,
                 deps.comfyui!.allBaseUrls,
                 deps.comfyui!.isEndpointGone,
                 deps.comfyui!.adapterGuard,

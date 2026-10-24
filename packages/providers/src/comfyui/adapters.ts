@@ -20,7 +20,9 @@ export function recipeWithAdapters(base: ComfyUiRecipe, input: unknown, catalogu
     // It is not measured pairing evidence and must never invent stricter or looser GPU floors.
     if (pairing.state === "owner-approved") continue;
     if (!pairing.hardware || !pairing.minEngineVersion || !pairing.exercisedThroughVersion) throw new Error("Adapter validation evidence is incomplete.");
-    for (const key of ["minVramMb", "minFreeVramMb", "minMemMb", "minFreeMemMb"] as const) {
+    // The pairing's free-memory figures stay in its validation record; only the size floors
+    // gate, because free memory is the engine's to judge at dispatch (2026-10-24).
+    for (const key of ["minVramMb", "minMemMb"] as const) {
       recipe.hardware[key] = Math.max(recipe.hardware[key] ?? 0, pairing.hardware[key]);
     }
     if (compareComfyUiVersions(pairing.minEngineVersion, recipe.engine.minVersion) === 1) recipe.engine.minVersion = pairing.minEngineVersion;

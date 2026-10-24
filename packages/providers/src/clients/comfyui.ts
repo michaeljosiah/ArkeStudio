@@ -28,7 +28,7 @@ import type {
   SubmitRequest,
   SubmitResult,
 } from "../types.js";
-import { ProviderBusyError, ProviderRequestRejectedError } from "../types.js";
+import { ProviderRequestRejectedError } from "../types.js";
 
 /** Where the engine is listening right now, or null when none is configured and healthy. */
 export type EngineBaseUrl = (model?: string) => string | null;
@@ -202,35 +202,14 @@ interface QueueEntryish {
  *
  * All-false declarations (D12): a spawned engine's queue dies with Arke and recovery requeues;
  * a surviving URL engine's ambiguous window is the user's honest decision, priced as GPU time.
- */
-/**
- * How long the card is given to empty after `/free`, and how often it is asked (SPEC-022 §2.6).
  *
- * The engine answers `/free` before it has done anything: the route sets two flags on its prompt
- * queue, and the worker thread unloads when it next wakes — after the response, and only once any
- * prompt it is executing has finished — with CUDA handing the memory back after that. A card
- * measured the instant the response lands is the card as it was, so the one re-measurement this
- * used to make was nearly always short, and #692's run refused alternate shots on a card each
- * success had left full for the next. Two seconds covers an idle engine putting a video model
- * down; a card still short after that has something else on it, and refusing is the honest answer.
- * The window is elapsed time with the probe's own duration counted, not a number of polls: the
- * desktop's probe is an nvidia-smi run with a five-second timeout, and eight slow readings would
- * have stretched two seconds into most of a minute with the job sitting in `submitting`.
+ * Free memory is ComfyUI's to judge, not Arke's (2026-10-24). This client used to measure the card
+ * and the machine before every dispatch and refuse below a recipe's free floor, and on the day it
+ * was removed it refused Qwen Image 2.1 at 9.7 GB free against a 9.8 GB floor — a picture the same
+ * graph, sent to the engine directly, made in 330 seconds. Windows' free figure moves by a
+ * gigabyte from minute to minute and the engine pages, offloads and streams weights on its own, so
+ * the job is sent and the engine's own answer, out of memory included, is the one reported.
  */
-const UNLOAD_POLL_MS = 250;
-const UNLOAD_WINDOW_MS = 2000;
-
-/**
- * How long the queue keeps re-checking a card or RAM that is still short after that window
- * (found in the installed app, 2026-10-01). The two seconds above cover an idle engine answering
- * `/free`; they do not cover an engine still putting down the last run's video model, or another
- * program giving back what it briefly held — both seen clearing over tens of seconds, after the
- * queue's ordinary four attempts had already spent theirs in about twelve. The wait happens on
- * the queued side, between dispatches, so the job is never held in `submitting` for it, and a
- * machine that is still short after two minutes is refused with the same words as before.
- */
-export const ROOM_PATIENCE_MS = 120_000;
-
 export class ComfyUiClient implements ProviderClient {
   readonly id = "comfyui" as const;
   readonly declarations: ClientDeclarations = {
@@ -249,41 +228,8 @@ export class ComfyUiClient implements ProviderClient {
      * optional because progress is the one thing a dispatch works perfectly well without.
      */
     private readonly openSocket?: (url: string) => ProgressSocket,
-    /**
-     * How much of the graphics card is free RIGHT NOW, in MB, or null where that cannot be asked
-     * (SPEC-022 §2.6).
-     *
-     * Deliberately not ComfyUI's own `/system_stats`: it reports what torch has allocated, so it
-     * answered "8.86 GB free" on a card with 6.77 GB actually free — it cannot see the browser or
-     * the game holding the other 3 GB. Asking the device is the only honest answer, and the
-     * device is the host's to ask.
-     */
-    private readonly freeVramMb?: (model?: string) => Promise<number | null>,
-    /**
-     * How much system memory is free RIGHT NOW, in MB, or null where that cannot be asked
-     * (issue 846). The resource offloading spends: a streaming video recipe bottoms out in RAM,
-     * not on the card, and the start-up probe only ever reads the machine's total.
-     */
-    private readonly freeMemMb?: () => Promise<number | null>,
-    /** The device probes belong to this computer and are invalid for a remote URL engine. */
+    /** A remote URL engine's memory is not this computer's to put down. */
     private readonly engineLocality: EngineLocality = () => "local",
-    /**
-     * How the card is waited on after `/free`, and what time it is — injected so the tests need
-     * no real clock. The wait ends early on the job's signal: a cancelled job must not hold the
-     * engine's slot for the rest of the window.
-     */
-    private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void> = (ms, signal) =>
-      new Promise((resolve) => {
-        const finish = (): void => {
-          clearTimeout(timer);
-          signal?.removeEventListener("abort", finish);
-          resolve();
-        };
-        const timer = setTimeout(finish, ms);
-        if (signal?.aborted) finish();
-        else signal?.addEventListener("abort", finish, { once: true });
-      }),
-    private readonly now: () => number = Date.now,
     private readonly allBaseUrls?: () => readonly string[],
     private readonly isEndpointGone?: (url: string) => boolean,
     private readonly adapterGuard?: (recipeId: string, selections: unknown) => Promise<void>,
@@ -743,91 +689,14 @@ export class ComfyUiClient implements ProviderClient {
   }
 
   /**
-   * Make room, or say plainly that there is none (SPEC-022 §2.6; issue 846 for system memory).
-   *
-   * The start-up probe reads the card's TOTAL size from the registry, so a machine passes the
-   * floor and then runs out anyway because something else already had the card. This is the same
-   * question asked at the moment it matters, of the device rather than of the engine.
-   *
-   * System memory is the same question asked of the other resource. Offloading spends RAM — H3's
-   * verified runs bottomed under a gigabyte free of 32 — and the start-up probe reads the
-   * machine's total there too, so a second program holding 2 GB, or an engine grown across a long
-   * session, sent a job into paging with readiness still saying ready. `/free` is the one reclaim
-   * on offer for both: the models the engine puts down leave RAM as well as the card, so a
-   * shortfall on either side asks once and re-measures whatever was short.
-   *
-   * When it is short, the engine is asked to put down whatever it is still holding — a video
-   * model from an earlier job, most likely — and the machine is measured again, for a couple of
-   * seconds: the engine says yes before it has put anything down (see UNLOAD_POLL_MS). Asking is
-   * worth doing only when short: `/free` throws away the model cache, so calling it before every
-   * dispatch would buy a cold start on every line.
-   *
-   * Still short is a busy machine, not a refused request: nothing about the job is wrong, and the
-   * same job goes through once the room is there. It is thrown as the transient it is, so the
-   * queue backs off and tries again while the engine finishes putting things down, and a user
-   * told to close other programs "then try again" has a Retry to press when it gives up (#692).
-   * It carries ROOM_PATIENCE_MS, because the queue's attempt bound is seconds and a release is
-   * not: the queue re-checks for that long before giving up, with nothing sent in between.
-   */
-  private async ensureRoom(base: string, recipe: ComfyUiRecipe, signal?: AbortSignal): Promise<void> {
-    if (this.engineLocality() === "remote") return;
-    // The FREE floors, not the size floors: a streaming recipe (H3) legitimately needs the whole
-    // card to exist and only a fraction of it free at dispatch. A recipe that measured no free-RAM
-    // floor is not asked about RAM at all.
-    type Room = { what: string; need: number; probe: () => Promise<number | null>; free: number | null };
-    const rooms: Room[] = [];
-    if (this.freeVramMb && recipe.hardware.minFreeVramMb > 0) {
-      rooms.push({ what: "graphics memory", need: recipe.hardware.minFreeVramMb, probe: () => this.freeVramMb!(recipe.id), free: null });
-    }
-    if (this.freeMemMb && (recipe.hardware.minFreeMemMb ?? 0) > 0) {
-      rooms.push({ what: "memory", need: recipe.hardware.minFreeMemMb!, probe: this.freeMemMb, free: null });
-    }
-    // Unknown stays unknown and dispatches (SPEC-021 D15): a resource this build cannot measure
-    // is not one this build may refuse on. Only what was short is asked again, so a wait on RAM
-    // does not spend the window running nvidia-smi for a card that already had room.
-    const measure = async (candidates: Room[]): Promise<Room[]> => {
-      for (const room of candidates) room.free = await room.probe().catch(() => null);
-      return candidates.filter((room) => room.free !== null && room.free < room.need);
-    };
-    let short = await measure(rooms);
-    if (short.length === 0) return;
-    await this.askToUnload(base);
-    // Asked again over a short window rather than once, because the engine has said yes before
-    // it has done anything. Unknown mid-window dispatches exactly as unknown at the start does:
-    // the probe failing is not the machine filling up.
-    const deadline = this.now() + UNLOAD_WINDOW_MS;
-    short = await measure(short);
-    while (short.length > 0) {
-      // The clock and the signal are read after the wait as well as before it: a probe launched
-      // at the deadline runs the window over by its own duration, and the engine's slot is held
-      // until submit returns, so a cancelled job left polling would block the next local job.
-      const remaining = deadline - this.now();
-      if (remaining <= 0) break;
-      await this.sleep(Math.min(UNLOAD_POLL_MS, remaining), signal);
-      signal?.throwIfAborted();
-      if (this.now() >= deadline) break;
-      short = await measure(short);
-    }
-    if (short.length === 0) return;
-    const gb = (mb: number): string => `${(mb / 1024).toFixed(1)} GB`;
-    const card = short.some((room) => room.what === "graphics memory");
-    throw new ProviderBusyError(
-      `comfyui: ${recipe.displayName} ` +
-        short.map((room) => `needs ${gb(room.need)} of free ${room.what} and this machine has ${gb(room.free!)} free`).join(", and ") +
-        `. The engine has already put down what it was holding — close other programs${card ? " using the graphics card" : ""}, then try again.`,
-      { patienceMs: ROOM_PATIENCE_MS },
-    );
-  }
-
-  /**
    * The local lane has drained: ask the engine to put down what the last job loaded (issue 846).
    *
    * A long ComfyUI session gets slower as it goes, because what a video job streamed through
    * system memory stays resident between runs and nothing asks for it back until the process
    * ends — the reclaim a community H3 rig makes its most-pressed button. Before every dispatch
-   * that would buy a cold start per line, which is why `ensureRoom` asks only when short; after
-   * the LAST job in a run it costs nothing extra, because the next job would reload after the
-   * idle gap anyway. The dispatcher decides when the lane is empty. This decides only whether
+   * that would buy a cold start per line; after the LAST job in a run it costs nothing extra,
+   * because the next job would reload after the idle gap anyway. The dispatcher decides when the
+   * lane is empty. This decides only whether
    * the job was the kind that spends memory (video), on an engine whose memory is this
    * machine's to reclaim — a remote engine's RAM is not ours to put down.
    */
@@ -977,11 +846,10 @@ export class ComfyUiClient implements ProviderClient {
       }
     }
     // The dispatcher serializes the ComfyUI lane. An idle sibling must relinquish cached
-    // weights before the selected recipe's independent process measures free memory.
+    // weights before the selected recipe's independent process loads its own.
     if (this.engineLocality() === "local") for (const other of this.allBaseUrls?.() ?? []) {
       if (ComfyUiClient.origin(other) !== base) await this.askToUnload(other);
     }
-    await this.ensureRoom(base, recipe, request.signal);
     // The file becomes a name the engine knows. Done after preflight so a job that was going to
     // be refused never puts a file on the engine, and before the graph is built because the
     // uploaded name IS the graph value.

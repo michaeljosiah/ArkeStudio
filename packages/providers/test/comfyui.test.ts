@@ -11,7 +11,7 @@ import {
   modelCapabilityCopy,
   referencePrompt,
 } from "@arke-studio/contracts";
-import { ComfyUiClient, COMFYUI_VERSION_FLOOR, meetsVersionFloor, ROOM_PATIENCE_MS, type ProgressSocket } from "../src/clients/comfyui.js";
+import { ComfyUiClient, COMFYUI_VERSION_FLOOR, meetsVersionFloor, type ProgressSocket } from "../src/clients/comfyui.js";
 import {
   callerParamNames,
   COMFYUI_MANIFEST_MODELS,
@@ -30,7 +30,7 @@ import { redactComfyUiBody, scrubPaths } from "../src/comfyui/redact.js";
 import { captureProviderClient } from "../src/capture.js";
 import { FalClient } from "../src/clients/fal.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
-import { ProviderBusyError, type FetchLike } from "../src/types.js";
+import type { FetchLike } from "../src/types.js";
 
 /**
  * SPEC-021 §3.2: recipes round-trip like any model, substitution cannot alter structure, the
@@ -295,12 +295,11 @@ describe("the recipe catalogue projects into the manifest like any other model",
     assert.equal(dispatchDuration(row, 20).kind, "over-cap");
   });
 
-  it("h3 states two vram floors, and the row carries every machine floor the run measured", () => {
+  it("h3 states its card floor, and the row carries every machine floor the run measured", () => {
     const h3 = comfyUiRecipeById("comfyui-h3-video")!;
-    // Card size and free-right-now are different questions: requiring the 10 GB card floor FREE
-    // would refuse the exact configuration the recipe was verified on (~4.1 GB free, streaming).
+    // The card's size only: how much of it is free at dispatch is the engine's to judge.
     assert.equal(h3.hardware.minVramMb, 10000);
-    assert.equal(h3.hardware.minFreeVramMb, 4000);
+    assert.equal("minFreeVramMb" in h3.hardware, false);
     assert.match(h3.hardware.floorSource, /measured through ComfyUI/);
     const row = COMFYUI_MANIFEST_MODELS.find((model) => model.id === h3.id)!;
     // System RAM was the resource the verified run nearly exhausted, so the floor lives on the
@@ -1501,13 +1500,12 @@ describe("progress from the engine's socket", () => {
 });
 
 /**
- * Room on the card, asked at the moment it matters (SPEC-022 §2.6).
- *
- * The start-up probe reads the card's TOTAL size, so a machine clears the floor and then runs out
- * because something else already had the card. These cover the question being asked again at
- * dispatch, the engine being told to put things down, and the refusal naming both figures.
+ * Free memory is the engine's to judge (2026-10-24). Arke used to measure the card and the machine
+ * before every dispatch and refuse below a recipe's free floor; it refused a Qwen picture at 9.7 GB
+ * free that the engine, sent the same graph, made without complaint. The job goes to the engine,
+ * and the engine's own answer is the one that counts.
  */
-describe("making room on the graphics card", () => {
+describe("free memory is the engine's to judge", () => {
   const VIDEO = {
     model: "comfyui-draft-video" as const,
     capability: "video" as const,
@@ -1518,147 +1516,13 @@ describe("making room on the graphics card", () => {
     { match: /\/upload\/image$/, status: 200, body: { name: "c.wav", subfolder: "" } },
     { match: /\/prompt$/, status: 200, body: { prompt_id: "p-1", node_errors: {} } },
   ];
-  // No real clock in here: the wait after `/free` is a quarter of a second a poll, and a test
-  // that sat through the window would be the stall the window exists to bound.
-  // The clock is the sum of the sleeps, so the window is measured rather than counted.
-  const client = (free: () => Promise<number | null>, fetch: FetchLike, onSleep: (ms: number) => void = () => {}) => {
-    let now = 0;
-    const sleep = async (ms: number): Promise<void> => { now += ms; onSleep(ms); };
-    return new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, free, undefined, undefined, sleep, () => now);
-  };
 
-  it("dispatches when the card cannot be measured", async () => {
-    // D15: unknown stays unknown and dispatches. A card this build cannot read is not a card it
-    // may refuse — that would disable local voice forever on any machine without nvidia-smi.
+  it("sends the job without measuring the machine or asking the engine to put anything down", async () => {
+    // `/free` throws away the loaded models, so asking before a dispatch would buy a cold start.
     const { fetch, calls } = engineFake(ROUTES);
-    await client(async () => null, fetch).submit("", VIDEO);
-    assert.equal(calls.some((c) => c.url.endsWith("/free")), false, "nothing to free when nothing is known");
-  });
-
-  it("does not apply this machine's free-memory probe to a remote engine", async () => {
-    const { fetch, calls } = engineFake(ROUTES);
-    await new ComfyUiClient(
-      fetch,
-      BASE,
-      OK_PREFLIGHT,
-      undefined,
-      async () => 1,
-      undefined,
-      () => "remote",
-    ).submit("", VIDEO);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", VIDEO);
     assert.equal(calls.some((c) => c.url.endsWith("/free")), false);
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true);
-  });
-
-  it("leaves the engine's model cache alone when there is already room", async () => {
-    // `/free` throws away the loaded models, so calling it before every dispatch buys a cold
-    // start on every line. It is worth doing only when the card is actually short.
-    const { fetch, calls } = engineFake(ROUTES);
-    await client(async () => 12_000, fetch).submit("", VIDEO);
-    assert.equal(calls.some((c) => c.url.endsWith("/free")), false);
-  });
-
-  it("asks the engine to put things down when the card is short, then goes ahead", async () => {
-    const { fetch, calls } = engineFake(ROUTES);
-    let asked = 0;
-    await client(async () => (++asked === 1 ? 3000 : 9000), fetch).submit("", VIDEO);
-    assert.equal(calls.some((c) => c.url.endsWith("/free") && c.method === "POST"), true);
-    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true, "it should proceed once there is room");
-  });
-
-  it("names both figures when there is still not enough, and does not dispatch", async () => {
-    // The whole point: say so before the wait, not after half an hour of paging to disk.
-    const { fetch, calls } = engineFake(ROUTES);
-    await assert.rejects(
-      client(async () => 3072, fetch).submit("", VIDEO),
-      (err: Error) => {
-        assert.match(err.message, /needs 7\.8 GB of free graphics memory/);
-        assert.match(err.message, /this machine has 3\.0 GB free/);
-        assert.match(err.message, /close other programs/);
-        // "then try again" has to be true (#692): a full card is a busy engine, not a refused
-        // request, so the queue must read it as transient — backed off, retried, and offered a
-        // live Retry when it gives up — never as the witnessed rejection that ends an attempt.
-        assert.ok(err instanceof ProviderBusyError, "a busy card declares its own class");
-        assert.equal(err.failureClass, "transient");
-        assert.equal("submissionRejected" in err, false);
-        // The queue's attempt bound is seconds; an engine putting the last run's models down,
-        // or another program giving back RAM, takes tens of them (2026-10-01). The refusal says
-        // how long to keep re-checking, and it is measured in minutes, not attempts.
-        assert.equal(err.patienceMs, ROOM_PATIENCE_MS);
-        assert.ok(ROOM_PATIENCE_MS >= 60_000 && ROOM_PATIENCE_MS <= 300_000, "tens of seconds to a few minutes");
-        return true;
-      },
-    );
-    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
-    assert.equal(calls.some((c) => c.url.endsWith("/upload/image")), false, "no clip left on the engine");
-  });
-
-  it("keeps asking the card for a moment, because the engine says yes before it has put anything down", async () => {
-    // `/free` sets flags and answers; the worker thread unloads when it next wakes. Measured the
-    // instant the answer lands, the card is the card as it was — which #692 saw as alternate
-    // shots refused on a card that was free a moment later.
-    const { fetch, calls } = engineFake(ROUTES);
-    const readings = [3000, 3000, 3000, 9000];
-    const sleeps: number[] = [];
-    await client(async () => readings.shift() ?? 9000, fetch, (ms) => { sleeps.push(ms); }).submit("", VIDEO);
-    assert.equal(calls.filter((c) => c.url.endsWith("/free")).length, 1, "asked to put things down once, never once per poll");
-    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true, "dispatched once the card emptied");
-    assert.equal(sleeps.length, 2, "one wait per short reading after the engine answered");
-  });
-
-  it("gives up after a bounded window, with the same refusal", async () => {
-    const { fetch, calls } = engineFake(ROUTES);
-    let asked = 0;
-    const sleeps: number[] = [];
-    await assert.rejects(
-      client(async () => { asked += 1; return 3072; }, fetch, (ms) => { sleeps.push(ms); }).submit("", VIDEO),
-      (err: Error) => {
-        assert.ok(err instanceof ProviderBusyError, "still the transient it was");
-        assert.match(err.message, /needs 7\.8 GB of free graphics memory/);
-        assert.match(err.message, /this machine has 3\.0 GB free/);
-        return true;
-      },
-    );
-    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
-    assert.ok(sleeps.length >= 4 && sleeps.length <= 12, `bounded, and long enough to matter: ${sleeps.length} waits`);
-    assert.ok(sleeps.reduce((sum, ms) => sum + ms, 0) <= 3000, "a couple of seconds, not a stall");
-    assert.equal(asked, sleeps.length + 1, "measured before asking, on the answer, and after every wait that ended inside the window");
-  });
-
-  it("bounds the window by elapsed time, so a slow probe cannot stretch it", async () => {
-    // The desktop's probe is an nvidia-smi run with a five-second timeout. Counting polls would
-    // let eight slow readings hold a job in `submitting` for most of a minute.
-    const { fetch, calls } = engineFake(ROUTES);
-    let now = 0;
-    let asked = 0;
-    const slowProbe = async (): Promise<number | null> => { asked += 1; now += 1500; return 3072; };
-    const slow = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, slowProbe, undefined, undefined, async (ms) => { now += ms; }, () => now);
-    await assert.rejects(slow.submit("", VIDEO), (err: Error) => err instanceof ProviderBusyError);
-    assert.ok(asked <= 4, `asked ${asked} times: a probe that takes 1.5 s runs the window out in two rounds, not eight`);
-    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
-  });
-
-  it("stops waiting on the card the moment the job is cancelled", async () => {
-    // The engine's slot is held until submit returns — the queue frees it in runJob's finally —
-    // so a cancelled job that kept polling would block the next local job for the rest of the
-    // window. The wait ends on the signal, and the loop reads it after every wait.
-    const { fetch, calls } = engineFake(ROUTES);
-    const controller = new AbortController();
-    let now = 0;
-    let asked = 0;
-    const probe = async (): Promise<number | null> => { asked += 1; return 3072; };
-    const sleep = async (ms: number): Promise<void> => { now += ms; controller.abort(); };
-    const cancelled = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, probe, undefined, undefined, sleep, () => now);
-    await assert.rejects(cancelled.submit("", { ...VIDEO, signal: controller.signal }), (err: Error) => err.name === "AbortError");
-    assert.equal(asked, 2, "measured before asking and on the answer, then never again");
-    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
-  });
-
-  it("dispatches when the card stops being measurable mid-window (D15)", async () => {
-    const { fetch, calls } = engineFake(ROUTES);
-    const readings: Array<number | null> = [3000, 3000, null];
-    await client(async () => readings.shift() ?? null, fetch).submit("", VIDEO);
-    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true, "the probe failing is not the card filling up");
   });
 });
 
@@ -1685,7 +1549,7 @@ describe("putting things down when the lane drains", () => {
     const { fetch, calls } = engineFake(ROUTES);
     await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).release("comfyui-draft-image");
     await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).release("not-a-recipe");
-    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, undefined, undefined, () => "remote").release("comfyui-h3-video");
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, () => "remote").release("comfyui-h3-video");
     await new ComfyUiClient(fetch, () => null, OK_PREFLIGHT).release("comfyui-h3-video");
     assert.equal(calls.some((c) => c.url.endsWith("/free")), false);
   });

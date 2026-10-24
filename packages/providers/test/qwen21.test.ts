@@ -15,7 +15,7 @@ it("a healthy isolated worker keeps provider validation available while the prim
   const client = new ComfyUiClient(async url => {
     assert.equal(url, `${worker}/system_stats`);
     return Response.json({ system: { comfyui_version: "0.37.0" } });
-  }, () => null, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => [worker]);
+  }, () => null, undefined, undefined, undefined, () => [worker]);
   try {
     assert.ok((await client.validateKey()).every(probe => probe.available));
   } finally { client.dispose(); }
@@ -23,7 +23,6 @@ it("a healthy isolated worker keeps provider validation available while the prim
 
 it("a routed recipe's submission, recovered polling, artifacts and cancellation use its own worker", async () => {
   const calls: string[] = [];
-  const memoryModels: Array<string | undefined> = [];
   const primary = "http://127.0.0.1:8100";
   const worker = "http://127.0.0.1:8101";
   const makeClient = () => new ComfyUiClient(async url => {
@@ -35,7 +34,7 @@ it("a routed recipe's submission, recovered polling, artifacts and cancellation 
     if (url.includes("/view?")) return new Response(Uint8Array.of(137, 80, 78, 71), { headers: { "Content-Type": "image/png" } });
     throw new Error(`Unexpected request: ${url}`);
   }, model => model === recipe.id ? worker : primary, async () => ({ ok: true }),
-  undefined, async model => { memoryModels.push(model); return 20000; }, undefined, undefined, undefined, undefined, () => [primary, worker]);
+  undefined, undefined, () => [primary, worker]);
   const first = makeClient();
   const recovered = makeClient();
   try {
@@ -45,7 +44,6 @@ it("a routed recipe's submission, recovered polling, artifacts and cancellation 
     await recovered.cancel("", "qwen-job", { model: recipe.id });
     assert.ok(calls.includes(`${primary}/free`), "the idle sibling releases cached weights");
     assert.ok(calls.includes(`${worker}/prompt`));
-    assert.deepEqual(memoryModels, [recipe.id]);
     assert.ok(calls.filter(url => !url.endsWith("/free")).every(url => url.startsWith(worker)));
   } finally { first.dispose(); recovered.dispose(); }
 });
@@ -63,7 +61,7 @@ it("GPU handoff accepts an exited sibling but still rejects a live endpoint's un
       throw new Error("connection refused");
     }
     return Response.json({});
-  }, () => primary, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => urls, url => url === primary && exited);
+  }, () => primary, undefined, undefined, undefined, () => urls, url => url === primary && exited);
   try {
     await client.unload();
     assert.deepEqual(calls, [`${primary}/free`, `${worker}/free`]);
@@ -74,7 +72,7 @@ it("GPU handoff accepts an exited sibling but still rejects a live endpoint's un
     assert.equal(urls.includes(primary), false);
     // Health loss alone cannot prove the process released its allocations.
     const unavailable = new ComfyUiClient(async () => { throw new Error("not released"); }, () => worker,
-      undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => [worker], () => false);
+      undefined, undefined, undefined, () => [worker], () => false);
     try { await assert.rejects(unavailable.unload(), /not released/); }
     finally { unavailable.dispose(); }
   } finally { client.dispose(); }
