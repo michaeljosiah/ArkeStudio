@@ -59,8 +59,8 @@ function chapter(overrides: Partial<ListeningChapter> = {}): ListeningChapter {
     ],
     gaps: [],
     pictures: [
-      { key: "p0.0", number: 2, file: "artifacts/walk.jpg", at: 2, seconds: 48, short: false, focus: { x: 0.62, y: 0.42 } },
-      { key: "p1.0", number: 3, file: "artifacts/booth.jpg", at: 50, seconds: 50, short: false },
+      { key: "p0.0", number: 2, file: "artifacts/walk.jpg", at: 2, seconds: 48, focus: { x: 0.62, y: 0.42 } },
+      { key: "p1.0", number: 3, file: "artifacts/booth.jpg", at: 50, seconds: 50 },
     ],
     opening: "cover.jpg",
     mix: { file: ".cache/audiobook-mix/x/r2-k.wav", seconds: 100 },
@@ -78,7 +78,7 @@ describe("the audiobook as a video (turn 197)", () => {
   });
 
   it("holds a card while the title is read, the cover blurred before the first picture, each picture until the next", () => {
-    const withCover = videoSegments(chapter({ pictures: [{ key: "p1.0", number: 3, file: "artifacts/booth.jpg", at: 50, seconds: 50, short: false }] }), "cover.jpg", true);
+    const withCover = videoSegments(chapter({ pictures: [{ key: "p1.0", number: 3, file: "artifacts/booth.jpg", at: 50, seconds: 50 }] }), "cover.jpg", true);
     assert.deepEqual(
       withCover.map((segment) => [segment.kind, segment.file, segment.from, segment.to]),
       [
@@ -97,7 +97,7 @@ describe("the audiobook as a video (turn 197)", () => {
   });
 
   it("folds a flash into the piece before it and fades over a second, or less beside a short piece", () => {
-    const segments = videoSegments(chapter({ pictures: [{ key: "p0.0", number: 2, file: "a.jpg", at: 3.2, seconds: 1, short: true }, { key: "p1.0", number: 3, file: "b.jpg", at: 4.2, seconds: 95.8, short: false }] }), "cover.jpg", true);
+    const segments = videoSegments(chapter({ pictures: [{ key: "p0.0", number: 2, file: "a.jpg", at: 3.2, seconds: 1 }, { key: "p1.0", number: 3, file: "b.jpg", at: 4.2, seconds: 95.8 }] }), "cover.jpg", true);
     assert.deepEqual(segments.map((segment) => [segment.kind, segment.from, segment.to]), [["card", 0, 3.2], ["picture", 3.2, 4.2], ["picture", 4.2, 100]], "the cover's 0.2 s goes to the card");
     assert.deepEqual(segmentFades(segments), [0, 0.5, 0.5], "half the one-second piece at each side");
     assert.equal(segmentAt(segments, 4)!.file, "a.jpg");

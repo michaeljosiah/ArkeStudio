@@ -1,6 +1,6 @@
 import PDFDocument from "pdfkit";
 import { audiobookBlocks, audiobookBlockOptions, audiobookHeading, audiobookTextHash, chapterParagraphs,
-  kitLookLibrary, pictureLookChanged, placePictures, worldImageReferences } from "@arke-studio/contracts";
+  kitLookLibrary, pictureLookChanged, placePictures, sentencesOf, worldImageReferences } from "@arke-studio/contracts";
 import type { AudiobookPlan } from "../productions/audiobook.js";
 import type { WorldStore } from "../world/store.js";
 import { readPublicationFile } from "./files.js";
@@ -40,7 +40,9 @@ export async function storyIllustrations(store: WorldStore, chapters: readonly {
       blockers.push(`${source.title}: illustration bindings could not be read.`); continue;
     }
     const record = plan.record;
-    const paragraphs = chapterParagraphs(source.body).length;
+    const texts = chapterParagraphs(source.body);
+    const paragraphs = texts.length;
+    const flat = (text: string) => text.replace(/\s+/g, " ").trim();
     const blocks = plan.blocks.map(row => row.block);
     const { placed, lost } = placePictures(blocks, record?.pictures, file => listed.has(file));
     for (const key of lost) blockers.push(`${source.title}: picture ${key} is missing or no longer has a manuscript position.`);
@@ -48,7 +50,8 @@ export async function storyIllustrations(store: WorldStore, chapters: readonly {
     for (const entry of placed) {
       const block = blocks[entry.index]!;
       const original = block.starts?.includes(entry.key) ? automatic.find(candidate => candidate.key === entry.key) : undefined;
-      if (entry.picture.textHash !== audiobookTextHash(block.text) && (!original || entry.picture.textHash !== audiobookTextHash(original.text))) {
+      // A mark (design turn 237) follows its sentence, which placement found; a block's own picture its words.
+      if (entry.picture.mark === undefined && entry.picture.textHash !== audiobookTextHash(block.text) && (!original || entry.picture.textHash !== audiobookTextHash(original.text))) {
         blockers.push(`${source.title}: picture ${entry.key} belongs to earlier text. Reattach it to the current passage.`); continue;
       }
       if (pictureLookChanged(entry.picture.look, record?.look, kitLookLibrary(bundle.referenceKits, record?.look), entry.picture.lookReview)) {
@@ -57,6 +60,10 @@ export async function storyIllustrations(store: WorldStore, chapters: readonly {
       if (block.paragraph < -1 || block.paragraph >= paragraphs) {
         blockers.push(`${source.title}: picture ${entry.key} has an unavailable manuscript position.`); continue;
       }
+      // A mark inside its block goes before the paragraph that holds its sentence (R-209).
+      const said = entry.sentence > 0 ? flat(sentencesOf(block.text)[entry.sentence] ?? "") : "";
+      const holding = said === "" ? -1 : texts.findIndex((text, at) => at >= block.paragraph && flat(text).includes(said));
+      const paragraph = holding >= 0 ? holding : block.paragraph;
       if (images.length >= STORY_ILLUSTRATION_LIMITS.count) { blockers.push("The illustrated EPUB exceeds 1,000 pictures. Select fewer chapters."); return images; }
       const file = entry.picture.file;
       try {
@@ -69,8 +76,8 @@ export async function storyIllustrations(store: WorldStore, chapters: readonly {
           mediaType = inspectStoryImage(Buffer.concat(chunks)).mediaType;
           checked.set(file, mediaType);
         }
-        const alt = entry.picture.shot?.frame.trim() || `Illustration for ${source.title}, ${block.paragraph < 0 ? "chapter opening" : `passage ${block.paragraph + 1}`}.`;
-        images.push({ chapter, paragraph: block.paragraph, file, alt, mediaType });
+        const alt = entry.picture.shot?.frame.trim() || `Illustration for ${source.title}, ${paragraph < 0 ? "chapter opening" : `passage ${paragraph + 1}`}.`;
+        images.push({ chapter, paragraph, file, alt, mediaType });
       } catch (error) { blockers.push(`${source.title}: picture ${entry.key}: ${error instanceof Error ? error.message : "the image could not be read"}.`); }
     }
   }

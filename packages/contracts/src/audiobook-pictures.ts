@@ -57,14 +57,35 @@ export const AudiobookPictureSchema = z
      * picture is marked and still plays until it is made again (the owner's call 3).
      */
     tall: z.object({ file: z.string().min(1).max(1000), at: IsoDateTimeSchema, from: z.string().min(1).max(1000) }).strict().optional(),
+    /**
+     * A picture set inside its block, at a sentence (design turn 237, SPEC-047 R-202): the hash of
+     * that sentence's words, as `sentencesOf` cuts them. Absent, the picture stands at its block's
+     * first word, as every picture set before the turn does. Kept under `pictureMarkKey`.
+     */
+    mark: z.object({ sentence: z.string().min(1).max(64) }).strict().optional(),
   })
   .strict();
 export type AudiobookPicture = z.infer<typeof AudiobookPictureSchema>;
 
+/**
+ * A mark's key on the chapter's record (design turn 237, SPEC-047 R-202): its block's key, `@`, and
+ * the hex of its sentence's hash, so the key alone names the sentence — a window can ask for a
+ * picture at a sentence with nothing on the record yet, and every command that names a picture by
+ * its block takes a mark's key the same way. A block's own picture keeps the block's key.
+ */
+export function pictureMarkKey(block: string, sentenceHash: string): string {
+  return `${block}@${sentenceHash.replace(/^text-v1:/, "")}`;
+}
+
+/** A picture key read back: the block it was set in and, for a mark, its sentence's hash. */
+export function pictureKeyParts(key: string): { block: string; sentence?: string } {
+  const at = key.lastIndexOf("@");
+  if (at <= 0 || at === key.length - 1) return { block: key };
+  return { block: key.slice(0, at), sentence: `text-v1:${key.slice(at + 1)}` };
+}
+
 /** A picture's Tall, made from an earlier picture than the one it has now (SPEC-047 R-197). */
 export const tallFromEarlier = (picture: Pick<AudiobookPicture, "file" | "tall">): boolean => picture.tall !== undefined && picture.tall.from !== picture.file;
 
-/** A picture stays at least this long (turn 186): a shorter hold is flagged in the chapter's view, never dropped. */
-export const PICTURE_MIN_HOLD_SEC = 20;
-/** One picture gives way to the next over this long. */
+/** One picture gives way to the next over this long. A picture holds until the next one, however soon (design turn 237, R-207). */
 export const PICTURE_CROSSFADE_SEC = 1;

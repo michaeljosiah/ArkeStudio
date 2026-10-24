@@ -223,7 +223,7 @@ describe("Picture on a block (turn 186c)", () => {
     const m = await mount(2, { "p1.0": picture(2, "world-art.png"), "p2.0": picture(3, "world-art.png") });
     const chips = all(m, '[data-testid="audiobook-picture-chip"]').map(text);
     assert.deepEqual(chips, ["0:34", "0:44"], "each chip at its block's start");
-    assert.equal(q(m, '[data-testid="audiobook-picture-chip"]')?.getAttribute("title"), "under 20 s", "a short hold is flagged on the chip, not refused");
+    assert.equal(q(m, '[data-testid="audiobook-picture-chip"]')?.getAttribute("title"), null, "a picture holds until the next however soon, and nothing flags it (design turn 237, R-207)");
     // 194g draws no Shows or Holds on the Picture tab, and no Choose: the picture is the press.
     assert.doesNotMatch(text(q(m, '[data-testid="audiobook-picture"]')), /Shows|Holds|Make again/);
     assert.equal(button(m, "Choose"), undefined);
@@ -1026,7 +1026,7 @@ describe("picture block opener (issue 1688)", () => {
     const played: string[] = [], selected: string[] = [];
     await act(async () => m.root.render(<AudiobookBlocks rows={rows} sounding={null} selected={null}
       onSelect={key => selected.push(key)} onPlayOne={row => played.push(row.block.key)} slug="the-undersong"
-      pictures={{ byKey: new Map([["p0.0", { file: "artifacts/harbour-upload.png", index: 1, at: 4, seconds: 80, short: false, until: null, estimated: false, entry: picture(1, "artifacts/harbour-upload.png") }]]), estimated: false }} />));
+      pictures={{ byKey: new Map([["p0.0", { file: "artifacts/harbour-upload.png", index: 1, at: 4, seconds: 80, until: null, estimated: false, entry: picture(1, "artifacts/harbour-upload.png") }]]), estimated: false }} />));
     await press(q(m, '[data-block="p0.0"] [data-testid="audiobook-picture-chip"]'));
     await press(q(m, '[data-block="p0.0"] .fy-ab__text'));
     assert.deepEqual(selected, ["p0.0", "p0.0"], "chip and text click select exactly once each");

@@ -74,8 +74,8 @@ export interface PictureSpan {
   /** The block it is set on, where it is kept (a picture that followed its words keeps its old key). */
   index: number;
   at: number;
+  /** How long it holds, to the next picture however soon (design turn 237, R-207). */
   seconds: number;
-  short: boolean;
   /** The block the next picture is on, or null to the chapter's end. */
   until: number | null;
   /** Its start leans on a block before it timed at the reading rate, not measured: said with a `~`. */
@@ -95,11 +95,14 @@ export function useChapterPictures(world: WorldBundle | null, rows: readonly Blo
       const take = record?.takes[row.block.key];
       const current = take !== undefined && row.artifact !== null && take.textHash === audiobookTextHash(row.block.text);
       const seconds = current ? (row.artifact?.mediaInfo?.durationSec ?? take.grouped?.durationSec ?? null) : null;
-      return { key: row.block.key, text: row.block.text, seconds };
+      // The take's word timing, when it is this take's: a picture set inside the take starts on its word (design turn 237, R-204).
+      const timing = current ? record?.wordTiming?.[row.block.key] : undefined;
+      const words = timing !== undefined && timing.artifactId === take?.artifactId && timing.textHash === take.textHash ? timing.words.map((word) => word.startSec) : undefined;
+      return { key: row.block.key, text: row.block.text, seconds, ...(words !== undefined ? { words } : {}) };
     });
     const { spans, lost, estimated } = pictureSpans(blocks, record?.pictures, (file) => listed.has(file));
     const byKey = new Map<string, PictureSpan>();
-    for (const span of spans) byKey.set(rows[span.index]!.block.key, { file: span.picture.file, index: span.index, at: span.at, seconds: span.seconds, short: span.short, until: span.until, estimated: span.startEstimated, entry: span.picture });
+    for (const span of spans) if (span.sentence === 0) byKey.set(rows[span.index]!.block.key, { file: span.picture.file, index: span.index, at: span.at, seconds: span.seconds, until: span.until, estimated: span.startEstimated, entry: span.picture });
     const first = spans[0];
     return { byKey, lost, estimated, count: spans.length, coverAtStart: first === undefined || first.at > 0 };
   }, [world, rows, record]);
@@ -118,7 +121,7 @@ export function pictureStart(picture: Pick<PictureSpan, "at" | "estimated">): st
 /** The margin's chip (186c): the picture, and when it starts. */
 export function PictureChip({ slug, picture, label }: { slug: string; picture: PictureSpan; label: string }) {
   return (
-    <button type="button" aria-label={label} className={cx("fy-ab__picchip", picture.short && "fy-ab__picchip--short")} data-testid="audiobook-picture-chip" title={picture.short ? "under 20 s" : undefined}>
+    <button type="button" aria-label={label} className="fy-ab__picchip" data-testid="audiobook-picture-chip">
       <img src={mediaUrl(slug, picture.file)} alt="" />
       {pictureStart(picture)}
     </button>

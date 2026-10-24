@@ -6,6 +6,7 @@ import {
   audiobookMotionPrice,
   pickableArtifacts,
   placePictures,
+  pictureSlot,
   worldImageReferences,
   type AudiobookMotionQuote,
   type AudiobookPicture,
@@ -45,17 +46,17 @@ async function context(store: WorldStore, productionId: string, chapterFile: str
     narrator: await anyNarrator(store, productionId, summary.id),
   });
   const blocks = plan.blocks.map((p) => p.block);
-  const index = blocks.findIndex((p) => p.key === block);
-  if (index < 0) throw new Error("that block is no longer in the chapter");
-  return { plan, blocks, index };
+  // `block` is a picture key, a block's own or a mark's (design turn 237): the picture at its place moves.
+  if (pictureSlot(blocks, {}, block) === null) throw new Error("that block is no longer in the chapter");
+  return { plan, blocks, key: block };
 }
 
 function source(
   pictures: Record<string, AudiobookPicture>,
   blocks: Parameters<typeof placePictures>[0],
-  index: number,
+  key: string,
 ) {
-  const placed = placePictures(blocks, pictures).placed.find((p) => p.index === index);
+  const placed = pictureSlot(blocks, pictures, key)?.placed;
   if (placed === undefined) throw new Error("choose a picture here first");
   return placed;
 }
@@ -76,11 +77,11 @@ export async function quoteAudiobookMotion(
     throw new Error("choose a supported resolution");
   if (!audiobookMotionDurations(model).includes(params.durationSec ?? 5))
     throw new Error("choose a supported clip length");
-  const { plan, blocks, index } = await context(store, productionId, chapterFile, block);
+  const { plan, blocks, key } = await context(store, productionId, chapterFile, block);
   const picture = source(
     plan.record === "unreadable" ? {} : (plan.record?.pictures ?? {}),
     blocks,
-    index,
+    key,
   ).picture;
   if (!worldImageReferences(store.getBundle()).some((p) => p.file === picture.file))
     throw new Error("this source picture is unavailable");
@@ -108,7 +109,7 @@ export async function saveAudiobookMotionCandidate(
   quote: AudiobookMotionQuote,
   artifactId: string,
 ) {
-  const { plan, blocks, index } = await context(store, productionId, chapterFile, block);
+  const { plan, blocks, key } = await context(store, productionId, chapterFile, block);
   const artifact = store.getBundle().artifacts.find((p) => p.id === artifactId);
   const media = artifact?.mediaInfo;
   if (
@@ -122,7 +123,7 @@ export async function saveAudiobookMotionCandidate(
   const file = `artifacts/${artifact.file}`;
   await hashFile(store, file);
   return updateAudiobook(store, productionId, plan.chapter, async (current) => {
-    const shown = source(current.pictures ?? {}, blocks, index);
+    const shown = source(current.pictures ?? {}, blocks, key);
     if (
       shown.picture.file !== quote.sourceFile ||
       shown.picture.at !== quote.sourceAt ||
@@ -162,9 +163,9 @@ export async function chooseAudiobookMotion(
   behavior: "repeat" | "hold",
   artifactId?: string,
 ) {
-  const { plan, blocks, index } = await context(store, productionId, chapterFile, block);
+  const { plan, blocks, key } = await context(store, productionId, chapterFile, block);
   return updateAudiobook(store, productionId, plan.chapter, async (current) => {
-    const shown = source(current.pictures ?? {}, blocks, index);
+    const shown = source(current.pictures ?? {}, blocks, key);
     let picture = shown.picture;
     if (choice === "candidate") {
       const candidate = picture.motionCandidate ?? picture.motion;

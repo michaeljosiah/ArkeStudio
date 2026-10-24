@@ -15,7 +15,8 @@ import {
   mergeLook,
   normalizeSpeechText,
   pictureOwnLooks,
-  placePictures,
+  pictureKeyParts,
+  pictureSlot,
   productionStyleFor,
   shortNameOf,
   type AudiobookBlock,
@@ -469,7 +470,7 @@ export async function chooseChapterLook(
   const held = lookOf(plan.record);
   const sheetId = who.sheet ?? held?.characters[who.key]?.sheet;
   const sheet = sheetId === undefined ? undefined : store.getBundle().sheets.find((candidate) => candidate.id === sheetId);
-  const index = picture === undefined ? -1 : plan.blocks.findIndex((candidate) => candidate.block.key === picture.block);
+  const index = picture === undefined ? -1 : plan.blocks.findIndex((candidate) => candidate.block.key === pictureKeyParts(picture.block).block);
   if (picture !== undefined && index < 0) throw new Error("that block is no longer in the chapter");
   let pick: { lookId: string; text: string } | null = null;
   if (lookId !== null) {
@@ -492,7 +493,7 @@ export async function chooseChapterLook(
       chosen = chooseLook(current.look, { key: who.key, ...(name !== undefined ? { name } : {}), ...(sheetId !== undefined ? { sheet: sheetId } : {}) }, pick, { chapterHash: plan.chapter.hash, at });
       if (chosen !== null && !AudiobookLookSchema.safeParse(chosen).success) throw new Error("that is not a look the chapter can hold");
     }
-    const owned = picture === undefined ? undefined : ownLooksAfter(current, plan, index, picture.block, who.key, picture.only ? (lookId ?? MAIN_PHOTO_LOOK) : null);
+    const owned = picture === undefined ? undefined : ownLooksAfter(current, plan, picture.block, who.key, picture.only ? (lookId ?? MAIN_PHOTO_LOOK) : null);
     if (chosen === null && owned === undefined) return null;
     const { ownLooks: _held, ...rest } = current;
     const ownLooks = owned === undefined ? current.ownLooks : owned;
@@ -507,9 +508,10 @@ export async function chooseChapterLook(
  * from the picture's own, so a choice put back as it was leaves nothing held. Undefined where
  * nothing changes.
  */
-function ownLooksAfter(current: ChapterAudiobook, plan: AudiobookPlan, index: number, block: string, key: string, lookId: string | null): Record<string, PictureOwnLooks> | undefined {
+function ownLooksAfter(current: ChapterAudiobook, plan: AudiobookPlan, block: string, key: string, lookId: string | null): Record<string, PictureOwnLooks> | undefined {
   const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
-  const made = placePictures(blocks, current.pictures ?? {}).placed.find((entry) => entry.index === index)?.picture.look;
+  // `block` is a picture key, a block's own or a mark's (design turn 237).
+  const made = pictureSlot(blocks, current.pictures ?? {}, block)?.placed?.picture.look;
   const pending = current.ownLooks?.[block];
   const base = pictureOwnLooks(pending, made);
   const { [key]: _was, ...others } = base;

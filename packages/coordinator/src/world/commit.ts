@@ -454,6 +454,13 @@ export const AUDIOBOOK_CHAPTER_NARRATOR_SCHEMA_VERSION = 107;
  */
 export const GUIDE_TEASERS_SCHEMA_VERSION = 108;
 /**
+ * Picture marks (design turn 237, SPEC-047 R-202): `mark` on a picture in the chapter's strict
+ * audiobook record, a picture set at a sentence inside its block. A build before it reads such a
+ * record as unreadable, and every take of the chapter then reads as lost, so the world is raised
+ * before the first mark is written.
+ */
+export const AUDIOBOOK_PICTURE_MARKS_SCHEMA_VERSION = 109;
+/**
  * Where a picture's subject stands (design turn 197b): `focus` on a picture in the chapter's
  * strict audiobook record, which the video's vertical crop and Slow push follow. A build before
  * it reads such a record as unreadable, so the world is raised before the first. Sixty-two and

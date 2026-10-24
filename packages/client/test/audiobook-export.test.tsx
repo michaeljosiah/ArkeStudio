@@ -60,8 +60,8 @@ const PLAN: AudiobookListening = {
   title: "Inkbound",
   cover: "world-art.png",
   chapters: [
-    { chapterId: "slack-water", order: 1, title: "Slack water", state: "read", seconds: 12, blocks: [block("t", 0), block("a", 4), block("b", 8)], gaps: [], pictures: [{ key: "a", number: 2, file: "artifacts/stair.png", at: 4, seconds: 8, short: true }], opening: "world-art.png" },
-    { chapterId: "neap", order: 2, title: "Neap", state: "part", seconds: 4, blocks: [block("t2", 0)], gaps: [{ at: 4, from: 2, to: 3 }], pictures: [{ key: "x", number: 3, file: "artifacts/never.png", at: 4, seconds: 0, short: true }], opening: "world-art.png" },
+    { chapterId: "slack-water", order: 1, title: "Slack water", state: "read", seconds: 12, blocks: [block("t", 0), block("a", 4), block("b", 8)], gaps: [], pictures: [{ key: "a", number: 2, file: "artifacts/stair.png", at: 4, seconds: 8 }], opening: "world-art.png" },
+    { chapterId: "neap", order: 2, title: "Neap", state: "part", seconds: 4, blocks: [block("t2", 0)], gaps: [{ at: 4, from: 2, to: 3 }], pictures: [{ key: "x", number: 3, file: "artifacts/never.png", at: 4, seconds: 0 }], opening: "world-art.png" },
   ],
 };
 

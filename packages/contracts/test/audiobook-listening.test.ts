@@ -11,10 +11,13 @@ import {
   listeningChapter,
   pictureSpans,
   placePictures,
+  retimePictureMarks,
+  sentenceHashes,
+  sentenceStart,
   sentencesOf,
   type ListeningInputBlock,
 } from "../src/audiobook-listening.js";
-import type { AudiobookPicture } from "../src/audiobook-pictures.js";
+import { pictureKeyParts, pictureMarkKey, type AudiobookPicture } from "../src/audiobook-pictures.js";
 
 /**
  * The book as a listener hears it (design turn 186, SPEC-047 R-66..R-71): the plan the player in
@@ -93,8 +96,8 @@ describe("pictures that follow the words (R-69)", () => {
     const pictures = { "p1.0": picture(BLOCKS[2]!.text, "artifacts/stair.png"), "p2.0": picture(BLOCKS[3]!.text, "references/odile/main.png") };
     const chapter = listeningChapter({ chapterId: "neap", order: 7, title: "The Tenth Key", blocks: BLOCKS, pictures, cover: "world-art.png" });
     assert.deepEqual(chapter.pictures, [
-      { key: "p1.0", number: 3, file: "artifacts/stair.png", at: 16, seconds: 3, short: true },
-      { key: "p2.0", number: 4, file: "references/odile/main.png", at: 19, seconds: 40, short: false },
+      { key: "p1.0", number: 3, file: "artifacts/stair.png", at: 16, seconds: 3 },
+      { key: "p2.0", number: 4, file: "references/odile/main.png", at: 19, seconds: 40 },
     ]);
     assert.equal(chapter.opening, "world-art.png", "cover at the start");
   });
@@ -209,5 +212,83 @@ describe("a chapter with timing plays its one mix (turn 187, R-85)", () => {
     assert.deepEqual(chapter.mix, timed.mix);
     assert.equal(chapter.seconds, 29.2, "as long as the mix is");
     assert.ok(ListeningChapterSchema.safeParse(chapter).success);
+  });
+});
+
+/**
+ * Picture marks (design turn 237, SPEC-047 R-202 – R-207): a picture set at a sentence inside its
+ * block, so a beat read as one take changes picture as it goes. Na love or Juju's goat story is the
+ * turn's sample: the goat-face picture belongs to "Tunde widened his eyes", not the beat's start.
+ */
+describe("picture marks (turn 237)", () => {
+  const GOAT = "Tunde was telling the goat story again. Ade had been in the car the first time it happened. Tunde widened his eyes and lowered his chin. Around them the club pressed on.";
+  const [, , widened, around] = sentencesOf(GOAT);
+  const beat: ListeningInputBlock = { key: "p0.0", text: GOAT, take: take(40) };
+  const mark = (sentence: string, file: string): [string, AudiobookPicture] => [pictureMarkKey("p0.0", audiobookTextHash(sentence)), { ...picture(GOAT, file), mark: { sentence: audiobookTextHash(sentence) } }];
+
+  it("keys a mark by its block and its sentence, and reads the key back", () => {
+    const key = pictureMarkKey("p0.0", audiobookTextHash(widened!));
+    assert.match(key, /^p0\.0@[0-9a-f]{16}$/);
+    assert.deepEqual(pictureKeyParts(key), { block: "p0.0", sentence: audiobookTextHash(widened!) });
+    assert.deepEqual(pictureKeyParts("p0.0"), { block: "p0.0" });
+    assert.ok(key.length <= 40, "a mark's key fits every command that names a picture by its block");
+  });
+
+  it("cuts emphasis closed after a stop with its sentence, as a mark names it from the first (codex on PR 2179)", () => {
+    const written = "Written above it: **a hand-span high.** Under it, smaller: *called it back. paid.* Then _the line._";
+    assert.deepEqual(sentencesOf(written), ["Written above it: **a hand-span high.**", "Under it, smaller: *called it back.", "paid.*", "Then _the line._"]);
+  });
+
+  it("places marks at their sentences beside the block's own picture, in reading order", () => {
+    const pictures = Object.fromEntries([mark(around!, "artifacts/club.png"), ["p0.0", picture(GOAT, "artifacts/booth.png")], mark(widened!, "artifacts/goat-face.png")]);
+    const { placed, lost } = placePictures([beat], pictures);
+    assert.deepEqual(placed.map((entry) => [entry.picture.file, entry.index, entry.sentence]), [["artifacts/booth.png", 0, 0], ["artifacts/goat-face.png", 0, 2], ["artifacts/club.png", 0, 3]]);
+    assert.deepEqual(lost, []);
+  });
+
+  it("follows its sentence when the blocks change, and is lost only when the sentence is gone", () => {
+    const pictures = Object.fromEntries([mark(widened!, "artifacts/goat-face.png")]);
+    // Split: the sentence now opens a block of its own, under another key.
+    const split = [{ key: "p0.0", text: sentencesOf(GOAT).slice(0, 2).join(" ") }, { key: "p0.1", text: sentencesOf(GOAT).slice(2).join(" ") }];
+    const moved = placePictures(split, pictures).placed[0]!;
+    assert.deepEqual([moved.index, moved.sentence, moved.moved], [1, 0, true]);
+    // Reworded: the sentence says something else now.
+    const reworded = [{ key: "p0.0", text: GOAT.replace("lowered his chin", "dropped his chin") }];
+    assert.deepEqual(placePictures(reworded, pictures).lost, [pictureMarkKey("p0.0", audiobookTextHash(widened!))]);
+  });
+
+  it("starts a mark at its words' share of the take, then on its first word once the take is timed", () => {
+    const pictures = Object.fromEntries([["p0.0", picture(GOAT, "artifacts/booth.png")], mark(widened!, "artifacts/goat-face.png")]);
+    const chapter = listeningChapter({ chapterId: "chapter-1", order: 1, title: "Gold on Gold", blocks: [{ key: "title", text: "Chapter 1 · Gold on Gold", take: take(3) }, beat], pictures, cover: null });
+    const start = sentenceStart(GOAT, 2);
+    const goat = chapter.pictures.find((entry) => entry.file === "artifacts/goat-face.png")!;
+    assert.equal(goat.at, Math.round((3 + 40 * start.share) * 1000) / 1000, "the estimate: its share of the 40 s take");
+    assert.equal(goat.word, start.word);
+    assert.equal(chapter.pictures[0]!.seconds, goat.at - 3, "the beat's own picture holds until the mark");
+    assert.ok(ListeningChapterSchema.safeParse(chapter).success);
+    // The take's validated words on the chapter's clock: the mark moves onto "Tunde".
+    const tokens = GOAT.split(/\s+/);
+    chapter.blocks[1]!.words = tokens.map((text, index) => ({ text, startSec: 3 + index, endSec: 3.9 + index, probability: 0.99 }));
+    retimePictureMarks(chapter);
+    assert.equal(chapter.pictures[1]!.at, 3 + start.word, "on its first word");
+    assert.equal(tokens[start.word], "Tunde");
+    assert.equal(chapter.pictures[1]!.seconds, chapter.seconds - chapter.pictures[1]!.at, "and holds to the chapter's end");
+  });
+
+  it("holds a picture until the next however soon, with no shortest hold (R-207)", () => {
+    const pictures = Object.fromEntries([["p0.0", picture(GOAT, "artifacts/booth.png")], mark(sentencesOf(GOAT)[1]!, "artifacts/car.png")]);
+    const chapter = listeningChapter({ chapterId: "chapter-1", order: 1, title: "Gold on Gold", blocks: [beat], pictures, cover: null });
+    assert.ok(chapter.pictures[0]!.seconds < 20);
+    assert.equal(chapter.pictures.length, 2, "both stand");
+  });
+
+  it("times a chip from the take's word timing when it is current, else estimates it and says so", () => {
+    const pictures = Object.fromEntries([mark(widened!, "artifacts/goat-face.png")]);
+    const words = GOAT.split(/\s+/).map((_, index) => index * 0.5);
+    const timed = pictureSpans([{ key: "p0.0", text: GOAT, seconds: 40, words }], pictures).spans[0]!;
+    assert.deepEqual([timed.at, timed.startEstimated], [sentenceStart(GOAT, 2).word * 0.5, false]);
+    const guessed = pictureSpans([{ key: "p0.0", text: GOAT, seconds: 40 }], pictures).spans[0]!;
+    assert.equal(guessed.startEstimated, true);
+    assert.equal(sentenceHashes(GOAT)[2], audiobookTextHash(widened!));
   });
 });

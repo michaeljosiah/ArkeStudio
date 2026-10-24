@@ -175,6 +175,9 @@ import {
   ridingPicks,
   PICTURE_PROMPT_MAX,
   placePictures,
+  placedKey,
+  pictureKeyParts,
+  pictureSlot,
   type PictureWho,
   pictureBench,
   pictureDetailSkins,
@@ -1381,6 +1384,8 @@ export class Coordinator {
   private readonly audiobookJobs = new JobWaiters();
   private readonly makingMotion = new Map<string, AbortController>();
   private readonly preparingWordTiming = new Map<string, AbortController>();
+  /** The chapters whose marked takes are being timed with no press (design turn 237, R-204), by world, production and chapter. */
+  private readonly timingMarks = new Map<string, AbortController>();
   private readonly checkingAudiobookWords = new Map<string, { control: AbortController; requestId: string; state: import("@arke-studio/contracts").AudiobookWordsState }>();
   private readonly audioStudioPreviews = new AudioStudioPreviews();
   private readonly wordTimingRequests = new Map<string, string>();
@@ -2152,6 +2157,8 @@ export class Coordinator {
               ...(event.record !== undefined ? { record: event.record } : {}),
               ...(event.reason !== undefined ? { reason: event.reason } : {}),
             });
+            // A take filed under a picture set inside it is timed with no press (design turn 237, R-204).
+            if (event.made > 0) void this.timeMarkedTakes(store, ids.productionId, ids.chapterId);
             return;
         }
       },
@@ -15583,6 +15590,8 @@ export class Coordinator {
             : await setAudiobookSeam(store, msg.productionId, chapter.id, { press: msg.press, anchor: msg.anchor }, { narrator });
           this.refreshIfStillOpen(store);
           this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record });
+          // A join may have filed a picture as a mark inside a made take (design turn 237, R-203, R-204).
+          void this.timeMarkedTakes(store, msg.productionId, chapter.id);
         } catch (err) {
           if (!(err instanceof SeamRefusal)) void this.appLog?.append({ kind: "audiobook.seam-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
           this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, refused: err instanceof SeamRefusal ? err.message : describeCoordinatorError(err) });
@@ -15640,6 +15649,8 @@ export class Coordinator {
             cut: grouped.cut,
             ...(grouped.summary !== undefined ? { summary: grouped.summary } : {}),
           });
+          // Pictures the beats folded into a take are marks now; their takes are timed (design turn 237).
+          void this.timeMarkedTakes(store, msg.productionId, chapter.id);
         } catch (err) {
           if (!(err instanceof BeatRefusal)) void this.appLog?.append({ kind: "audiobook.beats-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
           this.emit({ at: at(), type: "audiobook.beats", ...ids, outcome: err instanceof BeatRefusal ? "refused" : "failed", reason: err instanceof BeatRefusal ? err.message : describeCoordinatorError(err) });
@@ -16043,6 +16054,8 @@ export class Coordinator {
           const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, msg.picture);
           this.refreshIfStillOpen(store);
           this.emit({ at: at(), type: "audiobook.record", ...ids, record });
+          // A picture set inside a made take: the take is timed so it starts on its word (design turn 237, R-204).
+          if (msg.picture !== null && pictureKeyParts(msg.block).sentence !== undefined) void this.timeMarkedTakes(store, msg.productionId, chapter.id);
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.picture-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
           this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
@@ -16305,9 +16318,11 @@ export class Coordinator {
           const held = await readAudiobook(store, msg.productionId, chapter.file);
           const look = held === null || held === "unreadable" ? null : (held.look ?? null);
           const room = await pictureRoom(store, msg.productionId, chapter.id, look);
-          const index = room.plan.blocks.findIndex((planned) => planned.block.key === msg.block);
-          if (index < 0) return fail("that block is no longer in the chapter");
-          const shown = placePictures(room.plan.blocks.map(planned => planned.block), held === "unreadable" ? {} : held?.pictures).placed.find(entry => entry.index === index)?.picture;
+          // `block` is a picture key, a block's own or a mark's (design turn 237): where the picture is filed.
+          const slot = pictureSlot(room.plan.blocks.map(planned => planned.block), held === "unreadable" ? {} : held?.pictures, msg.block);
+          if (slot === null) return fail("that block is no longer in the chapter");
+          const index = slot.index;
+          const shown = slot.placed?.picture;
           if (msg.reuse !== undefined && shown?.file !== `artifacts/${store.getBundle().artifacts.find(artifact => artifact.id === msg.reuse!.artifactId)?.file}`) return fail("The block's picture changed. Open its current picture again.");
           if (msg.reuse !== undefined && shown?.textHash !== audiobookTextHash(room.plan.blocks[index]!.block.text)) return fail("The passage changed. Choose or make a picture for its current words.");
           const characters = depictable(room.people).filter((person) => msg.who.includes(person.key));
@@ -16343,6 +16358,7 @@ export class Coordinator {
           // The record the picture now stands in goes to every window as any record write does: the margin's chip and the panel read it from there, and the card's own word is only that it is done.
           this.emit({ at: at(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, requestId: msg.requestId, record });
           this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "made", sessionId: made.sessionId, record });
+          if (pictureKeyParts(msg.block).sentence !== undefined) void this.timeMarkedTakes(store, msg.productionId, chapter.id);
           // Its Tall (design turn 235, R-196), from the picture that just landed and under this
           // block's lock, answered under the Tall's own id: the picture stays made if it fails.
           if (msg.tall !== undefined) {
@@ -16453,7 +16469,7 @@ export class Coordinator {
               // A Tall made from this picture and still showable is done; one whose file is gone is
               // left out of the plan, so the sheet counts it to make and so must this (codex on PR 2166).
               if (placed.picture.tall !== undefined && placed.picture.tall.from === placed.picture.file && (await pictureFileUsable(store, placed.picture.tall.file))) continue;
-              todo.push({ chapter: { id: chapter.id, file: chapter.file, order: chapter.order }, block: blocks[placed.index]!.key });
+              todo.push({ chapter: { id: chapter.id, file: chapter.file, order: chapter.order }, block: placedKey(blocks, placed) });
             }
           }
           let made = 0;
@@ -20680,6 +20696,52 @@ export class Coordinator {
    * The window the author is in is left where it is: nothing here opens or changes the Bench view.
    */
   /**
+   * Word timing for the takes that hold a picture inside them (design turn 237, SPEC-047 R-204):
+   * prepared on this machine with no press, one take at a time, once a take is filed or a mark is
+   * set on a made block, so the picture starts on its first word rather than at its estimate. It
+   * stays quiet: a machine with no aligner keeps the estimate, a take already timed is left, and a
+   * Prepare the author started for the book is left to do it.
+   */
+  private async timeMarkedTakes(store: WorldStore, productionId: string, chapterId: string): Promise<void> {
+    const key = `${store.worldId}/${productionId}/${chapterId}`;
+    const voice = this.voiceService;
+    if (voice === undefined || voice === null || this.timingMarks.has(key) || this.preparingWordTiming.has(`${store.worldId}/${productionId}`)) return;
+    const control = new AbortController();
+    this.timingMarks.set(key, control);
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    try {
+      const availability = await voice.wordTimingAvailability().catch(() => null);
+      if (availability?.ready !== true) return;
+      const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId, chapterId) });
+      const record = plan.record === "unreadable" ? null : plan.record;
+      if (record === null || record.pictures === undefined) return;
+      const blocks = plan.blocks.map((entry) => entry.block);
+      const marked = new Set(placePictures(blocks, record.pictures).placed.filter((entry) => entry.sentence > 0).map((entry) => blocks[entry.index]!));
+      let timed = 0;
+      for (const block of marked) {
+        if (control.signal.aborted) break;
+        const take = record.takes[block.key];
+        const held = record.wordTiming?.[block.key];
+        if (take === undefined || take.textHash !== audiobookTextHash(block.text)) continue;
+        if (held !== undefined && held.artifactId === take.artifactId && held.textHash === take.textHash) continue;
+        try {
+          await prepareAudiobookWordTiming(store, productionId, plan, block.key, (audio, signal) => voice.transcribeWords(audio, signal), control.signal, this.opts.ffmpeg);
+          timed += 1;
+        } catch (error) {
+          if (!control.signal.aborted) void this.appLog?.append({ kind: "audiobook.mark-timing-failed", chapter: plan.chapter.file, block: block.key, message: describeCoordinatorError(error) });
+        }
+      }
+      if (timed > 0) this.refreshIfStillOpen(store);
+    } catch (error) {
+      if (!control.signal.aborted) void this.appLog?.append({ kind: "audiobook.mark-timing-failed", chapter: chapterId, message: describeCoordinatorError(error) });
+    } finally {
+      store.closingSignal.removeEventListener("abort", onClose);
+      this.timingMarks.delete(key);
+    }
+  }
+
+  /**
    * A block's picture made Tall (design turn 235, SPEC-047 R-196): the picture it shows now rides
    * as the only reference and is recomposed at 9:16, then filed beside it. A model that makes no
    * 9:16 is refused in one clause (R-200) rather than given another shape; the ChatGPT route takes
@@ -20696,9 +20758,11 @@ export class Coordinator {
     const offered = model.limits.providerSelectedSize !== true;
     const plan = await planAudiobook(store, input.productionId, input.chapter.id, { narrator: await anyNarrator(store, input.productionId) });
     const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
-    const index = blocks.findIndex((candidate) => candidate.key === input.block);
-    if (index < 0) return { ok: false, reason: "that block is no longer in the chapter" };
-    const shown = placePictures(blocks, plan.record === "unreadable" ? undefined : plan.record?.pictures).placed.find((entry) => entry.index === index)?.picture;
+    // `block` is a picture key, a block's own or a mark's (design turn 237): the picture that stands there.
+    const slot = pictureSlot(blocks, plan.record === "unreadable" ? undefined : plan.record?.pictures, input.block);
+    if (slot === null) return { ok: false, reason: "that block is no longer in the chapter" };
+    const index = slot.index;
+    const shown = slot.placed?.picture;
     if (shown === undefined) return { ok: false, reason: "that block has no picture" };
     input.onMaking?.();
     const made = await this.makeBenchPicture(store, {

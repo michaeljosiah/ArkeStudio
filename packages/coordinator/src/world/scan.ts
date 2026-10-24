@@ -208,7 +208,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 106: picture shapes — a picture's Tall and a book's shapes (design turn 235, #2164).
 // 107: a chapter's own audiobook narrator, `chapterNarrators` on the book (SPEC-047 R-195).
 // 108: a world's teasers, `teasers` on the Guide record (design turn 236, SPEC-059 R-24).
-export const SUPPORTED_SCHEMA_VERSION = 108;
+// 109: picture marks — a picture set at a sentence inside its block (design turn 237, SPEC-047 R-202).
+export const SUPPORTED_SCHEMA_VERSION = 109;
 
 export class WorldOpenError extends Error {
   constructor(
