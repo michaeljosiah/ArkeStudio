@@ -1,6 +1,6 @@
 # Turn 234 · A world's Guide
 
-Drawn 22 October 2026 and approved as drawn by the owner the same day; nothing is built. Its other half is Arke Player's
+Drawn 22 October 2026 and approved as drawn by the owner the same day. Built in ArkeStudio PRs #2156 and #2157, merged the same day; turn 236 added teasers. Its other half is Arke Player's
 turn P11 (in the ArkePlayer repository's design master): the Worlds tab, a world's characters,
 places and lore, and Reveal. To be specified in SPEC-059.
 

@@ -9,6 +9,16 @@ Client `screens/shell.tsx` shows size, completion, disk space and download recov
 `scripts/story-release-parts.mts` optionally slices the verified ZIP into pinned transport files.
 See [story releases](story-releases.md).
 
+Arke Player (SPEC-058, SPEC-059; turns 233–236): contracts `world-package.ts` reads world packages
+(schema 4 is a part of new chapters), listening documents and guides (version 2 has teasers),
+against Arke Player's own shared fixtures; `arke-player-release.ts` says what each release held and
+what a part may hold next; `world-guide.ts` is the Guide record and the guide document. Coordinator
+`productions/arke-player-export.ts` makes an edition or a part, `world-package.ts` writes and reads
+the ZIP back, `world-guide.ts` keeps the Guide and its teasers and packs the guide, and
+`arke-player-guide-export.ts` makes the guide alone. Client `components/arke-player-export.tsx` is
+the Export sheet's Arke Player kind with Release; `screens/world-guide.tsx` and
+`world-guide-teasers.tsx` are the Guide page. See [publications](publications.md).
+
 Audio Studio (approved turn 226): client
 `screens/chapter-audio-studio.tsx` composes the Cut layout, shared `EditorPanelTabs`,
 `EditorSheetSlot` and `useCutLayout` around the chapter script. `audio-studio-workspace.tsx`

@@ -306,6 +306,7 @@
   world.json                   <i>name, logline, tone, genre, and the canon revision number</i>
   bible.md                     <i>your own prose about the world</i>
   world-art.png                <i>the master look every generated image inherits</i>
+  guide.json                   <i>what Arke Player may show of the world, and its teasers</i>
   <b>art-direction\</b>
     art-direction.json         <i>the look in words, plus every look it has had before</i>
   <b>canon\</b>                       <i>what is true: one file per statement</i>
@@ -334,7 +335,7 @@
     saltlight\                 <i>a film</i>
     the-ledger-of-nights\      <i>a novel</i>
   <b>series\</b>                      <i>one thin record per series, for episodic work</i>
-  <b>exports\</b>                     <i>finished renders</i>
+  <b>exports\</b>                     <i>finished renders, and packages and parts for Arke Player</i>
   changes.jsonl                <i>every accepted change, one line each, oldest first</i>
   world.lock                   <i>present only while the world is open</i>
   <u>.history\</u>                    <i>a full copy of every version ever accepted</i>
@@ -618,6 +619,16 @@ where it needs to go. She has paid for it: her left ear is done...</div>
           Finished renders do not land inside the production. They go to <code>exports/</code> at the
           top of the world, next to <code>productions/</code>, and are encoded somewhere temporary
           first — so a cancelled or failed render leaves nothing that looks like a finished film.
+        </p>
+        <p class="note">
+          A package for Arke Player lands there too, as one file:
+          <code>the-undersong-player-2026-10-22.zip</code>. Chapters released after it come as a
+          <em>part</em>, <code>the-undersong-part-2026-10-30.zip</code>, holding only those chapters.
+          Beside each sits a small <code>.zip.json</code> saying what it holds and what it released;
+          that is how the next part knows where the last one stopped, so deleting one takes its
+          package out of Publications and out of that chain. <code>guide.json</code>, at the top of
+          the world, is the Guide: which characters, places and lore a reader may see, from when,
+          and the teasers shown before the world is installed. It stores choices, never text.
         </p>
       </section>
 
