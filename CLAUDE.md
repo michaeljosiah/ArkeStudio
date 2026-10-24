@@ -286,6 +286,19 @@ parts and empties the entry's `parts`. A Guide with teasers exports guide versio
 from before ArkePlayer PR #11 refuse, with the package carrying it: publish one only once phones
 have that Player.
 
+**A picture comes with the list** (SPEC-058 R-63 – R-67): a world's key art, a story's wide cover
+(16:9) or its upright cover (2:3), new or changed, needs no app release.
+1. Upload it under a name of its own, `<world id>-<keyArt|picture|tall>-<yyyymmdd>.<ext>`, to the
+   same `arke-player-worlds` release. Never replace one: a pinned phone would refuse new bytes.
+2. `dart run arke_world:pin_picture <file> <url>` from ArkePlayer prints its pin. Put the pin under
+   the entry's `pins` (`keyArt` on the world; `picture` and `tall` on the production), raise the
+   `serial`, and publish the list.
+3. Leave `picture`, `tall` and `keyArt` as bundle paths. Released Players read them as text, and
+   an object there would make them ignore the whole list.
+
+Phones fetch pinned pictures with the list, on any network. Players from before ArkePlayer PR #15
+keep their bundled pictures.
+
 ## Pull requests
 
 Branch, push, raise the PR, then comment `@codex review` on it. Fix every P1 and re-request until a
