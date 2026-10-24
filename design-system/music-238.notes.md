@@ -1,6 +1,6 @@
 # Turn 238 · Music as a production
 
-Drawn on 24 October 2026 and not yet approved, with Player P17 (ArkePlayer, drawn the same day).
+Drawn on 24 October 2026 and approved by the owner the same day (“Approved.”), with Player P17 (ArkePlayer PR #17).
 
 ## Asked
 

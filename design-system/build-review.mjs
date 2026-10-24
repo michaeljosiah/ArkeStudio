@@ -29,17 +29,17 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  */
 const SCREENS = [
   // BEGIN MUSIC 238
-  { group: "Music · turn 238", screen: "New production: Make music", frame: "238a", route: "World / New production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Proposed 24 October 2026 with Player P17; not yet approved."] },
-  { group: "Music · turn 238", screen: "Step two: what kind of music", frame: "238b", route: "World / New production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Proposed 24 October 2026 with Player P17; not yet approved."] },
-  { group: "Music · turn 238", screen: "An album: its cover and its tracks", frame: "238c", route: "Music / Production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Proposed 24 October 2026 with Player P17; not yet approved."] },
-  { group: "Music · turn 238", screen: "Add track: a kept take, or a file", frame: "238d", route: "Music / Production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Proposed 24 October 2026 with Player P17; not yet approved."] },
-  { group: "Music · turn 238", screen: "A track open", frame: "238e", route: "Music / Production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Proposed 24 October 2026 with Player P17; not yet approved."] },
-  { group: "Music · turn 238", screen: "The Guide: a character’s theme", frame: "238f", route: "World / Guide", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Proposed 24 October 2026 with Player P17; not yet approved."] },
-  { group: "Music · turn 238", screen: "Adding a teaser: a song", frame: "238g", route: "World / Guide", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Proposed 24 October 2026 with Player P17; not yet approved."] },
-  { group: "Music · turn 238", screen: "Export → Arke Player: an album", frame: "238h", route: "Music / Export", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Proposed 24 October 2026 with Player P17; not yet approved."] },
-  { group: "Music · turn 238", screen: "A track’s composer and takes", frame: "238i", route: "Music / Production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Proposed 24 October 2026 with Player P17; not yet approved."] },
-  { group: "Music · turn 238", screen: "The track editor", frame: "238j", route: "Music / Production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Proposed 24 October 2026 with Player P17; not yet approved."] },
-  { group: "Music · turn 238", screen: "The album’s sequence", frame: "238k", route: "Music / Production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Proposed 24 October 2026 with Player P17; not yet approved."] },
+  { group: "Music · turn 238", screen: "New production: Make music", frame: "238a", route: "World / New production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P17."] },
+  { group: "Music · turn 238", screen: "Step two: what kind of music", frame: "238b", route: "World / New production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P17."] },
+  { group: "Music · turn 238", screen: "An album: its cover and its tracks", frame: "238c", route: "Music / Production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P17."] },
+  { group: "Music · turn 238", screen: "Add track: a kept take, or a file", frame: "238d", route: "Music / Production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P17."] },
+  { group: "Music · turn 238", screen: "A track open", frame: "238e", route: "Music / Production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P17."] },
+  { group: "Music · turn 238", screen: "The Guide: a character’s theme", frame: "238f", route: "World / Guide", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P17."] },
+  { group: "Music · turn 238", screen: "Adding a teaser: a song", frame: "238g", route: "World / Guide", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P17."] },
+  { group: "Music · turn 238", screen: "Export → Arke Player: an album", frame: "238h", route: "Music / Export", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P17."] },
+  { group: "Music · turn 238", screen: "A track’s composer and takes", frame: "238i", route: "Music / Production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P17."] },
+  { group: "Music · turn 238", screen: "The track editor", frame: "238j", route: "Music / Production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P17."] },
+  { group: "Music · turn 238", screen: "The album’s sequence", frame: "238k", route: "Music / Production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P17."] },
   // END MUSIC 238
 
   // BEGIN RELEASE CHAPTERS 236
@@ -898,7 +898,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
-  { file: "music-238.review.html", what: "Turn 238: Music as a production — Make music at the door, an album’s cover and tracks, Add track from Bench or a file, a track open with its lyrics and Heard in, a character’s theme in the Guide, a song teaser, Export → Arke Player for an album, a track’s composer and takes, the track editor, and the album’s sequence.", state: "proposed 24 October 2026; not built" },
+  { file: "music-238.review.html", what: "Turn 238: Music as a production — Make music at the door, an album’s cover and tracks, Add track from Bench or a file, a track open with its lyrics and Heard in, a character’s theme in the Guide, a song teaser, Export → Arke Player for an album, a track’s composer and takes, the track editor, and the album’s sequence.", state: "approved 24 October 2026; not built" },
   { file: "picture-marks-237.review.html", what: "Turn 237: Picture marks — pictures set on the words inside a beat, + Picture at a sentence, a new mark’s panel, and Illustrate choosing pictures from the story under a cap.", state: "approved 24 October 2026; not built" },
   { file: "release-chapters-236.review.html", what: "Turn 236: Releasing chapters — a world’s Guide with its teasers, adding a clip, a character that waits for a chapter, Export → Arke Player releasing new chapters as a part, and the part made beside the releases before it.", state: "approved and built 24 October 2026 (ArkeStudio PR 2173; Player P15 in ArkePlayer PR 11)" },
   { file: "picture-shapes-235.review.html", what: "Turn 235: Picture shapes — the Pictures sheet (Wide and Tall), a block’s picture in both shapes, Tall not made yet, and Export → Arke Player with both shapes and the picture size.", state: "approved and built 23 October 2026 (ArkeStudio PRs 2165–2167)" },
