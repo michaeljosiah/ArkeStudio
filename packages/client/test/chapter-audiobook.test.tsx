@@ -2965,7 +2965,9 @@ describe("picture marks (turn 237)", () => {
     const block = q(m, '[data-block="p0.0"]')!;
     assert.deepEqual([...block.querySelectorAll('[data-testid="audiobook-pin"]')].map((pin) => pin.getAttribute("data-mark")), ["p0.0", markAt(1)], "a bar before each picture's first word");
     assert.equal(block.querySelectorAll('[data-testid="audiobook-mark-chip"]').length, 1, "the mark's chip; the block's own keeps the margin's");
-    assert.match(block.querySelector('[data-testid="audiobook-mark-chip"]')!.textContent!, /^~?\d+:\d\d$/);
+    const chip = block.querySelector('[data-testid="audiobook-mark-chip"]')!;
+    assert.match(chip.querySelector(".fy-ab__picchip-at")?.getAttribute("data-label") ?? "", /^~?\d+:\d\d$/);
+    assert.equal(chip.textContent, "", "drawn from its data: the block's words, which a selection counts, are only the words (codex on PR 2179)");
     assert.ok(block.textContent!.includes("Tunde widened his eyes"), "the words are as written");
   });
 
@@ -2982,6 +2984,18 @@ describe("picture marks (turn 237)", () => {
     await act(async () => q(m, '.fy-ab__pickitem[aria-label="Key art"]')!.click());
     const set = m.sent.findLast((message): message is Extract<ClientMessage, { kind: "set-audiobook-picture" }> => message.kind === "set-audiobook-picture");
     assert.equal(set?.block, markAt(2), "filed at the mark");
+  });
+
+  it("takes the author's tab with a mark open: Voice leaves the mark for its block (codex on PR 2179)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { body: STORY, audiobook: record([], {}) });
+    await act(async () => all(m, '[data-block="p0.0"] [data-testid="audiobook-picture-here"]')[0]!.click());
+    assert.match(q(m, ".fy-abp__title")?.textContent ?? "", /^Picture at/);
+    const voice = all(m, '.fy-abp__tabs [role="tab"]').find((tab) => tab.textContent?.startsWith("Voice"))!;
+    await act(async () => voice.click());
+    assert.ok(voice.classList.contains("fy-abp__tab--on"), "the tab chosen is the tab shown");
+    assert.doesNotMatch(q(m, ".fy-abp__title")?.textContent ?? "", /^Picture at/, "the block's panel, its own head");
+    assert.equal(q(m, '[data-block="p0.0"] .fy-ab__pin--on'), null, "the placed mark, never made, is gone");
   });
 
   it("offers + Picture at a sentence a block says twice only where it first comes (codex on PR 2178)", async () => {

@@ -3396,7 +3396,15 @@ export function ChapterWorkspace({
       voiceCard={voiceCard}
       steps={<ProgressSteps steps={progressSteps} />}
       pictures={pictureFiles.map(([, picture]) => mediaUrl(worldSlug, picture.file))}
-      onPicture={(index) => { const key = pictureFiles[index]?.[0]; chooseView("audiobook"); if (key !== undefined) selectBlock(key); }}
+      onPicture={(index) => {
+        const key = pictureFiles[index]?.[0];
+        chooseView("audiobook");
+        if (key === undefined) return;
+        // A mark's key names its block and its sentence (design turn 237): its block, then the mark, as its chip opens it.
+        const block = pictureKeyParts(key).block;
+        selectBlock(block);
+        setMarkKey(key === block ? null : key);
+      }}
       illustrate={<Button variant="ghost" onClick={() => chooseView("audiobook")}>Illustrate</Button>}
       continuity={continuitySection}
       versions={<>
@@ -4072,7 +4080,12 @@ export function ChapterWorkspace({
                     lines={seamActs.lines}
                     head={panelHead}
                     tab={panelTab}
-                    onTab={setChosenTab}
+                    onTab={(tab) => {
+                      setChosenTab(tab);
+                      // Voice and Timing are the block's: choosing one leaves the mark for its
+                      // block, rather than the mark holding the panel on Picture (codex on PR 2179).
+                      if (tab !== "picture") setMarkKey(null);
+                    }}
                     facts={{
                       ...(shownPicture !== undefined ? { picture: pictureStart(shownPicture) } : {}),
                       ...(panelTakes > 0 ? { voice: `v${panelTakes}` } : {}),

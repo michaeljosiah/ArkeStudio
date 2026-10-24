@@ -1765,7 +1765,10 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
       onDragEnd={() => setDragging(null)}
     />
   );
-  const markChip = (row: BlockRow, key: string, content: ReactNode, made: boolean, on: boolean) => (
+  // A mark's chip sits in its block's words, so its time and title are drawn from its data, never
+  // written in the page, as a seam's press is: a selection's offsets there count the words alone,
+  // and a chip's `1:10` would move a cast or a cue onto the wrong words (codex on PR 2179).
+  const markChip = (row: BlockRow, key: string, look: { file?: string; at: string; title?: string }, made: boolean, on: boolean) => (
     <button
       type="button"
       className={`fy-ab__picchip fy-ab__picchip--mark${made ? "" : " fy-ab__picchip--prop"}${on ? " fy-ab__picchip--on" : ""}`}
@@ -1777,7 +1780,9 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
         onPicture?.(row.block.key, key);
       }}
     >
-      {content}
+      {look.file !== undefined ? <img src={slug === undefined ? undefined : mediaUrl(slug, look.file)} alt="" /> : <i aria-hidden="true" />}
+      {look.at !== "" && <span className="fy-ab__picchip-at" data-label={look.title !== undefined ? `${look.at} ·` : look.at} />}
+      {look.title !== undefined && <b data-label={look.title} />}
     </button>
   );
   const marksFor = (row: BlockRow): Array<{ at: number; node: ReactNode }> => {
@@ -1798,7 +1803,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
       if (offsets[mark.sentence] === undefined) continue;
       taken.add(mark.sentence);
       const on = pictureKey === mark.key;
-      out.push({ at: offsets[mark.sentence]!, node: <>{pin(mark.key, true, on)}{markChip(row, mark.key, <><img src={slug === undefined ? undefined : mediaUrl(slug, mark.file)} alt="" />{pictureStart(mark)}</>, true, on)}</> });
+      out.push({ at: offsets[mark.sentence]!, node: <>{pin(mark.key, true, on)}{markChip(row, mark.key, { file: mark.file, at: pictureStart(mark) }, true, on)}</> });
     }
     for (const [key, proposal] of pictures.proposed ?? []) {
       const parts = pictureKeyParts(key);
@@ -1807,7 +1812,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
       if (sentence <= 0 || taken.has(sentence)) continue;
       taken.add(sentence);
       const at = proposal.at ?? pictures.startOf?.(index, sentence).at;
-      out.push({ at: offsets[sentence]!, node: <>{pin(key, false, pictureKey === key)}{markChip(row, key, <><i aria-hidden="true" />{at !== undefined ? `~${formatRunningTime(at)} · ` : ""}<b>{proposal.title}</b></>, false, pictureKey === key)}</> });
+      out.push({ at: offsets[sentence]!, node: <>{pin(key, false, pictureKey === key)}{markChip(row, key, { at: at !== undefined ? `~${formatRunningTime(at)}` : "", title: proposal.title }, false, pictureKey === key)}</> });
     }
     // One `+ Picture` placed and not yet made, dashed and pressed while its panel is open (237c).
     if (pictureKey !== null && !pictures.byKey.has(pictureKey) && pictureKeyParts(pictureKey).block === row.block.key) {
@@ -1816,7 +1821,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
       if (sentence > 0 && !taken.has(sentence)) {
         taken.add(sentence);
         const start = pictures.startOf?.(index, sentence);
-        out.push({ at: offsets[sentence]!, node: <>{pin(pictureKey, false, true)}{markChip(row, pictureKey, <><i aria-hidden="true" />{start !== undefined ? pictureStart(start) : ""}</>, false, true)}</> });
+        out.push({ at: offsets[sentence]!, node: <>{pin(pictureKey, false, true)}{markChip(row, pictureKey, { at: start !== undefined ? pictureStart(start) : "" }, false, true)}</> });
       }
     }
     // Each sentence start with no picture is a place: `+ Picture` on a fine pointer (237b), and a

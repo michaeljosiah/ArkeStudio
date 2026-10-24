@@ -508,6 +508,8 @@
 .fy-ab__pin--on { box-shadow: 0 0 0 2px color-mix(in srgb, var(--foreground) 25%, transparent); }
 .fy-ab__picchip--mark { position: absolute; z-index: 2; left: calc(100cqw - 134px); margin-top: -3px; transform: translateX(-100%); cursor: pointer; }
 .fy-ab__picchip--mark b { font-weight: 500; color: var(--foreground); }
+/* Drawn from the chip's data: it sits in the block's words, whose selection offsets count only them. */
+.fy-ab__picchip--mark [data-label]::before { content: attr(data-label); }
 .fy-ab__picchip--mark.fy-ab__picchip--prop i { width: 28px; height: 18px; border-radius: 4px; border: 1px dashed var(--neutral-400); display: inline-block; box-sizing: border-box; }
 .fy-ab__picchip--on { border-color: var(--foreground); box-shadow: 0 0 0 1px var(--foreground); }
 .fy-ab__place { position: relative; display: inline-block; width: 0; height: 1em; vertical-align: -2px; }
