@@ -1,19 +1,5 @@
-import type { ComfyUiStatus, RecipeReadiness } from "@arke-studio/contracts";
-
 /** One graphics card shared by the two local inference engines (SPEC-033, issue 984). */
 export type LocalGpuEngine = "Ollama" | "ComfyUI";
-
-export function memoryWait(recipe: RecipeReadiness): boolean {
-  return recipe.reasonKind === "vram-busy" || recipe.reasonKind === "memory-busy";
-}
-
-/** Preserve the measured fit; transient contention is handled after queue admission. */
-export function queueableLocalMemory(status: ComfyUiStatus): ComfyUiStatus {
-  if (status.engine.locality !== "local") return status;
-  return { ...status, recipes: status.recipes.map((recipe) => memoryWait(recipe)
-    ? { ...recipe, state: "ready", reason: "Memory will be checked when the graphics card is available.", reasonKind: undefined }
-    : recipe) };
-}
 
 interface WaitingTurn {
   engine: LocalGpuEngine;

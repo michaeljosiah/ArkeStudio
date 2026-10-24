@@ -40,7 +40,7 @@ import { createLocalWorldRepository } from "./application/local-worlds.js";
 import { createLocalEnginePolicy, LOCAL_ENGINE_CONTEXT } from "./application/local-policy.js";
 import { createStudioStorage, type StudioStorage } from "./application/studio-composition.js";
 import { referenceInputProblem, ollamaLlmAvailable } from "@arke-studio/contracts";
-import { LocalGpu, memoryWait, queueableLocalMemory } from "./local-ai/gpu.js";
+import { LocalGpu } from "./local-ai/gpu.js";
 import { withLocalGpu } from "./harness/local-gpu.js";
 import { withModelValidation } from "./harness/model-validation.js";
 import { HarnessModelCatalog, selectHarnessModel, type LanguageModelSelection } from "./harness/model-catalog.js";
@@ -3774,7 +3774,7 @@ export class Coordinator {
               const status = await service.status(this.readModel.getState().app.runtime?.probes ?? null);
               const recipe = status.recipes.find((r) => r.recipeId === input.model);
               if (!recipe) return { ok: false, reason: `"${input.model}" is not a shipped recipe` };
-              if (recipe.state === "disabled" && !(status.engine.locality === "local" && memoryWait(recipe))) {
+              if (recipe.state === "disabled") {
                 return { ok: false, reason: recipe.reason ?? "the recipe is not ready on this machine" };
               }
               const model = this.opts.manifest?.models.find(row => row.id === input.model && row.provider === input.provider);
@@ -6421,7 +6421,7 @@ export class Coordinator {
     if (!service || this.stopping) return;
     const revision = ++this.comfyUiRefreshRevision;
     const probes = this.readModel.getState().app.runtime?.probes ?? null;
-    const status = queueableLocalMemory(await service.status(probes));
+    const status = await service.status(probes);
     if (this.stopping || revision !== this.comfyUiRefreshRevision) return;
     this.emit({ at: new Date().toISOString(), type: "comfyui.status", comfyui: status });
     // The engine's locality decides every ComfyUI model's fit verdict, so the two statuses move

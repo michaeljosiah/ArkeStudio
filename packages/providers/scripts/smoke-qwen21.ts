@@ -37,7 +37,7 @@ const stats = await get("/system_stats");
 const client = new ComfyUiClient(async (url, init) => {
   if (url.endsWith("/prompt")) await writeFile(join(target, "request.json"), init!.body as string);
   return fetch(url, init);
-}, () => base, preflight, undefined, undefined, async () => freemem() / 2 ** 20);
+}, () => base, preflight, undefined);
 const started = Date.now();
 const before = { totalMb: totalmem() / 2 ** 20, freeMb: freemem() / 2 ** 20 };
 try {

@@ -32,7 +32,7 @@ function engine(locality: "local" | "remote" = "local") {
     }
     throw new Error(`Unexpected request ${url}`);
   };
-  const client = new ComfyUiClient(fetch, () => "http://127.0.0.1:8188", async () => ({ ok: true }), undefined, undefined, undefined, () => locality);
+  const client = new ComfyUiClient(fetch, () => "http://127.0.0.1:8188", async () => ({ ok: true }), undefined, () => locality);
   return { client, calls, graphs };
 }
 

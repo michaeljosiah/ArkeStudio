@@ -75,8 +75,8 @@ export const H3_REFERENCE: ComfyUiRecipe = {
     { file: "vae/minimax_h3_audio_vae_fp32.safetensors", sha256: "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48", sizeMb: 577, url: `${source}/vae/minimax_h3_audio_vae_fp32.safetensors` },
     { file: "loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors", sha256: "5b9ab5ade15d0775676d01a907268a69a1468dc6033b3b0d3ded5502f3ebb84c", sizeMb: 1866, url: `${source}/loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors` },
   ] },
-  hardware: { minVramMb: 10000, minFreeVramMb: 4000, recommendedVramMb: 24000, minMemMb: 30720, minFreeMemMb: 4096,
-    floorSource: "Mixed R2V verified 2026-09-07 on RTX 3080 10 GB / 32 GB RAM: two images, one 2s video with soundtrack and one 2s audio; 864×480×124 at four steps completed in 657s. Free RAM started at 4133 MiB and bottomed at 407 MiB. The 4 GB free-VRAM guard remains conservative from FL2VA; maximum-reference memory use is not measured." },
+  hardware: { minVramMb: 10000, recommendedVramMb: 24000, minMemMb: 30720,
+    floorSource: "Mixed R2V verified 2026-09-07 on RTX 3080 10 GB / 32 GB RAM: two images, one 2s video with soundtrack and one 2s audio; 864×480×124 at four steps completed in 657s. Free RAM started at 4133 MiB and bottomed at 407 MiB; maximum-reference memory use is not measured." },
 };
 
 export const H3_REFERENCE_MODEL: ManifestModel = {

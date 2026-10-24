@@ -100,8 +100,8 @@ export const QWEN21_IMAGE: ComfyUiRecipe = {
     customNodes: [],
   },
   hardware: {
-    accelerator: "cuda", minVramMb: 10240, minFreeVramMb: 6500, recommendedVramMb: 16384,
-    minMemMb: 30720, minFreeMemMb: 10000,
-    floorSource: "RTX 3080 10 GB / 32 GB Windows, ComfyUI 0.38.1 ordinary engine, 2026-10-10: every 2K canvas at 40 steps in 199–237 s, and text and one- to three-reference jobs at 1K, at a 9.4–9.7 GB whole-card peak; available RAM fell to tens of MiB while the models loaded on a busy desktop. Admission keeps v1's free-memory floors; see docs/development/qwen21.md.",
+    accelerator: "cuda", minVramMb: 10240, recommendedVramMb: 16384,
+    minMemMb: 30720,
+    floorSource: "RTX 3080 10 GB / 32 GB Windows, ComfyUI 0.38.1 ordinary engine, 2026-10-10: every 2K canvas at 40 steps in 199–237 s, and text and one- to three-reference jobs at 1K, at a 9.4–9.7 GB whole-card peak; available RAM fell to tens of MiB while the models loaded on a busy desktop; see docs/development/qwen21.md.",
   },
 };

@@ -163,14 +163,6 @@ export interface ComfyUiRecipe {
     accelerator?: "cuda";
     /** The card-size floor: total VRAM the machine must have, or the recipe is disabled. */
     minVramMb: number;
-    /**
-     * The free-VRAM floor: what readiness's busy check and the pre-dispatch room check compare
-     * against. Two floors because they answer two questions — "is the card big enough" against
-     * "is enough of it free right now" — and reusing one figure for both rejected the exact
-     * configuration H3 was verified on: a 10 GB card streaming a 20 GB transformer needs the
-     * whole card to exist and about 4 GB of it free, not 10 GB free.
-     */
-    minFreeVramMb: number;
     recommendedVramMb: number;
     /**
      * The system-memory floor, where one was measured. Offloading spends RAM, so for a
@@ -179,14 +171,6 @@ export interface ComfyUiRecipe {
      * reach dispatch without ever meeting `fitFor`.
      */
     minMemMb?: number;
-    /**
-     * The free-system-memory floor, where one was measured: what the pre-dispatch room check
-     * and readiness's memory-busy rung compare the machine's free RAM against (issue 846). A
-     * separate figure from `minMemMb` for the reason the two VRAM floors are separate — "is the
-     * machine big enough" against "is enough of it free right now". Absent means the run that
-     * would fix the number has not been recorded, and both checks stay silent rather than guess.
-     */
-    minFreeMemMb?: number;
     /** Where the floor came from, so nobody mistakes a transcription for a measurement (§1.4). */
     floorSource: string;
   };
@@ -255,8 +239,6 @@ const DRAFT_IMAGE: ComfyUiRecipe = {
   },
   hardware: {
     minVramMb: 6000,
-    // The pre-split value: SDXL genuinely wants its floor free, so the two figures agree here.
-    minFreeVramMb: 6000,
     recommendedVramMb: 8000,
     floorSource: "transcribed from the model publisher's stated requirement; not yet measured on Arke reference hardware",
   },
@@ -347,8 +329,6 @@ const DRAFT_VIDEO: ComfyUiRecipe = {
   },
   hardware: {
     minVramMb: 8000,
-    // The pre-split value: the 5B model resides on the card whole, so the two figures agree.
-    minFreeVramMb: 8000,
     recommendedVramMb: 12000,
     floorSource: "transcribed from the engine vendor's stated 8 GB requirement for this model; not yet measured on Arke reference hardware",
   },
@@ -377,8 +357,8 @@ const DRAFT_VIDEO: ComfyUiRecipe = {
  * and 8.2 to 8.4 GB of the card free, the rest held by other applications. Free RAM fell to the
  * low-water mark whatever the dispatch figure was (15.0 to 18.0 GB spent): the weights are
  * mapped, so the page cache fills what the machine has. That is why "to spare" says how close
- * the machine came and not how much a run needs, and why no free-RAM floor follows from it yet
- * (issue 846) — a run from a deliberately smaller free figure is the measurement that would.
+ * the machine came and not how much a run needs. No free-RAM floor follows from it: free memory
+ * is the engine's to judge at dispatch (2026-10-24).
  *
  * VRAM barely moves with length (9,500 → 9,677 MiB against a 10,240 MiB card) because the
  * transformer streams either way, while the decoded sequence grows with the length; the
@@ -601,20 +581,13 @@ const H3_VIDEO: ComfyUiRecipe = {
     // VRAM loading. Community reports put 8 GB cards through reduced runs, but nothing below
     // 10 GB was measured here, so nothing below 10 GB is claimed.
     minVramMb: 10000,
-    // Measured, not derived from the card floor: the verified run dispatched with ~4.1 GB free
-    // (~6 GB of the card held by other applications) and completed. Requiring the card floor
-    // FREE would have refused the only configuration this recipe has ever been proven on.
-    minFreeVramMb: 4000,
     recommendedVramMb: 24000,
     // System RAM is what offloading spends: the verified run bottomed at 933 MB free of 32 GB.
     // 30720 rather than 32768 because a nominal-32 GB machine reports slightly under (the
     // reference machine says 32676), and the floor must admit the machine class it was measured on.
     minMemMb: 30720,
-    // No free-RAM floor yet (issue 846). The runs above recorded where free memory BOTTOMED
-    // (758 MB on the 15 s clip) but not where it stood at dispatch, and the floor is the
-    // difference between the two. Deriving it from the weight sizes would be the transcription
-    // `floorSource` exists to expose, so the next measured run records both figures and the
-    // floor lands then; until it does, the drain-time /free is what keeps a session from growing.
+    // No free-RAM floor: free memory is the engine's to judge at dispatch (2026-10-24). The
+    // drain-time /free is what keeps a long session from growing.
     floorSource:
       "measured through ComfyUI on Arke reference hardware 2026-08-28: RTX 3080 10 GB, ~6 GB already in use by " +
       "other applications, 864×480×124 frames at 8 steps completed in 14m53s with peak card usage 9699 MB and " +
@@ -650,10 +623,6 @@ const H3_VIDEO_768: ComfyUiRecipe = {
   sampling: { ...H3_SAMPLING, clipSec: 5 },
   hardware: {
     minVramMb: 10000,
-    // Measured the way the 480p floor was: the second run in floorSource started with 3.8 GB of
-    // the card free, 4 GiB of it deliberately held by another process, and completed in the
-    // same time as the first.
-    minFreeVramMb: 4000,
     recommendedVramMb: 24000,
     minMemMb: 30720,
     floorSource:
@@ -1002,8 +971,8 @@ export const H3_768_DIMENSIONS: Record<string, { width: number; height: number }
  *   124 frames → 5.167 s     0 MB RAM to spare, 9,749 MiB VRAM  —  12m32s  (3.8 GB free, 4 GiB deliberately held)
  *
  * Three minutes over the 480p run of the same length, and the same shape otherwise: the
- * transformer streams either way, the decoded sequence is what grows. The second run is the
- * free-VRAM floor's measurement — the card held at 305 MiB free for the whole of the sampling
+ * transformer streams either way, the decoded sequence is what grows. In the second run the card
+ * held at 305 MiB free for the whole of the sampling
  * and the run took no longer for it — and its RAM low-water mark of nothing at all is the page
  * cache filling what the machine had (issue 848's finding), not a run that paged to a halt.
  *
