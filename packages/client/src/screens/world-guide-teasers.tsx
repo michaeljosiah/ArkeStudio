@@ -191,11 +191,15 @@ export function GuideTeasers({ world, worldId, record, productions }: { world: W
   );
 }
 
+/** A sheet with no picture yet shows its initials, as the Guide's rows do (234a). */
+const initialsOf = (name: string) => name.split(/\s+/).filter((word) => /^[A-Za-z]/.test(word) && !/^(the|of|a)$/i.test(word)).slice(0, 2).map((word) => word[0]!.toUpperCase()).join("") || name.slice(0, 1).toUpperCase();
+
 function TeaserPicture({ world, card, n }: { world: WorldBundle; card: Card; n?: number }) {
   const [shown, setShown] = useState(true);
   return (
     <span className="im">
       {card.picture?.kind === "sheet" && shown && <Portrait worldSlug={world.meta.slug} path={card.picture.path} label={card.picture.label} radius={0} loading="lazy" onAvailabilityChange={setShown} />}
+      {card.picture?.kind === "sheet" && !shown && <span className="fy-guide-ini">{initialsOf(card.picture.label)}</span>}
       {card.picture?.kind === "file" && <img src={mediaUrl(world.meta.slug, card.picture.file)} alt="" loading="lazy" />}
       {card.clip && <span className="play"><PlaySolid size={14} /></span>}
       {n !== undefined && <span className="n">{n}</span>}

@@ -220,7 +220,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
   const guide = world === null ? null : exportGuideCounts(world);
   const guided = guide !== null && guide.characters.public + guide.places.public + guide.lore.public + guide.teasers.chosen > 0;
   // A part carries its chapters alone: no cover, and no guide (R-45).
-  const planned = plan === null ? null : parting ? arkePlayerCounts({ ...plan, cover: null, chapters: ticked }, options) : arkePlayerCounts(plan, options);
+  const planned = plan === null ? null : parting ? arkePlayerCounts({ ...plan, cover: null, chapters: ticked }, { ...options, book: options.book && ticked.length > 0 }) : arkePlayerCounts(plan, options);
   // The guide rides in every package once something is public (R-15), and the estimate counts it.
   const counts = planned === null || !guided || parting ? planned : { ...planned, bytes: planned.bytes + (guide.characters.public + guide.places.public + guide.teasers.chosen) * GUIDE_ENTRY_BYTES };
   const empty = parting ? ticked.length === 0 : counts !== null && counts.chapters === 0 && !options.book;
@@ -366,7 +366,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       {made === null && (
         <div className="fy-abv-est" data-testid="arke-player-estimate">
           <b>{counts === null ? "…" : `~${megabytes(counts.bytes)} · ~${counts.minutes} min ${remote ? "on the desktop" : "on this machine"}`}</b>
-          {!phone && counts !== null && <span className="m">{[`${counts.chapters} chapter${counts.chapters === 1 ? "" : "s"}`, `${counts.pictures + counts.tall} picture${counts.pictures + counts.tall === 1 ? "" : "s"}`, options.book ? "the book" : null, guided && !parting ? "the guide" : null].filter(Boolean).join(" · ")}</span>}
+          {!phone && counts !== null && <span className="m">{[`${counts.chapters} chapter${counts.chapters === 1 ? "" : "s"}`, `${counts.pictures + counts.tall} picture${counts.pictures + counts.tall === 1 ? "" : "s"}`, options.book && (!parting || ticked.length > 0) ? "the book" : null, guided && !parting ? "the guide" : null].filter(Boolean).join(" · ")}</span>}
         </div>
       )}
       {making !== null && <div className="fy-abv-note" data-testid="arke-player-making">Making package · follow it in Activity</div>}

@@ -102,6 +102,7 @@
 .fy-abv-ch i { margin-left: auto; }
 .fy-abv-sched { display: inline-flex; gap: 8px; flex-wrap: wrap; }
 .fy-abv-sched .fy-abv-field { min-width: 120px; gap: 6px; background: transparent; color: var(--foreground); }
+.fy-abv-sched select.fy-abv-field { height: 28px; min-height: 0; padding: 0 8px; line-height: normal; }
 .fy-abv-sched input { border: 0; background: transparent; color: inherit; font: inherit; min-width: 0; }
 .fy-abv-rel { display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 6px 14px; border-top: 1px solid var(--border); font-size: var(--text-sm); }
 .fy-abv-rel:first-child { border-top: 0; }
