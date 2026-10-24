@@ -11,6 +11,9 @@ import { Button } from "./ui.js";
  * price; and `Make 290 tall` while Tall is on and pictures lack it, its run followed in place as
  * Illustrate's is. Counted from the book's own listening plan, as Export counts it.
  */
+/** Past the coordinator's deadline for a book read: an ask out this long was lost with its socket. */
+const LISTENING_LOST_MS = 150_000;
+
 const SHAPES: ReadonlyArray<{ shape: PictureShape; name: string; ratio: string; shows: string }> = [
   { shape: "wide", name: "Wide", ratio: "16:9", shows: "desktop · tablet" },
   { shape: "tall", name: "Tall", ratio: "9:16", shows: "phone" },
@@ -43,6 +46,8 @@ export function PicturesSheet({ worldId, production, onClose }: { worldId: strin
   const [, setHeard] = useState(0);
   const run: AudiobookTallProgress | null = lastAudiobookTallProgress(worldId, production.meta.id);
   const asked = useRef<string | null>(null);
+  const askedAt = useRef(0);
+  const owed = useRef(false);
   const shell = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const element = shell.current;
@@ -54,21 +59,40 @@ export function PicturesSheet({ worldId, production, onClose }: { worldId: strin
     };
   }, []);
   useEffect(() => {
+    const ask = () => {
+      owed.current = false;
+      askedAt.current = Date.now();
+      asked.current = openAudiobookListening(worldId, production.meta.id);
+    };
     const offPlan = subscribeAudiobookListening((answer) => {
-      if (answer.requestId === asked.current && answer.listening !== undefined) setPlan(answer.listening);
+      if (answer.requestId !== asked.current) return;
+      if (answer.listening !== undefined) setPlan(answer.listening);
+      asked.current = null;
+      if (owed.current) ask();
     });
     const offRun = subscribeAudiobookTallProgress((progress) => {
       if (progress.productionId !== production.meta.id) return;
       setHeard((count) => count + 1);
-      // Each Tall landed shows in the counts: the plan is read again as the run goes and when it ends.
-      asked.current = openAudiobookListening(worldId, production.meta.id);
+      // Each Tall landed shows in the counts: the plan is read again as the run goes and when it
+      // ends — one read out at a time (2026-10-24). A run lands pictures faster than a large book
+      // is read on a busy machine, and asking again on each one, never waiting, buried the
+      // coordinator in reads that each outlived their ask. One out past the coordinator's two
+      // minutes is lost, not slow.
+      if (asked.current !== null && Date.now() - askedAt.current < LISTENING_LOST_MS) owed.current = true;
+      else ask();
     });
-    asked.current = openAudiobookListening(worldId, production.meta.id);
     return () => {
       offPlan();
       offRun();
     };
   }, [worldId, production.meta.id]);
+  // Asked at once, and again when the window reconnects: an ask out as the socket closed is never answered.
+  useEffect(() => {
+    if (connection !== "open") return;
+    owed.current = false;
+    askedAt.current = Date.now();
+    asked.current = openAudiobookListening(worldId, production.meta.id);
+  }, [worldId, production.meta.id, connection]);
 
   const counts = plan === null ? null : pictureCounts(plan);
   const model = pictureRouteModel(store.state);

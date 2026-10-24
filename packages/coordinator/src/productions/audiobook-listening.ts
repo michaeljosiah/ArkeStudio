@@ -163,8 +163,11 @@ async function timedListening(store: WorldStore, productionId: string, plan: Aud
  * `mixAll`: every chapter on its one mix, timing or none (design turn 197, rule 7) — the video
  * takes its sound from the renderer the chapter's Play uses and nothing else, so a chapter with
  * no timing is rendered as one too: its takes back to back, at the book's one loudness.
+ *
+ * `abandoned`: the asker stopped waiting, and the read throws at the next chapter. `signal` is an
+ * export's cancel, which reaches a chapter's mix but leaves the read to finish.
  */
-export async function audiobookListening(store: WorldStore, productionId: string, options: { ffmpeg?: FfmpegRunner; mixAll?: boolean; scope?: AudiobookScope; finalAudio?: boolean; signal?: AbortSignal } = {}): Promise<AudiobookListening> {
+export async function audiobookListening(store: WorldStore, productionId: string, options: { ffmpeg?: FfmpegRunner; mixAll?: boolean; scope?: AudiobookScope; finalAudio?: boolean; signal?: AbortSignal; abandoned?: AbortSignal } = {}): Promise<AudiobookListening> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const scope = options.scope ?? { kind: "book" };
@@ -173,6 +176,9 @@ export async function audiobookListening(store: WorldStore, productionId: string
   const cover = await bookCover(store);
   const chapters: ListeningChapter[] = [];
   for (const summary of selected.sort((a, b) => a.order - b.order)) {
+    // A read given up on stops at the next chapter: on a large book each is a fifth of a second
+    // of the coordinator's one thread, and nobody is waiting for the rest (2026-10-24).
+    options.abandoned?.throwIfAborted();
     let plan: AudiobookPlan;
     try {
       plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId, summary.id) });

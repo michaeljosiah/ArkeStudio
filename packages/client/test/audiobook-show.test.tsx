@@ -425,6 +425,35 @@ describe("Pictures, in one sheet (turn 235a)", () => {
     await answerPlans();
     assert.match(q('[data-testid="pictures-make-tall"]')!.textContent!, /^Tall · 1 to make.*Make 1 tall$/);
   });
+
+  it("keeps one book read out while a run lands pictures, and asks again when the window reconnects (2026-10-24)", async () => {
+    const m = await mount(inkbound(91, { shapes: ["wide", "tall"] }));
+    const sheet = await openSheet();
+    const picture = (key: string) => ({ key, number: 1, file: `artifacts/${key}.png`, at: 0, seconds: 30 });
+    const plan = (count: number) => ({ productionId: "inkbound", title: "Inkbound", scope: { kind: "book" }, cover: null, chapters: [{ chapterId: "neap", order: 1, title: "Neap", state: "read", seconds: 90, blocks: [], gaps: [], opening: null, pictures: Array.from({ length: count }, (_, i) => picture(`p${i}`)) }] });
+    const asks = () => sent(m, "open-audiobook-listening") as Array<Extract<ClientMessage, { kind: "open-audiobook-listening" }>>;
+    const answer = (requestId: string, count: number) => act(async () => __applyEventForTest({ at: AT_, type: "audiobook.listening", requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: plan(count) } as never));
+    const progress = (made: number) => act(async () => __applyEventForTest({ at: AT_, type: "audiobook.tall-progress", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", state: "making", total: 9, made, failed: [] }));
+    const out = asks().at(-1)!;
+    const before = asks().length;
+    // Three Talls land before the book is read once: the sheet waits on the read it has out.
+    await progress(1); await progress(2); await progress(3);
+    assert.equal(asks().length, before, "no ask while one is out");
+    await answer(out.requestId, 3);
+    assert.match(sheet.querySelector('[data-testid="pictures-shape-wide"]')!.textContent!, /3 made/);
+    assert.equal(asks().length, before + 1, "the pictures landed meanwhile are read once, after it");
+    await answer(asks().at(-1)!.requestId, 4);
+    assert.match(sheet.querySelector('[data-testid="pictures-shape-wide"]')!.textContent!, /4 made/);
+    assert.equal(asks().length, before + 1, "nothing landed meanwhile, so nothing more is asked");
+    // An ask out as the socket closed is never answered: the window asks again once it is back.
+    await progress(4);
+    const lost = asks().length;
+    await act(async () => __setStateForTest(inkbound(91, { shapes: ["wide", "tall"] }), { connection: "connecting" }));
+    await act(async () => __setStateForTest(inkbound(91, { shapes: ["wide", "tall"] }), { connection: "open" }));
+    assert.ok(asks().length > lost);
+    await answer(asks().at(-1)!.requestId, 6);
+    assert.match(sheet.querySelector('[data-testid="pictures-shape-wide"]')!.textContent!, /6 made/);
+  });
 });
 
 describe("Reading, in one sheet (199e, rule 10)", () => {

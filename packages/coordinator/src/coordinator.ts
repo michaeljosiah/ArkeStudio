@@ -193,6 +193,7 @@ import {
   supportedDeliveries,
   type ChapterAudiobook,
   type AudiobookDirection,
+  type AudiobookListening,
   audiobookTextHash,
   type AudiobookLook,
   type IllustrationProgress,
@@ -255,6 +256,7 @@ import type { AppLog } from "./app-log.js";
 import { type AppSettingsFile, routingFaults } from "./app-settings.js";
 import { AskService } from "./canon/ask.js";
 import type { CredentialStore, Cipher } from "./credentials/store.js";
+import { CoalescedReads, ReadStalledError, type ReadTurn } from "./coalesced-reads.js";
 import { buildDiagnosticsBundle } from "./diagnostics.js";
 import { DiagnosticsSnapshotHolder } from "./diagnostics-snapshot.js";
 import {
@@ -1043,6 +1045,8 @@ export interface CoordinatorOptions {
   dispatchClients?: Record<string, DispatchClient>;
   /** SPEC-013 R-19: the local encoder for exports; absent → exports state the reason. */
   ffmpeg?: FfmpegRunner;
+  /** How long a window's book or chapter read may take before it is answered as stalled; two minutes. */
+  listeningDeadlineMs?: number;
   effectRasterHost?: EffectRasterHost;
   effectAudioAnalysisHost?: EffectAudioAnalysisHost;
   /**
@@ -1351,6 +1355,8 @@ export class Coordinator {
    * is never hidden by a reload (codex on PR 2166).
    */
   private readonly makingTallPictures = new Map<string, { control: AbortController; last?: Extract<DomainEvent, { type: "audiobook.tall-progress" }> }>();
+  /** The book as a listener hears it, read once at a time per book or chapter (see CoalescedReads). */
+  private readonly listeningReads: CoalescedReads<AudiobookListening | null>;
   /** `Illustrate this chapter` reading a chapter (turn 191b): one at a time, ended with the world. */
   private readonly illustrating = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /** A proposal not yet accepted (R-101): held by chapter and replayed to a window that connects. Nothing on disk. */
@@ -3490,6 +3496,7 @@ export class Coordinator {
     const storage = opts.storage ?? createStudioStorage(opts);
     this.secrets = storage.secrets;
     this.readModel = new ReadModel(opts.appVersion);
+    this.listeningReads = new CoalescedReads(opts.listeningDeadlineMs ?? 120_000);
     this.audiobookActivity = new AudiobookActivityJournal(opts.appRoot ? join(opts.appRoot, "queue", "audiobook-reads.jsonl") : undefined, run => this.emit({ type: "audiobook.activity", at: run.updatedAt, run }));
     this.changeLog = storage.changeLog;
     this.appLog = storage.appLog;
@@ -6973,7 +6980,8 @@ export class Coordinator {
     // A request owns its world independently of the renderer route. Use the same authenticated
     // commands and store, never a second coordinator or an unowned filesystem writer.
     if (!audiobookStore && "worldId" in msg && msg.worldId &&
-      ["read-audiobook-chapter", "read-audiobook-book", "open-audiobook", "open-audiobook-listening", "keep-audiobook-split", "export-audiobook-player", "export-arke-player"].includes(msg.kind) &&
+      // The book as a listener hears it takes its store inside its own read, under its deadline.
+      ["read-audiobook-chapter", "read-audiobook-book", "open-audiobook", "keep-audiobook-split", "export-audiobook-player", "export-arke-player"].includes(msg.kind) &&
       this.opts.provider.withBackgroundWorldStore) {
       if (this.stopping) return;
       return this.opts.provider.withBackgroundWorldStore(msg.worldId, store =>
@@ -16044,17 +16052,36 @@ export class Coordinator {
         // The book as a listener hears it (turn 186, SPEC-047 R-66..R-71): every chapter planned
         // as its press would plan it, the made takes on one clock and the pictures placed on it,
         // answered to the window that asked. Nothing written, nothing asked of a provider.
-        const store = audiobookStore ?? this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        // One read at a time per book or chapter, every ask answered within the deadline — as
+        // stalled when it must be, never with silence (2026-10-24, see CoalescedReads).
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId };
-        try {
+        const scope = msg.scope ?? { kind: "book" as const };
+        const key = `${msg.worldId}/${msg.productionId}/${scope.kind === "chapter" ? `chapter:${scope.chapterId}` : "book"}`;
+        const readFrom = async (store: WorldStore, turn: ReadTurn, began: number): Promise<AudiobookListening | null> => {
+          turn.stage("reading the book");
+          if (store.worldId !== msg.worldId || !store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return null;
+          const opened = Date.now();
           // No voice is asked for: what plays is judged by the words alone (codex on PR 1491).
-          const listening = await audiobookListening(store, msg.productionId, { ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), ...(msg.scope !== undefined ? { scope: msg.scope } : {}) });
+          const listening = await audiobookListening(store, msg.productionId, { ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), ...(msg.scope !== undefined ? { scope: msg.scope } : {}), abandoned: turn.signal });
+          // Which half was slow, for the next time a window waits: the world's turn or the read.
+          if (Date.now() - began > 20_000) void this.appLog?.append({ kind: "audiobook.listening-slow", production: msg.productionId, scope: scope.kind, waitedMs: opened - began, readMs: Date.now() - opened });
+          return listening;
+        };
+        try {
+          const listening = await this.listeningReads.ask(key, (turn) => {
+            const began = Date.now();
+            turn.stage("waiting for the world");
+            if (this.opts.provider.withBackgroundWorldStore) return this.opts.provider.withBackgroundWorldStore(msg.worldId, (store) => readFrom(store, turn, began), { signal: turn.signal });
+            const store = this.opts.provider.openStore?.();
+            return store ? readFrom(store, turn, began) : Promise.resolve(null);
+          });
+          // A world or production no longer held is answered by nobody, as it always was.
+          if (listening === null) return;
           this.emit({ at: new Date().toISOString(), type: "audiobook.listening", ...ids, listening });
         } catch (err) {
-          void this.appLog?.append({ kind: "audiobook.listening-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
-          this.emit({ at: new Date().toISOString(), type: "audiobook.listening", ...ids, listening: null, refused: describeCoordinatorError(err) });
+          const stalled = err instanceof ReadStalledError;
+          void this.appLog?.append({ kind: "audiobook.listening-failed", production: msg.productionId, scope: scope.kind, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: new Date().toISOString(), type: "audiobook.listening", ...ids, listening: null, refused: stalled ? "reading took too long · try again" : describeCoordinatorError(err) });
         }
         return;
       }

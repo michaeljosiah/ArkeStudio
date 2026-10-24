@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
+import { EventEmitter } from "node:events";
 import { join } from "node:path";
 import { describe, it, type TestContext } from "node:test";
 import WebSocket from "ws";
@@ -530,4 +531,60 @@ it("compacts request bodies, retains unchanged history only when negotiated, and
   const legacy = legacyClient.frames[0]!;
   if (legacy.kind === "snapshot") { assert.equal(legacy.retainedHistory, undefined); assert.equal(legacy.state.app.jobs[0]!.params.text, job.params.text); }
   assert.deepEqual(client.frames.map(f => f.seq), Array.from({ length: 11 }, (_, i) => i + 1));
+});
+
+/** A window that is not reading: every write waits until the test lets it complete. */
+function stalledWindow(transport: Transport) {
+  const sent: Frame[] = [];
+  const done: Array<() => void> = [];
+  const socket = Object.assign(new EventEmitter(), {
+    readyState: 1,
+    bufferedAmount: 0,
+    send(text: string, callback: (error?: Error) => void) { sent.push(FrameSchema.parse(JSON.parse(text))); done.push(() => callback()); },
+    close() { socket.readyState = 2; },
+    terminate() {},
+  });
+  (transport as unknown as { accept(socket: unknown, origin: string | undefined): void }).accept(socket, undefined);
+  return {
+    sent,
+    hello: (retainHistory: boolean) => socket.emit("message", Buffer.from(JSON.stringify({ kind: "hello", token: TOKEN, ...(retainHistory ? { retainHistory } : {}) }))),
+    drain: () => { while (done.length) done.shift()!(); },
+    closed: () => socket.readyState !== 1,
+  };
+}
+
+it("hands a window that fell behind only the newest refresh, every event in order, and history it has not got (2026-10-24)", async () => {
+  const { JobSchema } = await import("@arke-studio/contracts");
+  const job = JobSchema.parse({ id: "jb_01J8F3K2QW9VZX4N7M0RTYB6HC", idempotencyKey: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+    worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", target: { kind: "voice-preview" }, capability: "voice-tts", provider: "test", model: "voice",
+    params: { purpose: "audiobook" }, estimatedMicroUsd: 1, status: "running", createdAt: "2026-10-24T11:00:00Z", updatedAt: "2026-10-24T11:00:00Z" });
+  let state = emptyClientState({ jobs: [job] });
+  const transport = new Transport({ auth: AUTH, getSnapshot: () => state });
+  const window = stalledWindow(transport);
+  window.hello(true);
+  // The hello's snapshot is being written; the window reads nothing while three refreshes are asked.
+  transport.broadcastSnapshot();
+  const succeeded = { ...job, status: "succeeded" as const, updatedAt: "2026-10-24T11:01:00Z" };
+  state = { ...state, app: { ...state.app, jobs: [succeeded] } };
+  transport.broadcast({ type: "job.updated", at: succeeded.updatedAt, job: succeeded });
+  transport.broadcastSnapshot();
+  transport.broadcast(EVENT);
+  transport.broadcastSnapshot();
+  window.drain(); window.drain();
+  assert.equal(window.closed(), false);
+  assert.deepEqual(window.sent.map((frame) => frame.kind === "event" ? frame.event.type : "snapshot"), ["snapshot", "job.updated", "health.changed", "snapshot"]);
+  const [hello, , , refresh] = window.sent;
+  assert.equal(hello?.kind === "snapshot" && hello.retainedHistory, undefined);
+  // The jobs changed after the hello's snapshot. The refreshes that would have carried them were
+  // replaced, so the one that arrives carries them, rather than saying the window holds them.
+  assert.ok(refresh?.kind === "snapshot");
+  if (refresh?.kind === "snapshot") {
+    assert.deepEqual(refresh.retainedHistory, ["ledger"]);
+    assert.equal(refresh.state.app.jobs[0]!.status, "succeeded");
+  }
+  assert.deepEqual(window.sent.map((frame) => frame.seq), [1, 3, 5, 6], "sequence numbers keep counting past what was replaced");
+  // Nothing changed since: the next refresh may say the window holds the history now.
+  transport.broadcastSnapshot(); window.drain();
+  const next = window.sent.at(-1);
+  assert.ok(next?.kind === "snapshot" && next.retainedHistory?.includes("jobs"));
 });

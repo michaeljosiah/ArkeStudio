@@ -61,11 +61,12 @@ function wav(): Uint8Array {
 type Listening = Extract<DomainEvent, { type: "audiobook.listening" }>;
 type RecordEvent = Extract<DomainEvent, { type: "audiobook.record" }>;
 
-async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; send: (message: ClientMessage) => Promise<void>; schemaVersion: () => number; store: () => WorldStore }) => Promise<void>, options: { ffmpeg?: FfmpegRunner; openPath?: (file: string) => void } = {}): Promise<void> {
+async function withHarness(run: (h: { root: string; worldDir: string; events: DomainEvent[]; send: (message: ClientMessage) => Promise<void>; schemaVersion: () => number; store: () => WorldStore }) => Promise<void>, options: { ffmpeg?: FfmpegRunner; openPath?: (file: string) => void; listeningDeadlineMs?: number; provider?: (provider: FsWorldProvider) => void } = {}): Promise<void> {
   const { root, worldDir } = await makeTempRoot();
   await mkdir(join(worldDir, "productions", LEDGER, ".voices"), { recursive: true });
   const provider = new FsWorldProvider(root, { clock: () => CLOCK });
   await provider.loadWorld(WORLD_ID);
+  options.provider?.(provider);
   const events: DomainEvent[] = [];
   const coordinator = new Coordinator({
     provider,
@@ -80,6 +81,7 @@ async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; s
     mediaProbe: { durationSec: async () => 3, info: async () => ({ durationSec: 3, hasAudio: true }) },
     ...(options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {}),
     ...(options.openPath !== undefined ? { openPath: options.openPath } : {}),
+    ...(options.listeningDeadlineMs !== undefined ? { listeningDeadlineMs: options.listeningDeadlineMs } : {}),
     voice: {
       sidecar: {
         health: async () => ({ engineStatus: { kokoro: { ready: true } } }),
@@ -96,7 +98,7 @@ async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; s
     (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
-    await run({ worldDir, events, send, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!()! });
+    await run({ root, worldDir, events, send, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!()! });
   } finally {
     await provider.close();
   }
@@ -416,4 +418,74 @@ describe("the audiobook as the player (turn 186e)", () => {
       const result = await exportPlayer(send, events);
       assert.deepEqual(result, { ok: false, blockers: ["no chapter is read whole yet"] });
     }));
+});
+
+describe("the book read while a long run goes on (2026-10-24)", () => {
+  const ask = (send: (message: ClientMessage) => Promise<void>, requestId: string, scope?: AudiobookScope) =>
+    send({ kind: "open-audiobook-listening", worldId: WORLD_ID, productionId: LEDGER, requestId, ...(scope !== undefined ? { scope } : {}) });
+  const answers = (events: DomainEvent[]) => events.filter((e): e is Listening => e.type === "audiobook.listening");
+
+  it("answers every ask made while a read runs from one read begun after them, not one read each", () => {
+    let reads = 0, counting = false;
+    let holding!: () => void, release!: () => void;
+    const held = new Promise<void>((resolve) => (holding = resolve));
+    const barrier = new Promise<void>((resolve) => (release = resolve));
+    return withHarness(async ({ events, send }) => {
+      await read(send, "01-neap");
+      const asks = ["01J00000000000000000000A01", "01J00000000000000000000A02", "01J00000000000000000000A03", "01J00000000000000000000A04"];
+      counting = true;
+      const first = ask(send, asks[0]!);
+      await held;
+      // The windows ask again on every picture landed while the first read still runs.
+      const rest = asks.slice(1).map((requestId) => ask(send, requestId));
+      release();
+      await Promise.all([first, ...rest]);
+      assert.deepEqual(answers(events).map((answer) => answer.requestId).sort(), asks);
+      assert.ok(answers(events).every((answer) => answer.refused === undefined && answer.listening?.chapters[0]?.state === "read"));
+      assert.equal(reads, 2, "the asks made during the first read share the one after it");
+      counting = false;
+      // A chapter is its own read, not held behind the book's.
+      await ask(send, "01J00000000000000000000A05", { kind: "chapter", chapterId: "neap" });
+      assert.equal(answers(events).at(-1)?.listening?.chapters.length, 1);
+    }, {
+      provider: (provider) => {
+        const background = provider.withBackgroundWorldStore.bind(provider);
+        provider.withBackgroundWorldStore = async (worldId, fn, options) => background(worldId, async (store) => {
+          if (counting) reads += 1;
+          if (counting && reads === 1) { holding(); await barrier; }
+          return fn(store);
+        }, options);
+      },
+    });
+  });
+
+  it("answers a read whose world never comes as stalled, within the deadline, and says where it stuck", () => {
+    let abandoned = false;
+    return withHarness(async ({ root, events, send }) => {
+      await ask(send, REQUEST);
+      const answer = answers(events).at(-1);
+      assert.equal(answer?.requestId, REQUEST);
+      assert.equal(answer?.listening, null);
+      assert.equal(answer?.refused, "reading took too long · try again");
+      assert.equal(abandoned, true, "the wait for the world is given up, so its turn retains nothing");
+      let logged = "";
+      for (let i = 0; i < 50 && !logged.includes("audiobook.listening-failed"); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        logged = await readFile(join(root, "logs", "app.jsonl"), "utf8").catch(() => "");
+      }
+      const failure = logged.split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>).find((line) => line["kind"] === "audiobook.listening-failed");
+      assert.match(String(failure?.["message"]), /^stalled for \d+ s waiting for the world$/);
+      // The next ask is read afresh; it is not held behind the one that stalled.
+      await ask(send, "01J00000000000000000000B02");
+      assert.equal(answers(events).at(-1)?.requestId, "01J00000000000000000000B02");
+    }, {
+      listeningDeadlineMs: 50,
+      provider: (provider) => {
+        // The world's queue held by something that does not end, as every store call behind it would wait.
+        provider.withBackgroundWorldStore = (_worldId, _fn, options) => new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => { abandoned = true; reject(options.signal!.reason); }, { once: true });
+        });
+      },
+    });
+  });
 });
