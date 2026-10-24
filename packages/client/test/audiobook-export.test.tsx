@@ -402,8 +402,11 @@ describe("Export audiobook (turn 186e)", () => {
     assert.match(exportAsk.exportId ?? "", /^ab_/, "the window names the package");
     await act(async () => __setStateForTest(inkbound(), { connection: "closed" }));
     await act(async () => __setStateForTest(inkbound(), { connection: "open" }));
-    const listAsk = lastAsk(m, "list-web-packages")!;
-    await act(async () => __applyEventForTest({ at: AT, type: "web-packages.listed", requestId: listAsk.requestId, worldId: FIXTURE_WORLD_ID, packages: [{ kind: "audiobook", productionId: "inkbound", title: "Inkbound", dir: `exports/audiobook-inkbound-${exportAsk.exportId}`, exportedAt: AT }] }));
+    // The recovery asks again, and so may the sheet's Arke Player releases (turn 236): the
+    // coordinator answers each request, and the recovery takes its own answer.
+    for (const listAsk of m.sent.filter((message): message is Extract<ClientMessage, { kind: "list-web-packages" }> => message.kind === "list-web-packages")) {
+      await act(async () => __applyEventForTest({ at: AT, type: "web-packages.listed", requestId: listAsk.requestId, worldId: FIXTURE_WORLD_ID, packages: [{ kind: "audiobook", productionId: "inkbound", title: "Inkbound", dir: `exports/audiobook-inkbound-${exportAsk.exportId}`, exportedAt: AT }] }));
+    }
     assert.equal(text(q(m, '[data-testid="audiobook-export-done"]')), `exports/audiobook-inkbound-${exportAsk.exportId}`);
     await press([...dom.document.querySelectorAll("button")].find(button => text(button) === "Open player")!);
     assert.deepEqual(lastAsk(m, "open-exports-folder"), { kind: "open-exports-folder", worldId: FIXTURE_WORLD_ID, dir: `audiobook-inkbound-${exportAsk.exportId}`, file: "player.html" });

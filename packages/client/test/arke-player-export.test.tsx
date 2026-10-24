@@ -208,6 +208,24 @@ describe("Export → Arke Player (turn 233)", () => {
     assert.deepEqual(releases, [["22 Oct 2026", "Edition", false], ["30 Oct 2026", "Part", false], ["6 Nov 2026", "Part", true]]);
   });
 
+  it("asks for the releases again when a reconnect lost the answer (codex on PR 2173)", async () => {
+    const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
+    const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} />);
+    const asked = () => m.sent.filter((message) => message.kind === "list-web-packages").length;
+    const before = asked();
+    assert.ok(before > 0, "the releases are asked for when the sheet opens");
+    await act(async () => __setStateForTest(inkbound(), { connection: "closed" }));
+    await act(async () => __setStateForTest(inkbound(), { connection: "open" }));
+    assert.ok(asked() > before, "asked again once the connection is back");
+    // Answered, a later reconnect asks no more.
+    const answer = lastAsk(m, "list-web-packages")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "web-packages.listed", requestId: answer.requestId, worldId: FIXTURE_WORLD_ID, packages: [] }));
+    const settled = asked();
+    await act(async () => __setStateForTest(inkbound(), { connection: "closed" }));
+    await act(async () => __setStateForTest(inkbound(), { connection: "open" }));
+    assert.equal(asked(), settled);
+  });
+
   it("lists the package in Publications with its size and Copy SHA-256 (233e)", async () => {
     const m = await mount(<WebPackages worldId={FIXTURE_WORLD_ID} />);
     const ask = lastAsk(m, "list-web-packages")!;

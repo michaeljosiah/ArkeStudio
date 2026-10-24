@@ -161,14 +161,16 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
   // How many of the chapters ready to release are ticked; all of them until the author unticks one.
   const [upTo, setUpTo] = useState<number | null>(null);
   const [schedule, setSchedule] = useState<PartSchedule | null>(null);
+  // Any listing of the world is the same list, whoever asked, so every answer for it is taken.
   useEffect(() => subscribeWebPackages((answer) => {
-    if (answer.requestId === releasesAsk.current) setListed(answer.packages);
-  }), []);
-  // Asked once a sheet, never again on a reconnect: that listing is the export's own recovery's
-  // (codex on PR 1498), which answers by its own request.
+    if (answer.worldId === worldId) setListed(answer.packages);
+  }), [worldId]);
+  // Asked when the sheet opens, and again after a reconnect while no answer has come, which a
+  // dropped connection may have lost (codex on PR 2173).
+  const answered = listed !== null;
   useEffect(() => {
-    if (connection === "open" && releasesAsk.current === null) releasesAsk.current = listWebPackages(worldId);
-  }, [connection, worldId]);
+    if (connection === "open" && !answered) releasesAsk.current = listWebPackages(worldId);
+  }, [connection, worldId, answered]);
   useEffect(() => {
     const offExported = subscribeArkePlayerExported((answer) => {
       if (answer.exportId !== making) return;
