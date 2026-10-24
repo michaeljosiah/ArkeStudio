@@ -264,6 +264,34 @@ describe("picture marks (turn 237)", () => {
     await assert.rejects(moveAudiobookPicture(store, LEDGER, "01-neap", "p0.0", "p1.0"), /a picture stands there/);
   }));
 
+  it("carries the looks held for a picture that followed its words from where it is shown (codex on PR 2179)", () => withHarness(async ({ store, send }) => {
+    await save(send, body);
+    await setAudiobookPicture(store, LEDGER, "01-neap", "p1.0", { file: "world-art.png", source: "world" });
+    await save(send, "A new warning arrives.\n\n" + body);
+    const record = (await readAudiobook(store, LEDGER, "01-neap")) as ChapterAudiobook;
+    assert.ok(record.pictures?.["p1.0"] !== undefined, "kept under the key it was set on, shown at the bell's p2.0");
+    record.ownLooks = { "p2.0": { "maren-kest": "main-photo" } };
+    await writeAudiobook(store, LEDGER, "01-neap", record);
+    const moved = await moveAudiobookPicture(store, LEDGER, "01-neap", "p2.0", at("p1.0", "The third lamp waits."));
+    assert.deepEqual(moved.ownLooks, { [at("p1.0", "The third lamp waits.")]: { "maren-kest": "main-photo" } }, "the author's choice goes with it, none left at the place it left");
+  }));
+
+  it("refuses a move when the blocks change before it is written, and changes nothing (codex on PR 2179)", () => withHarness(async ({ store, send, worldDir }) => {
+    await save(send, body);
+    await setAudiobookPicture(store, LEDGER, "01-neap", "p0.0", { file: "world-art.png", source: "world" });
+    const before = await readAudiobook(store, LEDGER, "01-neap");
+    const chapterPath = join(worldDir, "productions", LEDGER, "chapters", "01-neap.md");
+    const raw = await readFile(chapterPath, "utf8"), write = store.ownedWrite.bind(store);
+    const boundary = mock.method(store, "ownedWrite", async (operation: () => Promise<unknown>) => {
+      await writeFile(chapterPath, raw.replace("The third lamp waits.", "The third lamp is gone."), "utf8");
+      return write(operation);
+    });
+    try {
+      await assert.rejects(moveAudiobookPicture(store, LEDGER, "01-neap", "p0.0", at("p0.0", "The third lamp waits.")), /blocks changed/);
+      assert.deepEqual(await readAudiobook(store, LEDGER, "01-neap"), before);
+    } finally { boundary.mock.restore(); }
+  }));
+
   it("refuses a mark at a sentence the block no longer says", () => withHarness(async ({ store, send }) => {
     await save(send, body);
     await assert.rejects(setAudiobookPicture(store, LEDGER, "01-neap", at("p0.0", "The fourth lamp is gone."), { file: "world-art.png", source: "world" }), /no longer in the block/);

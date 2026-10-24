@@ -13,6 +13,7 @@ import {
   pictureKeyParts,
   pictureMarkKey,
   pictureSlot,
+  placedKey,
   retimePictureMarks,
   sentenceHashes,
   kitLookLibrary,
@@ -375,8 +376,10 @@ export async function moveAudiobookPicture(store: WorldStore, productionId: stri
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   const summary = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
   if (summary === undefined) throw new Error("that chapter is no longer in this production");
-  const plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId, summary.id) });
-  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+  const narrator = await anyNarrator(store, productionId, summary.id);
+  const plan = await planAudiobook(store, productionId, summary.id, { narrator });
+  const layout = (planned: AudiobookPlan) => planned.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+  const blocks = layout(plan);
   return updateAudiobook(store, productionId, plan.chapter, (current) => {
     const source = pictureSlot(blocks, current.pictures, from);
     const target = pictureSlot(blocks, current.pictures, to);
@@ -390,11 +393,20 @@ export async function moveAudiobookPicture(store: WorldStore, productionId: stri
     const key = sentence === undefined ? block.key : pictureMarkKey(block.key, sentence);
     // A picture kept under that key though shown nowhere (one a join took off) is never written over.
     if (rest[key] !== undefined) throw new Error("a picture stands there");
-    // Looks held for the picture's next making go with it (R-146).
-    const { [source.placed.key]: held, ...looks } = current.ownLooks ?? {};
+    // Looks held for the picture's next making go with it (R-146). They are held under the key it is
+    // shown at, which a picture that followed its words to another block no longer shares with the key
+    // it is kept under (codex on PR 2179).
+    const shownAt = placedKey(blocks, source.placed);
+    const heldAt = current.ownLooks?.[shownAt] !== undefined ? shownAt : source.placed.key;
+    const { [heldAt]: held, ...looks } = current.ownLooks ?? {};
     const ownLooks = held === undefined ? current.ownLooks : { ...looks, [key]: held };
     return { ...current, updatedAt: store.now(), pictures: { ...rest, [key]: { ...picture, textHash: audiobookTextHash(block.text), ...(sentence !== undefined ? { mark: { sentence } } : {}) } }, ...(ownLooks !== undefined ? { ownLooks } : {}) };
-  }, { requireReadable: true });
+  }, { requireReadable: true, beforeWrite: async () => {
+    // Both places were found in the blocks as they were read: a Join, Split or edit since would move
+    // the picture to a sentence that is no longer there (codex on PR 2179), so it is refused, untouched.
+    const fresh = await planAudiobook(store, productionId, summary.id, { narrator });
+    if (JSON.stringify(layout(fresh)) !== JSON.stringify(blocks)) throw new Error("The chapter's blocks changed; move the picture again.");
+  } });
 }
 
 /**
