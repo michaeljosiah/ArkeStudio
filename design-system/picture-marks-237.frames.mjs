@@ -137,7 +137,7 @@ export const FRAMES = [
   ['d', 'Illustrate, from the story', 1360, 1040, () => root(
     '237d Illustrate&#8217;s proposal for Chapter 1, chosen from the story: twelve pictures where what we would see changes, each card saying why and naming its beat; the fifteen already there stay',
     1360, 1040,
-    `${PAGE}<div class="ap237-dim"></div><section class="ap237-ills"><header><h3>Illustrate &#183; Chapter 1</h3><span class="ap237-mono">12 pictures &#183; where the story changes &#183; 12 to make &#183; 15 already there</span><span class="grow"></span><span class="ap237-btn">Illustrate again</span><span class="ap237-btn">Close</span></header>
+    `${PAGE}<div class="ap237-dim"></div><section class="ap237-ills"><header><h3>Illustrate &#183; Chapter 1</h3><span class="ap237-mono">12 pictures &#183; where the story changes &#183; 12 to make, Wide and Tall &#183; 15 already there</span><span class="grow"></span><span class="ap237-btn">Illustrate again</span><span class="ap237-btn">Close</span></header>
 <div class="ap237-grid">${CARDS}</div>
 <footer class="ap237-ifoot"><span class="ap237-btn ghost">Review chapter looks</span><span class="ap237-btn">Refresh references</span><span class="grow"></span><span class="ap237-btn ghost">Discard</span><span class="ap237-btn pri">Accept &#183; ${PLAN}</span></footer></section>`,
   )],

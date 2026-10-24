@@ -25,6 +25,20 @@ so it doesn't go crazy." Agreed, and redrawn ("Yes redraw"):
 - There is no setting; the proposal's count and price, and Skip, are the author's control.
 - The Pace frame and the Pictures sheet's change are gone.
 
+**Revised again.** The owner asked: "Should the shortest time a picture stays on screen not be
+dictated by when the next picture appears?" Yes:
+
+- A picture holds until the next mark. There is no shortest hold for the author, and 186's 20 s hold
+  and its amber flag are retired.
+- Illustrate alone keeps its proposals at least 5 s apart, so a proposed picture outlasts its 1 s
+  crossfade.
+
+Asked "have we catered for the tall and wide images?", the turn now says so outright:
+
+- A mark's picture is made in every shape on, the Tall from the Wide (235).
+- The proposal counts both shapes.
+- The Player shows the Tall on a phone from the same start.
+
 ## What was checked before drawing
 
 - **Chapter 1 of Na Love or Juju, as it stands.**
@@ -87,7 +101,9 @@ Also ruled out:
 1. The cap: one picture per 20 s of narration at most, counting those already there, with no setting.
    The proposal's count and price before Accept, and Skip, are the author's control.
 2. The reasons, one word each: place, arrives, leaves, action, object, time, feeling.
-3. The shortest hold at 10 s, down from 20 s. A closer mark is flagged, not refused.
+3. A picture holds until the next one, with no shortest hold. Illustrate keeps its own proposals
+   5 s apart.
 4. Marks only at the start of a sentence, never mid-sentence.
 5. Standing pictures stay at their block's first word until moved. Arke does not guess which
    sentence a picture shows.
+6. Every mark's picture is made Wide and Tall where both are on, and counted that way.
