@@ -110,6 +110,25 @@ ${agent.skill.body}
 ${agent.postscript}` : skilled;
 }
 
+/**
+ * The shape a picture is asked for when the person names none (SPEC-050 R-59; SPEC-058 R-57, R-59).
+ * The owner set it on 2026-10-24, once Arke Player showed each shape where it belongs: a story's
+ * cover is the upright poster, an audiobook's Tall picture fills a phone held upright, and the
+ * rest is wide. Before it, a cover asked for in World Chat came back in whatever shape the turn
+ * guessed, and every guess that was not 2:3 had to be cut or remade to be a poster.
+ *
+ * It rides in the postscript, beyond a rewritten brief, because Arke Player's rows assume it.
+ */
+export const PICTURE_SHAPE_BASELINE = `### Picture shapes
+
+When the person has not named a shape, and nothing they are working in sets one, ask for each picture in the shape its use calls for:
+
+- A story's cover, upright: 2:3, 1024 × 1536. It is the poster Arke Player shows. Keep the subject and any title in its upper two-thirds, where the words laid over its foot do not reach, and leave the top twentieth clear, because the phone's feature trims it.
+- An audiobook's Tall picture of a moment: 9:16. It fills a phone held upright.
+- Everything wide (key art, a scene, a place, a wide shot, a story's wide cover): 16:9.
+
+A shape the person names always wins, and so does one their work already sets: a production's aspect, or the shapes an audiobook makes its pictures in. Ask a route only for a shape it lists. When it lists none of these, ask for the nearest one it does, and say which in the reply. A route that takes its size from the brief makes what the brief says, so name the shape in the brief.`;
+
 const BRIEFS: ReadonlyArray<Omit<RosterAgent, "prompt">> = [
   {
     name: "world-author",
@@ -382,7 +401,9 @@ Rules that are not yours to break:
 
 - For key art, read get_world_metadata, get_bible, get_art_direction, list_sheets and list_references; read the chosen character/location sheets before authoring keyArtIntent.prompt. Write one complete image-model prompt (about 300 words or fewer), concrete and present-tense: one frame, subjects, composition, light, materials and treatment. Translate lore into visible choices; omit backstory, invisible stakes, timing and rules for other shots. The prompt is sent intact, with only fixed application constraints appended. Set characters and location to the full sheet names of its subjects, and revise the prompt when its sources change.
 
-- For shot prompts, read get_production_metadata, get_scene, get_scene_script, get_scene_shots, the characters actually cited, the location, get_art_direction and list_references. Use the selected model and route shown in the production or generation context; never invent model capabilities. Author one complete editable prompt through scene-command / set-prompt-override, setting capability to image or video. For a new shot, create it first, then read its assigned id and author its prompt. Translate the effective production/world look into this setup; never paste the look, backstory, rules for other shots or absent characters. Video describes motion, camera movement, change over the duration and what is heard, respecting silence. Image describes one visible instant without motion instructions, timing or sound. Preserve explicit shot framing and reference identities. Keep reference bindings, duration parameters, costs and fixed constraints application-owned. Regenerate by proposing a replacement through the same command after rereading the current sources; never silently overwrite the approved prompt at paid dispatch.`,
+- For shot prompts, read get_production_metadata, get_scene, get_scene_script, get_scene_shots, the characters actually cited, the location, get_art_direction and list_references. Use the selected model and route shown in the production or generation context; never invent model capabilities. Author one complete editable prompt through scene-command / set-prompt-override, setting capability to image or video. For a new shot, create it first, then read its assigned id and author its prompt. Translate the effective production/world look into this setup; never paste the look, backstory, rules for other shots or absent characters. Video describes motion, camera movement, change over the duration and what is heard, respecting silence. Image describes one visible instant without motion instructions, timing or sound. Preserve explicit shot framing and reference identities. Keep reference bindings, duration parameters, costs and fixed constraints application-owned. Regenerate by proposing a replacement through the same command after rereading the current sources; never silently overwrite the approved prompt at paid dispatch.
+
+${PICTURE_SHAPE_BASELINE}`,
   },
 ];
 
