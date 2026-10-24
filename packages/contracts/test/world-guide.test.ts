@@ -84,7 +84,7 @@ describe("a world's Guide (SPEC-059)", () => {
   });
 
   it("starts with nothing public, counting only what can be (R-1, R-2, R-3)", () => {
-    assert.deepEqual(guideCounts(EMPTY_GUIDE_RECORD, world), { characters: { public: 0, of: 2 }, places: { public: 0, of: 2 }, lore: { public: 0, of: 2 }, after: 0 });
+    assert.deepEqual(guideCounts(EMPTY_GUIDE_RECORD, world), { teasers: { chosen: 0, of: 6 }, characters: { public: 0, of: 2 }, places: { public: 0, of: 2 }, lore: { public: 0, of: 2 }, after: 0 });
     assert.equal(guideDocument(EMPTY_GUIDE_RECORD, material()), null);
   });
 
@@ -116,7 +116,7 @@ describe("a world's Guide (SPEC-059)", () => {
     assert.deepEqual(guide.lore, [{ id: "canon-001", kind: "lore", title: "CANON-001", text: "Beneath the harbour lies a drowned god, and it is still singing.", links: ["maren-kest"] }]);
     // Only the production something waits for, with all its chapters.
     assert.deepEqual(guide.productions.map((production) => [production.id, production.chapters.map((chapter) => chapter.number)]), [["the-ledger-of-nights", [1, 6]]]);
-    assert.deepEqual(guideCounts(record, world), { characters: { public: 2, of: 2 }, places: { public: 1, of: 2 }, lore: { public: 1, of: 2 }, after: 1 });
+    assert.deepEqual(guideCounts(record, world), { teasers: { chosen: 0, of: 6 }, characters: { public: 2, of: 2 }, places: { public: 1, of: 2 }, lore: { public: 1, of: 2 }, after: 1 });
   });
 
   it("writes what the shared reader accepts (R-14)", () => {
