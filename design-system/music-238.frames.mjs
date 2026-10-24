@@ -31,21 +31,34 @@ const play = `<span class="ap238-play">${PLAY}</span>`;
 const wv = (seed, n = 48, from = -1, to = -1) => `<div class="ap238-wv">${Array.from({ length: n }, (_, i) => `<i${i / n >= from && i / n < to ? ' class="in"' : ''} style="height:${6 + Math.round(Math.abs(Math.sin(seed * 3.1 + i * 1.7)) * 30)}px"></i>`).join('')}</div>`;
 
 // The album, in order: title, length, where it came from, where it is heard, whose theme it is.
+// A track keeps its own takes (238i), so From names the chosen one; an imported file is its own.
 const TRACKS = [
-  ['The Drowned Verse', '4:12', 'Bench &#183; take 2', 'The Ledger of Nights &#183; Chapter 9', 'The Chorister&#8217;s theme'],
-  ['Slack Water', '3:05', 'Bench &#183; take 1', '', ''],
-  ['Saltmouth Bells', '3:42', 'Bench &#183; take 4', 'The Ledger of Nights &#183; Chapter 8', ''],
+  ['The Drowned Verse', '4:12', 'Take 2 of 3', 'The Ledger of Nights &#183; Chapter 9', 'The Chorister&#8217;s theme'],
+  ['Slack Water', '3:05', 'Take 1 of 1', '', ''],
+  ['Saltmouth Bells', '3:42', 'Take 4 of 4', 'The Ledger of Nights &#183; Chapter 8', ''],
   ['Tide-caller', '3:58', 'File &#183; tide-caller.wav', '', 'Maren Kest&#8217;s theme'],
-  ['The Vigil', '4:40', 'Bench &#183; take 1', '', ''],
-  ['Lantern Road', '3:20', 'Bench &#183; take 3', '', ''],
-  ['Ledger Hymn', '2:55', 'Bench &#183; take 2', '', ''],
-  ['Low Water', '3:33', 'Bench &#183; take 2', '', ''],
-  ['Undersong', '5:01', 'Bench &#183; take 3', '', ''],
+  ['The Vigil', '4:40', 'Take 1 of 2', '', ''],
+  ['Lantern Road', '3:20', 'Take 3 of 3', '', ''],
+  ['Ledger Hymn', '2:55', 'Take 2 of 2', '', ''],
+  ['Low Water', '3:33', 'Take 2 of 3', '', ''],
+  ['Undersong', '5:01', 'Take 3 of 5', '', ''],
 ];
+// Track 10, being made in its composer (238i): three takes, the second chosen.
+const NEW_TRACK = ['The Bell Ropes', '3:00', 'Take 2 of 3', '', ''];
+// Between each pair of tracks, a gap or a crossfade (238k): 6 gaps of 2 s and 2 crossfades of 3 s
+// make 34:26 of tracks play as 34:32.
+const JOINS = [['Gap', '2 s'], ['Crossfade', '3 s'], ['Gap', '2 s'], ['Gap', '2 s'], ['Crossfade', '3 s'], ['Gap', '2 s'], ['Gap', '2 s'], ['Gap', '2 s']];
 
 const top = (crumbs, tail = '') => `<div class="ap238-top">${crumbs.map((c, i) => i === crumbs.length - 1 ? `<b>${c}</b>` : `<span class="crumb">${c}</span><span class="crumb">/</span>`).join('')}<span class="grow"></span>${tail}</div>`;
-const trackRows = (open = -1) => TRACKS.map(([t, len, src, heard, theme], i) => `<div class="ap238-tr${i === open ? ' on' : ''}"><span class="grip">${GRIP}</span><span class="n">${i + 1}</span><div class="t"><b>${t}</b>${theme ? `<span>${theme}</span>` : ''}</div><span class="src">${src}</span><span class="heard${heard ? '' : ' none'}">${heard || '&#8212;'}</span><span class="len">${len}</span><span class="ap238-ib">${PLAY}</span></div>`).join('');
-const albumPage = (open = -1) => `${top(['Worlds', 'The Undersong', 'Productions', ALBUM], `<span class="ap238-btn">${PHONE}Preview</span>`)}<div class="ap238-prod"><div class="ap238-side"><div class="ap238-cover"><img src="${A}${COVER.album}" alt=""></div><div style="display:flex;align-items:center;gap:8px"><span class="ap238-btn">${SPARK}Make cover</span><span class="m">1:1 &#183; 1024 &#215; 1024</span></div><div style="margin-top:6px"><div class="ap238-eyebrow">ALBUM &#183; THE UNDERSONG</div><h1>${ALBUM}</h1><div class="m" style="margin-top:4px">9 tracks &#183; 34:26</div></div><div class="acts"><span class="ap238-btn pri">${PLAY}Play all</span><span class="ap238-btn">Export</span><span class="ap238-btn" style="width:32px;padding:0;justify-content:center">${MORE}</span></div></div><div><div class="ap238-group"><div class="ap238-gh">Tracks<span class="m">9 &#183; 34:26</span><span class="grow"></span><span class="ap238-btn" style="height:28px">${PLUS}Add track</span></div><div class="ap238-th" style="border-top:0"><span class="grip"></span><span class="n">#</span><span class="t">Title</span><span class="src">From</span><span class="heard">Heard in</span><span class="len">Length</span><span style="width:28px"></span></div>${trackRows(open)}<div class="ap238-addrow">${PLUS}Add track</div></div></div></div>`;
+const trackRows = (open = -1, tracks = TRACKS) => tracks.map(([t, len, src, heard, theme], i) => `<div class="ap238-tr${i === open ? ' on' : ''}"><span class="grip">${GRIP}</span><span class="n">${i + 1}</span><div class="t"><b>${t}</b>${theme ? `<span>${theme}</span>` : ''}</div><span class="src">${src}</span><span class="heard${heard ? '' : ' none'}">${heard || '&#8212;'}</span><span class="len">${len}</span><span class="ap238-ib">${PLAY}</span></div>`).join('');
+const seg = (labels, on) => `<span class="ap238-seg">${labels.map((l) => `<span${l === on ? ' class="on"' : ''}>${l}</span>`).join('')}</span>`;
+const tracksBody = (open, tracks) => `<div class="ap238-gh">${seg(['Tracks', 'Sequence'], 'Tracks')}<span class="m">${tracks.length} &#183; ${tracks.length > 9 ? '37:26' : '34:26'}</span><span class="grow"></span><span class="ap238-btn" style="height:28px">${PLUS}Add track</span></div><div class="ap238-th" style="border-top:0"><span class="grip"></span><span class="n">#</span><span class="t">Title</span><span class="src">From</span><span class="heard">Heard in</span><span class="len">Length</span><span style="width:28px"></span></div>${trackRows(open, tracks)}<div class="ap238-addrow">${PLUS}Add track</div>`;
+const sequenceBody = () => `<div class="ap238-gh">${seg(['Tracks', 'Sequence'], 'Sequence')}<span class="m">9 &#183; 34:32</span><span class="grow"></span><span class="ap238-in" style="height:28px;font:var(--type-mono);font-size:var(--text-2xs)">Loudness &#8722;14 LUFS${DOWN}</span><span class="ap238-btn pri" style="height:28px">${PLAY}Play through</span></div>${TRACKS.map(([t, len], i) => `<div class="ap238-seq"><span class="n">${i + 1}</span><b>${t}</b>${wv(i + 1, 56)}<span class="len">${len}</span><span class="ap238-ib">${PLAY}</span></div>${i < JOINS.length ? `<div class="ap238-join">${seg(['Gap', 'Crossfade'], JOINS[i][0])}<span class="v">${JOINS[i][1]}</span><span class="line"></span></div>` : ''}`).join('')}`;
+const albumPage = (open = -1, { view = 'tracks', extra = false } = {}) => {
+  const tracks = extra ? [...TRACKS, NEW_TRACK] : TRACKS;
+  const total = view === 'sequence' ? '9 tracks &#183; 34:32' : extra ? '10 tracks &#183; 37:26' : '9 tracks &#183; 34:26';
+  return `${top(['Worlds', 'The Undersong', 'Productions', ALBUM], `<span class="ap238-btn">${PHONE}Preview</span>`)}<div class="ap238-prod"><div class="ap238-side"><div class="ap238-cover"><img src="${A}${COVER.album}" alt=""></div><div style="display:flex;align-items:center;gap:8px"><span class="ap238-btn">${SPARK}Make cover</span><span class="m">1:1 &#183; 1024 &#215; 1024</span></div><div style="margin-top:6px"><div class="ap238-eyebrow">ALBUM &#183; THE UNDERSONG</div><h1>${ALBUM}</h1><div class="m" style="margin-top:4px">${total}</div></div><div class="acts"><span class="ap238-btn pri">${PLAY}Play all</span><span class="ap238-btn">Export</span><span class="ap238-btn" style="width:32px;padding:0;justify-content:center">${MORE}</span></div></div><div><div class="ap238-group">${view === 'sequence' ? sequenceBody() : tracksBody(open, tracks)}</div></div></div>`;
+};
 
 // The world's Guide (234a, 236a): Characters gains Theme.
 const pills = `<div class="ap238-pills">${['Overview', 'Art direction', 'Cast', 'Bible', 'Canon', 'World Chat', 'Artifacts', 'Productions', 'Guide'].map((p) => `<span${p === 'Guide' ? ' class="on"' : ''}>${p}</span>`).join('')}</div>`;
@@ -90,14 +103,17 @@ const TAKES = [
   ['Slack water, piano', 'Bench &#183; 2:21 &#183; kept 21 Oct', 7, ''],
 ];
 
-const LYRICS = `<span class="sec">[verse]</span>
-Under the harbour the old bells turn,
-salt in the ledger, the lamps that burn.
-Count me the tides that the city forgot,
-sing me the name that the water has not.
+// The Drowned Verse's words, in the sections the editor marks (238j).
+const VERSE1 = ['Under the harbour the old bells turn,', 'salt in the ledger, the lamps that burn.'];
+const CHORUS = ['Hold the verse, hold it low,', 'down where the drowned ones go.'];
+const VERSE2 = ['Count me the tides that the city forgot,', 'sing me the name that the water has not.'];
+const LYRICS = [['verse', VERSE1], ['chorus', CHORUS], ['verse', VERSE2], ['chorus', CHORUS]].map(([s, lines]) => `<span class="sec">[${s}]</span>\n${lines.join('\n')}`).join('\n');
+const BELL_ROPES = `<span class="sec">[verse]</span>
+Haul on the ropes when the water is high,
+three for the drowned and one for the sky.
 <span class="sec">[chorus]</span>
-Hold the verse, hold it low,
-down where the drowned ones go.`;
+Ring them low, ring them slow,
+bells for the ones below.`;
 
 export const FRAMES = [
   ['a', 'New production: Make music', 1360, 820, 'page', () => root(
@@ -136,7 +152,7 @@ export const FRAMES = [
   ['e', 'A track open', 1360, 780, 'panel', () => root(
     '238e A track open beside the album: its player, where it came from, its lyrics, where it is heard and whose theme it is',
     1360, 780,
-    `${albumPage(0)}<div class="ap238-panel"><header><div style="flex:1;min-width:0"><div class="ap238-eyebrow">TRACK 1 &#183; ${ALBUM.toUpperCase()}</div><h3>The Drowned Verse</h3></div><span class="ap238-ib">${X}</span></header><div class="bd"><div class="ap238-player">${play}${wv(1, 64)}<span class="m" style="font:var(--type-mono);font-size:var(--text-2xs)">4:12</span></div><div class="ap238-kv"><span>From</span><span style="display:flex;align-items:center;gap:8px">Bench &#183; The Drowned Verse &#183; take 2<span class="ap238-btn" style="height:26px;margin-left:auto">${OUT}Open</span></span><span>Lyrics</span><div style="display:flex;flex-direction:column;gap:8px"><div class="ap238-lyrics">${LYRICS}</div><span style="display:flex;gap:8px"><span class="ap238-btn" style="height:28px">Draft with Arke</span></span></div><span>Heard in</span><div style="display:flex;flex-direction:column;gap:6px"><div class="ap238-link">The Ledger of Nights &#183; Chapter 9<span class="m">at 12:10</span>${RIGHT}</div></div><span>Theme of</span><span><span class="ap238-who"><img src="${A}char-chorister.png" alt="">The Chorister</span></span></div></div><footer><span class="ap238-btn">Replace</span><span class="grow"></span><span class="ap238-btn ghost">Remove from album</span></footer></div>`,
+    `${albumPage(0)}<div class="ap238-panel"><header><div style="flex:1;min-width:0"><div class="ap238-eyebrow">TRACK 1 &#183; ${ALBUM.toUpperCase()}</div><h3>The Drowned Verse</h3></div><span class="ap238-ib">${X}</span></header><div class="bd"><div class="ap238-player">${play}${wv(1, 64)}<span class="m" style="font:var(--type-mono);font-size:var(--text-2xs)">4:12</span></div><div class="ap238-kv"><span>From</span><span style="display:flex;align-items:center;gap:8px">Take 2 of 3<span class="ap238-btn" style="height:26px;margin-left:auto">Takes</span></span><span>Lyrics</span><div style="display:flex;flex-direction:column;gap:8px"><div class="ap238-lyrics">${LYRICS}</div><span style="display:flex;gap:8px"><span class="ap238-btn" style="height:28px">Draft with Arke</span></span></div><span>Heard in</span><div style="display:flex;flex-direction:column;gap:6px"><div class="ap238-link">The Ledger of Nights &#183; Chapter 9<span class="m">at 12:10</span>${RIGHT}</div></div><span>Theme of</span><span><span class="ap238-who"><img src="${A}char-chorister.png" alt="">The Chorister</span></span></div></div><footer><span class="ap238-btn">Edit</span><span class="grow"></span><span class="ap238-btn ghost">Remove from album</span></footer></div>`,
   )],
 
   ['f', 'The Guide: a character&#8217;s theme', 1360, 800, 'panel', () => root(
@@ -159,12 +175,42 @@ export const FRAMES = [
   ['h', 'Export &#8594; Arke Player: an album', 1360, 560, 'sheet', () => root(
     '238h Export &#8594; Arke Player for a music production: its tracks as AAC, the square cover, lyrics and Heard in, priced as a package',
     1360, 560,
-    `${PAGE}<div class="ap238-dim"></div><div class="ap238-sheet" style="top:40px;width:720px"><h3>Export &#183; ${ALBUM}</h3><div class="sub">Album &#183; 9 tracks &#183; 34:26</div><div class="ap238-opts">${[
+    `${PAGE}<div class="ap238-dim"></div><div class="ap238-sheet" style="top:40px;width:720px"><h3>Export &#183; ${ALBUM}</h3><div class="sub">Album &#183; 9 tracks &#183; 34:32</div><div class="ap238-opts">${[
       ['World', `<img src="${KEY_ART}" alt=""><span>The Undersong</span>`, 'key art &#183; logline &#183; guide'],
-      ['Tracks', '<span>9 &#183; 34:26</span>', 'AAC &#183; 256 kbps'],
+      ['Tracks', '<span>9 &#183; 34:32</span>', 'AAC &#183; 256 kbps'],
+      ['Sequence', '<span>6 gaps &#183; 2 crossfades</span>', '&#8722;14 LUFS'],
       ['Cover', `<img class="sq" src="${A}${COVER.album}" alt=""><span>1:1</span>`, '1024 &#215; 1024'],
-      ['Lyrics', '<span>4 of 9 tracks</span>', ''],
+      ['Lyrics', '<span>4 of 9 tracks</span>', 'with sections'],
       ['Heard in', '<span>2 tracks</span>', 'The Ledger of Nights'],
     ].map(([label, middle, tail]) => `<div class="ap238-opt"><b>${label}</b>${middle}<span class="grow"></span>${tail ? `<i>${tail}</i>` : ''}</div>`).join('')}</div><div class="ap238-est"><b style="font-weight:600">~66 MB &#183; ~30 s on this machine</b><span class="m">9 tracks &#183; 1 cover</span></div><div class="ap238-foot"><span class="grow"></span><span class="ap238-btn">Cancel</span><span class="ap238-btn pri">Make package</span></div></div>`,
+  )],
+
+  // Asked after 238a–h: a music production's own Bench and its own editor, both inside the
+  // production rather than new tools (the owner: "Yes").
+  ['i', 'A track&#8217;s composer and takes', 1360, 820, 'panel', () => root(
+    '238i A track keeps its own takes, as a shot does: lyrics, style, length, vocal or instrumental, voice, reference, the route and its quote, and the takes, the chosen one the track',
+    1360, 820,
+    `${albumPage(9, { extra: true })}<div class="ap238-panel" style="width:640px"><header><div style="flex:1;min-width:0"><div class="ap238-eyebrow">TRACK 10 &#183; ${ALBUM.toUpperCase()}</div><h3>The Bell Ropes</h3></div><span class="ap238-ib">${X}</span></header><div class="bd"><div class="ap238-kv"><span>Lyrics</span><div style="display:flex;flex-direction:column;gap:8px"><div class="ap238-lyrics">${BELL_ROPES}</div><span style="display:flex;gap:8px"><span class="ap238-btn" style="height:28px">Draft with Arke</span></span></div><span>Style</span><div class="ap238-in">Slow sea shanty, low strings, one voice</div><span>Length</span><div style="display:flex;align-items:center;gap:10px"><div class="ap238-in" style="width:90px;font:var(--type-mono);font-size:var(--text-2xs)">3:00</div>${seg(['Vocal', 'Instrumental'], 'Vocal')}</div><span>Voice</span><div class="ap238-in off"><img src="${A}char-ilo.png" alt="">Ilo &#183; sung${DOWN}</div><span>Reference</span><div class="ap238-in off">None${DOWN}</div><span>Route</span><div style="display:flex;align-items:center;gap:10px"><div class="ap238-in" style="flex:1">Eleven Music${DOWN}</div><span class="ap238-btn pri">Make 3 &#183; $1.35</span></div></div><div style="display:flex;align-items:center;gap:8px;margin-top:4px"><b style="font:var(--type-ui);font-weight:600">Takes</b><span class="m">3</span></div><div class="ap238-takes">${[1, 2, 3].map((n) => `<div class="ap238-take${n === 2 ? ' on' : ''}"><div class="hd">Take ${n}<span class="m">3:00</span><span class="grow"></span>${n === 2 ? `<span class="ap238-tag">${CHECK}Track</span>` : ''}</div>${wv(n + 3, 44)}<div class="ft">${play}<span class="grow"></span>${n === 2 ? '' : '<span class="ap238-btn" style="height:28px">Choose</span>'}</div></div>`).join('')}</div></div><footer><span class="ap238-btn">Edit</span><span class="grow"></span><span class="ap238-btn ghost">Remove from album</span></footer></div>`,
+  )],
+
+  ['j', 'The track editor', 1360, 720, 'panel', () => {
+    // Positions as shares of the take's 4:12 (252 s): the sections, the trim at 3:58, the fades.
+    const at = (sec) => `${((sec / 252) * 100).toFixed(2)}%`;
+    const SECTIONS = [['Intro', 0, 18, null], ['Verse', 18, 62, VERSE1], ['Chorus', 62, 96, CHORUS], ['Verse', 96, 140, VERSE2], ['Chorus', 140, 190, CHORUS], ['Outro', 190, 238, null]];
+    const ruler = [0, 30, 60, 90, 120, 150, 180, 210, 240].map((s) => `<span style="left:${at(s)}">${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}</span>`).join('');
+    const secs = SECTIONS.map(([name, from, to]) => `<span style="left:${at(from)};width:calc(${at(to - from)} - 3px)">${name}</span>`).join('');
+    const divs = SECTIONS.slice(1).map(([, from]) => `<span class="div" style="left:${at(from)}"></span>`).join('');
+    const lines = SECTIONS.map(([, from, to, words]) => `<div class="${words ? '' : 'none'}" style="left:${at(from)};width:${at(to - from)}">${words ? words.join('<br>') : '&#8212;'}</div>`).join('');
+    return root(
+      '238j One light editor a track: trim and fade handles on the waveform, loudness to the album&#8217;s target, sections marked with each lyric line under its own; Extend and Remake section where the route can',
+      1360, 720,
+      `${albumPage()}<div class="ap238-dim"></div><div class="ap238-dlg" style="width:1240px"><header><h3>Edit &#183; The Drowned Verse</h3><small>Track 1 &#183; 4:12 &#183; plays 3:58</small><span class="grow"></span><span class="ap238-ib">${X}</span></header><div class="bd"><div class="ap238-ed"><div class="ap238-ruler">${ruler}</div><div class="ap238-secs">${secs}</div><div class="ap238-wave">${wv(1, 170)}${divs}<span class="fade" style="left:0;width:${at(2)}"></span><span class="fade out" style="left:${at(230)};width:${at(8)}"></span><span class="cut" style="width:${at(14)}"></span><span class="trim" style="left:5px"></span><span class="trim" style="left:${at(238)}"></span><span class="fh" style="left:${at(2)}"></span><span class="fh" style="left:${at(230)}"></span></div><div class="ap238-lines">${lines}</div></div><div class="ap238-ctrls">${[['Trim', '0:00 &#8211; 3:58'], ['Fade in', '0:02'], ['Fade out', '0:08'], ['Loudness', '&#8722;14 LUFS &#183; album']].map(([l, v]) => `<div class="ap238-fl"><span>${l}</span><div class="ap238-in">${v}</div></div>`).join('')}<span class="ap238-btn off">Extend</span><span class="ap238-btn off">Remake section</span><span class="grow"></span><span class="ap238-btn ghost">Cancel</span><span class="ap238-btn pri">Save</span></div></div></div>`,
+    );
+  }],
+
+  ['k', 'The album&#8217;s sequence', 1360, 860, 'page', () => root(
+    '238k Sequence: the tracks in order, between each pair a gap or a crossfade, one loudness target for the album, Play through from any track, the total following the gaps',
+    1360, 860,
+    albumPage(-1, { view: 'sequence' }),
   )],
 ];

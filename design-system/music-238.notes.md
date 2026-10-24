@@ -17,6 +17,17 @@ P17 draws the Player. This turn is the author's half: making music at the door (
 music production's page, adding its tracks from Bench, a track's lyrics and where it is heard, a
 theme in the Guide (234), a song teaser (236), and Export → Arke Player (233).
 
+The owner then asked whether a music production should have its own Bench and its own editor. The
+recommendation was both, scoped inside the production rather than as new tools, and the owner said
+"Yes". 238i–238k draw it:
+
+- **238i:** a track's composer and takes.
+- **238j:** a light track editor.
+- **238k:** the album's sequence.
+
+238a–238h keep their ids. 238e's From now names the chosen take, and Edit opens 238j. 238h gains
+Sequence and the lyrics' sections.
+
 ## What drove the shape
 
 - **A production, not an artifact.** A Bench take on the world's shelf has no cover, size, edition
@@ -32,6 +43,18 @@ theme in the Guide (234), a song teaser (236), and Export → Arke Player (233).
   links cannot drift from the work.
 - **One teaser shape.** A song's card keeps 236's 16:9 teaser card. Its square cover shows whole
   over its own blur, as P16 shows a picture that does not fit its row.
+- **A track keeps its takes, as a shot does.** The composer is Bench's music engine inside the track,
+  so a take made there is on the world's shelf and priced by Bench's quote. Bench stays the free
+  space.
+- **Only what the route takes.** The Studio's music route today is Eleven Music ($0.15 a minute,
+  up to 300 s). It declares no voice and no reference, so Voice and Reference are drawn disabled,
+  with no caption. Make 3 at 3:00 is $1.35. Extend and Remake section are disabled for the same
+  reason.
+- **A light editor, no multitrack.** Trim, fades, loudness and sections cover what an album needs
+  from a take. Stems, effects and automation belong to an outside tool, and the result comes back
+  through Import a file.
+- **The export renders the edits.** Trims, fades, loudness, gaps and crossfades go into the AAC files,
+  so the Player plays the album as it was made. The sections travel with the lyrics.
 
 ## The fourth picture shape
 
@@ -69,3 +92,8 @@ single and `scene4-shot14b` for the soundtrack.
 4. A character or place has one theme, which follows its gate: drawn so.
 5. A music cover is square, 1:1 at 1024 × 1024: drawn so.
 6. A song teaser is an excerpt of at most 30 seconds, as a clip is: drawn so.
+7. The editor is light: multitrack work stays in outside tools and comes back through Import a file:
+   drawn so.
+8. Sections are kept with the track, so the Player can time its lyrics by them later. That is P17
+   call 19, which today shows lyrics as written: drawn so.
+9. A track's takes are Bench takes, one shelf and one quote: drawn so.
