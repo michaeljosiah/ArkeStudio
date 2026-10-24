@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -9,19 +10,27 @@ import {
   guideDocument,
   guideProductionsOf,
   guideSheetPicture,
+  guideTeasers,
   MAX_GUIDE_VOICE_MS,
+  MAX_TEASER_CLIP_MS,
   packageSlug,
+  type AudiobookListening,
   type AudiobookTake,
   type GuideDocument,
+  type GuideMadeMoment,
   type GuideProductionChapters,
   type GuideRecord,
+  type GuideRecordMoment,
   type GuideRecordVoice,
+  type GuideTeaser,
   type GuideVoiceLine,
   type ListeningChapter,
   type SetGuideEntry,
+  type SetGuideTeasers,
 } from "@arke-studio/contracts";
 import { fitReadingImage, pngHasAlpha } from "../references/reading-image.js";
 import type { FfmpegRunner } from "../takes/export.js";
+import { GUIDE_TEASERS_SCHEMA_VERSION } from "../world/commit.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
@@ -31,6 +40,10 @@ import { containedWorldFile } from "./interactive.js";
 
 /** A guide's pictures are portraits and places on a phone's page, not a chapter's full screen (R-13). */
 const GUIDE_PICTURE_EDGE = 1024;
+/** A picture teaser opens full screen (SPEC-059 R-29, R-32), so it ships larger than a portrait. */
+const TEASER_PICTURE_EDGE = 1280;
+/** A clip's loop is a tile's and a phone's, not a chapter's full screen. */
+const TEASER_LOOP_SIDE = 720;
 
 /**
  * A world's Guide in the coordinator (SPEC-059 R-1 – R-8): the record's one write, the chapters an
@@ -60,20 +73,37 @@ async function liveGuide(store: WorldStore): Promise<{ raw: string | null; recor
  */
 const lanes = new WeakMap<WorldStore, Promise<unknown>>();
 
-/** Replaces one entry's choices, or clears them (R-4, R-8), through the world's own write. */
-export function setGuideEntry(store: WorldStore, change: SetGuideEntry, source: string): Promise<void> {
-  const run = (lanes.get(store) ?? Promise.resolve()).then(() => writeGuideEntry(store, change, source));
+const inLane = (store: WorldStore, write: () => Promise<void>): Promise<void> => {
+  const run = (lanes.get(store) ?? Promise.resolve()).then(write);
   lanes.set(store, run.catch(() => {}));
   return run;
+};
+
+/** Replaces one entry's choices, or clears them (R-4, R-8), through the world's own write. */
+export function setGuideEntry(store: WorldStore, change: SetGuideEntry, source: string): Promise<void> {
+  return inLane(store, async () => {
+    const { raw, record } = await liveGuide(store);
+    const kind = record[change.entryKind] as Record<string, unknown>;
+    const next = { ...kind };
+    if (change.entry === null) delete next[change.id];
+    else next[change.id] = change.entry;
+    await writeGuide(store, raw, GuideRecordSchema.parse({ ...record, [change.entryKind]: next }), source);
+  });
 }
 
-async function writeGuideEntry(store: WorldStore, change: SetGuideEntry, source: string): Promise<void> {
-  const { raw, record } = await liveGuide(store);
-  const kind = record[change.entryKind] as Record<string, unknown>;
-  const next = { ...kind };
-  if (change.entry === null) delete next[change.id];
-  else next[change.id] = change.entry;
-  const written: GuideRecord = GuideRecordSchema.parse({ ...record, [change.entryKind]: next });
+/** Replaces the teasers whole, in the author's order (R-24, R-27): Add, remove and a drag are each a new list. */
+export function setGuideTeasers(store: WorldStore, change: SetGuideTeasers, source: string): Promise<void> {
+  return inLane(store, async () => {
+    const { raw, record } = await liveGuide(store);
+    const { teasers: _teasers, ...rest } = record;
+    // A build before teasers reads a record naming them as unreadable, so the world says first
+    // that it needs a build that knows them.
+    if (change.teasers.length > 0) await store.ensureSchemaVersion(GUIDE_TEASERS_SCHEMA_VERSION, "guide-teasers");
+    await writeGuide(store, raw, GuideRecordSchema.parse(change.teasers.length > 0 ? { ...rest, teasers: change.teasers } : rest), source);
+  });
+}
+
+async function writeGuide(store: WorldStore, raw: string | null, written: GuideRecord, source: string): Promise<void> {
   await store.commit({
     kind: "guide-save",
     source,
@@ -143,13 +173,74 @@ export function resolveGuideVoice(lines: readonly GuideVoiceLine[], voice: Guide
 
 const SHEET_TYPES = { characters: "character", locations: "location", factions: "faction" } as const;
 
+/** A clip's narration as it is cut: a run of pieces of takes, or of the chapter's mix, back to back. */
+export interface GuideClipCut {
+  segments: Array<{ file: string; start: number; seconds: number }>;
+}
+
+/** The guide as it would ship, its files still the world's: what the export packs and compares. */
+export interface GuideDraft {
+  document: GuideDocument;
+  lines: ReadonlyMap<string, GuideVoiceLine>;
+  /** Each clip teaser's narration, by the name the draft's `audio` gives it. */
+  clips: ReadonlyMap<string, GuideClipCut>;
+}
+
+const momentKey = (teaser: GuideRecordMoment) => `${teaser.kind}\n${teaser.production}\n${teaser.chapter}\n${teaser.block}`;
+
+/**
+ * The moments a picture or clip teaser names, as they are now (SPEC-059 R-25, R-27): the moment's
+ * picture by its world path, and for a clip its narration — at most 30 seconds from the moment's
+ * start and never past its hold — from a chapter read whole. A moment that is gone, a picture the
+ * world does not hold, or a clip whose chapter is no longer read whole is left out.
+ */
+export async function guideMoments(store: WorldStore, choices: GuideRecord["teasers"], signal?: AbortSignal): Promise<{ made: Map<string, GuideMadeMoment>; clips: Map<string, GuideClipCut> }> {
+  const made = new Map<string, GuideMadeMoment>();
+  const clips = new Map<string, GuideClipCut>();
+  const plans = new Map<string, AudiobookListening | null>();
+  for (const choice of choices ?? []) {
+    if (choice.kind !== "picture" && choice.kind !== "clip") continue;
+    if (!plans.has(choice.production)) plans.set(choice.production, await audiobookListening(store, choice.production, signal !== undefined ? { signal } : {}).catch(() => null));
+    const chapter = plans.get(choice.production)?.chapters.find((candidate) => candidate.chapterId === choice.chapter);
+    const moment = chapter?.pictures.find((picture) => picture.key === choice.block);
+    if (chapter === undefined || moment === undefined || (await containedWorldFile(store.dir, moment.file)) === null) continue;
+    const title = chapter.title.trim() === "" ? `Chapter ${chapter.order}` : chapter.title.trim();
+    if (choice.kind === "picture") {
+      made.set(momentKey(choice), { title, picture: moment.file });
+      continue;
+    }
+    if (!readWhole(chapter)) continue;
+    const seconds = Math.min(MAX_TEASER_CLIP_MS / 1000, moment.seconds, chapter.seconds - moment.at);
+    if (!(seconds > 0)) continue;
+    const from = moment.at;
+    const to = from + seconds;
+    const segments =
+      chapter.mix !== undefined
+        ? [{ file: chapter.mix.file, start: from, seconds }]
+        : chapter.blocks
+            .filter((block) => block.at < to && block.at + block.seconds > from)
+            .map((block) => ({ file: block.file, start: Math.max(0, from - block.at), seconds: Math.min(to, block.at + block.seconds) - Math.max(from, block.at) }));
+    if (segments.length === 0) continue;
+    let contained = true;
+    for (const segment of segments) if ((await containedWorldFile(store.dir, segment.file)) === null) contained = false;
+    if (!contained) continue;
+    // Named by what it is cut from, so a take made again changes the draft the gate compares.
+    const audio = `clip-${createHash("sha256").update(JSON.stringify(segments)).digest("hex").slice(0, 16)}`;
+    clips.set(audio, { segments });
+    const loop = moment.motion !== undefined && (await containedWorldFile(store.dir, moment.motion.file)) !== null ? moment.motion.file : undefined;
+    made.set(momentKey(choice), { title, picture: moment.file, audio, duration: Math.max(1, Math.round(seconds * 1000)), ...(loop !== undefined ? { motion: loop } : {}) });
+  }
+  return { made, clips };
+}
+
 /**
  * The guide as it would ship now, its pictures and voice lines named by where they are in the
  * world rather than as package files: what the export packs (R-15) and what it compares under the
  * gate. A picture the world does not hold, and a voice line no longer read, are left out. Null when
- * nothing is public. `places` gives the packaged production's chapters their EPUB documents.
+ * nothing is public and there are no teasers. `places` gives the packaged production's chapters
+ * their EPUB documents.
  */
-export async function guideDraft(store: WorldStore, places?: { production: string; book: ReadonlyMap<string, string> }, signal?: AbortSignal): Promise<{ document: GuideDocument; lines: ReadonlyMap<string, GuideVoiceLine> } | null> {
+export async function guideDraft(store: WorldStore, places?: { production: string; book: ReadonlyMap<string, string> }, signal?: AbortSignal): Promise<GuideDraft | null> {
   const bundle = store.getBundle();
   const record = bundle.guide;
   const world = {
@@ -159,7 +250,7 @@ export async function guideDraft(store: WorldStore, places?: { production: strin
     canon: bundle.canon,
   };
   const counts = guideCounts(record, world);
-  if (counts.characters.public + counts.places.public + counts.lore.public === 0) return null;
+  if (counts.characters.public + counts.places.public + counts.lore.public + counts.teasers.chosen === 0) return null;
 
   const pictures = new Map<string, string>();
   for (const kind of ["characters", "locations", "factions"] as const) {
@@ -182,6 +273,7 @@ export async function guideDraft(store: WorldStore, places?: { production: strin
   const productions = guideProductionsOf(bundle.productions).map((production) =>
     places?.production !== production.id ? production : { ...production, chapters: production.chapters.map((chapter) => (places.book.has(chapter.id) ? { ...chapter, book: places.book.get(chapter.id)! } : chapter)) },
   );
+  const moments = await guideMoments(store, record.teasers, signal);
   const document = guideDocument(record, {
     ...world,
     productions,
@@ -190,8 +282,9 @@ export async function guideDraft(store: WorldStore, places?: { production: strin
       const line = lines.get(packageSlug(sheet.id));
       return line === undefined ? undefined : { audio: line.file, text: line.text.slice(0, 2000), duration: Math.min(MAX_GUIDE_VOICE_MS, Math.max(1, Math.round(line.seconds * 1000))), production: line.production, chapter: line.chapter };
     },
+    moment: (teaser) => moments.made.get(momentKey(teaser)),
   });
-  return document === null ? null : { document, lines };
+  return document === null ? null : { document, lines, clips: moments.clips };
 }
 
 export interface GuidePacking {
@@ -206,24 +299,48 @@ export interface GuidePacking {
 }
 
 /**
- * The guide in a package (R-13, R-15): each picture fitted to 1024 px (a transparent one stays
- * PNG), each voice line cut from its take as M4A, every file once however many entries show it,
- * and the guide document naming them by their package ids. Null when nothing is public.
+ * The guide in a package (R-13, R-15, R-29): each picture fitted to 1024 px (a teaser's to 1280; a
+ * transparent one stays PNG), each voice line cut from its take as M4A, each clip's narration cut
+ * and joined as M4A and its loop fitted, every file once however many entries show it, and the
+ * guide document naming them by their package ids.
  */
-export async function packGuide(draft: GuideDocument, lines: ReadonlyMap<string, GuideVoiceLine>, store: WorldStore, packing: GuidePacking): Promise<{ ok: true } | { ok: false; blocker: string }> {
+export async function packGuide(drafted: GuideDraft, store: WorldStore, packing: GuidePacking): Promise<{ ok: true } | { ok: false; blocker: string }> {
+  const { document: draft, lines, clips } = drafted;
   const ids = new Map<string, string>();
   let numbered = 0;
-  const fit = async (file: string): Promise<string> => {
-    const known = ids.get(file);
+  const fit = async (file: string, edge = GUIDE_PICTURE_EDGE, prefix = "g", folder = "guide"): Promise<string> => {
+    const known = ids.get(`${edge}\n${file}`);
     if (known !== undefined) return known;
     const real = (await containedWorldFile(store.dir, file))!;
     const keepsAlpha = pngHasAlpha(await readFile(toExtendedLength(real)));
-    const assetId = `g${String(++numbered).padStart(3, "0")}`;
-    const path = `guide/${assetId}.${keepsAlpha ? "png" : "jpg"}`;
-    await fitReadingImage(real, packing.at(path), keepsAlpha, packing.ffmpeg, packing.signal, GUIDE_PICTURE_EDGE);
+    const assetId = `${prefix}${String(++numbered).padStart(3, "0")}`;
+    const path = `${folder}/${assetId}.${keepsAlpha ? "png" : "jpg"}`;
+    await fitReadingImage(real, packing.at(path), keepsAlpha, packing.ffmpeg, packing.signal, edge);
     await packing.add(assetId, path, keepsAlpha ? "image/png" : "image/jpeg");
     await packing.original(assetId, real);
-    ids.set(file, assetId);
+    ids.set(`${edge}\n${file}`, assetId);
+    return assetId;
+  };
+  // A clip's narration (R-25): its pieces joined back to back as one mono M4A, as a voice line is cut.
+  const clip = async (audio: string): Promise<string> => {
+    const cut = clips.get(audio)!;
+    const inputs: string[] = [];
+    for (const segment of cut.segments) inputs.push("-ss", segment.start.toFixed(3), "-t", segment.seconds.toFixed(3), "-i", (await containedWorldFile(store.dir, segment.file))!);
+    const join = `${cut.segments.map((_, index) => `[${index}:a]aformat=sample_rates=44100:channel_layouts=mono[a${index}]`).join(";")};${cut.segments.map((_, index) => `[a${index}]`).join("")}concat=n=${cut.segments.length}:v=0:a=1[out]`;
+    const assetId = `t${String(++numbered).padStart(3, "0")}`;
+    const path = `guide/teasers/${assetId}.m4a`;
+    await packing.ffmpeg.run(["-y", ...inputs, "-filter_complex", join, "-map", "[out]", "-ac", "1", "-ar", "44100", "-c:a", "aac", "-b:a", "96k", packing.at(path)], () => {}, packing.signal);
+    await packing.add(assetId, path, "audio/mp4");
+    return assetId;
+  };
+  const loop = async (file: string): Promise<string> => {
+    const real = (await containedWorldFile(store.dir, file))!;
+    const assetId = `t${String(++numbered).padStart(3, "0")}`;
+    const path = `guide/teasers/${assetId}.mp4`;
+    const side = `scale='min(${TEASER_LOOP_SIDE},iw)':'min(${TEASER_LOOP_SIDE},ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`;
+    await packing.ffmpeg.run(["-y", "-i", real, "-an", "-vf", side, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", packing.at(path)], () => {}, packing.signal);
+    await packing.add(assetId, path, "video/mp4");
+    await packing.original(assetId, real);
     return assetId;
   };
   const cut = async (characterId: string): Promise<string> => {
@@ -247,7 +364,19 @@ export async function packGuide(draft: GuideDocument, lines: ReadonlyMap<string,
     }
     const places: GuideDocument["places"] = [];
     for (const place of draft.places) places.push({ ...place, ...(place.picture !== undefined ? { picture: await fit(place.picture) } : {}) });
-    const document: GuideDocument = { ...draft, characters, places };
+    const teasers: GuideTeaser[] = [];
+    const drafts = guideTeasers(draft);
+    if (drafts.some((teaser) => teaser.kind === "picture" || teaser.kind === "clip")) await mkdir(toExtendedLength(packing.at("guide/teasers")), { recursive: true });
+    for (const teaser of drafts) {
+      if (teaser.kind === "picture") teasers.push({ ...teaser, picture: await fit(teaser.picture, TEASER_PICTURE_EDGE, "t", "guide/teasers") });
+      else if (teaser.kind === "clip") {
+        const picture = await fit(teaser.picture, TEASER_PICTURE_EDGE, "t", "guide/teasers");
+        const audio = await clip(teaser.audio);
+        const { motion: _motion, ...still } = teaser;
+        teasers.push({ ...still, picture, audio, ...(teaser.motion !== undefined ? { motion: await loop(teaser.motion) } : {}) });
+      } else teasers.push(teaser);
+    }
+    const document: GuideDocument = draft.version === 2 ? { ...draft, characters, places, teasers } : { ...draft, characters, places };
     await writeFile(toExtendedLength(packing.at("guide/guide.json")), `${JSON.stringify(document, null, 2)}\n`, "utf8");
     await packing.add("guide", "guide/guide.json", GUIDE_MEDIA_TYPE);
   } catch {

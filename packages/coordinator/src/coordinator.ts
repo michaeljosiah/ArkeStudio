@@ -382,7 +382,7 @@ import { AudioStudioPreviews } from "./productions/audio-studio-preview.js";
 import { renderAudioStudioMix } from "./productions/audio-studio-mix.js";
 import { audiobookPlayerFile, exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
 import { exportArkePlayer, listArkePlayerPackages } from "./productions/arke-player-export.js";
-import { guideVoiceLines, setGuideEntry } from "./productions/world-guide.js";
+import { guideVoiceLines, setGuideEntry, setGuideTeasers } from "./productions/world-guide.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
 import { checkDirection, directionPlan, heldKey } from "./voice/direction.js";
@@ -10919,6 +10919,18 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "set-guide-teasers": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        try {
+          await setGuideTeasers(store, msg.change, "editor");
+        } catch (err) {
+          // The row goes back to what is kept with the snapshot below; this says why.
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The teasers could not be saved" });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "list-guide-voice-lines": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
@@ -14810,7 +14822,8 @@ export class Coordinator {
         const control = new AbortController();
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
-        const label = `Arke Player · ${production.meta.title}`.slice(0, 200);
+        // A part says so in Activity (236d): Release · New chapters is a different thing to make.
+        const label = `Arke Player · ${msg.options.part !== undefined ? "part · " : ""}${production.meta.title}`.slice(0, 200);
         let last = 0;
         const progress = (status: "running" | "done" | "cancelled" | "failed", percent: number, step?: string, output: string | null = null, error: string | null = null) =>
           this.emit({ at: new Date().toISOString(), type: "export.progress", worldId: msg.worldId, productionId: msg.productionId, exportId: msg.exportId, status, percent: Math.max(0, Math.min(100, Math.round(percent))), label, ...(step !== undefined ? { step: step.slice(0, 200) } : {}), output, error });
@@ -14824,6 +14837,7 @@ export class Coordinator {
           signal: control.signal,
           include: { book: msg.options.book, motion: msg.options.motion },
           ...(msg.options.size !== undefined ? { pictureSize: msg.options.size } : {}),
+          ...(msg.options.part !== undefined ? { part: msg.options.part } : {}),
           ...(publish !== undefined ? { publish: { title: publish.title, author: publish.author, language: publish.language, cover: publish.cover } } : {}),
           studioVersion: this.opts.appVersion,
           // Each step said at once, the percent within it at most twice a second.

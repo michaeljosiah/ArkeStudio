@@ -91,7 +91,7 @@ export async function exportGuideAlone(store: WorldStore, options: GuideAloneOpt
     step("Fitting the guide", 30);
     let packed: Awaited<ReturnType<typeof packGuide>>;
     try {
-      packed = await packGuide(drafted.document, drafted.lines, store, { ffmpeg, signal, at, add, original: async (assetId, file) => { originals[assetId] = sha256(await readFile(toExtendedLength(file))); } });
+      packed = await packGuide(drafted, store, { ffmpeg, signal, at, add, original: async (assetId, file) => { originals[assetId] = sha256(await readFile(toExtendedLength(file))); } });
     } catch (error) {
       if (signal.aborted) return cancelled();
       throw error;

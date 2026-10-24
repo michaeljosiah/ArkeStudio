@@ -448,6 +448,12 @@ export const AUDIOBOOK_PICTURE_SHAPES_SCHEMA_VERSION = 106;
  */
 export const AUDIOBOOK_CHAPTER_NARRATOR_SCHEMA_VERSION = 107;
 /**
+ * A world's teasers (design turn 236, SPEC-059 R-24): `teasers` on the strict Guide record. A build
+ * before it reads such a record as unreadable, and the Guide then refuses every write until it is
+ * fixed by hand, so the world is raised before the first teaser is kept.
+ */
+export const GUIDE_TEASERS_SCHEMA_VERSION = 108;
+/**
  * Where a picture's subject stands (design turn 197b): `focus` on a picture in the chapter's
  * strict audiobook record, which the video's vertical crop and Slow push follow. A build before
  * it reads such a record as unreadable, so the world is raised before the first. Sixty-two and

@@ -113,7 +113,7 @@ describe("a world's Guide record (SPEC-059 R-8)", () => {
         places: [{ id: "the-vigil", name: "The Vigil", picture: portrait, sections: [] }],
         lore: [],
       };
-      const packed = await packGuide(draft, new Map([["maren-kest", line]]), store, {
+      const packed = await packGuide({ document: draft, lines: new Map([["maren-kest", line]]), clips: new Map() }, store, {
         ffmpeg,
         signal: new AbortController().signal,
         at: (path) => join(made, ...path.split("/")),
