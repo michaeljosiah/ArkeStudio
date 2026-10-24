@@ -348,11 +348,15 @@ export function pictureWords(
   return { text: sentences.slice(slot.sentence, next).join(" "), ...(before !== "" ? { before } : {}), ...(after !== "" ? { after } : {}) };
 }
 
-/** A block's sentences, at sentence ends; a text with none is one sentence. */
+/**
+ * A block's sentences, at sentence ends; a text with none is one sentence. What closes after the
+ * stop stays with it — a quote, a bracket, emphasis's `*` or `_` — or the next sentence, and the
+ * mark set at it (design turn 237), would open on a stray `**`.
+ */
 export function sentencesOf(text: string): string[] {
   const flat = text.replace(/\s+/g, " ").trim();
   if (flat === "") return [];
-  const parts = flat.match(/[^.!?…]+(?:[.!?…]+["'”’)\]]*|$)/g) ?? [flat];
+  const parts = flat.match(/[^.!?…]+(?:[.!?…]+["'”’)\]*_]*|$)/g) ?? [flat];
   const kept = parts.map((part) => part.trim()).filter((part) => part !== "");
   return kept.length > 0 ? kept : [flat];
 }
