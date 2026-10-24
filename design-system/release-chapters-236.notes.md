@@ -1,6 +1,6 @@
 # Turn 236 · Releasing chapters, and a world's teasers
 
-Drawn and proposed on 24 October 2026, with Player P15 (ArkePlayer PR #10). Not built.
+Drawn and approved by the owner on 24 October 2026, with Player P15 (ArkePlayer PR #10). Not built.
 
 ## Asked
 

@@ -29,11 +29,11 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  */
 const SCREENS = [
   // BEGIN RELEASE CHAPTERS 236
-  { group: "Releasing chapters · turn 236", screen: "A world’s Guide with its teasers", frame: "236a", route: "World / Guide", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Proposed 24 October 2026 with Player P15 (ArkePlayer PR #10)."] },
-  { group: "Releasing chapters · turn 236", screen: "Adding a teaser: a clip", frame: "236b", route: "World / Guide", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Proposed 24 October 2026 with Player P15 (ArkePlayer PR #10)."] },
-  { group: "Releasing chapters · turn 236", screen: "A character that waits for a chapter cannot be a teaser", frame: "236c", route: "World / Guide", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Proposed 24 October 2026 with Player P15 (ArkePlayer PR #10)."] },
-  { group: "Releasing chapters · turn 236", screen: "Export → Arke Player: releasing new chapters", frame: "236d", route: "Story / Audiobook", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Proposed 24 October 2026 with Player P15 (ArkePlayer PR #10)."] },
-  { group: "Releasing chapters · turn 236", screen: "The part made, beside the releases before it", frame: "236e", route: "Story / Audiobook", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Proposed 24 October 2026 with Player P15 (ArkePlayer PR #10)."] },
+  { group: "Releasing chapters · turn 236", screen: "A world’s Guide with its teasers", frame: "236a", route: "World / Guide", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P15 (ArkePlayer PR #10)."] },
+  { group: "Releasing chapters · turn 236", screen: "Adding a teaser: a clip", frame: "236b", route: "World / Guide", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P15 (ArkePlayer PR #10)."] },
+  { group: "Releasing chapters · turn 236", screen: "A character that waits for a chapter cannot be a teaser", frame: "236c", route: "World / Guide", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P15 (ArkePlayer PR #10)."] },
+  { group: "Releasing chapters · turn 236", screen: "Export → Arke Player: releasing new chapters", frame: "236d", route: "Story / Audiobook", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P15 (ArkePlayer PR #10)."] },
+  { group: "Releasing chapters · turn 236", screen: "The part made, beside the releases before it", frame: "236e", route: "Story / Audiobook", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P15 (ArkePlayer PR #10)."] },
   // END RELEASE CHAPTERS 236
 
   // BEGIN PICTURE SHAPES 235
@@ -877,7 +877,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
-  { file: "release-chapters-236.review.html", what: "Turn 236: Releasing chapters — a world’s Guide with its teasers, adding a clip, a character that waits for a chapter, Export → Arke Player releasing new chapters as a part, and the part made beside the releases before it.", state: "proposed 24 October 2026; not built" },
+  { file: "release-chapters-236.review.html", what: "Turn 236: Releasing chapters — a world’s Guide with its teasers, adding a clip, a character that waits for a chapter, Export → Arke Player releasing new chapters as a part, and the part made beside the releases before it.", state: "approved 24 October 2026; not built" },
   { file: "picture-shapes-235.review.html", what: "Turn 235: Picture shapes — the Pictures sheet (Wide and Tall), a block’s picture in both shapes, Tall not made yet, and Export → Arke Player with both shapes and the picture size.", state: "approved 23 October 2026; not built" },
   { file: "world-guide-234.review.html", what: "Turn 234: a world’s Guide — what Arke Player shows of a world, its characters, places and settled lore, each public from the start or after a chapter; an entry with its sections, a voice line and the Player’s page beside it; Export → Arke Player carrying the guide; and from a phone.", state: "approved; to be specified in SPEC-059 (Player P11)" },
   { file: "arke-player-export-233.review.html", what: "Turn 233: Export → Arke Player — the sheet with Arke Player chosen, making it in Activity, the package made with its size and SHA-256, blockers in one clause, Publications’ Other exports, and from a phone with Download and Share.", state: "approved; implementation tracked in #2037 (SPEC-058)" },
