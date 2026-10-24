@@ -1,0 +1,104 @@
+/* Turn 236 · Releasing chapters, and a world's teasers. The Guide page is 234's and the Export
+   sheet 233's and 235's, copied here under .ap236 so the turn's review page stands alone; additions
+   follow. Type through the tokens only (turn 139). */
+.ap236{position:relative;overflow:hidden;background:var(--background);color:var(--foreground);font:var(--type-body)}
+.ap236 .grow{flex:1}
+.ap236-dim{position:absolute;inset:0;background:color-mix(in srgb,var(--background) 60%,transparent);z-index:2}
+.ap236-page{position:absolute;inset:0;padding:30px 44px;display:flex;flex-direction:column;gap:14px;opacity:.6}
+.ap236-page i{display:block;height:12px;border-radius:6px;background:var(--secondary)}
+.ap236-btn{height:32px;padding:0 13px;border:1px solid var(--border);border-radius:8px;display:inline-flex;align-items:center;gap:7px;font:var(--type-label);background:var(--background);color:var(--foreground);white-space:nowrap}
+.ap236-btn.pri{background:var(--foreground);color:var(--background);border-color:transparent;font-weight:600}
+.ap236-btn.off{opacity:.45}
+.ap236-btn svg{width:13px;height:13px}
+.ap236-box{width:15px;height:15px;border-radius:4px;border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;flex:none;color:var(--background)}
+.ap236-box.on{background:var(--foreground);border-color:transparent}
+.ap236-box svg{width:11px;height:11px}
+.ap236-tag{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:6px;background:var(--secondary);font:var(--type-label);font-size:var(--text-2xs);color:var(--foreground);white-space:nowrap}
+.ap236-tag svg{width:12px;height:12px}
+
+/* The world's pages (234a): the top bar, the pill nav, the head, the groups and their rows. */
+.ap236-top{height:52px;display:flex;align-items:center;gap:14px;padding:0 24px;border-bottom:1px solid var(--border);font:var(--type-ui)}
+.ap236-top .crumb{color:var(--muted-foreground)}
+.ap236-top b{font-weight:600}
+.ap236-pills{display:flex;gap:6px;padding:14px 40px 0}
+.ap236-pills span{height:32px;padding:0 13px;border-radius:99px;display:inline-flex;align-items:center;font:var(--type-ui);color:var(--muted-foreground)}
+.ap236-pills span.on{background:var(--secondary);color:var(--foreground);font-weight:600}
+.ap236-head{display:flex;align-items:flex-end;gap:16px;padding:22px 40px 0}
+.ap236-head h1{margin:0;font:var(--type-ui);font-weight:650;font-size:var(--text-3xl);letter-spacing:-.02em;line-height:1.1}
+.ap236-head .m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);margin-top:6px}
+.ap236-cols{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:28px;padding:0 40px}
+.ap236-group{border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px}
+.ap236-gh{display:flex;align-items:center;gap:10px;height:38px;padding:0 14px;background:var(--secondary);font:var(--type-ui);font-weight:600}
+.ap236-gh .m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);font-weight:400}
+.ap236-row{display:flex;align-items:center;gap:12px;min-height:46px;padding:6px 14px;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.ap236-row:first-of-type{border-top:0}
+.ap236-row .who{display:flex;align-items:center;gap:10px;min-width:0;flex:1.2}
+.ap236-row .who b{display:block;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap236-row .who div>span{display:block;font:var(--type-meta);color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap236-row .col{flex:1;min-width:0;font:var(--type-meta);color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap236-row .col.ink{color:var(--foreground)}
+.ap236-face{width:32px;height:32px;border-radius:8px;flex:none;object-fit:cover;background:var(--secondary)}
+.ap236-sw{width:34px;height:20px;border-radius:99px;background:var(--neutral-300,var(--border));position:relative;flex:none}
+.ap236-sw::after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:99px;background:var(--background)}
+.ap236-sw.on{background:var(--foreground)}
+.ap236-sw.on::after{left:16px}
+
+/* Teasers: the author's cards in their order, each its picture over its name and what it is; an
+   empty place is a dashed card with Add. A character is 4:5 as the Player draws it, the rest 16:9. */
+.ap236-teasers{display:flex;gap:12px;align-items:flex-start;padding:14px}
+.ap236-tz{flex:none;width:168px;display:flex;flex-direction:column;gap:6px}
+.ap236-tz .im{position:relative;width:100%;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:var(--secondary);border:1px solid var(--border)}
+.ap236-tz.pc .im{aspect-ratio:4/5;width:108px}
+.ap236-tz.pc{width:108px}
+.ap236-tz .im img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.ap236-tz .play{position:absolute;inset:0;margin:auto;width:34px;height:34px;border-radius:99px;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--media-overlay-bg) 55%,transparent);color:var(--media-overlay-fg)}
+.ap236-tz .play svg{width:14px;height:14px;margin-left:2px}
+.ap236-tz .n{position:absolute;left:6px;top:6px;min-width:20px;height:20px;padding:0 6px;border-radius:99px;display:inline-flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--media-overlay-bg) 62%,transparent);color:var(--media-overlay-fg);font:var(--type-label);font-size:var(--text-2xs)}
+.ap236-tz b{font-weight:500;font-size:var(--text-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap236-tz span.m{font:var(--type-meta);color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:-4px}
+.ap236-tz.add .im{border:1px dashed var(--neutral-400,var(--border));background:transparent;display:flex;align-items:center;justify-content:center;gap:6px;font:var(--type-label);color:var(--muted-foreground)}
+.ap236-tz.add .im svg{width:14px;height:14px}
+
+/* The picker over the Guide: its tabs, then a grid of what can be chosen; what cannot says why. */
+.ap236-pick{position:absolute;z-index:3;top:40px;left:50%;transform:translateX(-50%);width:760px;border:1px solid var(--border);border-radius:16px;background:var(--popover,var(--background));box-shadow:var(--shadow-lg,0 18px 50px color-mix(in srgb,var(--foreground) 16%,transparent));padding:20px 22px;display:flex;flex-direction:column;gap:14px}
+.ap236-pick h3,.ap236-sheet h3{margin:0;font:var(--type-ui);font-weight:600;font-size:var(--text-md)}
+.ap236-pick .sub,.ap236-sheet .sub{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);margin-top:-8px}
+.ap236-tabs{display:flex;gap:20px;border-bottom:1px solid var(--border)}
+.ap236-tabs span{padding:0 0 10px;font-size:var(--text-sm);color:var(--muted-foreground)}
+.ap236-tabs span.on{color:var(--foreground);font-weight:500;box-shadow:inset 0 -2px 0 var(--foreground)}
+.ap236-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 12px}
+.ap236-grid .ap236-tz{width:auto}
+.ap236-grid .ap236-tz.on .im{outline:2px solid var(--foreground);outline-offset:2px}
+.ap236-grid .ap236-tz.no .im img{opacity:.35}
+.ap236-foot{display:flex;align-items:center;gap:8px}
+
+/* The Export sheet (233a, 235d) with Release: its rows, the chapters since the last release as a
+   checklist, the schedule's fields, and the releases made so far. */
+.ap236-sheet{position:absolute;z-index:3;left:50%;transform:translateX(-50%);border:1px solid var(--border);border-radius:16px;background:var(--popover,var(--background));box-shadow:var(--shadow-lg,0 18px 50px color-mix(in srgb,var(--foreground) 16%,transparent));padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.ap236-opts{border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.ap236-opt{display:flex;align-items:center;gap:14px;min-height:44px;padding:6px 14px;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.ap236-opt:first-child{border-top:0}
+.ap236-opt>b{width:96px;flex:none;font-weight:500;color:var(--muted-foreground)}
+.ap236-opt i{font-style:normal;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);white-space:nowrap}
+.ap236-opt img{width:44px;height:25px;object-fit:cover;border-radius:4px;flex:none}
+.ap236-seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.ap236-seg span{height:28px;padding:0 12px;display:inline-flex;align-items:center;font:var(--type-label);border-left:1px solid var(--border)}
+.ap236-seg span:first-child{border-left:0}
+.ap236-seg span.on{background:var(--foreground);color:var(--background);font-weight:600}
+.ap236-field{height:28px;padding:0 10px;border:1px solid var(--border);border-radius:8px;display:inline-flex;align-items:center;gap:6px;font:var(--type-label);min-width:120px}
+.ap236-field svg{width:13px;height:13px;color:var(--muted-foreground);margin-left:auto}
+.ap236-chs{display:flex;flex-direction:column;gap:2px;flex:1}
+.ap236-ch{display:flex;align-items:center;gap:10px;min-height:30px}
+.ap236-ch .t{font-size:var(--text-sm)}
+.ap236-ch.no .t{color:var(--muted-foreground)}
+.ap236-ch i{margin-left:auto}
+.ap236-est{display:flex;align-items:center;gap:12px;font-size:var(--text-sm)}
+.ap236-est .m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap236-rel{display:flex;align-items:center;gap:12px;min-height:46px;padding:6px 14px;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.ap236-rel:first-child{border-top:0}
+.ap236-rel .d{width:96px;flex:none;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap236-rel .k{width:64px;flex:none;font-weight:500}
+.ap236-rel .m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap236-rel.now{background:color-mix(in srgb,var(--foreground) 4%,transparent)}
+.ap236-sha{display:flex;align-items:center;gap:10px;font-size:var(--text-sm)}
+.ap236-sha code{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);overflow-wrap:anywhere;flex:1}
