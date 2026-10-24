@@ -1,6 +1,7 @@
 import { savedPicture, openSavedPicture, type SavedPicture } from "./productions/audiobook-picture-reuse.js";
 import { chapterReviewSummary } from "@arke-studio/contracts";
 import { rebuildBenchPrefill } from "@arke-studio/contracts";
+import { MUSIC_IMPORT_EXTENSIONS } from "@arke-studio/contracts";
 import { ChapterReviewService } from "./productions/chapter-review.js";
 import { makeReviewTaskRunner } from "./harness/review-task.js";
 import { needsExpressiveDirection, directionSchemaVersion } from "@arke-studio/contracts";
@@ -529,6 +530,9 @@ import {
 import { makeArtDirector } from "./references/art-director.js";
 import { enhancerBrief } from "./bench/enhancer.js";
 import { LYRICS_MAX_CHARS, lyricistBrief } from "./bench/lyricist.js";
+import { addMusicTrack, readMusicRecord, removeMusicTrack, reorderMusicTracks, setMusicCover, updateMusicTrack } from "./productions/music.js";
+import { musicHeardIn } from "./productions/music-heard.js";
+import { renderMusicAlbum } from "./productions/music-render.js";
 import { KEY_ART_EXTENSIONS, WORLD_IMAGE_DIR, worldImagePrompt, worldImageRequest } from "./references/world-image.js";
 import { adoptKeyArtCandidate } from "./references/key-art.js";
 import { assembleKeyArt, keyArtComposition, readKeyArtBrief } from "./references/key-art-references.js";
@@ -10416,6 +10420,7 @@ export class Coordinator {
           ...(msg.frameRate !== undefined ? { frameRate: msg.frameRate } : {}),
           ...(msg.defaults !== undefined ? { defaults: msg.defaults } : {}),
           ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
+          ...(msg.soundtrackFor !== undefined ? { soundtrackFor: msg.soundtrackFor } : {}),
           ...(requestId !== undefined ? { requestId } : {}),
         }, () => this.refreshWorldSnapshot(msg.worldId));
         if (result.status === "created") answer({ disposition: "created", slug: result.slug });
@@ -10962,6 +10967,69 @@ export class Coordinator {
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
+      }
+      case "music-track-add":
+      case "music-track-update":
+      case "music-track-remove":
+      case "music-tracks-reorder":
+      case "music-set-cover": {
+        // The album's tracks and cover (design turn 238c – 238e, SPEC-060 R-5 – R-7): one fenced
+        // write of music.json each. A refusal is said; the page follows the snapshot below either way.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        try {
+          if (msg.kind === "music-track-add") await addMusicTrack(store, msg.productionId, msg.artifactId, { makeAlbum: msg.makeAlbum === true });
+          else if (msg.kind === "music-track-update") await updateMusicTrack(store, msg.productionId, msg.trackId, { ...(msg.title !== undefined ? { title: msg.title } : {}), ...(msg.lyrics !== undefined ? { lyrics: msg.lyrics } : {}) });
+          else if (msg.kind === "music-track-remove") await removeMusicTrack(store, msg.productionId, msg.trackId);
+          else if (msg.kind === "music-tracks-reorder") await reorderMusicTracks(store, msg.productionId, msg.order);
+          else await setMusicCover(store, msg.productionId, msg.artifactId);
+        } catch (err) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The album could not be saved" });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "music-draft-lyrics": {
+        // Draft with Arke on a track (238e, R-7): the lyricist Bench's music mode asks, answered as
+        // an event, because words reach the track only when the author keeps them.
+        const answer = (lyrics: string | null, reason?: string) =>
+          this.emit({ at: this.nowIso(), type: "music.lyrics-drafted", worldId: msg.worldId, productionId: msg.productionId, trackId: msg.trackId, requestId: msg.requestId, lyrics, ...(reason !== undefined ? { reason } : {}) });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return answer(null, "that world is not open");
+        if (!this.opts.adapter?.readiness().ready) return answer(null, "the writing harness is not running");
+        const lyricist = makeArtDirector(
+          this.opts.adapter,
+          this.sessionInput,
+          this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
+          { agent: "lyricist", answerKey: "lyrics", maxChars: LYRICS_MAX_CHARS },
+        );
+        const drafted = await lyricist(lyricistBrief({ description: msg.description })).catch(() => null);
+        void this.appLog?.append({ kind: drafted ? "music.lyrics-drafted" : "music.lyrics-unavailable", worldId: msg.worldId });
+        return answer(drafted, drafted === null ? "the lyricist had no answer this time" : undefined);
+      }
+      case "read-music-heard-in": {
+        // Heard in (R-14): found again each time it is asked for, never kept.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const tracks = await readMusicRecord(store, msg.productionId).then(({ record }) => musicHeardIn(store, msg.productionId, record)).catch(() => ({}));
+        this.emit({ at: this.nowIso(), type: "music.heard-in", worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId, tracks });
+        return;
+      }
+      case "render-music": {
+        // Play all (R-8): the export's render, made on demand and cached.
+        const answer = (result: { ok: true; file: string; durationMs: number; starts: Array<{ trackId: string; atMs: number }> } | { ok: false; reason: string }) =>
+          this.emit({ at: this.nowIso(), type: "music.rendered", worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId, result });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return answer({ ok: false, reason: "that world is not open" });
+        if (this.opts.ffmpeg === undefined) return answer({ ok: false, reason: "Needs ffmpeg" });
+        try {
+          const { record } = await readMusicRecord(store, msg.productionId);
+          const album = await renderMusicAlbum(store, record, { ffmpeg: this.opts.ffmpeg, signal: store.closingSignal });
+          return answer({ ok: true, file: album.file, durationMs: album.durationMs, starts: album.starts });
+        } catch (err) {
+          void this.appLog?.append({ kind: "music.render-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+          return answer({ ok: false, reason: err instanceof Error ? err.message.slice(0, 300) : "the album could not be rendered" });
+        }
       }
       case "list-guide-voice-lines": {
         const store = this.opts.provider.openStore?.();
@@ -18232,7 +18300,7 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "Filing artifacts is unavailable.");
           return;
         }
-        const chosen = msg.sourcePaths ?? await pick!({ accept: [...ATTACHABLE_EXTENSIONS] }).catch(() => []);
+        const chosen = msg.sourcePaths ?? await pick!({ accept: msg.music !== undefined ? [...MUSIC_IMPORT_EXTENSIONS] : [...ATTACHABLE_EXTENSIONS] }).catch(() => []);
         if (chosen.length > 16) {
           this.rejectEnqueue(msg.requestId, msg.kind, "Import up to 16 files at a time.");
           return;
@@ -18256,6 +18324,32 @@ export class Coordinator {
             this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
             if (this.stillOpen(store)) await this.refreshWorldSnapshot(msg.worldId);
           }
+          return;
+        }
+        if (msg.music !== undefined) {
+          // Import a file as a track (238d, SPEC-060 R-6): WAV, MP3, M4A or FLAC, checked and
+          // probed as any import is, filed as the production's own, then added to the album. A
+          // file the probe hears no sound in is filed but never becomes a track.
+          const music = msg.music;
+          const failures: Array<{ index: number; reason: string }> = [];
+          for (const [index, sourcePath] of chosen.entries()) {
+            if (!this.stillOpen(store)) return;
+            if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
+            const name = basename(sourcePath);
+            if (!(MUSIC_IMPORT_EXTENSIONS as readonly string[]).includes(extname(name).slice(1).toLowerCase())) { failures.push({ index, reason: `${name}: a track is WAV, MP3, M4A or FLAC` }); continue; }
+            const outcome = await fileArtifact(store, {
+              sourcePath,
+              ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
+              abandoned: () => !this.stillOpen(store) || this.stopping,
+              production: music.productionId,
+            }).catch((err: unknown) => ({ outcome: "refused" as const, reason: describeCoordinatorError(err) }));
+            if (outcome.outcome !== "filed" && outcome.outcome !== "deduplicated") { failures.push({ index, reason: `${name}: ${outcome.reason}` }); continue; }
+            if (outcome.artifact.kind !== "audio" || outcome.artifact.mediaInfo?.hasAudio !== true) { failures.push({ index, reason: `${name}: no sound could be read from it` }); continue; }
+            await addMusicTrack(store, music.productionId, outcome.artifact.id, { makeAlbum: music.makeAlbum === true })
+              .catch((err: unknown) => failures.push({ index, reason: `${name}: ${err instanceof Error ? err.message : describeCoordinatorError(err)}` }));
+          }
+          await this.refreshWorldSnapshot(msg.worldId);
+          this.emitEnqueueResult(msg.requestId, msg.kind, chosen.length, [], failures, true);
           return;
         }
         if (msg.editor) {

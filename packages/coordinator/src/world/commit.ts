@@ -461,6 +461,12 @@ export const GUIDE_TEASERS_SCHEMA_VERSION = 108;
  */
 export const AUDIOBOOK_PICTURE_MARKS_SCHEMA_VERSION = 109;
 /**
+ * Music productions (design turn 238, SPEC-060 R-1, R-4): `medium: "music"` on a production and
+ * its `music.json`. A build before it cannot read the medium, so it would drop the production from
+ * the world without a word; the world is raised when the first music production is made.
+ */
+export const MUSIC_SCHEMA_VERSION = 110;
+/**
  * Where a picture's subject stands (design turn 197b): `focus` on a picture in the chapter's
  * strict audiobook record, which the video's vertical crop and Slow push follow. A build before
  * it reads such a record as unreadable, so the world is raised before the first. Sixty-two and

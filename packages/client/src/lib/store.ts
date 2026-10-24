@@ -1020,6 +1020,27 @@ export function subscribeLyricsDrafted(listener: (answer: LyricsDrafted) => void
   return () => lyricsDraftedListeners.delete(listener);
 }
 
+// A music production's answers (design turn 238, SPEC-060): a track's drafted lyrics, where its
+// tracks are heard, and Play all's render, each to the window that asked by its request id.
+export type MusicLyricsDrafted = Extract<DomainEvent, { type: "music.lyrics-drafted" }>;
+export type MusicHeardIn = Extract<DomainEvent, { type: "music.heard-in" }>;
+export type MusicRendered = Extract<DomainEvent, { type: "music.rendered" }>;
+const musicLyricsListeners = new Set<(answer: MusicLyricsDrafted) => void>();
+const musicHeardListeners = new Set<(answer: MusicHeardIn) => void>();
+const musicRenderedListeners = new Set<(answer: MusicRendered) => void>();
+export function subscribeMusicLyricsDrafted(listener: (answer: MusicLyricsDrafted) => void): () => void {
+  musicLyricsListeners.add(listener);
+  return () => musicLyricsListeners.delete(listener);
+}
+export function subscribeMusicHeardIn(listener: (answer: MusicHeardIn) => void): () => void {
+  musicHeardListeners.add(listener);
+  return () => musicHeardListeners.delete(listener);
+}
+export function subscribeMusicRendered(listener: (answer: MusicRendered) => void): () => void {
+  musicRenderedListeners.add(listener);
+  return () => musicRenderedListeners.delete(listener);
+}
+
 
 export function subscribeFiledBatch(listener: (batch: FiledBatch) => void): () => void {
   filedBatchListeners.add(listener);
@@ -2032,6 +2053,9 @@ function handleFrame(json: string): void {
     if (event.type === "bench.lyrics-drafted") {
       for (const listener of lyricsDraftedListeners) listener(event);
     }
+    if (event.type === "music.lyrics-drafted") for (const listener of musicLyricsListeners) listener(event);
+    if (event.type === "music.heard-in") for (const listener of musicHeardListeners) listener(event);
+    if (event.type === "music.rendered") for (const listener of musicRenderedListeners) listener(event);
     if (event.type === "artifact.filed-batch") {
       for (const listener of filedBatchListeners) listener(event);
     }
@@ -4964,9 +4988,11 @@ export function createProduction(
   input: {
     title: string;
     /** The audience-facing medium (SPEC-023 R-1) — step one of the dialog. */
-    medium: "story" | "video" | "interactive-video";
+    medium: "story" | "video" | "interactive-video" | "music";
     /** The named format beneath it (SPEC-023 R-2), sent only when it says something. */
     productionKind?: string;
+    /** The production a soundtrack is for (SPEC-060 R-1). */
+    soundtrackFor?: string;
     seriesTitle?: string;
     aspect?: string;
     frameRate?: 24 | 25 | 30;
@@ -4986,6 +5012,51 @@ export function createProduction(
   const requestId = ulid();
   send({ kind: "create-production", worldId, requestId, ...input });
   return requestId;
+}
+
+// ---- SPEC-060: a music production's album (design turn 238) ---------------
+
+/** A kept take as the album's last track (238d, R-6); a Single's second asks for `makeAlbum`. */
+export function addMusicTrack(worldId: string, productionId: string, artifactId: string, makeAlbum = false): boolean {
+  return send({ kind: "music-track-add", worldId, productionId, artifactId, ...(makeAlbum ? { makeAlbum: true } : {}) });
+}
+
+/** A track's title or lyrics (238e, R-7); empty lyrics clear them. */
+export function updateMusicTrack(worldId: string, productionId: string, trackId: string, change: { title?: string; lyrics?: string }): boolean {
+  return send({ kind: "music-track-update", worldId, productionId, trackId, ...change });
+}
+
+/** Remove from album (R-7): the take stays on the shelf. */
+export function removeMusicTrack(worldId: string, productionId: string, trackId: string): boolean {
+  return send({ kind: "music-track-remove", worldId, productionId, trackId });
+}
+
+/** The tracks in a new order (R-5), every one, each once. */
+export function reorderMusicTracks(worldId: string, productionId: string, order: readonly string[]): boolean {
+  return send({ kind: "music-tracks-reorder", worldId, productionId, order: [...order] });
+}
+
+/** The album's cover (R-5): a picture on the shelf, or none. */
+export function setMusicCover(worldId: string, productionId: string, artifactId: string | null): boolean {
+  return send({ kind: "music-set-cover", worldId, productionId, artifactId });
+}
+
+/** Draft with Arke on a track (R-7): answered as `music.lyrics-drafted` under the id returned. */
+export function draftMusicLyrics(worldId: string, productionId: string, trackId: string, description: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "music-draft-lyrics", worldId, productionId, trackId, requestId, description }) ? requestId : null;
+}
+
+/** Heard in (R-14), read each time: answered as `music.heard-in` under the id returned. */
+export function readMusicHeardIn(worldId: string, productionId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "read-music-heard-in", worldId, productionId, requestId }) ? requestId : null;
+}
+
+/** Play all (R-8): answered as `music.rendered` under the id returned. */
+export function renderMusic(worldId: string, productionId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "render-music", worldId, productionId, requestId }) ? requestId : null;
 }
 
 /** Stage the structured overview through the gate — nothing is written live (issue 385). */
@@ -5631,6 +5702,7 @@ export function importEditorMedia(
   worldId: string, editor: Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"],
   files?: readonly File[], production?: string,
   audioStudio?: Extract<ClientMessage, { kind: "upload-artifacts" }>["audioStudio"],
+  music?: Extract<ClientMessage, { kind: "upload-artifacts" }>["music"],
 ): { requestId: string | null; reason?: string } {
   if (isRemoteSession()) return { requestId: null, reason: "Import media on the desktop app." };
   if (files && files.length > 16) return { requestId: null, reason: "Import up to 16 files at a time." };
@@ -5641,7 +5713,7 @@ export function importEditorMedia(
   const requestId = queueRequest("upload-artifacts");
   // Omitted rather than sent as undefined: the frame is `.strict()`, and the picker and the drop
   // have to carry the same scope or one entrance on a page would file somewhere the other did not.
-  const scope = { ...(production !== undefined ? { production } : {}), ...(audioStudio ? { audioStudio } : {}) };
+  const scope = { ...(production !== undefined ? { production } : {}), ...(audioStudio ? { audioStudio } : {}), ...(music ? { music } : {}) };
   if (browserImport) {
     const currentBridge = bridge;
     let worldChanged = false;

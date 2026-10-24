@@ -126,6 +126,10 @@ export const AudioStudioImportSchema = z.object({
 }).strict();
 export type AudioStudioImport = z.infer<typeof AudioStudioImportSchema>;
 
+/** Import a file as a music production's track (SPEC-060 R-6, 238d): filed to the production, probed, then added. */
+export const MusicImportSchema = z.object({ productionId: SlugSchema, makeAlbum: z.boolean().optional() }).strict();
+export type MusicImport = z.infer<typeof MusicImportSchema>;
+
 export const ClientMessageSchema = z.discriminatedUnion("kind", [
   ProductionSetupCommandSchema,
   z.object({ kind: z.literal("save-production-narrative"), worldId: UlidSchema, productionId: SlugSchema,
@@ -2057,6 +2061,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         .strict()
         .optional(),
       logline: z.string().max(500).optional(),
+      /** The production a Soundtrack is for (SPEC-060 R-3): music only, written to its `music.json`. */
+      soundtrackFor: SlugSchema.optional(),
     })
     .strict(),
   /**
@@ -3067,6 +3073,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     production: SlugSchema.nullable().optional(),
     editor: EditorImportSchema.optional(),
     audioStudio: AudioStudioImportSchema.optional(),
+    music: MusicImportSchema.optional(),
   }).strict(),
   /**
    * Another world's placeable files, for the Cut's Library to browse (issue 1033): names, kinds,
@@ -4063,6 +4070,32 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("set-guide-entry"), worldId: UlidSchema, change: SetGuideEntrySchema }).strict(),
   /** The Guide's teasers (SPEC-059 R-24, R-27), replaced whole in the author's order. */
   z.object({ kind: z.literal("set-guide-teasers"), worldId: UlidSchema, change: SetGuideTeasersSchema }).strict(),
+  /**
+   * A music production's tracks (SPEC-060 R-5 – R-7, design turn 238). Each writes `music.json`
+   * through the production store. Adding a second track to a Single makes it an Album only when
+   * the person said so (`makeAlbum`): a Single holds one track.
+   */
+  z.object({ kind: z.literal("music-track-add"), worldId: UlidSchema, productionId: SlugSchema, artifactId: ArtifactIdSchema, makeAlbum: z.boolean().optional() }).strict(),
+  z.object({
+    kind: z.literal("music-track-update"),
+    worldId: UlidSchema,
+    productionId: SlugSchema,
+    trackId: SlugSchema,
+    title: z.string().trim().min(1).max(200).optional(),
+    /** Plain text; an empty string clears them. */
+    lyrics: z.string().max(20_000).optional(),
+  }).strict(),
+  z.object({ kind: z.literal("music-track-remove"), worldId: UlidSchema, productionId: SlugSchema, trackId: SlugSchema }).strict(),
+  /** The tracks in their new order, every one of them. */
+  z.object({ kind: z.literal("music-tracks-reorder"), worldId: UlidSchema, productionId: SlugSchema, order: z.array(SlugSchema).min(1).max(64) }).strict(),
+  /** The album's cover (R-5): an image on the shelf, or null to clear it. */
+  z.object({ kind: z.literal("music-set-cover"), worldId: UlidSchema, productionId: SlugSchema, artifactId: ArtifactIdSchema.nullable() }).strict(),
+  /** Draft with Arke (R-7): the lyricist's words for a track, answered as `music.lyrics-drafted`. */
+  z.object({ kind: z.literal("music-draft-lyrics"), worldId: UlidSchema, productionId: SlugSchema, trackId: SlugSchema, requestId: UlidSchema, description: z.string().trim().min(1).max(2_000) }).strict(),
+  /** Where each track is heard in the world's other productions (R-14), answered as `music.heard-in`. */
+  z.object({ kind: z.literal("read-music-heard-in"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  /** Play all (R-8): the album rendered as the export renders it, answered as `music.rendered`. */
+  z.object({ kind: z.literal("render-music"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   /** The sentences a character speaks in takes of chapters read whole (R-6), answered as `guide.voice-lines`. */
   z.object({ kind: z.literal("list-guide-voice-lines"), ...GuideVoiceLinesRequestSchema.shape }).strict(),
   z.object({ kind: z.literal("pick-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),

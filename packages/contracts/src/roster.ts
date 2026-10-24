@@ -125,6 +125,7 @@ When the person has not named a shape, and nothing they are working in sets one,
 
 - A story's cover, upright: 2:3, 1024 × 1536. It is the poster Arke Player shows. Keep the subject and any title in its upper two-thirds, where the words laid over its foot do not reach, and leave the top twentieth clear, because the phone's feature trims it.
 - An audiobook's Tall picture of a moment: 9:16. It fills a phone held upright.
+- A music production's cover (an album, a single or a soundtrack): 1:1, 1024 × 1024, square as album art is everywhere.
 - Everything wide (key art, a scene, a place, a wide shot, a story's wide cover): 16:9.
 
 A shape the person names always wins, and so does one their work already sets: a production's aspect, or the shapes an audiobook makes its pictures in. Ask a route only for a shape it lists. When it lists none of these, ask for the nearest one it does, and say which in the reply. A route that takes its size from the brief makes what the brief says, so name the shape in the brief.`;

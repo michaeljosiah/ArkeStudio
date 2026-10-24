@@ -10,6 +10,7 @@ import {
   LISTENING_MEDIA_TYPE,
   manuscriptDocument,
   packageSlug,
+  productionShape,
   SlugSchema,
   WORLD_PACKAGE_FORMAT,
   withUnplannedChapters,
@@ -33,6 +34,7 @@ import { writeEpub } from "./manuscript.js";
 import { openChapter } from "./ops.js";
 import { checkWorldPackageZip, editionFingerprint, readWorldPackageRelease, writeWorldPackageZip } from "./world-package.js";
 import { guideDraft, packGuide } from "./world-guide.js";
+import { exportMusicPlayer } from "./music-export.js";
 import { fitReadingImage, pngHasAlpha } from "../references/reading-image.js";
 export { pngHasAlpha } from "../references/reading-image.js";
 
@@ -55,7 +57,7 @@ const COMPILER_VERSION = 1;
 const MOTION_SIDE = 1080;
 
 export type ArkePlayerExportResult =
-  | { ok: true; file: string; bytes: number; sha256: string; edition: string; chapters: number; pictures: number; book: boolean; guide: boolean; part?: number }
+  | { ok: true; file: string; bytes: number; sha256: string; edition: string; chapters: number; pictures: number; book: boolean; guide: boolean; part?: number; tracks?: number }
   | { ok: false; blockers: string[] };
 
 export interface ArkePlayerExportOptions {
@@ -165,6 +167,8 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
   const bundle = store.getBundle();
   const production = bundle.productions.find((entry) => entry.meta.id === productionId);
   if (production === undefined) return { ok: false, blockers: ["that production is no longer in this world"] };
+  // A music production is its own package (SPEC-060 R-15 – R-17), made by the same press.
+  if (productionShape(production.meta).isMusic) return exportMusicPlayer(store, productionId, options);
   const step = options.onStep ?? (() => {});
 
   if (signal.aborted) return cancelled();
@@ -505,8 +509,11 @@ const ArkePlayerListedSchema = z.object({
   guide: z.boolean().optional(),
   /** What it released (SPEC-058 R-43); absent in a record made before releases, and then read from the package. */
   release: ArkePlayerReleaseSchema.optional(),
+  /** A music production's package (SPEC-060 R-15): its tracks and how long they play. */
+  tracks: z.number().int().min(0).optional(),
+  durationMs: z.number().int().min(0).optional(),
 }).strict();
-type ArkePlayerListed = z.infer<typeof ArkePlayerListedSchema>;
+export type ArkePlayerListed = z.infer<typeof ArkePlayerListedSchema>;
 
 // What a package made before releases holds, read from the package once: its records are written
 // once and never again, and a 400 MB package is not reread each time Publications opens.
@@ -528,11 +535,13 @@ async function releaseOfPackage(file: string, bytes: number): Promise<ArkePlayer
 
 /**
  * The world's Arke Player packages and parts for Publications (233e, 236e), newest first: each by
- * the record written beside it, and only while the package is there at the length it records.
+ * the record written beside it, and only while the package is there at the length it records. A
+ * production package is named by its production (SPEC-060 R-17), so any dated ZIP is looked at;
+ * the record is what decides, and a guide alone, which has none, is never listed.
  */
 export async function listArkePlayerPackages(store: WorldStore): Promise<Array<ArkePlayerListed & { dir: string; file: string }>> {
   const exportsDir = join(store.dir, "exports");
-  const names = (await readdir(toExtendedLength(exportsDir)).catch(() => [] as string[])).filter((name) => /-(?:player|part)-\d{4}-\d{2}-\d{2}(?:-\d+)?\.zip$/.test(name));
+  const names = (await readdir(toExtendedLength(exportsDir)).catch(() => [] as string[])).filter((name) => /-\d{4}-\d{2}-\d{2}(?:-\d+)?\.zip$/.test(name));
   const out: Array<ArkePlayerListed & { dir: string; file: string }> = [];
   for (const name of names) {
     try {

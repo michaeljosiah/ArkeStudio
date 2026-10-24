@@ -48,6 +48,10 @@ import {
   type ChapterImplies,
   AudioDramaRecordSchema,
   DEFAULT_AUDIO_DRAMA_PLAN,
+  EMPTY_MUSIC_RECORD,
+  MUSIC_RECORD_FILE,
+  MusicRecordSchema,
+  musicKindOf,
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
 import { posterNameFor } from "../takes/poster.js";
@@ -57,7 +61,7 @@ import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sceneLookReleases } from "../references/kit.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import { JsonFile, MarkdownFile, sha256 } from "../world/text-files.js";
-import { AUDIO_DRAMA_SCHEMA_VERSION, CommitStaleError, type CommitFileInput, type CommitResult } from "../world/commit.js";
+import { AUDIO_DRAMA_SCHEMA_VERSION, CommitStaleError, MUSIC_SCHEMA_VERSION, type CommitFileInput, type CommitResult } from "../world/commit.js";
 import { readSceneRecord } from "./scene-record.js";
 import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
@@ -85,6 +89,8 @@ export interface CreateProductionInput {
   frameRate?: FrameRate;
   defaults?: Season["defaults"];
   logline?: string;
+  /** The production a Soundtrack is for (SPEC-060 R-3); music only. */
+  soundtrackFor?: string;
   /** Stamped on the commit's change lines so a redelivered request finds its commit (#384). */
   requestId?: string;
 }
@@ -321,7 +327,14 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
    * for dropped on the floor. What that input means now is the video medium carrying the
    * interactive kind, so that is what lands on disk.
    */
-  const kind = input.productionKind ?? (input.medium === "interactive-video" ? "interactive" : undefined);
+  // Music is one of its three kinds and nothing else (SPEC-060 R-1): an unknown word reads as an album.
+  const kind = medium === "music"
+    ? musicKindOf({ kind: input.productionKind })
+    : input.productionKind ?? (input.medium === "interactive-video" ? "interactive" : undefined);
+  const soundtrackFor = medium === "music" && kind === "soundtrack" ? input.soundtrackFor : undefined;
+  if (medium === "music" && kind === "soundtrack" && (soundtrackFor === undefined || !taken.includes(soundtrackFor))) {
+    throw new Error("A soundtrack is for one of this world's productions; choose which");
+  }
   const carriesNewModel =
     medium !== plainShape.medium || (kind !== undefined && kind !== plainShape.kind);
   const shape = productionShape({ format: legacyFormat, ...(carriesNewModel ? { medium, kind } : {}) });
@@ -352,6 +365,15 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
       path: `productions/${slug}/audio-drama.json`,
       action: "create",
       content: JSON.stringify(AudioDramaRecordSchema.parse({ version: 1, plan: DEFAULT_AUDIO_DRAMA_PLAN }), null, 2) + "\n",
+      baseHash: null,
+    });
+  }
+  // Music starts with no tracks and the album's loudness (SPEC-060 R-4); a soundtrack names its production.
+  if (shape.isMusic) {
+    files.push({
+      path: `productions/${slug}/${MUSIC_RECORD_FILE}`,
+      action: "create",
+      content: JSON.stringify(MusicRecordSchema.parse({ ...EMPTY_MUSIC_RECORD, ...(soundtrackFor !== undefined ? { for: soundtrackFor } : {}) }), null, 2) + "\n",
       baseHash: null,
     });
   }
@@ -401,7 +423,9 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
     files,
     // Any new-model write crosses the schema boundary (SPEC-023 R-23) so older builds refuse
     // this world by name instead of silently dropping the production from the bundle.
-    ...(shape.isAudioDrama
+    ...(shape.isMusic
+      ? { raiseSchemaVersion: MUSIC_SCHEMA_VERSION }
+      : shape.isAudioDrama
       ? { raiseSchemaVersion: AUDIO_DRAMA_SCHEMA_VERSION }
       : input.frameRate !== undefined
       ? { raiseSchemaVersion: 5 }
