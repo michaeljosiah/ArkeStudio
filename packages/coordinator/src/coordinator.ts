@@ -1816,12 +1816,14 @@ export class Coordinator {
           const held = await readAudiobook(store, productionId, chapter.file);
           const record = held === null || held === "unreadable" ? null : held;
           const room = await pictureRoom(store, productionId, chapter.id, record?.look ?? null);
-          const planned = room.plan.blocks.find((candidate) => candidate.block.key === row.block);
-          if (planned === undefined || audiobookTextHash(planned.block.text) !== row.textHash) {
+          // A row names its block, or a mark inside it (design turn 237): found by its sentence.
+          const planned = room.plan.blocks.find((candidate) => candidate.block.key === pictureKeyParts(row.block).block);
+          const slot = pictureSlot(room.plan.blocks.map((candidate) => candidate.block), record?.pictures, row.block);
+          if (planned === undefined || slot === null || audiobookTextHash(planned.block.text) !== row.textHash) {
             progress.failed.push({ block: row.block, reason: "the words changed · illustrate again" });
             continue;
           }
-          if (record?.pictures?.[row.block] !== undefined) {
+          if (slot.placed !== undefined || record?.pictures?.[row.block] !== undefined) {
             progress.failed.push({ block: row.block, reason: "a picture stands here now" });
             continue;
           }
@@ -1864,7 +1866,20 @@ export class Coordinator {
           }
           progress.spentMicroUsd += made.costMicroUsd ?? made.estimatedMicroUsd;
           const stamp = pictureLookFor(record?.look ?? null, who.filter((entry) => entry.kind === "character").map((entry) => entry.key), ridingPicks(who), kitLookLibrary(store.getBundle().referenceKits, record?.look ?? null));
-          const next = await setAudiobookPicture(store, productionId, chapter.file, row.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, { ...(stamp !== undefined ? { look: stamp } : {}), ...(row.shot !== undefined ? { shot: row.shot } : {}), arke: true });
+          let next = await setAudiobookPicture(store, productionId, chapter.file, row.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, { ...(stamp !== undefined ? { look: stamp } : {}), ...(row.shot !== undefined ? { shot: row.shot } : {}), arke: true });
+          // Its Tall too, when the book makes them (design turn 237, R-208): from the picture that just
+          // landed, under what is left of the one confirm. A Tall that fails leaves the picture made.
+          if (row.tallMicroUsd !== undefined && !control.signal.aborted) {
+            try {
+              const tall = await this.makeTallPicture(store, { productionId, chapter, block: row.block, ceilingMicroUsd: Math.max(0, run.confirmedMicroUsd - progress.spentMicroUsd), requestId: ulid(), signal: control.signal });
+              if (tall.ok) {
+                progress.spentMicroUsd += tall.estimatedMicroUsd;
+                next = tall.record;
+              } else if (!control.signal.aborted) void this.appLog?.append({ kind: "audiobook.illustration-tall-failed", chapter: chapter.file, block: row.block, message: tall.reason });
+            } catch (err) {
+              if (!control.signal.aborted) void this.appLog?.append({ kind: "audiobook.illustration-tall-failed", chapter: chapter.file, block: row.block, message: describeCoordinatorError(err) });
+            }
+          }
           progress.made.push(row.block);
           this.refreshIfStillOpen(store);
           this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record: next });
@@ -1878,6 +1893,8 @@ export class Coordinator {
     }
     delete progress.current;
     progress.state = control.signal.aborted ? "stopped" : "done";
+    // Pictures filed inside a made take start on their word once it is timed (design turn 237, R-204).
+    if (progress.made.some((made) => pictureKeyParts(made).sentence !== undefined)) void this.timeMarkedTakes(store, productionId, chapter.id);
     // What was made belongs to its blocks now; what is left is the proposal still, for another try.
     // A row this run could not make keeps why, so a window that opens the proposal later holds it
     // with its reason instead of offering it as an ordinary picture (2026-10-04); a row the run did

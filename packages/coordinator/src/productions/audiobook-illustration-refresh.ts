@@ -1,4 +1,4 @@
-import { illustrationReferencesChanged, audiobookTextHash, chapterLookDisagreement, kitLookLibrary, lookLinesFor, ownLookPicks, pictureLookFor, resolveReferenceCharacter, ridingPicks, type IllustrationProposal, type IllustrationRow, type ManifestModel } from "@arke-studio/contracts";
+import { illustrationReferencesChanged, audiobookTextHash, chapterLookDisagreement, kitLookLibrary, lookLinesFor, ownLookPicks, pictureKeyParts, pictureLookFor, pictureSlot, resolveReferenceCharacter, ridingPicks, sentenceHashes, sentencesOf, type IllustrationProposal, type IllustrationRow, type ManifestModel } from "@arke-studio/contracts";
 import { referenceBudgetFor } from "../references/generate.js";
 import type { WorldStore } from "../world/store.js";
 import { chapterPersonCandidates } from "./audiobook-look.js";
@@ -45,7 +45,11 @@ export function refreshIllustrationRow(store: WorldStore, room: PictureRoom, mod
     });
     const held = holdBrief({ frame: shot.frame, inFrame: shot.inFrame.map(key), notInFrame: shot.notInFrame.map(key), expressions: Object.fromEntries(Object.entries(shot.expressions).map(([who, words]) => [key(who), words])), details: shot.details.map(detail => ({ ...detail, of: key(detail.of) })), prompt: row.prompt }, { people, places: room.places, prompt: row.prompt, fallback: () => [] });
     const lines = lookLinesFor(room.look, [...held.inFrame.map(person => person.key), ...held.details.map(detail => detail.of)], { ...ownLookPicks(own), ...picks }, library);
-    const block = room.plan.blocks.find(entry => entry.block.key === row.block)?.block.text ?? "";
+    // A row at a mark is checked against its own words, from its sentence on (design turn 237).
+    const parts = pictureKeyParts(row.block);
+    const text = room.plan.blocks.find(entry => entry.block.key === parts.block)?.block.text ?? "";
+    const from = parts.sentence === undefined ? 0 : Math.max(0, sentenceHashes(text).indexOf(parts.sentence));
+    const block = sentencesOf(text).slice(from).join(" ");
     shot = { frame: held.frame, inFrame: held.inFrame.map(person => person.key), notInFrame: held.notInFrame, expressions: held.expressions, details: held.details, checks: pictureChecks({ held, who, people, lines, block, mood: room.mood }), checkedPrompt: row.prompt };
   }
   return { ...rest, who, estimatedMicroUsd: pictureQuote(model, who.filter(entry => entry.carried).length), ...(needs.length ? { needs } : {}), ...(disagrees.length ? { disagrees } : {}), ...(stamp === undefined ? {} : { look: stamp }), ...(shot === undefined ? {} : { shot }) };
@@ -56,8 +60,10 @@ export function refreshIllustrationProposal(store: WorldStore, productionId: str
   if (model.id !== proposal.model.id || model.provider !== proposal.model.provider) throw new Error("the picture model changed · illustrate again");
   if (room.plan.record === "unreadable") throw new Error("the chapter record is unreadable");
   const record = room.plan.record;
-  const rows = proposal.rows.filter(row => record?.pictures?.[row.block] === undefined).map(row => {
-    const block = room.plan.blocks.find(entry => entry.block.key === row.block);
+  const blocks = room.plan.blocks.map(entry => entry.block);
+  // A row whose place has a picture now is left out; a row at a mark is found by its sentence (design turn 237).
+  const rows = proposal.rows.filter(row => pictureSlot(blocks, record?.pictures, row.block)?.placed === undefined).map(row => {
+    const block = room.plan.blocks.find(entry => entry.block.key === pictureKeyParts(row.block).block);
     if (block === undefined || audiobookTextHash(block.block.text) !== row.textHash) throw new Error("the words changed · illustrate again");
     return refreshIllustrationRow(store, room, model, row);
   });

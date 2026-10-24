@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { formatRunningTime, frameWord, illustrationRowGoes, illustrationTotal, pacePhrase, priceLabel, type IllustrationRow, type PictureWho } from "@arke-studio/contracts";
+import { formatRunningTime, frameWord, illustrationRowGoes, illustrationTotal, priceLabel, type IllustrationRow, type PictureWho } from "@arke-studio/contracts";
 import { refreshIllustrationReferences, dismissIllustration, illustrateChapter, skipIllustrationRow, sendIllustrationWithout, stopIllustration, acceptIllustration, useIllustrationRuns, type IllustrationRun } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
 import { ReferenceCoverage } from "./reference-coverage.js";
@@ -127,10 +127,12 @@ function Face({ who, slug }: { who: PictureWho; slug: string }) {
   return who.reference === null ? <i className="fy-ills__fig fy-ills__fig--none" aria-hidden="true" /> : <img className={cx("fy-ills__fig", !who.carried && "fy-ills__fig--over")} src={mediaUrl(slug, who.reference)} alt="" />;
 }
 
-function Card({ row, estimated, words, skipped, without, reason, slug, disabled, refreshed, onSkip, onWithout, onMakeLook, onLook }: {
+function Card({ row, estimated, words, beat, skipped, without, reason, slug, disabled, refreshed, onSkip, onWithout, onMakeLook, onLook }: {
   row: IllustrationRow;
   estimated: boolean;
   words: string | undefined;
+  /** The beat the picture falls in (design turn 237, 237d): `in The goat story`. */
+  beat?: string | undefined;
   skipped: boolean;
   without: boolean;
   reason: string | undefined;
@@ -186,6 +188,13 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
           </Button>
         )}
       </div>
+      {/* Why the story wants a picture here, and the beat it falls in (design turn 237d, R-206). */}
+      {(row.reason !== undefined || beat !== undefined) && (
+        <p className="fy-mono fy-ills__why" data-testid="illustration-why">
+          {row.reason !== undefined && <span className="fy-ills__reason">{row.reason}</span>}
+          {beat !== undefined && <span>in {beat}</span>}
+        </p>
+      )}
       {refreshed && <p className="fy-mono fy-ills__note" data-testid="illustration-row-refreshed">References updated</p>}
       <div className="fy-ills__wh">
         {people.map((entry) => (
@@ -229,11 +238,14 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
  * `onMakeLook` is the held row's one action; the default sends a person to the character's page,
  * where the picture a look is made from lives.
  */
-export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, onDiscard, onSkip, onWithout, onMakeLook, onAgain, onClose, onLook, onRefresh, offline }: {
+export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, beatOf, onAccept, onDiscard, onSkip, onWithout, onMakeLook, onAgain, onClose, onLook, onRefresh, offline }: {
   run: IllustrationRun;
   chapterOrder: number;
   slug: string;
+  /** A row's words, by its picture key: a block's own, or from a mark's sentence on (design turn 237). */
   wordsOf: (block: string) => string | undefined;
+  /** The name of the beat a row's picture falls in, where its block is one (237d). */
+  beatOf?: (block: string) => string | undefined;
   onAccept: () => void;
   onDiscard: () => void;
   onSkip: (block: string) => void;
@@ -251,12 +263,14 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
   const skipped = new Set(run.skipped);
   const total = illustrationTotal(proposal.rows, skipped, new Set(run.without));
   const reasons = new Map((run.progress?.failed ?? []).map((entry) => [entry.block, entry.reason]));
-  const per = proposal.rows.length === 0 ? proposal.seconds : proposal.seconds / (proposal.rows.length + proposal.standing);
   const count = `${proposal.rows.length} picture${proposal.rows.length === 1 ? "" : "s"}`;
+  // Chosen from the story under a cap, not to a pace (design turn 237, R-206); a book made Tall makes both shapes (R-208).
+  const tall = proposal.rows.some((row) => row.tallMicroUsd !== undefined);
   const headline = [
     count,
-    pacePhrase(per),
-    `${total.count} to make`,
+    "where the story changes",
+    `${total.count} to make${tall ? ", Wide and Tall" : ""}`,
+    ...(proposal.standing > 0 ? [`${proposal.standing} already there`] : []),
     ...(skipped.size > 0 ? [`${skipped.size} skipped`] : []),
     ...(total.held > 0 ? [`${total.held} need${total.held === 1 ? "s" : ""} a reference`] : []),
     ...(total.disagree > 0 ? [`${total.disagree} look${total.disagree === 1 ? " disagrees" : "s disagree"}`] : []),
@@ -291,6 +305,7 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
                   row={row}
                   estimated={proposal.estimated}
                   words={wordsOf(row.block)}
+                  beat={beatOf?.(row.block)}
                   skipped={skipped.has(row.block)}
                   without={run.without.includes(row.block)}
                   reason={reasons.get(row.block)}

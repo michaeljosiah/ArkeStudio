@@ -19,18 +19,19 @@ describe("the chapter's clock (R-101)", () => {
   });
 });
 
-describe("the pace and the twenty-second rule (R-101)", () => {
-  it("allows about one picture every minute and a half of speech, less those already standing, and never none for a chapter with words", () => {
-    assert.equal(pictureCap(630, 0), 7);
-    assert.equal(pictureCap(630, 3), 4);
-    assert.equal(pictureCap(630, 9), 0);
-    assert.equal(pictureCap(20, 0), 1);
-    assert.equal(pictureCap(20, 1), 0);
+describe("the cap and the five-second rule (R-101, design turn 237 R-207)", () => {
+  it("allows at most one picture per twenty seconds of speech, less those already standing, and never none for a chapter with words", () => {
+    assert.equal(pictureCap(630, 0), 32);
+    assert.equal(pictureCap(630, 15), 17);
+    assert.equal(pictureCap(630, 40), 0);
+    assert.equal(pictureCap(1228, 15), 46, "Na love or Juju's Chapter 1, 20:28 with fifteen standing: 61 at most");
+    assert.equal(pictureCap(10, 0), 1);
+    assert.equal(pictureCap(10, 1), 0);
   });
 
-  it("keeps a proposal at least twenty seconds from every picture standing and every one kept before it", () => {
-    assert.deepEqual(thinPictures([{ at: 0 }, { at: 10 }, { at: 25 }, { at: 40 }, { at: 41 }], [], 9), [0, 2], "0 and 25: 10 is too near 0, and 40 and 41 too near 25");
-    assert.deepEqual(thinPictures([{ at: 0 }, { at: 30 }, { at: 55 }], [28], 9), [0, 2], "30 is beside a picture already standing at 28");
+  it("keeps a proposal at least five seconds from every picture standing and every one kept before it", () => {
+    assert.deepEqual(thinPictures([{ at: 0 }, { at: 3 }, { at: 8 }, { at: 12 }, { at: 13 }], [], 9), [0, 2, 4], "0, 8 and 13: 3 is too near 0, and 12 too near 8");
+    assert.deepEqual(thinPictures([{ at: 0 }, { at: 30 }, { at: 40 }], [28], 9), [0, 2], "30 is beside a picture already standing at 28");
   });
 
   it("past the cap, drops the proposal nearest a neighbour first", () => {
@@ -42,7 +43,7 @@ describe("the pace and the twenty-second rule (R-101)", () => {
   });
 
   it("counts a standing picture as a neighbour when thinning", () => {
-    assert.deepEqual(thinPictures([{ at: 40 }, { at: 100 }], [85], 1), [0], "100 is 15 from the picture at 85: never proposed");
+    assert.deepEqual(thinPictures([{ at: 40 }, { at: 100 }], [97], 1), [0], "100 is 3 from the picture at 97: never proposed");
   });
 });
 

@@ -253,10 +253,19 @@ export function referenceBriefLine(cited: ReadonlyArray<{ name: string; kind: "c
 // Illustrate this chapter (design turn 191b, SPEC-047 R-101, R-102)
 // ---------------------------------------------------------------------------
 
-/** About one picture every minute and a half of speech (191b). */
-export const PICTURE_PACE_SEC = 90;
-/** The shortest a picture holds (186): a proposal is never closer than this to another picture. */
-export const PICTURE_PROPOSAL_GAP_SEC = 20;
+/**
+ * The most a chapter is proposed (design turn 237, SPEC-047 R-207): one picture per twenty seconds
+ * of its speech, counting those already there. A ceiling, never an aim: Illustrate chooses from
+ * the story where what we would see changes (R-206), and 191b's minute and a half is gone.
+ */
+export const PICTURE_CAP_SEC = 20;
+/** Illustrate keeps its own proposals this far apart (R-207), so each outlasts its one-second crossfade; the author's are never held to it. */
+export const PICTURE_PROPOSAL_GAP_SEC = 5;
+
+/** Why the story wants a picture there (design turn 237, R-206): what we would see that changes. */
+export const PICTURE_REASONS = ["place", "arrives", "leaves", "action", "object", "time", "feeling"] as const;
+export const PictureReasonSchema = z.enum(PICTURE_REASONS);
+export type PictureReason = z.infer<typeof PictureReasonSchema>;
 
 /** The chapter's blocks on one clock (186c): a made take's length, else its words at the reading rate — and whether any was estimated. */
 export function pictureStarts(blocks: ReadonlyArray<{ text: string; seconds: number | null }>, charactersPerSecond = 15): { starts: number[]; total: number; estimated: boolean } {
@@ -275,11 +284,11 @@ export function pictureStarts(blocks: ReadonlyArray<{ text: string; seconds: num
 }
 
 /**
- * How many pictures a chapter may be proposed (R-101): one every minute and a half of its speech,
- * counting those already on its blocks — the author's are never moved and never crowded.
+ * How many pictures a chapter may be proposed (R-101, R-207): one per twenty seconds of its speech
+ * at most, counting those already there — the author's are never moved and never crowded.
  */
 export function pictureCap(totalSeconds: number, existing: number): number {
-  return Math.max(0, Math.max(1, Math.round(totalSeconds / PICTURE_PACE_SEC)) - existing);
+  return Math.max(0, Math.max(1, Math.round(totalSeconds / PICTURE_CAP_SEC)) - existing);
 }
 
 /**
@@ -326,11 +335,16 @@ export function pacePhrase(seconds: number): string {
 /** One picture the proposal puts on one block (191b): where, what it shows, who is in it and what it would cost. */
 export const IllustrationRowSchema = z
   .object({
+    /** Where it goes: its block's key, or a mark's key for a sentence inside the block (design turn 237, R-206). */
     block: z.string().min(1).max(40),
     /** The block's words as they stood: a row whose block has since been reworded is left out of the run. */
     textHash: z.string().min(1),
-    /** The block's start on the chapter's clock, estimated until it is read. */
+    /** Its start on the chapter's clock: its sentence's, estimated until the block is read. */
     at: z.number().min(0),
+    /** Why the story wants a picture there (R-206), as the card says it. */
+    reason: PictureReasonSchema.optional(),
+    /** Its Tall's price, when the book's pictures are made Tall too (R-208): Accept makes both. */
+    tallMicroUsd: z.number().int().min(0).optional(),
     title: z.string().min(1).max(PICTURE_TITLE_MAX),
     prompt: z.string().min(1).max(PICTURE_PROMPT_MAX),
     who: z.array(PictureWhoSchema).max(24),
@@ -394,7 +408,7 @@ export type IllustrationProposal = z.infer<typeof IllustrationProposalSchema>;
  * picture was refused (`refused`) — unless the author named it in `without` (sent without the
  * reference, sent as it is, or tried again).
  */
-export function illustrationTotal(rows: readonly Pick<IllustrationRow, "block" | "estimatedMicroUsd" | "needs" | "disagrees" | "refused">[], skipped: ReadonlySet<string>, without: ReadonlySet<string>): { count: number; microUsd: number; held: number; disagree: number; refused: number } {
+export function illustrationTotal(rows: readonly Pick<IllustrationRow, "block" | "estimatedMicroUsd" | "tallMicroUsd" | "needs" | "disagrees" | "refused">[], skipped: ReadonlySet<string>, without: ReadonlySet<string>): { count: number; microUsd: number; held: number; disagree: number; refused: number } {
   let count = 0;
   let microUsd = 0;
   let held = 0;
@@ -415,7 +429,8 @@ export function illustrationTotal(rows: readonly Pick<IllustrationRow, "block" |
       continue;
     }
     count += 1;
-    microUsd += row.estimatedMicroUsd;
+    // A row whose book makes Tall pictures is priced for both shapes (design turn 237, R-208).
+    microUsd += row.estimatedMicroUsd + (row.tallMicroUsd ?? 0);
   }
   return { count, microUsd, held, disagree, refused };
 }
