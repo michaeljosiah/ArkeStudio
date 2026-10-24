@@ -90,30 +90,12 @@
 .ap237-btn.pri{background:var(--foreground);color:var(--background);border-color:transparent;font-weight:600}
 .ap237-btn.ghost{border-color:transparent}
 
-/* The Pictures sheet (235a), with Pace added. */
+/* The page behind a sheet, dimmed. */
 .ap237-page{position:absolute;inset:0;padding:30px 44px;display:flex;flex-direction:column;gap:14px;opacity:.6}
 .ap237-page i{display:block;height:12px;border-radius:6px;background:var(--secondary)}
-.ap237-sheet{position:absolute;z-index:3;left:50%;transform:translateX(-50%);border:1px solid var(--border);border-radius:16px;background:var(--popover,var(--background));box-shadow:var(--shadow-lg,0 18px 50px color-mix(in srgb,var(--foreground) 16%,transparent));padding:20px 22px;display:flex;flex-direction:column;gap:12px;box-sizing:border-box}
-.ap237-sheet h3{margin:0;font:var(--type-ui);font-weight:600;font-size:var(--text-md)}
-.ap237-sheet .sub{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);margin-top:-8px}
-.ap237-opts{border:1px solid var(--border);border-radius:12px;overflow:hidden}
-.ap237-opt{display:flex;align-items:center;gap:14px;min-height:44px;padding:6px 14px;border-top:1px solid var(--border);font-size:var(--text-sm)}
-.ap237-opt:first-child{border-top:0}
-.ap237-opt .k{width:96px;flex:none;font-weight:500;color:var(--muted-foreground)}
-.ap237-opt i,.ap237-opt em{font-style:normal;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);white-space:nowrap}
-.ap237-opt em{width:72px;text-align:right;color:var(--foreground)}
-.ap237-opt.new{background:color-mix(in srgb,var(--secondary) 55%,transparent)}
-.ap237-chk{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;width:96px;flex:none}
-.ap237-chk b{font-weight:600}
-.ap237-box{width:15px;height:15px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;flex:none;background:var(--foreground);color:var(--background)}
-.ap237-box svg{width:11px;height:11px}
-.ap237-ratio{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
-.ap237-seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
-.ap237-seg span{height:28px;padding:0 12px;display:inline-flex;align-items:center;font:var(--type-label);border-left:1px solid var(--border)}
-.ap237-seg span:first-child{border-left:0}
-.ap237-seg span.on{background:var(--foreground);color:var(--background);font-weight:600}
 
-/* Illustrate's proposal (193's sheet): a grid of cards, four across. */
+/* Illustrate's proposal (193's sheet): a grid of cards, four across. Each card now says why the story
+   wants a picture there, in one word, before the beat it falls in. */
 .ap237-ills{position:absolute;z-index:3;inset:20px 24px;border:1px solid var(--border);border-radius:16px;background:var(--background);box-shadow:var(--shadow-lg,0 18px 50px color-mix(in srgb,var(--foreground) 16%,transparent));padding:20px 26px;display:flex;flex-direction:column;gap:16px;box-sizing:border-box}
 .ap237-ills header{display:flex;align-items:center;gap:12px}
 .ap237-ills h3{margin:0;font:var(--type-ui);font-weight:600;font-size:var(--text-md);white-space:nowrap}
@@ -131,5 +113,6 @@
 .ap237-iwh{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;font-size:var(--text-xs);color:var(--muted-foreground)}
 .ap237-iwh span{display:inline-flex;align-items:center;gap:6px}
 .ap237-iwh img{width:22px;height:30px;box-sizing:border-box;border-radius:6px;border:1px solid var(--border);object-fit:cover;object-position:top}
-.ap237-in{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap237-in{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);margin-top:-4px}
+.ap237-why{display:inline-block;padding:0 6px;margin-right:2px;border:1px solid var(--border);border-radius:5px;color:var(--foreground)}
 .ap237-ifoot{margin-top:auto;display:flex;align-items:center;gap:8px;padding-top:14px;border-top:1px solid var(--border)}

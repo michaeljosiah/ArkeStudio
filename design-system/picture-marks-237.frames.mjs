@@ -4,7 +4,6 @@
 // picture. That picture is Tunde pulling the goat face, a moment 34 seconds in, shown from 0:03 because
 // a picture can only start where a block does. The words are the author's; the times of moments inside
 // a take are drawn as word timing would give them. Every frame's root is .ap237 with its data-screen-label.
-const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 const CHEVRON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
 const PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l12-7.5z"/></svg>';
 
@@ -96,25 +95,25 @@ const PANEL = `<aside class="ap237-panel"><div class="ap237-ph"><b>Picture at 1:
 <div class="ap237-sec"><span class="ap237-h">Words</span><p class="ap237-prompt">Tunde had chosen the place. Tunde had chosen the table, a low leather booth near enough the dance floor to be seen and far enough to be heard, and had ordered without consulting anyone. When the waitress came back with the card machine, Ade already had his card out.</p></div>
 <div class="ap237-foot"><span class="ap237-btn ghost">Remove</span><span class="grow"></span><span class="ap237-btn">Edit prompt</span><span class="ap237-btn pri">Generate &#183; ${PLAN}</span></div></div></aside>`;
 
-// Illustrate's proposal at 45 s: cards for moments inside beats, each naming the beat it falls in.
-const ills = (at, frame, words, title, inBeat, who) => `<article class="ap237-ic"><div class="ap237-th"><span class="fr">${frame}</span><span class="tm ap237-mono">${at}</span><p>${words}</p></div>
-<div class="ap237-ihd"><b>${title}</b><span>Skip</span></div><div class="ap237-iwh">${who.map(([img, name]) => `<span><img src="${img}" alt="">${name}</span>`).join('')}${inBeat === null ? '' : `<span class="ap237-in">in ${inBeat}</span>`}</div></article>`;
+// Illustrate's proposal, chosen from the story: cards where what we would see changes, so they bunch
+// where the scene moves and thin out where a conversation holds still (none between 7:22 and 10:24,
+// the talk at her table). Each card says why in one word and names the beat it falls in.
+const ills = (at, frame, words, title, why, inBeat, who) => `<article class="ap237-ic"><div class="ap237-th"><span class="fr">${frame}</span><span class="tm ap237-mono">${at}</span><p>${words}</p></div>
+<div class="ap237-ihd"><b>${title}</b><span>Skip</span></div><span class="ap237-in"><span class="ap237-why">${why}</span>${inBeat === null ? '' : ` in ${inBeat}`}</span><div class="ap237-iwh">${who.map(([img, name]) => `<span><img src="${img}" alt="">${name}</span>`).join('')}</div></article>`;
 const CARDS = [
-  ills('0:03', 'Medium', 'Tunde was telling the goat story again.', 'The goat story', 'The goat story', [[TUNDE, 'Tunde'], [ADE, 'Ade']]),
-  ills('1:20', 'Wide', 'Around them the club pressed on in the way Victoria Island clubs did after midnight: an amapiano log drum thudding up through the floor&#8230;', 'The club after midnight', 'The goat story', [[ADE, 'Ade'], [TUNDE, 'Tunde']]),
-  ills('2:36', 'Close', 'Ade had left a pot of ofada stew on the cooker at home, enough for two days, or two people.', 'One drink, three glasses', 'Ade takes stock', [[ADE, 'Ade']]),
-  ills('5:04', 'Medium', 'She had sat down among friends &#8212; two women, and a man who kept leaning towards her and being, quite gently, ignored.', 'Among her friends', 'Watching her laugh', [[IFE, 'Ife']]),
-  ills('5:40', 'Close', 'He was aware, suddenly, of his own body: the collar of his shirt, his hands on his knees&#8230;', 'A heat at his neck', 'Watching her laugh', [[ADE, 'Ade']]),
-  ills('6:10', 'Medium', 'Tunde stared at him. Then he put a hand flat on the table and laughed until he coughed.', 'Like a weather report', 'Go and greet her', [[TUNDE, 'Tunde'], [ADE, 'Ade']]),
-  ills('6:54', 'Wide', 'The dance floor was full, and crossing it took longer than it should have.', 'Crossing the floor', 'Crossing the floor', [[ADE, 'Ade']]),
-  ills('7:22', 'Medium', 'Her friends saw him first. One said something and the other laughed.', 'Her friends see him first', 'Crossing the floor', [[IFE, 'Ife'], [ADE, 'Ade']]),
-  ills('10:24', 'Close', 'The music was loud and she spoke softly, so he had to lean in to hear her.', 'Always the one leaning in', null, [[IFE, 'Ife'], [ADE, 'Ade']]),
-  ills('11:50', 'Close', 'He knew he had been in the middle of a sentence. He knew roughly where it had been going. He could not find a single word of it.', 'The lost sentence', 'Her hand, his arm', [[ADE, 'Ade'], [IFE, 'Ife']]),
-  ills('17:02', 'Wide', 'In the kitchen the ofada stew sat on the cooker where he had left it, covered, cold. Beside it, a pot of rice, enough for two.', 'Rice for two', 'The empty house', [[ADE, 'Ade']]),
-  ills('18:50', 'Medium', 'He thought about her mouth when she had imitated him. He thought about the gold at her ear swinging against her jaw&#8230;', 'Gold, remembered', 'Blue ticks, nothing', [[IFE, 'Ife']]),
+  ills('0:03', 'Medium', 'Tunde was telling the goat story again.', 'The goat story', 'action', 'The goat story', [[TUNDE, 'Tunde'], [ADE, 'Ade']]),
+  ills('1:20', 'Wide', 'Around them the club pressed on in the way Victoria Island clubs did after midnight: an amapiano log drum thudding up through the floor&#8230;', 'The club after midnight', 'place', 'The goat story', [[ADE, 'Ade'], [TUNDE, 'Tunde']]),
+  ills('2:36', 'Close', 'Ade had left a pot of ofada stew on the cooker at home, enough for two days, or two people.', 'One drink, three glasses', 'object', 'Ade takes stock', [[ADE, 'Ade']]),
+  ills('3:30', 'Close', 'Gold on gold. Heavy bangles knocking together on a wrist, and something at an ear that answered them when a head turned.', 'Gold on gold', 'object', 'Gold on gold', [[IFE, 'Ife']]),
+  ills('5:04', 'Medium', 'She had sat down among friends &#8212; two women, and a man who kept leaning towards her and being, quite gently, ignored.', 'Among her friends', 'place', 'Watching her laugh', [[IFE, 'Ife']]),
+  ills('6:10', 'Medium', 'Tunde stared at him. Then he put a hand flat on the table and laughed until he coughed.', 'Like a weather report', 'action', 'Go and greet her', [[TUNDE, 'Tunde'], [ADE, 'Ade']]),
+  ills('6:54', 'Wide', 'The dance floor was full, and crossing it took longer than it should have.', 'Crossing the floor', 'action', 'Crossing the floor', [[ADE, 'Ade']]),
+  ills('7:22', 'Medium', 'Her friends saw him first. One said something and the other laughed.', 'Her friends see him first', 'arrives', 'Crossing the floor', [[IFE, 'Ife'], [ADE, 'Ade']]),
+  ills('10:24', 'Close', 'The music was loud and she spoke softly, so he had to lean in to hear her.', 'Always the one leaning in', 'feeling', null, [[IFE, 'Ife'], [ADE, 'Ade']]),
+  ills('11:50', 'Close', 'He knew he had been in the middle of a sentence. He knew roughly where it had been going. He could not find a single word of it.', 'The lost sentence', 'feeling', 'Her hand, his arm', [[ADE, 'Ade'], [IFE, 'Ife']]),
+  ills('17:02', 'Wide', 'In the kitchen the ofada stew sat on the cooker where he had left it, covered, cold. Beside it, a pot of rice, enough for two.', 'Rice for two', 'place', 'The empty house', [[ADE, 'Ade']]),
+  ills('18:50', 'Medium', 'He thought about her mouth when she had imitated him. He thought about the gold at her ear swinging against her jaw&#8230;', 'Gold, remembered', 'feeling', 'Blue ticks, nothing', [[IFE, 'Ife']]),
 ].join('');
-
-const box = `<span class="ap237-box">${CHECK}</span>`;
 
 export const FRAMES = [
   ['a', 'Pictures on the words: one beat, three pictures', 1360, 980, () => root(
@@ -135,21 +134,10 @@ export const FRAMES = [
     `${BAR}<div class="ap237-split"><div class="ap237-blocks" style="--ab-measure:470px">${beat({ name: 'The goat story', whose: 'Tunde', paragraphs: 9, length: '2:12', pictures: '4 pictures', rows: GOAT, marks: { ...MARKS_A, 3: { at: '1:48', on: true, line: 6 } }, from: 11, to: 14, sel: true })}</div></div>${PANEL}`,
   )],
 
-  ['d', 'Pictures: how often', 1360, 560, () => root(
-    '237d The Pictures sheet (235a) gains Pace: 90 s, 45 s or 20 s between pictures, with what that pace makes for the book; Illustrate proposes to it',
-    1360, 560,
-    `${PAGE}<div class="ap237-dim"></div><div class="ap237-sheet" style="top:56px;width:640px"><h3>Pictures &#183; Na love or Juju</h3><div class="sub">361 pictures &#183; 26 chapters</div><div class="ap237-opts">${[
-      `<div class="ap237-opt"><span class="ap237-chk">${box}<b>Wide</b></span><span class="ap237-ratio">16:9</span><span class="grow"></span><i>desktop &#183; tablet</i><em>361 made</em></div>`,
-      `<div class="ap237-opt"><span class="ap237-chk">${box}<b>Tall</b></span><span class="ap237-ratio">9:16</span><span class="grow"></span><i>phone</i><em>13 made</em></div>`,
-      `<div class="ap237-opt"><b class="k">Model</b><span>Codex Image</span><span class="grow"></span><i>${PLAN} &#183; uses Codex allowance</i></div>`,
-      `<div class="ap237-opt new"><b class="k">Pace</b><span class="ap237-seg"><span>90 s</span><span class="on">45 s</span><span>20 s</span></span><span class="grow"></span><i>~950 for the book</i></div>`,
-    ].join('')}</div><div class="ap237-foot"><span class="grow"></span><span class="ap237-btn">Done</span></div></div>`,
-  )],
-
-  ['e', 'Illustrate at 45 s', 1360, 1000, () => root(
-    '237e Illustrate&#8217;s proposal for Chapter 1 at 45 s: twelve pictures for moments inside the beats, each card naming the beat it falls in; the fifteen already standing stay',
-    1360, 1000,
-    `${PAGE}<div class="ap237-dim"></div><section class="ap237-ills"><header><h3>Illustrate &#183; Chapter 1</h3><span class="ap237-mono">12 pictures &#183; one every 45 s &#183; 12 to make &#183; 15 standing</span><span class="grow"></span><span class="ap237-btn">Illustrate again</span><span class="ap237-btn">Close</span></header>
+  ['d', 'Illustrate, from the story', 1360, 1040, () => root(
+    '237d Illustrate&#8217;s proposal for Chapter 1, chosen from the story: twelve pictures where what we would see changes, each card saying why and naming its beat; the fifteen already there stay',
+    1360, 1040,
+    `${PAGE}<div class="ap237-dim"></div><section class="ap237-ills"><header><h3>Illustrate &#183; Chapter 1</h3><span class="ap237-mono">12 pictures &#183; where the story changes &#183; 12 to make &#183; 15 already there</span><span class="grow"></span><span class="ap237-btn">Illustrate again</span><span class="ap237-btn">Close</span></header>
 <div class="ap237-grid">${CARDS}</div>
 <footer class="ap237-ifoot"><span class="ap237-btn ghost">Review chapter looks</span><span class="ap237-btn">Refresh references</span><span class="grow"></span><span class="ap237-btn ghost">Discard</span><span class="ap237-btn pri">Accept &#183; ${PLAN}</span></footer></section>`,
   )],

@@ -15,6 +15,16 @@ words. The owner weighed three answers:
 
 They chose the third ("Lets go with your recommendations").
 
+**Revised the same day.** The first drawing gave the Pictures sheet a Pace, a picture every 90, 45 or
+20 s. The owner asked instead: "Would it not make sense for the agent to determine how many pictures
+are needed for that chapter based on what it identifies in the read? … There may be an upper cap,
+so it doesn't go crazy." Agreed, and redrawn ("Yes redraw"):
+
+- Illustrate proposes a picture wherever what we would see changes, and each card says why.
+- A fixed cap of one per 20 s stands in for a pace.
+- There is no setting; the proposal's count and price, and Skip, are the author's control.
+- The Pace frame and the Pictures sheet's change are gone.
+
 ## What was checked before drawing
 
 - **Chapter 1 of Na Love or Juju, as it stands.**
@@ -29,6 +39,9 @@ They chose the third ("Lets go with your recommendations").
   - `PICTURE_PROPOSAL_GAP_SEC` and `PICTURE_MIN_HOLD_SEC` hold a picture at least 20 s.
   - Chapter 1's 15 pictures over 20:28 is that pace exactly.
   - So one beat per picture is half of the problem; the 90 s pace is the other half.
+  - Illustrate's request already tells the model "Fewer is better than a weak one", but it asks for
+    "about one every 90 seconds", so the model fills to the cap. The revision keeps the first and
+    drops the second.
 - **Pictures are keyed by block.** The chapter record keeps `pictures: Record<blockKey, AudiobookPicture>`,
   and placement keeps one picture per block ("two pictures on one block keep the one set there").
   Joining a block with a picture under another asks "Block N's picture comes off" (198d).
@@ -63,14 +76,18 @@ Also ruled out:
 - The goat face and the booth two-shot are the chapter's own pictures, as are the portraits.
 - The goat face standing at 0:37 is what moving its mark would do. Today it is at 0:03.
 - The times of moments inside a take (0:37, 1:20, 1:48 and the proposal's) are drawn as word timing
-  would give them, from the words' share of the take. Illustrate's twelve cards are drawn, not run.
-- Pace's "~950 for the book" is 11 h 55 m at 45 s.
+  would give them, from the words' share of the take.
+- Illustrate's twelve cards and their reasons are drawn, not run. They bunch where the scene moves
+  and leave the talk at Ife's table (7:22 to 10:24) alone, which is what a story-led proposal should
+  do.
+- The cap of 61 is Chapter 1's 20:28 at one per 20 s.
 
 ## Calls (for the owner)
 
-1. Pace's choices, 90 s, 45 s and 20 s, and the default. A production keeps 90 s until Pace is
-   changed, so nothing changes by itself.
-2. The shortest hold at 10 s, down from 20 s. A closer mark is flagged, not refused.
-3. Marks only at the start of a sentence, never mid-sentence.
-4. Standing pictures stay at their block's first word until moved. Arke does not guess which
+1. The cap: one picture per 20 s of narration at most, counting those already there, with no setting.
+   The proposal's count and price before Accept, and Skip, are the author's control.
+2. The reasons, one word each: place, arrives, leaves, action, object, time, feeling.
+3. The shortest hold at 10 s, down from 20 s. A closer mark is flagged, not refused.
+4. Marks only at the start of a sentence, never mid-sentence.
+5. Standing pictures stay at their block's first word until moved. Arke does not guess which
    sentence a picture shows.
