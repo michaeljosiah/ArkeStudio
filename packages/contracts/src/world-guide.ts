@@ -49,8 +49,10 @@ export type GuideRecordEntry = z.infer<typeof GuideRecordEntrySchema>;
 
 /**
  * A teaser as the Guide keeps it (SPEC-059 R-27): a choice by reference, never a copy. A sheet by its
- * id; a picture or clip by the moment it is — the production, the chapter and the block whose
- * picture it is — so a picture remade ships the new one and a moment that is gone drops out.
+ * id; a picture or clip by the moment it is — the production, the chapter and the picture's own key,
+ * a block's or a mark's `block@sentence` (design turn 237) — so a picture remade ships the new one
+ * and a moment that is gone drops out. A choice made before marks named themselves holds a bare
+ * block key, read as that block's first picture (`listeningPictureNamed`).
  */
 export const GuideRecordTeaserSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("character"), sheet: SlugSchema }).strict(),

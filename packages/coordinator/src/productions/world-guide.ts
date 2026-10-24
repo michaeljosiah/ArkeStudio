@@ -11,6 +11,7 @@ import {
   guideProductionsOf,
   guideSheetPicture,
   guideTeasers,
+  listeningPictureNamed,
   MAX_GUIDE_VOICE_MS,
   MAX_TEASER_CLIP_MS,
   packageSlug,
@@ -204,7 +205,8 @@ export async function guideMoments(store: WorldStore, choices: GuideRecord["teas
     // does in the package (codex on PR 2173).
     if (!plans.has(choice.production)) plans.set(choice.production, await audiobookListening(store, choice.production, { ...(signal !== undefined ? { signal } : {}), ...(ffmpeg !== undefined ? { ffmpeg } : {}) }).catch(() => null));
     const chapter = plans.get(choice.production)?.chapters.find((candidate) => candidate.chapterId === choice.chapter);
-    const moment = chapter?.pictures.find((picture) => picture.key === choice.block);
+    // A mark by its own key, as a block's own picture is by its block's (design turn 237, R-202).
+    const moment = chapter === undefined ? undefined : listeningPictureNamed(chapter.pictures, choice.block);
     if (chapter === undefined || moment === undefined || (await containedWorldFile(store.dir, moment.file)) === null) continue;
     const title = chapter.title.trim() === "" ? `Chapter ${chapter.order}` : chapter.title.trim();
     if (choice.kind === "picture") {

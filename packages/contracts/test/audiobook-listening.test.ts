@@ -9,6 +9,8 @@ import {
   blockSentences,
   bookPlace,
   listeningChapter,
+  listeningPictureKey,
+  listeningPictureNamed,
   pictureSpans,
   pictureWords,
   placePictures,
@@ -275,6 +277,22 @@ describe("picture marks (turn 237)", () => {
     assert.equal(chapter.pictures[1]!.at, 3 + start.word, "on its first word");
     assert.equal(tokens[start.word], "Tunde");
     assert.equal(chapter.pictures[1]!.seconds, chapter.seconds - chapter.pictures[1]!.at, "and holds to the chapter's end");
+  });
+
+  it("names a mark by its own key beside its block's own picture, so a Guide teaser can choose either (SPEC-059 R-27)", () => {
+    const goat = pictureMarkKey("p0.0", audiobookTextHash(widened!));
+    const pictures = Object.fromEntries([["p0.0", picture(GOAT, "artifacts/booth.png")], mark(widened!, "artifacts/goat-face.png")]);
+    const chapter = listeningChapter({ chapterId: "chapter-1", order: 1, title: "Gold on Gold", blocks: [beat], pictures, cover: null });
+    assert.deepEqual(chapter.pictures.map((entry) => [entry.key, entry.markKey, listeningPictureKey(entry)]), [["p0.0", undefined, "p0.0"], ["p0.0", goat, goat]]);
+    assert.ok(ListeningChapterSchema.safeParse(chapter).success);
+    assert.equal(listeningPictureNamed(chapter.pictures, "p0.0")?.file, "artifacts/booth.png", "the block's own");
+    assert.equal(listeningPictureNamed(chapter.pictures, goat)?.file, "artifacts/goat-face.png", "the mark, though its block has a picture of its own");
+    assert.equal(listeningPictureNamed(chapter.pictures, pictureMarkKey("p0.0", audiobookTextHash(around!))), undefined, "a mark not there names nothing, never the block's other picture");
+    // A choice stored before marks named themselves holds the block's key alone: its first picture.
+    const markOnly = listeningChapter({ chapterId: "chapter-1", order: 1, title: "Gold on Gold", blocks: [beat], pictures: Object.fromEntries([mark(widened!, "artifacts/goat-face.png")]), cover: null });
+    assert.equal(listeningPictureNamed(markOnly.pictures, "p0.0")?.file, "artifacts/goat-face.png");
+    // A plan made before marks carried their key still reads.
+    assert.ok(ListeningChapterSchema.safeParse({ ...chapter, pictures: chapter.pictures.map(({ markKey: _markKey, ...rest }) => rest) }).success);
   });
 
   it("holds a picture until the next however soon, with no shortest hold (R-207)", () => {

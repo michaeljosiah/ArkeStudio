@@ -4,9 +4,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import type { ClientMessage, ClientState } from "@arke-studio/contracts";
+import type { AudiobookListening, ClientMessage, ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -157,6 +157,52 @@ describe("a world's teasers (design turn 236a - 236c, SPEC-059 R-24 - R-27)", ()
     assert.deepEqual(sent.filter((message) => message.kind === "set-guide-teasers").at(-1), { kind: "set-guide-teasers", worldId: FIXTURE_WORLD_ID, change: { teasers: [{ kind: "character", sheet: "maren-kest" }] } });
     assert.equal(container.querySelector("[data-testid=guide-teaser-1] b")?.textContent, "Maren Kest");
     assert.equal(container.querySelectorAll(".fy-guide-tz--add").length, 5);
+  });
+
+  it("offers a mark beside its block's own picture and keeps it by the mark's key, while a bare block key still finds its picture (R-27, design turn 237)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = withChapters();
+    // Chosen before marks named themselves: block p80.0's only picture, a mark, under the block's key.
+    const napkin = { kind: "picture" as const, production: "saltlight", chapter: "chapter-1", block: "p80.0" };
+    state.world!.guide = { schemaVersion: 1, characters: {}, locations: {}, factions: {}, lore: {}, teasers: [napkin] };
+    const { container } = await mount(state);
+    const ask = sent.filter((message): message is Extract<ClientMessage, { kind: "open-audiobook-listening" }> => message.kind === "open-audiobook-listening").at(-1);
+    assert.ok(ask, "the Guide asks where the pictures are");
+    const listening: AudiobookListening = {
+      productionId: "saltlight",
+      title: "Saltlight",
+      cover: null,
+      chapters: [{
+        chapterId: "chapter-1", order: 1, title: "Chapter 1", state: "part", seconds: 60, blocks: [], gaps: [], opening: null,
+        pictures: [
+          { key: "p75.0", number: 3, file: "artifacts/booth.png", at: 10, seconds: 5 },
+          { key: "p75.0", number: 3, file: "artifacts/goat-face.png", at: 15, seconds: 5, word: 12, markKey: "p75.0@0123456789abcdef" },
+          { key: "p80.0", number: 4, file: "artifacts/napkin.png", at: 20, seconds: 40, word: 3, markKey: "p80.0@77e6497d69a55639" },
+        ],
+      }],
+    };
+    await act(async () => __applyEventForTest({ at: "2026-10-24T09:00:00.000Z", type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "saltlight", listening }));
+    const shows = (selector: string) => container.querySelector(`${selector} img`)?.getAttribute("src") ?? "";
+    assert.match(shows("[data-testid=guide-teaser-1]"), /napkin\.png/, "the bare block key finds the block's first picture");
+    assert.notEqual(container.querySelector("[data-testid=guide-teaser-1] .m")?.textContent, "Moment removed");
+
+    await click(container.querySelector("[data-testid=guide-teaser-add]"));
+    await click([...container.querySelectorAll(".fy-guide-pick__tabs button")].find((button) => button.textContent === "Pictures") ?? null);
+    const options = [...container.querySelectorAll("[data-testid=guide-teaser-options] .fy-guide-tz")];
+    const option = (file: string) => options.find((element) => element.querySelector("img")?.getAttribute("src")?.includes(file)) ?? null;
+    assert.equal(options.length, 3, "a block's own picture and its mark are each a moment");
+    assert.equal(option("napkin.png")?.querySelector(".m")?.textContent, "Teaser 1", "already chosen, under its block's key");
+    assert.equal(option("booth.png")?.hasAttribute("disabled"), false);
+    assert.equal(option("goat-face.png")?.hasAttribute("disabled"), false);
+    await click(option("goat-face.png"));
+    await click(container.querySelector("[data-testid=guide-teaser-confirm]"));
+    assert.deepEqual(sent.filter((message) => message.kind === "set-guide-teasers").at(-1), {
+      kind: "set-guide-teasers",
+      worldId: FIXTURE_WORLD_ID,
+      change: { teasers: [napkin, { kind: "picture", production: "saltlight", chapter: "chapter-1", block: "p75.0@0123456789abcdef" }] },
+    });
+    assert.match(shows("[data-testid=guide-teaser-2]"), /goat-face\.png/, "the mark, not its block's own picture");
   });
 
   it("marks a teaser that no longer qualifies, and keeps it (R-27)", async () => {
