@@ -24,7 +24,7 @@ import { ChapterReferenceCoverageSchema } from "./audiobook-reference-coverage-s
 import { IllustrationProgressSchema, IllustrationProposalSchema, PICTURE_PROMPT_MAX, PictureSuggestionSchema } from "./audiobook-illustrate.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { AudioHeardSchema, AudioWaveformSchema, AudioSourceSchema, AudioStudioSnapshotSchema } from "./audio-arrangement-schema.js";
-import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX } from "./cadence.js";
+import { PERFORMANCE_NOTE_MAX } from "./cadence.js";
 import { FreePlanShortSchema } from "./provider-plans.js";
 import { z } from "zod";
 import { EffectAnalysisProjectionSchema } from "./editor-effect-analysis.js";

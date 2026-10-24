@@ -252,9 +252,7 @@ function buildDirectionPrompt(input: DirectionDeriverInput, retryNote?: string):
   const speakerWords = speakerNoteWords(input.blocks);
   const speakerChars = Math.min(PERFORMANCE_NOTE_MAX, ...input.blocks.map(block => block.speakerNoteChars ?? (block.note === "instruction" ? PERFORMANCE_NOTE_MAX : 60)));
   const speakerCap = speakerWords === undefined ? `at most ${speakerChars} characters` : `${speakerWords} words at most`;
-  const extra = [
-    ...(speakerNotes.length > 0 ? [`"speakerNotes": {"<speaker key>": "<how the narrator plays them, ${speakerCap}>"}`] : []),
-  ];
+  const extra = speakerNotes.length > 0 ? [`"speakerNotes": {"<speaker key>": "<how the narrator plays them, ${speakerCap}>"}`] : [];
   const context = input.context === undefined ? "" : `## The book\n\n${renderDirectionContext(input.context)}\n\n`;
   return `Direct the reading of the chapter blocks below for an audiobook. Read what the book is about first, then direct the blocks as one reading. Respond with ONLY a JSON object:
 {"blocks": [{"block": "<the block's key>", "delivery": "<one of ${AUDIOBOOK_DELIVERIES.join(", ")}>", "note": "<optional: how to read it, in your own words, never words to say>", "speed": <optional: 0.7 to 1.2>, "cues": [{"kind": "pause", "after": "<exact words from the block the pause follows>", "length": "short" | "long"}, {"kind": "breath", "before": "<exact words from the block>", "action": "inhale" | "exhale"}, {"kind": "emphasis", "words": "<exact words from the block>", "level": "moderate" | "strong"}, {"kind": "sound", "after": "<exact words from the block the sound follows>", "sound": "<one of ${SOUNDS.join(", ")}>"}, {"kind": "delivery", "words": "<exact words from the block>", "delivery": "<optional: one of the six>", "phrase": "<optional: at most ${CADENCE_PHRASE_MAX} characters>"}]}], "summary": "<one or two sentences on what you did and why>"${extra.length > 0 ? `, ${extra.join(", ")}` : ""}}
