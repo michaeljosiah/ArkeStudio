@@ -468,3 +468,40 @@ world-independent Publications page. The existing captured-book preview opens in
 sheet with chapter navigation and restores focus to its opener when closed. It reads frozen
 text and inventoried images without opening or checking the mutable source world. The saved
 edition and deliverable bytes do not change; this is not a new preparation or publication.
+
+## Arke Player world packages, parts and the guide
+
+Export → Arke Player (SPEC-058, turns 233, 235, 236) writes a world package, not a publication: a
+stored ZIP with `world.json` first and every file it inventories, played natively by Arke Player and
+never run. Contracts `world-package.ts` holds the readers, strict as SPEC-048 R-17 asks: schema 2
+adds a production's listening document, schema 3 the world's guide (SPEC-059), and schema 4 is a
+**part**, the chapters released since an edition. A guide document is version 1, or version 2 when it
+carries teasers. `arke-player-release.ts` holds what each release held and where a production's
+releases stand; `world-guide.ts` holds the Guide record and `guideDocument`.
+
+The readers are one reader in two languages. Arke Player's `arke_world` reads the same shared
+fixtures, which are its own: `packages/arke_world/test/fixtures/{listening,guide,part}`, written by
+its `tool/make_*_fixtures.py`. Copy them byte for byte into `packages/contracts/test/fixtures/world-package/`
+whenever they change, and change both readers together.
+
+Coordinator:
+
+- `productions/arke-player-export.ts` makes an edition, `exports/<slug>-player-<date>.zip`, or with
+  `part` a part, `exports/<slug>-part-<date>.zip`, under R-4's capture: staged, read back by
+  `world-package.ts`'s `checkWorldPackageZip`, and checked again under the world's gate before it is
+  named. Beside each it writes a `.zip.json` record that Publications lists and that keeps the
+  `release` (its chapters, and on a part the edition it follows). A part names its edition by
+  `editionFingerprint`, which must stay arke_world's to the byte. A part's chapters run on from the
+  last release, counting every manuscript chapter, so none is skipped.
+- `productions/world-guide.ts` writes the Guide record (`set-guide-entry`, `set-guide-teasers`; a
+  first teaser raises the world to schema 108), drafts the guide with world paths, and packs it:
+  pictures fitted to 1024 px, teaser pictures to 1280, voice lines and clips cut as M4A.
+  `arke-player-guide-export.ts` makes the guide alone.
+- `scripts/export-arke-player.mts` runs the same export headless for publishing (`--guide-alone`,
+  `--part`); CLAUDE.md's "Publishing a world to Arke Player" is the procedure.
+
+Client `components/arke-player-export.tsx` is the Export sheet's Arke Player kind with Release, and
+`screens/world-guide.tsx` with `world-guide-teasers.tsx` is the Guide page. Tests: contracts
+`world-package.test.ts` and `arke-player-release.test.ts`; coordinator
+`productions/arke-player-export.test.ts`, `arke-player-guide-export.test.ts` and `world-guide.test.ts`;
+client `arke-player-export.test.tsx` and `world-guide.test.tsx`.

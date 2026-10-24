@@ -1,6 +1,6 @@
 # Turn 235 · Picture shapes
 
-Drawn and approved as drawn by the owner on 23 October 2026, with the three calls below. Not built.
+Drawn and approved as drawn by the owner on 23 October 2026, with the three calls below. Built in ArkeStudio PRs #2165, #2166 and #2167, merged the same day (518d668f4).
 
 ## Asked
 

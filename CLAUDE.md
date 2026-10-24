@@ -282,7 +282,9 @@ ZIP and its `.zip.json` record — and any parts already after it — into the c
 `exports/<slug>-part-<UTC date>.zip`; upload it under that name, pin it as a part with ArkePlayer's
 `pin_world` (its docs say how), add the pin to the world's `parts`, raise the `serial`, and publish
 the list. Installed phones fetch a part on their own over Wi-Fi; a new whole edition gathers the
-parts and empties the entry's `parts`.
+parts and empties the entry's `parts`. A Guide with teasers exports guide version 2, which Players
+from before ArkePlayer PR #11 refuse, with the package carrying it: publish one only once phones
+have that Player.
 
 ## Pull requests
 

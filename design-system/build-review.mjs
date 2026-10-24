@@ -28,34 +28,34 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN RELEASE CHAPTERS 236
+  { group: "Releasing chapters · turn 236", screen: "A world’s Guide with its teasers", frame: "236a", route: "World / Guide", status: "built", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P15 (ArkePlayer PR #10). Built in ArkeStudio PR 2173: 236a–d checked in the dev app, 236e by its client test."] },
+  { group: "Releasing chapters · turn 236", screen: "Adding a teaser: a clip", frame: "236b", route: "World / Guide", status: "built", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P15 (ArkePlayer PR #10). Built in ArkeStudio PR 2173: 236a–d checked in the dev app, 236e by its client test."] },
+  { group: "Releasing chapters · turn 236", screen: "A character that waits for a chapter cannot be a teaser", frame: "236c", route: "World / Guide", status: "built", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P15 (ArkePlayer PR #10). Built in ArkeStudio PR 2173: 236a–d checked in the dev app, 236e by its client test."] },
+  { group: "Releasing chapters · turn 236", screen: "Export → Arke Player: releasing new chapters", frame: "236d", route: "Story / Audiobook", status: "built", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P15 (ArkePlayer PR #10). Built in ArkeStudio PR 2173: 236a–d checked in the dev app, 236e by its client test."] },
+  { group: "Releasing chapters · turn 236", screen: "The part made, beside the releases before it", frame: "236e", route: "Story / Audiobook", status: "built", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P15 (ArkePlayer PR #10). Built in ArkeStudio PR 2173: 236a–d checked in the dev app, 236e by its client test."] },
+  // END RELEASE CHAPTERS 236
+
+  // BEGIN PICTURE SHAPES 235
+  { group: "Picture shapes · turn 235", screen: "Pictures: the shapes a production’s pictures are made in", frame: "235a", route: "Story / Audiobook", status: "built", checked: "2026-10-23", controls: [], notes: ["Approved 23 October 2026 with calls 1–3. Player half: P14 (ArkePlayer PR #7). Built in ArkeStudio PRs 2165–2167; not compared with this frame by eye since."] },
+  { group: "Picture shapes · turn 235", screen: "A block’s picture in both shapes", frame: "235b", route: "Story / Audiobook", status: "built", checked: "2026-10-23", controls: [], notes: ["Approved 23 October 2026 with calls 1–3. Player half: P14 (ArkePlayer PR #7). Built in ArkeStudio PRs 2165–2167; not compared with this frame by eye since."] },
+  { group: "Picture shapes · turn 235", screen: "Tall not made yet", frame: "235c", route: "Story / Audiobook", status: "built", checked: "2026-10-23", controls: [], notes: ["Approved 23 October 2026 with calls 1–3. Player half: P14 (ArkePlayer PR #7). Built in ArkeStudio PRs 2165–2167; not compared with this frame by eye since."] },
+  { group: "Picture shapes · turn 235", screen: "Export → Arke Player: both shapes, and the picture size", frame: "235d", route: "Story / Audiobook", status: "built", checked: "2026-10-23", controls: [], notes: ["Approved 23 October 2026 with calls 1–3. Player half: P14 (ArkePlayer PR #7). Built in ArkeStudio PRs 2165–2167; not compared with this frame by eye since."] },
+  // END PICTURE SHAPES 235
+
+  // BEGIN WORLD GUIDE 234
+  { group: "Guide · turn 234", screen: "A world’s Guide", frame: "234a", route: "World / Guide", status: "built", checked: "2026-10-22", controls: [], notes: ["Approved 22 October 2026; Player P11 is its other half; SPEC-059. Built in ArkeStudio PRs 2156 and 2157; not compared with this frame by eye since."] },
+  { group: "Guide · turn 234", screen: "A character’s entry, with the Player’s page beside it", frame: "234b", route: "World / Guide", status: "built", checked: "2026-10-22", controls: [], notes: ["Approved 22 October 2026; Player P11 is its other half; SPEC-059. Built in ArkeStudio PRs 2156 and 2157; not compared with this frame by eye since."] },
+  { group: "Guide · turn 234", screen: "Export → Arke Player carries the guide", frame: "234c", route: "World / Guide", status: "built", checked: "2026-10-22", controls: [], notes: ["Approved 22 October 2026; Player P11 is its other half; SPEC-059. Built in ArkeStudio PRs 2156 and 2157; not compared with this frame by eye since."] },
+  { group: "Guide · turn 234", screen: "The Guide from a phone", frame: "234d", route: "World / Guide", status: "built", checked: "2026-10-22", controls: [], notes: ["Approved 22 October 2026; Player P11 is its other half; SPEC-059. Built in ArkeStudio PRs 2156 and 2157; not compared with this frame by eye since."] },
+  // END WORLD GUIDE 234
+
   // BEGIN PICTURE MARKS 237
   { group: "Picture marks · turn 237", screen: "Pictures on the words: one beat, three pictures", frame: "237a", route: "Story / Audiobook", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with calls 1–6."] },
   { group: "Picture marks · turn 237", screen: "Put a picture at a sentence", frame: "237b", route: "Story / Audiobook", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with calls 1–6."] },
   { group: "Picture marks · turn 237", screen: "A new picture’s panel", frame: "237c", route: "Story / Audiobook", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with calls 1–6."] },
   { group: "Picture marks · turn 237", screen: "Illustrate, from the story", frame: "237d", route: "Story / Audiobook", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with calls 1–6."] },
   // END PICTURE MARKS 237
-
-  // BEGIN RELEASE CHAPTERS 236
-  { group: "Releasing chapters · turn 236", screen: "A world’s Guide with its teasers", frame: "236a", route: "World / Guide", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P15 (ArkePlayer PR #10)."] },
-  { group: "Releasing chapters · turn 236", screen: "Adding a teaser: a clip", frame: "236b", route: "World / Guide", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P15 (ArkePlayer PR #10)."] },
-  { group: "Releasing chapters · turn 236", screen: "A character that waits for a chapter cannot be a teaser", frame: "236c", route: "World / Guide", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P15 (ArkePlayer PR #10)."] },
-  { group: "Releasing chapters · turn 236", screen: "Export → Arke Player: releasing new chapters", frame: "236d", route: "Story / Audiobook", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P15 (ArkePlayer PR #10)."] },
-  { group: "Releasing chapters · turn 236", screen: "The part made, beside the releases before it", frame: "236e", route: "Story / Audiobook", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P15 (ArkePlayer PR #10)."] },
-  // END RELEASE CHAPTERS 236
-
-  // BEGIN PICTURE SHAPES 235
-  { group: "Picture shapes · turn 235", screen: "Pictures: the shapes a production’s pictures are made in", frame: "235a", route: "Story / Audiobook", status: "drawn", checked: "2026-10-23", controls: [], notes: ["Approved 23 October 2026 with calls 1–3. Player half: P14 (ArkePlayer PR #7)."] },
-  { group: "Picture shapes · turn 235", screen: "A block’s picture in both shapes", frame: "235b", route: "Story / Audiobook", status: "drawn", checked: "2026-10-23", controls: [], notes: ["Approved 23 October 2026 with calls 1–3. Player half: P14 (ArkePlayer PR #7)."] },
-  { group: "Picture shapes · turn 235", screen: "Tall not made yet", frame: "235c", route: "Story / Audiobook", status: "drawn", checked: "2026-10-23", controls: [], notes: ["Approved 23 October 2026 with calls 1–3. Player half: P14 (ArkePlayer PR #7)."] },
-  { group: "Picture shapes · turn 235", screen: "Export → Arke Player: both shapes, and the picture size", frame: "235d", route: "Story / Audiobook", status: "drawn", checked: "2026-10-23", controls: [], notes: ["Approved 23 October 2026 with calls 1–3. Player half: P14 (ArkePlayer PR #7)."] },
-  // END PICTURE SHAPES 235
-
-  // BEGIN WORLD GUIDE 234
-  { group: "Guide · turn 234", screen: "A world’s Guide", frame: "234a", route: "World / Guide", status: "drawn", checked: "2026-10-22", controls: [], notes: ["Approved 22 October 2026; Player P11 is its other half; to be specified in SPEC-059."] },
-  { group: "Guide · turn 234", screen: "A character’s entry, with the Player’s page beside it", frame: "234b", route: "World / Guide", status: "drawn", checked: "2026-10-22", controls: [], notes: ["Approved 22 October 2026; Player P11 is its other half; to be specified in SPEC-059."] },
-  { group: "Guide · turn 234", screen: "Export → Arke Player carries the guide", frame: "234c", route: "World / Guide", status: "drawn", checked: "2026-10-22", controls: [], notes: ["Approved 22 October 2026; Player P11 is its other half; to be specified in SPEC-059."] },
-  { group: "Guide · turn 234", screen: "The Guide from a phone", frame: "234d", route: "World / Guide", status: "drawn", checked: "2026-10-22", controls: [], notes: ["Approved 22 October 2026; Player P11 is its other half; to be specified in SPEC-059."] },
-  // END WORLD GUIDE 234
 
   // BEGIN ARKE PLAYER EXPORT 233
   { group: "Export · turn 233", screen: "The Export sheet with Arke Player chosen", frame: "233a", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-10-21", controls: [], notes: ["Approved 21 October 2026; implementation tracked in #2037 (SPEC-058)."] },
@@ -885,9 +885,9 @@ const SCREENS = [
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
   { file: "picture-marks-237.review.html", what: "Turn 237: Picture marks — pictures set on the words inside a beat, + Picture at a sentence, a new mark’s panel, and Illustrate choosing pictures from the story under a cap.", state: "approved 24 October 2026; not built" },
-  { file: "release-chapters-236.review.html", what: "Turn 236: Releasing chapters — a world’s Guide with its teasers, adding a clip, a character that waits for a chapter, Export → Arke Player releasing new chapters as a part, and the part made beside the releases before it.", state: "approved 24 October 2026; not built" },
-  { file: "picture-shapes-235.review.html", what: "Turn 235: Picture shapes — the Pictures sheet (Wide and Tall), a block’s picture in both shapes, Tall not made yet, and Export → Arke Player with both shapes and the picture size.", state: "approved 23 October 2026; not built" },
-  { file: "world-guide-234.review.html", what: "Turn 234: a world’s Guide — what Arke Player shows of a world, its characters, places and settled lore, each public from the start or after a chapter; an entry with its sections, a voice line and the Player’s page beside it; Export → Arke Player carrying the guide; and from a phone.", state: "approved; to be specified in SPEC-059 (Player P11)" },
+  { file: "release-chapters-236.review.html", what: "Turn 236: Releasing chapters — a world’s Guide with its teasers, adding a clip, a character that waits for a chapter, Export → Arke Player releasing new chapters as a part, and the part made beside the releases before it.", state: "approved and built 24 October 2026 (ArkeStudio PR 2173; Player P15 in ArkePlayer PR 11)" },
+  { file: "picture-shapes-235.review.html", what: "Turn 235: Picture shapes — the Pictures sheet (Wide and Tall), a block’s picture in both shapes, Tall not made yet, and Export → Arke Player with both shapes and the picture size.", state: "approved and built 23 October 2026 (ArkeStudio PRs 2165–2167)" },
+  { file: "world-guide-234.review.html", what: "Turn 234: a world’s Guide — what Arke Player shows of a world, its characters, places and settled lore, each public from the start or after a chapter; an entry with its sections, a voice line and the Player’s page beside it; Export → Arke Player carrying the guide; and from a phone.", state: "approved and built 22 October 2026 (SPEC-059; ArkeStudio PRs 2156, 2157; Player P11)" },
   { file: "arke-player-export-233.review.html", what: "Turn 233: Export → Arke Player — the sheet with Arke Player chosen, making it in Activity, the package made with its size and SHA-256, blockers in one clause, Publications’ Other exports, and from a phone with Download and Share.", state: "approved; implementation tracked in #2037 (SPEC-058)" },
   { file: "prose-review-232.review.html", what: "Turn 232 revision 2: AI tells in the chapter review — choosing checks, a crowded passage marked in the page with its note and the chapter strip, a tell hovered, a kind lit, What counts, Check again after the writer’s rewrite, the report, a chapter with nothing crowded, phone, and Rewrite with Arke checked before it is shown (still crowded, kept and versioned).", state: "approved; implementation tracked in #1952" },
   { file: "stage-231.review.html", what: "Turn 231: the Stage as its own workspace in the page, the draft bar after Build and Quick layout with Arke’s notes apart, Start from, one Keep, lights in a draft, and the plate picker with locations first.", state: "current" },
