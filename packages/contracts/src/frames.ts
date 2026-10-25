@@ -1454,6 +1454,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("clear-comfyui-models-dir") }).strict(),
   z.object({ kind: z.literal("set-comfyui-url"), url: z.string().min(1).max(2000) }).strict(),
   z.object({ kind: z.literal("clear-comfyui-engine") }).strict(),
+  z.object({ kind: z.literal("set-ollama-url"), url: z.string().min(1).max(2000) }).strict(),
+  z.object({ kind: z.literal("clear-ollama-engine") }).strict(),
+  z.object({ kind: z.literal("ollama-refresh") }).strict(),
+  z.object({ kind: z.literal("ollama-update-runtime") }).strict(),
   z.object({ kind: z.literal("use-detected-comfyui"), location: z.string().min(1) }).strict(),
   /** Re-read node classes and dependency identity on demand — the Settings refresh. */
   z.object({ kind: z.literal("comfyui-refresh") }).strict(),
@@ -1476,7 +1480,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("repair-voice-models") }).strict(),
   z.object({ kind: z.literal("open-model-folder") }).strict(),
   /** Open what a spawned engine said, host-owned end to end (SPEC-033 R-70; issue 585). */
-  z.object({ kind: z.literal("open-engine-log"), engine: z.enum(["comfyui", "voxa"]) }).strict(),
+  z.object({ kind: z.literal("open-engine-log"), engine: z.enum(["comfyui", "voxa", "ollama"]) }).strict(),
   z.object({ kind: z.literal("test-local-voice"), requestId: UlidSchema }).strict(),
   z
     .object({

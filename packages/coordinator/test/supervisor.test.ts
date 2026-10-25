@@ -68,6 +68,22 @@ const SHIM_READY_MS = 30_000;
 const HEALTHY_WAIT_MS = 40_000;
 
 describe("ChildSupervisor", () => {
+  it("preserves a host-reserved port and expands it in environment across restarts", async () => {
+    const port = await allocateLoopbackPort();
+    const sup = new ChildSupervisor({ id: "reserved", command: process.execPath, args: [CHILD], port,
+      env: { PORT: "{port}", MODE: "healthy", OPENAI_API_KEY: "port-{port}" }, healthPath: "/health", readyTimeoutMs: 10_000 });
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await sup.start();
+        assert.equal(sup.status, "healthy");
+        assert.equal(sup.port, port);
+        const result = await fetch(`http://127.0.0.1:${port}/health`).then(response => response.json()) as { pid: number; env: { OPENAI_API_KEY: string } };
+        assert.equal(result.env.OPENAI_API_KEY, `port-${port}`);
+        await sup.stopAndConfirm();
+        assert.ok(processGone(result.pid));
+      }
+    } finally { await sup.stopAndConfirm(); }
+  });
   it("allocates distinct loopback ports", async () => {
     const a = await allocateLoopbackPort();
     const b = await allocateLoopbackPort();

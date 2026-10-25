@@ -44,6 +44,8 @@ export interface ProviderClientDeps {
    * always failing.
    */
   voxa?: SidecarBaseUrl;
+  /** The host's explicitly selected Ollama runtime; never discover a personal service here. */
+  ollama?: () => string | null;
   /** Host-owned synthesis path shared with direct Voxa callers, including its global scheduler. */
   voxaSynthesize?: KokoroSynthesize;
   /** Host-owned transcription path shared with direct Voxa callers, including its cancellation. */
@@ -132,7 +134,7 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
     google: captureProviderClient("google", (fetch) => new GoogleClient(fetch), fetchImpl, capture, undefined, transport),
     breezeblue: captureProviderClient("breezeblue", (fetch) => new BreezeBlueClient(fetch), fetchImpl, capture, undefined, transport),
     fishaudio: captureProviderClient("fishaudio", (fetch) => new FishAudioClient(fetch), fetchImpl, capture, undefined, transport),
-    ollama: captureProviderClient("ollama", (fetch) => new OllamaClient(fetch), fetchImpl, capture),
+    ollama: captureProviderClient("ollama", (fetch) => new OllamaClient(fetch, deps.ollama ?? (() => null)), fetchImpl, capture),
     ...(deps.voxa === undefined
       ? {}
       : {

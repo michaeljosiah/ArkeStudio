@@ -13,6 +13,42 @@ import { makeTempRoot } from "./world/helpers.js";
 import { tempDir } from "./tmp.js";
 import { until } from "./wait.js";
 
+it("keeps a Ming batch on the card through cancellation and confirmed process cleanup", async () => {
+  const unloaded: string[] = [];
+  let finishCleanup!: () => void;
+  const gpu = new LocalGpu(async engine => {
+    unloaded.push(engine);
+    if (engine === "Ming") await new Promise<void>(resolve => { finishCleanup = resolve; });
+  }, ["Ollama", "ComfyUI", "Ming"]);
+  const cancel = new AbortController();
+  let started = false;
+  const batch = gpu.runMingBatch(async signal => {
+    started = true;
+    await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+    signal.throwIfAborted();
+  }, cancel.signal);
+  const rejected = assert.rejects(batch, /cancelled/);
+  await until(() => started, "Ming started after releasing other engines");
+  assert.deepEqual(unloaded, ["Ollama", "ComfyUI"]);
+  cancel.abort(new Error("cancelled"));
+  await until(() => finishCleanup !== undefined, "Ming cleanup started");
+  let admitted = false;
+  const writing = gpu.acquire("Ollama", new AbortController().signal).then(release => { admitted = true; return release; });
+  assert.equal(admitted, false);
+  finishCleanup(); await rejected;
+  // Handover rechecks every other participant, even after a previous cleanup.
+  await until(() => unloaded.filter(engine => engine === "Ming").length === 2, "handover confirmation");
+  finishCleanup(); (await writing)(); gpu.stop();
+});
+
+it("refuses the next job when Ming cannot confirm release", async () => {
+  const gpu = new LocalGpu(async engine => { if (engine === "Ming") throw new Error("Ming exit unconfirmed"); }, ["Ollama", "ComfyUI", "Ming"]);
+  await assert.rejects(gpu.runMingBatch(async () => "done", new AbortController().signal), /unconfirmed/);
+  assert.equal(gpu.isBusy("Ming"), true);
+  const next = assert.rejects(gpu.acquire("ComfyUI", new AbortController().signal), /stopping/);
+  gpu.stop(); await next;
+});
+
 it("hands over in order, awaits unloading, and cancels waiting work without taking the card", async () => {
   const unloaded: string[] = [];
   const gpu = new LocalGpu(async (engine) => { unloaded.push(engine); });

@@ -42,6 +42,7 @@ import { createLocalEnginePolicy, LOCAL_ENGINE_CONTEXT } from "./application/loc
 import { createStudioStorage, type StudioStorage } from "./application/studio-composition.js";
 import { referenceInputProblem, ollamaLlmAvailable } from "@arke-studio/contracts";
 import { LocalGpu } from "./local-ai/gpu.js";
+import type { MingBatchCommand } from "./local-ai/ming.js";
 import { withLocalGpu } from "./harness/local-gpu.js";
 import { withModelValidation } from "./harness/model-validation.js";
 import { HarnessModelCatalog, selectHarnessModel, type LanguageModelSelection } from "./harness/model-catalog.js";
@@ -256,6 +257,8 @@ import {
 import { recordBenchOutcome, serialiseSceneConversation } from "./bench/outcome.js";
 import type { AppLog } from "./app-log.js";
 import { type AppSettingsFile, routingFaults } from "./app-settings.js";
+import type { OllamaEngineService } from "./local-ai/ollama.js";
+import { normalizeOllamaUrl } from "@arke-studio/contracts";
 import { AskService } from "./canon/ask.js";
 import type { CredentialStore, Cipher } from "./credentials/store.js";
 import { CoalescedReads, ReadStalledError, type ReadTurn } from "./coalesced-reads.js";
@@ -1021,6 +1024,12 @@ export interface CoordinatorOptions {
     choosePath?: () => Promise<string | null>;
     chooseModelsDir?: () => Promise<string | null>;
   };
+  ollama?: {
+    service: OllamaEngineService;
+    reconfigureHarness?: () => Promise<void>;
+  };
+  /** Ming owns a separate process even when its interpreter belongs to ComfyUI. */
+  ming?: { run(command: MingBatchCommand, signal: AbortSignal): Promise<void>; unload(signal: AbortSignal): Promise<void>; dispose(): Promise<void> };
   /**
    * Vendor-side voice state for the hosted readers (SPEC-046 R-13): the calls that save a clip
    * into a Breeze voice slot and remove it, wired by the host from the provider clients. Absent
@@ -3458,6 +3467,19 @@ export class Coordinator {
   private backfillStore: WorldStore | null = null;
 
   private readonly localGpu: LocalGpu;
+  private readonly runtimeStop = new AbortController();
+
+  /** Host-only entry for the optional Ming worker; no paths or commands come from the renderer. */
+  runMingBatch<T>(work: (signal: AbortSignal) => Promise<T>, signal: AbortSignal, waiting?: (reason: string | null) => void): Promise<T> {
+    if (!this.opts.ming) return Promise.reject(new Error("The Ming worker is not configured."));
+    const task = this.localGpu.runMingBatch(work, AbortSignal.any([signal, this.runtimeStop.signal]), waiting);
+    this.trackBackground(task);
+    return task;
+  }
+
+  generateMingBatch(command: MingBatchCommand, signal: AbortSignal, waiting?: (reason: string | null) => void): Promise<void> {
+    return this.runMingBatch(combined => this.opts.ming!.run(command, combined), signal, waiting);
+  }
   private readonly effectAnalysis: EditorEffectAnalysisService;
   private readonly effectDependencies: EditorEffectDependencies;
   /**
@@ -3493,10 +3515,18 @@ export class Coordinator {
     // comes up settles both from its failure paths below, and a session on it fails at creation.
     if (!opts.adapter) this.settleHarnessGates();
     this.localGpu = new LocalGpu(async (engine, signal) => {
+      if (engine === "Ming") { await opts.ming?.unload(signal); return; }
+      if (engine === "Ollama" && opts.ollama && opts.ollama.service.baseUrl() === null && !opts.ollama.service.externallySelected()) {
+        // An uninstalled runtime owns no memory. A failed owned child must confirm exit;
+        // a nullable endpoint by itself is not evidence that it released its allocations.
+        await opts.ollama.service.stopManaged();
+        this.clearLocalResidency("ollama");
+        return;
+      }
       if (engine === "ComfyUI" && opts.comfyui?.service.engineIdentity()?.locality !== "local") return;
       await opts.dispatchClients?.[engine === "Ollama" ? "ollama" : "comfyui"]?.unload?.(signal);
       this.clearLocalResidency(engine === "Ollama" ? "ollama" : "comfyui");
-    });
+    }, ["Ollama", "ComfyUI", "Ming"]);
     if (opts.adapter) opts.adapter = withModelValidation(
       withLocalGpu(opts.adapter, this.localGpu, () => { void this.refreshLocalResidency(); }, (model) => this.harnessOllamaModels.add(model)),
       (reference, needsImages, signal) => this.validateLanguageModel(reference, needsImages, signal),
@@ -4301,6 +4331,7 @@ export class Coordinator {
   private readonly pendingVoiceReads = new Map<string, { token: string; inputs: EnqueueInput[] }>();
 
   private onSetupComponentReady(componentId: string): Promise<void> {
+    if (componentId === "ollama-runtime") return this.opts.ollama?.service.refresh() ?? Promise.resolve();
     if (componentId !== "comfyui-runtime" && !isComfyUiWeightsComponent(componentId)) return Promise.resolve();
     const work = this.comfyUiSetupWork
       .catch(() => {})
@@ -4751,6 +4782,13 @@ export class Coordinator {
     if (this.opts.comfyui && this.appSettings) {
       const settings = await this.appSettings.load();
       await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
+    }
+    if (this.opts.ollama && this.appSettings) {
+      const settings = await this.appSettings.load();
+      await this.opts.ollama.service.applySettings(settings.ollama);
+      const publish = () => { if (!this.stopping) this.emit({ at: this.nowIso(), type: "ollama.status", ollama: this.opts.ollama!.service.status() }); };
+      this.lifecycleDisposers.add(this.opts.ollama.service.subscribe(publish));
+      publish();
     }
     // Reconcile every non-terminal job before accepting new work (SPEC-009 R-18). The report
     // reaches clients as an event; the folded jobs seed the read model.
@@ -6367,16 +6405,17 @@ export class Coordinator {
     patch: Partial<import("@arke-studio/contracts").ComfyUiSettings>,
   ): Promise<void> {
     if (!this.appSettings || !this.opts.comfyui) return;
-    const settings = await this.appSettings.setComfyUi(patch);
-    this.jobQueue?.resetProviderTransport("comfyui");
-    await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
-    // Work in flight against the engine that just stopped being the configured one is failed
-    // here, with the reason (SPEC-021 §2.11). Without this the poll loop keeps asking the NEW
-    // engine about a prompt id only the OLD one ever issued — which reads as "the engine no
-    // longer knows this prompt" and looks like the engine lost the job.
-    await this.retireAndReleaseComfyUi();
-    await this.setup?.detect().catch(() => {});
-    await this.refreshComfyUi();
+    if (this.localGpu.isBusy("ComfyUI")) throw new Error("Finish or cancel ComfyUI work before changing its runtime.");
+    const release = await this.localGpu.acquire("ComfyUI", this.runtimeStop.signal);
+    try {
+      const settings = await this.appSettings.setComfyUi(patch);
+      this.runtimeStop.signal.throwIfAborted();
+      this.jobQueue?.resetProviderTransport("comfyui");
+      await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
+      await this.retireAndReleaseComfyUi();
+      await this.setup?.detect().catch(() => {});
+      await this.refreshComfyUi();
+    } finally { release(); }
   }
 
   /**
@@ -10252,6 +10291,47 @@ export class Coordinator {
         await this.applyComfyUiPatch({ enginePath: null, engineUrl: null });
         return;
       }
+      case "set-ollama-url":
+      case "clear-ollama-engine": {
+        const service = this.opts.ollama?.service;
+        if (!service || !this.appSettings) return;
+        if (this.localGpu.isBusy("Ollama")) {
+          this.emit({ at: this.nowIso(), type: "ollama.status", ollama: { ...service.status(), detail: "Finish or cancel local language work before changing its runtime." } });
+          return;
+        }
+        const engineUrl = msg.kind === "clear-ollama-engine" ? null : normalizeOllamaUrl(msg.url);
+        if (msg.kind === "set-ollama-url" && engineUrl === null) return;
+        const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
+        try {
+          const previous = (await this.appSettings.load()).ollama;
+          const settings = await this.appSettings.setOllama({ engineUrl });
+          this.runtimeStop.signal.throwIfAborted();
+          try { await service.applySettings(settings.ollama); }
+          catch (error) { await this.appSettings.setOllama(previous); throw error; }
+          await this.opts.ollama?.reconfigureHarness?.();
+          await this.setup?.detect();
+        } finally { release(); }
+        return;
+      }
+      case "ollama-refresh": {
+        if (this.localGpu.isBusy("Ollama")) return;
+        const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
+        try { await this.opts.ollama?.service.refresh(); }
+        finally { release(); }
+        return;
+      }
+      case "ollama-update-runtime": {
+        const service = this.opts.ollama?.service;
+        if (!service || !this.setup || !this.appSettings || this.localGpu.isBusy("Ollama")) return;
+        // A selected user service is never stopped or modified by a managed-runtime update.
+        const external = service.externallySelected();
+        const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
+        try {
+          if (!external) await service.stopManaged();
+          await this.setup.updateTree("ollama-runtime");
+        } finally { try { if (!external && !this.stopping) await service.refresh(); } finally { release(); } }
+        return;
+      }
       case "use-detected-comfyui": {
         // Only a location the host itself just discovered and published (SPEC-021 D10): the
         // renderer selects among offers, it does not originate paths.
@@ -10287,9 +10367,7 @@ export class Coordinator {
         if (!this.appSettings || !this.opts.comfyui) return;
         // Re-applying the settings *is* the restart: `applySettingsOnce` stops supervision,
         // resolves the selection again and starts the child, whether or not anything changed.
-        const settings = await this.appSettings.load();
-        await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
-        await this.refreshComfyUi();
+        await this.applyComfyUiPatch({});
         return;
       }
       case "comfyui-refresh": {
@@ -10311,18 +10389,22 @@ export class Coordinator {
       case "comfyui-update-runtime": {
         const service = this.opts.comfyui?.service;
         if (!service || !this.setup || !this.appSettings) return;
-        // Stop only the managed child (SPEC-021 R-20): a user-directed engine is supervised
-        // identically and is somebody else's work, and the case this serves is a stale managed tree
-        // behind a selected user engine. The swap runs with the files closed; the engine comes back
-        // through the same path Settings uses, and only if it was the one stopped.
-        const stopped = await service.stopManagedSupervision().catch(() => false);
-        await this.setup.updateTree("comfyui-runtime").catch(() => false);
-        await this.setup.detect().catch(() => {});
-        if (stopped) {
-          const settings = await this.appSettings.load();
-          await service.applySettings(settings.comfyui).catch(() => {});
-        }
-        await this.refreshComfyUi();
+        if (this.localGpu.isBusy("ComfyUI")) throw new Error("Finish or cancel ComfyUI work before updating its runtime.");
+        const release = await this.localGpu.acquire("ComfyUI", this.runtimeStop.signal);
+        try {
+          // Only Arke's managed child is stopped; an explicitly selected URL/path keeps
+          // its owner's lifecycle. Ming has already exited before the tree can move.
+          const stopped = await service.stopManagedSupervision();
+          try { await this.setup.updateTree("comfyui-runtime"); }
+          finally {
+            if (stopped && !this.stopping) {
+              const settings = await this.appSettings.load();
+              await service.applySettings(settings.comfyui);
+            }
+          }
+          await this.setup.detect();
+          await this.refreshComfyUi();
+        } finally { release(); }
         return;
       }
       case "repair-voice-models": {
@@ -22939,6 +23021,7 @@ export class Coordinator {
     // reload timer that would have settled it is cleared below, and nothing else fires.
     this.settleHarnessGates();
     this.localGpu.stop();
+    this.runtimeStop.abort(new Error("Local runtimes are stopping."));
     for (const controller of this.performanceGenerations.values()) controller.abort();
     for (const controller of this.keyArtPromptDrafts.values()) controller.abort();
     this.keyArtPromptReviews.clear();
@@ -23005,6 +23088,7 @@ export class Coordinator {
       await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
       await this.opts.adapter?.dispose?.().catch(() => {});
       await this.releaseOllama();
+      const runtimeStops = await Promise.allSettled([this.opts.ming?.dispose(), this.opts.ollama?.service.dispose()]);
       await this.worldQuery.stop();
       // Provider close is the critical gate: it saves pending state and releases the world lock.
       this.engineClosed = true;
@@ -23017,6 +23101,8 @@ export class Coordinator {
       // called, so a fault recorded in the last moments of a run — the kind most worth having,
       // because the run ended — could still be in the queue when the process left.
       await this.appLog?.drain();
+      const failedRuntimeStops = runtimeStops.filter(result => result.status === "rejected");
+      if (failedRuntimeStops.length) throw new AggregateError(failedRuntimeStops.map(result => result.reason), "Local runtime cleanup did not confirm exit.");
     })();
     try {
       await this.stopPromise;

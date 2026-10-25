@@ -24,9 +24,15 @@ export class OllamaClient implements ProviderClient {
 
   constructor(
     private readonly fetchImpl: FetchLike,
-    private readonly baseUrl = "http://127.0.0.1:11434",
+    private readonly endpoint: string | (() => string | null) = "http://127.0.0.1:11434",
     private readonly residencyPause: (signal?: AbortSignal) => Promise<void> = async (signal) => { await pause(1_000, undefined, { signal }); },
   ) {}
+
+  private get baseUrl(): string {
+    const url = typeof this.endpoint === "function" ? this.endpoint() : this.endpoint;
+    if (url === null) throw new Error("Ollama is not ready. Install or start the selected runtime in Settings.");
+    return url;
+  }
 
   async validateKey(): Promise<CapabilityProbe[]> {
     // Bounded: this probe is re-run on a timer (issue 462), and a loopback port that accepts a

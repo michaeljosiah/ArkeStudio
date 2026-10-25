@@ -1846,6 +1846,7 @@ describe("the provider table and the registry cannot drift apart (issue 462)", (
     const scopes: ProviderTransportScope[] = [];
     let localCalls = 0;
     const clients = createProviderClients({
+      ollama: () => "http://127.0.0.1:11434",
       fetch: async () => {
         localCalls += 1;
         return new Response(JSON.stringify({ models: [{ name: "llama3.1" }] }), { status: 200 });

@@ -1,4 +1,6 @@
 export { AppLog } from "./app-log.js";
+export { OllamaEngineService } from "./local-ai/ollama.js";
+export { MingProcess, type MingBatchCommand } from "./local-ai/ming.js";
 export { RemoteDevices, writeRemotePrivate } from "./remote-access/devices.js";
 export { RemoteGateway, type RemoteTrace } from "./remote-access/gateway.js";
 export { AppSettingsFile, routingFaults } from "./app-settings.js";

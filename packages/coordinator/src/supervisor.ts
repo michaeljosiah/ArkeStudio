@@ -48,6 +48,8 @@ export interface SupervisorStatusEvent {
 
 export interface SupervisedSpec {
   id: string;
+  /** A host-reserved port, stable across this worker's restarts. Otherwise allocated per spawn. */
+  port?: number;
   /** null → the child is not configured on this machine; status reports why (R-6). */
   command: string | null;
   /** `{port}` in an argument is replaced with the allocated loopback port. */
@@ -230,9 +232,9 @@ export class EngineLog {
 export class ChildSupervisor extends EventEmitter {
   readonly id: string;
   private readonly spec: Required<
-    Omit<SupervisedSpec, "command" | "args" | "env" | "validateHealth" | "healthHeaders" | "onStdoutLine" | "logFile">
+    Omit<SupervisedSpec, "command" | "args" | "env" | "validateHealth" | "healthHeaders" | "onStdoutLine" | "logFile" | "port">
   > &
-    Pick<SupervisedSpec, "command" | "args" | "env" | "validateHealth" | "healthHeaders" | "onStdoutLine" | "logFile">;
+    Pick<SupervisedSpec, "command" | "args" | "env" | "validateHealth" | "healthHeaders" | "onStdoutLine" | "logFile" | "port">;
   private readonly deps: SupervisorDeps;
   private child: ChildProcess | null = null;
   private _port: number | null = null;
@@ -252,6 +254,9 @@ export class ChildSupervisor extends EventEmitter {
 
   constructor(spec: SupervisedSpec, deps: SupervisorDeps = {}) {
     super();
+    if (spec.port !== undefined && (!Number.isInteger(spec.port) || spec.port < 1 || spec.port > 65535)) {
+      throw new Error("A supervised worker port must be an integer from 1 to 65535.");
+    }
     this.id = spec.id;
     this.deps = deps;
     this.spec = {
@@ -369,7 +374,7 @@ export class ChildSupervisor extends EventEmitter {
     this.healthFailure = undefined;
     this.clearHealthTimer();
     this.consecutiveHealthFailures = 0;
-    const port = await allocateLoopbackPort();
+    const port = this.spec.port ?? await allocateLoopbackPort();
     if (epoch !== this.launchEpoch || this.stopping) return;
     this._port = port;
     const args = (this.spec.args ?? []).map((a) => a.replaceAll("{port}", String(port)));
@@ -380,7 +385,11 @@ export class ChildSupervisor extends EventEmitter {
     let child: ChildProcess;
     try {
       child = spawn(command, args, {
-        env: { ...(this.spec.inheritEnv ? process.env : {}), ...this.spec.env, PORT: String(port) },
+        env: {
+          ...(this.spec.inheritEnv ? process.env : {}),
+          ...Object.fromEntries(Object.entries(this.spec.env ?? {}).map(([key, value]) => [key, value.replaceAll("{port}", String(port))])),
+          PORT: String(port),
+        },
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
         shell: needsShell,
@@ -786,6 +795,19 @@ export class ChildSupervisor extends EventEmitter {
   }
 
   /** Graceful stop: signal, wait, then force-kill the process tree. Never leaves an orphan. */
+  async stopAndConfirm(): Promise<void> {
+    const child = this.child;
+    try { await this.stop(); }
+    finally {
+      if (child && child.exitCode === null && child.signalCode === null && this.child === null) this.child = child;
+    }
+    if (child && child.exitCode === null && child.signalCode === null) {
+      // Keep the handle for a later retry/backstop; forgetting it would turn the next stop
+      // into a false confirmation while the worker still holds the graphics card.
+      throw new Error(`${this.id} has not confirmed process exit; its memory cannot be handed over.`);
+    }
+  }
+
   async stop(): Promise<void> {
     this.stopping = true;
     this.terminalStartupChild = null;

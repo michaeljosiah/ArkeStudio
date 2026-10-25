@@ -12,7 +12,9 @@ import { createStudioHost } from "./application/studio-host.js";
 import { devCipher } from "./credentials/dev-cipher.js";
 import { ProviderCallStore } from "./providers/call-store.js";
 import { SecretRegistry } from "./redact.js";
-import { registerExitBackstop } from "./supervisor.js";
+import { allocateLoopbackPort, registerExitBackstop } from "./supervisor.js";
+import { OllamaEngineService } from "./local-ai/ollama.js";
+import { MingProcess } from "./local-ai/ming.js";
 import { nodeSetupDeps } from "./setup/node-deps.js";
 import { FsWorldProvider } from "./world/provider.js";
 import { UNDERSONG_RELEASE } from "./world/undersong-release.js";
@@ -75,12 +77,15 @@ if (swept.reaped.length > 0) {
 // when neither is. One seam builds the whole launch (issue 327 §3–§4) — v2 preferred, v1
 // the escape hatch — so dev and desktop cannot drift.
 // Read before assembly: the stored choice decides which lane launches.
-const storedHarness =
-  (await new AppSettingsFile(join(devRoot, "settings.json")).load().catch(() => null))?.harness ?? null;
+const savedHostSettings = await new AppSettingsFile(join(devRoot, "settings.json")).load();
+const storedHarness = savedHostSettings.harness;
+const ollamaEngine = new OllamaEngineService({ appRoot: devRoot, port: await allocateLoopbackPort(), deps: { ledger } });
+await ollamaEngine.applySettings(savedHostSettings.ollama);
 const chosenHarness = effectiveHarnessEngine(storedHarness?.engine ?? "opencode", process.env["ARKE_HARNESS"]);
 
 const wiring = await assembleHarness({
   appRoot: devRoot,
+  ollamaEndpoint: () => ollamaEngine.endpoint(),
   engine: chosenHarness,
   deps: { ledger },
   preferV1: process.env["ARKE_OPENCODE_GENERATION"] === "v1",
@@ -137,7 +142,7 @@ const codexImage = lazyCodexImageRunner({
     return path ? { configuredPath: path } : {};
   },
 });
-const providerClients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: providerCalls, codexImage });
+const providerClients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: providerCalls, codexImage, ollama: () => ollamaEngine.baseUrl() });
 
 const transportToken = randomBytes(32).toString("hex");
 const devOrigins = process.env["ARKE_DEV_ORIGIN"]
@@ -178,7 +183,9 @@ const { coordinator, server } = createStudioHost({
   // What the packaged build reads out of its resources, dev reads out of the repo — so
   // Settings · Sample world is a working surface here and not a dead one (SPEC-016 R-6).
   sampleWorldDownload: UNDERSONG_RELEASE,
-  setup: nodeSetupDeps(),
+  setup: { ...nodeSetupDeps(), ollama: ollamaEngine, externallyPresent: async id => id === "ollama-runtime" && ollamaEngine.externallySelected() },
+  ollama: { service: ollamaEngine, reconfigureHarness: wiring.reconfigureOllama },
+  ming: new MingProcess(ledger),
   authoring: { agentForPurpose, roster: ROSTER, skillFor },
   ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
   harnessLaunchEngine: chosenHarness,

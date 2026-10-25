@@ -29,6 +29,9 @@ import {
   ChildLedger,
   ChildSupervisor,
   ComfyUiEngineService,
+  OllamaEngineService,
+  MingProcess,
+  allocateLoopbackPort,
   Coordinator,
   UNDERSONG_RELEASE,
   createStudioHost,
@@ -711,6 +714,7 @@ async function initialize(): Promise<{ port: number }> {
   // Stop-Process); the ledger sweep reaps them before this run spawns its own (R-5). One of
   // those orphans once held a file lock that broke packaging — this is not hypothetical.
   const childLedger = new ChildLedger(join(appRoot, "run", "children.json"));
+  const mingProcess = new MingProcess(childLedger);
   const swept = await childLedger.reapStale();
   if (swept.reaped.length > 0) {
     const named = swept.reaped.map((r) => `${r.id} (pid ${r.pid})`).join(", ");
@@ -728,11 +732,15 @@ async function initialize(): Promise<{ port: number }> {
    * The same file the coordinator writes through, so Settings and launch cannot disagree.
    */
   const hostSettings = new AppSettingsFile(join(appRoot, "settings.json"));
-  const storedHarness = (await hostSettings.load().catch(() => null))?.harness ?? null;
+  const savedHostSettings = await hostSettings.load();
+  const storedHarness = savedHostSettings.harness;
+  const ollamaEngine = new OllamaEngineService({ appRoot, port: await allocateLoopbackPort(), deps: { ledger: childLedger } });
+  await ollamaEngine.applySettings(savedHostSettings.ollama);
   const chosenHarness = effectiveHarnessEngine(storedHarness?.engine ?? "opencode", process.env["ARKE_HARNESS"]);
 
   const wiring = await assembleHarness({
     appRoot,
+    ollamaEndpoint: () => ollamaEngine.endpoint(),
     engine: chosenHarness,
     deps: { ledger: childLedger },
     preferV1: process.env["ARKE_OPENCODE_GENERATION"] === "v1",
@@ -867,6 +875,7 @@ async function initialize(): Promise<{ port: number }> {
   // folder through the coordinator's external-dir resolver.
   const comfyUiWeightEntries = comfyUiWeightCatalogue(COMFYUI_RECIPES);
   const providerClients = createProviderClients({
+    ollama: () => ollamaEngine.baseUrl(),
     fetch: (url, init) => fetch(url, init),
     transport: providerTransport,
     higgsfield: lazyHiggsfieldRunner(findHiggsfield),
@@ -1380,7 +1389,8 @@ async function initialize(): Promise<{ port: number }> {
     setup: {
       ...nodeSetupDeps(),
       externallyPresent: async (entryId) =>
-        entryId === "comfyui-runtime" ? comfyUiEngine.externallySelected() : false,
+        entryId === "comfyui-runtime" ? comfyUiEngine.externallySelected() : entryId === "ollama-runtime" ? ollamaEngine.externallySelected() : false,
+      ollama: ollamaEngine,
     },
     // Breeze and Fish keep a cloned voice on the account — a slot, a model; the library asks for
     // it here (SPEC-046 R-13). A reader whose client carries no slot calls keeps none.
@@ -1406,6 +1416,8 @@ async function initialize(): Promise<{ port: number }> {
         return client.hasVoice(key, voiceId, signal);
       },
     },
+    ollama: { service: ollamaEngine, reconfigureHarness: wiring.reconfigureOllama },
+    ming: mingProcess,
     comfyui: {
       service: comfyUiEngine,
       choosePath: async () => {

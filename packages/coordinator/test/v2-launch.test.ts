@@ -85,6 +85,23 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
     assert.equal(await readFile(path, "utf8"), original, "user model configuration is not the generated inventory");
   });
 
+  it("points native Ollama discovery at the selected service without generating a model inventory", async () => {
+    const appRoot = await tempDir("v2-owned-ollama-");
+    let endpoint = "http://127.0.0.1:24567";
+    const wiring = await assembleHarness({ appRoot, ollamaEndpoint: () => endpoint,
+      v2: { runCommand: async command => command === "where" || command === "which"
+        ? { status: 0, stdout: "C:/bin/opencode2.exe" } : { status: 0, stdout: "opencode v2.0.26" } },
+      v1: { runCommand: async () => ({ status: 1, stdout: "" }) },
+    });
+    try {
+      const path = join(harnessProfileDir(appRoot), ".config", "opencode", "opencode.json");
+      assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { providers: { ollama: { settings: { baseURL: `${endpoint}/v1` } } } });
+      endpoint = "http://localhost:11434";
+      await wiring.reconfigureOllama!();
+      assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { providers: { ollama: { settings: { baseURL: `${endpoint}/v1` } } } });
+    } finally { await wiring.supervisor?.stop(); }
+  });
+
   it("boots the pinned native runtime through the shared launcher and authenticated readiness route", {
     skip: !process.env["ARKE_TEST_OPENCODE2"], timeout: 75_000,
   }, async () => {

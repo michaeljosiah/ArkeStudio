@@ -587,8 +587,9 @@ export class ComfyUiEngineService {
     void supervisor.start().catch(() => {});
   }
 
-  private async stopSupervision(): Promise<void> {
+  private async stopSupervision(confirm = false): Promise<void> {
     const supervisor = this.supervisor;
+    if (confirm && supervisor) await supervisor.stopAndConfirm();
     this.supervisor = null;
     const statusListener = this.supervisorStatusListener;
     this.supervisorStatusListener = null;
@@ -657,7 +658,7 @@ export class ComfyUiEngineService {
     if (this.disposed || this.resolved.source !== "managed" || this.supervisor === null) return false;
     this.cancelHashing();
     this.invalidateVerification();
-    await this.stopSupervision();
+    await this.stopSupervision(true);
     this.recordProbe({ version: null, reachable: false, detail: null });
     await this.publish();
     return true;

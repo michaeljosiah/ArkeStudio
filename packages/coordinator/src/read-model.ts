@@ -386,6 +386,10 @@ export class ReadModel {
         this.state = { ...this.state, app: { ...this.state.app, comfyui: event.comfyui } };
         return;
       }
+      case "ollama.status": {
+        this.state = { ...this.state, app: { ...this.state.app, ollama: event.ollama } };
+        return;
+      }
       case "adapters.changed": {
         this.state = { ...this.state, app: { ...this.state.app, adapters: event.adapters } };
         return;

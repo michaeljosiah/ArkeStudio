@@ -1,5 +1,20 @@
 # Code map
 
+Managed local engines: coordinator `local-ai/ollama.ts` owns portable Ollama and explicit URL
+overrides; `setup/catalogue.ts` / `setup/local-setup.ts` own pinned archives and architecture/
+version receipts. `harness/v2-launch.ts` writes only the selected Ollama endpoint into the
+owned OpenCode profile. `local-ai/gpu.ts` serializes writing, ComfyUI and Ming; `local-ai/ming.ts`
+owns Python batch cancellation/confirmed exit, exposed through Coordinator's host-only
+`generateMingBatch`. Desktop/dev compose these services; contracts `ollama.ts`, wire status
+folds and client `screens/engine-panes.tsx` expose runtime ownership. Tests: coordinator
+`ollama-engine`, `ming-process`, `local-gpu`, `supervisor`, `v2-launch` and `setup/comfyui-setup`;
+client `engine-panes`; contracts `ollama`; providers `clients`. See
+[managed runtime policy and delivery boundary](managed-local-runtimes.md).
+
+Ming qualification (0.5B and the original-weight tiny trial) is a standalone offline probe in `scripts/probe-ming-tts.py`, with
+input/environment checks in `scripts/test-probe-ming-tts.py`. It does not register a provider or
+change Voxa. See [audition setup and evidence boundaries](ming-tts-audition.md).
+
 On-demand story delivery: coordinator `world/undersong-release.ts` pins the public archive;
 `world/story-download.ts` owns pinned single/multipart resumable archives, disk-space inspection, verification
 and extraction, then `world/sample-world.ts` installs an independent copy. Contracts

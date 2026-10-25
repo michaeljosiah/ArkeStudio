@@ -159,6 +159,8 @@ export function harnessInfoFrom(harness: DiscoveredHarness): AssembledHarnessInf
 }
 
 export interface AssembleHarnessOptions {
+  /** Arke's selected local runtime. Native discovery still owns the model inventory. */
+  ollamaEndpoint?: () => string;
   appRoot: string;
   /** Authoritative resolved Settings/environment selection. */
   engine?: HarnessEngine;
@@ -191,6 +193,7 @@ export interface AssembleHarnessOptions {
 }
 
 export interface AssembledHarness {
+  reconfigureOllama?: () => Promise<void>;
   harness: DiscoveredHarness | null;
   isV2: boolean;
   supervisor: ChildSupervisor | null;
@@ -282,6 +285,23 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     await mkdir(profileDir, { recursive: true });
     await retireGeneratedOllamaModels(profileDir);
   }
+  const configureOllama = async () => {
+    if (!isV2 || !opts.ollamaEndpoint) return;
+    const path = join(profileDir, ".config", "opencode", "opencode.json");
+    let config: Record<string, unknown>;
+    try { config = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      config = {};
+    }
+    const providers = object(config.providers) ? config.providers : {};
+    const ollama = object(providers.ollama) ? providers.ollama : {};
+    const settings = object(ollama.settings) ? ollama.settings : {};
+    const baseURL = `${opts.ollamaEndpoint().replace(/\/+$/, "")}/v1`;
+    if (settings.baseURL === baseURL) return;
+    await atomicWriteFile(path, JSON.stringify({ ...config, providers: { ...providers, ollama: { ...ollama, settings: { ...settings, baseURL } } } }, null, 2) + "\n");
+  };
+  await configureOllama();
 
   const supervisor = new ChildSupervisor(
     {
@@ -347,6 +367,7 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     ...(harness ? { harnessInfo: harnessInfoFrom(harness) } : {}),
     // The PATCH form, deliberately: it names every managed variable, so a cleared key is a
     // deletion the merge honours rather than an omission it preserves.
+    reconfigureOllama: async () => { await configureOllama(); if (supervisor.pid !== null) await supervisor.restart(); },
     relaunchHarness: (credentials) => supervisor.updateEnv(credentialEnvPatch(credentials)),
     logLines,
   };

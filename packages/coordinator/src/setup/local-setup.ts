@@ -61,6 +61,13 @@ export interface SetupDeps {
    * (SPEC-021 D10). Discovery alone is not presence here; it remains an offer beside Download.
    */
   externallyPresent?(entryId: string): Promise<boolean>;
+  /** Host-selected service: model operations must not fall back to a personal CLI/server. */
+  ollama?: {
+    modelsDir(): string | null;
+    list(signal: AbortSignal): Promise<readonly string[]>;
+    pull(model: string, signal: AbortSignal, progress: (done: number, total: number) => void): Promise<void>;
+    remove(model: string, signal: AbortSignal): Promise<void>;
+  };
 }
 
 export interface SetupOptions {
@@ -188,7 +195,10 @@ export class LocalSetupService {
     private readonly emit: (event: DomainEvent) => void,
     private readonly opts: SetupOptions,
   ) {
-    for (const entry of opts.catalogue ?? SETUP_CATALOGUE) {
+    for (const declared of opts.catalogue ?? SETUP_CATALOGUE) {
+      const arch = opts.arch ?? (process.arch === "arm64" ? "arm64" : "x64");
+      const file = declared.spec.kind === "tree" ? declared.spec.byArch?.[arch] : undefined;
+      const entry = file && declared.spec.kind === "tree" ? { ...declared, sizeMb: file.sizeMb, spec: { ...declared.spec, file } } : declared;
       this.components.set(entry.id, {
         entry,
         id: entry.id,
@@ -505,6 +515,7 @@ export class LocalSetupService {
     }
     if (spec.kind === "archive" || spec.kind === "tree") return this.toolDir(spec);
     if (spec.kind === "pull") {
+      if (this.deps.ollama) return this.deps.ollama.modelsDir();
       if (process.env["OLLAMA_MODELS"]) return resolve(process.env["OLLAMA_MODELS"]);
       return process.platform === "linux"
         ? "/usr/share/ollama/.ollama/models"
@@ -659,6 +670,10 @@ export class LocalSetupService {
       return marker !== null;
     }
     if (spec.kind === "pull") {
+      if (this.deps.ollama) {
+        const models: readonly string[] = await this.deps.ollama.list(this.abort.signal).catch((): string[] => []);
+        return models.includes(spec.args[spec.args.length - 1] ?? "");
+      }
       const listed = await this.deps.run(spec.command, ["list"], this.abort.signal).catch(() => null);
       if (!listed || listed.code !== 0) return false;
       const wanted = spec.args[spec.args.length - 1] ?? "";
@@ -918,6 +933,13 @@ export class LocalSetupService {
           this.publish();
           return;
         }
+        if (spec.version && spec.file.sha256) {
+          const receipt = await open(join(staged, ".arke-runtime.json"), "w");
+          try {
+            await receipt.writeFile(JSON.stringify({ owner: "arke-studio/local-setup", componentId: entry.id, version: spec.version, sha256: spec.file.sha256 }));
+            await receipt.sync();
+          } finally { await receipt.close(); }
+        }
         if (this.replacing.has(entry.id)) {
           if (!(await this.replaceTree(entry.id, spec, dir, staged))) return;
         } else {
@@ -1034,6 +1056,16 @@ export class LocalSetupService {
       this.publish();
       const progress = new PullProgress();
       let published = 0;
+      if (this.deps.ollama) {
+        await this.deps.ollama.pull(spec.args[spec.args.length - 1] ?? "", this.abort.signal, (done, total) => {
+          this.set(entry.id, { bytesDone: done, bytesTotal: total });
+          if (Date.now() - published >= 500) { published = Date.now(); this.publish(); }
+        });
+        this.set(entry.id, { state: "ready", bytesDone: this.components.get(entry.id)?.bytesTotal ?? 0, detail: undefined });
+        this.publish();
+        await this.componentReady(entry.id);
+        return;
+      }
       const pulled = await this.deps.run(spec.command, spec.args, this.abort.signal, (text) => {
         if (!progress.read(text)) return;
         this.set(entry.id, { bytesDone: progress.done, bytesPerSecond: progress.perSecond });
@@ -1454,7 +1486,11 @@ export class LocalSetupService {
         ? null
         : await this.treeMarkerPath(join(this.opts.appRoot, spec.dir), spec.versionFile);
     const text = file === null ? null : await readFile(toExtendedLength(file), "utf8").catch(() => null);
-    const installed = text === null ? null : (/__version__\s*=\s*["']([^"']+)["']/.exec(text)?.[1] ?? null);
+    let installed = text === null ? null : (/__version__\s*=\s*["']([^"']+)["']/.exec(text)?.[1] ?? null);
+    if (spec.versionFile === undefined) {
+      const receipt = await readFile(join(this.opts.appRoot, spec.dir, ".arke-runtime.json"), "utf8").then(value => JSON.parse(value)).catch(() => null);
+      if (receipt?.owner === "arke-studio/local-setup" && receipt.componentId === entry.id && typeof receipt.version === "string" && /^[a-f0-9]{64}$/.test(receipt.sha256)) installed = receipt.version;
+    }
     if (installed === null) return { pinnedVersion: spec.version, currency: "unknown" };
     const order = compareComfyUiVersions(installed, spec.version);
     return {
@@ -1650,9 +1686,9 @@ export class LocalSetupService {
     // that can take it back — `rm -rf` on a store we do not own is not a removal, it is damage.
     if (spec.kind === "pull") {
       const model = spec.args[spec.args.length - 1] ?? "";
-      const result = await this.deps
-        .run(spec.command, ["rm", model], this.abort.signal)
-        .catch(() => ({ code: 1, output: "" }));
+      const result = this.deps.ollama
+        ? await this.deps.ollama.remove(model, this.abort.signal).then(() => ({ code: 0, output: "" }), error => ({ code: 1, output: errorText(error) }))
+        : await this.deps.run(spec.command, ["rm", model], this.abort.signal).catch(() => ({ code: 1, output: "" }));
       const ok = result.code === 0;
       this.set(componentId, {
         state: ok ? "available" : c.state,

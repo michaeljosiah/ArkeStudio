@@ -66,7 +66,7 @@ export type ComponentKind =
    * because upstream archives wrap their content in a single top-level folder.
    */
   /** `version` is what the release pins; `versionFile` is where the tree records its own, relative to the same root as `rootMarker` (issue 592). */
-  | { kind: "tree"; dir: string; rootMarker: string; file: DownloadFile; version?: string; versionFile?: string };
+  | { kind: "tree"; dir: string; rootMarker: string; file: DownloadFile; byArch?: Partial<Record<"x64" | "arm64", DownloadFile>>; version?: string; versionFile?: string };
 
 export interface CatalogueEntry {
   id: string;
@@ -153,6 +153,7 @@ const SEVENZ_MAGIC = [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c] as const;
  * without a portable release asset, so 0.38.0 is the newest build with a published digest.
  */
 export const COMFYUI_VERSION = "0.38.0";
+export const OLLAMA_VERSION = "0.40.11";
 
 /** Canonical setup identities for the two model directories Voxa reads at launch. */
 export const VOXA_SETUP_COMPONENT_IDS = {
@@ -181,13 +182,22 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     engine: "ollama",
     displayName: "Ollama",
     purpose: "Runs language models here",
-    sizeMb: 750,
+    sizeMb: 1587,
+    installedMb: 6800,
     spec: {
-      kind: "installer",
-      file: { url: "https://ollama.com/download/OllamaSetup.exe", file: "OllamaSetup.exe", sizeMb: 750 },
-      // Inno Setup's flags. If the installer refuses them it is launched visibly instead,
-      // and the row says so — never a silent failure, never a silent install either.
-      silentArgs: ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
+      kind: "tree", dir: "ollama-runtime", rootMarker: "ollama.exe", version: OLLAMA_VERSION,
+      byArch: {
+        arm64: {
+          url: `https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-windows-arm64.zip`,
+          file: "ollama-windows-arm64.zip", sizeMb: 214, magic: [0x50, 0x4b, 0x03, 0x04],
+          sha256: "a43eeaea23bef3157b0f7d42216fe8a8fecdd7a9f06722f7f8e623470308bd9a",
+        },
+      },
+      file: {
+        url: `https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-windows-amd64.zip`,
+        file: "ollama-windows-amd64.zip", sizeMb: 1587, magic: [0x50, 0x4b, 0x03, 0x04],
+        sha256: "bda4a493ba8a7c24d57263cd843cd68cee84f44aed4299eeed532acad7eda12a",
+      },
     },
   },
   {
@@ -283,7 +293,6 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     // at once. Almost none of it is ComfyUI: the tree is an embedded Python plus torch and the
     // CUDA libraries, which is the cost §2.1 says every alternative runtime pays too.
     installedMb: 8200,
-    optional: true,
     caveat: `v${COMFYUI_VERSION} · NVIDIA build · about 6 GB on disk`,
     spec: {
       kind: "tree",

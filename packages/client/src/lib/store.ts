@@ -1570,6 +1570,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, residency: event.residency } };
     case "comfyui.status":
       return { ...state, app: { ...state.app, comfyui: event.comfyui } };
+    case "ollama.status":
+      return { ...state, app: { ...state.app, ollama: event.ollama } };
     case "adapters.changed":
       return { ...state, app: { ...state.app, adapters: event.adapters } };
     case "harness.status":
@@ -4237,6 +4239,11 @@ export function setComfyUiUrl(url: string): void {
 export function clearComfyUiEngine(): void {
   send({ kind: "clear-comfyui-engine" });
 }
+
+export function setOllamaUrl(url: string): void { send({ kind: "set-ollama-url", url }); }
+export function useManagedOllama(): void { send({ kind: "clear-ollama-engine" }); }
+export function refreshOllama(): void { send({ kind: "ollama-refresh" }); }
+export function updateOllamaRuntime(): void { send({ kind: "ollama-update-runtime" }); }
 
 export function useDetectedComfyUi(location: string): void {
   send({ kind: "use-detected-comfyui", location });
@@ -7680,7 +7687,7 @@ export function acceptPropState(
 }
 
 /** The Logs control on a spawned engine's row (SPEC-033 R-70; issue 585): the host opens the file. */
-export function openEngineLog(engine: "comfyui" | "voxa"): void {
+export function openEngineLog(engine: "comfyui" | "voxa" | "ollama"): void {
   send({ kind: "open-engine-log", engine });
 }
 

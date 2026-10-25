@@ -5,6 +5,7 @@ import { IsoDateTimeSchema } from "./ids.js";
 import { LocalSamplingSettingsSchema } from "./local-sampling.js";
 import { HarnessEngineSchema } from "./harness.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
+import { OllamaSettingsSchema } from "./ollama.js";
 
 /**
  * App-level settings (SPEC-008 §2.7, §2.10): routing defaults that resolve to concrete models
@@ -310,6 +311,8 @@ const AppSettingsObjectSchema = z
         VoxaSettingsSchema,
       )
       .default({ executablePath: null, extraArgs: [] }),
+    /** null endpoint selects the Arke-managed runtime; malformed overrides refuse on load. */
+    ollama: OllamaSettingsSchema.default({}),
     /** Where the ComfyUI engine is (SPEC-021 §2.2); guarded the same way voxa is. */
     comfyui: z
       .preprocess(

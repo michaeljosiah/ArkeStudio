@@ -83,6 +83,19 @@ function render(path: string, state: ClientState = stateWith()): string {
 const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, " ");
 
 describe("Engines: one row per engine, and the components under it (R-68, R-71)", () => {
+  it("states runtime ownership and offers explicit existing-service and managed choices", () => {
+    const managed = plain(render("/settings/providers?provider=ollama", stateWith({ ollama: {
+      source: "managed", state: "ready", url: "http://127.0.0.1:24567", version: "0.40.11", detail: null,
+    } })));
+    assert.match(managed, /Arke-managed.*v0\.40\.11.*24567/);
+    assert.match(managed, /USE AN EXISTING SERVICE/);
+    assert.doesNotMatch(managed, /server\.log in its data folder/);
+    const external = plain(render("/settings/providers?provider=ollama", stateWith({ ollama: {
+      source: "user-url", state: "ready", url: "http://localhost:11434", version: "custom", detail: null,
+    } })));
+    assert.match(external, /Your service/);
+    assert.match(external, /Use Arke-managed/);
+  });
   it("folds a ComfyUI status that arrives after the startup snapshot", () => {
     __setStateForTest(FIXTURE_STATE);
     const comfyui = stateWith().app.comfyui!;

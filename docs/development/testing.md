@@ -1,5 +1,10 @@
 # Running and validating changes
 
+Managed local runtime checks are listed in [Managed local runtimes](managed-local-runtimes.md#validation).
+Use native Windows process/loopback access for the supervisor, Ming cancellation and file-handle
+fixtures; sandbox IPC refusals do not establish an application regression. Model qualification
+is offline and separate from these lightweight native lifecycle tests.
+
 Baseline regression checks (#2079) use client `test/art-direction-step.test.tsx` and
 `test/one-register.test.tsx`, contracts `test/world-chat-shape.test.ts`, and coordinator
 `test/productions/audiobook-video.test.ts` / `test/world/store.test.ts`. Keep empty and accepted
