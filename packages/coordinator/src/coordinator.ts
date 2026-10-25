@@ -11077,17 +11077,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         try {
-          const { record } = await readMusicRecord(store, msg.productionId);
-          if (record.session !== msg.sessionId) throw new MusicRefusal("that take is not this album's");
-          const takeOf = async () => (await this.benchFor(msg.worldId, msg.sessionId))?.session.takes.find((take) => take.id === msg.takeId);
-          let take = await takeOf();
-          if (take?.media === undefined) throw new MusicRefusal("that take has not finished");
-          if (take.keptArtifactId === undefined) {
-            await this.handleClientMessage({ kind: "bench-keep", worldId: msg.worldId, sessionId: msg.sessionId, takeId: msg.takeId, requestId: msg.requestId });
-            take = await takeOf();
-          }
-          if (take?.keptArtifactId === undefined) throw new MusicRefusal("that take could not be kept");
-          await chooseMusicTake(store, msg.productionId, msg.trackId, { sessionId: msg.sessionId, takeId: msg.takeId }, take.keptArtifactId);
+          await this.chooseAlbumTake(store, msg.productionId, msg.trackId, msg.sessionId, msg.takeId, msg.requestId);
         } catch (err) {
           this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The take could not be chosen" });
         }
@@ -21372,6 +21362,25 @@ export class Coordinator {
 
   /** Re-fold and push the open workspace + the bundle's session rows after a command. */
   /**
+   * A track's take chosen (238i, SPEC-060 R-10), from its composer or World Chat: kept to the
+   * shelf as Bench's Keep keeps one, then played from there by the track.
+   */
+  private async chooseAlbumTake(store: WorldStore, productionId: string, trackId: string, sessionId: string, takeId: string, requestId: string): Promise<void> {
+    const { record } = await readMusicRecord(store, productionId);
+    if (record.session === undefined || record.session !== sessionId) throw new MusicRefusal("that take is not this album's");
+    const session = record.session;
+    const takeOf = async () => (await this.benchFor(store.worldId, session))?.session.takes.find((take) => take.id === takeId);
+    let take = await takeOf();
+    if (take?.media === undefined) throw new MusicRefusal("that take has not finished");
+    if (take.keptArtifactId === undefined) {
+      await this.handleClientMessage({ kind: "bench-keep", worldId: store.worldId, sessionId: session, takeId: take.id, requestId });
+      take = await takeOf();
+    }
+    if (take?.keptArtifactId === undefined) throw new MusicRefusal("that take could not be kept");
+    await chooseMusicTake(store, productionId, trackId, { sessionId: session, takeId: take.id }, take.keptArtifactId);
+  }
+
+  /**
    * The album's takes by track (238i), to a composer open on it. A refresh of the album's session
    * sends them too, so a take that lands while its composer is open shows without asking again.
    */
@@ -22152,6 +22161,12 @@ export class Coordinator {
           try {
             const reservation = await bench.store.append({ type: "takes-reserved", takes: reserved }, { at: this.nowIso(), requestId: id });
             if (reservation.deduplicated) return { status: "running", detail: "Rejoining the reserved Bench generation." };
+            // A track's takes (SPEC-060 R-9) are its own once reserved, as its composer's are.
+            if (action.musicTrack !== undefined) {
+              await tagMusicTakes(store, action.musicTrack.productionId, action.musicTrack.trackId, reserved.map((take) => ({ sessionId, takeId: take.id }))).catch((error: unknown) => {
+                void this.appLog?.append({ kind: "music.takes-untagged", production: action.musicTrack!.productionId, message: error instanceof Error ? error.message : String(error) });
+              });
+            }
             for (const [index, input] of admittedInputs.entries()) {
               // An absent queue row after an uncertain append is not proof of no purchase.
               await bench.store.append({ type: "take-status", takeId: reserved[index]!.id, status: "needs-reconciliation",
@@ -22185,6 +22200,10 @@ export class Coordinator {
       },
     }, quotePorts);
     return {
+      chooseMusicTake: async (productionId, trackId, sessionId, takeId) => {
+        await this.chooseAlbumTake(store, productionId, trackId, sessionId, takeId, ulid());
+        await this.refreshWorldSnapshot(store.worldId);
+      },
       reconcileChapterReview: async (productionId, chapterId, requestId) => {
         const review = await this.chapterReviews().read({ worldId: store.worldId, productionId, chapterId }, requestId);
         return review && review.status !== "running" ? { id: review.id, summary: chapterReviewSummary(review) } : null;

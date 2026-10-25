@@ -202,7 +202,10 @@ export async function ensureMusicSession(store: WorldStore, productionId: string
   return kept;
 }
 
-/** Takes a track's composer asked for (R-9), added to its list in the order they were made. */
+/**
+ * Takes a track's composer asked for (R-9), added to its list in the order they were made. An
+ * album with no session yet keeps theirs: World Chat's card makes one on approval, as Bench does.
+ */
 export async function tagMusicTakes(store: WorldStore, productionId: string, trackId: string, refs: readonly MusicTakeRef[]): Promise<void> {
   if (refs.length === 0) return;
   await writeMusic(store, productionId, "music-takes-tag", (record) => {
@@ -211,7 +214,7 @@ export async function tagMusicTakes(store: WorldStore, productionId: string, tra
     const track = record.tracks[index]!;
     const known = new Set(track.takes.map((take) => take.takeId));
     const takes = [...track.takes, ...refs.filter((ref) => !known.has(ref.takeId))].slice(-200);
-    return { record: { ...record, tracks: record.tracks.map((entry, at) => (at === index ? { ...track, takes } : entry)) } };
+    return { record: { ...record, ...(record.session === undefined ? { session: refs[0]!.sessionId } : {}), tracks: record.tracks.map((entry, at) => (at === index ? { ...track, takes } : entry)) } };
   });
 }
 
