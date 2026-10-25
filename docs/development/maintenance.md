@@ -13,7 +13,8 @@ licence source in `apps/desktop/runtime-sources.json`, and rerun the real-binary
 [testing](testing.md#writing-engines-and-model-control) before moving the pin. Stable v2 uses
 `@opencode/cli-windows-x64` and extracts `package/bin/opencode.exe`; staging renames it to
 `opencode2.exe` to preserve Studio's installed paths. PATH discovery checks both command names
-and keeps v2 binaries out of the v1 adapter. OpenCode remains the bundled default while the
+and accepts only the pinned v2 release. OpenCode v1 has no adapter, fallback or launch override.
+OpenCode remains the bundled default while the
 Arke replacement in [issue #1698](https://github.com/michaeljosiah/ArkeStudio/issues/1698) is deferred.
 
 Commands below run from the repository root unless stated otherwise. Read the script before running a generator: regeneration can fetch remote data or change many files and is not part of ordinary documentation validation.

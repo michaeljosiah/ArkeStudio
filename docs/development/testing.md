@@ -664,6 +664,9 @@ and client `test/harness-model-controls.test.tsx`, `test/agents.test.tsx`,
 `test/settings-general.test.tsx`, `test/production-setup.test.tsx`. Catalog tests cover
 canonical/legacy references, discovery failure and retry, precedence and Stage image capability.
 Adapter tests exercise captured settings, confined tool access, cancellation and final-turn events.
+OpenCode discovery tests require v2 2.0.26 and prove a v1-only installation cannot launch.
+Coordinator `test/studio-server.test.ts` also proves the real Node composition can satisfy the
+mandatory readiness gate with explicitly selected healthy ComfyUI and Ollama services.
 
 For an OpenCode v2 pin change, stage the exact runtime and qualify the actual binary:
 

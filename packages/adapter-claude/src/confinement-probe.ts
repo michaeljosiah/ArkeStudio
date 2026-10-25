@@ -9,7 +9,7 @@ import { unexpectedSurface, type InitSurface, type Surface } from "./surface.js"
  * without telling us — one moved from 2.1.177 to 2.1.235 mid-session during the spike that
  * produced this module. What would fail is confinement itself, and it would fail silently, so
  * it cannot be inferred from a version number (SPEC-005 R-2) and it cannot be allowed to
- * degrade the way an OpenCode generation mismatch degrades. OpenCode too old falls back to v1;
+ * degrade the way an OpenCode generation mismatch degrades. An unsupported OpenCode version disables authoring;
  * Claude Code that cannot be verified is not offered at all.
  *
  * Every build tried so far honours the gate. That is not a reason to skip the check — it is

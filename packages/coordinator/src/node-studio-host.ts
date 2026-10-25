@@ -16,6 +16,7 @@ import { nodeSetupDeps } from "./setup/node-deps.js";
 import { allocateLoopbackPort, registerExitBackstop } from "./supervisor.js";
 import { OllamaEngineService } from "./local-ai/ollama.js";
 import { MingProcess } from "./local-ai/ming.js";
+import { createNodeComfyUiEngine } from "./comfyui/node-engine.js";
 import type { TransportAuth } from "./transport.js";
 import { FsWorldProvider } from "./world/provider.js";
 
@@ -43,6 +44,7 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
   let wiring: AssembledHarness | undefined;
   let codexImage: ReturnType<typeof lazyCodexImageRunner> | undefined;
   let ollama: OllamaEngineService | undefined, ming: MingProcess | undefined;
+  let comfy: ReturnType<typeof createNodeComfyUiEngine> | undefined;
   try {
     await provider.ensureAppRoot();
     const ledger = new ChildLedger(join(options.appRoot, "run", "children.json"));
@@ -50,13 +52,13 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
     const settings = await new AppSettingsFile(join(options.appRoot, "settings.json")).load();
     ollama = new OllamaEngineService({ appRoot: options.appRoot, port: await allocateLoopbackPort(), deps: { ledger } });
     ming = new MingProcess(ledger);
+    comfy = createNodeComfyUiEngine(options.appRoot, { ledger });
     await ollama.applySettings(settings.ollama);
     const chosen = effectiveHarnessEngine(settings.harness.engine, process.env["ARKE_HARNESS"]);
     if (options.adapter === undefined) {
       wiring = await assembleHarness({
         appRoot: options.appRoot, engine: chosen, deps: { ledger },
         ollamaEndpoint: () => ollama!.endpoint(),
-        preferV1: process.env["ARKE_OPENCODE_GENERATION"] === "v1",
         claude: { enabled: chosen === "claude", ...(settings.harness.claudePath ? { configuredPath: settings.harness.claudePath } : {}) },
         codex: { enabled: chosen === "codex", ...(settings.harness.codexPath ? { configuredPath: settings.harness.codexPath } : {}) },
         onTrace: harnessTrace(options.appRoot),
@@ -70,7 +72,8 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
         return path ? { configuredPath: path } : {};
       } });
     const clients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: calls, codexImage,
-      ollama: () => ollama!.baseUrl(), ollamaCleanup: () => ollama!.endpoint() });
+      ollama: () => ollama!.baseUrl(), ollamaCleanup: () => ollama!.endpoint(),
+      comfyui: { ...comfy.client, adapterGuard: (recipe, selections) => host.coordinator.guardAdapters(recipe, selections) } });
     const host = createStudioHost({
       ...createNodeMediaHost(options.media ?? defaultMediaPaths()),
       provider, appRoot: options.appRoot, appVersion: options.appVersion,
@@ -81,7 +84,9 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
       jobsSeedPath: join(options.appRoot, "queue", "jobs.jsonl"), ledgerSeedPath: join(options.appRoot, "ledger.jsonl"),
       secretRegistry: secrets, providerCalls: calls, validators: clients, dispatchClients: clients, manifest: SHIPPED_MANIFEST,
       voice: { sidecar: null, localPresets: [], cloudSources: cloudVoiceSources(clients) },
-      setup: { ...nodeSetupDeps(), ollama, externallyPresent: async id => id === "ollama-runtime" && ollama!.externallySelected() },
+      setup: { ...nodeSetupDeps(), ollama, externallyPresent: async id => id === "ollama-runtime" ? ollama!.externallySelected() : id === "comfyui-runtime" && comfy!.service.externallySelected() },
+      setupExtraEntries: comfy.weights,
+      comfyui: { service: comfy.service },
       ollama: { service: ollama, reconfigureHarness: wiring?.reconfigureOllama }, ming,
       authoring: { agentForPurpose, roster: ROSTER, skillFor },
       harnessLaunchEngine: chosen, relaunchHarness: wiring?.relaunchHarness,
@@ -94,7 +99,7 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
     }
     return host;
   } catch (error) {
-    await Promise.allSettled([provider.close(), wiring?.supervisor?.stop(), wiring?.adapter?.dispose?.(), codexImage?.dispose(), ollama?.dispose(), ming?.dispose()]);
+    await Promise.allSettled([provider.close(), wiring?.supervisor?.stop(), wiring?.adapter?.dispose?.(), codexImage?.dispose(), ollama?.dispose(), ming?.dispose(), comfy?.service.dispose()]);
     throw error;
   }
 }

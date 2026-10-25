@@ -11,8 +11,8 @@ import {
 import { assessMappedPermission, type SessionPermissionPolicy } from "../permission-policy.js";
 
 /**
- * Session configuration in OpenCode v2's shapes (issue 327 Â§7). The POLICY is the v1
- * writer's, unchanged: Studio owns the roster, the tool denials, and the MCP registration;
+ * Session configuration in OpenCode v2 shapes. Contracts owns confinement policy;
+ * Studio owns the roster, tool denials and MCP registration, and
  * credentials never appear here (SPEC-005 D5). Only the grammar is new â€” `agents` with
  * `system`, one ordered `permissions` array per agent, `mcp.servers`, `default_agent`.
  */

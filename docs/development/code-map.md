@@ -8,6 +8,9 @@ owns Python batch cancellation/confirmed exit, exposed through Coordinator's hos
 `generateMingBatch`. Desktop/dev/`node-studio-host.ts` compose these services; desktop
 `startup-runtime-owners.ts` retains them across initialization failure until transfer to
 Coordinator. `harness/runtime-change.ts` fences endpoint changes against cloud/local turns.
+Node hosts compose ComfyUI through `comfyui/node-engine.ts`; its scoped HTTP transport,
+digest cache and weight catalogue live beside the engine and are also reused by desktop.
+OpenCode has only the pinned v2 adapter; discovery refuses v1 and other unqualified releases.
 Contracts `ollama.ts`, wire status
 folds and client `screens/engine-panes.tsx` expose runtime ownership. Tests: coordinator
 `ollama-engine`, `ming-process`, `local-gpu`, `supervisor`, `v2-launch` and `setup/comfyui-setup`;
@@ -921,10 +924,10 @@ Regressions are in coordinator `retrieval.test.ts`,
 `turn-result.test.ts`, `run.test.ts` and `world/schema-version.test.ts`.
 
 Proposal cancellation (#1981): `harness/authoring.ts` retains the active-run guard through the
-writer's terminal event and interrupt acknowledgement. The v1 adapter scopes abort to the same
-directory and execution API as prompt_async, waits for pending prompt admission, and translates
-MessageAbortedError to cancellation. Requests are bounded; partial proposal files remain intact.
-Tests: coordinator `test/harness/authoring.test.ts`, adapter-opencode `test/adapter.test.ts`.
+writer's terminal event and interrupt acknowledgement. OpenCode uses only the pinned v2 adapter
+and its execution interruption protocol; the v1 adapter and fallback are removed. Requests are
+bounded; partial proposal files remain intact. Tests: coordinator `test/harness/authoring.test.ts`,
+adapter-opencode `test/v2-adapter.test.ts`.
 
 Ready EPUB editions (#2062) expose Preview EPUB from `StoryEditionFiles`, in both the
 world-independent Publications library and Publish. The shared `StoryBookPreview` reads only

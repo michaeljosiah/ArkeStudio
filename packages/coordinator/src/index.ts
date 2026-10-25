@@ -360,6 +360,9 @@ export {
 } from "./comfyui/engine.js";
 export { ProfiledComfyUiEngineService } from "./comfyui/profiled-engine.js";
 export { CUSTOM_NODE_IDENTITY_FILE, readCustomNodeRef } from "./comfyui/node-ref.js";
+export { ComfyUiDigestCache } from "./comfyui/digest-cache.js";
+export { createComfyUiFetch, comfyUiLoopbackAddresses } from "./comfyui/node-transport.js";
+export { comfyUiWeightCatalogue } from "./comfyui/setup.js";
 export { sanitizeComfyUiMedia, type SanitizeResult } from "./comfyui/sanitize.js";
 export { GrantStore, type RememberedGrant } from "./harness/grants.js";
 export { WorldQueryServer } from "./harness/world-query.js";

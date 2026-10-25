@@ -724,16 +724,8 @@ async function initialize(): Promise<{ port: number }> {
     console.log(`[arke] reaped ${swept.reaped.length} orphaned child process(es): ${named}`);
   }
 
-  // Harness assembly (SPEC-005 R-1, issue 327 §3–§4): both generations resolved, v2
-  // preferred, v1 the escape hatch (ARKE_OPENCODE_GENERATION=v1 until the Settings toggle
-  // lands). One seam builds the whole launch — discovery, password protocol, redirected
-  // profile, adapter, config writer — so dev and desktop cannot drift. Absent → authoring
-  // degrades with the reason stated (R-4). The trace file answers "what did the app hear,
-  // and when" whenever a chat sticks, without a debugger.
-  /*
-   * Read before the harness is assembled, because the stored choice decides which lane launches.
-   * The same file the coordinator writes through, so Settings and launch cannot disagree.
-   */
+  // Harness assembly (SPEC-005 R-1).
+  // Only the pinned OpenCode v2 runtime is supported.
   const hostSettings = new AppSettingsFile(join(appRoot, "settings.json"));
   const savedHostSettings = await hostSettings.load();
   const storedHarness = savedHostSettings.harness;
@@ -747,11 +739,6 @@ async function initialize(): Promise<{ port: number }> {
     ollamaEndpoint: () => ollamaEngine.endpoint(),
     engine: chosenHarness,
     deps: { ledger: childLedger },
-    preferV1: process.env["ARKE_OPENCODE_GENERATION"] === "v1",
-    v1: {
-      ...(process.env["ARKE_OPENCODE_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE_CMD"] } : {}),
-      ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode", "opencode.exe") } : {}),
-    },
     v2: {
       ...(process.env["ARKE_OPENCODE2_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE2_CMD"] } : {}),
       ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode2", "opencode2.exe") } : {}),

@@ -69,10 +69,8 @@ extraResources:
   # Runtime preparation is a hard package prerequisite. ${arch} is expanded independently for
   # each target, while the installed path stays stable for main.ts.
   #
-  # The v2 harness (issue 327 §9): pinned, staged by prepare-opencode2, REQUIRED by both
-  # gates. The old build-resources/opencode entry is gone — it was specced but never staged,
-  # so it shipped nothing in any release; v1 remains reachable via PATH or a configured path
-  # as the beta escape hatch, and retires with the beta (§9).
+  # The only supported OpenCode runtime is pinned v2, staged by prepare-opencode2 and
+  # required by both packaging gates. Older generations cannot be launched from PATH either.
   - from: build-resources/opencode2
     to: opencode2
     filter: ["**/*"]

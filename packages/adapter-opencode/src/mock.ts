@@ -16,7 +16,7 @@ import {
   type SessionConfigInput,
   type SessionFile,
 } from "@arke-studio/contracts";
-import { assessV1Permission, buildSessionConfig } from "./config.js";
+import { assessV2Permission, buildSessionConfigV2 } from "./v2/config.js";
 import { PreparedSessionPolicies, type SessionPermissionPolicy } from "./permission-policy.js";
 
 /**
@@ -46,7 +46,7 @@ export class MockHarnessAdapter implements HarnessAdapter {
    * mock that quietly wrote nothing would make every confinement assertion pass by absence.
    */
   sessionFiles(input: SessionConfigInput): ReadonlyArray<SessionFile> {
-    return [{ name: "opencode.json", contents: `${JSON.stringify(buildSessionConfig(input), null, 2)}
+    return [{ name: "opencode.json", contents: `${JSON.stringify(buildSessionConfigV2(input), null, 2)}
 ` }];
   }
 
@@ -125,7 +125,7 @@ export class MockHarnessAdapter implements HarnessAdapter {
   }
 
   assessPermission(request: PermissionRequest): PermissionAssessment {
-    return assessV1Permission(this.sessionPolicies.get(request.sessionId), request.actionClass);
+    return assessV2Permission(this.sessionPolicies.get(request.sessionId), request.actionClass);
   }
 
   /** Test hook: inject an event as if the harness produced it. */
@@ -143,7 +143,7 @@ export class MockHarnessAdapter implements HarnessAdapter {
   }
 
   streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent> {
-    // Eager registration — see OpenCodeAdapter.streamEvents for why.
+    // Eager registration — see OpenCodeV2Adapter.streamEvents for why.
     const sub: { queue: HarnessEvent[]; wake: (() => void) | null } = { queue: [], wake: null };
     this.subscribers.add(sub);
     const { subscribers } = this;

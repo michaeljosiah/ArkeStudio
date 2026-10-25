@@ -971,7 +971,7 @@ export interface CoordinatorOptions {
    * into app state so Settings can name it (issue 327 §9, SPEC-005 R-1).
    */
   harnessInfo?: {
-    generation: "v2" | "v1" | "claude" | "codex";
+    generation: "v2" | "claude" | "codex";
     source: "configured" | "path" | "bundled";
     version: string | null;
     beta: boolean;
@@ -5819,7 +5819,7 @@ export class Coordinator {
     // harnessInfo, but Settings must still attach its health failure to the engine we tried.
     const generation = this.opts.harnessInfo?.generation;
     this.launchEngine = generation === "claude" || generation === "codex" ? generation
-      : generation === "v1" || generation === "v2" ? "opencode"
+      : generation === "v2" ? "opencode"
       : this.opts.harnessLaunchEngine ?? this.opts.harnessEngineOverride ?? settings?.harness.engine ?? "opencode";
     // Read once here so the first session of the run already carries the user's choices —
     // not the second, after something happened to touch settings.

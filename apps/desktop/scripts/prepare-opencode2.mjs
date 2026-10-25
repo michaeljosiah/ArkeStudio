@@ -62,7 +62,7 @@ const untar = spawnSync(tarPath(), ["-xzf", tarball, "-C", extracted], { stdio: 
 if (untar.status !== 0) throw new Error(`tar failed with exit code ${untar.status}`);
 
 // Stable v2 moved to @opencode/cli and names the executable opencode.exe. Keep Studio's
-// staged name opencode2.exe so discovery and installed paths still distinguish the v1 lane.
+// staged name opencode2.exe for a stable packaged runtime path.
 const binary = join(extracted, "package", "bin", "opencode.exe");
 if (!existsSync(binary)) throw new Error("the platform package did not contain bin/opencode.exe");
 assertPeArchitecture(binary, arch);

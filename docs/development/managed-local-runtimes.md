@@ -100,3 +100,12 @@ The first-run gate also uses contracts `test/local-ai-setup.test.ts`, coordinato
 `test/setup/local-ai-readiness.test.ts`, and client `test/launch-lifecycle.test.tsx` /
 `test/downloads.test.tsx`. They cover missing detection, failed/paused/skipped installation,
 one healthy engine, recovery, health loss, explicit existing services and optional downloads.
+Desktop, browser development and standalone Node hosts own both engine services. Node hosts
+use coordinator `comfyui/node-engine.ts`, with the shared digest cache, scoped loopback transport
+and weight catalogue; desktop imports those utilities through its existing platform wrappers.
+An explicitly selected external URL satisfies installation detection and must pass live health.
+
+OpenCode support is v2 only, pinned to 2.0.26. Discovery can use `opencode2` or `opencode`, but
+rejects every other version, including v1. There is no v1 adapter, generation preference,
+`ARKE_OPENCODE_GENERATION` escape hatch or `ARKE_OPENCODE_CMD` launch path. The desktop binary
+override is `ARKE_OPENCODE2_CMD`; Claude Code and Codex retain their separate explicit choices.

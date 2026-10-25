@@ -4,7 +4,6 @@ import type { HarnessEngine } from "@arke-studio/contracts";
 import {
   credentialEnvPatch,
   discoverPreferredHarness,
-  OpenCodeAdapter,
   OpenCodeV2Adapter,
   OPENCODE2_PINNED_VERSION,
   v2BasicAuth,
@@ -49,7 +48,7 @@ const claudeVerdicts = new ConfinementCache();
  * route with it (Basic, username `opencode`); it reads the user's own credential store
  * unless the profile is redirected, and stored connections OUTRANK spawn-env keys — a stale
  * personal login then fails turns with a bare `provider.auth`; and its `serve` arguments are
- * otherwise identical to v1's. So the launch is: redirected profile, password parsed from
+ * bind a private loopback port. The launch uses a redirected profile, password parsed from
  * stdout and held in memory, health probed with Basic auth.
  *
  * The password never appears in a log line, a trace, a status reason, or an error string —
@@ -141,7 +140,7 @@ async function retireGeneratedOllamaModels(profileDir: string): Promise<void> {
 
 /** What Settings names about the wired harness (issue 327 §9, SPEC-005 R-1). */
 export interface AssembledHarnessInfo {
-  generation: "v2" | "v1" | "claude" | "codex";
+  generation: "v2" | "claude" | "codex";
   source: "configured" | "path" | "bundled";
   version: string | null;
   beta: boolean;
@@ -155,7 +154,6 @@ export function harnessInfoFrom(harness: DiscoveredHarness): AssembledHarnessInf
     source: harness.discovery.source,
     version: harness.discovery.version,
     beta: false,
-    ...(harness.rejectedV2 ? { rejectedV2Version: harness.rejectedV2.version } : {}),
   };
 }
 
@@ -167,8 +165,6 @@ export interface AssembleHarnessOptions {
   engine?: HarnessEngine;
   /** Ledger for orphan sweeps; absent in bare test hosts. */
   deps?: SupervisorDeps;
-  preferV1?: boolean;
-  v1?: DiscoveryOptions;
   v2?: DiscoveryOptions;
   /**
    * The bring-your-own harness, off unless asked for, and never a fallback: OpenCode is the
@@ -198,7 +194,7 @@ export interface AssembledHarness {
   harness: DiscoveredHarness | null;
   isV2: boolean;
   supervisor: ChildSupervisor | null;
-  adapter: OpenCodeAdapter | OpenCodeV2Adapter | ClaudeAdapter | CodexAdapter | null;
+  adapter: OpenCodeV2Adapter | ClaudeAdapter | CodexAdapter | null;
   harnessInfo?: AssembledHarnessInfo;
   unavailableReason?: string;
   relaunchHarness: (credentials: Record<string, string | undefined>) => Promise<void>;
@@ -210,9 +206,8 @@ export interface AssembledHarness {
 }
 
 /**
- * The whole harness assembly, once (issue 327 §3–§4): discovery with the v2-first
- * preference, the launch protocol (password holder, redirected profile, authenticated
- * probe), the generation-matched adapter and session-config writer, the harnessInfo Settings
+ * The whole harness assembly, once (issue 327 §3–§4): discovery of the pinned v2 release, the launch protocol (password holder, redirected profile, authenticated
+ * probe), the v2 adapter and session-config writer, the harnessInfo Settings
  * reads, and the credential-delivery closure. Both hosts call this; everything host-specific
  * — ledger, backstop, logging prefix, coordinator wiring — stays with the host. Extracted
  * after review found the two copies already drifting in their first week.
@@ -264,11 +259,7 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
       logLines: [`Codex ${found.version}: ${found.source}, private app-server with confined Arke tools`],
     };
   }
-  const discovery = await discoverPreferredHarness({
-    ...(opts.preferV1 !== undefined ? { preferV1: opts.preferV1 } : {}),
-    ...(opts.v1 ? { v1: opts.v1 } : {}),
-    ...(opts.v2 ? { v2: opts.v2 } : {}),
-  });
+  const discovery = await discoverPreferredHarness(opts.v2 ? { v2: opts.v2 } : {});
   const harness = discovery.found;
   if (!harness && discovery.rejectedV2) {
     const rejected = discovery.rejectedV2;
@@ -313,19 +304,17 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
       args: ["serve", "--port", "{port}", "--hostname", "127.0.0.1"],
       // Real keys arrive via relaunchHarness before the first spawn (SPEC-005 D5); v2 also
       // gets the redirected profile so no personal OpenCode login can shadow them (§2).
-      ...(isV2 ? {
-        // An inherited password suppresses the stdout handshake. This is Studio's private
-        // server, so personal server credentials must not determine its authentication.
-        inheritEnv: false,
-        env: {
-          ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined &&
+      // An inherited password suppresses the stdout handshake. This is Studio's private
+      // server, so personal server credentials must not determine its authentication.
+      inheritEnv: false,
+      env: {
+        ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined &&
             !["OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME"].includes(entry[0].toUpperCase()))),
-          ...v2ProfileEnv(profileDir),
-        },
-      } : {}),
-      healthPath: isV2 ? "/api/info" : "/api/health",
+        ...v2ProfileEnv(profileDir),
+      },
+      healthPath: "/api/info",
       readyTimeoutMs: 30_000,
-      ...(isV2 ? { healthHeaders: password.healthHeaders, onStdoutLine: password.onStdoutLine } : {}),
+      healthHeaders: password.healthHeaders, onStdoutLine: password.onStdoutLine,
     },
     opts.deps ?? {},
   );
@@ -333,13 +322,11 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
   const baseUrl = () => `http://127.0.0.1:${supervisor.port ?? 0}`;
   const runtimeChanges = new HarnessRuntimeChanges();
   const rawAdapter = harness
-    ? isV2
-      ? new OpenCodeV2Adapter({
-          baseUrl,
-          password: password.current,
-          ...(opts.onTrace ? { onTrace: opts.onTrace } : {}),
-        })
-      : new OpenCodeAdapter({ baseUrl, ...(opts.onTrace ? { onTrace: opts.onTrace } : {}) })
+    ? new OpenCodeV2Adapter({
+        baseUrl,
+        password: password.current,
+        ...(opts.onTrace ? { onTrace: opts.onTrace } : {}),
+      })
     : null;
   const adapter = rawAdapter === null ? null : runtimeChanges.wrap(rawAdapter);
 
@@ -348,18 +335,6 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     logLines.push(
       `OpenCode ${harness.generation}: ${harness.discovery.source} (${harness.discovery.version ?? "unknown version"})`,
     );
-    if (harness.rejectedV2) {
-      logLines.push(
-        `OpenCode v2 does not match the supported release: ${harness.rejectedV2.version ?? "unknown version"} — running v1`,
-      );
-    }
-    // The legacy knob deserves honest treatment now that a generation preference outranks it
-    // (SPEC-005 R-4: degrade with the reason stated, never silently).
-    if (isV2 && opts.v1?.configuredPath) {
-      logLines.push(
-        "configured OpenCode path passed over — v2 preferred; set ARKE_OPENCODE_GENERATION=v1 to use it",
-      );
-    }
   } else {
     logLines.push("OpenCode: not found — authoring disabled");
   }

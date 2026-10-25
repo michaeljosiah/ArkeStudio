@@ -104,13 +104,6 @@ export interface DiscoveryOptions {
   runCommand?: CommandRunner;
 }
 
-/** Resolve the OpenCode v1 to use, or null with the honest reason. */
-export async function discoverOpenCode(opts: DiscoveryOptions = {}): Promise<DiscoveredOpenCode | null> {
-  // Stable v2 now also installs as `opencode`. Never send that server v1 requests.
-  const { found } = await discoverGated(["opencode"], opts, version => version?.startsWith("1.") === true);
-  return found;
-}
-
 /** Only the release qualified with Studio's adapter and bundle is supported. */
 export const OPENCODE2_PINNED_VERSION = "2.0.26";
 
@@ -138,8 +131,7 @@ async function discoverGated(
   let rejected: DiscoveredOpenCode | null = null;
   const consider = (candidate: DiscoveredOpenCode): DiscoveredOpenCode | null => {
     if (accept(candidate.version)) return candidate;
-    // The shared `opencode` command may be v1; that is absence of v2, not a rejected v2 install.
-    if (!candidate.version?.startsWith("1.")) rejected ??= candidate;
+    rejected ??= candidate;
     return null;
   };
   if (opts.configuredPath && existsSync(opts.configuredPath)) {
@@ -176,46 +168,20 @@ export async function discoverOpenCode2(
 }
 
 export interface DiscoveredHarness {
-  generation: "v2" | "v1";
+  generation: "v2";
   discovery: DiscoveredOpenCode;
-  /**
-   * A v2 binary that answered but did not match the qualified release, when that is why v2 was not chosen.
-   * Settings states it plainly ("found 2.0.25, need 2.0.26") instead of claiming
-   * nothing is installed (SPEC-005 R-1).
-   */
-  rejectedV2?: DiscoveredOpenCode;
 }
 
 export interface PreferredHarnessDiscovery {
   found: DiscoveredHarness | null;
-  /** Retained even when there is no launchable fallback, so absence and incompatibility stay distinct. */
+  /** Retain an incompatible candidate so Settings can explain the required release. */
   rejectedV2: DiscoveredOpenCode | null;
 }
 
-/**
- * Both binaries coexist by design; v2 wins unless Settings says otherwise (issue 327 §3).
- * The choice is a launch-time decision — it never changes under a running session.
- */
+/** Discover only the qualified OpenCode v2 runtime. No older generation is launched. */
 export async function discoverPreferredHarness(opts: {
-  preferV1?: boolean;
-  v1?: DiscoveryOptions;
   v2?: DiscoveryOptions;
 } = {}): Promise<PreferredHarnessDiscovery> {
-  const gate = meetsV2Gate;
-  // Both lanes probe concurrently: each is a PATH walk plus a --version spawn (~300ms
-  // typical, seconds on a loaded machine), the probes are independent, and this runs on the
-  // visible boot path — serial probing charged every v1-only machine a failed v2 probe
-  // before its own discovery even began.
-  const [v2, v1] = await Promise.all([
-    discoverGated(["opencode2", "opencode"], opts.v2 ?? {}, gate),
-    discoverOpenCode(opts.v1 ?? {}),
-  ]);
-  const withReason = (result: DiscoveredHarness): DiscoveredHarness => ({
-    ...result,
-    ...(v2.rejected ? { rejectedV2: v2.rejected } : {}),
-  });
-  const found = !opts.preferV1 && v2.found ? { generation: "v2" as const, discovery: v2.found }
-    : v1 ? withReason({ generation: "v1", discovery: v1 })
-    : v2.found ? { generation: "v2" as const, discovery: v2.found } : null;
-  return { found, rejectedV2: v2.rejected };
+  const v2 = await discoverGated(["opencode2", "opencode"], opts.v2 ?? {}, meetsV2Gate);
+  return { found: v2.found ? { generation: "v2", discovery: v2.found } : null, rejectedV2: v2.rejected };
 }
