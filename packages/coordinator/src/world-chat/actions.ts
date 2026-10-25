@@ -267,7 +267,7 @@ import type { MediaProbe } from "../media/probe.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { readBible, applyTurnBibleEdits } from "../world/bible.js";
 import { readChanges } from "../world/change-writer.js";
-import { CommitStaleError, type CommitResult } from "../world/commit.js";
+import { CommitStaleError, GUIDE_THEMES_SCHEMA_VERSION, type CommitResult } from "../world/commit.js";
 import {
   WorldStateStaleError,
   type WorldStatePrecondition,
@@ -1782,6 +1782,9 @@ const preparationPath = (store: WorldStore, authority: "bible" | "scene" | "worl
 async function writePreparation(store: WorldStore, authority: "bible" | "scene" | "world", actionId: string, payload: WorldChatPreparedAction): Promise<void> {
   if (payload.kind === "world-chat-production-timeline-operation" || payload.kind === "world-chat-production-timeline-transcribe") await store.ensureSchemaVersion(PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION, "production-chat-timeline");
   if (["world-chat-production-audio-generation", "world-chat-production-performance-command", "world-chat-production-audio-cue"].includes(payload.kind)) await store.ensureSchemaVersion(PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, "production-chat-audio");
+  // A music creation plan or an album card (SPEC-060 R-19): a build before them opens the world
+  // and cannot read the preparation, so the pending card would be lost (codex on PR 2190).
+  if (payload.kind === "world-chat-production-music" || (payload.kind === "world-chat-production-create" && payload.plan.music !== undefined)) await store.ensureSchemaVersion(GUIDE_THEMES_SCHEMA_VERSION, "world-chat-music");
   if ((payload.kind === "world-chat-production-scene-command" && payload.scenePlan) || ("dependencyPreview" in payload && payload.dependencyPreview)) {
     await store.ensureSchemaVersion(CHAT_SEQUENCING_SCHEMA_VERSION, "world-chat-sequencing");
     await store.ownedWrite(() => atomicWriteFile(preparationPath(store, authority, actionId), `${JSON.stringify(payload, null, 2)}\n`));

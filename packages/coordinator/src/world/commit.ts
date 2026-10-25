@@ -470,6 +470,8 @@ export const MUSIC_SCHEMA_VERSION = 110;
  * Music in the Guide (design turn 238f, 238g, SPEC-059 R-35, R-36): `theme` on a Guide entry and a
  * `song` teaser, both on the strict Guide record. A build before it reads such a record as
  * unreadable and the Guide then refuses every write, so the world is raised before the first is kept.
+ * World Chat's music cards (SPEC-060 R-19) share it: a creation plan carrying an album's start, and
+ * an album card, are preparations a build before it cannot read.
  */
 export const GUIDE_THEMES_SCHEMA_VERSION = 111;
 

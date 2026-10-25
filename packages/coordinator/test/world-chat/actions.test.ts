@@ -58,6 +58,7 @@ import { readKeyArtBrief } from "../../src/references/key-art-references.js";
 import { applyTurnBibleEdits, readBible } from "../../src/world/bible.js";
 import { WorldStore } from "../../src/world/store.js";
 import { readWorldMeta } from "../../src/world/scan.js";
+import { GUIDE_THEMES_SCHEMA_VERSION } from "../../src/world/commit.js";
 import {
   prepareWorldChatActions,
   worldChatActionAdapters,
@@ -1559,7 +1560,10 @@ describe("World Chat authority adapters", () => {
     const payload = prepared[0]!.payload;
     if (payload.kind !== "world-chat-production-create") assert.fail("expected a production creation");
     await appendTurn(w.log, oneTurn, prepared);
+    assert.ok((await readWorldMeta(w.store.dir)).schemaVersion < GUIDE_THEMES_SCHEMA_VERSION);
     await bindAll(w.lifecycle, prepared);
+    // A build before music cards would open the world and lose the pending card (codex on PR 2190).
+    assert.ok((await readWorldMeta(w.store.dir)).schemaVersion >= GUIDE_THEMES_SCHEMA_VERSION, "the world is raised before the plan is kept");
     const card = (await loaded(w.log)).actions[0]!;
     if (card.shown.body.family !== "command") assert.fail("expected a command card");
     assert.match(card.shown.body.commands.find((command) => command.label === "Album")?.detail ?? "", /^Soundtrack · for .+ · no tracks yet$/);
@@ -1590,7 +1594,9 @@ describe("World Chat authority adapters", () => {
       actions: [{ kind: "production-music", productionId: album, command: { kind: "add-track", artifactId: BELLS }, checkReceiptIds: [alone.id] }],
     })), /artifacts read/);
     const read = metadata();
+    assert.ok((await readWorldMeta(w.store.dir)).schemaVersion < GUIDE_THEMES_SCHEMA_VERSION);
     const add = await card({ kind: "production-music", productionId: album, command: { kind: "add-track", artifactId: BELLS }, checkReceiptIds: [] }, [read, currentReceipt(w.store, "artifacts")]);
+    assert.ok((await readWorldMeta(w.store.dir)).schemaVersion >= GUIDE_THEMES_SCHEMA_VERSION, "the world is raised before an album card is kept");
     assert.equal(add.shown.title, "Add a track to Songs of the Drowned Quarter");
     assert.equal(add.shown.permissionReason, "authored-change");
     assert.equal((await decide(w.lifecycle, w.log, add)).status, "completed");
@@ -1609,6 +1615,17 @@ describe("World Chat authority adapters", () => {
     assert.deepEqual(lyrics.shown.body.commands.map((command) => command.label), ["Title", "Lyrics"]);
     assert.equal((await decide(w.lifecycle, w.log, lyrics)).status, "completed");
     assert.deepEqual([record().tracks[0]!.title, record().tracks[0]!.lyrics], ["Saltmouth Bells", "[verse]\nRing them low"]);
+
+    // Lyrics longer than a card's line are shown whole, over as many lines as they need (codex on PR 2190).
+    const long = Array.from({ length: 350 }, (_, index) => `[verse]\nThe bell rope ${index} hauls the harbour under`).join("\n");
+    assert.ok(long.length > 12_000 && long.length <= 20_000);
+    const whole = await card({ kind: "production-music", productionId: album, command: { kind: "update-track", trackId: "harbour-bells", lyrics: long }, checkReceiptIds: [] }, [metadata()]);
+    if (whole.shown.body.family !== "command") assert.fail("expected a command card");
+    const shown = whole.shown.body.commands.filter((command) => command.label.startsWith("Lyrics"));
+    assert.ok(shown.length > 1 && shown.every((command) => (command.detail ?? "").length <= 4_000));
+    assert.equal(shown.map((command) => command.detail).join(""), long, "what is approved is what is written");
+    assert.equal((await decide(w.lifecycle, w.log, whole)).status, "completed");
+    assert.equal(record().tracks[0]!.lyrics, long);
 
     // An order that changes nothing is refused as its card is prepared.
     await assert.rejects(card({ kind: "production-music", productionId: album, command: { kind: "reorder-tracks", order: ["harbour-bells"] }, checkReceiptIds: [] }, [metadata()]), /could not prepare this action/);

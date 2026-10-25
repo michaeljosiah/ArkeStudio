@@ -142,7 +142,7 @@ export function planProductionCreation(
       production,
       initialSeason: null,
       series: { operation: "none" },
-      ...(shape.isMusic ? { music: MusicRecordSchema.parse({ ...EMPTY_MUSIC_RECORD, ...(soundtrackFor !== undefined ? { for: soundtrackFor } : {}) }) } : {}),
+      ...(shape.isMusic ? { music: soundtrackFor !== undefined ? { for: soundtrackFor } : {} } : {}),
     };
   }
   const initialSeason = SeasonSchema.parse({ version: 1, ...(input.defaults ? { defaults: input.defaults } : {}) });
@@ -244,7 +244,7 @@ export async function createProductionFromPlan(
     files.push({
       path: `productions/${plan.production.id}/${MUSIC_RECORD_FILE}`,
       action: "create",
-      content: `${JSON.stringify(MusicRecordSchema.parse(plan.music), null, 2)}\n`,
+      content: `${JSON.stringify(MusicRecordSchema.parse({ ...EMPTY_MUSIC_RECORD, ...plan.music }), null, 2)}\n`,
       baseHash: null,
     });
   }

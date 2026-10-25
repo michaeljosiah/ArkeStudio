@@ -22,6 +22,24 @@ export interface MusicAlbumCard {
 const line = (label: string, detail?: string) => ({ label: label.slice(0, 200), ...(detail !== undefined ? { detail: detail.slice(0, 4_000) } : {}) });
 const tracksOf = (count: number) => `${count} track${count === 1 ? "" : "s"}`;
 
+/**
+ * Lyrics whole, in as many lines as a card's 4,000-character line needs, each cut after a line
+ * break where it can be: what is approved is every word that is written (codex on PR 2190).
+ * Joined, the pieces are the lyrics exactly.
+ */
+export function lyricsPieces(lyrics: string, size = 4_000): string[] {
+  const pieces: string[] = [];
+  let rest = lyrics;
+  while (rest.length > size) {
+    const breakAt = rest.lastIndexOf("\n", size - 1);
+    const cut = breakAt > 0 ? breakAt + 1 : size;
+    pieces.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
+  }
+  pieces.push(rest);
+  return pieces;
+}
+
 /** What the card shows, or the refusal it is prepared with: the album as it is now decides. */
 export function musicAlbumCard(bundle: WorldBundle, prepared: Prepared): MusicAlbumCard {
   const { productionId, command } = prepared.action;
@@ -56,7 +74,11 @@ export function musicAlbumCard(bundle: WorldBundle, prepared: Prepared): MusicAl
       if (!retitled && !relyriced) throw new Error("The track already has that title and those lyrics.");
       return card(`Change ${track.title}`, `Updates the track on ${album}; its take is unchanged.`, [
         ...(retitled ? [line("Title", `${track.title} → ${title}`)] : []),
-        ...(relyriced ? [line("Lyrics", lyrics === null ? "Cleared" : lyrics)] : []),
+        ...(relyriced
+          ? lyrics === null
+            ? [line("Lyrics", "Cleared")]
+            : lyricsPieces(lyrics).map((piece, index, all) => line(all.length === 1 ? "Lyrics" : `Lyrics ${index + 1} of ${all.length}`, piece))
+          : []),
       ], `The track reads as shown on ${album}.`);
     }
     case "remove-track": {

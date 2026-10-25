@@ -4,7 +4,6 @@ import { EpisodeSchema, ProductionSchema, SeasonSchema, SeriesSchema } from "./w
 import { SceneRecordSchema, validateSceneFlow } from "./scene-flow.js";
 import { ProductionNarrativeSchema } from "./production-narrative.js";
 import { AudioDramaRecordSchema } from "./audio-drama.js";
-import { MusicRecordSchema } from "./music.js";
 
 /** Delivery defaults shared by direct creation and conversational setup. Story endings remain authored. */
 export const MICRODRAMA_DEFAULTS = {
@@ -39,8 +38,13 @@ export const ProductionCreationPlanSchema = z.object({
     /** An audio drama's plan and source, written as `audio-drama.json` (SPEC-057 R-7). */
     audioDrama: AudioDramaRecordSchema.optional(),
   }).strict().optional(),
-  /** A music production's record, written as `music.json` (SPEC-060 R-4): a soundtrack's `for` is fixed here. */
-  music: MusicRecordSchema.optional(),
+  /**
+   * A music production's start (SPEC-060 R-3, R-4): an empty album, written as `music.json`, and a
+   * soundtrack's `for` fixed here. Only what a creation decides, never the album's whole record:
+   * carried into every schema that holds a plan — production setup's, inside WorldChatLoadedSchema —
+   * the record made it too long for the engine's declaration bundle (TS7056) and stopped the build.
+   */
+  music: z.object({ for: SlugSchema.optional() }).strict().optional(),
 }).strict();
 export type ProductionCreationPlan = z.infer<typeof ProductionCreationPlanSchema>;
 
