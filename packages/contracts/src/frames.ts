@@ -40,6 +40,7 @@ import { z } from "zod";
 import { CharacterAliasesInputSchema } from "./world.js";
 import { RoutingCommandSchema } from "./world-chat-actions.js";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
+import { MusicSequenceSchema, MusicTrackEditSchema } from "./music.js";
 import { ClientStateSchema } from "./client-state.js";
 import { AdapterActionSchema } from "./adapters.js";
 import { MAX_CLIP_LANE } from "./cut.js";
@@ -4115,30 +4116,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * The track editor's Save (238j, R-11): its trim, fades and sections, applied at render and
    * never to the take. A null trim plays the whole source.
    */
-  z.object({
-    kind: z.literal("music-track-edit"),
-    worldId: UlidSchema,
-    productionId: SlugSchema,
-    trackId: SlugSchema,
-    trim: z.object({ startMs: z.number().int().min(0), endMs: z.number().int().min(1) }).strict().nullable(),
-    fadeInMs: z.number().int().min(0).max(60_000),
-    fadeOutMs: z.number().int().min(0).max(60_000),
-    sections: z.array(z.object({ label: z.string().trim().min(1).max(100), atMs: z.number().int().min(0) }).strict()).max(200),
-  }).strict(),
+  z.object({ kind: z.literal("music-track-edit"), worldId: UlidSchema, productionId: SlugSchema, trackId: SlugSchema, ...MusicTrackEditSchema.shape }).strict(),
   /**
    * The album's sequence (238k, R-13): each track's join to the next — a gap, a crossfade, or
    * back to back — and its loudness target.
    */
-  z.object({
-    kind: z.literal("music-sequence-set"),
-    worldId: UlidSchema,
-    productionId: SlugSchema,
-    loudness: z.number().min(-30).max(-6),
-    joins: z.array(z.object({
-      trackId: SlugSchema,
-      next: z.union([z.object({ gapMs: z.number().int().min(0).max(30_000) }).strict(), z.object({ crossfadeMs: z.number().int().min(0).max(15_000) }).strict()]).nullable(),
-    }).strict()).max(64),
-  }).strict(),
+  z.object({ kind: z.literal("music-sequence-set"), worldId: UlidSchema, productionId: SlugSchema, ...MusicSequenceSchema.shape }).strict(),
   /** The takes of the album's Bench session by track (238i), answered as `music.takes`. */
   z.object({ kind: z.literal("read-music-takes"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   /** A waveform of a world audio file (238j, 238k), answered as `music.waveform`. */

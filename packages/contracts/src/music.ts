@@ -51,6 +51,28 @@ export const MusicJoinSchema = z.union([
 ]);
 export type MusicJoin = z.infer<typeof MusicJoinSchema>;
 
+/** A trim on the source's own clock (238j): what plays of it. */
+export const MusicTrimSchema = z.object({ startMs: z.number().int().min(0), endMs: z.number().int().min(1) }).strict();
+
+/**
+ * The track editor's Save (238j, R-11), as the page and World Chat send it: its trim, fades and
+ * sections, applied at render and never to the take. A null trim plays the whole source.
+ */
+export const MusicTrackEditSchema = z.object({
+  trim: MusicTrimSchema.nullable(),
+  fadeInMs: z.number().int().min(0).max(60_000),
+  fadeOutMs: z.number().int().min(0).max(60_000),
+  sections: z.array(MusicSectionSchema).max(200),
+}).strict();
+export type MusicTrackEdit = z.infer<typeof MusicTrackEditSchema>;
+
+/** The album's sequence (238k, R-13): each track's join to the next, or none, and its loudness target. */
+export const MusicSequenceSchema = z.object({
+  loudness: z.number().min(-30).max(-6),
+  joins: z.array(z.object({ trackId: SlugSchema, next: MusicJoinSchema.nullable() }).strict()).max(64),
+}).strict();
+export type MusicSequence = z.infer<typeof MusicSequenceSchema>;
+
 export const MusicRecordTrackSchema = z.object({
   /** The track's id in the package's music document: a slug, unique on the album. */
   id: SlugSchema,
@@ -61,7 +83,7 @@ export const MusicRecordTrackSchema = z.object({
   /** Plain text, as the lyricist drafts it or the author types it (call 3). */
   lyrics: z.string().max(20_000).optional(),
   sections: z.array(MusicSectionSchema).max(200).optional(),
-  trim: z.object({ startMs: z.number().int().min(0), endMs: z.number().int().min(1) }).strict().optional(),
+  trim: MusicTrimSchema.optional(),
   fadeInMs: z.number().int().min(0).max(60_000).optional(),
   fadeOutMs: z.number().int().min(0).max(60_000).optional(),
   next: MusicJoinSchema.optional(),

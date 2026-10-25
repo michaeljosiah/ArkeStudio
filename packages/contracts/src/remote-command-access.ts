@@ -198,6 +198,7 @@ export const REMOTE_PREPARED_ACTION_ACCESS = {
   "world-chat-voice-clip-review": "studio", "world-chat-world-archive": "studio",
   "world-chat-world-export": "studio", "world-chat-production-create": "studio",
   "world-chat-production-metadata": "studio", "world-chat-production-model": "studio",
+  "world-chat-music-track-choose": "studio", "world-chat-music-track-edit": "studio", "world-chat-music-sequence-set": "studio",
   "world-chat-production-series": "studio", "world-chat-production-overview": "studio",
   "world-chat-production-prose-style": "studio", "world-chat-production-episode-script": "studio", "world-chat-production-season": "studio",
   "world-chat-production-episode": "studio", "world-chat-production-chapter": "studio",
