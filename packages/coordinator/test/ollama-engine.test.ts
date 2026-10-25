@@ -10,6 +10,44 @@ import { tempDir } from "./tmp.js";
 const signal = () => new AbortController().signal;
 const managed = { engineUrl: null, modelsDir: null };
 
+it("an older health check cannot overwrite a newer failure for the same selected service", async () => {
+  let mode: "ready" | "held" | "failed" = "ready";
+  let answer!: (response: Response) => void;
+  const service = new OllamaEngineService({ appRoot: await tempDir("ollama-health-order-"), port: 24110,
+    fetch: async () => mode === "held" ? new Promise<Response>(resolve => { answer = resolve; })
+      : mode === "failed" ? Response.json({}, { status: 503 }) : Response.json({ version: "existing" }),
+  });
+  try {
+    await service.applySettings({ ...managed, engineUrl: "http://127.0.0.1:11434" });
+    mode = "held";
+    const previous = service.refresh();
+    mode = "failed";
+    await service.refresh();
+    assert.equal(service.status().state, "failed");
+    answer(Response.json({ version: "existing" }));
+    await previous;
+    assert.equal(service.status().state, "failed");
+  } finally { await service.dispose(); }
+});
+
+it("rechecks an explicit service during setup and stops polling on disposal", async () => {
+  let healthy = true, calls = 0;
+  const service = new OllamaEngineService({ appRoot: await tempDir("ollama-health-"), port: 24109, externalHealthIntervalMs: 30,
+    fetch: async () => { calls++; if (!healthy) throw new Error("offline"); return Response.json({ version: "existing" }); },
+  });
+  try {
+    await service.applySettings({ ...managed, engineUrl: "http://127.0.0.1:11434" });
+    assert.equal(service.status().state, "ready");
+    healthy = false;
+    const deadline = Date.now() + 5000;
+    while (service.status().state !== "failed" && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(service.status().state, "failed");
+  } finally { await service.dispose(); }
+  const stopped = calls;
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(calls, stopped);
+});
+
 class Worker extends EventEmitter {
   status = "starting";
   reason: string | undefined;

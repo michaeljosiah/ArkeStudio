@@ -624,6 +624,7 @@ import { FoundingBuildService } from "./world/founding-build.js";
 import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
 import { NoArkeCloud, type AccountService } from "./account.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
+import { localAiSetupReadiness, type SetupStatus } from "@arke-studio/contracts";
 import {
   SETUP_CATALOGUE,
   VOXA_SETUP_COMPONENT_IDS,
@@ -4262,7 +4263,7 @@ export class Coordinator {
       changed: (adapters) => {
         this.emit({ type: "adapters.changed", at: new Date().toISOString(), adapters });
         if (this.setup) {
-          const setup = this.visibleAdapterSetup(this.setup.status());
+          const setup = this.projectSetup(this.setup.status());
           this.readModel.setSetup(setup);
           this.emit({ type: "setup.status", at: new Date().toISOString(), setup });
         }
@@ -4273,7 +4274,7 @@ export class Coordinator {
         ? new LocalSetupService(
             opts.setup,
             (event) => {
-              if (event.type === "setup.status") event = { ...event, setup: this.visibleAdapterSetup(event.setup) };
+              if (event.type === "setup.status") event = { ...event, setup: this.projectSetup(event.setup) };
               // The snapshot carries it too: a window that opens mid-download still sees it.
               if (event.type === "setup.status") {
                 const previous = this.readModel.getState().app.setup;
@@ -4309,6 +4310,8 @@ export class Coordinator {
             },
           )
         : null;
+    // Seed before transport opens: an early snapshot must not bypass the gate during detect().
+    if (this.setup) this.readModel.setSetup(this.projectSetup(this.setup.status()));
     this.askService = opts.authoring
       ? new AskService(opts.adapter, {
           sessionInput: this.sessionInput,
@@ -4353,6 +4356,14 @@ export class Coordinator {
     this.comfyUiSetupWork = work.catch(() => {});
     this.trackBackground(this.comfyUiSetupWork);
     return work;
+  }
+
+  private publishSetupReadiness(): void {
+    if (!this.setup || this.stopping) return;
+    const setup = this.projectSetup(this.setup.status());
+    if (JSON.stringify(setup.localAi) === JSON.stringify(this.readModel.getState().app.setup?.localAi)) return;
+    this.readModel.setSetup(setup);
+    this.emit({ type: "setup.status", at: this.nowIso(), setup });
   }
 
   getState(): ClientState {
@@ -4789,7 +4800,10 @@ export class Coordinator {
     if (this.opts.ollama && this.appSettings) {
       const settings = await this.appSettings.load();
       await this.opts.ollama.service.applySettings(settings.ollama);
-      const publish = () => { if (!this.stopping) this.emit({ at: this.nowIso(), type: "ollama.status", ollama: this.opts.ollama!.service.status() }); };
+      const publish = () => { if (!this.stopping) {
+        this.emit({ at: this.nowIso(), type: "ollama.status", ollama: this.opts.ollama!.service.status() });
+        this.publishSetupReadiness();
+      } };
       this.lifecycleDisposers.add(this.opts.ollama.service.subscribe(publish));
       publish();
     }
@@ -4894,6 +4908,7 @@ export class Coordinator {
     // starting → healthy → failed. Both in the background: the app never waits on an engine.
     if (this.opts.comfyui) {
       const unsubscribe = this.opts.comfyui.service.subscribe(() => {
+        this.publishSetupReadiness();
         this.trackBackground(
           this.retireAndReleaseComfyUi()
             .then(() => this.refreshComfyUi())
@@ -6594,9 +6609,11 @@ export class Coordinator {
     return work;
   }
 
-  private visibleAdapterSetup(setup: import("@arke-studio/contracts").SetupStatus): import("@arke-studio/contracts").SetupStatus {
-    return this.readModel.getState().app.adapters?.adultContent.enabled ? setup :
-      { ...setup, components: setup.components.filter(row => !row.id.startsWith("adapter-")) };
+  private projectSetup(setup: SetupStatus): SetupStatus {
+    const components = this.readModel.getState().app.adapters?.adultContent.enabled ? setup.components
+      : setup.components.filter(row => !row.id.startsWith("adapter-"));
+    return { ...setup, components, localAi: localAiSetupReadiness(components,
+      this.opts.comfyui?.service.engineStatus(), this.opts.ollama?.service.status()) };
   }
 
   /** Release recovered work when a host-owned runtime reports capability readiness. */

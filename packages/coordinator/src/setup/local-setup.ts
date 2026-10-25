@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import {
   componentIsSettled,
+  isRequiredLocalRuntime,
   setupClosure,
   type DomainEvent,
   type SetupClosure,
@@ -1440,6 +1441,7 @@ export class LocalSetupService {
 
   /** Leave this one out. A skipped component is never attempted again this session. */
   skip(componentId: string): void {
+    if (isRequiredLocalRuntime(componentId)) return;
     const c = this.components.get(componentId);
     if (!c || c.state === "ready" || c.state === "present") return;
     this.set(componentId, { state: "skipped", bytesPerSecond: null, detail: "you skipped this" });

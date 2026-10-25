@@ -110,6 +110,17 @@ function render(path: string, state: ClientState): string {
   );
 }
 
+it("shows incomplete local AI setup and never offers Skip for its required runtimes", () => {
+  const state = stateWith([RUNTIME, component({ id: "comfyui-runtime", state: "queued" })]);
+  state.app.setup!.localAi = { ready: false, engines: {
+    comfyui: { installed: false, healthy: false, detail: "Waiting for installation." },
+    ollama: { installed: true, healthy: false, detail: "Not answering." },
+  } };
+  const html = render("/settings/downloads", state);
+  assert.ok(html.includes("Local AI setup is incomplete"));
+  assert.ok(!html.includes(">Skip<"));
+});
+
 const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, " ");
 
 /**

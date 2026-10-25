@@ -158,6 +158,41 @@ export const SetupComponentSchema = z
   .strict();
 export type SetupComponent = z.infer<typeof SetupComponentSchema>;
 
+export const LOCAL_AI_RUNTIMES = { comfyui: "comfyui-runtime", ollama: "ollama-runtime" } as const;
+export function isRequiredLocalRuntime(componentId: string): boolean {
+  return Object.values(LOCAL_AI_RUNTIMES).some(id => id === componentId);
+}
+
+const LocalAiEngineCheckSchema = z.object({
+  installed: z.boolean(),
+  healthy: z.boolean(),
+  detail: z.string().nullable(),
+}).strict();
+export const LocalAiSetupReadinessSchema = z.object({
+  ready: z.boolean(),
+  engines: z.object({ comfyui: LocalAiEngineCheckSchema, ollama: LocalAiEngineCheckSchema }).strict(),
+}).strict();
+export type LocalAiSetupReadiness = z.infer<typeof LocalAiSetupReadinessSchema>;
+
+/** SPEC-033: installation and a healthy selected service are separate, mandatory checks. */
+export function localAiSetupReadiness(
+  components: readonly SetupComponent[],
+  comfyui?: { state: string; source: string; detail: string | null },
+  ollama?: { state: string; source: string; detail: string | null },
+): LocalAiSetupReadiness {
+  const check = (id: string, engine: typeof comfyui) => {
+    const component = components.find(c => c.id === id);
+    const installed = component !== undefined && componentIsSettled(component.state);
+    const healthy = engine?.state === "ready" && ["managed", "user-path", "user-url"].includes(engine.source);
+    return { installed, healthy,
+      detail: !installed ? component?.detail ?? "Waiting for installation."
+        : !healthy ? engine?.detail ?? (engine ? "Waiting for the selected service to become healthy."
+          : "This host has not configured this runtime service.") : null };
+  };
+  const engines = { comfyui: check(LOCAL_AI_RUNTIMES.comfyui, comfyui), ollama: check(LOCAL_AI_RUNTIMES.ollama, ollama) };
+  return { ready: Object.values(engines).every(engine => engine.installed && engine.healthy), engines };
+}
+
 /**
  * What one activation actually costs (SPEC-033 R-40, R-41).
  *
@@ -261,6 +296,8 @@ export const SetupStatusSchema = z
     components: z.array(SetupComponentSchema),
     /** True while any component is downloading or installing. */
     running: z.boolean(),
+    /** Coordinator-owned runtime health gate; absent on hosts without local setup support. */
+    localAi: LocalAiSetupReadinessSchema.optional(),
     /** Free disk at the last check — the guard's evidence, shown rather than assumed. */
     diskFreeMb: z.number().int().min(0).nullable(),
     /**

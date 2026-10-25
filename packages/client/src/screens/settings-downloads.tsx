@@ -3,6 +3,7 @@ import { isRemoteSession } from "../lib/remote-session.js";
 import { useNavigate } from "react-router";
 import {
   componentIsSettled,
+  isRequiredLocalRuntime,
   transferProgress,
   type SetupComponent,
   type TransferProgress,
@@ -66,7 +67,7 @@ function ProgressRow({ component, progress, sizeLabel }: { component: SetupCompo
         <SetupTransferControl component={component} />
         {/* Only what is still waiting can be skipped. Pause preserves one range-capable transfer;
             Stop all remains the destructive action for the whole setup run. */}
-        {component.state === "queued" && (
+        {component.state === "queued" && !isRequiredLocalRuntime(component.id) && (
           <button type="button" className="fy-set__link" onClick={() => setupSkip(component.id)}>
             Skip
           </button>
@@ -162,6 +163,10 @@ export function SettingsDownloadsScreen() {
 
   return (
     <div data-screen="settings-downloads" className="fy-set">
+      {setup?.localAi && <p role="status">
+        {setup.localAi.ready ? "Local AI ready · ComfyUI and Ollama are running and healthy."
+          : "Local AI setup is incomplete. ComfyUI and Ollama must be installed, running and healthy."}
+      </p>}
       <RuntimeHead
         title="Downloads"
         caps={setup?.diskFreeMb == null ? "" : `${sizeMb(setup.diskFreeMb)} FREE`}

@@ -6,9 +6,18 @@ ComfyUI offers an explicitly selected install folder or URL; Ollama offers an ex
 selected loopback HTTP URL. **Use Arke-managed** clears the override. Existing overrides remain
 selected across upgrades; there is no silent migration of a personal model store.
 
-Setup currently runs in the background and can be skipped. A downloaded component is not a
-first-run health guarantee: engine status reports whether the selected service is running.
-Mandatory local-AI onboarding that waits for both health checks is not implemented here.
+Launch holds local AI setup until **both selected runtimes are installed, running and healthy**.
+Coordinator seeds `setup.localAi` before detection or transport startup and republishes it on
+installation and engine health changes. `running: false`, a finished transfer, Stop all, or a
+failed/skipped component cannot complete this gate. Runtime Skip is refused by the service.
+Pause/resume, retry, Downloads and Runtime settings remain reachable; explicit existing sources
+must pass the same checks. The setup surface opens only after Continue. Once the runtime gate
+passes, optional model downloads can continue in the background. Each launch rechecks health;
+there is no saved completion flag that can mask an unhealthy service. Health loss revokes
+readiness without ejecting an already open world. Managed engines and external ComfyUI retain
+their health loops; selected external Ollama is also rechecked every 15 seconds. Overlapping
+checks cannot publish an older result over a newer one, and disposal stops the polling timer.
+Hosts that do not configure both engine services cannot report local AI setup as complete.
 
 Ollama is a pinned, SHA-256-verified portable tree, not a system installer or PATH command.
 Arke owns its process, a private loopback port, `<appRoot>/models/ollama`, and
@@ -83,3 +92,8 @@ Run client `test/engine-panes.test.tsx`, contracts `test/ollama.test.ts` and pro
 process, loopback and file-handle access. These regressions use native lightweight stand-ins;
 real model qualification remains separate from CI. Finish with the repository's full gates
 and Windows/Linux CI.
+
+The first-run gate also uses contracts `test/local-ai-setup.test.ts`, coordinator
+`test/setup/local-ai-readiness.test.ts`, and client `test/launch-lifecycle.test.tsx` /
+`test/downloads.test.tsx`. They cover missing detection, failed/paused/skipped installation,
+one healthy engine, recovery, health loss, explicit existing services and optional downloads.

@@ -3,6 +3,7 @@ import {
   FIT_LABEL,
   ENGINE_LABEL,
   transferProgress,
+  isRequiredLocalRuntime,
   normalizeOllamaUrl,
   type ComfyUiEngineStatus,
   type EngineId,
@@ -118,7 +119,7 @@ export function ComponentRows({ components }: { components: readonly SetupCompon
               </RuntimeStatus>
               <SetupTransferControl component={c} />
               {offered && <Button onClick={() => setupRetry(c.id)}>Download · {sizeMb(c.sizeMb)}</Button>}
-              {!settled && !offered && c.state !== "skipped" && (
+              {!settled && !offered && c.state !== "skipped" && !isRequiredLocalRuntime(c.id) && (
                 <button type="button" className="fy-set__link" onClick={() => setupSkip(c.id)}>
                   Skip
                 </button>

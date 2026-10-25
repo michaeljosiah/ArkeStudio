@@ -14,6 +14,12 @@ folds and client `screens/engine-panes.tsx` expose runtime ownership. Tests: coo
 client `engine-panes`; contracts `ollama`; providers `clients`. See
 [managed runtime policy and delivery boundary](managed-local-runtimes.md).
 
+The mandatory local-AI launch gate is projected by contracts `setup.ts` and Coordinator onto
+`setup.localAi`, seeded before detection and refreshed by both engine subscriptions. Client
+`screens/launch.tsx` holds continuation until both installation and health checks pass;
+Downloads reports the same verdict. Runtime Skip is refused in `setup/local-setup.ts`.
+Tests: contracts `local-ai-setup`, coordinator `setup/local-ai-readiness`, client `launch-lifecycle`.
+
 Ming qualification (0.5B and the original-weight tiny trial) is a standalone offline probe in `scripts/probe-ming-tts.py`, with
 input/environment checks in `scripts/test-probe-ming-tts.py`. It does not register a provider or
 change Voxa. See [audition setup and evidence boundaries](ming-tts-audition.md).
