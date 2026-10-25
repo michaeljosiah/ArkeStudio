@@ -207,6 +207,27 @@ describe("an album's page (238c, R-5)", () => {
   });
 });
 
+describe("whose theme a track is (238c, 238e, SPEC-059 R-35)", () => {
+  const PAGE = `/w/${FIXTURE_WORLD_ID}/p/${ALBUM}`;
+  const theme = { production: ALBUM, track: "harbour-bells" };
+
+  it("says it on the track's row and in its panel, for the entries that are public", async () => {
+    const state = withMusic();
+    state.world!.guide = { schemaVersion: 1, characters: { "maren-kest": { public: true, theme } }, locations: { "the-vigil": { public: true, theme } }, factions: { "the-ebb-council": { public: false, theme } }, lore: {} };
+    const m = await mount(state, PAGE);
+    assert.equal(m.container.querySelector("[data-testid='music-track'] .fy-music__theme")?.textContent, "Maren Kest’s theme · +1");
+    await press(m.container.querySelector("[data-testid='music-track'] .t") ?? undefined, "the track");
+    assert.equal(m.container.querySelector("[data-testid='music-theme-of']")?.textContent, "Maren Kest · The Vigil");
+  });
+
+  it("says none where no public entry has it", async () => {
+    const m = await mount(withMusic(), PAGE);
+    assert.equal(m.container.querySelector("[data-testid='music-track'] .fy-music__theme"), null);
+    await press(m.container.querySelector("[data-testid='music-track'] .t") ?? undefined, "the track");
+    assert.equal(m.container.querySelector("[data-testid='music-theme-of']")?.textContent, "—");
+  });
+});
+
 describe("Add track (238d, R-6)", () => {
   const PAGE = `/w/${FIXTURE_WORLD_ID}/p/${ALBUM}`;
 

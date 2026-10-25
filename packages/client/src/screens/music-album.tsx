@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import {
+  EMPTY_GUIDE_RECORD,
   keptMusic,
   MUSIC_AAC_KBPS,
   MUSIC_COVER_EDGE,
@@ -56,6 +57,7 @@ import {
   type ArkePlayerExported,
 } from "../lib/store.js";
 import { LoudnessSelect, MusicSequence, Peaks, TrackComposer, TrackEditor } from "./music-tools.js";
+import { themeNames } from "./world-guide-music.js";
 
 /**
  * A music production's page (design turn 238c – 238e and 238h, SPEC-060 R-5 – R-8, R-14 – R-17):
@@ -251,6 +253,8 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
           {view === "tracks" && tracks.map((track, index) => {
             const length = musicTrackLengthMs(track, artifacts);
             const rows = heard[track.id] ?? [];
+            // Whose theme it is in the Guide (238c, SPEC-059 R-35): the first by name, and how many more.
+            const themes = themeNames(world, world.guide ?? EMPTY_GUIDE_RECORD, { production: productionId, track: track.id });
             return (
               <div
                 key={track.id}
@@ -265,6 +269,7 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
                 <span className="n">{index + 1}</span>
                 <button type="button" className="t" onClick={() => setOpen(open === track.id ? null : track.id)}>
                   <b>{track.title}</b>
+                  {themes.length > 0 && <span className="fy-music__theme">{themes[0]}’s theme{themes.length > 1 ? ` · +${themes.length - 1}` : ""}</span>}
                 </button>
                 {!phone && <span className="src">{fromOf(track, artifacts)}</span>}
                 {!phone && <span className={cx("heard", rows.length === 0 && "none")}>{heardLine(rows)}</span>}
@@ -385,13 +390,14 @@ function AddTrackDialog({ world, production, record, onClose }: { world: WorldBu
 
 /**
  * A track open beside the album (238e, R-7): its player, where it came from, its lyrics with
- * Draft with Arke, where it is heard and whose theme it is. Takes widens it into the track's
- * composer (238i); Edit opens the track editor (238j). Theme of is the Guide's (SPEC-059 rev 9).
+ * Draft with Arke, where it is heard and whose theme it is in the Guide (SPEC-059 R-35). Takes
+ * widens it into the track's composer (238i); Edit opens the track editor (238j).
  */
 function TrackPanel({ world, production, record, track, number, heard, clip, onClose }: { world: WorldBundle; production: ProductionBundle; record: MusicRecord; track: Track; number: number; heard: readonly MusicHeardRow[]; clip: Clip | null; onClose: () => void }) {
   const worldId = world.meta.worldId;
   const productionId = production.meta.id;
   const length = musicTrackLengthMs(track, world.artifacts);
+  const themes = themeNames(world, world.guide ?? EMPTY_GUIDE_RECORD, { production: productionId, track: track.id });
   const [title, setTitle] = useState(track.title);
   const [lyrics, setLyrics] = useState(track.lyrics ?? "");
   const [drafting, setDrafting] = useState<string | null>(null);
@@ -457,7 +463,7 @@ function TrackPanel({ world, production, record, track, number, heard, clip, onC
               ))}
             </div>
             <span>Theme of</span>
-            <span className="fy-music__m">—</span>
+            <span className={cx("fy-music-panel__themes", themes.length === 0 && "fy-music__m")} data-testid="music-theme-of">{themes.length === 0 ? "—" : themes.join(" · ")}</span>
           </div>
           </>
         )}

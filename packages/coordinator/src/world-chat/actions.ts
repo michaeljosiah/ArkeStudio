@@ -9,6 +9,8 @@ import { WorldChatBenchKeepActionSchema, WorldChatBenchSelectActionSchema, World
 import { WorldChatProductionAudioGenerationActionSchema, WorldChatProductionPerformanceActionSchema, WorldChatProductionAudioCueActionSchema, PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { freezeProductionPerformance, productionPerformanceBody, executeProductionPerformance } from "./production-performance.js";
 import { freezeProductionAudioCue, productionAudioCueBody, executeProductionAudioCue } from "./production-audio-cue.js";
+import { WorldChatProductionMusicActionSchema } from "@arke-studio/contracts";
+import { executeProductionMusic, musicAlbumCard } from "./production-music.js";
 import { frameRunReadRows, performanceReadRows, voiceSampleReadRows, audioCutReadRows, editorRequestReadRows, productionReadFence } from "./production-reads.js";
 import { readAudioRightsSync } from "../audio/rights.js";
 import type { ProductionBatchControls } from "./production-batch.js";
@@ -269,7 +271,7 @@ import type { MediaProbe } from "../media/probe.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { readBible, applyTurnBibleEdits } from "../world/bible.js";
 import { readChanges } from "../world/change-writer.js";
-import { CommitStaleError, MUSIC_COMPOSER_SCHEMA_VERSION, type CommitResult } from "../world/commit.js";
+import { CommitStaleError, GUIDE_THEMES_SCHEMA_VERSION, MUSIC_COMPOSER_SCHEMA_VERSION, type CommitResult } from "../world/commit.js";
 import {
   WorldStateStaleError,
   type WorldStatePrecondition,
@@ -574,6 +576,7 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-effects-propose": ["timeline", "editor-requests"],
   "production-timeline-operation": ["timeline", "scenes", "takes", "artifacts"],
   "production-audio-cue": ["timeline"],
+  "production-music": ["production-metadata"],
 };
 
 function currentWorldObservation(
@@ -819,6 +822,9 @@ function productionActionTargets(
       ...(action.source.kind === "bench-take" ? [{ requirement: "bench" as const, target: action.source.sessionId }] : []),
       ...(action.source.kind === "artifact" ? [{ requirement: "artifacts" as const, target: worldId }] : []),
       ...(action.source.kind === "take" ? [{ requirement: "takes" as const, target: action.productionId }] : [])];
+    // The album as get_production_metadata reads it, and the shelf a track or cover comes from.
+    case "production-music": return [{ requirement: "production-metadata", target: action.productionId },
+      ...(action.command.kind === "add-track" || (action.command.kind === "set-cover" && action.command.artifactId !== null) ? [{ requirement: "artifacts" as const, target: worldId }] : [])];
     case "production-performance-command": return [{ requirement: "performances", target: action.productionId },
       { requirement: "scenes", target: action.productionId }, ...(action.command.operation === "place-selected" ? [{ requirement: "timeline" as const, target: action.productionId }] : [])];
     case "production-audio-generation": return [{ requirement: "scenes", target: action.productionId },
@@ -1056,6 +1062,7 @@ function preparedWorldPayload(
         proposal: action.proposal, ...effectProposalRequestContext(store.getBundle(), action.productionId, action.scope, subject) });
     }
     case "production-audio-cue": return WorldChatProductionAudioCueActionSchema.parse({ kind: "world-chat-production-audio-cue", ...common, ...freezeProductionAudioCue(store, action.productionId) });
+    case "production-music": return WorldChatProductionMusicActionSchema.parse({ kind: "world-chat-production-music", ...common });
     case "production-routing": return WorldChatProductionRoutingActionSchema.parse({ kind: "world-chat-production-routing", ...common });
     case "production-routing-traversal": return WorldChatProductionTraversalActionSchema.parse({ kind: "world-chat-production-routing-traversal", ...common });
     case "production-branch-canon": return WorldChatProductionBranchCanonActionSchema.parse({ kind: "world-chat-production-branch-canon", ...common });
@@ -1462,6 +1469,15 @@ function worldActionTargets(
     case "production-effects-propose":
     case "production-audio-studio-propose":
     case "production-audio-cue": return [{ kind: "production", id: action.productionId, label: action.productionId }];
+    case "production-music": {
+      const command = action.command;
+      const artifactId = command.kind === "add-track" ? command.artifactId : command.kind === "set-cover" ? command.artifactId : null;
+      return [
+        { kind: "production", id: action.productionId, label: action.productionId },
+        ...(command.kind === "update-track" || command.kind === "remove-track" ? [{ kind: "track", id: command.trackId, label: command.trackId }] : []),
+        ...(artifactId !== null ? [{ kind: "artifact", id: artifactId, label: artifactId }] : []),
+      ];
+    }
     case "production-audio-generation": return [{ kind: "production", id: action.productionId, label: action.productionId },
       ...("sheetId" in action.request ? [{ kind: "sheet", id: action.request.sheetId, label: action.request.sheetId }] : [])];
   }
@@ -1800,6 +1816,9 @@ const preparationPath = (store: WorldStore, authority: "bible" | "scene" | "worl
 async function writePreparation(store: WorldStore, authority: "bible" | "scene" | "world", actionId: string, payload: WorldChatPreparedAction): Promise<void> {
   if (payload.kind === "world-chat-production-timeline-operation" || payload.kind === "world-chat-production-timeline-transcribe") await store.ensureSchemaVersion(PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION, "production-chat-timeline");
   if (["world-chat-production-audio-generation", "world-chat-production-performance-command", "world-chat-production-audio-cue"].includes(payload.kind)) await store.ensureSchemaVersion(PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, "production-chat-audio");
+  // A music creation plan or an album card (SPEC-060 R-19): a build before them opens the world
+  // and cannot read the preparation, so the pending card would be lost (codex on PR 2190).
+  if (payload.kind === "world-chat-production-music" || (payload.kind === "world-chat-production-create" && payload.plan.music !== undefined)) await store.ensureSchemaVersion(GUIDE_THEMES_SCHEMA_VERSION, "world-chat-music");
   // A music track's cards, and takes asked for a track, carry fields a build before the composer cannot read (codex on PR 2191).
   if (["world-chat-music-track-choose", "world-chat-music-track-edit", "world-chat-music-sequence-set"].includes(payload.kind)
     || (payload.kind === "world-chat-bench-generation" && payload.action.musicTrack !== undefined)) await store.ensureSchemaVersion(MUSIC_COMPOSER_SCHEMA_VERSION, "music-takes");
@@ -2859,6 +2878,12 @@ async function sharedResourceProjection(
               label: "Audio drama plan",
               detail: `${DEFAULT_AUDIO_DRAMA_PLAN.episodes} episodes, about ${DEFAULT_AUDIO_DRAMA_PLAN.minutes} minutes each · narrator, pilot and secrets not yet decided`,
             }] : []),
+            // What a music production is created holding (SPEC-060 R-3, R-4): an empty album, and a
+            // soundtrack the production it is for.
+            ...(plan.music !== undefined ? [{
+              label: "Album",
+              detail: `${productionShape(plan.production).displayLabel}${plan.music.for !== undefined ? ` · for ${bundle.productions.find((candidate) => candidate.meta.id === plan.music!.for)?.meta.title ?? plan.music.for}` : ""} · no tracks yet`,
+            }] : []),
             {
               label: "Series consequence",
               detail: plan.series.operation === "none"
@@ -3001,6 +3026,13 @@ async function sharedResourceProjection(
       shown = { title: `Review ${chapter.title}`, consequence: "Uses configured script, AI tells and visual specialists: the saved chapter goes to the script and AI tells reviewers in one model call each. Selected images may be sent to the permitted image-inspection provider. Saves advisory findings; changes no prose or media.",
         affectedTargets: [...intent.targets], ripples: [], permissionReason: "external-network-action",
         body: { family: "command", commands: [{ label: "Review saved chapter and selected pictures" }], expectedResult: "Evidence-backed findings and an AI tells count in Chapter review; audio delivery is not listened to.", undoAvailable: false } };
+      break;
+    }
+    case "world-chat-production-music": {
+      // The album page's own commands (SPEC-060 R-19), checked against the album as it is now.
+      authority = { kind: "production-store", id: intent.actionId };
+      const card = musicAlbumCard(bundle, payload);
+      shown = { title: card.title, consequence: card.consequence, affectedTargets: [...intent.targets], ripples: [], permissionReason: "authored-change", body: card.body };
       break;
     }
     case "world-chat-production-episode-order":
@@ -4178,10 +4210,10 @@ async function executeSharedResource(
       if (stale) throw new WorldStateStaleError(stale);
       if (payload.kind === "world-chat-music-track-edit") {
         const { trim, fadeInMs, fadeOutMs, sections } = payload.action;
-        await editMusicTrack(store, payload.action.productionId, payload.action.trackId, { trim, fadeInMs, fadeOutMs, sections }, payload.action.baseHash);
+        await editMusicTrack(store, payload.action.productionId, payload.action.trackId, { trim, fadeInMs, fadeOutMs, sections }, { ...options, baseHash: payload.action.baseHash });
         return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary: "The track's edit was saved." } };
       }
-      await setMusicSequence(store, payload.action.productionId, { loudness: payload.action.loudness, joins: payload.action.joins }, payload.action.baseHash);
+      await setMusicSequence(store, payload.action.productionId, { loudness: payload.action.loudness, joins: payload.action.joins }, { ...options, baseHash: payload.action.baseHash });
       return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary: "The album's sequence was saved." } };
     }
     case "world-chat-production-model":
@@ -4453,6 +4485,10 @@ async function executeSharedResource(
           summary: result.spine === null ? "The audio spine was deleted." : `The audio spine advanced to revision ${result.spine.revision}.`,
         },
       };
+    }
+    case "world-chat-production-music": {
+      const summary = await executeProductionMusic(store, payload, options);
+      return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary } };
     }
     default:
       return { status: "failed", detail: "That shared-resource action cannot execute." };
@@ -5358,6 +5394,7 @@ export function worldChatActionAdapters(
     "world-chat-production-export-cancel",
     "world-chat-bench-generation",
     "world-chat-bench-keep", "world-chat-bench-select", "world-chat-bench-discard",
+    "world-chat-production-music",
   ] satisfies readonly WorldChatPreparedAction["kind"][];
 
   const canonAction = proposalBacked(

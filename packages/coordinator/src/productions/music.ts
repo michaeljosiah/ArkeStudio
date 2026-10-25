@@ -27,7 +27,7 @@ import {
 import { BenchStore, sessionDir } from "../bench/store.js";
 import { MUSIC_COMPOSER_SCHEMA_VERSION, type CommitFileInput } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
-import { WorldStateStaleError, type WorldStore } from "../world/store.js";
+import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 import { JsonFile, sha256 } from "../world/text-files.js";
 import { oneAtATime } from "./audio-drama.js";
 
@@ -73,13 +73,25 @@ interface MusicChange {
   kind?: "album";
 }
 
-async function writeMusic(store: WorldStore, productionId: string, kind: string, change: (record: MusicRecord) => MusicChange, baseHash?: string): Promise<void> {
+/**
+ * How a World Chat card writes (SPEC-060 R-19): under its own source and request id, so a
+ * redelivered approval finds its commit, and only while what it was approved against holds.
+ * A track's card names the album it read as `baseHash` (codex on PR 2191).
+ */
+export interface MusicCommitOptions {
+  source?: string;
+  requestId?: string;
+  precondition?: WorldStatePrecondition;
+  baseHash?: string;
+}
+
+async function writeMusic(store: WorldStore, productionId: string, kind: string, change: (record: MusicRecord) => MusicChange, commit: MusicCommitOptions = {}): Promise<void> {
   const path = recordPath(productionId);
   await oneAtATime(`${store.dir}/${path}`, async () => {
     musicProduction(store, productionId);
     const { record, raw } = await readMusicRecord(store, productionId);
     // A change prepared against an album that has moved since is refused, never written over it.
-    if (baseHash !== undefined && musicRecordFence(record) !== baseHash) throw new WorldStateStaleError("The album changed since it was read. Read get_production again.");
+    if (commit.baseHash !== undefined && musicRecordFence(record) !== commit.baseHash) throw new WorldStateStaleError("The album changed since it was read. Read get_production again.");
     const next = change(record);
     const files: CommitFileInput[] = [{
       path,
@@ -94,7 +106,7 @@ async function writeMusic(store: WorldStore, productionId: string, kind: string,
       doc.set({ kind: next.kind });
       files.push({ path: metaPath, action: "replace", content: doc.serialize(), baseHash: sha256(metaRaw) });
     }
-    await store.commit({ kind, source: "music", files });
+    await store.commit({ kind, source: commit.source ?? "music", files, ...(commit.requestId !== undefined ? { requestId: commit.requestId } : {}) }, undefined, commit.precondition);
   });
 }
 
@@ -103,7 +115,7 @@ async function writeMusic(store: WorldStore, productionId: string, kind: string,
  * world's shelf, or this production's own; a Single holds one track, so a second is added only
  * with the person's word to make it an Album.
  */
-export async function addMusicTrack(store: WorldStore, productionId: string, artifactId: string, options: { makeAlbum?: boolean } = {}): Promise<string> {
+export async function addMusicTrack(store: WorldStore, productionId: string, artifactId: string, options: { makeAlbum?: boolean } = {}, commit?: MusicCommitOptions): Promise<string> {
   const production = musicProduction(store, productionId);
   const artifacts = store.getBundle().artifacts;
   const artifact = artifacts.find((candidate) => candidate.id === artifactId);
@@ -129,12 +141,12 @@ export async function addMusicTrack(store: WorldStore, productionId: string, art
       record: { ...record, tracks: [...record.tracks, { id: added, title, source: { artifactId }, takes: [], ...(sung !== "" ? { lyrics: sung } : {}) }] },
       ...(single && record.tracks.length >= 1 ? { kind: "album" as const } : {}),
     };
-  });
+  }, commit);
   return added;
 }
 
 /** A track's title or lyrics (R-7): lyrics are plain text, and an empty string clears them. */
-export async function updateMusicTrack(store: WorldStore, productionId: string, trackId: string, change: { title?: string; lyrics?: string }): Promise<void> {
+export async function updateMusicTrack(store: WorldStore, productionId: string, trackId: string, change: { title?: string; lyrics?: string }, commit?: MusicCommitOptions): Promise<void> {
   await writeMusic(store, productionId, "music-track-update", (record) => {
     const index = record.tracks.findIndex((track) => track.id === trackId);
     if (index < 0) throw new MusicRefusal("that track is no longer on the album");
@@ -143,11 +155,11 @@ export async function updateMusicTrack(store: WorldStore, productionId: string, 
     const { lyrics: _was, ...rest } = track;
     const next = { ...rest, ...(change.title !== undefined ? { title: change.title.trim() } : {}), ...(lyrics !== undefined ? { lyrics } : {}) };
     return { record: { ...record, tracks: record.tracks.map((entry, at) => (at === index ? next : entry)) } };
-  });
+  }, commit);
 }
 
 /** Remove a track (R-7): its takes stay on the shelf; nothing is deleted but the album's line. */
-export async function removeMusicTrack(store: WorldStore, productionId: string, trackId: string): Promise<void> {
+export async function removeMusicTrack(store: WorldStore, productionId: string, trackId: string, commit?: MusicCommitOptions): Promise<void> {
   await writeMusic(store, productionId, "music-track-remove", (record) => {
     if (!record.tracks.some((track) => track.id === trackId)) throw new MusicRefusal("that track is no longer on the album");
     // A join belongs to the track before it; the last track has nothing to join.
@@ -158,22 +170,22 @@ export async function removeMusicTrack(store: WorldStore, productionId: string, 
       tracks[tracks.length - 1] = rest;
     }
     return { record: { ...record, tracks } };
-  });
+  }, commit);
 }
 
 /** The tracks in a new order (R-5, drag reorders): every track, each once. */
-export async function reorderMusicTracks(store: WorldStore, productionId: string, order: readonly string[]): Promise<void> {
+export async function reorderMusicTracks(store: WorldStore, productionId: string, order: readonly string[], commit?: MusicCommitOptions): Promise<void> {
   await writeMusic(store, productionId, "music-tracks-reorder", (record) => {
     const byId = new Map(record.tracks.map((track) => [track.id, track] as const));
     if (order.length !== record.tracks.length || new Set(order).size !== order.length || order.some((id) => !byId.has(id))) {
       throw new MusicRefusal("the album changed · try again");
     }
     return { record: { ...record, tracks: order.map((id) => byId.get(id)!) } };
-  });
+  }, commit);
 }
 
 /** The album's cover (R-5): an image on the shelf, or none. */
-export async function setMusicCover(store: WorldStore, productionId: string, artifactId: string | null): Promise<void> {
+export async function setMusicCover(store: WorldStore, productionId: string, artifactId: string | null, commit?: MusicCommitOptions): Promise<void> {
   if (artifactId !== null) {
     const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === artifactId);
     if (artifact === undefined || artifact.retiredAt !== undefined) throw new MusicRefusal("that picture is no longer on the shelf");
@@ -182,7 +194,7 @@ export async function setMusicCover(store: WorldStore, productionId: string, art
   await writeMusic(store, productionId, "music-set-cover", (record) => {
     const { cover: _was, ...rest } = record;
     return { record: artifactId === null ? rest : { ...rest, cover: artifactId } };
-  });
+  }, commit);
 }
 
 /**
@@ -234,7 +246,7 @@ export async function tagMusicTakes(store: WorldStore, productionId: string, tra
  * Choose a take as its track's (R-10): it plays from the shelf, where keeping put it. The trim is
  * clipped to the new take's length; the sections are kept as they were.
  */
-export async function chooseMusicTake(store: WorldStore, productionId: string, trackId: string, ref: MusicTakeRef, artifactId: string, baseHash?: string): Promise<void> {
+export async function chooseMusicTake(store: WorldStore, productionId: string, trackId: string, ref: MusicTakeRef, artifactId: string, commit?: MusicCommitOptions): Promise<void> {
   const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === artifactId);
   if (artifact === undefined || artifact.retiredAt !== undefined || artifact.kind !== "audio") throw new MusicRefusal("that take is not on the shelf");
   const lengthMs = artifact.mediaInfo?.durationSec === undefined ? null : Math.round(artifact.mediaInfo.durationSec * 1000);
@@ -247,7 +259,7 @@ export async function chooseMusicTake(store: WorldStore, productionId: string, t
     const trim = clipMusicTrim(track.trim, lengthMs);
     const next: MusicRecordTrack = { ...rest, source: { artifactId }, takes, ...(trim !== undefined ? { trim } : {}) };
     return { record: { ...record, tracks: record.tracks.map((entry, at) => (at === index ? next : entry)) } };
-  }, baseHash);
+  }, commit);
 }
 
 /**
@@ -259,7 +271,7 @@ export async function editMusicTrack(store: WorldStore, productionId: string, tr
   fadeInMs: number;
   fadeOutMs: number;
   sections: readonly MusicSection[];
-}, baseHash?: string): Promise<void> {
+}, commit?: MusicCommitOptions): Promise<void> {
   await writeMusic(store, productionId, "music-track-edit", (record) => {
     const index = record.tracks.findIndex((track) => track.id === trackId);
     if (index < 0) throw new MusicRefusal("that track is no longer on the album");
@@ -282,14 +294,14 @@ export async function editMusicTrack(store: WorldStore, productionId: string, tr
       ...(sections.length > 0 ? { sections } : {}),
     };
     return { record: { ...record, tracks: record.tracks.map((entry, at) => (at === index ? next : entry)) } };
-  }, baseHash);
+  }, commit);
 }
 
 /**
  * The album's sequence (238k, R-13): each track's join to the next, and one loudness target. The
  * last track joins nothing, so whatever is asked of it is not kept.
  */
-export async function setMusicSequence(store: WorldStore, productionId: string, sequence: { loudness: number; joins: ReadonlyArray<{ trackId: string; next: MusicJoin | null }> }, baseHash?: string): Promise<void> {
+export async function setMusicSequence(store: WorldStore, productionId: string, sequence: { loudness: number; joins: ReadonlyArray<{ trackId: string; next: MusicJoin | null }> }, commit?: MusicCommitOptions): Promise<void> {
   await writeMusic(store, productionId, "music-sequence-set", (record) => {
     const joins = new Map(sequence.joins.map((join) => [join.trackId, join.next] as const));
     for (const id of joins.keys()) if (!record.tracks.some((track) => track.id === id)) throw new MusicRefusal("the album changed · try again");
@@ -301,7 +313,7 @@ export async function setMusicSequence(store: WorldStore, productionId: string, 
       return next === null ? rest : { ...rest, next };
     });
     return { record: { ...record, loudness: sequence.loudness, tracks } };
-  }, baseHash);
+  }, commit);
 }
 
 /** Every take of the album's session, by the track that asked for it (238i): what its composer shows. */

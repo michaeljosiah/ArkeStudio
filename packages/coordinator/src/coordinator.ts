@@ -21366,7 +21366,7 @@ export class Coordinator {
       take = await takeOf();
     }
     if (take?.keptArtifactId === undefined) throw new MusicRefusal("that take could not be kept");
-    await chooseMusicTake(store, productionId, trackId, { sessionId: session, takeId: take.id }, take.keptArtifactId, baseHash);
+    await chooseMusicTake(store, productionId, trackId, { sessionId: session, takeId: take.id }, take.keptArtifactId, baseHash === undefined ? undefined : { baseHash });
   }
 
   /**

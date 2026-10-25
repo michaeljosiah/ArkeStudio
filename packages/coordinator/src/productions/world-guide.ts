@@ -13,21 +13,28 @@ import {
   guideTeasers,
   listeningPictureNamed,
   MAX_GUIDE_VOICE_MS,
+  MAX_MUSIC_TRACK_MS,
   MAX_TEASER_CLIP_MS,
+  musicTrackLengthMs,
   packageSlug,
+  productionShape,
   type AudiobookListening,
   type AudiobookTake,
   type GuideDocument,
   type GuideMadeMoment,
+  type GuideMadeSong,
   type GuideProductionChapters,
   type GuideRecord,
   type GuideRecordMoment,
+  type GuideRecordSong,
   type GuideRecordVoice,
-  type GuideTeaserV2,
+  type GuideTeaser,
   type GuideVoiceLine,
   type ListeningChapter,
+  type MusicRecord,
   type SetGuideEntry,
   type SetGuideTeasers,
+  type WorldBundle,
 } from "@arke-studio/contracts";
 import { fitReadingImage, pngHasAlpha } from "../references/reading-image.js";
 import type { FfmpegRunner } from "../takes/export.js";
@@ -38,6 +45,7 @@ import { sha256 } from "../world/text-files.js";
 import { planAudiobook } from "./audiobook.js";
 import { anyNarrator, audiobookListening } from "./audiobook-listening.js";
 import { containedWorldFile } from "./interactive.js";
+import { musicRenderPlan, renderMusicTrack } from "./music-render.js";
 
 /** A guide's pictures are portraits and places on a phone's page, not a chapter's full screen (R-13). */
 const GUIDE_PICTURE_EDGE = 1024;
@@ -88,6 +96,7 @@ export function setGuideEntry(store: WorldStore, change: SetGuideEntry, source: 
     const next = { ...kind };
     if (change.entry === null) delete next[change.id];
     else next[change.id] = change.entry;
+    // A theme raises the world at the commit (R-35): a build before it reads the record as unreadable.
     await writeGuide(store, raw, GuideRecordSchema.parse({ ...record, [change.entryKind]: next }), source);
   });
 }
@@ -100,6 +109,7 @@ export function setGuideTeasers(store: WorldStore, change: SetGuideTeasers, sour
     // A build before teasers reads a record naming them as unreadable, so the world says first
     // that it needs a build that knows them.
     if (change.teasers.length > 0) await store.ensureSchemaVersion(GUIDE_TEASERS_SCHEMA_VERSION, "guide-teasers");
+    // A song is newer still (R-36), and raises the world at the commit, as a theme does.
     await writeGuide(store, raw, GuideRecordSchema.parse(change.teasers.length > 0 ? { ...rest, teasers: change.teasers } : rest), source);
   });
 }
@@ -179,12 +189,72 @@ export interface GuideClipCut {
   segments: Array<{ file: string; start: number; seconds: number }>;
 }
 
+/** A song teaser's excerpt as it is cut (R-36, R-37): a window on its track's render. */
+export interface GuideSongCut {
+  /** The track's render, absolute: Play all's and the album's own (SPEC-060 R-8, R-16). */
+  path: string;
+  start: number;
+  seconds: number;
+}
+
 /** The guide as it would ship, its files still the world's: what the export packs and compares. */
 export interface GuideDraft {
   document: GuideDocument;
   lines: ReadonlyMap<string, GuideVoiceLine>;
   /** Each clip teaser's narration, by the name the draft's `audio` gives it. */
   clips: ReadonlyMap<string, GuideClipCut>;
+  /** Each song teaser's excerpt, by the name the draft's `audio` gives it. */
+  songs?: ReadonlyMap<string, GuideSongCut>;
+}
+
+/** A track of one of the world's music productions, with its album, as the bundle holds them. */
+export function guideMusicTrack(bundle: Pick<WorldBundle, "productions">, production: string, track: string): { record: MusicRecord; track: MusicRecord["tracks"][number]; title: string } | undefined {
+  const found = bundle.productions.find((candidate) => candidate.meta.id === production);
+  if (found === undefined || !productionShape(found.meta).isMusic) return undefined;
+  const record = found.music ?? null;
+  const entry = record?.tracks.find((candidate) => candidate.id === track);
+  return record !== null && entry !== undefined ? { record, track: entry, title: found.meta.title } : undefined;
+}
+
+const songKey = (teaser: GuideRecordSong) => `${teaser.production}\n${teaser.track}`;
+
+/**
+ * The songs the teasers name, as they are now (SPEC-059 R-36, R-37): each a window of at most 30
+ * seconds on its track as the album plays it — its trim, fades and loudness, the render the export
+ * ships (SPEC-060 R-16) — with the album's square cover, or the world's key art where it has none.
+ * A track that is gone, or one that will not render, is left out.
+ */
+export async function guideSongs(store: WorldStore, choices: GuideRecord["teasers"], signal?: AbortSignal, ffmpeg?: FfmpegRunner): Promise<{ made: Map<string, GuideMadeSong>; songs: Map<string, GuideSongCut> }> {
+  const made = new Map<string, GuideMadeSong>();
+  const songs = new Map<string, GuideSongCut>();
+  const bundle = store.getBundle();
+  for (const choice of choices ?? []) {
+    if (choice.kind !== "song" || ffmpeg === undefined) continue;
+    const found = guideMusicTrack(bundle, choice.production, choice.track);
+    if (found === undefined) continue;
+    const plan = musicRenderPlan({ tracks: [found.track] }, bundle.artifacts);
+    if (!plan.ok) continue;
+    const planned = plan.tracks[0]!;
+    // The excerpt is a window on the track alone: its gap and its join to the next are the album's.
+    let rendered: Awaited<ReturnType<typeof renderMusicTrack>>;
+    try {
+      rendered = await renderMusicTrack(store.dir, { ...planned, gapMs: 0 }, found.record.loudness, { ffmpeg, ...(signal !== undefined ? { signal } : {}) });
+    } catch {
+      if (signal?.aborted) throw signal.reason;
+      continue;
+    }
+    const startMs = Math.min(choice.start, Math.max(0, rendered.durationMs - 1000));
+    const lengthMs = Math.min(choice.duration, MAX_TEASER_CLIP_MS, rendered.durationMs - startMs);
+    if (!(lengthMs > 0)) continue;
+    const cover = found.record.cover === undefined ? undefined : bundle.artifacts.find((artifact) => artifact.id === found.record.cover);
+    const coverFile = cover !== undefined ? `artifacts/${cover.file}` : bundle.keyArt ?? undefined;
+    if (coverFile === undefined || (await containedWorldFile(store.dir, coverFile)) === null) continue;
+    // Named by what it is cut from, so a track edited or made again changes the draft the gate compares.
+    const audio = `song-${createHash("sha256").update(JSON.stringify([rendered.file, startMs, lengthMs])).digest("hex").slice(0, 16)}`;
+    songs.set(audio, { path: rendered.path, start: startMs / 1000, seconds: lengthMs / 1000 });
+    made.set(songKey(choice), { title: found.track.title, picture: coverFile, audio, duration: lengthMs });
+  }
+  return { made, songs };
 }
 
 const momentKey = (teaser: GuideRecordMoment) => `${teaser.kind}\n${teaser.production}\n${teaser.chapter}\n${teaser.block}`;
@@ -280,6 +350,7 @@ export async function guideDraft(store: WorldStore, places?: { production: strin
     places?.production !== production.id ? production : { ...production, chapters: production.chapters.map((chapter) => (places.book.has(chapter.id) ? { ...chapter, book: places.book.get(chapter.id)! } : chapter)) },
   );
   const moments = await guideMoments(store, record.teasers, signal, ffmpeg);
+  const songs = await guideSongs(store, record.teasers, signal, ffmpeg);
   const document = guideDocument(record, {
     ...world,
     productions,
@@ -289,8 +360,16 @@ export async function guideDraft(store: WorldStore, places?: { production: strin
       return line === undefined ? undefined : { audio: line.file, text: line.text.slice(0, 2000), duration: Math.min(MAX_GUIDE_VOICE_MS, Math.max(1, Math.round(line.seconds * 1000))), production: line.production, chapter: line.chapter };
     },
     moment: (teaser) => moments.made.get(momentKey(teaser)),
+    // A theme carries its track's title and length as it plays (R-37); a track never measured has
+    // no length to name, so it waits, as a total does (#253).
+    theme: (theme) => {
+      const found = guideMusicTrack(bundle, theme.production, theme.track);
+      const length = found === undefined ? null : musicTrackLengthMs(found.track, bundle.artifacts);
+      return found === undefined || length === null || length < 1 ? undefined : { title: found.track.title, duration: Math.min(MAX_MUSIC_TRACK_MS, length) };
+    },
+    song: (teaser) => songs.made.get(songKey(teaser)),
   });
-  return document === null ? null : { document, lines, clips: moments.clips };
+  return document === null ? null : { document, lines, clips: moments.clips, songs: songs.songs };
 }
 
 export interface GuidePacking {
@@ -312,6 +391,7 @@ export interface GuidePacking {
  */
 export async function packGuide(drafted: GuideDraft, store: WorldStore, packing: GuidePacking): Promise<{ ok: true } | { ok: false; blocker: string }> {
   const { document: draft, lines, clips } = drafted;
+  const songs = drafted.songs ?? new Map<string, GuideSongCut>();
   const ids = new Map<string, string>();
   let numbered = 0;
   const fit = async (file: string, edge = GUIDE_PICTURE_EDGE, prefix = "g", folder = "guide"): Promise<string> => {
@@ -336,6 +416,16 @@ export async function packGuide(drafted: GuideDraft, store: WorldStore, packing:
     const assetId = `t${String(++numbered).padStart(3, "0")}`;
     const path = `guide/teasers/${assetId}.m4a`;
     await packing.ffmpeg.run(["-y", ...inputs, "-filter_complex", join, "-map", "[out]", "-ac", "1", "-ar", "44100", "-c:a", "aac", "-b:a", "96k", packing.at(path)], () => {}, packing.signal);
+    await packing.add(assetId, path, "audio/mp4");
+    return assetId;
+  };
+  // A song's excerpt (R-37): a window on its track's render, kept stereo, at most 30 seconds.
+  const song = async (audio: string): Promise<string> => {
+    const cut = songs.get(audio)!;
+    const assetId = `t${String(++numbered).padStart(3, "0")}`;
+    const path = `guide/teasers/${assetId}.m4a`;
+    const seconds = Math.min(cut.seconds, MAX_TEASER_CLIP_MS / 1000);
+    await packing.ffmpeg.run(["-y", "-ss", cut.start.toFixed(3), "-t", seconds.toFixed(3), "-i", cut.path, "-vn", "-map_metadata", "-1", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", packing.at(path)], () => {}, packing.signal);
     await packing.add(assetId, path, "audio/mp4");
     return assetId;
   };
@@ -370,10 +460,9 @@ export async function packGuide(drafted: GuideDraft, store: WorldStore, packing:
     }
     const places: GuideDocument["places"] = [];
     for (const place of draft.places) places.push({ ...place, ...(place.picture !== undefined ? { picture: await fit(place.picture) } : {}) });
-    // The draft is version 1 or 2 (`guideDocument` writes no songs yet), so its teasers are too.
-    const teasers: GuideTeaserV2[] = [];
+    const teasers: GuideTeaser[] = [];
     const drafts = guideTeasers(draft);
-    if (drafts.some((teaser) => teaser.kind === "picture" || teaser.kind === "clip")) await mkdir(toExtendedLength(packing.at("guide/teasers")), { recursive: true });
+    if (drafts.some((teaser) => teaser.kind !== "character" && teaser.kind !== "place")) await mkdir(toExtendedLength(packing.at("guide/teasers")), { recursive: true });
     for (const teaser of drafts) {
       if (teaser.kind === "picture") teasers.push({ ...teaser, picture: await fit(teaser.picture, TEASER_PICTURE_EDGE, "t", "guide/teasers") });
       else if (teaser.kind === "clip") {
@@ -381,9 +470,11 @@ export async function packGuide(drafted: GuideDraft, store: WorldStore, packing:
         const audio = await clip(teaser.audio);
         const { motion: _motion, ...still } = teaser;
         teasers.push({ ...still, picture, audio, ...(teaser.motion !== undefined ? { motion: await loop(teaser.motion) } : {}) });
-      } else if (teaser.kind !== "song") teasers.push(teaser);
+      } else if (teaser.kind === "song") teasers.push({ ...teaser, picture: await fit(teaser.picture, TEASER_PICTURE_EDGE, "t", "guide/teasers"), audio: await song(teaser.audio) });
+      else teasers.push(teaser);
     }
-    const document: GuideDocument = draft.version === 2 ? { ...draft, characters, places, teasers } : { ...draft, characters, places };
+    // The version is the draft's: 3 only with a theme or a song (R-37), and teasers only where it has them.
+    const document = { ...draft, characters, places, ...(drafts.length > 0 ? { teasers } : {}) } as GuideDocument;
     await writeFile(toExtendedLength(packing.at("guide/guide.json")), `${JSON.stringify(document, null, 2)}\n`, "utf8");
     await packing.add("guide", "guide/guide.json", GUIDE_MEDIA_TYPE);
   } catch {

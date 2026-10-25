@@ -98,6 +98,7 @@ import {
   WorldChatWorldExportActionSchema,
   WorldChatWorldMetadataActionSchema,
   WorldChatAudioSpineActionSchema,
+  WorldChatProductionMusicActionSchema,
   WorldChatBenchGenerationActionSchema,
   ProductionRoutingModelActionSchema,
   ProductionTraversalModelActionSchema,
@@ -465,8 +466,8 @@ const CLIENT_COMMAND_METADATA = {
   "restore-bible": action("world", "authored-diff", "bible", "authored-change", ["bible"]),
   "set-guide-entry": humanOnly("What a reader of the world may see is the author's to choose (SPEC-059 R-2)."),
   "set-guide-teasers": humanOnly("What anyone sees of a world before installing it is the author's to choose (SPEC-059 R-26)."),
-  // A music production's tracks (SPEC-060 R-5 – R-7). Authored changes Arke can be given (R-19);
-  // until World Chat's model actions exist they are blocked as `no-model-action`, by name.
+  // A music production's tracks (SPEC-060 R-5 – R-7): authored changes World Chat reaches through
+  // production-music (R-19). Draft with Arke is the page's; in a conversation Arke writes the words.
   "music-track-add": action("production", "command", "production-store", "authored-change", ["production-metadata", "artifacts"]),
   "music-track-update": action("production", "command", "production-store", "authored-change", ["production-metadata"]),
   "music-track-remove": action("production", "command", "production-store", "authored-change", ["production-metadata"]),
@@ -836,6 +837,11 @@ const COMMAND_MODEL_PATHS = {
   "set-style-override": ["reference-style"],
   "voice-preview": ["voice-audition"],
   "create-production": ["production-create"],
+  "music-track-add": ["production-music"],
+  "music-track-update": ["production-music"],
+  "music-track-remove": ["production-music"],
+  "music-tracks-reorder": ["production-music"],
+  "music-set-cover": ["production-music"],
   "propose-story-overview": ["production-overview", "candidateOperations"],
   "propose-season": ["production-season", "candidateOperations"],
   "create-episode": ["production-episode", "candidateOperations"],
@@ -1338,6 +1344,11 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     kind: "world-chat-audio-spine-command",
     schema: WorldChatAudioSpineActionSchema,
     ...action("production", "command", "audio-spine", "authored-change", ["spine"]),
+  },
+  "world-chat-production-music": {
+    kind: "world-chat-production-music",
+    schema: WorldChatProductionMusicActionSchema,
+    ...action("production", "command", "production-store", "authored-change", ["production-metadata"]),
   },
   "world-chat-production-timeline-transcribe": { kind: "world-chat-production-timeline-transcribe", schema: WorldChatProductionTimelineTranscribeActionSchema,
     ...action("production", "generation", "timeline", "privacy-sensitive", ["timeline", "scenes", "takes", "artifacts"]) },

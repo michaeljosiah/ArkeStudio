@@ -5,11 +5,12 @@ import { describe, it } from "node:test";
 import { openPromise } from "yauzl";
 import { guideChapterNumber, readGuide, readWorldManifest } from "@arke-studio/contracts";
 import { exportGuideAlone } from "../../src/productions/arke-player-guide-export.js";
-import { setGuideEntry } from "../../src/productions/world-guide.js";
+import { setGuideEntry, setGuideTeasers } from "../../src/productions/world-guide.js";
 import { checkWorldPackageZip } from "../../src/productions/world-package.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
+import { musicFfmpeg, withAlbum } from "./music-world.js";
 
 // SPEC-059 R-10: a world's guide alone, the package Arke Player pins beside the full one so a
 // world can be explored before it is installed.
@@ -140,5 +141,29 @@ describe("a world's guide alone (SPEC-059 R-10)", () => {
       const result = await exportGuideAlone(store, { clock: CLOCK, ffmpeg, exportId: exportId(6), studioVersion: "test" });
       assert.deepEqual(result, { ok: false, blockers: ["the world or its Guide changed while the package was made · make it again"] });
       assert.deepEqual(await readdir(join(dir, "exports")).catch(() => []), []);
+    }));
+
+  it("carries a theme and a song teaser as guide version 3, the excerpt its own file (SPEC-059 R-35 – R-37)", () =>
+    withAlbum(CLOCK, async (store, dir, album, track) => {
+      await setGuideEntry(store, { entryKind: "characters", id: "maren-kest", entry: { public: true, theme: { production: album, track } } }, "editor");
+      await setGuideTeasers(store, { teasers: [{ kind: "song", production: album, track, start: 0, duration: 24_000 }] }, "editor");
+      const result = await exportGuideAlone(store, { clock: CLOCK, ffmpeg: musicFfmpeg(), exportId: exportId(7), studioVersion: "test" });
+      assert.ok(result.ok, result.ok ? "" : result.blockers.join("; "));
+      const file = join(dir, ...result.file.split("/"));
+      const checked = await checkWorldPackageZip(file);
+      assert.ok(checked.ok, checked.ok ? "" : checked.problems.join("; "));
+      const opened = readWorldManifest(await entry(file, "world.json"));
+      assert.ok(opened.ok, opened.ok ? "" : opened.reason);
+      const readBack = readGuide(await entry(file, "guide/guide.json"), opened.manifest.assets);
+      assert.ok(readBack.ok, readBack.ok ? "" : readBack.reason);
+      const guide = readBack.guide;
+      assert.equal(guide.version, 3);
+      const maren = guide.characters[0]!;
+      assert.deepEqual("theme" in maren ? maren.theme : null, { production: album, track, title: "The drowned verse", duration: 3000 });
+      const song = guide.version === 3 ? guide.teasers?.[0] : undefined;
+      assert.ok(song?.kind === "song");
+      // Three seconds is all the track has, so that is all the excerpt is.
+      assert.equal(song.duration, 3000);
+      assert.equal(opened.manifest.assets[song.audio]?.mediaType, "audio/mp4");
     }));
 });

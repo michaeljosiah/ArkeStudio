@@ -4,6 +4,7 @@ import {
   deriveProductionReadiness,
   episodeScriptFile,
   productionShape,
+  EMPTY_MUSIC_RECORD,
   FrameRunIdSchema,
   CandidateIdSchema,
   PropIdSchema,
@@ -205,7 +206,10 @@ export const plansFence = (plans: readonly DispatchPlanReadRecord[]) => fence(pl
 
 export function productionMetadataFence(bundle: WorldBundle, productionId: string): string {
   const production = productionOf(bundle, productionId);
-  return fence(production?.meta ?? null, production?.meta.updated ?? "absent");
+  // A music production's album is read with its metadata (SPEC-060 R-19), so a track added since
+  // the read makes a card prepared from it stale.
+  const music = production !== undefined && productionShape(production.meta).isMusic;
+  return fence(music ? { meta: production.meta, music: production.music ?? null } : production?.meta ?? null, production?.meta.updated ?? "absent");
 }
 
 export function productionsFence(bundle: WorldBundle): string {
@@ -757,7 +761,11 @@ export class WorldChatTargetReads {
         const productionId = requireString(args, "productionId");
         const production = productionOf(bundle, productionId);
         readTarget = target("production-metadata", productionId);
-        rows = production ? [{ key: "metadata", value: production.meta }] : [];
+        // A music production's album beside its metadata: its tracks by id, their lyrics and its cover.
+        rows = production ? [
+          { key: "metadata", value: production.meta },
+          ...(productionShape(production.meta).isMusic ? [{ key: "music", value: production.music ?? EMPTY_MUSIC_RECORD }] : []),
+        ] : [];
         revisionOrDigest = productionMetadataFence(bundle, productionId);
         break;
       }
