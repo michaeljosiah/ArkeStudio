@@ -4,6 +4,7 @@ import { EpisodeSchema, ProductionSchema, SeasonSchema, SeriesSchema } from "./w
 import { SceneRecordSchema, validateSceneFlow } from "./scene-flow.js";
 import { ProductionNarrativeSchema } from "./production-narrative.js";
 import { AudioDramaRecordSchema } from "./audio-drama.js";
+import { MusicRecordSchema } from "./music.js";
 
 /** Delivery defaults shared by direct creation and conversational setup. Story endings remain authored. */
 export const MICRODRAMA_DEFAULTS = {
@@ -38,6 +39,8 @@ export const ProductionCreationPlanSchema = z.object({
     /** An audio drama's plan and source, written as `audio-drama.json` (SPEC-057 R-7). */
     audioDrama: AudioDramaRecordSchema.optional(),
   }).strict().optional(),
+  /** A music production's record, written as `music.json` (SPEC-060 R-4): a soundtrack's `for` is fixed here. */
+  music: MusicRecordSchema.optional(),
 }).strict();
 export type ProductionCreationPlan = z.infer<typeof ProductionCreationPlanSchema>;
 
