@@ -176,7 +176,7 @@ export function musicTitleFrom(brief: string | undefined, file: string): string 
 
 /** A track id from its title, unique on the album: the package's music document names it. */
 export function musicTrackId(title: string, taken: readonly string[]): string {
-  const base = title.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "track";
+  const base = title.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48).replace(/-+$/, "") || "track";
   const used = new Set(taken);
   if (!used.has(base)) return base;
   for (let counter = 2; ; counter++) if (!used.has(`${base}-${counter}`)) return `${base}-${counter}`;

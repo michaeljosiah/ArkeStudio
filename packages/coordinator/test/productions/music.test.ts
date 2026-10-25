@@ -24,6 +24,7 @@ import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
  */
 const BELLS = "ar_01J8G0000000000000000000R1";
 const BOARD = "ar_01J8G0000000000000000000B2";
+const CUE = "ar_01J9M00000000000000000C001";
 
 /** One second of a quiet stereo tone, 48 kHz, as the decode step writes it. */
 function toneWav(seconds = 1): Buffer {
@@ -72,6 +73,7 @@ interface Harness {
   events: DomainEvent[];
   send: (message: ClientMessage) => Promise<void>;
   store: () => WorldStore;
+  provider: FsWorldProvider;
 }
 
 async function withHarness(run: (h: Harness) => Promise<void>, options: { ffmpeg?: FfmpegRunner; probe?: MediaProbe; prepare?: (worldDir: string) => Promise<void> } = {}): Promise<void> {
@@ -79,6 +81,12 @@ async function withHarness(run: (h: Harness) => Promise<void>, options: { ffmpeg
   // A picture on the shelf for the cover, beside the fixture's own board.
   await writeFile(join(worldDir, "artifacts", "cover.png"), Buffer.from("89504e470d0a1a0a", "hex"));
   await writeFile(join(worldDir, "artifacts", "cover.png.json"), JSON.stringify({ id: BOARD, kind: "image", file: "cover.png", hash: "sha256:1111111111111111", origin: { by: "user" }, links: [], created: "2026-10-24T10:00:00Z" }));
+  // An audio drama's music cue, filed as Saltlight's own (SPEC-057 R-40): the world's music still.
+  await writeFile(join(worldDir, "artifacts", "harbour-reel.wav"), toneWav());
+  await writeFile(join(worldDir, "artifacts", "harbour-reel.wav.json"), JSON.stringify({
+    id: CUE, kind: "audio", file: "harbour-reel.wav", hash: "sha256:2222222222222222", origin: { by: "system", producedBy: "sound" }, links: [], production: "saltlight", created: "2026-10-24T10:00:00Z",
+    generation: { source: "sound", productionId: "saltlight", name: "Harbour reel", cue: "music", heard: "a reel on the quay", prompt: "a harbour reel", provider: "elevenlabs", model: "sound", outputFormat: "wav", estimatedMicroUsd: 0, costMicroUsd: null },
+  }));
   await options.prepare?.(worldDir);
   const provider = new FsWorldProvider(root, { clock: () => "2026-10-25T09:00:00.000Z" });
   await provider.loadWorld(WORLD_ID);
@@ -99,7 +107,7 @@ async function withHarness(run: (h: Harness) => Promise<void>, options: { ffmpeg
   const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
-    await run({ worldDir, events, send, store: () => provider.openStore!()! });
+    await run({ worldDir, events, send, store: () => provider.openStore!()!, provider });
   } finally {
     await provider.close();
   }
@@ -192,6 +200,14 @@ describe("the album's tracks (238c – 238e, R-5 – R-7)", () => {
       assert.equal((await recordOf(h.worldDir, slug)).tracks.length, 2);
       const meta = JSON.parse(await readFile(join(h.worldDir, "productions", slug, "production.json"), "utf8")) as { kind?: string };
       assert.equal(meta.kind, "album");
+    }));
+
+  it("takes music another production made, as an audio drama's cue (codex on PR 2189)", () =>
+    withHarness(async (h) => {
+      const slug = (await createMusic(h, "Songs", "album")).slug!;
+      await h.send({ kind: "music-track-add", worldId: WORLD_ID, productionId: slug, artifactId: CUE });
+      assert.deepEqual((await recordOf(h.worldDir, slug)).tracks.map((track) => [track.id, track.title]), [["harbour-reel", "Harbour reel"]]);
+      assert.deepEqual(failures(h), []);
     }));
 
   it("takes a picture as its cover and refuses a sound (R-5)", () =>
@@ -304,6 +320,9 @@ describe("the render and Export → Arke Player (238h, R-8, R-15 – R-17)", () 
       assert.ok(played?.result.ok);
       assert.equal(played.result.durationMs, 1000);
       assert.equal(calls.length, before);
+      // What Play all answers is something the media route will serve, as audio (codex on PR 2189).
+      const served = await h.provider.serveMedia("the-undersong", played.result.file);
+      assert.equal(served?.contentType, "audio/mp4");
     }, { ffmpeg: fakeFfmpeg(calls) });
   });
 

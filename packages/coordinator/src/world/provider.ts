@@ -726,6 +726,8 @@ export class FsWorldProvider implements WorldProvider {
     ".mp3": "audio/mpeg",
     ".wav": "audio/wav",
     ".flac": "audio/flac",
+    // A music production's render and an imported track (SPEC-060 R-6, R-8): AAC in MP4.
+    ".m4a": "audio/mp4",
     ".pdf": "application/pdf",
   };
 

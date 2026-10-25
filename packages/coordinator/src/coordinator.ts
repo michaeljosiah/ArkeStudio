@@ -3417,6 +3417,8 @@ export class Coordinator {
   private readonly performanceGenerations = new Map<string, AbortController>();
   /** SPEC-013: exports in flight, cancellable by id (R-21). */
   private readonly exports = new Map<string, ExportHandle>();
+  /** Play all's renders in flight (SPEC-060 R-8), by request: aborted with the coordinator. */
+  private readonly renderingMusic = new Map<string, AbortController>();
   /** The audiobook video render going for a book, by `<world>/<production>`: two never run at once (design turn 197, rule 10). */
   private readonly videoRenders = new Map<string, string>();
   /** Safe read projections for the target-read surface; output paths remain world-relative. */
@@ -11022,13 +11024,19 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return answer({ ok: false, reason: "that world is not open" });
         if (this.opts.ffmpeg === undefined) return answer({ ok: false, reason: "Needs ffmpeg" });
+        if (this.stopping) return;
+        // Cancelled with the world, and with the coordinator before it drains its handlers.
+        const control = new AbortController();
+        this.renderingMusic.set(msg.requestId, control);
         try {
           const { record } = await readMusicRecord(store, msg.productionId);
-          const album = await renderMusicAlbum(store, record, { ffmpeg: this.opts.ffmpeg, signal: store.closingSignal });
+          const album = await renderMusicAlbum(store, record, { ffmpeg: this.opts.ffmpeg, signal: AbortSignal.any([control.signal, store.closingSignal]) });
           return answer({ ok: true, file: album.file, durationMs: album.durationMs, starts: album.starts });
         } catch (err) {
           void this.appLog?.append({ kind: "music.render-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
-          return answer({ ok: false, reason: err instanceof Error ? err.message.slice(0, 300) : "the album could not be rendered" });
+          return answer({ ok: false, reason: control.signal.aborted ? "the render was cancelled" : err instanceof Error ? err.message.slice(0, 300) : "the album could not be rendered" });
+        } finally {
+          this.renderingMusic.delete(msg.requestId);
         }
       }
       case "list-guide-voice-lines": {
@@ -22832,6 +22840,7 @@ export class Coordinator {
       await this.storyPublications.stop();
       this.dramaEditions.stop();
       for (const handle of this.exports.values()) handle.cancel();
+      for (const control of this.renderingMusic.values()) control.abort();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused
       // by the store anyway once the world begins closing.
       this.backfillAbort?.abort();

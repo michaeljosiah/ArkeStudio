@@ -84,7 +84,8 @@ export function MusicAlbumScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   if (!world || !production) return <Screen id="music-album"><EmptyState title="Opening production…" /></Screen>;
-  return <MusicAlbum world={world} production={production} />;
+  // Keyed by both, so another album never inherits this one's open track, order or drafts.
+  return <MusicAlbum key={`${world.meta.worldId}/${production.meta.id}`} world={world} production={production} />;
 }
 
 export function MusicAlbum({ world, production }: { world: WorldBundle; production: ProductionBundle }) {
@@ -120,7 +121,19 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
   // Heard in (R-14): asked for again whenever the album's sources or the world's placements move.
   const [heard, setHeard] = useState<Record<string, MusicHeardRow[]>>({});
   const asked = useRef<string | null>(null);
-  const heardKey = JSON.stringify([record.tracks.map((track) => track.source), world.productions.length, world.artifacts.length]);
+  // Every placement Heard in reads, by what changes when it moves: a chapter's audiobook record,
+  // an episode script, a cut, an edited timeline, a spine. Another window's edit arrives here.
+  const heardKey = useMemo(() => JSON.stringify([
+    record.tracks.map((track) => track.source),
+    world.productions.filter((entry) => entry.meta.id !== productionId).map((entry) => [
+      entry.meta.id,
+      entry.chapters.map((chapter) => chapter.audiobook ?? null),
+      entry.episodeScripts?.map((script) => script.hash) ?? null,
+      entry.cut,
+      entry.timeline?.status === "ready" ? entry.timeline.hash ?? entry.timeline.timeline.revision : entry.timeline?.status ?? null,
+      entry.spine?.trackArtifactId ?? null,
+    ]),
+  ]), [record.tracks, world.productions, productionId]);
   useEffect(() => subscribeMusicHeardIn((answer) => {
     if (answer.requestId === asked.current) setHeard(answer.tracks);
   }), []);
@@ -263,7 +276,8 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
  */
 function AddTrackDialog({ world, production, record, onClose }: { world: WorldBundle; production: ProductionBundle; record: MusicRecord; onClose: () => void }) {
   const worldId = world.meta.worldId;
-  const kept = keptMusic(shelfOf(world, production));
+  // Kept music is the world's, whichever production made it: an audio drama's music cues too.
+  const kept = keptMusic(world.artifacts);
   const [filter, setFilter] = useState<"kept" | "songs" | "instrumental">("kept");
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<string | null>(null);
@@ -316,7 +330,7 @@ function AddTrackDialog({ world, production, record, onClose }: { world: WorldBu
                 </div>
                 <button type="button" className="nm" disabled={track !== undefined} onClick={() => setChosen(artifact.id)}>
                   <b>{title}</b>
-                  <small>{track !== undefined ? `Track ${track}` : ["Bench", seconds !== undefined ? musicClock(seconds * 1000) : null, `kept ${new Date(artifact.created).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`].filter(Boolean).join(" · ")}</small>
+                  <small>{track !== undefined ? `Track ${track}` : [artifact.generation?.source === "sound" ? "Audio drama" : "Bench", seconds !== undefined ? musicClock(seconds * 1000) : null, `kept ${new Date(artifact.created).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`].filter(Boolean).join(" · ")}</small>
                 </button>
               </div>
             );

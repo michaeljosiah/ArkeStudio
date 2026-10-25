@@ -85,7 +85,9 @@ export async function addMusicTrack(store: WorldStore, productionId: string, art
   const artifact = artifacts.find((candidate) => candidate.id === artifactId);
   if (artifact === undefined || artifact.retiredAt !== undefined) throw new MusicRefusal("that take is no longer on the shelf");
   if (artifact.kind !== "audio") throw new MusicRefusal("a track is audio");
-  if (artifact.production !== undefined && artifact.production !== productionId) throw new MusicRefusal("that take belongs to another production");
+  // Kept music is the world's whoever made it: an audio drama files its music cues as its own
+  // (SPEC-057 R-40), and an album may take one. Anything else another production owns stays its.
+  if (artifact.production !== undefined && artifact.production !== productionId && keptMusic([artifact]).length === 0) throw new MusicRefusal("that take belongs to another production");
   const title = keptMusic([artifact])[0]?.title ?? musicTitleFrom(undefined, artifact.file);
   let added = "";
   await writeMusic(store, productionId, "music-track-add", (record) => {

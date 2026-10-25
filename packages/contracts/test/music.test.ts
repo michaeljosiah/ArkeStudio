@@ -96,6 +96,10 @@ describe("what the album page reads", () => {
     assert.equal(musicTrackId("The Drowned Verse", []), "the-drowned-verse");
     assert.equal(musicTrackId("The Drowned Verse", ["the-drowned-verse"]), "the-drowned-verse-2");
     assert.equal(musicTrackId("¿?", []), "track");
+    // Cut to 48, an id never ends on a separator (codex on PR 2189).
+    const long = musicTrackId(`${"a".repeat(47)} song`, []);
+    assert.equal(long, "a".repeat(47));
+    assert.match(long, /^[a-z0-9][a-z0-9-]*[a-z0-9]$/);
   });
 
   it("asks for a music cover square, 1024 on a side (R-5)", () => {

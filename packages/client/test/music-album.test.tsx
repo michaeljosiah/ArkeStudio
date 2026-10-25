@@ -34,6 +34,7 @@ const BELLS = "ar_01J8G0000000000000000000R1";
 const SONG = "ar_01J9M000000000000000000501";
 const TUNE = "ar_01J9M000000000000000000502";
 const COVER = "ar_01J9M000000000000000000503";
+const CUE = "ar_01J9M000000000000000000504";
 const ALBUM = "songs-of-the-drowned-quarter";
 
 const bench = (id: string, file: string, brief: string, lyrics: string) => ({
@@ -58,6 +59,9 @@ function withMusic(kind: "album" | "single" = "album"): ClientState {
     bench(SONG, "bell-rope-chant.mp3", "Bell rope chant, slow", "[verse]\nhaul on the ropes"),
     bench(TUNE, "harbour-reel.mp3", "Harbour reel", ""),
     { id: COVER, kind: "image", file: "cover.png", hash: "sha256:2222222222222222", origin: { by: "user" }, links: [], created: AT },
+    // An audio drama's music cue, filed as its own production's: still the world's music.
+    { id: CUE, kind: "audio", file: "bell-watch-cue.wav", hash: "sha256:3333333333333333", origin: { by: "system", producedBy: "sound" }, links: [], production: "saltlight", created: AT,
+      generation: { source: "sound", productionId: "saltlight", name: "Bell watch cue", cue: "music", heard: "", prompt: "a bell watch cue", provider: "elevenlabs", model: "sound", outputFormat: "wav", estimatedMicroUsd: 0, costMicroUsd: null } },
   ] as never;
   return state;
 }
@@ -177,6 +181,16 @@ describe("an album's page (238c, R-5)", () => {
     assert.match(m.container.querySelector("[data-testid='music-track'] .heard")!.textContent!, /Saltlight · Cut/);
   });
 
+  it("asks where its tracks are heard again when a placement moves elsewhere (codex on PR 2189)", async () => {
+    const state = withMusic();
+    const m = await mount(state, PAGE);
+    const before = m.of("read-music-heard-in").length;
+    const moved = structuredClone(state);
+    moved.world!.productions.find(p => p.meta.id === "saltlight")!.cut = { audio: [{ kind: "score", label: "Score", entries: [{ artifactId: BELLS, offsetSec: 12 }] }], overlays: [] } as never;
+    await act(async () => __setStateForTest(moved, { connection: "open" }));
+    assert.equal(m.of("read-music-heard-in").length, before + 1);
+  });
+
   it("plays the album through the export's render (R-8)", async () => {
     const m = await mount(withMusic(), PAGE);
     await click(m.container, "Play all");
@@ -193,14 +207,15 @@ describe("Add track (238d, R-6)", () => {
     await click(m.container, "Add track");
     const dialog = dom.document.body.querySelector(".fy-music-dlg")!;
     assert.ok(dialog, "Add track opens over the album");
-    assert.match(dialog.textContent!, /Kept 2/);
+    assert.match(dialog.textContent!, /Kept 3/);
     assert.match(dialog.textContent!, /Songs 1/);
-    assert.match(dialog.textContent!, /Instrumental 1/);
+    assert.match(dialog.textContent!, /Instrumental 2/);
     const tiles = () => [...dialog.querySelectorAll("[data-testid='music-take']")].map(tile => tile.textContent);
-    assert.deepEqual(tiles().map(t => t!.split("Bench")[0]), ["Bell rope chant", "Harbour reel"]);
-    await click(dialog, "Instrumental 1");
-    assert.equal(tiles().length, 1);
-    await click(dialog, "Kept 2");
+    // An audio drama's music cue is offered too, though another production filed it (codex on PR 2189).
+    assert.deepEqual(tiles().map(t => t!.split(/Bench|Audio drama/)[0]), ["Bell rope chant", "Harbour reel", "Bell watch cue"]);
+    await click(dialog, "Instrumental 2");
+    assert.equal(tiles().length, 2);
+    await click(dialog, "Kept 3");
     assert.match(dialog.textContent!, /Import a file/);
     assert.match(dialog.textContent!, /WAV · MP3 · M4A · FLAC/);
     await press(dialog.querySelector("[role='radio'][aria-label='Bell rope chant']") ?? undefined, "Bell rope chant");
