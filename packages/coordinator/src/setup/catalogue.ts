@@ -278,7 +278,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
       },
     },
   },
-  // The ComfyUI engine (SPEC-021 §2.4, D10). Optional and selection-first: a source the user
+  // The ComfyUI engine (SPEC-021 §2.4, D10). Queued by default and selection-first: a source the user
   // deliberately selected is reused, while mere detection remains an offer and does not suppress
   // this managed option. Pinned to a release with the release's own published sha256; the
   // NVIDIA build only, said on the row (§1.4). The archive is 7z, which the resolved System32

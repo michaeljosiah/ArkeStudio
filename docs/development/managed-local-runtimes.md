@@ -6,6 +6,10 @@ ComfyUI offers an explicitly selected install folder or URL; Ollama offers an ex
 selected loopback HTTP URL. **Use Arke-managed** clears the override. Existing overrides remain
 selected across upgrades; there is no silent migration of a personal model store.
 
+Setup currently runs in the background and can be skipped. A downloaded component is not a
+first-run health guarantee: engine status reports whether the selected service is running.
+Mandatory local-AI onboarding that waits for both health checks is not implemented here.
+
 Ollama is a pinned, SHA-256-verified portable tree, not a system installer or PATH command.
 Arke owns its process, a private loopback port, `<appRoot>/models/ollama`, and
 `<appRoot>/runtime-home/ollama`. Logs are `<appRoot>/logs/engines/ollama.log`.
