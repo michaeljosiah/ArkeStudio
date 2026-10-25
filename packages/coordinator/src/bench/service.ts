@@ -28,6 +28,8 @@ import {
   mappedReferenceKinds,
   modeCapability,
   MUSIC_DURATION_SEC,
+  musicTakesInstrumental,
+  musicTakesLength,
   newId,
   orderedShots,
   pricedDuration,
@@ -1078,8 +1080,16 @@ export function planBenchDispatch(
   // minimax-music-3 requires prompt AND lyrics. Refused here with the missing half named,
   // rather than sent and 422'd: the brief is already guarded above, and words nobody wrote
   // are not something to discover from a provider error.
-  if (params.kind === "music" && params.lyrics.trim().length === 0) {
+  // An instrumental (SPEC-060 R-9) goes without words, on a route that can make one; anything
+  // else still needs its lyrics. A length goes only to a route that keeps it.
+  if (params.kind === "music" && params.instrumental === true) {
+    if (!musicTakesInstrumental(model)) return { ok: false, reason: `${model.displayName} needs lyrics` };
+    if (params.lyrics.trim().length > 0) return { ok: false, reason: "An instrumental is sent without lyrics" };
+  } else if (params.kind === "music" && params.lyrics.trim().length === 0) {
     return { ok: false, reason: "There are no lyrics yet — write them, or ask for a draft." };
+  }
+  if (params.kind === "music" && params.lengthSec !== undefined && !musicTakesLength(model)) {
+    return { ok: false, reason: `${model.displayName} takes no length` };
   }
 
   const videoDuration =
@@ -1316,12 +1326,13 @@ export function planBenchDispatch(
           // refuses a length a model does not declare, and its comment is the reason this is
           // here at all: a request that runs at the provider's default while the estimate was
           // computed from a number is the bug that machinery exists to prevent.
-          durationSec: MUSIC_DURATION_SEC,
+          // A track's composer may ask a length a route keeps (SPEC-060 R-9); priced at it.
+          durationSec: params.kind === "music" && params.lengthSec !== undefined ? params.lengthSec : MUSIC_DURATION_SEC,
         },
         // A ceiling, not a quote — the route calls `duration` an upper bound and stops when the
         // song is done. The take states the length that was actually made, measured from the
         // file, and the ledger records what was actually charged.
-        estimatedMicroUsd: estimateMicroUsd(model, { durationSec: MUSIC_DURATION_SEC }),
+        estimatedMicroUsd: estimateMicroUsd(model, { durationSec: params.kind === "music" && params.lengthSec !== undefined ? params.lengthSec : MUSIC_DURATION_SEC }),
         landing: { dir: sessionMediaDir(session.id, takeId) },
       });
     }

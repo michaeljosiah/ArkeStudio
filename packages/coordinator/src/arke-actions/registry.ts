@@ -472,6 +472,14 @@ const CLIENT_COMMAND_METADATA = {
   "music-draft-lyrics": readOnly("Returns a lyrics draft without changing the track."),
   "read-music-heard-in": readOnly(QUERY),
   "render-music": readOnly(QUERY),
+  // A track's composer, editor and the album's sequence (SPEC-060 R-9 – R-13): the composer
+  // spends as the Bench does; the editor and the sequence are authored changes to music.json.
+  "music-track-make": action("production", "generation", "bench", "spend-and-compute", ["bench", "artifacts", "jobs", "production-metadata"]),
+  "music-track-choose": action("production", "command", "production-store", "authored-change", ["production-metadata", "artifacts", "bench"]),
+  "music-track-edit": action("production", "command", "production-store", "authored-change", ["production-metadata"]),
+  "music-sequence-set": action("production", "command", "production-store", "authored-change", ["production-metadata"]),
+  "read-music-takes": readOnly(QUERY),
+  "read-music-waveform": readOnly(QUERY),
   "list-guide-voice-lines": readOnly(QUERY),
   "reorder-chapters": action("production", "command", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   "reorder-scenes": action("production", "command", "production-store", "authored-change", ["scenes", "episodes"]),
@@ -1686,8 +1694,12 @@ export function arkeClientCommand<K extends ClientMessageKind>(
 
 /** Kept local to this boundary so arbitrary strings never acquire a descriptor by assertion. */
 export function findArkeClientCommand(kind: string): ArkeClientCommandDescriptor | undefined {
-  return Object.prototype.hasOwnProperty.call(ARKE_CLIENT_COMMAND_REGISTRY, kind)
-    ? ARKE_CLIENT_COMMAND_REGISTRY[kind as ClientMessageKind]
+  // Indexed by the whole kind union, the mapped registry is past what the checker will represent
+  // (TS2590) once ClientMessage passed five hundred commands; a lookup by string reads it as the
+  // record it is at runtime.
+  const registry = ARKE_CLIENT_COMMAND_REGISTRY as unknown as Readonly<Record<string, ArkeClientCommandDescriptor>>;
+  return Object.prototype.hasOwnProperty.call(registry, kind)
+    ? registry[kind]
     : undefined;
 }
 

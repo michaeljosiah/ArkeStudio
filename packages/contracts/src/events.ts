@@ -38,7 +38,7 @@ import { ArtifactKindSchema } from "./artifact.js";
 import { BorrowableArtifactSchema } from "./editor-media.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
 import { BenchPresetSchema } from "./bench.js";
-import { MusicHeardRowSchema } from "./music.js";
+import { MusicHeardRowSchema, MusicTakeViewSchema, MusicWaveformSchema } from "./music.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
 import { DiagnosticsSnapshotSchema } from "./diagnostics.js";
@@ -158,6 +158,8 @@ export const QueueCommandSchema = z.enum([
   "bench-dispatch",
   "bench-rerun",
   "bench-upscale",
+  // A track's composer (SPEC-060 R-9), which dispatches through the Bench's own plan.
+  "music-track-make",
   "bench-upload-references",
   "upload-artifacts",
   "borrow-artifacts",
@@ -2389,6 +2391,14 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       z.object({ ok: z.literal(false), reason: z.string().max(2000) }).strict(),
     ]),
   }).strict(),
+  /**
+   * A music production's takes (SPEC-060 R-9, R-10): every take of its Bench session, by the
+   * track that asked for it. Answers `read-music-takes`, and is said again, with a null requestId,
+   * whenever the session moves, so a queued take is seen to finish.
+   */
+  z.object({ ...base, type: z.literal("music.takes"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema.nullable(), takes: z.array(MusicTakeViewSchema) }).strict(),
+  /** A world audio file's waveform (238j, 238k), or why it could not be read. */
+  z.object({ ...base, type: z.literal("music.waveform"), worldId: UlidSchema, requestId: UlidSchema, file: z.string().min(1).max(1000), waveform: MusicWaveformSchema.nullable(), reason: z.string().max(500).optional() }).strict(),
   /** Saved bench setups changed (issue 305 §3): the whole list rides, it is small. */
   z.object({ ...base, type: z.literal("presets.changed"), presets: z.array(BenchPresetSchema) }).strict(),
   /** Rolling spend re-evaluated on a ledger append or a settings change (SPEC-008 R-19, D10). */

@@ -73,6 +73,12 @@ export const MusicRecordSchema = z.object({
   version: z.literal(1),
   /** The production a soundtrack is for (R-1), by id. */
   for: SlugSchema.optional(),
+  /**
+   * The album's own Bench session (R-9): every take a track's composer makes is a Bench take in
+   * it, so it is on the world's shelf too, with one quote and one take list (call 9). Made the
+   * first time a track asks for takes.
+   */
+  session: SessionIdSchema.optional(),
   cover: ArtifactIdSchema.optional(),
   loudness: z.number().min(-30).max(-6).default(DEFAULT_MUSIC_LOUDNESS),
   tracks: z.array(MusicRecordTrackSchema).max(MAX_MUSIC_TRACKS),
@@ -203,3 +209,88 @@ export const MusicHeardRowSchema = z.object({
   open: z.string().min(1).max(500),
 }).strict();
 export type MusicHeardRow = z.infer<typeof MusicHeardRowSchema>;
+
+/**
+ * A track's take as its composer shows it (238i, R-9, R-10): a Bench take of the album's session,
+ * by number, with where it stands. `file` is world-relative once the take has media; `durationMs`
+ * is measured from it. `trackId` is the track whose composer asked for it.
+ */
+export const MusicTakeViewSchema = z.object({
+  trackId: SlugSchema.nullable(),
+  sessionId: SessionIdSchema,
+  takeId: TakeIdSchema,
+  n: z.number().int().min(1),
+  status: z.string().min(1).max(40),
+  file: z.string().min(1).max(500).optional(),
+  durationMs: z.number().int().min(0).optional(),
+  keptArtifactId: ArtifactIdSchema.optional(),
+  error: z.string().max(500).optional(),
+  createdAt: z.string().min(1),
+}).strict();
+export type MusicTakeView = z.infer<typeof MusicTakeViewSchema>;
+
+/** A waveform the editor and the sequence draw (238j, 238k): peaks 0..1, left and right merged. */
+export const MusicWaveformSchema = z.object({ durationMs: z.number().int().min(0), peaks: z.array(z.number().min(0).max(1)).max(4096) }).strict();
+export type MusicWaveform = z.infer<typeof MusicWaveformSchema>;
+
+/**
+ * Lyrics as stanzas (238j): a `[verse]` or `[chorus]` tag starts one, labelled from it; lines
+ * before any tag are a stanza of their own, and blank lines close one. The tags are the singing
+ * model's, never shown as lines.
+ */
+export function musicStanzas(lyrics: string | undefined): Array<{ label: string | null; lines: string[] }> {
+  const stanzas: Array<{ label: string | null; lines: string[] }> = [];
+  let current: { label: string | null; lines: string[] } | null = null;
+  for (const raw of (lyrics ?? "").split(/\r?\n/)) {
+    const line = raw.trim();
+    const tag = /^\[([^\]]{1,40})\]$/.exec(line);
+    if (tag !== null) {
+      current = { label: tag[1]!.trim().replace(/^./, (first) => first.toUpperCase()), lines: [] };
+      stanzas.push(current);
+      continue;
+    }
+    if (line === "") {
+      if (current !== null && current.lines.length > 0) current = null;
+      continue;
+    }
+    if (current === null) {
+      current = { label: null, lines: [] };
+      stanzas.push(current);
+    }
+    current.lines.push(line);
+  }
+  return stanzas.filter((stanza) => stanza.lines.length > 0);
+}
+
+/**
+ * A trim kept after another take is chosen (R-10): clipped to the new take's length, or dropped
+ * when nothing of it is left. The sections are kept as they were.
+ */
+export function clipMusicTrim(trim: MusicRecordTrack["trim"], lengthMs: number | null): MusicRecordTrack["trim"] {
+  if (trim === undefined || lengthMs === null) return trim;
+  const endMs = Math.min(trim.endMs, lengthMs);
+  if (endMs <= trim.startMs) return undefined;
+  return endMs === lengthMs && trim.startMs === 0 ? undefined : { startMs: trim.startMs, endMs };
+}
+
+/** The sequence as the head and the Export sheet say it (238h, 238k): `6 gaps · 2 crossfades`, or `Back to back`. */
+export function musicSequenceLine(record: Pick<MusicRecord, "tracks">): string {
+  const joins = record.tracks.slice(0, -1).map((track) => track.next);
+  const gaps = joins.filter((join) => join !== undefined && "gapMs" in join && join.gapMs > 0).length;
+  const fades = joins.filter((join) => join !== undefined && "crossfadeMs" in join && join.crossfadeMs > 0).length;
+  if (gaps + fades === 0) return "Back to back";
+  return [gaps > 0 ? `${gaps} gap${gaps === 1 ? "" : "s"}` : null, fades > 0 ? `${fades} crossfade${fades === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ");
+}
+
+/** `−14 LUFS`: the album's loudness, with a true minus. */
+export function musicLoudnessLabel(loudness: number): string {
+  return `${loudness === Math.round(loudness) ? loudness : loudness.toFixed(1)} LUFS`.replace("-", "−");
+}
+
+/** `Take 2 of 3` (238c, 238e): which of its track's takes a track plays, when it plays one. */
+export function musicTakeLabel(track: Pick<MusicRecordTrack, "takes">, artifact: Pick<ArtifactSidecar, "generation"> | undefined): string | null {
+  const generation = artifact?.generation;
+  if (generation === undefined || !("takeId" in generation) || generation.source !== "bench") return null;
+  const index = track.takes.findIndex((take) => take.takeId === generation.takeId);
+  return index < 0 ? null : `Take ${index + 1} of ${track.takes.length}`;
+}

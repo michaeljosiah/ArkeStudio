@@ -190,9 +190,30 @@ export const BenchMusicParamsSchema = z
     lyrics: z.string().max(20_000),
     /** How many songs one press asks for — each its own numbered take, as images are. */
     count: z.number().int().min(1).max(4),
+    /**
+     * The length asked, where the route keeps it (SPEC-060 R-9; `limits.musicLength`). A track's
+     * composer offers it; the Bench's own composer still asks none, for the reason above. A route
+     * whose length is a ceiling is never sent one: the dispatch refuses it rather than price a
+     * number the song need not reach.
+     */
+    lengthSec: z.number().int().min(3).max(300).optional(),
+    /**
+     * A song with no voice (SPEC-060 R-9; `limits.musicInstrumental`). It is sent without lyrics,
+     * so a route that needs words is refused rather than sent an empty song.
+     */
+    instrumental: z.literal(true).optional(),
   })
+  // Not refined here: a member of the discriminated union below must stay a plain object. The
+  // dispatch plan refuses lyrics beside `instrumental`.
   .strict();
 export type BenchMusicParams = z.infer<typeof BenchMusicParamsSchema>;
+
+/** Whether a route keeps the length it is asked for, and so may be asked one (SPEC-060 R-9). */
+export const musicTakesLength = (model: { capability: string; limits: { musicLength?: "exact" | undefined } }): boolean =>
+  model.capability === "music" && model.limits.musicLength === "exact";
+/** Whether a route can make a song with no voice (SPEC-060 R-9). */
+export const musicTakesInstrumental = (model: { capability: string; limits: { musicInstrumental?: true | undefined } }): boolean =>
+  model.capability === "music" && model.limits.musicInstrumental === true;
 
 /**
  * The length every music request is made at, in seconds.

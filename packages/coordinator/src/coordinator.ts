@@ -189,6 +189,7 @@ import {
   makesShape,
   type BenchSession,
   type BenchTake,
+  type MusicWaveform,
   type SessionId,
   type Delivery,
   supportedDeliveries,
@@ -530,7 +531,8 @@ import {
 import { makeArtDirector } from "./references/art-director.js";
 import { enhancerBrief } from "./bench/enhancer.js";
 import { LYRICS_MAX_CHARS, lyricistBrief } from "./bench/lyricist.js";
-import { addMusicTrack, readMusicRecord, removeMusicTrack, reorderMusicTracks, setMusicCover, updateMusicTrack } from "./productions/music.js";
+import { addMusicTrack, chooseMusicTake, editMusicTrack, ensureMusicSession, MusicRefusal, musicTakeViews, readMusicRecord, removeMusicTrack, reorderMusicTracks, setMusicCover, setMusicSequence, tagMusicTakes, updateMusicTrack } from "./productions/music.js";
+import { musicWaveform } from "./productions/music-waveform.js";
 import { musicHeardIn } from "./productions/music-heard.js";
 import { renderMusicAlbum } from "./productions/music-render.js";
 import { KEY_ART_EXTENSIONS, WORLD_IMAGE_DIR, worldImagePrompt, worldImageRequest } from "./references/world-image.js";
@@ -11039,6 +11041,91 @@ export class Coordinator {
           this.renderingMusic.delete(msg.requestId);
         }
       }
+      case "music-track-make": {
+        // A track's composer (238i, SPEC-060 R-9): its takes are Bench takes in the album's own
+        // session, made by the Bench's own dispatch — the plan, quote, reservation, ledger and
+        // Activity a press in Bench gets — and then tagged with the track that asked for them.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return this.rejectEnqueue(msg.requestId, msg.kind, "That world is not open.");
+        if (msg.composer.params.kind !== "music") return this.rejectEnqueue(msg.requestId, msg.kind, "A track's takes are music.");
+        let sessionId: SessionId;
+        try {
+          const { record } = await readMusicRecord(store, msg.productionId);
+          if (!record.tracks.some((track) => track.id === msg.trackId)) throw new MusicRefusal("That track is no longer on the album.");
+          sessionId = await ensureMusicSession(store, msg.productionId, this.nowIso());
+        } catch (err) {
+          return this.rejectEnqueue(msg.requestId, msg.kind, err instanceof Error ? err.message.slice(0, 300) : "The album could not be read.");
+        }
+        await this.handleClientMessage({ kind: "bench-dispatch", worldId: msg.worldId, sessionId, requestId: msg.requestId, composer: { mode: "music", ...msg.composer } });
+        // A press of several takes reserves `<request>/<n>`; one take reserves the request itself.
+        const made = (await this.benchFor(msg.worldId, sessionId))?.session.takes
+          .filter((take) => take.requestId === msg.requestId || take.requestId.startsWith(`${msg.requestId}/`)) ?? [];
+        try {
+          await tagMusicTakes(store, msg.productionId, msg.trackId, made.map((take) => ({ sessionId, takeId: take.id })));
+        } catch (err) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The takes could not be added to the track" });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        await this.emitMusicTakes(store, msg.productionId, msg.requestId);
+        return;
+      }
+      case "music-track-choose": {
+        // Choose (238i, R-10): the take is kept to the shelf as Bench's Keep keeps one, and the
+        // track plays it from there, so the render, the export and Heard in read it as any track.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        try {
+          const { record } = await readMusicRecord(store, msg.productionId);
+          if (record.session !== msg.sessionId) throw new MusicRefusal("that take is not this album's");
+          const takeOf = async () => (await this.benchFor(msg.worldId, msg.sessionId))?.session.takes.find((take) => take.id === msg.takeId);
+          let take = await takeOf();
+          if (take?.media === undefined) throw new MusicRefusal("that take has not finished");
+          if (take.keptArtifactId === undefined) {
+            await this.handleClientMessage({ kind: "bench-keep", worldId: msg.worldId, sessionId: msg.sessionId, takeId: msg.takeId, requestId: msg.requestId });
+            take = await takeOf();
+          }
+          if (take?.keptArtifactId === undefined) throw new MusicRefusal("that take could not be kept");
+          await chooseMusicTake(store, msg.productionId, msg.trackId, { sessionId: msg.sessionId, takeId: msg.takeId }, take.keptArtifactId);
+        } catch (err) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The take could not be chosen" });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        await this.emitMusicTakes(store, msg.productionId, msg.requestId);
+        return;
+      }
+      case "music-track-edit":
+      case "music-sequence-set": {
+        // The track editor's Save (238j, R-11) and the album's sequence (238k, R-13): one fenced
+        // write of music.json each, applied at render; the take itself is never touched.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        try {
+          if (msg.kind === "music-track-edit") await editMusicTrack(store, msg.productionId, msg.trackId, { trim: msg.trim, fadeInMs: msg.fadeInMs, fadeOutMs: msg.fadeOutMs, sections: msg.sections });
+          else await setMusicSequence(store, msg.productionId, { loudness: msg.loudness, joins: msg.joins });
+        } catch (err) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The album could not be saved" });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "read-music-takes": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await this.emitMusicTakes(store, msg.productionId, msg.requestId);
+        return;
+      }
+      case "read-music-waveform": {
+        // A strip for the editor and the sequence (238j, 238k): decoded once and cached.
+        const answer = (waveform: MusicWaveform | null, reason?: string) =>
+          this.emit({ at: this.nowIso(), type: "music.waveform", worldId: msg.worldId, requestId: msg.requestId, file: msg.file, waveform, ...(reason !== undefined ? { reason } : {}) });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return answer(null, "that world is not open");
+        try {
+          return answer(await musicWaveform(store.dir, msg.file, { ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), signal: store.closingSignal }));
+        } catch (err) {
+          return answer(null, err instanceof Error ? err.message.slice(0, 300) : "the waveform could not be read");
+        }
+      }
       case "list-guide-voice-lines": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
@@ -13260,7 +13347,25 @@ export class Coordinator {
           } catch (error) {
             this.emit({ type: "command.failed", at: this.nowIso(), command: msg.kind, requestId: null, reason: describeCoordinatorError(error) });
           }
-        } else await this.openBenchWorkspace(store, undefined, true);
+        } else {
+          const opened = await this.openBenchWorkspace(store, undefined, true);
+          // Make cover (238c, SPEC-060 R-5): a music cover is square, so its session starts at 1:1
+          // with the album's words, and the picture is made that shape rather than cut to it.
+          if (opened !== null && msg.image !== undefined) {
+            const composer = opened.composer;
+            await this.handleClientMessage({
+              kind: "bench-compose",
+              worldId: msg.worldId,
+              sessionId: opened.id,
+              requestId: ulid(),
+              mode: "image",
+              provider: composer.provider,
+              model: composer.model,
+              params: { kind: "image", count: composer.params.kind === "image" ? composer.params.count : 1, aspect: msg.image.aspect },
+              brief: msg.image.brief,
+            });
+          }
+        }
         return;
       }
       case "bench-close": {
@@ -21119,7 +21224,7 @@ export class Coordinator {
    * Recovery is idempotent, so running it on every open costs a read and buys the two crash
    * windows their answer (issue 305 §6).
    */
-  private async openBenchWorkspace(store: WorldStore, sessionId?: SessionId, fresh = false): Promise<void> {
+  private async openBenchWorkspace(store: WorldStore, sessionId?: SessionId, fresh = false): Promise<BenchSession | null> {
     const settings = this.appSettings ? await this.appSettings.load() : null;
     const routed = this.opts.manifest ? imageModelFor(settings, this.opts.manifest, undefined, store.getBundle().meta.models) : null;
     const opened = await openBenchSession(store.dir, () => this.nowIso(), {
@@ -21130,7 +21235,7 @@ export class Coordinator {
     if (!opened) {
       this.readModel.setBench(null);
       this.transport.broadcastSnapshot();
-      return;
+      return null;
     }
     const touched = await recoverBenchSession(opened, this.benchJobFacts(store.worldId), () =>
       this.nowIso(),
@@ -21149,6 +21254,7 @@ export class Coordinator {
     this.readModel.setBench({ worldId: store.worldId, session });
     this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
     this.transport.broadcastSnapshot();
+    return session;
   }
 
   /** Complete the small crash window between an atomic production commit and the Bench event. */
@@ -21263,6 +21369,21 @@ export class Coordinator {
   }
 
   /** Re-fold and push the open workspace + the bundle's session rows after a command. */
+  /**
+   * The album's takes by track (238i), to a composer open on it. A refresh of the album's session
+   * sends them too, so a take that lands while its composer is open shows without asking again.
+   */
+  private async emitMusicTakes(store: WorldStore, productionId: string, requestId: string | null, onlyFor?: SessionId): Promise<void> {
+    const read = async () => {
+      const { record } = await readMusicRecord(store, productionId);
+      if (record.session === undefined || (onlyFor !== undefined && record.session !== onlyFor)) return null;
+      return musicTakeViews(record, (await this.benchFor(store.worldId, record.session))?.session ?? null);
+    };
+    const takes = await read().catch(() => null);
+    if (takes === null || !this.stillOpen(store)) return;
+    this.emit({ at: this.nowIso(), type: "music.takes", worldId: store.worldId, productionId, requestId, takes });
+  }
+
   private async refreshBench(worldId: string, sessionId: SessionId): Promise<void> {
     const store = this.opts.provider.openStore?.();
     if (!store || store.worldId !== worldId) return;
@@ -21284,6 +21405,9 @@ export class Coordinator {
       }
       this.readModel.setBenchSessions(sessions);
       this.transport.broadcastSnapshot();
+      // An album's own session (SPEC-060 R-9) tells the composer open on it what landed.
+      const subject = bench?.session.subject;
+      if (subject?.kind === "production" && subject.role === "music") void this.emitMusicTakes(store, subject.productionId, null, sessionId);
     } finally {
       if (this.benchRefreshes.get(key) === refresh) this.benchRefreshes.delete(key);
     }

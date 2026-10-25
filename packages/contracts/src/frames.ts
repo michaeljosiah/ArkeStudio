@@ -4096,6 +4096,53 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("read-music-heard-in"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   /** Play all (R-8): the album rendered as the export renders it, answered as `music.rendered`. */
   z.object({ kind: z.literal("render-music"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  /**
+   * A track's composer (design turn 238i, SPEC-060 R-9): takes made in the album's own Bench
+   * session at the Bench's quote, tagged to the track. Answered as the Bench answers a dispatch
+   * (`queue.result` by requestId), then `music.takes`.
+   */
+  z.object({
+    kind: z.literal("music-track-make"),
+    worldId: UlidSchema,
+    productionId: SlugSchema,
+    trackId: SlugSchema,
+    requestId: UlidSchema,
+    composer: z.object({ provider: z.string().min(1), model: z.string().min(1), params: BenchParamsSchema, brief: z.string().max(4_000) }).strict(),
+  }).strict(),
+  /** Choose a take as its track's (238i, R-10): kept to the shelf if it is not yet, and played from there. */
+  z.object({ kind: z.literal("music-track-choose"), worldId: UlidSchema, productionId: SlugSchema, trackId: SlugSchema, sessionId: SessionIdSchema, takeId: TakeIdSchema, requestId: UlidSchema }).strict(),
+  /**
+   * The track editor's Save (238j, R-11): its trim, fades and sections, applied at render and
+   * never to the take. A null trim plays the whole source.
+   */
+  z.object({
+    kind: z.literal("music-track-edit"),
+    worldId: UlidSchema,
+    productionId: SlugSchema,
+    trackId: SlugSchema,
+    trim: z.object({ startMs: z.number().int().min(0), endMs: z.number().int().min(1) }).strict().nullable(),
+    fadeInMs: z.number().int().min(0).max(60_000),
+    fadeOutMs: z.number().int().min(0).max(60_000),
+    sections: z.array(z.object({ label: z.string().trim().min(1).max(100), atMs: z.number().int().min(0) }).strict()).max(200),
+  }).strict(),
+  /**
+   * The album's sequence (238k, R-13): each track's join to the next — a gap, a crossfade, or
+   * back to back — and its loudness target.
+   */
+  z.object({
+    kind: z.literal("music-sequence-set"),
+    worldId: UlidSchema,
+    productionId: SlugSchema,
+    loudness: z.number().min(-30).max(-6),
+    joins: z.array(z.object({
+      trackId: SlugSchema,
+      next: z.union([z.object({ gapMs: z.number().int().min(0).max(30_000) }).strict(), z.object({ crossfadeMs: z.number().int().min(0).max(15_000) }).strict()]).nullable(),
+    }).strict()).max(64),
+  }).strict(),
+  /** The takes of the album's Bench session by track (238i), answered as `music.takes`. */
+  z.object({ kind: z.literal("read-music-takes"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  /** A waveform of a world audio file (238j, 238k), answered as `music.waveform`. */
+  z.object({ kind: z.literal("read-music-waveform"), worldId: UlidSchema, file: z.string().min(1).max(1000), requestId: UlidSchema }).strict(),
   /** The sentences a character speaks in takes of chapters read whole (R-6), answered as `guide.voice-lines`. */
   z.object({ kind: z.literal("list-guide-voice-lines"), ...GuideVoiceLinesRequestSchema.shape }).strict(),
   z.object({ kind: z.literal("pick-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
@@ -4200,7 +4247,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /** Clear-the-bench: a NEW session. The old one keeps running; nothing is cancelled by this. */
-  z.object({ kind: z.literal("bench-new-session"), worldId: UlidSchema, picture: z.object({ source: PictureReuseSchema, prompt: z.string().min(1).max(PICTURE_PROMPT_MAX) }).strict().optional() }).strict(),
+  z.object({
+    kind: z.literal("bench-new-session"),
+    worldId: UlidSchema,
+    picture: z.object({ source: PictureReuseSchema, prompt: z.string().min(1).max(PICTURE_PROMPT_MAX) }).strict().optional(),
+    /**
+     * A fresh image session set to a shape, with words to start from: Make cover opens one at
+     * 1:1 for a music cover (SPEC-060 R-5, call 5), so the cover is made square, never cut.
+     */
+    image: z.object({ aspect: z.string().min(1).max(20), brief: z.string().max(4_000) }).strict().optional(),
+  }).strict(),
   z.object({ kind: z.literal("bench-close"), worldId: UlidSchema }).strict(),
   z
     .object({
