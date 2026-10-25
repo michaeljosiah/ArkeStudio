@@ -158,8 +158,6 @@ export const QueueCommandSchema = z.enum([
   "bench-dispatch",
   "bench-rerun",
   "bench-upscale",
-  // A track's composer (SPEC-060 R-9), which dispatches through the Bench's own plan.
-  "music-track-make",
   "bench-upload-references",
   "upload-artifacts",
   "borrow-artifacts",

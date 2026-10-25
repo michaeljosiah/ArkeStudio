@@ -11045,16 +11045,18 @@ export class Coordinator {
         // A track's composer (238i, SPEC-060 R-9): its takes are Bench takes in the album's own
         // session, made by the Bench's own dispatch — the plan, quote, reservation, ledger and
         // Activity a press in Bench gets — and then tagged with the track that asked for them.
+        // Its answer is the Bench dispatch's, under the same request, whether it is refused here
+        // or by the plan, so the composer listens for one kind of result.
         const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return this.rejectEnqueue(msg.requestId, msg.kind, "That world is not open.");
-        if (msg.composer.params.kind !== "music") return this.rejectEnqueue(msg.requestId, msg.kind, "A track's takes are music.");
+        if (!store || store.worldId !== msg.worldId) return this.rejectEnqueue(msg.requestId, "bench-dispatch", "That world is not open.");
+        if (msg.composer.params.kind !== "music") return this.rejectEnqueue(msg.requestId, "bench-dispatch", "A track's takes are music.");
         let sessionId: SessionId;
         try {
           const { record } = await readMusicRecord(store, msg.productionId);
           if (!record.tracks.some((track) => track.id === msg.trackId)) throw new MusicRefusal("That track is no longer on the album.");
           sessionId = await ensureMusicSession(store, msg.productionId, this.nowIso());
         } catch (err) {
-          return this.rejectEnqueue(msg.requestId, msg.kind, err instanceof Error ? err.message.slice(0, 300) : "The album could not be read.");
+          return this.rejectEnqueue(msg.requestId, "bench-dispatch", err instanceof Error ? err.message.slice(0, 300) : "The album could not be read.");
         }
         await this.handleClientMessage({ kind: "bench-dispatch", worldId: msg.worldId, sessionId, requestId: msg.requestId, composer: { mode: "music", ...msg.composer } });
         // A press of several takes reserves `<request>/<n>`; one take reserves the request itself.

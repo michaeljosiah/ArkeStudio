@@ -7,6 +7,9 @@ import {
   MUSIC_IMPORT_EXTENSIONS,
   musicClock,
   musicKindOf,
+  musicLoudnessLabel,
+  musicSequenceLine,
+  musicTakeLabel,
   musicTotalMs,
   musicTrackArtifact,
   musicTrackLengthMs,
@@ -19,7 +22,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { EditorDialog } from "../components/editor-dialog.js";
-import { Grip, ImageMark, More, MusicMark, Plus, Search, Sparkle, Upload, X } from "../components/icons.js";
+import { Grip, ImageMark, More, MusicMark, PlaySolid, Plus, Search, Sparkle, Upload, X } from "../components/icons.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { ClipPlayButton } from "../components/player.js";
@@ -52,15 +55,15 @@ import {
   useStore,
   type ArkePlayerExported,
 } from "../lib/store.js";
+import { LoudnessSelect, MusicSequence, Peaks, TrackComposer, TrackEditor } from "./music-tools.js";
 
 /**
  * A music production's page (design turn 238c – 238e and 238h, SPEC-060 R-5 – R-8, R-14 – R-17):
  * the square cover and what it is on the left, its tracks in order on the right. A track comes
  * from a kept take or an imported file (238d), opens beside the album (238e), and the album is
  * played whole by the export's own render (R-8) and exported as a package of its own (238h).
- *
- * The composer and takes (238i), the track editor (238j) and the Sequence (238k) are SPEC-060
- * task 3: their places are drawn here, and disabled until it lands.
+ * A track's Takes open its composer (238i), Edit its editor (238j), and Sequence the album's
+ * joins and loudness (238k): those live in music-tools.
  */
 
 const EMPTY: MusicRecord = { version: 1, loudness: -14, tracks: [] };
@@ -69,10 +72,12 @@ type Track = MusicRecord["tracks"][number];
 const shelfOf = (world: WorldBundle, production: ProductionBundle) =>
   world.artifacts.filter((artifact) => artifact.retiredAt === undefined && (artifact.production === undefined || artifact.production === production.meta.id));
 
-/** Where a track came from, as the From column says it (238c). Task 3 adds `Take N of M`. */
+/** Where a track came from, as the From column says it (238c): its chosen take, or the file. */
 function fromOf(track: Track, artifacts: readonly ArtifactSidecar[]): string {
   const artifact = musicTrackArtifact(track, artifacts);
   if (artifact === undefined) return "Not on the shelf";
+  const take = musicTakeLabel(track, artifact);
+  if (take !== null) return take;
   const kept = keptMusic([artifact])[0];
   if (kept !== undefined) return artifact.generation?.source === "sound" ? "Sound · audio drama" : "Bench take";
   return `File · ${artifact.file}`;
@@ -108,6 +113,7 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
   const [exporting, setExporting] = useState(false);
   const [more, setMore] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [view, setView] = useState<"tracks" | "sequence">("tracks");
   // Drag reorders (238c): the order shown while a drop is on its way, then the record's own.
   const [order, setOrder] = useState<string[] | null>(null);
   const dragged = useRef<string | null>(null);
@@ -146,14 +152,28 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
     if (event.command.startsWith("music-")) setProblem(event.reason);
   }), []);
 
-  // Play all (R-8): the export's render, made once and cached, played whole.
-  const [rendering, setRendering] = useState<string | null>(null);
+  // Play all (R-8): the export's render, made once and cached, played whole; Play through
+  // (238k) plays the same render from a track's start.
+  const [rendering, setRendering] = useState<{ requestId: string; from: string | null } | null>(null);
   useEffect(() => subscribeMusicRendered((answer) => {
-    if (answer.requestId !== rendering) return;
+    if (rendering === null || answer.requestId !== rendering.requestId) return;
     setRendering(null);
     if (!answer.result.ok) { setProblem(answer.result.reason); return; }
-    void playClip({ id: `album:${productionId}:${answer.result.file}`, url: mediaUrl(world.meta.slug, answer.result.file), title: production.meta.title, sub: shape.displayLabel });
+    const { file, durationMs, starts } = answer.result;
+    const at = starts.find((start) => start.trackId === rendering.from)?.atMs ?? 0;
+    void playClip({
+      id: `album:${productionId}:${file}:${at}`,
+      url: mediaUrl(world.meta.slug, file),
+      title: production.meta.title,
+      sub: shape.displayLabel,
+      ...(at > 0 ? { range: { inSec: at / 1000, outSec: durationMs / 1000 } } : {}),
+    });
   }), [rendering, productionId, world.meta.slug, production.meta.title, shape.displayLabel]);
+  const playFrom = (from: string | null) => {
+    setProblem(null);
+    const requestId = renderMusic(worldId, productionId);
+    if (requestId !== null) setRendering({ requestId, from });
+  };
 
   const clipOf = (track: Track): Clip | null => {
     const artifact = musicTrackArtifact(track, artifacts);
@@ -189,7 +209,7 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
             </div>
           </div>
           <div className="fy-music__acts">
-            <Button variant="primary" disabled={record.tracks.length === 0 || rendering !== null || connection !== "open"} onClick={() => { setProblem(null); setRendering(renderMusic(worldId, productionId)); }}>
+            <Button variant="primary" disabled={record.tracks.length === 0 || rendering !== null || connection !== "open"} onClick={() => playFrom(null)}>
               {rendering !== null ? "Rendering…" : "Play all"}
             </Button>
             <Button disabled={record.tracks.length === 0} onClick={() => setExporting(true)}>Export</Button>
@@ -208,20 +228,27 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
         <section className="fy-music__group" aria-label="Tracks">
           <div className="fy-music__gh">
             <span className="fy-music__seg" role="radiogroup" aria-label="View">
-              <button type="button" role="radio" aria-checked className="on">Tracks</button>
-              {/* The sequence is task 3's (238k): its place, not yet its page. */}
-              <button type="button" role="radio" aria-checked={false} disabled>Sequence</button>
+              <button type="button" role="radio" aria-checked={view === "tracks"} className={cx(view === "tracks" && "on")} onClick={() => setView("tracks")}>Tracks</button>
+              <button type="button" role="radio" aria-checked={view === "sequence"} className={cx(view === "sequence" && "on")} disabled={record.tracks.length === 0} onClick={() => { setOpen(null); setView("sequence"); }}>Sequence</button>
             </span>
             <span className="fy-music__m">{record.tracks.length}{total !== null && record.tracks.length > 0 ? ` · ${musicClock(total)}` : ""}</span>
             <span className="grow" />
-            <Button onClick={() => setAdding(true)}><Plus size={13} />Add track</Button>
+            {view === "sequence" ? (
+              <>
+                <LoudnessSelect world={world} production={production} record={record} />
+                <Button variant="primary" disabled={rendering !== null || connection !== "open"} onClick={() => playFrom(record.tracks[0]?.id ?? null)}><PlaySolid size={12} />{rendering !== null ? "Rendering…" : "Play through"}</Button>
+              </>
+            ) : (
+              <Button onClick={() => setAdding(true)}><Plus size={13} />Add track</Button>
+            )}
           </div>
-          {!phone && (
+          {view === "sequence" && record.tracks.length > 0 && <MusicSequence world={world} production={production} record={record} onPlayFrom={playFrom} />}
+          {view === "tracks" && !phone && (
             <div className="fy-music__th" aria-hidden="true">
               <span className="grip" /><span className="n">#</span><span className="t">Title</span><span className="src">From</span><span className="heard">Heard in</span><span className="len">Length</span><span className="pl" />
             </div>
           )}
-          {tracks.map((track, index) => {
+          {view === "tracks" && tracks.map((track, index) => {
             const length = musicTrackLengthMs(track, artifacts);
             const rows = heard[track.id] ?? [];
             return (
@@ -246,7 +273,7 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
               </div>
             );
           })}
-          <button type="button" className="fy-music__addrow" onClick={() => setAdding(true)}><Plus size={14} />Add track</button>
+          {view === "tracks" && <button type="button" className="fy-music__addrow" onClick={() => setAdding(true)}><Plus size={14} />Add track</button>}
         </section>
 
         {openTrack !== null && (
@@ -254,6 +281,7 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
             key={openTrack.id}
             world={world}
             production={production}
+            record={record}
             track={openTrack}
             number={tracks.indexOf(openTrack) + 1}
             heard={heard[openTrack.id] ?? []}
@@ -357,10 +385,10 @@ function AddTrackDialog({ world, production, record, onClose }: { world: WorldBu
 
 /**
  * A track open beside the album (238e, R-7): its player, where it came from, its lyrics with
- * Draft with Arke, where it is heard and whose theme it is. Takes, Edit and Theme of are task 3's
- * and the Guide's (SPEC-059 rev 9): drawn, and disabled or empty until they land.
+ * Draft with Arke, where it is heard and whose theme it is. Takes widens it into the track's
+ * composer (238i); Edit opens the track editor (238j). Theme of is the Guide's (SPEC-059 rev 9).
  */
-function TrackPanel({ world, production, track, number, heard, clip, onClose }: { world: WorldBundle; production: ProductionBundle; track: Track; number: number; heard: readonly MusicHeardRow[]; clip: Clip | null; onClose: () => void }) {
+function TrackPanel({ world, production, record, track, number, heard, clip, onClose }: { world: WorldBundle; production: ProductionBundle; record: MusicRecord; track: Track; number: number; heard: readonly MusicHeardRow[]; clip: Clip | null; onClose: () => void }) {
   const worldId = world.meta.worldId;
   const productionId = production.meta.id;
   const length = musicTrackLengthMs(track, world.artifacts);
@@ -368,6 +396,9 @@ function TrackPanel({ world, production, track, number, heard, clip, onClose }: 
   const [lyrics, setLyrics] = useState(track.lyrics ?? "");
   const [drafting, setDrafting] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [composing, setComposing] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const artifact = musicTrackArtifact(track, world.artifacts);
   useEffect(() => { setLyrics(track.lyrics ?? ""); }, [track.lyrics]);
   useEffect(() => subscribeMusicLyricsDrafted((answer) => {
     if (answer.requestId !== drafting) return;
@@ -381,8 +412,20 @@ function TrackPanel({ world, production, track, number, heard, clip, onClose }: 
     if (next !== "" && next !== track.title) updateMusicTrack(worldId, productionId, track.id, { title: next });
     else setTitle(track.title);
   };
+  const lyricsField = (
+    <div className="fy-music-panel__lyrics">
+      <textarea aria-label="Lyrics" rows={composing ? 6 : 8} value={lyrics} placeholder="[verse]" onChange={(event) => setLyrics(event.target.value)} />
+      <span className="fy-music-panel__row">
+        <Button disabled={drafting !== null} onClick={() => { setNote(null); setDrafting(draftMusicLyrics(worldId, productionId, track.id, `${track.title}, a track on ${production.meta.title}, from ${world.meta.name}`)); }}>
+          {drafting !== null ? "Drafting…" : "Draft with Arke"}
+        </Button>
+        {changed && <Button variant="primary" onClick={() => updateMusicTrack(worldId, productionId, track.id, { lyrics })}>Save</Button>}
+        {note !== null && <span className="fy-music__m">{note}</span>}
+      </span>
+    </div>
+  );
   return (
-    <aside className="fy-music-panel" aria-label={`Track ${number}`} data-testid="music-panel">
+    <aside className={cx("fy-music-panel", composing && "fy-music-panel--wide")} aria-label={`Track ${number}`} data-testid="music-panel">
       <header>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="fy-music__eyebrow">TRACK {number} · {production.meta.title.toUpperCase()}</div>
@@ -391,42 +434,41 @@ function TrackPanel({ world, production, track, number, heard, clip, onClose }: 
         <button type="button" className="fy-music__ib" aria-label="Close" onClick={onClose}><X size={15} /></button>
       </header>
       <div className="fy-music-panel__bd">
-        <div className="fy-music-panel__player">
-          <ClipPlayButton clip={clip} />
-          <span className="fy-music-panel__wave"><Wave seed={track.id} width={260} height={30} stretch /></span>
-          <span className="fy-music__m">{length === null ? "—" : musicClock(length)}</span>
-        </div>
-        <div className="fy-music-panel__kv">
-          <span>From</span>
-          <span className="fy-music-panel__from">{fromOf(track, world.artifacts)}<Button disabled>Takes</Button></span>
-          <span>Lyrics</span>
-          <div className="fy-music-panel__lyrics">
-            <textarea aria-label="Lyrics" rows={8} value={lyrics} placeholder="[verse]" onChange={(event) => setLyrics(event.target.value)} />
-            <span className="fy-music-panel__row">
-              <Button disabled={drafting !== null} onClick={() => { setNote(null); setDrafting(draftMusicLyrics(worldId, productionId, track.id, `${track.title}, a track on ${production.meta.title}, from ${world.meta.name}`)); }}>
-                {drafting !== null ? "Drafting…" : "Draft with Arke"}
-              </Button>
-              {changed && <Button variant="primary" onClick={() => updateMusicTrack(worldId, productionId, track.id, { lyrics })}>Save</Button>}
-              {note !== null && <span className="fy-music__m">{note}</span>}
-            </span>
+        {composing ? (
+          <TrackComposer world={world} production={production} track={track} lyrics={lyrics} lyricsField={lyricsField} onLyricsUsed={() => { if (changed) updateMusicTrack(worldId, productionId, track.id, { lyrics }); }} />
+        ) : (
+          <>
+          <div className="fy-music-panel__player">
+            <ClipPlayButton clip={clip} />
+            <span className="fy-music-panel__wave"><Peaks worldId={worldId} file={artifact === undefined ? null : `artifacts/${artifact.file}`} seed={track.id} bars={52} height={30} /></span>
+            <span className="fy-music__m">{length === null ? "—" : musicClock(length)}</span>
           </div>
-          <span>Heard in</span>
-          <div className="fy-music-panel__heard" data-testid="music-heard">
-            {heard.length === 0 ? <span className="fy-music__m">—</span> : heard.map((row) => (
-              <Link key={`${row.production}/${row.chapter}/${row.at}`} className="fy-music-panel__link" to={`/w/${worldId}${row.open}`}>
-                {row.productionTitle} · {row.label}<span className="fy-music__m">at {musicClock(row.at)}</span>
-              </Link>
-            ))}
+          <div className="fy-music-panel__kv">
+            <span>From</span>
+            <span className="fy-music-panel__from">{fromOf(track, world.artifacts)}<Button onClick={() => setComposing(true)} data-testid="music-takes">Takes</Button></span>
+            <span>Lyrics</span>
+            {lyricsField}
+            <span>Heard in</span>
+            <div className="fy-music-panel__heard" data-testid="music-heard">
+              {heard.length === 0 ? <span className="fy-music__m">—</span> : heard.map((row) => (
+                <Link key={`${row.production}/${row.chapter}/${row.at}`} className="fy-music-panel__link" to={`/w/${worldId}${row.open}`}>
+                  {row.productionTitle} · {row.label}<span className="fy-music__m">at {musicClock(row.at)}</span>
+                </Link>
+              ))}
+            </div>
+            <span>Theme of</span>
+            <span className="fy-music__m">—</span>
           </div>
-          <span>Theme of</span>
-          <span className="fy-music__m">—</span>
-        </div>
+          </>
+        )}
       </div>
       <footer>
-        <Button disabled>Edit</Button>
+        {composing && <Button variant="ghost" onClick={() => setComposing(false)}>Back</Button>}
+        <Button disabled={artifact === undefined} onClick={() => setEditing(true)} data-testid="music-edit">Edit</Button>
         <span className="grow" />
         <Button variant="ghost" onClick={() => { if (removeMusicTrack(worldId, productionId, track.id)) onClose(); }}>Remove from album</Button>
       </footer>
+      {editing && <TrackEditor world={world} production={production} record={record} track={track} number={number} onClose={() => setEditing(false)} />}
     </aside>
   );
 }
@@ -458,7 +500,7 @@ function CoverDialog({ world, production, record, onClose }: { world: WorldBundl
         </div>
       </div>
       <footer className="fy-music-dlg__foot">
-        <Link className="ui-btn ui-btn--secondary ui-btn--default" to={`/w/${worldId}/artifacts/bench`} onClick={() => sendBenchNewSession(worldId)}><Sparkle size={13} />Make in Bench</Link>
+        <Link className="ui-btn ui-btn--secondary ui-btn--default" to={`/w/${worldId}/artifacts/bench`} onClick={() => sendBenchNewSession(worldId, undefined, { aspect: "1:1", brief: `Cover for ${production.meta.title}, ${productionShape(production.meta).displayLabel.toLowerCase()} from ${world.meta.name}` })}><Sparkle size={13} />Make in Bench</Link>
         <span className="grow" />
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
         <Button variant="primary" disabled={chosen === null || chosen === record.cover} onClick={() => { if (chosen !== null && setMusicCover(worldId, production.meta.id, chosen)) onClose(); }}>Use as cover</Button>
@@ -481,9 +523,6 @@ function MusicExportSheet({ world, production, record, heard, onClose }: { world
   const shape = productionShape(production.meta);
   const total = musicTotalMs(record, world.artifacts);
   const cover = record.cover === undefined ? undefined : world.artifacts.find((artifact) => artifact.id === record.cover);
-  const joins = record.tracks.slice(0, -1).map((track) => track.next);
-  const gaps = joins.filter((join) => join !== undefined && "gapMs" in join).length;
-  const fades = joins.filter((join) => join !== undefined && "crossfadeMs" in join).length;
   const withLyrics = record.tracks.filter((track) => track.lyrics?.trim()).length;
   const withSections = record.tracks.some((track) => (track.sections?.length ?? 0) > 0);
   const heardTracks = record.tracks.filter((track) => (heard[track.id]?.length ?? 0) > 0);
@@ -526,7 +565,7 @@ function MusicExportSheet({ world, production, record, heard, onClose }: { world
             <div className="fy-abv-opts">
               {opt("World", <>{world.keyArt ? <img src={mediaUrl(world.meta.slug, world.keyArt)} alt="" /> : null}<span>{world.meta.name}</span></>, "beside its edition")}
               {opt("Tracks", <span>{record.tracks.length}{total !== null ? ` · ${musicClock(total)}` : ""}</span>, `AAC · ${MUSIC_AAC_KBPS} kbps`)}
-              {opt("Sequence", <span>{gaps + fades === 0 ? "Back to back" : [gaps > 0 ? `${gaps} gap${gaps === 1 ? "" : "s"}` : null, fades > 0 ? `${fades} crossfade${fades === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ")}</span>, `${record.loudness === Math.round(record.loudness) ? record.loudness : record.loudness.toFixed(1)} LUFS`.replace("-", "−"))}
+              {opt("Sequence", <span>{musicSequenceLine(record)}</span>, musicLoudnessLabel(record.loudness))}
               {opt("Cover", cover !== undefined ? <><img className="sq" src={mediaUrl(world.meta.slug, `artifacts/${cover.file}`)} alt="" /><span>1:1</span></> : <span>None</span>, cover !== undefined ? `${MUSIC_COVER_EDGE} × ${MUSIC_COVER_EDGE}` : undefined)}
               {opt("Lyrics", <span>{withLyrics} of {record.tracks.length} track{record.tracks.length === 1 ? "" : "s"}</span>, withSections ? "with sections" : undefined)}
               {opt("Heard in", <span>{heardTracks.length === 0 ? "—" : `${heardTracks.length} track${heardTracks.length === 1 ? "" : "s"}`}</span>, heardIn.length > 0 ? heardIn.join(" · ") : undefined)}
