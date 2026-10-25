@@ -18,6 +18,9 @@ readiness without ejecting an already open world. Managed engines and external C
 their health loops; selected external Ollama is also rechecked every 15 seconds. Overlapping
 checks cannot publish an older result over a newer one, and disposal stops the polling timer.
 Hosts that do not configure both engine services cannot report local AI setup as complete.
+Shutdown refuses late installation activation and quiesces an admitted Ollama startup before
+waiting for setup to drain. Healthy inference retains its owned child until normal job draining
+and confirmed process cleanup; quiescing does not discard the child or its exit backstop.
 
 Ollama is a pinned, SHA-256-verified portable tree, not a system installer or PATH command.
 Arke owns its process, a private loopback port, `<appRoot>/models/ollama`, and

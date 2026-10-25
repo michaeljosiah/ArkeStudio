@@ -60,7 +60,29 @@ class Worker extends EventEmitter {
     this.status = "healthy"; this.emit("status");
   }
   async stopAndConfirm() { this.stops++; if (this.refuseStop) throw new Error("exit unconfirmed"); this.status = "stopped"; }
+  quiesce() {}
 }
+
+it("shutdown cancels an admitted startup before disposal waits on its serial activation", { timeout: 5000 }, async () => {
+  let finish!: () => void;
+  class StartingWorker extends Worker {
+    override start() { return new Promise<void>(resolve => { finish = resolve; }); }
+    override quiesce() { finish(); }
+  }
+  let worker: StartingWorker | undefined;
+  const service = new OllamaEngineService({ appRoot: await tempDir("ollama-stop-start-"), port: 24111, exists: () => true,
+    registerBackstop: () => () => {}, supervise: spec => (worker = new StartingWorker(spec)) as unknown as ChildSupervisor,
+  });
+  const starting = service.applySettings(managed);
+  while (!worker) await new Promise(resolve => setTimeout(resolve, 5));
+  service.beginShutdown();
+  await starting;
+  assert.equal(worker.stops, 0, "startup was cancelled without killing an admitted inference owner early");
+  await service.dispose();
+  assert.equal(worker.stops, 1);
+  await service.applySettings(managed);
+  assert.equal(worker.stops, 1, "closed service never activates again");
+});
 
 it("defaults to its owned runtime and never probes a personal service when absent", async () => {
   let calls = 0;

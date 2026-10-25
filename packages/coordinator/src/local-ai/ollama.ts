@@ -190,9 +190,15 @@ export class OllamaEngineService {
     await work;
   }
 
-  async dispose(): Promise<void> {
+  /** Close activation immediately; existing inference keeps its process until normal drain. */
+  beginShutdown(): void {
     this.closing = true;
     this.stopExternalHealth();
+    this.supervisor?.quiesce();
+  }
+
+  async dispose(): Promise<void> {
+    this.beginShutdown();
     await this.serial;
     await this.stopOwned();
     this.listeners.clear();

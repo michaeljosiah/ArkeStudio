@@ -4337,6 +4337,7 @@ export class Coordinator {
   private readonly pendingVoiceReads = new Map<string, { token: string; inputs: EnqueueInput[] }>();
 
   private onSetupComponentReady(componentId: string): Promise<void> {
+    if (this.stopping) return Promise.resolve();
     if (componentId === "ollama-runtime") return this.opts.ollama?.service.refresh() ?? Promise.resolve();
     if (componentId !== "comfyui-runtime" && !isComfyUiWeightsComponent(componentId)) return Promise.resolve();
     const work = this.comfyUiSetupWork
@@ -4891,8 +4892,8 @@ export class Coordinator {
       this.emit({ at: new Date().toISOString(), type: "env.check", ...envCheck });
     }
 
-    // Local runtimes arrive in the background (R-5 revised): the app is usable throughout, and
-    // every component can be skipped. Detection runs first, so a second launch fetches nothing.
+    // Downloads run behind the interactive core. The launch gate separately requires both
+    // runtimes healthy; optional components can be skipped. Detection avoids repeat downloads.
     void this.setup?.run();
 
     // An external image login restores itself without holding the transport behind a slow
@@ -23051,6 +23052,8 @@ export class Coordinator {
     this.settleHarnessGates();
     this.localGpu.stop();
     this.runtimeStop.abort(new Error("Local runtimes are stopping."));
+    // Setup completion can be awaiting startup: cancel that wait before setup itself drains.
+    this.opts.ollama?.service.beginShutdown();
     for (const controller of this.performanceGenerations.values()) controller.abort();
     for (const controller of this.keyArtPromptDrafts.values()) controller.abort();
     this.keyArtPromptReviews.clear();

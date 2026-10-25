@@ -232,7 +232,7 @@ export function StartupScreen() {
 
   // One bar over the whole job. A check counts 1 once settled; a component counts its own
   // fraction of bytes — and counts as done when it is skipped, blocked or failed, because
-  // those are settled outcomes too and the bar must not stall on something never coming.
+  // those are settled transfer outcomes. Required runtime health steps remain incomplete.
   const parts = steps.length + components.length;
   const doneParts =
     steps.filter((s) => s.settled).length +
@@ -267,9 +267,8 @@ export function StartupScreen() {
   const speed = active?.bytesPerSecond ?? null;
   const remaining = speed !== null && speed > 0 ? Math.round((totalBytes - doneBytes) / speed) : null;
 
-  // Setup happens once. Every start after it detects the runtimes already on this machine and
-  // fetches nothing, so the setup panel is kept for the start that is actually doing the work:
-  // something queued, downloading, paused or installing.
+  // Detection reuses installed files. Hold setup while a transfer or required health check
+  // remains outstanding, including a failed engine with no download left running.
   const setupRun = fetching || localAiPending;
 
   const destination = (): string | null => {

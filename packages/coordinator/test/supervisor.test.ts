@@ -68,6 +68,21 @@ const SHIM_READY_MS = 30_000;
 const HEALTHY_WAIT_MS = 40_000;
 
 describe("ChildSupervisor", () => {
+  it("quiesces a native startup without waiting for readiness or losing the child", { timeout: 20000 }, async () => {
+    const sup = new ChildSupervisor({ id: "quiesce-start", command: process.execPath, args: [CHILD],
+      env: { MODE: "never-healthy" }, readyTimeoutMs: 30000, probeIntervalMs: 100 });
+    try {
+      const starting = sup.start();
+      await until(() => sup.pid !== null, "native startup child", SETTLE_WAIT_MS);
+      const pid = sup.pid!;
+      sup.quiesce();
+      await starting;
+      assert.equal(sup.pid, pid, "ownership survives cancellation of the readiness wait");
+      assert.equal(processGone(pid), false);
+      await sup.stopAndConfirm();
+      assert.ok(processGone(pid));
+    } finally { await sup.stopAndConfirm(); }
+  });
   it("retains a failed-startup child until a later cleanup confirms native exit", { timeout: 60_000 }, async () => {
     let refuse = true;
     const sup = new ChildSupervisor({ id: "failed-start", command: process.execPath, args: [CHILD],

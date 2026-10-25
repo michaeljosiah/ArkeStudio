@@ -820,12 +820,17 @@ export class ChildSupervisor extends EventEmitter {
     if (this.descendants.length > 0) throw new Error(`${this.id} has not confirmed descendant exit; its memory cannot be handed over.`);
   }
 
-  async stop(): Promise<void> {
+  /** Cancel startup/restart waits without killing a healthy child before its jobs drain. */
+  quiesce(): void {
     this.stopping = true;
     this.terminalStartupChild = null;
     this.launchEpoch += 1; // any in-flight spawn continuation is now superseded
     this.clearHealthTimer();
     this.clearSleepTimers();
+  }
+
+  async stop(): Promise<void> {
+    this.quiesce();
     const child = this.child;
     this.child = null;
     if (child && child.exitCode === null && child.signalCode === null) {

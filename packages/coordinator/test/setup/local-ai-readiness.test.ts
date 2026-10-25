@@ -12,12 +12,43 @@ import { LocalSetupService } from "../../src/setup/local-setup.js";
 import { SETUP_CATALOGUE } from "../../src/setup/catalogue.js";
 import type { SetupDeps } from "../../src/setup/local-setup.js";
 import type { DomainEvent } from "@arke-studio/contracts";
+import type { ChildSupervisor } from "../../src/supervisor.js";
 
 const setupDeps: SetupDeps = {
   fetchStream: async () => { throw new Error("Optional model not downloaded in this test."); },
   run: async () => ({ code: 1, output: "" }), which: async () => null, probeUrl: async () => false,
   diskFreeMb: async () => 100000, externallyPresent: async id => id === "comfyui-runtime" || id === "ollama-runtime",
 };
+
+it("shutdown cancels setup activation before waiting for the setup drain, and refuses late completion", { timeout: 10000 }, async () => {
+  const root = await tempDir("local-ai-setup-quit-");
+  let finish!: () => void, admitted = false, refreshes = 0;
+  const service = new OllamaEngineService({ appRoot: root, port: 28104, exists: () => true,
+    registerBackstop: () => () => {}, supervise: () => ({ status: "starting", on() {},
+      start: () => new Promise<void>(resolve => { admitted = true; finish = resolve; }),
+      quiesce: () => finish(), stopAndConfirm: async () => {},
+    }) as unknown as ChildSupervisor,
+  });
+  const refresh = service.refresh.bind(service);
+  service.refresh = async () => { refreshes++; await refresh(); };
+  const coordinator = new Coordinator({ appRoot: root, appVersion: "test", adapter: null,
+    provider: new FsWorldProvider(root), changeLogPath: join(root, "logs", "changes.jsonl"), cipher: devCipher(),
+    setup: setupDeps, ollama: { service },
+  });
+  const internal = coordinator as unknown as { setup: LocalSetupService; onSetupComponentReady(id: string): Promise<void> };
+  // Model the completion callback held after the final install rename, exactly what dispose drains.
+  const activation = internal.onSetupComponentReady("ollama-runtime");
+  const dispose = internal.setup.dispose.bind(internal.setup);
+  internal.setup.dispose = async () => { await activation; await dispose(); };
+  try {
+    while (!admitted) await new Promise(resolve => setTimeout(resolve, 5));
+    await coordinator.stop();
+    await activation;
+    const before = refreshes;
+    await internal.onSetupComponentReady("ollama-runtime");
+    assert.equal(refreshes, before, "a late installation callback cannot try to start Ollama");
+  } finally { if (admitted) finish(); await coordinator.stop(); }
+});
 
 it("never skips a mandatory runtime, while optional models remain skippable", async () => {
   const service = new LocalSetupService(setupDeps, () => {}, { appRoot: await tempDir("required-local-ai-"), catalogue: SETUP_CATALOGUE });

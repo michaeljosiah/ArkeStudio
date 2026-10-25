@@ -4,9 +4,9 @@ import { EngineIdSchema } from "./local-ai.js";
 import { ProviderIdSchema } from "./provider.js";
 
 /**
- * Local runtimes fetched during setup: the writing runtime (Ollama and one model) and the two
- * voice models. Each one is optional, individually skippable, and never blocks the app — the
- * user can continue while they arrive.
+ * Local runtimes and model downloads. ComfyUI and Ollama must be installed and healthy before
+ * local AI setup completes; optional components can be skipped. Transfers run behind the
+ * interactive core, with runtime health reported separately from file presence.
  *
  * A component is a *thing that must be on this machine*, not a thing we generate. Presence is
  * detected before anything is fetched, so a second launch downloads nothing.

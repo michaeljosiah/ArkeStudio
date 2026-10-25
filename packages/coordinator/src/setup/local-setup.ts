@@ -23,8 +23,8 @@ const errorText = (err: unknown): string => (err instanceof Error ? err.message 
  * Fetching the local runtimes at setup (Ollama and its default model, the voice models).
  *
  * Three promises hold this together. Nothing is fetched twice — presence is detected first.
- * Nothing blocks the app — the user continues while it runs, and every component can be
- * skipped. Nothing fails silently — a bad status code, a truncated file or an installer that
+ * Transfers leave the core interactive; required runtimes cannot be skipped and engine health
+ * owns local-AI completion. Nothing fails silently — a bad status code, a truncated file or an installer that
  * refuses its own silent flags becomes a stated reason on the row.
  */
 
