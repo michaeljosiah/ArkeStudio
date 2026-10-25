@@ -21,8 +21,8 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 
 /**
- * Creation is two steps: a door of three pictures, then the screen that asks whatever the card
- * left unanswered and takes the name (design turns 83, 99, 113).
+ * Creation is two steps: a door of four pictures, then the screen that asks whatever the card
+ * left unanswered and takes the name (design turns 83, 99, 113, and 238a's fourth, Listen).
  *
  * Step two cannot be reached by `renderToString` — it needs a card pressed — so what is asserted
  * of it here is the shape of the constants it renders from, plus the plates on disk. The copy is
@@ -42,10 +42,10 @@ function render(path: string): string {
   }
 }
 
-describe("the door is three pictures and nothing else (design turn 113)", () => {
+describe("the door is four pictures and nothing else (design turns 113, 238a)", () => {
   const NEW = `/w/${FIXTURE_WORLD_ID}/productions/new`;
 
-  it("asks what the world should become, and offers the three cards to answer with", () => {
+  it("asks what the world should become, and offers the four cards to answer with", () => {
     const html = render(NEW);
     assert.match(html, /What should this world become next\?/, "the question is the title");
     for (const door of DOOR_CHOICES) {
@@ -94,11 +94,11 @@ describe("the door is three pictures and nothing else (design turn 113)", () => 
 });
 
 describe("what the door writes (turn 113a)", () => {
-  it("three cards, in the drawn order, and Audio is not among them", () => {
+  it("four cards, in the drawn order, and Audio is not among them", () => {
     assert.deepEqual(
       DOOR_CHOICES.map((d) => d.label),
-      ["Tell a story", "Make a film", "Make it interactive"],
-      "write · watch · choose",
+      ["Tell a story", "Make a film", "Make it interactive", "Make music"],
+      "write · watch · choose · listen (design turn 238a)",
     );
     // Turn 99 claimed Audio as a medium and nothing ever shipped behind it; the audiobook rides
     // under WRITE until there is something to open.
@@ -116,7 +116,7 @@ describe("what the door writes (turn 113a)", () => {
     assert.equal(choose.medium, "video");
     assert.equal("productionKind" in choose && choose.productionKind, "interactive");
     for (const door of DOOR_CHOICES) {
-      assert.ok(["story", "video"].includes(door.medium), `${door.id} keeps a shipped medium`);
+      assert.ok(["story", "video", "music"].includes(door.medium), `${door.id} keeps a shipped medium`);
     }
   });
 
