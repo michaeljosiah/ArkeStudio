@@ -170,8 +170,8 @@ export function keptMusic<A extends ShelfArtifact>(artifacts: readonly A[]): Arr
 export function musicTitleFrom(brief: string | undefined, file: string): string {
   const firstClause = (brief ?? "").split(/[.,;\n]/)[0]!.trim();
   if (firstClause.length > 0) return firstClause.slice(0, 80);
-  const name = file.split("/").pop() ?? file;
-  return (name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim() || "Untitled").slice(0, 80);
+  const name = (file.split("/").pop() ?? file).replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim() || "Untitled";
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)}`.slice(0, 80);
 }
 
 /** A track id from its title, unique on the album: the package's music document names it. */
