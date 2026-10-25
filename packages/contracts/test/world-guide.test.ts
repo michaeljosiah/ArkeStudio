@@ -7,7 +7,11 @@ import {
   guideLoreText,
   guidePublicText,
   guideSections,
+  GuideRecordSchema,
+  guideTheme,
   readGuide,
+  sameGuideTeaser,
+  SetGuideTeasersSchema,
   type CanonEntry,
   type GuideMaterial,
   type GuideRecord,
@@ -84,7 +88,7 @@ describe("a world's Guide (SPEC-059)", () => {
   });
 
   it("starts with nothing public, counting only what can be (R-1, R-2, R-3)", () => {
-    assert.deepEqual(guideCounts(EMPTY_GUIDE_RECORD, world), { teasers: { chosen: 0, of: 6 }, characters: { public: 0, of: 2 }, places: { public: 0, of: 2 }, lore: { public: 0, of: 2 }, after: 0 });
+    assert.deepEqual(guideCounts(EMPTY_GUIDE_RECORD, world), { teasers: { chosen: 0, of: 6 }, characters: { public: 0, of: 2 }, places: { public: 0, of: 2 }, lore: { public: 0, of: 2 }, after: 0, themes: 0 });
     assert.equal(guideDocument(EMPTY_GUIDE_RECORD, material()), null);
   });
 
@@ -116,7 +120,7 @@ describe("a world's Guide (SPEC-059)", () => {
     assert.deepEqual(guide.lore, [{ id: "canon-001", kind: "lore", title: "CANON-001", text: "Beneath the harbour lies a drowned god, and it is still singing.", links: ["maren-kest"] }]);
     // Only the production something waits for, with all its chapters.
     assert.deepEqual(guide.productions.map((production) => [production.id, production.chapters.map((chapter) => chapter.number)]), [["the-ledger-of-nights", [1, 6]]]);
-    assert.deepEqual(guideCounts(record, world), { teasers: { chosen: 0, of: 6 }, characters: { public: 2, of: 2 }, places: { public: 1, of: 2 }, lore: { public: 1, of: 2 }, after: 1 });
+    assert.deepEqual(guideCounts(record, world), { teasers: { chosen: 0, of: 6 }, characters: { public: 2, of: 2 }, places: { public: 1, of: 2 }, lore: { public: 1, of: 2 }, after: 1, themes: 0 });
   });
 
   it("writes what the shared reader accepts (R-14)", () => {
@@ -138,5 +142,72 @@ describe("a world's Guide (SPEC-059)", () => {
     const guide = guideDocument({ ...record, locations: { ...record.locations, "maren-kest": { public: true, sections: { Look: { public: true } } } } }, material({ locations: [vigil, twin] }))!;
     assert.deepEqual(guide.places.map((entry) => entry.id), ["the-vigil", "maren-kest-2"]);
     assert.deepEqual(guide.places[0]!.links, ["maren-kest"]);
+  });
+});
+
+// SPEC-059 R-35 – R-37 (design turn 238f, 238g): a character's or place's theme, a song teaser, and
+// the guide version that carries them.
+describe("music in a world's Guide (SPEC-059 R-35 – R-37)", () => {
+  const verse = { production: "songs-of-the-drowned-quarter", track: "the-drowned-verse" };
+  const tracks: Record<string, { title: string; duration: number }> = { "the-drowned-verse": { title: "The Drowned Verse", duration: 252_000 } };
+  const music = (overrides: Partial<GuideMaterial> = {}) =>
+    material({
+      theme: (theme) => (theme.production === verse.production ? tracks[theme.track] : undefined),
+      song: (teaser) => (tracks[teaser.track] !== undefined ? { title: tracks[teaser.track]!.title, picture: "t-cover", audio: "t-song", duration: teaser.duration } : undefined),
+      ...overrides,
+    });
+  const assets: Record<string, WorldAsset> = {
+    "g-maren": { path: "guide/maren-kest.jpg", mediaType: "image/jpeg", byteLength: 1, sha256: "0".repeat(64) },
+    "t-cover": { path: "guide/teasers/t001.jpg", mediaType: "image/jpeg", byteLength: 1, sha256: "1".repeat(64) },
+    "t-song": { path: "guide/teasers/t001.m4a", mediaType: "audio/mp4", byteLength: 1, sha256: "2".repeat(64) },
+  };
+
+  it("carries a theme on its entry as a version 3 guide, and leaves out one whose track is gone (R-35, R-37)", () => {
+    const record: GuideRecord = {
+      ...EMPTY_GUIDE_RECORD,
+      characters: {
+        "maren-kest": { public: true, theme: verse, sections: { Essence: { public: true } } },
+        "bray-half-hitch": { public: true, theme: { production: verse.production, track: "cut-track" } },
+      },
+      locations: { "the-vigil": { public: true, theme: verse } },
+    };
+    const guide = guideDocument(record, music())!;
+    assert.equal(guide.version, 3);
+    assert.deepEqual(guideTheme(guide.characters[0]!), { production: "songs-of-the-drowned-quarter", track: "the-drowned-verse", title: "The Drowned Verse", duration: 252_000 });
+    assert.equal(guideTheme(guide.characters[1]!), undefined);
+    assert.equal(guideTheme(guide.places[0]!)?.track, "the-drowned-verse");
+    assert.ok(readGuide(JSON.stringify(guide), assets).ok);
+    // The head counts the themes the author chose on entries that are public.
+    assert.equal(guideCounts(record, world).themes, 3);
+  });
+
+  it("follows its entry's gate: a theme on an entry that is not public neither ships nor counts", () => {
+    const record: GuideRecord = { ...EMPTY_GUIDE_RECORD, characters: { "maren-kest": { public: true }, "bray-half-hitch": { public: false, theme: verse } } };
+    assert.equal(guideDocument(record, music())!.version, 1);
+    assert.equal(guideCounts(record, world).themes, 0);
+  });
+
+  it("makes a song teaser from its excerpt as a version 3 guide, and leaves out one whose track is gone (R-36, R-37)", () => {
+    const record: GuideRecord = {
+      ...EMPTY_GUIDE_RECORD,
+      characters: { "maren-kest": { public: true } },
+      teasers: [{ kind: "song", ...verse, start: 108_000, duration: 24_000 }, { kind: "song", production: verse.production, track: "cut-track", start: 0, duration: 30_000 }],
+    };
+    const guide = guideDocument(record, music())!;
+    assert.equal(guide.version, 3);
+    assert.deepEqual(guide.version === 3 ? guide.teasers : [], [{ kind: "song", title: "The Drowned Verse", picture: "t-cover", audio: "t-song", duration: 24_000, production: "songs-of-the-drowned-quarter", track: "the-drowned-verse" }]);
+    assert.ok(readGuide(JSON.stringify(guide), assets).ok);
+    // With its only song gone, a guide is the version every Player reads.
+    assert.equal(guideDocument({ ...record, teasers: record.teasers!.slice(1) }, music())!.version, 1);
+  });
+
+  it("keeps a song by its track and an excerpt of at most 30 seconds", () => {
+    const song = { kind: "song" as const, ...verse, start: 0, duration: 30_000 };
+    assert.ok(sameGuideTeaser(song, { ...song, start: 60_000, duration: 12_000 }));
+    assert.ok(!sameGuideTeaser(song, { ...song, track: "saltmouth-bells" }));
+    assert.ok(!sameGuideTeaser(song, { kind: "picture", production: verse.production, chapter: "neap", block: "b1" }));
+    assert.equal(SetGuideTeasersSchema.safeParse({ teasers: [song, { ...song, start: 60_000 }] }).success, false);
+    assert.equal(GuideRecordSchema.safeParse({ ...EMPTY_GUIDE_RECORD, teasers: [{ ...song, duration: 30_001 }] }).success, false);
+    assert.equal(GuideRecordSchema.safeParse({ ...EMPTY_GUIDE_RECORD, characters: { "maren-kest": { public: true, theme: { ...verse, title: "copied" } } } }).success, false);
   });
 });
