@@ -12,8 +12,8 @@ import { readAudiobook } from "./audiobook.js";
  *  - an audiobook chapter's bed or block sound, which name the world file, and its Audio Studio
  *    clips, which name the artifact;
  *  - an audio drama's music, ambience and sound cues, which name the artifact;
- *  - a film's cut — its score and ambience beds, the clips placed on its lanes, the track a cut to
- *    music is cut to — and the edited timeline's clips once there is one.
+ *  - a film's cut: the edited timeline's clips once there is one, and before it the score and
+ *    ambience beds, the clips placed on its lanes and the track a cut to music is cut to.
  *
  * `at` is the moment where the placement says one plainly — a fixed Audio Studio clip, a timeline
  * clip's first frame — and the start of the chapter, episode or cut where it is anchored to the
@@ -81,6 +81,18 @@ export async function musicHeardIn(store: WorldStore, productionId: string, reco
     }
 
     const cut = (at: number): MusicHeardRow => ({ production: production.meta.id, productionTitle, chapter: "cut", label: "Cut", at, open: `${base}/cut` });
+    // Once the edited timeline exists it is the cut (SPEC-037): cut.json and the spine are the
+    // placements it was made from, frozen, and a clip moved since is only where the timeline says.
+    if (production.timeline?.status === "ready") {
+      const { timeline } = production.timeline;
+      for (const track of timeline.tracks) {
+        for (const clip of track.clips) {
+          if (clip.source.kind !== "artifact" || !byArtifact.has(clip.source.artifactId)) continue;
+          add(clip.source.artifactId, cut(Math.round((clip.startFrame * 1000) / timeline.frameRate)));
+        }
+      }
+      continue;
+    }
     if (production.spine !== null && byArtifact.has(production.spine.trackArtifactId)) add(production.spine.trackArtifactId, cut(0));
     for (const track of production.cut.audio) {
       for (const entry of track.entries) {
@@ -91,15 +103,6 @@ export async function musicHeardIn(store: WorldStore, productionId: string, reco
     }
     for (const overlay of production.cut.overlays) {
       if (byArtifact.has(overlay.artifactId)) add(overlay.artifactId, cut(Math.round(overlay.startSec * 1000)));
-    }
-    if (production.timeline?.status === "ready") {
-      const { timeline } = production.timeline;
-      for (const track of timeline.tracks) {
-        for (const clip of track.clips) {
-          if (clip.source.kind !== "artifact" || !byArtifact.has(clip.source.artifactId)) continue;
-          add(clip.source.artifactId, cut(Math.round((clip.startFrame * 1000) / timeline.frameRate)));
-        }
-      }
     }
   }
   for (const rows of Object.values(out)) rows.sort((a, b) => a.productionTitle.localeCompare(b.productionTitle) || a.label.localeCompare(b.label, undefined, { numeric: true }) || a.at - b.at);

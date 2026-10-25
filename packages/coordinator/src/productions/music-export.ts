@@ -81,7 +81,8 @@ export async function exportMusicPlayer(store: WorldStore, productionId: string,
   if (kind === "soundtrack" && record.for === undefined) return { ok: false, blockers: ["Choose the production this is a soundtrack for"] };
   const plan = musicRenderPlan(record, bundle.artifacts);
   if (!plan.ok) return plan;
-  const coverArtifact = record.cover === undefined ? undefined : bundle.artifacts.find((artifact) => artifact.id === record.cover && artifact.retiredAt === undefined);
+  // A retired cover is still this album's cover: retirement is the shelf's, not the album's.
+  const coverArtifact = record.cover === undefined ? undefined : bundle.artifacts.find((artifact) => artifact.id === record.cover);
   if (record.cover !== undefined && coverArtifact === undefined) return { ok: false, blockers: ["the cover is no longer on the shelf · make or choose another"] };
   const coverFile = coverArtifact !== undefined ? `artifacts/${coverArtifact.file}` : null;
   const coverReal = coverFile !== null ? await containedWorldFile(store.dir, coverFile) : null;

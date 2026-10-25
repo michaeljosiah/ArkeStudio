@@ -86,8 +86,11 @@ export async function addMusicTrack(store: WorldStore, productionId: string, art
   if (artifact === undefined || artifact.retiredAt !== undefined) throw new MusicRefusal("that take is no longer on the shelf");
   if (artifact.kind !== "audio") throw new MusicRefusal("a track is audio");
   // Kept music is the world's whoever made it: an audio drama files its music cues as its own
-  // (SPEC-057 R-40), and an album may take one. Anything else another production owns stays its.
-  if (artifact.production !== undefined && artifact.production !== productionId && keptMusic([artifact]).length === 0) throw new MusicRefusal("that take belongs to another production");
+  // (SPEC-057 R-40), and an album may take one. So is a file a person imported, which another
+  // album may have imported first: the import finds those bytes already filed and keeps their
+  // owner. Anything else another production made stays its own.
+  const worlds = keptMusic([artifact]).length > 0 || artifact.origin.by === "user";
+  if (artifact.production !== undefined && artifact.production !== productionId && !worlds) throw new MusicRefusal("that take belongs to another production");
   const title = keptMusic([artifact])[0]?.title ?? musicTitleFrom(undefined, artifact.file);
   // A song made in Bench keeps the words it was sung from, as the track's lyrics to start with.
   const generation = artifact.generation;

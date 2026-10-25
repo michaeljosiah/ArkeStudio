@@ -13,6 +13,9 @@ import { listArkePlayerPackages } from "../../src/productions/arke-player-export
 import { musicDocumentSections } from "../../src/productions/music-export.js";
 import { musicRenderPlan } from "../../src/productions/music-render.js";
 import { checkWorldPackageZip } from "../../src/productions/world-package.js";
+import { createProductionFromPlan, planProductionCreation } from "../../src/productions/ops.js";
+import { MUSIC_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import type { WorldStore } from "../../src/world/store.js";
 import { tempDir } from "../tmp.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
@@ -163,6 +166,14 @@ describe("a music production (turn 238, SPEC-060 R-1 – R-4)", () => {
       assert.deepEqual(production?.music?.tracks, []);
     }));
 
+  it("raises the world's schema however it is made: World Chat's prepared create too (codex on PR 2189)", () =>
+    withHarness(async (h) => {
+      const store = h.store();
+      const plan = planProductionCreation(store.getBundle(), { title: "Saltmouth Bells", medium: "music", productionKind: "single" }, "2026-10-25T09:00:00.000Z");
+      await createProductionFromPlan(store, plan, { source: "test", requestId: requestId(), precondition: () => null });
+      assert.ok((await readWorldMeta(store.dir)).schemaVersion >= MUSIC_SCHEMA_VERSION, "an older build refuses the world rather than dropping its music");
+    }));
+
   it("names the production a soundtrack is for, and refuses one that names none", () =>
     withHarness(async (h) => {
       const without = await createMusic(h, "The Bell Watch", "soundtrack");
@@ -224,6 +235,25 @@ describe("the album's tracks (238c – 238e, R-5 – R-7)", () => {
       assert.deepEqual(failures(h), []);
     }));
 
+  it("adds a file imported into another album already, leaving it that album's (codex on PR 2189)", async () => {
+    const dir = await tempDir("arke-music-import-");
+    const song = join(dir, "tide-caller.wav");
+    await writeFile(song, toneWav());
+    await withHarness(async (h) => {
+      const first = (await createMusic(h, "Songs", "album")).slug!;
+      const second = (await createMusic(h, "More Songs", "album")).slug!;
+      for (const slug of [first, second]) {
+        const id = requestId();
+        await h.send({ kind: "upload-artifacts", worldId: WORLD_ID, requestId: id, sourcePaths: [song], music: { productionId: slug } });
+        assert.deepEqual(h.events.find((event): event is Enqueued => event.type === "queue.enqueue-result" && event.requestId === id)?.failures, []);
+      }
+      const [a, b] = [await recordOf(h.worldDir, first), await recordOf(h.worldDir, second)];
+      assert.deepEqual(a.tracks.map((track) => track.source), b.tracks.map((track) => track.source), "one file, on both albums");
+      const filed = h.store().getBundle().artifacts.find((artifact) => "artifactId" in a.tracks[0]!.source && artifact.id === a.tracks[0]!.source.artifactId);
+      assert.equal(filed?.production, first, "its owner is the album that imported it first");
+    });
+  });
+
   it("takes a picture as its cover and refuses a sound (R-5)", () =>
     withHarness(async (h) => {
       const slug = (await createMusic(h, "Songs", "album")).slug!;
@@ -275,6 +305,29 @@ describe("Heard in (R-14)", () => {
     }, {
       prepare: async (worldDir) => {
         await writeFile(join(worldDir, "productions", "saltlight", "cut.json"), JSON.stringify({ audio: [{ kind: "score", label: "Score", entries: [{ artifactId: BELLS, offsetSec: 12.5 }] }], overlays: [] }));
+      },
+    }));
+});
+
+describe("Heard in once the timeline holds the cut (codex on PR 2189)", () => {
+  it("reports where the timeline places a take, never the frozen cut.json it was made from", () =>
+    withHarness(async (h) => {
+      const slug = (await createMusic(h, "Songs", "album")).slug!;
+      await h.send({ kind: "music-track-add", worldId: WORLD_ID, productionId: slug, artifactId: BELLS });
+      const id = requestId();
+      await h.send({ kind: "read-music-heard-in", worldId: WORLD_ID, productionId: slug, requestId: id });
+      const answer = h.events.find((event): event is Heard => event.type === "music.heard-in" && event.requestId === id);
+      assert.deepEqual(answer?.tracks["harbour-bells"]?.map((row) => row.at), [10_000], "the moved clip, at 0:10, and not the bed's 0:12.5");
+    }, {
+      prepare: async (worldDir) => {
+        await writeFile(join(worldDir, "productions", "saltlight", "cut.json"), JSON.stringify({ audio: [{ kind: "score", label: "Score", entries: [{ artifactId: BELLS, offsetSec: 12.5 }] }], overlays: [] }));
+        await writeFile(join(worldDir, "productions", "saltlight", "timeline.json"), JSON.stringify({
+          schemaVersion: 1, revision: 3, frameRate: 24, history: { undo: [], redo: [] }, migratedCut: true,
+          tracks: [
+            { id: "tr_picture", kind: "picture", name: "Picture", order: 0, muted: false, endFrame: 480, clips: [] },
+            { id: "tr_score", kind: "audio", name: "Score", order: 1, muted: false, clips: [{ id: "cl_bells", startFrame: 240, durationFrames: 48, sourceInFrames: 0, source: { kind: "artifact", artifactId: BELLS, label: "Bells" } }] },
+          ],
+        }));
       },
     }));
 });
@@ -339,6 +392,25 @@ describe("the render and Export → Arke Player (238h, R-8, R-15 – R-17)", () 
       assert.equal(served?.contentType, "audio/mp4");
     }, { ffmpeg: fakeFfmpeg(calls) });
   });
+
+  it("still exports a track and a cover retired from the shelf since (codex on PR 2189)", () =>
+    withHarness(async (h) => {
+      const slug = (await createMusic(h, "Songs", "album")).slug!;
+      await h.send({ kind: "music-track-add", worldId: WORLD_ID, productionId: slug, artifactId: BELLS });
+      await h.send({ kind: "music-set-cover", worldId: WORLD_ID, productionId: slug, artifactId: BOARD });
+      await h.send({ kind: "retire-artifact", worldId: WORLD_ID, artifactId: BELLS });
+      await h.send({ kind: "retire-artifact", worldId: WORLD_ID, artifactId: BOARD });
+      assert.ok(h.store().getBundle().artifacts.filter((artifact) => artifact.id === BELLS || artifact.id === BOARD).every((artifact) => artifact.retiredAt !== undefined));
+      const exportId = "ap_01J9M000000000000000000003";
+      await h.send({ kind: "export-arke-player", worldId: WORLD_ID, productionId: slug, requestId: requestId(), exportId, options: { book: false, motion: false } });
+      const answer = h.events.find((event): event is Exported => event.type === "arke-player.exported" && event.exportId === exportId);
+      assert.ok(answer?.result.ok, JSON.stringify(answer?.result));
+      assert.equal(answer.result.pictures, 1, "the cover went with it");
+      // A new choice of a retired take is still refused.
+      const before = failures(h).length;
+      await h.send({ kind: "music-track-add", worldId: WORLD_ID, productionId: slug, artifactId: BELLS });
+      assert.equal(failures(h).length, before + 1);
+    }, { ffmpeg: fakeFfmpeg([]) }));
 
   it("refuses an album with no tracks, and needs ffmpeg", () =>
     withHarness(async (h) => {

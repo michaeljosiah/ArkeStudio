@@ -61,7 +61,8 @@ export function musicRenderPlan(record: Pick<MusicRecord, "tracks">, artifacts: 
   const blockers: string[] = [];
   for (const [index, track] of record.tracks.entries()) {
     const artifact = musicTrackArtifact(track, artifacts);
-    if (artifact === undefined || artifact.retiredAt !== undefined || artifact.kind !== "audio") {
+    // Retired is off the shelf for a new choice, never out of a track that already plays it.
+    if (artifact === undefined || artifact.kind !== "audio") {
       blockers.push(`Track ${index + 1} · ${track.title} · its take is no longer on the shelf`);
       continue;
     }
