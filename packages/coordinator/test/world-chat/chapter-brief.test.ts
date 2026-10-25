@@ -91,6 +91,8 @@ it("asks the first two chapters of the outline to hook the reader", async () => 
   const brief = (index: number) => chapterDraftingBrief(bundle, production.meta.id, production.chapters[index]!.id, read, 60_000);
   assert.match(await brief(0), /## Opening chapters\nThis is chapter 1 of the book\. Readers decide in the first two chapters/);
   assert.match(await brief(1), /This is chapter 2 of the book/);
+  // The owner's second note on the same book: its secret was pointed at in chapter 1 by name.
+  assert.match(await brief(1), /plant only signs that read innocently now and make sense at the reveal; never point at the answer/);
   assert.doesNotMatch(await brief(2), /Opening chapters/);
   production.chapters[0]!.retired = true;
   assert.match(await brief(2), /This is chapter 2 of the book/, "a retired chapter is not one the reader meets");
