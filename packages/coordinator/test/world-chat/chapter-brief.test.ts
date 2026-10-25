@@ -70,6 +70,32 @@ it("assembles the plan, bounded previous ending, resolved draws and style with d
   await assert.rejects(chapterDraftingBrief(bundle, production.meta.id, chapter.id, read, brief.length + 100, { manuscript: true }), /too large/, "full manuscript reads share the context budget");
 });
 
+// The Undersong's first two chapters lost their reader on 2026-10-25: the brief for chapters 1 and 2
+// asks for the book's question in the present and a turn at the end, counted along the outline the
+// reader meets, so a retired chapter takes no place and chapter 3 is drafted without it.
+it("asks the first two chapters of the outline to hook the reader", async () => {
+  const bundle = await fixtureBundle();
+  const production = bundle.productions.find((p) => p.meta.id === "the-ledger-of-nights")!;
+  while (production.chapters.length < 4) {
+    const n = production.chapters.length + 1;
+    production.chapters.push({ ...production.chapters.at(-1)!, id: `added-${n}`, file: `0${n}-added`, title: `Added ${n}`, order: n });
+  }
+  const leases = new QueryLeaseRegistry(() => bundle.meta.worldId);
+  const lease = leases.mint({ worldId: bundle.meta.worldId, conversationId: newId("cv"), runId: newId("run"), allowedAttachmentIds: [] });
+  const retrieval = new WorldChatRetrieval({
+    leases, getBundle: () => bundle, getIndex: () => null,
+    attachments: new WorldChatAttachmentStore(await tempDir("chapter-opening-")), findAttachment: async () => null,
+    getChapterBody: async () => "The tide turned.",
+  });
+  const read = (tool: string, args: Record<string, unknown>) => retrieval.call(lease.token, tool, args);
+  const brief = (index: number) => chapterDraftingBrief(bundle, production.meta.id, production.chapters[index]!.id, read, 60_000);
+  assert.match(await brief(0), /## Opening chapters\nThis is chapter 1 of the book\. Readers decide in the first two chapters/);
+  assert.match(await brief(1), /This is chapter 2 of the book/);
+  assert.doesNotMatch(await brief(2), /Opening chapters/);
+  production.chapters[0]!.retired = true;
+  assert.match(await brief(2), /This is chapter 2 of the book/, "a retired chapter is not one the reader meets");
+});
+
 // The beats a chapter was grouped by (design turn 201), as an adaptation reads them (SPEC-052 R-15):
 // each placed at the paragraph its first block begins, with its opening words; none for a chapter
 // never grouped, and a section the read does not know refused.
