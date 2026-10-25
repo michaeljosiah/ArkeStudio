@@ -601,17 +601,20 @@ const ProductionModelModelActionSchema = z
 // A music production's track (SPEC-060 R-10 – R-13, design turn 238i – 238k): choose one of its
 // finished takes, set its trim, fades and sections, or set the album's joins and loudness. Each is
 // the page's own write of music.json; the takes themselves are never changed.
+// `baseHash` is get_production's `music.baseHash`: a card is stale once the album it read has
+// changed, so it never writes over a newer edit.
+const MusicBaseHashSchema = z.string().min(1).max(200);
 const MusicTrackChooseModelActionSchema = z.object({
   kind: z.literal("music-track-choose"), productionId: SlugSchema, trackId: SlugSchema,
-  sessionId: SessionIdSchema, takeId: TakeIdSchema, checkReceiptIds: CompleteReadIdsSchema,
+  sessionId: SessionIdSchema, takeId: TakeIdSchema, baseHash: MusicBaseHashSchema, checkReceiptIds: CompleteReadIdsSchema,
 }).strict();
 const MusicTrackEditModelActionSchema = z.object({
   kind: z.literal("music-track-edit"), productionId: SlugSchema, trackId: SlugSchema,
-  ...MusicTrackEditSchema.shape, checkReceiptIds: CompleteReadIdsSchema,
+  ...MusicTrackEditSchema.shape, baseHash: MusicBaseHashSchema, checkReceiptIds: CompleteReadIdsSchema,
 }).strict();
 const MusicSequenceModelActionSchema = z.object({
   kind: z.literal("music-sequence-set"), productionId: SlugSchema,
-  ...MusicSequenceSchema.shape, checkReceiptIds: CompleteReadIdsSchema,
+  ...MusicSequenceSchema.shape, baseHash: MusicBaseHashSchema, checkReceiptIds: CompleteReadIdsSchema,
 }).strict();
 
 const ProductionSeriesModelActionSchema = z

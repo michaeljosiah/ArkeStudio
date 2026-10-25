@@ -531,7 +531,7 @@ import {
 import { makeArtDirector } from "./references/art-director.js";
 import { enhancerBrief } from "./bench/enhancer.js";
 import { LYRICS_MAX_CHARS, lyricistBrief } from "./bench/lyricist.js";
-import { addMusicTrack, chooseMusicTake, editMusicTrack, ensureMusicSession, MusicRefusal, musicTakeViews, readMusicRecord, removeMusicTrack, reorderMusicTracks, setMusicCover, setMusicSequence, tagMusicTakes, updateMusicTrack } from "./productions/music.js";
+import { addMusicTrack, chooseMusicTake, editMusicTrack, ensureMusicSession, MusicRefusal, musicTakeViews, readMusicRecord, removeMusicTrack, reorderMusicTracks, setMusicCover, setMusicSequence, tagMusicTakes, untaggedMusicTakes, updateMusicTrack } from "./productions/music.js";
 import { musicWaveform } from "./productions/music-waveform.js";
 import { musicHeardIn } from "./productions/music-heard.js";
 import { renderMusicAlbum } from "./productions/music-render.js";
@@ -11058,7 +11058,9 @@ export class Coordinator {
         } catch (err) {
           return this.rejectEnqueue(msg.requestId, "bench-dispatch", err instanceof Error ? err.message.slice(0, 300) : "The album could not be read.");
         }
-        await this.handleClientMessage({ kind: "bench-dispatch", worldId: msg.worldId, sessionId, requestId: msg.requestId, composer: { mode: "music", ...msg.composer } });
+        // The track rides in each reservation (codex on PR 2191): fsynced before any job exists,
+        // so a take whose tagging below never lands is still found as this track's.
+        await this.handleClientMessage({ kind: "bench-dispatch", worldId: msg.worldId, sessionId, requestId: msg.requestId, composer: { mode: "music", ...msg.composer, params: { ...msg.composer.params, track: msg.trackId } } });
         // A press of several takes reserves `<request>/<n>`; one take reserves the request itself.
         const made = (await this.benchFor(msg.worldId, sessionId))?.session.takes
           .filter((take) => take.requestId === msg.requestId || take.requestId.startsWith(`${msg.requestId}/`)) ?? [];
@@ -21365,7 +21367,7 @@ export class Coordinator {
    * A track's take chosen (238i, SPEC-060 R-10), from its composer or World Chat: kept to the
    * shelf as Bench's Keep keeps one, then played from there by the track.
    */
-  private async chooseAlbumTake(store: WorldStore, productionId: string, trackId: string, sessionId: string, takeId: string, requestId: string): Promise<void> {
+  private async chooseAlbumTake(store: WorldStore, productionId: string, trackId: string, sessionId: string, takeId: string, requestId: string, baseHash?: string): Promise<void> {
     const { record } = await readMusicRecord(store, productionId);
     if (record.session === undefined || record.session !== sessionId) throw new MusicRefusal("that take is not this album's");
     const session = record.session;
@@ -21377,7 +21379,7 @@ export class Coordinator {
       take = await takeOf();
     }
     if (take?.keptArtifactId === undefined) throw new MusicRefusal("that take could not be kept");
-    await chooseMusicTake(store, productionId, trackId, { sessionId: session, takeId: take.id }, take.keptArtifactId);
+    await chooseMusicTake(store, productionId, trackId, { sessionId: session, takeId: take.id }, take.keptArtifactId, baseHash);
   }
 
   /**
@@ -21386,9 +21388,14 @@ export class Coordinator {
    */
   private async emitMusicTakes(store: WorldStore, productionId: string, requestId: string | null, onlyFor?: SessionId): Promise<void> {
     const read = async () => {
-      const { record } = await readMusicRecord(store, productionId);
+      let { record } = await readMusicRecord(store, productionId);
       if (record.session === undefined || (onlyFor !== undefined && record.session !== onlyFor)) return null;
-      return musicTakeViews(record, (await this.benchFor(store.worldId, record.session))?.session ?? null);
+      const session = (await this.benchFor(store.worldId, record.session))?.session ?? null;
+      // Takes reserved for a track whose tagging never landed are given to it now (codex on PR 2191).
+      const untagged = session === null ? new Map() : untaggedMusicTakes(record, session);
+      for (const [trackId, refs] of untagged) await tagMusicTakes(store, productionId, trackId, refs);
+      if (untagged.size > 0) ({ record } = await readMusicRecord(store, productionId));
+      return musicTakeViews(record, session);
     };
     const takes = await read().catch(() => null);
     if (takes === null || !this.stillOpen(store)) return;
@@ -22200,8 +22207,8 @@ export class Coordinator {
       },
     }, quotePorts);
     return {
-      chooseMusicTake: async (productionId, trackId, sessionId, takeId) => {
-        await this.chooseAlbumTake(store, productionId, trackId, sessionId, takeId, ulid());
+      chooseMusicTake: async (productionId, trackId, sessionId, takeId, baseHash) => {
+        await this.chooseAlbumTake(store, productionId, trackId, sessionId, takeId, ulid(), baseHash);
         await this.refreshWorldSnapshot(store.worldId);
       },
       reconcileChapterReview: async (productionId, chapterId, requestId) => {

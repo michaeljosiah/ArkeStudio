@@ -235,7 +235,7 @@ export function TrackComposer({ world, production, track, lyrics, lyricsField, o
         {lyricsField}
         <span>Style</span>
         <Input aria-label="Style" value={style} maxLength={4_000} placeholder={track.title} onChange={(event) => setStyle(event.target.value)} />
-        <span>{takesLength ? "Length" : "Sung"}</span>
+        <span>{takesLength ? "Length" : ""}</span>
         <span className="fy-music-panel__row">
           {takesLength && <TimeField label="Length" ms={lengthMs} onChange={(ms) => setLengthMs(Math.min(300_000, Math.max(3_000, Math.round(ms / 1000) * 1000)))} />}
           <span className="fy-music__seg" role="radiogroup" aria-label="Vocal or instrumental">

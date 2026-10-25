@@ -13,7 +13,7 @@ import { frameRunReadRows, performanceReadRows, voiceSampleReadRows, audioCutRea
 import { readAudioRightsSync } from "../audio/rights.js";
 import type { ProductionBatchControls } from "./production-batch.js";
 import { readPlanRecords } from "../productions/plans.js";
-import { editMusicTrack, setMusicSequence } from "../productions/music.js";
+import { editMusicTrack, musicRecordFence, setMusicSequence } from "../productions/music.js";
 import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema, checkPropName, newId, pickableArtifacts } from "@arke-studio/contracts";
 import { createProp, addPropState, renameProp, acceptPropStateReference } from "../references/props.js";
 import { createHash } from "node:crypto";
@@ -269,7 +269,7 @@ import type { MediaProbe } from "../media/probe.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { readBible, applyTurnBibleEdits } from "../world/bible.js";
 import { readChanges } from "../world/change-writer.js";
-import { CommitStaleError, type CommitResult } from "../world/commit.js";
+import { CommitStaleError, MUSIC_COMPOSER_SCHEMA_VERSION, type CommitResult } from "../world/commit.js";
 import {
   WorldStateStaleError,
   type WorldStatePrecondition,
@@ -363,7 +363,7 @@ export interface WorldChatActionTurn {
 
 export interface WorldChatActionAdapterDeps {
   /** Choose a music track's take (SPEC-060 R-10): kept to the shelf as Keep keeps one, then the track's. */
-  readonly chooseMusicTake?: (productionId: string, trackId: string, sessionId: string, takeId: string) => Promise<void>;
+  readonly chooseMusicTake?: (productionId: string, trackId: string, sessionId: string, takeId: string, baseHash: string) => Promise<void>;
   readonly reconcileChapterReview?: (productionId: string, chapterId: string, requestId: string) => Promise<{ id: string; summary: string } | null>;
   readonly reviewChapter?: (productionId: string, chapterId: string, requestId: string) => Promise<{ id: string; summary: string }>;
   readonly audioStudioOptions?: { ffmpeg?: import("../takes/export.js").FfmpegRunner };
@@ -1186,7 +1186,9 @@ function scopedWorldAction(
     if (!record?.tracks.some((track) => track.id === trackId)) throw new Error("That track is no longer on the album.");
     // The album's session when it has one (SPEC-060 R-9); otherwise approval makes it, as Bench does.
     const { sessionId: _asked, ...rest } = action;
-    return ModelWorldChatActionSchema.parse({ ...rest, productionId: album, ...(record.session !== undefined ? { sessionId: record.session } : {}) });
+    // The track rides in each reservation, as the composer's does (codex on PR 2191).
+    return ModelWorldChatActionSchema.parse({ ...rest, productionId: album, composer: { ...action.composer, params: { ...action.composer.params, track: trackId } },
+      ...(record.session !== undefined ? { sessionId: record.session } : {}) });
   }
   if (action.kind === "bench-generation" && action.composer.mode === "music" && productionId && !action.productionId) return ModelWorldChatActionSchema.parse({ ...action, productionId });
   return action;
@@ -1798,6 +1800,9 @@ const preparationPath = (store: WorldStore, authority: "bible" | "scene" | "worl
 async function writePreparation(store: WorldStore, authority: "bible" | "scene" | "world", actionId: string, payload: WorldChatPreparedAction): Promise<void> {
   if (payload.kind === "world-chat-production-timeline-operation" || payload.kind === "world-chat-production-timeline-transcribe") await store.ensureSchemaVersion(PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION, "production-chat-timeline");
   if (["world-chat-production-audio-generation", "world-chat-production-performance-command", "world-chat-production-audio-cue"].includes(payload.kind)) await store.ensureSchemaVersion(PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, "production-chat-audio");
+  // A music track's cards, and takes asked for a track, carry fields a build before the composer cannot read (codex on PR 2191).
+  if (["world-chat-music-track-choose", "world-chat-music-track-edit", "world-chat-music-sequence-set"].includes(payload.kind)
+    || (payload.kind === "world-chat-bench-generation" && payload.action.musicTrack !== undefined)) await store.ensureSchemaVersion(MUSIC_COMPOSER_SCHEMA_VERSION, "music-takes");
   if ((payload.kind === "world-chat-production-scene-command" && payload.scenePlan) || ("dependencyPreview" in payload && payload.dependencyPreview)) {
     await store.ensureSchemaVersion(CHAT_SEQUENCING_SCHEMA_VERSION, "world-chat-sequencing");
     await store.ownedWrite(() => atomicWriteFile(preparationPath(store, authority, actionId), `${JSON.stringify(payload, null, 2)}\n`));
@@ -2918,6 +2923,8 @@ async function sharedResourceProjection(
       authority = { kind: "production-store", id: intent.actionId };
       const record = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId)?.music;
       if (!record) throw new Error("That music production is no longer in this world.");
+      // The album as the card read it (codex on PR 2191): a newer edit is never written over.
+      if (musicRecordFence(record) !== payload.action.baseHash) throw new Error("The album changed since it was read. Read get_production again.");
       const clock = (ms: number) => `${Math.floor(ms / 60_000)}:${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")}`;
       if (payload.kind === "world-chat-music-sequence-set") {
         const joins = payload.action.joins.map((join) => `${musicTrackTitle(store, payload.action.productionId, join.trackId)}: ${join.next === null ? "back to back" : "gapMs" in join.next ? `${join.next.gapMs / 1000} s gap` : `${join.next.crossfadeMs / 1000} s crossfade`}`);
@@ -4162,7 +4169,7 @@ async function executeSharedResource(
       const stale = precondition();
       if (stale) throw new WorldStateStaleError(stale);
       if (!deps.chooseMusicTake) throw new Error("Choosing a take is unavailable on this host.");
-      await deps.chooseMusicTake(payload.action.productionId, payload.action.trackId, payload.action.sessionId, payload.action.takeId);
+      await deps.chooseMusicTake(payload.action.productionId, payload.action.trackId, payload.action.sessionId, payload.action.takeId, payload.action.baseHash);
       return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary: "The take is the track's now." } };
     }
     case "world-chat-music-track-edit":
@@ -4171,10 +4178,10 @@ async function executeSharedResource(
       if (stale) throw new WorldStateStaleError(stale);
       if (payload.kind === "world-chat-music-track-edit") {
         const { trim, fadeInMs, fadeOutMs, sections } = payload.action;
-        await editMusicTrack(store, payload.action.productionId, payload.action.trackId, { trim, fadeInMs, fadeOutMs, sections });
+        await editMusicTrack(store, payload.action.productionId, payload.action.trackId, { trim, fadeInMs, fadeOutMs, sections }, payload.action.baseHash);
         return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary: "The track's edit was saved." } };
       }
-      await setMusicSequence(store, payload.action.productionId, { loudness: payload.action.loudness, joins: payload.action.joins });
+      await setMusicSequence(store, payload.action.productionId, { loudness: payload.action.loudness, joins: payload.action.joins }, payload.action.baseHash);
       return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary: "The album's sequence was saved." } };
     }
     case "world-chat-production-model":

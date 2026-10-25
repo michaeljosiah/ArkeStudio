@@ -212,7 +212,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 108: a world's teasers, `teasers` on the Guide record (design turn 236, SPEC-059 R-24).
 // 109: picture marks — a picture set at a sentence inside its block (design turn 237, SPEC-047 R-202).
 // 110: music productions — `medium: "music"` and `music.json` (design turn 238, SPEC-060 R-1, R-4).
-export const SUPPORTED_SCHEMA_VERSION = 110;
+// 111: the Guide's music — a theme and a song teaser (SPEC-059 R-35 – R-37).
+// 112: a music track's composer — the album's session and a take's length, instrumental and track (SPEC-060 R-9).
+export const SUPPORTED_SCHEMA_VERSION = 112;
 
 export class WorldOpenError extends Error {
   constructor(

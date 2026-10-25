@@ -466,6 +466,13 @@ export const AUDIOBOOK_PICTURE_MARKS_SCHEMA_VERSION = 109;
  * the world without a word; the world is raised when the first music production is made.
  */
 export const MUSIC_SCHEMA_VERSION = 110;
+/**
+ * A music track's composer (design turn 238i, SPEC-060 R-9): `session` on `music.json`, and the
+ * length, instrumental and track a music take's params carry in the album's Bench session. A build
+ * before it reads the strict record and the session's takes as unreadable, so the world is raised
+ * before the first is written. 111 is the Guide's music (SPEC-059 R-35).
+ */
+export const MUSIC_COMPOSER_SCHEMA_VERSION = 112;
 
 /** Do these production.json bytes make the production music (SPEC-060 R-1)? */
 function carriesMusic(raw: string): boolean {
@@ -1079,6 +1086,8 @@ export class Committer {
       // prepared create, a metadata edit, or its record. An older build refuses the world by name
       // rather than reading a production whose medium it does not know.
       files.some(f => f.newContent != null && ((classify(f.path).track === "production-meta" && carriesMusic(f.newContent)) || /^productions\/[^/]+\/music\.json$/.test(f.path))) ? MUSIC_SCHEMA_VERSION : 0,
+      // The album's own session, however it is first written (SPEC-060 R-9).
+      files.some(f => f.newContent != null && /^productions\/[^/]+\/music\.json$/.test(f.path) && "session" in JsonFile.parse(f.newContent).value) ? MUSIC_COMPOSER_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "shortName" in MarkdownFile.parse(f.newContent).data) ? SHEET_SHORT_NAME_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "aliases" in MarkdownFile.parse(f.newContent).data) ? CHARACTER_ALIASES_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "narration" in MarkdownFile.parse(f.newContent).data) ? SHEET_NARRATION_SCHEMA_VERSION : 0,

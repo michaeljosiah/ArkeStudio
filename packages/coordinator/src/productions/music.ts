@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -11,7 +12,6 @@ import {
   musicKindOf,
   musicTitleFrom,
   musicTrackId,
-  PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION,
   productionShape,
   SessionIdSchema,
   ulid,
@@ -25,9 +25,9 @@ import {
   type SessionId,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir } from "../bench/store.js";
-import type { CommitFileInput } from "../world/commit.js";
+import { MUSIC_COMPOSER_SCHEMA_VERSION, type CommitFileInput } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
-import type { WorldStore } from "../world/store.js";
+import { WorldStateStaleError, type WorldStore } from "../world/store.js";
 import { JsonFile, sha256 } from "../world/text-files.js";
 import { oneAtATime } from "./audio-drama.js";
 
@@ -58,17 +58,28 @@ export async function readMusicRecord(store: WorldStore, productionId: string): 
   return { record: raw === null ? EMPTY_MUSIC_RECORD : MusicRecordSchema.parse(JSON.parse(raw)), raw };
 }
 
+/**
+ * The album as World Chat read it (SPEC-060 R-10 – R-13): its parsed record, hashed, so a card
+ * prepared against it is stale once a track's source, trim, sections or the joins move. Over the
+ * parsed record rather than the file's bytes, so a read and a write agree however it was saved.
+ */
+export function musicRecordFence(record: MusicRecord): string {
+  return `sha256:${createHash("sha256").update(JSON.stringify(MusicRecordSchema.parse(record))).digest("hex")}`;
+}
+
 interface MusicChange {
   record: MusicRecord;
   /** The production's own kind, changed in the same commit: a Single made an Album (R-3). */
   kind?: "album";
 }
 
-async function writeMusic(store: WorldStore, productionId: string, kind: string, change: (record: MusicRecord) => MusicChange): Promise<void> {
+async function writeMusic(store: WorldStore, productionId: string, kind: string, change: (record: MusicRecord) => MusicChange, baseHash?: string): Promise<void> {
   const path = recordPath(productionId);
   await oneAtATime(`${store.dir}/${path}`, async () => {
     musicProduction(store, productionId);
     const { record, raw } = await readMusicRecord(store, productionId);
+    // A change prepared against an album that has moved since is refused, never written over it.
+    if (baseHash !== undefined && musicRecordFence(record) !== baseHash) throw new WorldStateStaleError("The album changed since it was read. Read get_production again.");
     const next = change(record);
     const files: CommitFileInput[] = [{
       path,
@@ -184,8 +195,9 @@ export async function ensureMusicSession(store: WorldStore, productionId: string
   const production = musicProduction(store, productionId);
   const { record } = await readMusicRecord(store, productionId);
   if (record.session !== undefined && (await new BenchStore(sessionDir(store.dir, record.session)).readMeta()) !== null) return record.session;
-  // A production-subject session is a field a build before production audio cannot fold.
-  await store.ensureSchemaVersion(PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, "music-takes");
+  // The session, and a take's length, instrumental and track, are fields a build before the
+  // composer cannot read; production audio's subject (57) is below it.
+  await store.ensureSchemaVersion(MUSIC_COMPOSER_SCHEMA_VERSION, "music-takes");
   const id = SessionIdSchema.parse(`sess_${ulid()}`);
   await store.ownedWrite(async () => {
     await new BenchStore(sessionDir(store.dir, id)).create(id, at, { kind: "production", productionId, productionTitle: production.meta.title, role: "music" });
@@ -222,7 +234,7 @@ export async function tagMusicTakes(store: WorldStore, productionId: string, tra
  * Choose a take as its track's (R-10): it plays from the shelf, where keeping put it. The trim is
  * clipped to the new take's length; the sections are kept as they were.
  */
-export async function chooseMusicTake(store: WorldStore, productionId: string, trackId: string, ref: MusicTakeRef, artifactId: string): Promise<void> {
+export async function chooseMusicTake(store: WorldStore, productionId: string, trackId: string, ref: MusicTakeRef, artifactId: string, baseHash?: string): Promise<void> {
   const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === artifactId);
   if (artifact === undefined || artifact.retiredAt !== undefined || artifact.kind !== "audio") throw new MusicRefusal("that take is not on the shelf");
   const lengthMs = artifact.mediaInfo?.durationSec === undefined ? null : Math.round(artifact.mediaInfo.durationSec * 1000);
@@ -235,7 +247,7 @@ export async function chooseMusicTake(store: WorldStore, productionId: string, t
     const trim = clipMusicTrim(track.trim, lengthMs);
     const next: MusicRecordTrack = { ...rest, source: { artifactId }, takes, ...(trim !== undefined ? { trim } : {}) };
     return { record: { ...record, tracks: record.tracks.map((entry, at) => (at === index ? next : entry)) } };
-  });
+  }, baseHash);
 }
 
 /**
@@ -247,7 +259,7 @@ export async function editMusicTrack(store: WorldStore, productionId: string, tr
   fadeInMs: number;
   fadeOutMs: number;
   sections: readonly MusicSection[];
-}): Promise<void> {
+}, baseHash?: string): Promise<void> {
   await writeMusic(store, productionId, "music-track-edit", (record) => {
     const index = record.tracks.findIndex((track) => track.id === trackId);
     if (index < 0) throw new MusicRefusal("that track is no longer on the album");
@@ -270,14 +282,14 @@ export async function editMusicTrack(store: WorldStore, productionId: string, tr
       ...(sections.length > 0 ? { sections } : {}),
     };
     return { record: { ...record, tracks: record.tracks.map((entry, at) => (at === index ? next : entry)) } };
-  });
+  }, baseHash);
 }
 
 /**
  * The album's sequence (238k, R-13): each track's join to the next, and one loudness target. The
  * last track joins nothing, so whatever is asked of it is not kept.
  */
-export async function setMusicSequence(store: WorldStore, productionId: string, sequence: { loudness: number; joins: ReadonlyArray<{ trackId: string; next: MusicJoin | null }> }): Promise<void> {
+export async function setMusicSequence(store: WorldStore, productionId: string, sequence: { loudness: number; joins: ReadonlyArray<{ trackId: string; next: MusicJoin | null }> }, baseHash?: string): Promise<void> {
   await writeMusic(store, productionId, "music-sequence-set", (record) => {
     const joins = new Map(sequence.joins.map((join) => [join.trackId, join.next] as const));
     for (const id of joins.keys()) if (!record.tracks.some((track) => track.id === id)) throw new MusicRefusal("the album changed · try again");
@@ -289,7 +301,7 @@ export async function setMusicSequence(store: WorldStore, productionId: string, 
       return next === null ? rest : { ...rest, next };
     });
     return { record: { ...record, loudness: sequence.loudness, tracks } };
-  });
+  }, baseHash);
 }
 
 /** Every take of the album's session, by the track that asked for it (238i): what its composer shows. */
@@ -297,8 +309,9 @@ export function musicTakeViews(record: MusicRecord, session: BenchSession | null
   if (session === null) return [];
   const owner = new Map<string, string>();
   for (const track of record.tracks) for (const take of track.takes) if (take.sessionId === session.id) owner.set(take.takeId, track.id);
+  const tracks = new Set(record.tracks.map((track) => track.id));
   return session.takes.map((take) => ({
-    trackId: owner.get(take.id) ?? null,
+    trackId: owner.get(take.id) ?? (take.request.params.kind === "music" && take.request.params.track !== undefined && tracks.has(take.request.params.track) ? take.request.params.track : null),
     sessionId: session.id,
     takeId: take.id,
     n: take.n,
@@ -309,4 +322,21 @@ export function musicTakeViews(record: MusicRecord, session: BenchSession | null
     ...(take.error !== undefined ? { error: take.error.slice(0, 500) } : {}),
     createdAt: take.createdAt,
   }));
+}
+
+/**
+ * Takes whose reservation names a track but whose tagging never landed (SPEC-060 R-9): the process
+ * stopped, or the world closed, between the Bench's reservation and the album's write. Found from
+ * the session and given to their tracks, so a paid take is never left out of its track's list.
+ */
+export function untaggedMusicTakes(record: MusicRecord, session: BenchSession): Map<string, MusicTakeRef[]> {
+  const tagged = new Set(record.tracks.flatMap((track) => track.takes.map((take) => take.takeId)));
+  const tracks = new Set(record.tracks.map((track) => track.id));
+  const found = new Map<string, MusicTakeRef[]>();
+  for (const take of session.takes) {
+    const track = take.request.params.kind === "music" ? take.request.params.track : undefined;
+    if (track === undefined || !tracks.has(track) || tagged.has(take.id)) continue;
+    found.set(track, [...(found.get(track) ?? []), { sessionId: session.id, takeId: take.id }]);
+  }
+  return found;
 }

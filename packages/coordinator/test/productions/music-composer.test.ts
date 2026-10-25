@@ -9,6 +9,8 @@ import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { BenchStore, sessionDir, sessionMediaDir } from "../../src/bench/store.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { musicRenderPlan } from "../../src/productions/music-render.js";
+import { MUSIC_COMPOSER_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { readWorldMeta, SUPPORTED_SCHEMA_VERSION } from "../../src/world/scan.js";
 import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
@@ -137,7 +139,10 @@ describe("a track's composer and takes (238i, R-9, R-10)", () => {
       const session = await new BenchStore(sessionDir(h.worldDir, record.session)).fold();
       assert.deepEqual(session!.subject, { kind: "production", productionId: slug, productionTitle: "Songs of the Drowned Quarter", role: "music" });
       assert.deepEqual(session!.takes.map((take) => [take.requestId, take.request.mode, take.request.brief]), [[`${first}/0`, "music", "Slow sea shanty, low strings"], [`${first}/1`, "music", "Slow sea shanty, low strings"]]);
-      assert.deepEqual(session!.takes.map((take) => take.request.params.kind === "music" ? take.request.params.lengthSec : null), [180, 180]);
+      assert.deepEqual(session!.takes.map((take) => take.request.params.kind === "music" ? [take.request.params.lengthSec, take.request.params.track] : null), [[180, "harbour-bells"], [180, "harbour-bells"]], "each reservation names its track");
+      // A build before the composer refuses the world rather than drop its album (codex on PR 2191).
+      assert.ok((await readWorldMeta(h.worldDir)).schemaVersion >= MUSIC_COMPOSER_SCHEMA_VERSION);
+      assert.ok(SUPPORTED_SCHEMA_VERSION >= MUSIC_COMPOSER_SCHEMA_VERSION);
       assert.deepEqual(record.tracks[0]!.takes, session!.takes.map((take) => ({ sessionId: record.session, takeId: take.id })));
       const pushed = h.events.filter((event): event is Takes => event.type === "music.takes" && event.requestId === first).at(-1);
       assert.deepEqual(pushed?.takes.map((take) => take.trackId), ["harbour-bells", "harbour-bells"]);
@@ -147,6 +152,23 @@ describe("a track's composer and takes (238i, R-9, R-10)", () => {
       const again = await recordOf(h.worldDir, slug);
       assert.equal(again.session, record.session);
       assert.equal(again.tracks[0]!.takes.length, 4);
+    }));
+
+  it("gives a track the takes reserved for it whose tagging never landed (codex on PR 2191)", () =>
+    withHarness(async (h) => {
+      const slug = await album(h);
+      await make(h, slug, {});
+      const session = (await recordOf(h.worldDir, slug)).session!;
+      // Reserved and paid for, then the process stopped before the album was written.
+      const takeId = `tk_${ulid()}`;
+      await new BenchStore(sessionDir(h.worldDir, session)).append({ type: "takes-reserved", takes: [{ id: takeId as never, n: 7, requestId: `lost-${takeId}`, createdAt: "2026-10-25T09:00:00.000Z",
+        request: { mode: "music", brief: "Slow sea shanty", references: [], keyframes: [], provider: "elevenlabs", model: "music_v1", params: { kind: "music", lyrics: "[verse]\nRing them low", count: 1, track: "harbour-bells" } } }] });
+      assert.equal((await recordOf(h.worldDir, slug)).tracks[0]!.takes.some((take) => take.takeId === takeId), false);
+      const requestId = ulid();
+      await h.send({ kind: "read-music-takes", worldId: WORLD_ID, productionId: slug, requestId });
+      const answer = h.events.find((event): event is Takes => event.type === "music.takes" && event.requestId === requestId);
+      assert.equal(answer?.takes.find((take) => take.takeId === takeId)?.trackId, "harbour-bells");
+      assert.ok((await recordOf(h.worldDir, slug)).tracks[0]!.takes.some((take) => take.takeId === takeId), "and kept with the track");
     }));
 
   it("refuses words beside an instrumental, and a length a route treats as a ceiling", () =>

@@ -202,6 +202,11 @@ export const BenchMusicParamsSchema = z
      * so a route that needs words is refused rather than sent an empty song.
      */
     instrumental: z.literal(true).optional(),
+    /**
+     * The album track whose composer asked for the take (SPEC-060 R-9), kept with its reservation,
+     * so a take whose tagging never landed is still found as that track's from the session.
+     */
+    track: SlugSchema.optional(),
   })
   // Not refined here: a member of the discriminated union below must stay a plain object. The
   // dispatch plan refuses lyrics beside `instrumental`.

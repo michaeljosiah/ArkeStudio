@@ -95,9 +95,11 @@
 .fy-music-panel__link { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: 10px; color: var(--foreground); font-size: var(--text-sm); text-decoration: none; }
 .fy-music-panel__link .fy-music__m { margin-left: auto; }
 
-/* A track's composer (238i): the panel widened to 640, its takes in a strip of three. */
+/* A track's composer (238i): the panel widened to 640, its takes in a strip of three. The page
+   stretches to the window's foot, so the panel beside it does and its strip is not cut short. */
+.lay-screen[data-screen="music-album"] { align-content: stretch; }
 .fy-music-panel--wide { width: 640px; }
-.fy-music__time { width: 90px; font: var(--type-mono); font-size: var(--text-2xs); }
+.ui-input.fy-music__time { width: 90px; flex: none; font: var(--type-mono); font-size: var(--text-2xs); }
 .fy-music__tag { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--secondary); font: var(--type-label); font-size: var(--text-2xs); color: var(--foreground); white-space: nowrap; }
 .fy-music-takes__head { display: flex; align-items: center; gap: 8px; margin-top: 4px; font: var(--type-ui); }
 .fy-music-takes__head b { font-weight: 600; }
@@ -147,7 +149,7 @@
 .fy-music-seq .len { width: 44px; text-align: right; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); flex: none; }
 .fy-music-join { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 2px 14px 2px 46px; border-top: 1px dashed var(--border); background: color-mix(in srgb, var(--foreground) 2.5%, var(--background)); }
 .fy-music-join .fy-music__seg button { height: 22px; padding: 0 9px; }
-.fy-music-join .fy-music__time { width: 64px; height: 26px; }
+.fy-music-join .ui-input.fy-music__time { width: 64px; height: 26px; }
 .fy-music-join__line { flex: 1; border-top: 1px solid var(--border); }
 
 @media (max-width: 1099px) {
