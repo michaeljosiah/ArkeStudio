@@ -37,6 +37,7 @@
 .fy-music__tr .t, .fy-music__th .t { flex: 1.5; min-width: 0; }
 .fy-music__tr .t { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .fy-music__tr .t b { display: block; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-music__theme { display: block; font: var(--type-meta); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fy-music__tr .src, .fy-music__th .src { flex: 1.1; min-width: 0; font: var(--type-meta); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fy-music__tr .heard, .fy-music__th .heard { flex: 1.3; min-width: 0; font: var(--type-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fy-music__tr .heard.none { color: var(--muted-foreground); }
@@ -94,6 +95,7 @@
 .fy-music-panel__heard { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
 .fy-music-panel__link { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: 10px; color: var(--foreground); font-size: var(--text-sm); text-decoration: none; }
 .fy-music-panel__link .fy-music__m { margin-left: auto; }
+.fy-music-panel__themes { padding-top: 6px; }
 
 @media (max-width: 1099px) {
   .fy-music { grid-template-columns: 240px minmax(0, 1fr); gap: 24px; padding: 24px 32px; }

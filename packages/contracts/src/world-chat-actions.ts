@@ -42,6 +42,7 @@ import { SceneRecordSchema, type SceneRecord } from "./scene-flow.js";
 import { AudioSpineCommandSchema } from "./spine.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { TimelineClipIdSchema, TimelineTrackIdSchema } from "./timeline.js";
+import { MAX_MUSIC_TRACKS } from "./world-package.js";
 import {
   CHARACTER_ROLE_MAX,
   FrameRateSchema,
@@ -559,6 +560,8 @@ const ProductionCreateModelActionSchema = z
         frameRate: FrameRateSchema.optional(),
         defaults: SeasonDefaultsSchema.optional(),
         logline: z.string().trim().min(1).max(1_000).optional(),
+        /** The production a music Soundtrack is for (SPEC-060 R-3); music only, and a soundtrack needs one. */
+        soundtrackFor: SlugSchema.optional(),
       })
       .strict(),
     checkReceiptIds: CompleteReadIdsSchema,
@@ -1131,6 +1134,25 @@ export const AudioSpineModelActionSchema = z
   .strict();
 export type AudioSpineModelAction = z.infer<typeof AudioSpineModelActionSchema>;
 
+/**
+ * A music production's album (SPEC-060 R-5 – R-7, R-19): a track added from the shelf, a track's
+ * title or lyrics, a track removed, the tracks in a new order, or the cover — one command a card,
+ * each the album page's own. Lyrics are plain text; Arke drafts them in its own words and sets them
+ * here, as Draft with Arke's words reach a track only when they are kept.
+ */
+export const MusicAlbumCommandSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("add-track"), artifactId: ArtifactIdSchema, makeAlbum: z.boolean().optional() }).strict(),
+  z.object({ kind: z.literal("update-track"), trackId: SlugSchema, title: z.string().trim().min(1).max(200).optional(), lyrics: z.string().max(20_000).optional() }).strict(),
+  z.object({ kind: z.literal("remove-track"), trackId: SlugSchema }).strict(),
+  z.object({ kind: z.literal("reorder-tracks"), order: z.array(SlugSchema).min(1).max(MAX_MUSIC_TRACKS) }).strict(),
+  z.object({ kind: z.literal("set-cover"), artifactId: ArtifactIdSchema.nullable() }).strict(),
+]);
+export type MusicAlbumCommand = z.infer<typeof MusicAlbumCommandSchema>;
+export const ProductionMusicModelActionSchema = z
+  .object({ kind: z.literal("production-music"), productionId: SlugSchema, command: MusicAlbumCommandSchema, checkReceiptIds: CompleteReadIdsSchema })
+  .strict();
+export type ProductionMusicModelAction = z.infer<typeof ProductionMusicModelActionSchema>;
+
 const RoutingChoiceIdSchema = z.string().regex(/^ch_[a-z0-9-]+$/, "expected ch_<slug>");
 const RoutingGroupIdSchema = z.string().regex(/^grp_[a-z0-9-]+$/, "expected grp_<slug>");
 const NonEmptyRoutingChangesSchema = <T extends z.ZodRawShape>(shape: T, message: string) =>
@@ -1429,6 +1451,7 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionAudioCueModelActionSchema.extend(ActionSequencingShape),
   ProductionTimelineModelActionSchema.extend(ActionSequencingShape),
   ChapterReviewModelActionSchema.extend(ActionSequencingShape),
+  ProductionMusicModelActionSchema.extend(ActionSequencingShape),
 ]);
 export type ModelWorldChatAction = z.infer<typeof ModelWorldChatActionSchema>;
 
@@ -1561,6 +1584,7 @@ export const WorldChatBenchGenerationActionSchema = preparedAction("world-chat-b
 export const WorldChatBenchKeepActionSchema = preparedAction("world-chat-bench-keep", BenchKeepModelActionSchema);
 export const WorldChatBenchSelectActionSchema = preparedAction("world-chat-bench-select", BenchSelectModelActionSchema);
 export const WorldChatBenchDiscardActionSchema = preparedAction("world-chat-bench-discard", BenchDiscardModelActionSchema);
+export const WorldChatProductionMusicActionSchema = preparedAction("world-chat-production-music", ProductionMusicModelActionSchema);
 
 export type WorldChatWorldMetadataAction = z.infer<typeof WorldChatWorldMetadataActionSchema>;
 export type WorldChatCanonAction = z.infer<typeof WorldChatCanonActionSchema>;
@@ -1643,6 +1667,7 @@ export type WorldChatBenchGenerationAction = z.infer<typeof WorldChatBenchGenera
 export type WorldChatBenchKeepAction = z.infer<typeof WorldChatBenchKeepActionSchema>;
 export type WorldChatBenchSelectAction = z.infer<typeof WorldChatBenchSelectActionSchema>;
 export type WorldChatBenchDiscardAction = z.infer<typeof WorldChatBenchDiscardActionSchema>;
+export type WorldChatProductionMusicAction = z.infer<typeof WorldChatProductionMusicActionSchema>;
 
 /** Existing World Chat outputs after coordinator validation, before an authority prepares them. */
 export const WorldChatProposalActionSchema = z
@@ -1795,5 +1820,6 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionAudioCueActionSchema,
   WorldChatProductionTimelineActionSchema,
   WorldChatProductionTimelineTranscribeActionSchema,
+  WorldChatProductionMusicActionSchema,
 ]);
 export type WorldChatPreparedAction = z.infer<typeof WorldChatPreparedActionSchema>;

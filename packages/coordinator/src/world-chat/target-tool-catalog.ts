@@ -53,7 +53,7 @@ export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
   tool("list_voices", "Read selectable voice catalogue targets, cloned voices and every sheet voice assignment. Choose the exact provider/model/voiceId from a catalogue row for Bench speech.", {}),
   tool("list_productions", "Read every production identity and metadata record.", {}),
   tool("list_series", "Read complete Series records.", {}),
-  tool("get_production_metadata", "Read one production's complete metadata.", PRODUCTION, ["productionId"]),
+  tool("get_production_metadata", "Read one production's complete metadata, and a music production's album: its tracks by id, their lyrics and its cover.", PRODUCTION, ["productionId"]),
   tool("get_story", "Read one production's story overview, prose style, and treatment in bounded chunks. The overview section excludes the treatment and supports chapter proposals; other story actions require the full read.", { ...PRODUCTION, section: { type: "string", enum: ["overview"], description: "Overview and prose style only. Omit for the full story." } }, ["productionId"]),
   tool("get_season", "Read one production's complete season, including every arc.", PRODUCTION, ["productionId"]),
   tool("list_episodes", "Read every episode and scene membership in explicit order.", PRODUCTION, ["productionId"]),

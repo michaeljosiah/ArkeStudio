@@ -58,6 +58,7 @@ import { readKeyArtBrief } from "../../src/references/key-art-references.js";
 import { applyTurnBibleEdits, readBible } from "../../src/world/bible.js";
 import { WorldStore } from "../../src/world/store.js";
 import { readWorldMeta } from "../../src/world/scan.js";
+import { GUIDE_THEMES_SCHEMA_VERSION } from "../../src/world/commit.js";
 import {
   prepareWorldChatActions,
   worldChatActionAdapters,
@@ -1544,6 +1545,93 @@ describe("World Chat authority adapters", () => {
     assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
     const drama = w.store.getBundle().productions.find(production => production.meta.id === payload.plan.production.id)!;
     assert.deepEqual(drama.audioDrama?.plan, { episodes: 6, minutes: 25, keptFromListener: [] }, "what was shown is what was written");
+  });
+
+  it("creates a soundtrack holding its album, the production it is for named on the card (SPEC-060 R-3, R-19)", async () => {
+    const w = await setup();
+    const productions = currentReceipt(w.store, "production-metadata");
+    const series = currentReceipt(w.store, "series");
+    const create = (production: { title: string; medium: "music"; productionKind: string; soundtrackFor?: string }) =>
+      turn(w.conversationId, w.entryContext, { receipts: [productions, series], actions: [{ kind: "production-create", production, checkReceiptIds: [productions.id, series.id] }] });
+    // As the dialog's create does: a soundtrack names what it is for.
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, create({ title: "The Bell Watch", medium: "music", productionKind: "soundtrack" })), /A soundtrack is for one of this world's productions/);
+    const oneTurn = create({ title: "Saltlight Soundtrack", medium: "music", productionKind: "soundtrack", soundtrackFor: PRODUCTION });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    const payload = prepared[0]!.payload;
+    if (payload.kind !== "world-chat-production-create") assert.fail("expected a production creation");
+    await appendTurn(w.log, oneTurn, prepared);
+    assert.ok((await readWorldMeta(w.store.dir)).schemaVersion < GUIDE_THEMES_SCHEMA_VERSION);
+    await bindAll(w.lifecycle, prepared);
+    // A build before music cards would open the world and lose the pending card (codex on PR 2190).
+    assert.ok((await readWorldMeta(w.store.dir)).schemaVersion >= GUIDE_THEMES_SCHEMA_VERSION, "the world is raised before the plan is kept");
+    const card = (await loaded(w.log)).actions[0]!;
+    if (card.shown.body.family !== "command") assert.fail("expected a command card");
+    assert.match(card.shown.body.commands.find((command) => command.label === "Album")?.detail ?? "", /^Soundtrack · for .+ · no tracks yet$/);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const made = w.store.getBundle().productions.find((production) => production.meta.id === payload.plan.production.id)!;
+    assert.equal(made.meta.kind, "soundtrack");
+    assert.deepEqual(made.music, { version: 1, loudness: -14, tracks: [], for: PRODUCTION }, "what was shown is what was written");
+  });
+
+  it("changes a music production's album through production-music cards, each checked against the album as it is (SPEC-060 R-19)", async () => {
+    const w = await setup();
+    const album = await createProduction(w.store, { title: "Songs of the Drowned Quarter", medium: "music", productionKind: "album" });
+    const BELLS = "ar_01J8G0000000000000000000R1";
+    const card = async (action: Extract<WorldChatActionTurn["actions"][number], { kind: "production-music" }>, receipts: WorldChatCheckReceipt[]) => {
+      const oneTurn = turn(w.conversationId, w.entryContext, { receipts, actions: [{ ...action, checkReceiptIds: receipts.map((receipt) => receipt.id) }] });
+      const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+      assert.equal(prepared[0]!.payload.kind, "world-chat-production-music");
+      await appendTurn(w.log, oneTurn, prepared);
+      await bindAll(w.lifecycle, prepared);
+      return (await loaded(w.log)).actions.at(-1)!;
+    };
+    const metadata = () => currentReceipt(w.store, "production-metadata", album);
+
+    // A track comes from the shelf, so the shelf is read as well as the album.
+    const alone = metadata();
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, w.entryContext, {
+      receipts: [alone],
+      actions: [{ kind: "production-music", productionId: album, command: { kind: "add-track", artifactId: BELLS }, checkReceiptIds: [alone.id] }],
+    })), /artifacts read/);
+    const read = metadata();
+    assert.ok((await readWorldMeta(w.store.dir)).schemaVersion < GUIDE_THEMES_SCHEMA_VERSION);
+    const add = await card({ kind: "production-music", productionId: album, command: { kind: "add-track", artifactId: BELLS }, checkReceiptIds: [] }, [read, currentReceipt(w.store, "artifacts")]);
+    assert.ok((await readWorldMeta(w.store.dir)).schemaVersion >= GUIDE_THEMES_SCHEMA_VERSION, "the world is raised before an album card is kept");
+    assert.equal(add.shown.title, "Add a track to Songs of the Drowned Quarter");
+    assert.equal(add.shown.permissionReason, "authored-change");
+    assert.equal((await decide(w.lifecycle, w.log, add)).status, "completed");
+    const record = () => w.store.getBundle().productions.find((production) => production.meta.id === album)!.music!;
+    assert.deepEqual(record().tracks.map((track) => track.id), ["harbour-bells"]);
+
+    // The album read before the track was added no longer says what the album is.
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, w.entryContext, {
+      receipts: [read],
+      actions: [{ kind: "production-music", productionId: album, command: { kind: "remove-track", trackId: "harbour-bells" }, checkReceiptIds: [read.id] }],
+    })), /no longer current/);
+
+    // Lyrics are Arke's own words, set on the track when the person approves them.
+    const lyrics = await card({ kind: "production-music", productionId: album, command: { kind: "update-track", trackId: "harbour-bells", title: "Saltmouth Bells", lyrics: "[verse]\nRing them low" }, checkReceiptIds: [] }, [metadata()]);
+    if (lyrics.shown.body.family !== "command") assert.fail("expected a command card");
+    assert.deepEqual(lyrics.shown.body.commands.map((command) => command.label), ["Title", "Lyrics"]);
+    assert.equal((await decide(w.lifecycle, w.log, lyrics)).status, "completed");
+    assert.deepEqual([record().tracks[0]!.title, record().tracks[0]!.lyrics], ["Saltmouth Bells", "[verse]\nRing them low"]);
+
+    // Lyrics longer than a card's line are shown whole, over as many lines as they need (codex on PR 2190).
+    const long = Array.from({ length: 350 }, (_, index) => `[verse]\nThe bell rope ${index} hauls the harbour under`).join("\n");
+    assert.ok(long.length > 12_000 && long.length <= 20_000);
+    const whole = await card({ kind: "production-music", productionId: album, command: { kind: "update-track", trackId: "harbour-bells", lyrics: long }, checkReceiptIds: [] }, [metadata()]);
+    if (whole.shown.body.family !== "command") assert.fail("expected a command card");
+    const shown = whole.shown.body.commands.filter((command) => command.label.startsWith("Lyrics"));
+    assert.ok(shown.length > 1 && shown.every((command) => (command.detail ?? "").length <= 4_000));
+    assert.equal(shown.map((command) => command.detail).join(""), long, "what is approved is what is written");
+    assert.equal((await decide(w.lifecycle, w.log, whole)).status, "completed");
+    assert.equal(record().tracks[0]!.lyrics, long);
+
+    // An order that changes nothing is refused as its card is prepared.
+    await assert.rejects(card({ kind: "production-music", productionId: album, command: { kind: "reorder-tracks", order: ["harbour-bells"] }, checkReceiptIds: [] }, [metadata()]), /could not prepare this action/);
+    const remove = await card({ kind: "production-music", productionId: album, command: { kind: "remove-track", trackId: "harbour-bells" }, checkReceiptIds: [] }, [metadata()]);
+    assert.equal((await decide(w.lifecycle, w.log, remove)).status, "completed");
+    assert.deepEqual(record().tracks, []);
   });
 
   it("refuses a book's overview or prose style for an audio drama (SPEC-057 R-82)", async () => {

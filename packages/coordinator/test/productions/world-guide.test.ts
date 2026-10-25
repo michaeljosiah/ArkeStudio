@@ -5,12 +5,16 @@ import { describe, it } from "node:test";
 import { DEFAULT_NARRATOR, guideCounts, guideDocument, pictureMarkKey, sentenceHashes, type GuideDocument, type GuideRecord, type ListeningChapter } from "@arke-studio/contracts";
 import { planAudiobook } from "../../src/productions/audiobook.js";
 import { setAudiobookPicture } from "../../src/productions/audiobook-listening.js";
-import { chapterVoiceLines, guideMoments, guideProductions, packGuide, setGuideEntry } from "../../src/productions/world-guide.js";
+import { removeMusicTrack } from "../../src/productions/music.js";
+import { chapterVoiceLines, guideDraft, guideMoments, guideProductions, packGuide, setGuideEntry, setGuideTeasers } from "../../src/productions/world-guide.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
+import { GUIDE_THEMES_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { sha256 } from "../../src/world/text-files.js";
 import { tempDir } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
+import { musicFfmpeg, withAlbum } from "./music-world.js";
 
 // SPEC-059 R-2, R-5, R-8: a world's Guide is its own record, written through the world's writes,
 // versioned as a sheet is, and read from the sheets as they are at the time.
@@ -185,4 +189,64 @@ describe("a world's Guide record (SPEC-059 R-8)", () => {
       await store.close();
     }
   });
+});
+
+// SPEC-059 R-35 – R-37 (design turn 238f, 238g): a theme and a song teaser in the record, and in
+// the guide a package carries.
+describe("music in a world's Guide (SPEC-059 R-35 – R-37)", () => {
+  it("keeps a theme on its entry, raising the world first, and ships it while its track is there (R-35, R-37)", () =>
+    withAlbum(CLOCK, async (store, dir, album, track) => {
+      assert.ok((await readWorldMeta(dir)).schemaVersion < GUIDE_THEMES_SCHEMA_VERSION);
+      await setGuideEntry(store, { entryKind: "characters", id: "maren-kest", entry: { public: true, theme: { production: album, track } } }, "editor");
+      assert.ok((await readWorldMeta(dir)).schemaVersion >= GUIDE_THEMES_SCHEMA_VERSION, "an older build refuses the world rather than its Guide");
+      assert.deepEqual(store.getBundle().guide.characters["maren-kest"]?.theme, { production: album, track });
+
+      const draft = (await guideDraft(store))!;
+      assert.equal(draft.document.version, 3);
+      const maren = draft.document.characters[0]!;
+      assert.deepEqual("theme" in maren ? maren.theme : null, { production: album, track, title: "The drowned verse", duration: 3000 });
+
+      // The track gone, the record keeps the choice, marked in the Guide, and the package leaves it out.
+      await removeMusicTrack(store, album, track);
+      assert.deepEqual(store.getBundle().guide.characters["maren-kest"]?.theme, { production: album, track });
+      const without = (await guideDraft(store))!;
+      assert.equal(without.document.version, 1);
+      assert.ok(!("theme" in without.document.characters[0]!));
+    }));
+
+  it("cuts a song teaser from its track as the album plays it, at most what the track has, with the key art where the album has no cover (R-36, R-37)", () =>
+    withAlbum(CLOCK, async (store, dir, album, track) => {
+      await setGuideEntry(store, { entryKind: "lore", id: "CANON-001", entry: { public: true } }, "editor");
+      await setGuideTeasers(store, { teasers: [{ kind: "song", production: album, track, start: 1000, duration: 30_000 }] }, "editor");
+      assert.ok((await readWorldMeta(dir)).schemaVersion >= GUIDE_THEMES_SCHEMA_VERSION);
+      const calls: string[][] = [];
+      const ffmpeg = musicFfmpeg(calls);
+      // Without the export's encoder there is nothing to cut, so the song waits for it.
+      assert.equal((await guideDraft(store))!.document.version, 1);
+      const draft = (await guideDraft(store, undefined, undefined, ffmpeg))!;
+      assert.equal(draft.document.version, 3);
+      const [song] = draft.document.version === 3 ? (draft.document.teasers ?? []) : [];
+      assert.ok(song?.kind === "song");
+      assert.deepEqual([song.title, song.duration, song.production, song.track, song.picture], ["The drowned verse", 2000, album, track, store.getBundle().keyArt]);
+      assert.equal(draft.songs?.get(song.audio)?.start, 1);
+
+      const made = await tempDir("arke-guide-song-");
+      const added: Array<[string, string, string]> = [];
+      const packed = await packGuide(draft, store, {
+        ffmpeg,
+        signal: new AbortController().signal,
+        at: (path) => join(made, ...path.split("/")),
+        add: async (assetId, path, mediaType) => { added.push([assetId, path, mediaType]); },
+        original: async () => {},
+      });
+      assert.deepEqual(packed, { ok: true });
+      assert.deepEqual(added.map(([, path, mediaType]) => [path.replace(/\.(jpg|png)$/, ".pic"), mediaType.split("/")[0]]), [["guide/teasers/t001.pic", "image"], ["guide/teasers/t002.m4a", "audio"], ["guide/guide.json", "application"]]);
+      // A window on the track's own render: from the second it starts, for the two it has left.
+      const cut = calls.find((args) => args.at(-1)!.endsWith("t002.m4a"))!;
+      assert.deepEqual([cut[cut.indexOf("-ss") + 1], cut[cut.indexOf("-t") + 1]], ["1.000", "2.000"]);
+      assert.match(cut[cut.indexOf("-i") + 1]!, /[\\/]\.cache[\\/]music[\\/]/);
+      const written = JSON.parse(await readFile(join(made, "guide", "guide.json"), "utf8")) as GuideDocument;
+      assert.equal(written.version, 3);
+      assert.deepEqual(written.version === 3 ? written.teasers?.map((teaser) => teaser.kind === "song" && [teaser.picture, teaser.audio]) : null, [["t001", "t002"]]);
+    }));
 });

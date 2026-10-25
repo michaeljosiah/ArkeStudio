@@ -466,12 +466,35 @@ export const AUDIOBOOK_PICTURE_MARKS_SCHEMA_VERSION = 109;
  * the world without a word; the world is raised when the first music production is made.
  */
 export const MUSIC_SCHEMA_VERSION = 110;
+/**
+ * Music in the Guide (design turn 238f, 238g, SPEC-059 R-35, R-36): `theme` on a Guide entry and a
+ * `song` teaser, both on the strict Guide record. A build before it reads such a record as
+ * unreadable and the Guide then refuses every write, so the world is raised before the first is kept.
+ * World Chat's music cards (SPEC-060 R-19) share it: a creation plan carrying an album's start, and
+ * an album card, are preparations a build before it cannot read.
+ */
+export const GUIDE_THEMES_SCHEMA_VERSION = 111;
 
 /** Do these production.json bytes make the production music (SPEC-060 R-1)? */
 function carriesMusic(raw: string): boolean {
   try {
     const value = JSON.parse(raw) as unknown;
     return typeof value === "object" && value !== null && (value as Record<string, unknown>)["medium"] === "music";
+  } catch {
+    return false;
+  }
+}
+
+/** Do these guide.json bytes keep a theme or a song teaser (SPEC-059 R-35, R-36)? */
+function carriesGuideMusic(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value !== "object" || value === null) return false;
+    const record = value as Record<string, unknown>;
+    const entries = ["characters", "locations", "factions"].flatMap((kind) => (typeof record[kind] === "object" && record[kind] !== null ? Object.values(record[kind] as Record<string, unknown>) : []));
+    const themed = entries.some((entry) => typeof entry === "object" && entry !== null && "theme" in entry);
+    const sung = Array.isArray(record["teasers"]) && record["teasers"].some((teaser: unknown) => typeof teaser === "object" && teaser !== null && (teaser as Record<string, unknown>)["kind"] === "song");
+    return themed || sung;
   } catch {
     return false;
   }
@@ -1079,6 +1102,9 @@ export class Committer {
       // prepared create, a metadata edit, or its record. An older build refuses the world by name
       // rather than reading a production whose medium it does not know.
       files.some(f => f.newContent != null && ((classify(f.path).track === "production-meta" && carriesMusic(f.newContent)) || /^productions\/[^/]+\/music\.json$/.test(f.path))) ? MUSIC_SCHEMA_VERSION : 0,
+      // A theme or a song in the Guide (SPEC-059 R-35, R-36), at the one boundary every write of
+      // the record passes, so no path to it can keep one in a world an older build would open.
+      files.some(f => classify(f.path).track === "guide" && f.newContent != null && carriesGuideMusic(f.newContent)) ? GUIDE_THEMES_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "shortName" in MarkdownFile.parse(f.newContent).data) ? SHEET_SHORT_NAME_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "aliases" in MarkdownFile.parse(f.newContent).data) ? CHARACTER_ALIASES_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "narration" in MarkdownFile.parse(f.newContent).data) ? SHEET_NARRATION_SCHEMA_VERSION : 0,

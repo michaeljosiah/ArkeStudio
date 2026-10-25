@@ -112,7 +112,15 @@ export function planProductionCreation(
   });
   const format = legacyFormatFor(medium);
   const defaultShape = productionShape({ format });
-  const productionKind = input.productionKind ?? (input.medium === "interactive-video" ? "interactive" : undefined);
+  // Music is one of its three kinds and nothing else, and a soundtrack names the production it is
+  // for (SPEC-060 R-1, R-3), as the dialog's own create says: World Chat's plan is held to both.
+  const productionKind = medium === "music"
+    ? musicKindOf({ kind: input.productionKind })
+    : input.productionKind ?? (input.medium === "interactive-video" ? "interactive" : undefined);
+  const soundtrackFor = medium === "music" && productionKind === "soundtrack" ? input.soundtrackFor : undefined;
+  if (medium === "music" && productionKind === "soundtrack" && (soundtrackFor === undefined || !bundle.productions.some((production) => production.meta.id === soundtrackFor))) {
+    throw new Error("A soundtrack is for one of this world's productions; choose which");
+  }
   const carriesNewModel = medium !== defaultShape.medium ||
     (productionKind !== undefined && productionKind !== defaultShape.kind);
   const production = ProductionSchema.parse({
@@ -130,7 +138,12 @@ export function planProductionCreation(
   });
   const shape = productionShape(production);
   if (!shape.isEpisodic) {
-    return { production, initialSeason: null, series: { operation: "none" } };
+    return {
+      production,
+      initialSeason: null,
+      series: { operation: "none" },
+      ...(shape.isMusic ? { music: soundtrackFor !== undefined ? { for: soundtrackFor } : {} } : {}),
+    };
   }
   const initialSeason = SeasonSchema.parse({ version: 1, ...(input.defaults ? { defaults: input.defaults } : {}) });
   const seriesTitle = input.seriesTitle ?? input.title;
@@ -221,6 +234,17 @@ export async function createProductionFromPlan(
       path: `productions/${plan.production.id}/audio-drama.json`,
       action: "create",
       content: `${JSON.stringify(AudioDramaRecordSchema.parse({ version: 1, plan: DEFAULT_AUDIO_DRAMA_PLAN }), null, 2)}\n`,
+      baseHash: null,
+    });
+  }
+  // Music starts with its record (SPEC-060 R-4), a soundtrack's `for` fixed in the plan. A plan
+  // prepared before plans carried one starts as the empty album its first change writes.
+  if (plan.music !== undefined) {
+    if (!shape.isMusic) throw new Error("The prepared production plan has a music record for a production that is not music.");
+    files.push({
+      path: `productions/${plan.production.id}/${MUSIC_RECORD_FILE}`,
+      action: "create",
+      content: `${JSON.stringify(MusicRecordSchema.parse({ ...EMPTY_MUSIC_RECORD, ...plan.music }), null, 2)}\n`,
       baseHash: null,
     });
   }

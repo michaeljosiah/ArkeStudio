@@ -2806,6 +2806,7 @@ const exampleWorldActions = {
     scope: { kind: "effects-only", target: { kind: "composition" }, range: { startFrame: 0, endFrame: 240 }, audio: { kind: "off" },
       direction: "Soften the existing dust", palette: [{ id: "dust", version: 1 }] }, proposal: { summary: "Soften the atmosphere",
     commands: [{ kind: "effect-patch", clipId: "cl_dust", patch: { appearance: { opacity: .35 } } }], identities: [] }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "production-music": { kind: "production-music", productionId: "songs-of-the-drowned-quarter", command: { kind: "update-track", trackId: "the-drowned-verse", lyrics: "[verse]\nThe bells went under singing" }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-audio-cue": { kind: "production-audio-cue", productionId: "saltlight", source: { kind: "generation", actionRef: "music", outputIndex: 0 }, after: ["music"], trackId: "tr_music", startFrame: 0, durationFrames: 240, sourceInFrames: 0, gainDb: -6, role: "music", checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
 } satisfies Record<ModelWorldChatAction["kind"], ModelWorldChatAction>;
 
@@ -2853,7 +2854,8 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "voice-clip-review": "Accept or reject a voice take for a shot; a rejection cites the sheet field it fails.",
   "world-archive": "Archive this world.",
   "world-export": "Export this world.",
-  "production-create": "Create a production with its medium, kind, series, aspect, frame rate and defaults. The plan on the card is exactly what is created; it is never replanned after Approve.",
+  "production-create": "Create a production with its medium, kind, series, aspect, frame rate and defaults. Music is an album, single or soundtrack (productionKind); a soundtrack names the production it is for in soundtrackFor. The plan on the card is exactly what is created; it is never replanned after Approve.",
+  "production-music": "Change a music production's album: add a kept audio take or imported file from list_artifacts as its last track (makeAlbum only when the person said a single becomes an album), retitle a track or set its plain-text lyrics (write the words yourself; an empty string clears them), remove a track, reorder every track once, or set the cover to an image artifact or null. Track ids come from get_production_metadata's music row.",
   "production-metadata": "Change a production's title, medium, kind, series, status, aspect or frame rate.",
   "production-model": "Set the model a production uses for one capability.",
   "production-series": "Create or edit the Series record: title, engine, continuity and seasons. Recurring cast stays in world sheets.",

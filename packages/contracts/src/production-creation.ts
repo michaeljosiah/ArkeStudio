@@ -38,6 +38,13 @@ export const ProductionCreationPlanSchema = z.object({
     /** An audio drama's plan and source, written as `audio-drama.json` (SPEC-057 R-7). */
     audioDrama: AudioDramaRecordSchema.optional(),
   }).strict().optional(),
+  /**
+   * A music production's start (SPEC-060 R-3, R-4): an empty album, written as `music.json`, and a
+   * soundtrack's `for` fixed here. Only what a creation decides, never the album's whole record:
+   * carried into every schema that holds a plan — production setup's, inside WorldChatLoadedSchema —
+   * the record made it too long for the engine's declaration bundle (TS7056) and stopped the build.
+   */
+  music: z.object({ for: SlugSchema.optional() }).strict().optional(),
 }).strict();
 export type ProductionCreationPlan = z.infer<typeof ProductionCreationPlanSchema>;
 
