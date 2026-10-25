@@ -152,8 +152,11 @@ export async function openBenchSession(
     defaultModel?: { provider: string; model: string } | undefined;
     /** Force a new session even where others exist — the clear-the-bench gesture. */
     fresh?: boolean | undefined;
-    /** Create an exact, fresh session with these reviewed words when sessionId does not exist. */
-    initial?: { mode: Extract<BenchMode, "image" | "video">; brief: string; title?: string } | undefined;
+    /**
+     * Create an exact, fresh session with these reviewed words when sessionId does not exist. An
+     * image's shape starts it too: Make cover's is square (SPEC-060 R-5).
+     */
+    initial?: { mode: Extract<BenchMode, "image" | "video">; brief: string; title?: string; aspect?: string } | undefined;
   } = {},
 ): Promise<OpenedBench | null> {
   if (options.sessionId !== undefined) {
@@ -184,7 +187,7 @@ async function createBenchSession(
   at: string,
   options: {
     defaultModel?: { provider: string; model: string } | undefined;
-    initial?: { mode: Extract<BenchMode, "image" | "video">; brief: string; title?: string } | undefined;
+    initial?: { mode: Extract<BenchMode, "image" | "video">; brief: string; title?: string; aspect?: string } | undefined;
   },
 ): Promise<OpenedBench | null> {
   const mode = options.initial?.mode ?? "image";
@@ -199,7 +202,7 @@ async function createBenchSession(
         mode,
         provider: options.defaultModel?.provider ?? "",
         model: options.defaultModel?.model ?? "",
-        params: mode === "image" ? { kind: "image", count: 1 } : { kind: "video" },
+        params: mode === "image" ? { kind: "image", count: 1, ...(options.initial?.aspect !== undefined ? { aspect: options.initial.aspect } : {}) } : { kind: "video" },
         brief: options.initial?.brief ?? "",
       },
       { at, requestId: composerRequestId },

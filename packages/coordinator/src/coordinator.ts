@@ -13342,23 +13342,10 @@ export class Coordinator {
             this.emit({ type: "command.failed", at: this.nowIso(), command: msg.kind, requestId: null, reason: describeCoordinatorError(error) });
           }
         } else {
-          const opened = await this.openBenchWorkspace(store, undefined, true);
-          // Make cover (238c, SPEC-060 R-5): a music cover is square, so its session starts at 1:1
-          // with the album's words, and the picture is made that shape rather than cut to it.
-          if (opened !== null && msg.image !== undefined) {
-            const composer = opened.composer;
-            await this.handleClientMessage({
-              kind: "bench-compose",
-              worldId: msg.worldId,
-              sessionId: opened.id,
-              requestId: ulid(),
-              mode: "image",
-              provider: composer.provider,
-              model: composer.model,
-              params: { kind: "image", count: composer.params.kind === "image" ? composer.params.count : 1, aspect: msg.image.aspect },
-              brief: msg.image.brief,
-            });
-          }
+          // Make cover (238c, SPEC-060 R-5): a music cover is square, so its session is made at
+          // 1:1 with the album's words before the Bench shows it, and the picture is made that
+          // shape rather than cut to it.
+          await this.openBenchWorkspace(store, undefined, true, msg.image === undefined ? undefined : { mode: "image", brief: msg.image.brief, aspect: msg.image.aspect });
         }
         return;
       }
@@ -21218,18 +21205,19 @@ export class Coordinator {
    * Recovery is idempotent, so running it on every open costs a read and buys the two crash
    * windows their answer (issue 305 §6).
    */
-  private async openBenchWorkspace(store: WorldStore, sessionId?: SessionId, fresh = false): Promise<BenchSession | null> {
+  private async openBenchWorkspace(store: WorldStore, sessionId?: SessionId, fresh = false, initial?: { mode: "image"; brief: string; aspect: string }): Promise<void> {
     const settings = this.appSettings ? await this.appSettings.load() : null;
     const routed = this.opts.manifest ? imageModelFor(settings, this.opts.manifest, undefined, store.getBundle().meta.models) : null;
     const opened = await openBenchSession(store.dir, () => this.nowIso(), {
       sessionId,
       fresh,
       ...(routed ? { defaultModel: { provider: routed.provider, model: routed.id } } : {}),
+      ...(initial !== undefined ? { initial } : {}),
     }).catch(() => null);
     if (!opened) {
       this.readModel.setBench(null);
       this.transport.broadcastSnapshot();
-      return null;
+      return;
     }
     const touched = await recoverBenchSession(opened, this.benchJobFacts(store.worldId), () =>
       this.nowIso(),
@@ -21248,7 +21236,6 @@ export class Coordinator {
     this.readModel.setBench({ worldId: store.worldId, session });
     this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
     this.transport.broadcastSnapshot();
-    return session;
   }
 
   /** Complete the small crash window between an atomic production commit and the Bench event. */
