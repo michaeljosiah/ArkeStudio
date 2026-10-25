@@ -12,10 +12,12 @@
 .fy-prodcard-slot--1 { --production-tilt: 1.2deg; --production-top: -8px; --production-drift: 8.3s; }
 .fy-prodcard-slot--2 { --production-tilt: -1deg; --production-top: 0px; --production-drift: 7.9s; }
 .fy-prodcard { transform: rotate(var(--production-tilt)); }
-.fy-production-doors { display: grid; grid-template-columns: repeat(3, minmax(0, 372px)); justify-content: center; gap: 30px; padding: 40px 24px 0; }
+/* Four cards since Listen joined them (design turn 238a), in the width three used to take. */
+.fy-production-doors { display: grid; grid-template-columns: repeat(4, minmax(0, 290px)); justify-content: center; gap: 22px; padding: 40px 24px 0; }
 .fy-door--0 { --door-tilt: -1.2deg; animation-delay: 0s; }
 .fy-door--1 { --door-tilt: 0deg; animation-delay: .06s; }
 .fy-door--2 { --door-tilt: 1deg; animation-delay: .12s; }
+.fy-door--3 { --door-tilt: -.6deg; animation-delay: .18s; }
 .fy-door__print { transform: rotate(var(--door-tilt)); }
 .fy-production-step { position: relative; }
 .fy-production-step__panel { max-width: 560px; position: relative; }
@@ -122,7 +124,7 @@
   .fy-prodcard { max-width: 100%; }
   .fy-production-resumes { padding-inline: 48px; }
   .fy-production-resumes .ui-btn { min-height: 44px; }
-  .fy-production-doors { gap: 16px; padding-inline: 48px; }
+  .fy-production-doors { grid-template-columns: repeat(2, minmax(0, 320px)); gap: 16px; padding-inline: 48px; }
   .fy-door__body { height: auto; min-height: 40px; }
   .fy-door__go { overflow-wrap: anywhere; }
   .fy-production-step__foot { flex-wrap: wrap; }
