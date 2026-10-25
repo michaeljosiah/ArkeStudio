@@ -254,7 +254,9 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       id: "music_v1", provider: "elevenlabs", capability: "music",
       displayName: "Eleven Music",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-      limits: { maxDurationSec: 300, audioFormat: "mp3", maxPromptChars: 2000 },
+      // `music_length_ms` makes a song that long (3 s – 5 min), and `force_instrumental` one with
+      // no voice (SPEC-060 R-9, read 2026-10-25 from the same compose reference).
+      limits: { maxDurationSec: 300, audioFormat: "mp3", maxPromptChars: 2000, musicLength: "exact", musicInstrumental: true },
       pricing: { kind: "perSecond", microUsdPerSecond: 2500 },
     },
     // New cloud creative choices start with Flash; saved routing and casting win first.

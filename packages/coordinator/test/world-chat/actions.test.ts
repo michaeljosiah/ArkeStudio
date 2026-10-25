@@ -48,6 +48,7 @@ import { ARKE_CLIENT_COMMAND_REGISTRY, worldChatActionDescriptor } from "../../s
 import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
 import { readEditorRequest } from "../../src/productions/editor-requests.js";
 import { createEpisode, createProduction, openChapter } from "../../src/productions/ops.js";
+import { addMusicTrack, editMusicTrack, ensureMusicSession, musicRecordFence, readMusicRecord } from "../../src/productions/music.js";
 import { bookAuthoringRefusal } from "../../src/world-chat/production-authoring.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
@@ -3645,5 +3646,111 @@ describe("Arke's episode scripts reach the score or say why (issue 1883)", () =>
     assert.equal(body.family, "authored-diff");
     assert.ok(body.fields.some((field) => field.label === "Episode 1 script: Script" && field.after === "SCENE · The quay\nNARRATOR: The tide was out."), JSON.stringify(body.fields));
     assert.ok(body.fields.every((field) => !(field.after ?? "").includes('"kind"')), "never the blocks as JSON");
+  });
+});
+
+describe("a music track from World Chat (SPEC-060 R-9 – R-13)", () => {
+  const BELLS = "ar_01J8G0000000000000000000R1";
+  async function album(w: Awaited<ReturnType<typeof setup>>) {
+    const id = await createProduction(w.store, { title: "Songs of the Drowned Quarter", medium: "music", productionKind: "album" });
+    await addMusicTrack(w.store, id, BELLS);
+    await addMusicTrack(w.store, id, BELLS);
+    return id;
+  }
+
+  it("edits a track and sets the album's sequence only once each card is approved", async () => {
+    const w = await setup();
+    const id = await album(w);
+    const receipt = currentReceipt(w.store, "production-metadata", id);
+    const baseHash = musicRecordFence((await readMusicRecord(w.store, id)).record);
+    const one = turn(w.conversationId, w.entryContext, {
+      receipts: [receipt],
+      actions: [
+        ModelWorldChatActionSchema.parse({ kind: "music-track-edit", productionId: id, trackId: "harbour-bells", trim: { startMs: 0, endMs: 2000 }, fadeInMs: 500, fadeOutMs: 0,
+          sections: [{ label: "Chorus", atMs: 1000 }, { label: "Verse", atMs: 0 }], baseHash, checkReceiptIds: [receipt.id] }),
+      ],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const before = (await readMusicRecord(w.store, id)).record;
+    assert.equal(before.tracks[0]!.trim, undefined, "nothing changes before approval");
+    const [edit] = (await loaded(w.log)).actions;
+    assert.equal(edit!.shown.title, "Edit Harbour bells");
+    assert.equal(edit!.shown.body.family, "command");
+    if (edit!.shown.body.family === "command") assert.deepEqual(edit!.shown.body.commands.map((command) => command.label), ["Trim 0:00 – 0:02", "Fade in 0.5 s · fade out 0 s", "Chorus at 0:01", "Verse at 0:00"]);
+    assert.equal((await decide(w.lifecycle, w.log, edit!)).status, "completed");
+    // The sequence is read against the album as the edit left it.
+    const next = currentReceipt(w.store, "production-metadata", id);
+    const two = turn(w.conversationId, w.entryContext, { receipts: [next], actions: [ModelWorldChatActionSchema.parse({ kind: "music-sequence-set", productionId: id, loudness: -16,
+      joins: [{ trackId: "harbour-bells", next: { crossfadeMs: 1000 } }, { trackId: "harbour-bells-2", next: { gapMs: 2000 } }], baseHash: musicRecordFence((await readMusicRecord(w.store, id)).record), checkReceiptIds: [next.id] })] });
+    const preparedTwo = prepareWorldChatActions(w.store, w.lifecycle, two);
+    await appendTurn(w.log, two, preparedTwo);
+    await bindAll(w.lifecycle, preparedTwo);
+    const sequence = (await loaded(w.log)).actions.find((action) => action.shown.title === "Set the album's sequence")!;
+    assert.equal((await decide(w.lifecycle, w.log, sequence)).status, "completed");
+    const after = (await readMusicRecord(w.store, id)).record;
+    assert.deepEqual([after.tracks[0]!.trim, after.tracks[0]!.fadeInMs, after.tracks[0]!.sections], [{ startMs: 0, endMs: 2000 }, 500, [{ label: "Verse", atMs: 0 }, { label: "Chorus", atMs: 1000 }]]);
+    assert.deepEqual([after.loudness, after.tracks[0]!.next, after.tracks[1]!.next], [-16, { crossfadeMs: 1000 }, undefined], "the last track joins nothing");
+  });
+
+  it("makes a track's takes in the album's own session, as music for that track", async () => {
+    const w = await setup({ kind: "world" }, { getGenerationRouteRows: () => [], getJobs: () => [] });
+    const id = await album(w);
+    const session = await ensureMusicSession(w.store, id, AT);
+    const reads = [currentReceipt(w.store, "jobs"), currentReceipt(w.store, "generation-routes"), currentReceipt(w.store, "bench", session)];
+    const generation = (extra: Record<string, unknown>) => ModelWorldChatActionSchema.parse({
+      kind: "bench-generation", musicTrack: { productionId: id, trackId: "harbour-bells-2" },
+      composer: { mode: "music", provider: "elevenlabs", model: "music_v1", params: { kind: "music", lyrics: "[verse]\nRing them low", count: 2, lengthSec: 180 }, brief: "Slow sea shanty" },
+      checkReceiptIds: reads.map((receipt) => receipt.id), ...extra,
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, w.entryContext, { receipts: reads, actions: [generation({ sessionId: `sess_${ulid()}` })] }), w.actionDeps);
+    const payload = prepared[0]!.payload as { action: { productionId?: string; sessionId?: string } };
+    assert.deepEqual([payload.action.productionId, payload.action.sessionId], [id, session], "the album's session, whatever session the chat named");
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, w.entryContext, { receipts: reads,
+      actions: [generation({ musicTrack: { productionId: id, trackId: "gone" } })] }), w.actionDeps), /no longer on the album/);
+  });
+
+  it("chooses a finished take through the host's Choose, and only one of the album's", async () => {
+    const chosen: string[][] = [];
+    const w = await setup({ kind: "world" }, { chooseMusicTake: async (...args) => { chosen.push(args); } });
+    const id = await album(w);
+    const session = await ensureMusicSession(w.store, id, AT);
+    const reads = [currentReceipt(w.store, "production-metadata", id), currentReceipt(w.store, "bench", session)];
+    const take = `tk_${ulid()}`;
+    const one = turn(w.conversationId, w.entryContext, { receipts: reads, actions: [ModelWorldChatActionSchema.parse({
+      kind: "music-track-choose", productionId: id, trackId: "harbour-bells", sessionId: session, takeId: take, baseHash: musicRecordFence((await readMusicRecord(w.store, id)).record), checkReceiptIds: reads.map((receipt) => receipt.id),
+    })] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    assert.equal(card.shown.title, "Choose a take for Harbour bells");
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    assert.deepEqual(chosen.map((call) => call.slice(0, 4)), [[id, "harbour-bells", session, take]]);
+  });
+
+  it("goes stale rather than write over an edit made after it was read (codex on PR 2191)", async () => {
+    const w = await setup();
+    const id = await album(w);
+    const receipt = currentReceipt(w.store, "production-metadata", id);
+    const baseHash = musicRecordFence((await readMusicRecord(w.store, id)).record);
+    const one = turn(w.conversationId, w.entryContext, { receipts: [receipt], actions: [ModelWorldChatActionSchema.parse({
+      kind: "music-track-edit", productionId: id, trackId: "harbour-bells", trim: null, fadeInMs: 0, fadeOutMs: 0, sections: [], baseHash, checkReceiptIds: [receipt.id],
+    })] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared);
+    await bindAll(w.lifecycle, prepared);
+    // The author marks a section on the page while the card waits.
+    await editMusicTrack(w.store, id, "harbour-bells", { trim: null, fadeInMs: 0, fadeOutMs: 0, sections: [{ label: "Verse", atMs: 0 }] });
+    const result = await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!);
+    assert.notEqual(result.status, "completed");
+    assert.deepEqual((await readMusicRecord(w.store, id)).record.tracks[0]!.sections, [{ label: "Verse", atMs: 0 }], "the newer edit stands");
+    // A card read against the old album is refused as it is prepared, too.
+    const late = currentReceipt(w.store, "production-metadata", id);
+    const two = turn(w.conversationId, w.entryContext, { receipts: [late], actions: [ModelWorldChatActionSchema.parse({ kind: "music-sequence-set", productionId: id, loudness: -14, joins: [], baseHash, checkReceiptIds: [late.id] })] });
+    const preparedTwo = prepareWorldChatActions(w.store, w.lifecycle, two);
+    await appendTurn(w.log, two, preparedTwo);
+    await assert.rejects(bindAll(w.lifecycle, preparedTwo), /could not prepare this action/);
   });
 });

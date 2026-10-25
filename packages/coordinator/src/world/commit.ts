@@ -474,6 +474,13 @@ export const MUSIC_SCHEMA_VERSION = 110;
  * an album card, are preparations a build before it cannot read.
  */
 export const GUIDE_THEMES_SCHEMA_VERSION = 111;
+/**
+ * A music track's composer (design turn 238i, SPEC-060 R-9): `session` on `music.json`, and the
+ * length, instrumental and track a music take's params carry in the album's Bench session. A build
+ * before it reads the strict record and the session's takes as unreadable, so the world is raised
+ * before the first is written.
+ */
+export const MUSIC_COMPOSER_SCHEMA_VERSION = 112;
 
 /** Do these production.json bytes make the production music (SPEC-060 R-1)? */
 function carriesMusic(raw: string): boolean {
@@ -1105,6 +1112,8 @@ export class Committer {
       // A theme or a song in the Guide (SPEC-059 R-35, R-36), at the one boundary every write of
       // the record passes, so no path to it can keep one in a world an older build would open.
       files.some(f => classify(f.path).track === "guide" && f.newContent != null && carriesGuideMusic(f.newContent)) ? GUIDE_THEMES_SCHEMA_VERSION : 0,
+      // The album's own session, however it is first written (SPEC-060 R-9).
+      files.some(f => f.newContent != null && /^productions\/[^/]+\/music\.json$/.test(f.path) && "session" in JsonFile.parse(f.newContent).value) ? MUSIC_COMPOSER_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "shortName" in MarkdownFile.parse(f.newContent).data) ? SHEET_SHORT_NAME_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "aliases" in MarkdownFile.parse(f.newContent).data) ? CHARACTER_ALIASES_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "narration" in MarkdownFile.parse(f.newContent).data) ? SHEET_NARRATION_SCHEMA_VERSION : 0,

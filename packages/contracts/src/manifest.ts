@@ -165,6 +165,19 @@ export const ModelLimitsSchema = z
      */
     alwaysSound: z.boolean().optional(),
     /**
+     * Music (SPEC-060 R-9): the route makes a song of the length it is asked for, rather than
+     * treating `duration` as a ceiling it may stop short of. Eleven Music takes `music_length_ms`
+     * and makes that; MiniMax Music 3 calls its `duration` an upper bound, which is why the
+     * Bench's own composer asks no length at all. A composer offers Length only where this says
+     * the number will be kept.
+     */
+    musicLength: z.literal("exact").optional(),
+    /**
+     * Music: the route can make a song with no voice (Eleven Music's `force_instrumental`). A
+     * route without it needs lyrics, and Instrumental is not offered.
+     */
+    musicInstrumental: z.literal(true).optional(),
+    /**
      * What the reference route calls its image array. Seedance says `image_urls`; minimax and
      * wan say `reference_image_urls`. Data for the same reason `framesField` is.
      */

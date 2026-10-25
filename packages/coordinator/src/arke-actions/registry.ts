@@ -36,6 +36,9 @@ import {
   WorldChatProductionEpisodeOrderActionSchema,
   WorldChatProductionMetadataActionSchema,
   WorldChatProductionModelActionSchema,
+  WorldChatMusicSequenceActionSchema,
+  WorldChatMusicTrackChooseActionSchema,
+  WorldChatMusicTrackEditActionSchema,
   WorldChatProductionOverviewActionSchema,
   WorldChatProductionProseStyleActionSchema,
   WorldChatProductionEpisodeScriptActionSchema,
@@ -473,6 +476,14 @@ const CLIENT_COMMAND_METADATA = {
   "music-draft-lyrics": readOnly("Returns a lyrics draft without changing the track."),
   "read-music-heard-in": readOnly(QUERY),
   "render-music": readOnly(QUERY),
+  // A track's composer, editor and the album's sequence (SPEC-060 R-9 – R-13): the composer
+  // spends as the Bench does; the editor and the sequence are authored changes to music.json.
+  "music-track-make": action("production", "generation", "bench", "spend-and-compute", ["bench", "artifacts", "jobs", "production-metadata"]),
+  "music-track-choose": action("production", "command", "production-store", "authored-change", ["production-metadata", "artifacts", "bench"]),
+  "music-track-edit": action("production", "command", "production-store", "authored-change", ["production-metadata"]),
+  "music-sequence-set": action("production", "command", "production-store", "authored-change", ["production-metadata"]),
+  "read-music-takes": readOnly(QUERY),
+  "read-music-waveform": readOnly(QUERY),
   "list-guide-voice-lines": readOnly(QUERY),
   "reorder-chapters": action("production", "command", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   "reorder-scenes": action("production", "command", "production-store", "authored-change", ["scenes", "episodes"]),
@@ -880,6 +891,11 @@ const COMMAND_MODEL_PATHS = {
   "extract-artifact": ["artifact-extraction"],
   "stop-extraction": ["artifact-extraction-stop"],
   "bench-dispatch": ["bench-generation"],
+  // A track's takes are a Bench generation naming the track; the rest are typed actions (SPEC-060).
+  "music-track-make": ["bench-generation"],
+  "music-track-choose": ["music-track-choose"],
+  "music-track-edit": ["music-track-edit"],
+  "music-sequence-set": ["music-sequence-set"],
   "bench-rerun": ["bench-generation"],
   "bench-keep": ["bench-keep"],
   "bench-select-take": ["bench-select"],
@@ -1181,6 +1197,13 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     schema: WorldChatProductionModelActionSchema,
     ...action("production", "setting", "production-store", "authored-change", ["production-metadata"]),
   },
+  // A music track's take, its edit and the album's sequence (SPEC-060 R-10 – R-13).
+  "world-chat-music-track-choose": { kind: "world-chat-music-track-choose", schema: WorldChatMusicTrackChooseActionSchema,
+    ...action("production", "command", "production-store", "authored-change", ["production-metadata", "bench"]) },
+  "world-chat-music-track-edit": { kind: "world-chat-music-track-edit", schema: WorldChatMusicTrackEditActionSchema,
+    ...action("production", "command", "production-store", "authored-change", ["production-metadata"]) },
+  "world-chat-music-sequence-set": { kind: "world-chat-music-sequence-set", schema: WorldChatMusicSequenceActionSchema,
+    ...action("production", "command", "production-store", "authored-change", ["production-metadata"]) },
   "world-chat-production-series": {
     kind: "world-chat-production-series",
     schema: WorldChatProductionSeriesActionSchema,
@@ -1697,8 +1720,12 @@ export function arkeClientCommand<K extends ClientMessageKind>(
 
 /** Kept local to this boundary so arbitrary strings never acquire a descriptor by assertion. */
 export function findArkeClientCommand(kind: string): ArkeClientCommandDescriptor | undefined {
-  return Object.prototype.hasOwnProperty.call(ARKE_CLIENT_COMMAND_REGISTRY, kind)
-    ? ARKE_CLIENT_COMMAND_REGISTRY[kind as ClientMessageKind]
+  // Indexed by the whole kind union, the mapped registry is past what the checker will represent
+  // (TS2590) once ClientMessage passed five hundred commands; a lookup by string reads it as the
+  // record it is at runtime.
+  const registry = ARKE_CLIENT_COMMAND_REGISTRY as unknown as Readonly<Record<string, ArkeClientCommandDescriptor>>;
+  return Object.prototype.hasOwnProperty.call(registry, kind)
+    ? registry[kind]
     : undefined;
 }
 

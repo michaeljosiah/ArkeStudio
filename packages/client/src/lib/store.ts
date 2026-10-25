@@ -1040,6 +1040,20 @@ export function subscribeMusicRendered(listener: (answer: MusicRendered) => void
   musicRenderedListeners.add(listener);
   return () => musicRenderedListeners.delete(listener);
 }
+// A track's takes (238i), asked for or pushed when the album's session moves, and a file's
+// waveform (238j, 238k), each to whoever is listening.
+export type MusicTakes = Extract<DomainEvent, { type: "music.takes" }>;
+export type MusicWaveformAnswer = Extract<DomainEvent, { type: "music.waveform" }>;
+const musicTakesListeners = new Set<(answer: MusicTakes) => void>();
+const musicWaveformListeners = new Set<(answer: MusicWaveformAnswer) => void>();
+export function subscribeMusicTakes(listener: (answer: MusicTakes) => void): () => void {
+  musicTakesListeners.add(listener);
+  return () => musicTakesListeners.delete(listener);
+}
+export function subscribeMusicWaveform(listener: (answer: MusicWaveformAnswer) => void): () => void {
+  musicWaveformListeners.add(listener);
+  return () => musicWaveformListeners.delete(listener);
+}
 
 
 export function subscribeFiledBatch(listener: (batch: FiledBatch) => void): () => void {
@@ -2056,6 +2070,8 @@ function handleFrame(json: string): void {
     if (event.type === "music.lyrics-drafted") for (const listener of musicLyricsListeners) listener(event);
     if (event.type === "music.heard-in") for (const listener of musicHeardListeners) listener(event);
     if (event.type === "music.rendered") for (const listener of musicRenderedListeners) listener(event);
+    if (event.type === "music.takes") for (const listener of musicTakesListeners) listener(event);
+    if (event.type === "music.waveform") for (const listener of musicWaveformListeners) listener(event);
     if (event.type === "artifact.filed-batch") {
       for (const listener of filedBatchListeners) listener(event);
     }
@@ -5059,6 +5075,42 @@ export function renderMusic(worldId: string, productionId: string): string | nul
   return send({ kind: "render-music", worldId, productionId, requestId }) ? requestId : null;
 }
 
+/**
+ * Make takes for a track (238i, R-9): the Bench's own dispatch in the album's session, so its
+ * answer is a Bench dispatch's `queue.enqueue-result` under the id returned.
+ */
+export function makeMusicTakes(worldId: string, productionId: string, trackId: string, composer: Extract<ClientMessage, { kind: "music-track-make" }>["composer"]): string | null {
+  const requestId = queueRequest("bench-dispatch");
+  return send({ kind: "music-track-make", worldId, productionId, trackId, requestId, composer }) ? requestId : null;
+}
+
+/** Choose a take as its track's (238i, R-10). */
+export function chooseMusicTake(worldId: string, productionId: string, trackId: string, sessionId: string, takeId: string): boolean {
+  return send({ kind: "music-track-choose", worldId, productionId, trackId, sessionId, takeId, requestId: ulid() });
+}
+
+/** The track editor's Save (238j, R-11): its trim, fades and sections. */
+export function editMusicTrack(worldId: string, productionId: string, trackId: string, edit: Omit<Extract<ClientMessage, { kind: "music-track-edit" }>, "kind" | "worldId" | "productionId" | "trackId">): boolean {
+  return send({ kind: "music-track-edit", worldId, productionId, trackId, ...edit });
+}
+
+/** The album's sequence (238k, R-13): every join and the loudness target. */
+export function setMusicSequence(worldId: string, productionId: string, loudness: number, joins: Extract<ClientMessage, { kind: "music-sequence-set" }>["joins"]): boolean {
+  return send({ kind: "music-sequence-set", worldId, productionId, loudness, joins: [...joins] });
+}
+
+/** The album's takes by track (238i): answered as `music.takes` under the id returned. */
+export function readMusicTakes(worldId: string, productionId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "read-music-takes", worldId, productionId, requestId }) ? requestId : null;
+}
+
+/** A world audio file's waveform (238j, 238k): answered as `music.waveform` under the id returned. */
+export function readMusicWaveform(worldId: string, file: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "read-music-waveform", worldId, file, requestId }) ? requestId : null;
+}
+
 /** Stage the structured overview through the gate — nothing is written live (issue 385). */
 export function proposeStoryOverview(
   worldId: string,
@@ -7371,8 +7423,8 @@ export function sendBenchRebuildSubject(worldId: string, sessionId: string): str
     : null;
 }
 
-export function sendBenchNewSession(worldId: string, picture?: Extract<ClientMessage, { kind: "bench-new-session" }>["picture"]): void {
-  send({ kind: "bench-new-session", worldId, ...(picture !== undefined ? { picture } : {}) });
+export function sendBenchNewSession(worldId: string, picture?: Extract<ClientMessage, { kind: "bench-new-session" }>["picture"], image?: Extract<ClientMessage, { kind: "bench-new-session" }>["image"]): void {
+  send({ kind: "bench-new-session", worldId, ...(picture !== undefined ? { picture } : {}), ...(image !== undefined ? { image } : {}) });
 }
 
 export function sendBenchClose(worldId: string): void {

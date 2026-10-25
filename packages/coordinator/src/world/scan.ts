@@ -214,7 +214,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 110: music productions — `medium: "music"` and `music.json` (design turn 238, SPEC-060 R-1, R-4).
 // 111: music in the Guide — a character's or place's `theme` and a `song` teaser (design turn 238, SPEC-059 R-35, R-36) —
 // and World Chat's music cards (SPEC-060 R-19).
-export const SUPPORTED_SCHEMA_VERSION = 111;
+// 112: a music track's composer — the album's session and a take's length, instrumental and track (SPEC-060 R-9).
+export const SUPPORTED_SCHEMA_VERSION = 112;
 
 export class WorldOpenError extends Error {
   constructor(

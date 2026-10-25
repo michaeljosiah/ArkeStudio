@@ -1,5 +1,6 @@
 import type { ProductionBundle, WorldBundle } from "@arke-studio/contracts";
 import { orderedShots, productionShape } from "@arke-studio/contracts";
+import { musicRecordFence } from "../productions/music.js";
 
 /**
  * One production, read whole (round 3, 2026-08-22).
@@ -29,6 +30,10 @@ export function productionRecord(bundle: WorldBundle, productionId: string): Rec
     season: production.season,
     // An audio drama's plan, source and secrets (SPEC-057 R-7): its episodes are not scene records.
     ...(production.audioDrama ? { audioDrama: production.audioDrama } : {}),
+    // A music production's album (SPEC-060 R-4): its tracks in order, each with its takes, trim,
+    // fades, sections and the join to the next, and the session its takes are made in.
+    // `baseHash` is what a music card names, so it is stale once the album moves (codex on PR 2191).
+    ...(production.music ? { music: { ...production.music, baseHash: musicRecordFence(production.music) } } : {}),
     // Its episode scripts, by episode (SPEC-057 R-83): blocks carry the ids an edit names.
     // With the hash a whole-script proposal is fenced on (codex on PR 1874).
     ...(production.episodeScripts?.length ? { episodeScripts: production.episodeScripts.map((entry) => ({ ...entry.script, baseHash: entry.hash })) } : {}),

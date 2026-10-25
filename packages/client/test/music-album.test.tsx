@@ -16,8 +16,9 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 
 /**
- * Music productions in the Studio (design turn 238a – 238e and 238h, SPEC-060 task 2): the Listen
- * door, What kind of music?, the album page, Add track, a track open, and Export → Arke Player.
+ * Music productions in the Studio (design turn 238, SPEC-060 tasks 2 and 3): the Listen door, What
+ * kind of music?, the album page, Add track, a track open, its composer and takes, the track
+ * editor, the album's sequence, Make cover and Export → Arke Player.
  */
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -103,6 +104,13 @@ async function choose(select: HTMLSelectElement, value: string) {
     select.dispatchEvent(new dom.Event("change", { bubbles: true }));
   });
 }
+/** A field left, as React holds its handler. */
+async function leave(el: HTMLInputElement) {
+  await act(async () => {
+    const key = Object.keys(el).find(candidate => candidate.startsWith("__reactProps$"))!;
+    (el as unknown as Record<string, Record<string, (event: { target: typeof el; currentTarget: typeof el }) => void>>)[key]!["onBlur"]!({ target: el, currentTarget: el });
+  });
+}
 /** A handler as React holds it: linkedom raises no input event React listens for. */
 async function type(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
   await act(async () => {
@@ -169,7 +177,7 @@ describe("an album's page (238c, R-5)", () => {
     assert.equal(rows.length, 1);
     assert.match(rows[0]!.textContent!, /1Saltmouth BellsFile · harbour-bells\.wav—3:42/);
     assert.ok(buttons(m.container, "Play all")[0] && buttons(m.container, "Export")[0]);
-    assert.equal(buttons(m.container, "Sequence")[0]!.disabled, true, "the sequence is task 3's");
+    assert.equal(buttons(m.container, "Sequence")[0]!.disabled, false);
     assert.deepEqual(m.of("read-music-heard-in").map(({ productionId }) => productionId), [ALBUM], "Heard in is asked for, never kept");
     assert.deepEqual(productionPages({ hasChapters: false, isEpisodic: false, isBranching: false, isMusic: true }), [["", "Tracks"], ["artifacts", "Artifacts"]]);
   });
@@ -268,7 +276,7 @@ describe("a track open (238e, R-7)", () => {
     assert.equal(held, "[verse]\nRing them low");
     assert.match(text, /Heard in—/);
     assert.match(text, /Theme of—/);
-    assert.equal(buttons(panel, "Edit")[0]!.disabled, true, "the editor is task 3's");
+    assert.equal(buttons(panel, "Edit")[0]!.disabled, false);
     await click(panel, "Draft with Arke");
     assert.equal(m.of("music-draft-lyrics")[0]!.trackId, "harbour-bells");
     await type(panel.querySelector<HTMLTextAreaElement>("textarea[aria-label='Lyrics']")!, "[chorus]\nHold the verse");
@@ -276,6 +284,177 @@ describe("a track open (238e, R-7)", () => {
     assert.deepEqual(m.of("music-track-update").map(({ trackId, lyrics }) => [trackId, lyrics]), [["harbour-bells", "[chorus]\nHold the verse"]]);
     await click(panel, "Remove from album");
     assert.deepEqual(m.of("music-track-remove").map(({ trackId }) => trackId), ["harbour-bells"]);
+  });
+});
+
+// Eleven Music as the manifest declares it: a length it keeps and an instrumental, $0.15 a minute.
+const ELEVEN = {
+  id: "music_v1", provider: "elevenlabs", capability: "music", displayName: "Eleven Music",
+  accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+  limits: { maxDurationSec: 300, audioFormat: "mp3", maxPromptChars: 2000, musicLength: "exact", musicInstrumental: true },
+  pricing: { kind: "perSecond", microUsdPerSecond: 2500 },
+};
+// A route that treats its length as a ceiling and needs words, as MiniMax Music does.
+const CEILING = { ...ELEVEN, id: "test-music", provider: "fal", displayName: "Test Music", limits: { maxDurationSec: 300 } };
+
+function withRoute(state: ClientState, model: Record<string, unknown> = ELEVEN): ClientState {
+  state.app.manifest = { ...state.app.manifest!, models: [...state.app.manifest!.models, model] } as never;
+  state.app.providers = state.app.providers.map(provider => (provider.id === model["provider"]
+    ? { ...provider, configured: true, validation: "valid", probes: [...provider.probes, { capability: "music", available: true }], lastValidated: AT }
+    : provider)) as never;
+  return state;
+}
+
+const SESSION = "sess_01J9M000000000000000000777";
+const TAKE_ONE = "tk_01J9M000000000000000000701";
+const TAKE_TWO = "tk_01J9M000000000000000000702";
+
+describe("a track's composer and takes (238i, R-9, R-10)", () => {
+  const PAGE = `/w/${FIXTURE_WORLD_ID}/p/${ALBUM}`;
+  async function composer(state: ClientState) {
+    const m = await mount(state, PAGE);
+    await click(m.container, "Saltmouth Bells");
+    const panel = m.container.querySelector("[data-testid='music-panel']")!;
+    await click(panel, "Takes");
+    return { ...m, panel };
+  }
+
+  it("asks the route's length, sends the style as the brief and prices Make at the Bench's quote", async () => {
+    const m = await composer(withRoute(withMusic()));
+    assert.ok(m.panel.classList.contains("fy-music-panel--wide"), "the composer is the wide panel");
+    assert.ok(m.panel.querySelector("[data-testid='music-composer']"));
+    assert.deepEqual(m.of("read-music-takes").map(({ productionId }) => productionId), [ALBUM]);
+    assert.equal(m.panel.querySelector<HTMLSelectElement>("select[aria-label='Voice']")!.disabled, true, "no route declares a voice");
+    assert.equal(m.panel.querySelector<HTMLSelectElement>("select[aria-label='Reference']")!.disabled, true);
+    await type(m.panel.querySelector<HTMLInputElement>("input[aria-label='Style']")!, "Slow sea shanty, low strings, one voice");
+    const length = m.panel.querySelector<HTMLInputElement>("input[aria-label='Length']")!;
+    await type(length, "3:00");
+    await leave(length);
+    // Three takes at 3:00 on Eleven Music's $0.15 a minute.
+    await click(m.panel, "Make 3 · $1.35");
+    assert.deepEqual(m.of("music-track-make").map(({ trackId, composer: c }) => [trackId, c]), [["harbour-bells", {
+      provider: "elevenlabs", model: "music_v1", brief: "Slow sea shanty, low strings, one voice",
+      params: { kind: "music", count: 3, lyrics: "[verse]\nRing them low", lengthSec: 180 },
+    }]]);
+  });
+
+  it("sends an instrumental with no words, and the route's flag", async () => {
+    const m = await composer(withRoute(withMusic()));
+    await type(m.panel.querySelector<HTMLInputElement>("input[aria-label='Style']")!, "Harbour reel");
+    await click(m.panel, "Instrumental");
+    await press(m.panel.querySelector("[data-testid='music-make']") ?? undefined, "Make");
+    assert.deepEqual(m.of("music-track-make").map(({ composer: c }) => c.params), [{ kind: "music", count: 3, lyrics: "", lengthSec: 222, instrumental: true }]);
+  });
+
+  it("offers no length and no instrumental on a route that keeps neither", async () => {
+    const m = await composer(withRoute(withMusic(), CEILING));
+    assert.equal(m.panel.querySelector("input[aria-label='Length']"), null);
+    assert.equal(buttons(m.panel, "Instrumental")[0]!.disabled, true);
+    await type(m.panel.querySelector<HTMLInputElement>("input[aria-label='Style']")!, "Bell rope chant");
+    await press(m.panel.querySelector("[data-testid='music-make']") ?? undefined, "Make");
+    assert.deepEqual(m.of("music-track-make").map(({ composer: c }) => c.params), [{ kind: "music", count: 3, lyrics: "[verse]\nRing them low" }]);
+  });
+
+  it("shows the track's takes in a strip, and Choose makes one the track", async () => {
+    const m = await composer(withRoute(withMusic()));
+    const ask = m.of("read-music-takes").at(-1)!;
+    await act(async () => __applyEventForTest({ at: AT, type: "music.takes", worldId: FIXTURE_WORLD_ID, productionId: ALBUM, requestId: ask.requestId, takes: [
+      { trackId: "harbour-bells", sessionId: SESSION, takeId: TAKE_ONE, n: 1, status: "succeeded", file: `.sessions/${SESSION}/media/${TAKE_ONE}/take.mp3`, durationMs: 180_000, createdAt: AT },
+      { trackId: "harbour-bells", sessionId: SESSION, takeId: TAKE_TWO, n: 2, status: "running", createdAt: AT },
+      { trackId: null, sessionId: SESSION, takeId: "tk_01J9M000000000000000000703", n: 3, status: "succeeded", createdAt: AT },
+    ] } as DomainEvent));
+    const cards = [...m.panel.querySelectorAll("[data-testid='music-track-take']")];
+    assert.deepEqual(cards.map(card => card.querySelector(".hd")!.textContent), ["Take 13:00", "Take 2"], "only this track's takes");
+    assert.match(cards[1]!.textContent!, /Making…/);
+    assert.equal(buttons(cards[1]!, "Choose").length, 0, "a take still being made is not chosen");
+    await click(cards[0]!, "Choose");
+    assert.deepEqual(m.of("music-track-choose").map(({ trackId, sessionId, takeId }) => [trackId, sessionId, takeId]), [["harbour-bells", SESSION, TAKE_ONE]]);
+  });
+
+  it("names the chosen take as From: Take n of m (238c)", async () => {
+    const state = withMusic();
+    const album = state.world!.productions.find(p => p.meta.id === ALBUM)!;
+    album.music = { ...album.music!, tracks: [{ ...album.music!.tracks[0]!, source: { artifactId: SONG }, takes: [{ sessionId: SESSION, takeId: TAKE_ONE }, { sessionId: "bs_01J9M000000000000000000001", takeId: "bt_01J9M000000000000000000001" }] }] } as never;
+    const m = await mount(state, PAGE);
+    assert.match(m.container.querySelector("[data-testid='music-track'] .src")!.textContent!, /^Take 2 of 2$/);
+  });
+});
+
+describe("the track editor (238j, R-11)", () => {
+  it("trims, fades and marks sections over the take's waveform, and Save writes them with the track", async () => {
+    const m = await mount(withMusic(), `/w/${FIXTURE_WORLD_ID}/p/${ALBUM}`);
+    await click(m.container, "Saltmouth Bells");
+    await click(m.container.querySelector("[data-testid='music-panel']")!, "Edit");
+    const dialog = dom.document.body.querySelector("[data-testid='music-editor']")!.closest(".fy-music-dlg")!;
+    assert.match(dialog.textContent!, /Track 1 · 3:42 · plays 3:42/);
+    assert.match(dialog.querySelector("[data-testid='music-edit-loudness']")!.textContent!, /^−14 LUFS · album$/);
+    assert.equal(buttons(dialog, "Extend")[0]!.disabled, true);
+    assert.equal(buttons(dialog, "Remake section")[0]!.disabled, true);
+    const wave = m.of("read-music-waveform").find(({ file }) => file === "artifacts/harbour-bells.wav")!;
+    assert.ok(wave, "the waveform is read from the take");
+    await act(async () => __applyEventForTest({ at: AT, type: "music.waveform", worldId: FIXTURE_WORLD_ID, requestId: wave.requestId, file: wave.file, waveform: { durationMs: 222_000, peaks: [0.1, 0.8, 0.4, 0.9] } } as DomainEvent));
+    assert.equal(dialog.querySelector(".fy-music-ed__seed"), null, "the take's own peaks replace the drawn wave");
+
+    const end = dialog.querySelector<HTMLInputElement>("input[aria-label='Trim end']")!;
+    await type(end, "3:30");
+    await leave(end);
+    const fade = dialog.querySelector<HTMLInputElement>("input[aria-label='Fade in']")!;
+    await type(fade, "2");
+    await leave(fade);
+    assert.match(dialog.textContent!, /plays 3:30/);
+    // A section goes halfway through the longest stretch, named for the lyrics' first stanza.
+    await click(dialog, "Section");
+    const name = dialog.querySelector<HTMLInputElement>("input[aria-label='Section']")!;
+    name.value = "Verse";
+    await leave(name);
+    assert.deepEqual([...dialog.querySelectorAll("[data-testid='music-section']")].map(section => section.textContent), ["Verse"]);
+    assert.match(dialog.querySelector(".fy-music-ed__lines")!.textContent!, /Ring them low/, "the stanza sits under its section, its tag gone");
+    await press(dialog.querySelector("[data-testid='music-edit-save']") ?? undefined, "Save");
+    assert.deepEqual(m.of("music-track-edit").map(({ trackId, trim, fadeInMs, fadeOutMs, sections }) => ({ trackId, trim, fadeInMs, fadeOutMs, sections })), [{
+      trackId: "harbour-bells", trim: { startMs: 0, endMs: 210_000 }, fadeInMs: 2000, fadeOutMs: 0, sections: [{ label: "Verse", atMs: 111_000 }],
+    }]);
+  });
+});
+
+describe("the album's sequence (238k, R-13)", () => {
+  function twoTracks(): ClientState {
+    const state = withMusic();
+    const album = state.world!.productions.find(p => p.meta.id === ALBUM)!;
+    album.music = { ...album.music!, tracks: [{ ...album.music!.tracks[0]!, next: { gapMs: 2000 } }, { id: "bell-rope", title: "Bell rope chant", source: { artifactId: SONG }, takes: [] }] } as never;
+    return state;
+  }
+
+  it("shows the tracks in order with the join between them, and the total follows the gaps", async () => {
+    const m = await mount(twoTracks(), `/w/${FIXTURE_WORLD_ID}/p/${ALBUM}`);
+    assert.match(m.container.querySelector("[data-testid='music-total']")!.textContent!, /2 tracks · 5:36/, "3:42 and 1:52 with 2 s between");
+    await click(m.container, "Sequence");
+    assert.deepEqual([...m.container.querySelectorAll("[data-testid='music-seq-track']")].map(row => row.querySelector("b")!.textContent), ["Saltmouth Bells", "Bell rope chant"]);
+    const joins = [...m.container.querySelectorAll("[data-testid='music-join']")];
+    assert.equal(joins.length, 1, "a join between each pair, none after the last");
+    assert.equal(joins[0]!.querySelector("[role='radio'][aria-checked='true']")!.textContent, "Gap");
+    await click(joins[0]!, "Crossfade");
+    assert.deepEqual(m.of("music-sequence-set").map(({ loudness, joins: sent }) => [loudness, sent]), [[-14, [{ trackId: "harbour-bells", next: { crossfadeMs: 2000 } }]]]);
+    await choose(m.container.querySelector<HTMLSelectElement>("select[aria-label='Loudness']")!, "-16");
+    assert.equal(m.of("music-sequence-set").at(-1)!.loudness, -16);
+    await press(m.container.querySelector("[aria-label='Play through from Bell rope chant']") ?? undefined, "Play through");
+    assert.equal(m.of("render-music").length, 1, "Play through is the album's render, played from that track");
+  });
+
+  it("is what the Export sheet's Sequence row says", async () => {
+    const m = await mount(twoTracks(), `/w/${FIXTURE_WORLD_ID}/p/${ALBUM}`);
+    await click(m.container, "Export");
+    assert.match(dom.document.body.querySelector("[data-testid='music-export']")!.textContent!, /Sequence1 gap−14 LUFS/);
+  });
+});
+
+describe("Make cover (238c, R-5)", () => {
+  it("opens Bench at the cover's square, with the album's words", async () => {
+    const m = await mount(withMusic(), `/w/${FIXTURE_WORLD_ID}/p/${ALBUM}`);
+    await click(m.container, "Make cover");
+    await press([...dom.document.body.querySelectorAll("a")].find(link => link.textContent === "Make in Bench"), "Make in Bench");
+    const [opened] = m.of("bench-new-session");
+    assert.equal(opened!.image!.aspect, "1:1");
+    assert.match(opened!.image!.brief, /^Cover for Songs of the Drowned Quarter, album from The Undersong$/);
   });
 });
 
