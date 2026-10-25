@@ -328,6 +328,21 @@ export function guideCounts(record: GuideRecord, world: GuideWorld): GuideCounts
   };
 }
 
+/**
+ * Whose theme a track is (R-35; design turn 238c, 238e): the living characters and places whose
+ * public entry names it, characters first, as an album's rows and a track's Theme of list them.
+ */
+export function guideThemeHolders(record: GuideRecord, world: Omit<GuideWorld, "canon">, theme: GuideRecordTheme): Array<{ kind: GuideSheetKind; sheet: Sheet }> {
+  return (["characters", "locations", "factions"] as const).flatMap((kind) =>
+    guideLiving(world[kind])
+      .filter((sheet) => {
+        const entry = record[kind][sheet.id];
+        return entry?.public === true && entry.theme?.production === theme.production && entry.theme.track === theme.track;
+      })
+      .map((sheet) => ({ kind, sheet })),
+  );
+}
+
 /** A picture or clip teaser as the exporter made it: its files as assets, and the name it is shown by. */
 export interface GuideMadeMoment {
   title: string;

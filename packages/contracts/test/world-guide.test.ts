@@ -9,6 +9,7 @@ import {
   guideSections,
   GuideRecordSchema,
   guideTheme,
+  guideThemeHolders,
   readGuide,
   sameGuideTeaser,
   SetGuideTeasersSchema,
@@ -179,12 +180,15 @@ describe("music in a world's Guide (SPEC-059 R-35 – R-37)", () => {
     assert.ok(readGuide(JSON.stringify(guide), assets).ok);
     // The head counts the themes the author chose on entries that are public.
     assert.equal(guideCounts(record, world).themes, 3);
+    // And the album says whose theme each track is, characters first.
+    assert.deepEqual(guideThemeHolders(record, world, verse).map(({ kind, sheet }) => [kind, sheet.id]), [["characters", "maren-kest"], ["locations", "the-vigil"]]);
   });
 
   it("follows its entry's gate: a theme on an entry that is not public neither ships nor counts", () => {
     const record: GuideRecord = { ...EMPTY_GUIDE_RECORD, characters: { "maren-kest": { public: true }, "bray-half-hitch": { public: false, theme: verse } } };
     assert.equal(guideDocument(record, music())!.version, 1);
     assert.equal(guideCounts(record, world).themes, 0);
+    assert.deepEqual(guideThemeHolders(record, world, verse), []);
   });
 
   it("makes a song teaser from its excerpt as a version 3 guide, and leaves out one whose track is gone (R-36, R-37)", () => {
