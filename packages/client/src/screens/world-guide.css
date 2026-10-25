@@ -175,7 +175,7 @@
 .fy-guide-menu__h{padding:6px 8px 4px;font:var(--type-label);font-size:var(--text-2xs);letter-spacing:var(--tracking-label);text-transform:uppercase;color:var(--muted-foreground)}
 .fy-guide-menu__sec{display:flex;align-items:center;gap:8px;padding:8px 8px 4px;font:var(--type-label);color:var(--muted-foreground)}
 .fy-guide-menu__sec img,.fy-guide-menu__mark{width:20px;height:20px;border-radius:4px;object-fit:cover;flex:none;background:var(--secondary);display:inline-flex;align-items:center;justify-content:center}
-.fy-guide-menu__it{display:flex;align-items:center;gap:8px;min-height:32px;padding:0 8px;border:0;border-radius:8px;background:none;color:var(--foreground);font:var(--type-ui);font-weight:400;text-align:left;cursor:pointer}
+.fy-guide-menu__it{display:flex;width:100%;align-items:center;gap:8px;min-height:32px;padding:0 8px;border:0;border-radius:8px;background:none;color:var(--foreground);font:var(--type-ui);font-weight:400;text-align:left;cursor:pointer}
 .fy-guide-menu__it:hover{background:var(--secondary)}
 .fy-guide-menu__it.on{font-weight:600}
 .fy-guide-menu__ck{width:14px;flex:none;display:inline-flex}
