@@ -1,4 +1,5 @@
 import { createWindowsCommitProbe } from "./windows-commit.js";
+import { StartupRuntimeOwners } from "./startup-runtime-owners.js";
 import { pathToFileURL } from "node:url";
 import { webWindowOpenHandler } from "./external-links.js";
 import { storyPublicationFileFilter } from "./story-publication-file.js";
@@ -228,6 +229,7 @@ let backgroundLogin = false;
 let windowPresentation: StartupWindowPresentation | null = null;
 let startupController: StartupController | null = null;
 let startupProvider: FsWorldProvider | null = null;
+const startupRuntimeOwners = new StartupRuntimeOwners();
 let providerTransport: CloudProviderTransport | null = null;
 let startupState: StartupState = { status: "initializing" };
 let transportSession: { port: number; token: string } | null = null;
@@ -715,6 +717,7 @@ async function initialize(): Promise<{ port: number }> {
   // those orphans once held a file lock that broke packaging — this is not hypothetical.
   const childLedger = new ChildLedger(join(appRoot, "run", "children.json"));
   const mingProcess = new MingProcess(childLedger);
+  const transferMing = startupRuntimeOwners.own(mingProcess);
   const swept = await childLedger.reapStale();
   if (swept.reaped.length > 0) {
     const named = swept.reaped.map((r) => `${r.id} (pid ${r.pid})`).join(", ");
@@ -735,6 +738,7 @@ async function initialize(): Promise<{ port: number }> {
   const savedHostSettings = await hostSettings.load();
   const storedHarness = savedHostSettings.harness;
   const ollamaEngine = new OllamaEngineService({ appRoot, port: await allocateLoopbackPort(), deps: { ledger: childLedger } });
+  const transferOllama = startupRuntimeOwners.own(ollamaEngine);
   await ollamaEngine.applySettings(savedHostSettings.ollama);
   const chosenHarness = effectiveHarnessEngine(storedHarness?.engine ?? "opencode", process.env["ARKE_HARNESS"]);
 
@@ -876,6 +880,7 @@ async function initialize(): Promise<{ port: number }> {
   const comfyUiWeightEntries = comfyUiWeightCatalogue(COMFYUI_RECIPES);
   const providerClients = createProviderClients({
     ollama: () => ollamaEngine.baseUrl(),
+    ollamaCleanup: () => ollamaEngine.endpoint(),
     fetch: (url, init) => fetch(url, init),
     transport: providerTransport,
     higgsfield: lazyHiggsfieldRunner(findHiggsfield),
@@ -1522,6 +1527,7 @@ async function initialize(): Promise<{ port: number }> {
   });
   coordinator = studioHost.coordinator;
   studioServer = studioHost.server;
+  transferMing(); transferOllama();
   startupProvider = null;
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,
@@ -1563,7 +1569,8 @@ async function shutdownConfirmed(): Promise<void> {
         await publicationHost?.stop();
         await (studioServer?.stop() ?? startupProvider?.close() ?? Promise.resolve());
       } finally {
-        await closeProviderTransport();
+        try { await startupRuntimeOwners.close(); }
+        finally { await closeProviderTransport(); }
       }
     });
   } finally {
@@ -1620,7 +1627,8 @@ if (!gotLock) {
           if (started) await started.stop();
           else await provider?.close();
         } finally {
-          await closeProviderTransport();
+          try { await startupRuntimeOwners.close(); }
+          finally { await closeProviderTransport(); }
         }
         coordinator = null;
         studioServer = null;

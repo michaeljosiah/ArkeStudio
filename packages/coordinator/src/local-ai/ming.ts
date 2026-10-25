@@ -3,6 +3,7 @@ import { mkdir, realpath } from "node:fs/promises";
 import { basename, isAbsolute, join } from "node:path";
 import { killTree, ownerStamp, type ChildLedger } from "../child-ledger.js";
 import { leashChildToParent } from "../job-leash.js";
+import { EngineLog } from "../supervisor.js";
 
 export interface MingBatchCommand {
   /** Host-resolved ComfyUI interpreter and qualified Ming worker, never renderer input. */
@@ -29,7 +30,10 @@ export class MingProcess {
 
   constructor(private readonly ledger?: ChildLedger,
     private readonly spawnProcess: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess = spawn,
+    private readonly cleanup: { kill?: (pid: number) => Promise<void>; timeoutMs?: number } = {},
   ) { process.once("exit", this.backstop); }
+
+  private cleanupSignal(): AbortSignal { return AbortSignal.timeout(this.cleanup.timeoutMs ?? 30_000); }
 
   async run(command: MingBatchCommand, signal: AbortSignal): Promise<void> {
     if (this.disposed || this.active || this.launching) throw new Error("Ming is stopped or already running a batch.");
@@ -44,19 +48,28 @@ export class MingProcess {
       if (this.disposed) throw new Error("Ming is stopped.");
       const allowed = new Set(["SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PATH", "COMSPEC", "PATHEXT", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "HOME", "LD_LIBRARY_PATH"]);
       const env = Object.fromEntries(Object.entries(process.env).filter((row): row is [string, string] => row[1] !== undefined && allowed.has(row[0].toUpperCase())));
-      const child = this.spawnProcess(command.python, ["-B", command.worker, ...command.args], {
-        shell: false, windowsHide: true, detached: process.platform !== "win32", stdio: "ignore",
+      const log = new EngineLog(join(command.cacheRoot, "worker.log"));
+      log.open(`=== ${new Date().toISOString()} Ming batch ===\n`);
+      let child: ChildProcess;
+      try { child = this.spawnProcess(command.python, ["-B", command.worker, ...command.args], {
+        shell: false, windowsHide: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"], cwd: command.cacheRoot,
         env: { ...env, HF_HUB_OFFLINE: "1", TRANSFORMERS_OFFLINE: "1", HF_HUB_DISABLE_TELEMETRY: "1", PYTHONNOUSERSITE: "1", PYTHONDONTWRITEBYTECODE: "1", TOKENIZERS_PARALLELISM: "false",
           TEMP: cache("temp"), TMP: cache("temp"), TMPDIR: cache("temp"), HF_HOME: cache("hub"), TRITON_CACHE_DIR: cache("triton"), TORCHINDUCTOR_CACHE_DIR: cache("inductor"), TORCH_HOME: cache("torch"), TORCH_EXTENSIONS_DIR: cache("extensions"), USER: "arke-ming" },
-      });
+      }); } catch (error) { await log.close(); throw error; }
+      child.stdout?.on("data", (chunk: Buffer) => log.write(chunk));
+      child.stderr?.on("data", (chunk: Buffer) => log.write(chunk));
       let failed = false, code: number | null = null;
+      let didClose = false;
       const closed = new Promise<void>(resolve => {
         child.once("error", () => { failed = true; });
-        child.once("close", value => { code = value; resolve(); });
+        child.once("close", value => { didClose = true; code = value; resolve(); });
       });
       const active = { child, closed };
       this.active = active;
-      const abort = () => { void this.unload(AbortSignal.timeout(30_000)).catch(() => {}); };
+      let cleanupFailed!: (error: unknown) => void;
+      const cancellation = new Promise<never>((_resolve, reject) => { cleanupFailed = reject; });
+      void cancellation.catch(() => {}); // Cleanup may fail while the flushed ledger write is still settling.
+      const abort = () => { void this.unload(this.cleanupSignal()).catch(cleanupFailed); };
       signal.addEventListener("abort", abort, { once: true });
       if (signal.aborted) abort();
       try {
@@ -66,16 +79,19 @@ export class MingProcess {
             ...(process.platform !== "win32" ? { imageKind: "executable" as const, processGroupLeader: true as const } : {}), ...ownerStamp(), recordedAt: Date.now() });
           if (process.platform === "win32") void leashChildToParent(pid);
         }
-        await closed;
+        await Promise.race([closed, cancellation]);
         signal.throwIfAborted();
         if (failed || code !== 0) throw new Error("Ming generation failed. Check the batch's private diagnostics.");
       } finally {
         signal.removeEventListener("abort", abort);
         // A failed ledger write must still stop the process before its reservation can end.
-        if (child.exitCode === null && child.signalCode === null) await this.unload(AbortSignal.timeout(30_000));
-        await closed;
-        if (this.active === active) this.active = null;
-        if (child.pid) await this.ledger?.release(child.pid);
+        try {
+          if (!didClose) await this.unload(this.cleanupSignal());
+          if (didClose) {
+            if (this.active === active) this.active = null;
+            if (child.pid) await this.ledger?.release(child.pid);
+          }
+        } finally { await log.close(); }
       }
     } finally { this.launching = false; }
   }
@@ -84,24 +100,30 @@ export class MingProcess {
     const active = this.active;
     if (!active) return;
     const { child, closed } = active;
-    if (child.pid && child.exitCode === null && child.signalCode === null) {
-      if (process.platform === "win32") await killTree(child.pid);
-      else { try { process.kill(-child.pid, "SIGKILL"); } catch { /* await close below */ } }
-    }
-    signal.throwIfAborted();
+    const bounded = AbortSignal.any([signal, this.cleanupSignal()]);
+    const stop = async () => {
+      if (child.pid && child.exitCode === null && child.signalCode === null) {
+        if (this.cleanup.kill) await this.cleanup.kill(child.pid);
+        else if (process.platform === "win32") await killTree(child.pid);
+        else { try { process.kill(-child.pid, "SIGKILL"); } catch { /* await close below */ } }
+      }
+      await closed;
+    };
     let abort!: () => void;
     try {
-      await Promise.race([closed, new Promise<never>((_resolve, reject) => {
+      await Promise.race([stop(), new Promise<never>((_resolve, reject) => {
         abort = () => reject(new Error("Ming has not confirmed process exit; the graphics card remains reserved."));
-        signal.addEventListener("abort", abort, { once: true });
-        if (signal.aborted) abort();
+        bounded.addEventListener("abort", abort, { once: true });
+        if (bounded.aborted) abort();
       })]);
-    } finally { signal.removeEventListener("abort", abort); }
+      if (this.active === active) this.active = null;
+      if (child.pid) await this.ledger?.release(child.pid);
+    } finally { bounded.removeEventListener("abort", abort); }
   }
 
   async dispose(): Promise<void> {
     this.disposed = true;
-    await this.unload(AbortSignal.timeout(30_000));
+    await this.unload(this.cleanupSignal());
     process.off("exit", this.backstop);
   }
 }

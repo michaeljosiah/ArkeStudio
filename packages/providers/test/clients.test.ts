@@ -41,6 +41,18 @@ it("Ollama unload queries actual loaded models and awaits keep_alive=0 for each"
   await assert.rejects(new OllamaClient(async () => Response.json({})).unload(), /loaded models/);
 });
 
+it("Ollama cleanup probes an explicitly selected unavailable endpoint and distinguishes refusal from timeout", async () => {
+  const urls: string[] = [];
+  const client = new OllamaClient(async url => {
+    urls.push(url);
+    throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
+  }, () => null, undefined, () => "http://127.0.0.1:24567");
+  await client.unload();
+  assert.deepEqual(urls, ["http://127.0.0.1:24567/api/ps"]);
+  const hung = new OllamaClient(async () => { throw new Error("timed out"); }, () => null, undefined, () => "http://127.0.0.1:24567");
+  await assert.rejects(hung.unload(), /could not release/);
+});
+
 it("Ollama remembers what it dispatched, and an unload given `only` leaves every other loaded model alone (issue 1289)", async () => {
   const unloaded: string[] = [];
   const client = new OllamaClient(async (url, init) => {

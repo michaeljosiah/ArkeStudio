@@ -1026,7 +1026,7 @@ export interface CoordinatorOptions {
   };
   ollama?: {
     service: OllamaEngineService;
-    reconfigureHarness?: () => Promise<void>;
+    reconfigureHarness?: (apply?: () => Promise<void>) => Promise<void>;
   };
   /** Ming owns a separate process even when its interpreter belongs to ComfyUI. */
   ming?: { run(command: MingBatchCommand, signal: AbortSignal): Promise<void>; unload(signal: AbortSignal): Promise<void>; dispose(): Promise<void> };
@@ -6408,10 +6408,13 @@ export class Coordinator {
     if (this.localGpu.isBusy("ComfyUI")) throw new Error("Finish or cancel ComfyUI work before changing its runtime.");
     const release = await this.localGpu.acquire("ComfyUI", this.runtimeStop.signal);
     try {
+      if (this.opts.comfyui.service.engineStatus().source === "user-url") await this.opts.dispatchClients?.comfyui?.unload?.(this.runtimeStop.signal);
+      const previous = (await this.appSettings.load()).comfyui;
       const settings = await this.appSettings.setComfyUi(patch);
       this.runtimeStop.signal.throwIfAborted();
       this.jobQueue?.resetProviderTransport("comfyui");
-      await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
+      try { await this.opts.comfyui.service.applySettings(settings.comfyui); }
+      catch (error) { await this.appSettings.setComfyUi(previous); throw error; }
       await this.retireAndReleaseComfyUi();
       await this.setup?.detect().catch(() => {});
       await this.refreshComfyUi();
@@ -10294,22 +10297,28 @@ export class Coordinator {
       case "set-ollama-url":
       case "clear-ollama-engine": {
         const service = this.opts.ollama?.service;
-        if (!service || !this.appSettings) return;
+        const settingsFile = this.appSettings;
+        if (!service || !settingsFile) return;
+        const engineUrl = msg.kind === "clear-ollama-engine" ? null : normalizeOllamaUrl(msg.url);
+        if (msg.kind === "set-ollama-url" && engineUrl === null) return;
+        if ((await settingsFile.load()).ollama.engineUrl === engineUrl) return;
         if (this.localGpu.isBusy("Ollama")) {
           this.emit({ at: this.nowIso(), type: "ollama.status", ollama: { ...service.status(), detail: "Finish or cancel local language work before changing its runtime." } });
           return;
         }
-        const engineUrl = msg.kind === "clear-ollama-engine" ? null : normalizeOllamaUrl(msg.url);
-        if (msg.kind === "set-ollama-url" && engineUrl === null) return;
         const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
         try {
-          const previous = (await this.appSettings.load()).ollama;
-          const settings = await this.appSettings.setOllama({ engineUrl });
-          this.runtimeStop.signal.throwIfAborted();
-          try { await service.applySettings(settings.ollama); }
-          catch (error) { await this.appSettings.setOllama(previous); throw error; }
-          await this.opts.ollama?.reconfigureHarness?.();
-          await this.setup?.detect();
+          const apply = async () => {
+            if (service.baseUrl() !== null || service.externallySelected()) await this.opts.dispatchClients?.ollama?.unload?.(this.runtimeStop.signal);
+            const previous = (await settingsFile.load()).ollama;
+            const settings = await settingsFile.setOllama({ engineUrl });
+            this.runtimeStop.signal.throwIfAborted();
+            try { await service.applySettings(settings.ollama); }
+            catch (error) { await settingsFile.setOllama(previous); throw error; }
+            await this.setup?.detect();
+          };
+          if (this.opts.ollama?.reconfigureHarness) await this.opts.ollama.reconfigureHarness(apply);
+          else await apply();
         } finally { release(); }
         return;
       }

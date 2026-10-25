@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { createServer } from "node:http";
 import { it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -10,8 +11,34 @@ import { createNodeStudioHost } from "../src/node-studio-host.js";
 import { writeServerSession } from "../src/server-session.js";
 import { emptyClientState } from "./client-state.js";
 import { makeTempRoot, WORLD_ID } from "./world/helpers.js";
+import { AppSettingsFile } from "../src/app-settings.js";
+import { until } from "./wait.js";
 
 const auth = { token: "a".repeat(64), allowedOrigins: ["http://localhost:5173"] };
+
+it("the Node host routes provider probes through its explicitly selected Ollama service", { timeout: 60_000 }, async () => {
+  const hits: string[] = [];
+  const native = createServer((request, response) => {
+    hits.push(request.url ?? "");
+    response.setHeader("Content-Type", "application/json");
+    response.setHeader("Connection", "close");
+    response.end(JSON.stringify(request.url === "/api/version" ? { version: "external-test" } : { models: [] }));
+  });
+  native.listen(0, "127.0.0.1"); await once(native, "listening");
+  const port = (native.address() as { port: number }).port;
+  const { root } = await makeTempRoot();
+  await new AppSettingsFile(join(root, "settings.json")).setOllama({ engineUrl: `http://127.0.0.1:${port}` });
+  const host = await createNodeStudioHost({ appRoot: root, appVersion: "test", adapter: null, transportAuth: auth });
+  try {
+    await host.server.start();
+    assert.equal(host.coordinator.serverApplication.getSnapshot().app.ollama?.source, "user-url");
+    await until(() => hits.includes("/api/tags"), "selected-runtime provider probe");
+    assert.ok(hits.includes("/api/version"));
+  } finally {
+    await host.server.stop();
+    await new Promise<void>((resolve, reject) => native.close(error => error ? reject(error) : resolve()));
+  }
+});
 
 async function connect(port: number, token = auth.token) {
   const socket = new WebSocket(`ws://127.0.0.1:${port}`, { origin: "http://localhost:5173" });

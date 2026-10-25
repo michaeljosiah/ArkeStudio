@@ -142,7 +142,8 @@ const codexImage = lazyCodexImageRunner({
     return path ? { configuredPath: path } : {};
   },
 });
-const providerClients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: providerCalls, codexImage, ollama: () => ollamaEngine.baseUrl() });
+const providerClients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: providerCalls, codexImage,
+  ollama: () => ollamaEngine.baseUrl(), ollamaCleanup: () => ollamaEngine.endpoint() });
 
 const transportToken = randomBytes(32).toString("hex");
 const devOrigins = process.env["ARKE_DEV_ORIGIN"]

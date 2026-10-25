@@ -94,3 +94,22 @@ it("pulls and removes through the selected API, requiring download confirmation"
     assert.deepEqual(requests.at(-1)!.body, { model: "gemma4:12b" });
   } finally { await service.dispose(); }
 });
+
+it("ignores an old external health response after selecting a different runtime", async () => {
+  let hold = false, finish!: (response: Response) => void;
+  const service = new OllamaEngineService({ appRoot: await tempDir("ollama-health-race-"), port: 24103,
+    fetch: async url => {
+      if (String(url).includes(":24567/") && hold) return new Promise<Response>(resolve => { finish = resolve; });
+      return Response.json({ version: String(url).includes(":24567/") ? "old" : "new" });
+    } });
+  try {
+    await service.applySettings({ ...managed, engineUrl: "http://127.0.0.1:24567" });
+    hold = true;
+    const stale = service.refresh();
+    await service.applySettings({ ...managed, engineUrl: "http://127.0.0.1:24568" });
+    finish(Response.json({ version: "stale" }));
+    await stale;
+    assert.equal(service.status().version, "new");
+    assert.equal(service.baseUrl(), "http://127.0.0.1:24568");
+  } finally { await service.dispose(); }
+});

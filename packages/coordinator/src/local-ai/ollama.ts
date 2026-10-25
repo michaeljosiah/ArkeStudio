@@ -22,6 +22,7 @@ export class OllamaEngineService {
   private removeBackstop: (() => void) | null = null;
   private serial: Promise<void> = Promise.resolve();
   private closing = false;
+  private generation = 0;
   private readonly listeners = new Set<() => void>();
   private current: OllamaRuntimeStatus = { source: "managed", state: "absent", url: null, version: null, detail: "Install the Arke-managed Ollama runtime." };
 
@@ -48,6 +49,7 @@ export class OllamaEngineService {
       if (this.current.state === "ready" && this.settings.engineUrl === url && this.settings.modelsDir === settings.modelsDir) return;
       await this.stopOwned();
       if (this.closing) return;
+      this.generation++;
       this.settings = { ...settings, engineUrl: url };
       this.publish({ source: url === null ? "managed" : "user-url", state: "starting", url: this.endpoint(), version: null, detail: null });
       if (url !== null) { await this.checkExternal(); return; }
@@ -88,13 +90,15 @@ export class OllamaEngineService {
   }
 
   private async checkExternal(): Promise<void> {
+    const generation = this.generation;
+    const endpoint = this.endpoint();
     try {
-      const response = await (this.opts.fetch ?? fetch)(`${this.endpoint()}/api/version`, { signal: AbortSignal.timeout(3_000), redirect: "error" });
+      const response = await (this.opts.fetch ?? fetch)(`${endpoint}/api/version`, { signal: AbortSignal.timeout(3_000), redirect: "error" });
       const value = await response.json() as { version?: unknown };
       if (!response.ok || typeof value.version !== "string") throw new Error("The selected service did not report an Ollama version.");
-      this.publish({ state: "ready", version: value.version, detail: null });
+      if (!this.closing && generation === this.generation) this.publish({ state: "ready", version: value.version, detail: null });
     } catch {
-      this.publish({ state: "failed", version: null, detail: "The selected Ollama service is not answering. Start it or choose Arke-managed." });
+      if (!this.closing && generation === this.generation) this.publish({ state: "failed", version: null, detail: "The selected Ollama service is not answering. Start it or choose Arke-managed." });
     }
   }
 

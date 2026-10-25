@@ -545,19 +545,21 @@ export class ChildSupervisor extends EventEmitter {
    */
   private async reapSurvivors(): Promise<void> {
     const epoch = this.launchEpoch;
-    const tracked = this.descendants;
-    this.descendants = [];
+    const tracked = [...this.descendants];
     if (tracked.length === 0) return;
+    const resolved = (d: DescendantInfo, release: boolean) => {
+      this.descendants = this.descendants.filter(current => current.pid !== d.pid || current.startedAt !== d.startedAt);
+      if (release) void this.deps.ledger?.release(d.pid).catch(() => {});
+    };
     const survivors: DescendantInfo[] = [];
     for (const d of tracked) {
       if (pidExists(d.pid)) survivors.push(d);
-      else void this.deps.ledger?.release(d.pid).catch(() => {});
+      else resolved(d, true);
     }
     if (survivors.length === 0) return;
     // Identity comes before any kill, and the probe gets one retry: nothing else in-process
-    // ever re-attempts it, and the exit backstop reads the descendant list this method has
-    // already cleared, so a single transient probe failure used to strand the survivors for
-    // the next startup's sweep. Only one retry, because this path is awaited inside stop()
+    // ever re-attempts it. Unresolved descendants stay reachable by the exit backstop and
+    // a later stopAndConfirm retry. Only one retry, because this path is awaited inside stop()
     // — every extra attempt is shutdown latency for the case where WMI is genuinely down.
     let probed: Map<number, ProcessInfo> | null = null;
     for (let attempt = 0; attempt < 2 && probed === null; attempt += 1) {
@@ -578,6 +580,7 @@ export class ChildSupervisor extends EventEmitter {
     if (probed === null) return; // cannot verify identity — kill nothing, keep the records
     for (const d of survivors) {
       const live = probed.get(d.pid);
+      if (live === undefined && pidExists(d.pid)) continue; // An incomplete process-table read is not exit evidence.
       const isOurs =
         live !== undefined &&
         live.image === d.image &&
@@ -587,9 +590,11 @@ export class ChildSupervisor extends EventEmitter {
       if (isOurs) {
         try { await killTree(d.pid); }
         catch { continue; } // failed inspection/kill keeps ownership for the next sweep
+        const deadline = Date.now() + 2_000;
+        while (pidExists(d.pid) && Date.now() < deadline && this.launchEpoch === epoch) await this.sleep(50);
         if (pidExists(d.pid)) continue;
       }
-      if (live === undefined || isOurs) void this.deps.ledger?.release(d.pid).catch(() => {});
+      resolved(d, live === undefined || isOurs);
       // A stranger wearing the pid keeps its record; the sweep clears it without a kill.
     }
   }
@@ -782,6 +787,10 @@ export class ChildSupervisor extends EventEmitter {
     // spawn a second child beside it — `stopping` alone cannot carry this, because a
     // completed restart has already reset it (found in review of the reap retry).
     if (this.stopping || epoch !== this.launchEpoch) return;
+    if (this.descendants.length > 0) {
+      this.setStatus("failed", `${this.id} could not confirm descendant exit; restart is held for cleanup.`);
+      return;
+    }
     const why = signal ? `signal ${signal}` : `exit code ${code}`;
     if (this.restarts >= this.spec.maxRestarts) {
       this.setStatus("failed", `${this.id} exited (${why}) and exceeded its restart budget`);
@@ -806,6 +815,7 @@ export class ChildSupervisor extends EventEmitter {
       // into a false confirmation while the worker still holds the graphics card.
       throw new Error(`${this.id} has not confirmed process exit; its memory cannot be handed over.`);
     }
+    if (this.descendants.length > 0) throw new Error(`${this.id} has not confirmed descendant exit; its memory cannot be handed over.`);
   }
 
   async stop(): Promise<void> {

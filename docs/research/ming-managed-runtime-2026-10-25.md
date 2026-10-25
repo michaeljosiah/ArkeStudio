@@ -67,6 +67,8 @@ store, yields to a real 0.5B batch, and is admitted again only after Ming exits.
 generates 2.40 seconds in 7.34 seconds, with peak PyTorch allocation 3,100,709,376 bytes.
 Ollama's downloaded archive matches its catalogue SHA-256. This checks process ownership
 and handover, not loaded Ollama model eviction or a simultaneous ComfyUI image job.
+A separate native check confirms that Ollama creates its identity key in the Arke-owned
+runtime home, reads an empty dedicated model store, and confirms process exit on disposal.
 
 All tested workers exit. Detailed provenance, package inventories, audio and source passages
 remain under ignored local scratch. The application-side integration and its remaining

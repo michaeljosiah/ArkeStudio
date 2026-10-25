@@ -670,9 +670,9 @@ export class ComfyUiEngineService {
     if (this.disposed) return;
     this.nodeClasses = null;
     this.invalidateVerification();
-    this.settings = settings;
     this.stopUrlProbe();
-    await this.stopSupervision();
+    await this.stopSupervision(true);
+    this.settings = settings;
     if (this.disposed) {
       this.resolved = { source: "absent", root: null, url: null, problem: null };
       return;

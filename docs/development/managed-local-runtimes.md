@@ -34,11 +34,19 @@ memory. Cancellation kills the owned tree and waits for close. If exit cannot be
 the GPU remains reserved and the next job is refused. A ledger and parent-lifetime leash
 provide orphan cleanup. The worker gets runtime environment variables, offline flags and
 private caches, without inherited provider credentials. It never installs into shared Python.
+The worker's working directory and bounded `worker.log` stay inside its private cache root;
+model diagnostics and source passages are not forwarded to the application log.
 
-Desktop and dev wire this owner into Coordinator. `generateMingBatch` is a **host-only** API
+Desktop, dev and the standalone Node host wire this owner into Coordinator. `generateMingBatch` is a **host-only** API
 accepting a qualified `MingBatchCommand`; paths and commands are never renderer-originated.
 It reserves the same GPU lane before starting the process and drains it after exit. Shutdown
 aborts active batches and disposes both process owners.
+Failed process termination settles the batch with a cleanup error while retaining the process
+and GPU reservation for retry; it cannot hold world/journal draining open indefinitely.
+Confirmed supervisor shutdown includes tracked inference descendants. Desktop initialization
+owns new runtimes until Coordinator construction succeeds and retries failed startup cleanup
+before another initialization can start. Ollama routing changes are also fenced against cloud
+writing turns; unchanged endpoint configuration does not restart the harness.
 
 ## Ming qualification and delivery boundary
 
@@ -59,11 +67,11 @@ and narration-queue integration. There is no silent fallback to the retired Inde
 From `packages/coordinator`:
 
 ```powershell
-node --import tsx --test test/ollama-engine.test.ts test/ming-process.test.ts test/local-gpu.test.ts test/supervisor.test.ts test/v2-launch.test.ts test/setup/comfyui-setup.test.ts
+node --import tsx --test test/ollama-engine.test.ts test/ming-process.test.ts test/local-gpu.test.ts test/supervisor.test.ts test/supervisor-retry.test.ts test/harness-runtime-change.test.ts test/v2-launch.test.ts test/studio-server.test.ts test/setup/comfyui-setup.test.ts
 ```
 
 Run client `test/engine-panes.test.tsx`, contracts `test/ollama.test.ts` and providers
-`test/clients.test.ts` from their package directories. Native Windows checks require normal
+`test/clients.test.ts`, plus desktop `test/startup-runtime-owners.test.ts`, from their package directories. Native Windows checks require normal
 process, loopback and file-handle access. These regressions use native lightweight stand-ins;
 real model qualification remains separate from CI. Finish with the repository's full gates
 and Windows/Linux CI.

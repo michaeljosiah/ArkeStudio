@@ -5,7 +5,10 @@ overrides; `setup/catalogue.ts` / `setup/local-setup.ts` own pinned archives and
 version receipts. `harness/v2-launch.ts` writes only the selected Ollama endpoint into the
 owned OpenCode profile. `local-ai/gpu.ts` serializes writing, ComfyUI and Ming; `local-ai/ming.ts`
 owns Python batch cancellation/confirmed exit, exposed through Coordinator's host-only
-`generateMingBatch`. Desktop/dev compose these services; contracts `ollama.ts`, wire status
+`generateMingBatch`. Desktop/dev/`node-studio-host.ts` compose these services; desktop
+`startup-runtime-owners.ts` retains them across initialization failure until transfer to
+Coordinator. `harness/runtime-change.ts` fences endpoint changes against cloud/local turns.
+Contracts `ollama.ts`, wire status
 folds and client `screens/engine-panes.tsx` expose runtime ownership. Tests: coordinator
 `ollama-engine`, `ming-process`, `local-gpu`, `supervisor`, `v2-launch` and `setup/comfyui-setup`;
 client `engine-panes`; contracts `ollama`; providers `clients`. See

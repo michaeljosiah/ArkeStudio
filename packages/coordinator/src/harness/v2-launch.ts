@@ -27,6 +27,7 @@ import type { CodexImageRunner } from "@arke-studio/providers";
 import { ChildSupervisor, type SupervisorDeps } from "../supervisor.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { ownedChildHooks } from "./owned-child.js";
+import { HarnessRuntimeChanges } from "./runtime-change.js";
 
 // This package owns shared desktop/dev composition, so every adapter is a runtime dependency.
 // Keep concrete adapter imports here; Coordinator itself consumes the HarnessAdapter contract.
@@ -193,7 +194,7 @@ export interface AssembleHarnessOptions {
 }
 
 export interface AssembledHarness {
-  reconfigureOllama?: () => Promise<void>;
+  reconfigureOllama?: (apply?: () => Promise<void>) => Promise<void>;
   harness: DiscoveredHarness | null;
   isV2: boolean;
   supervisor: ChildSupervisor | null;
@@ -285,8 +286,8 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     await mkdir(profileDir, { recursive: true });
     await retireGeneratedOllamaModels(profileDir);
   }
-  const configureOllama = async () => {
-    if (!isV2 || !opts.ollamaEndpoint) return;
+  const configureOllama = async (checkOnly = false): Promise<boolean> => {
+    if (!isV2 || !opts.ollamaEndpoint) return false;
     const path = join(profileDir, ".config", "opencode", "opencode.json");
     let config: Record<string, unknown>;
     try { config = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>; }
@@ -298,8 +299,10 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     const ollama = object(providers.ollama) ? providers.ollama : {};
     const settings = object(ollama.settings) ? ollama.settings : {};
     const baseURL = `${opts.ollamaEndpoint().replace(/\/+$/, "")}/v1`;
-    if (settings.baseURL === baseURL) return;
+    if (settings.baseURL === baseURL) return false;
+    if (checkOnly) return true;
     await atomicWriteFile(path, JSON.stringify({ ...config, providers: { ...providers, ollama: { ...ollama, settings: { ...settings, baseURL } } } }, null, 2) + "\n");
+    return true;
   };
   await configureOllama();
 
@@ -328,7 +331,8 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
   );
 
   const baseUrl = () => `http://127.0.0.1:${supervisor.port ?? 0}`;
-  const adapter = harness
+  const runtimeChanges = new HarnessRuntimeChanges();
+  const rawAdapter = harness
     ? isV2
       ? new OpenCodeV2Adapter({
           baseUrl,
@@ -337,6 +341,7 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
         })
       : new OpenCodeAdapter({ baseUrl, ...(opts.onTrace ? { onTrace: opts.onTrace } : {}) })
     : null;
+  const adapter = rawAdapter === null ? null : runtimeChanges.wrap(rawAdapter);
 
   const logLines: string[] = [];
   if (harness) {
@@ -367,7 +372,13 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     ...(harness ? { harnessInfo: harnessInfoFrom(harness) } : {}),
     // The PATCH form, deliberately: it names every managed variable, so a cleared key is a
     // deletion the merge honours rather than an omission it preserves.
-    reconfigureOllama: async () => { await configureOllama(); if (supervisor.pid !== null) await supervisor.restart(); },
+    reconfigureOllama: async (apply) => {
+      if (!apply && !(await configureOllama(true))) return;
+      await runtimeChanges.run(async () => {
+        await apply?.();
+        if (await configureOllama() && supervisor.pid !== null) await supervisor.restart();
+      });
+    },
     relaunchHarness: (credentials) => supervisor.updateEnv(credentialEnvPatch(credentials)),
     logLines,
   };
