@@ -18,6 +18,9 @@ import { WorldStore } from "../packages/coordinator/src/world/store.js";
 // exports/<slug>-part-<date>.zip, following the newest edition in WORLD_DIR/exports/, so copy the
 // published edition's ZIP and its .zip.json record (and any parts after it) into the copy first.
 // --day friday|daily and --next 2026-11-06 are the author's schedule, carried in the part.
+// A music production (SPEC-060 R-15 – R-17) makes its production package instead, the same call:
+// exports/<slug>-<production-id>-<date>.zip, every track rendered as Play all plays it, its cover
+// at 1:1. --no-book, --no-motion, --cover and --part do not apply; the cover is the album's own.
 // FFMPEG is the installed app's own (…\Programs\Arke Studio\resources\ffmpeg\ffmpeg.exe): winget's
 // build on PATH has crashed on other exports. The package lands in WORLD_DIR/exports/ with its
 // record beside it; the last line printed is the export's result as JSON.

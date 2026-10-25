@@ -38,6 +38,7 @@ import { ArtifactKindSchema } from "./artifact.js";
 import { BorrowableArtifactSchema } from "./editor-media.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
 import { BenchPresetSchema } from "./bench.js";
+import { MusicHeardRowSchema } from "./music.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
 import { DiagnosticsSnapshotSchema } from "./diagnostics.js";
@@ -1704,6 +1705,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
           guide: z.boolean().optional(),
           /** A part's number after the edition it follows (236e). */
           part: z.number().int().min(1).optional(),
+          /** A music production's tracks (SPEC-060 R-15). */
+          tracks: z.number().int().min(0).optional(),
         }).strict(),
         z.object({ ok: z.literal(false), blockers: z.array(z.string().min(1)).min(1) }).strict(),
       ]),
@@ -1756,6 +1759,9 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
         guide: z.boolean().optional(),
         /** What an Arke Player release held, so Release knows what the next part follows (SPEC-058 R-43). */
         release: ArkePlayerReleaseSchema.optional(),
+        /** A music production's package (SPEC-060 R-15): its tracks and how long they play. */
+        tracks: z.number().int().min(0).optional(),
+        durationMs: z.number().int().min(0).optional(),
       }).strict()),
     })
     .strict(),
@@ -2364,6 +2370,25 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       reason: z.string().optional(),
     })
     .strict(),
+  /** A track's lyrics, drafted by the lyricist (SPEC-060 R-7): shown with Use these words, written only then. */
+  z.object({ ...base, type: z.literal("music.lyrics-drafted"), worldId: UlidSchema, productionId: SlugSchema, trackId: SlugSchema, requestId: UlidSchema, lyrics: z.string().nullable(), reason: z.string().optional() }).strict(),
+  /** Where each of a music production's tracks is heard in the world's other productions (SPEC-060 R-14), by track id. */
+  z.object({ ...base, type: z.literal("music.heard-in"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, tracks: z.record(SlugSchema, z.array(MusicHeardRowSchema)) }).strict(),
+  /**
+   * Play all (SPEC-060 R-8): the album rendered as the export renders it, one world file, with
+   * where each track starts in it; or why it could not be made.
+   */
+  z.object({
+    ...base,
+    type: z.literal("music.rendered"),
+    worldId: UlidSchema,
+    productionId: SlugSchema,
+    requestId: UlidSchema,
+    result: z.discriminatedUnion("ok", [
+      z.object({ ok: z.literal(true), file: z.string().min(1).max(1000), durationMs: z.number().int().min(0), starts: z.array(z.object({ trackId: SlugSchema, atMs: z.number().int().min(0) }).strict()) }).strict(),
+      z.object({ ok: z.literal(false), reason: z.string().max(2000) }).strict(),
+    ]),
+  }).strict(),
   /** Saved bench setups changed (issue 305 §3): the whole list rides, it is small. */
   z.object({ ...base, type: z.literal("presets.changed"), presets: z.array(BenchPresetSchema) }).strict(),
   /** Rolling spend re-evaluated on a ledger append or a settings change (SPEC-008 R-19, D10). */

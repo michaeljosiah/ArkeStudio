@@ -2,6 +2,7 @@ import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { EMPTY_GUIDE_RECORD, GuideRecordSchema } from "./world-guide.js";
 import { valueSchema } from "./value-schema.js";
 import { AudioDramaRecordSchema, EpisodeScriptSchema, EpisodeTakesSchema } from "./audio-drama.js";
+import { MusicRecordSchema } from "./music.js";
 import { DesignedVoiceSchema } from "./designed-voice.js";
 import { StageReviewSchema } from "./human-decision.js";
 import { AdapterLibraryStateSchema } from "./adapters.js";
@@ -171,6 +172,8 @@ export const ProductionBundleSchema = valueSchema(z
     narrative: ProductionNarrativeSchema.nullable().optional(),
     /** audio-drama.json — an audio drama's plan and source (SPEC-057 R-7), or null. */
     audioDrama: AudioDramaRecordSchema.nullable().optional(),
+    /** music.json — a music production's cover, loudness and tracks (SPEC-060 R-4), or null. */
+    music: MusicRecordSchema.nullable().optional(),
     /**
      * An audio drama's episode scripts (SPEC-057 R-11, R-83), whole, as a scene's script is: the
      * score renders from these. `hash` is the file's, the base its next save is fenced on.

@@ -461,6 +461,22 @@ export const GUIDE_TEASERS_SCHEMA_VERSION = 108;
  */
 export const AUDIOBOOK_PICTURE_MARKS_SCHEMA_VERSION = 109;
 /**
+ * Music productions (design turn 238, SPEC-060 R-1, R-4): `medium: "music"` on a production and
+ * its `music.json`. A build before it cannot read the medium, so it would drop the production from
+ * the world without a word; the world is raised when the first music production is made.
+ */
+export const MUSIC_SCHEMA_VERSION = 110;
+
+/** Do these production.json bytes make the production music (SPEC-060 R-1)? */
+function carriesMusic(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return typeof value === "object" && value !== null && (value as Record<string, unknown>)["medium"] === "music";
+  } catch {
+    return false;
+  }
+}
+/**
  * Where a picture's subject stands (design turn 197b): `focus` on a picture in the chapter's
  * strict audiobook record, which the video's vertical crop and Slow push follow. A build before
  * it reads such a record as unreadable, so the world is raised before the first. Sixty-two and
@@ -1059,6 +1075,10 @@ export class Committer {
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesBeat(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,
       // The kind as much as the beat: a visual novel created or converted, before any beat is set.
       files.some(f => classify(f.path).track === "production-meta" && f.newContent != null && carriesVisualNovel(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,
+      // A music production, however it is written (SPEC-060 R-1): the dialog, World Chat's
+      // prepared create, a metadata edit, or its record. An older build refuses the world by name
+      // rather than reading a production whose medium it does not know.
+      files.some(f => f.newContent != null && ((classify(f.path).track === "production-meta" && carriesMusic(f.newContent)) || /^productions\/[^/]+\/music\.json$/.test(f.path))) ? MUSIC_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "shortName" in MarkdownFile.parse(f.newContent).data) ? SHEET_SHORT_NAME_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "aliases" in MarkdownFile.parse(f.newContent).data) ? CHARACTER_ALIASES_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "narration" in MarkdownFile.parse(f.newContent).data) ? SHEET_NARRATION_SCHEMA_VERSION : 0,

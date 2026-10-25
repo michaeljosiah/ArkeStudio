@@ -114,7 +114,8 @@ describe("Tell a story asks what kind of story (design turn 230b)", () => {
     const write = DOOR_CHOICES.find(d => d.id === "write")!;
     assert.match(write.body, /audio drama/);
     assert.match(write.body, /audiobook/, "the audiobook still rides under WRITE");
-    assert.deepEqual(DOOR_CHOICES.map(d => d.label), ["Tell a story", "Make a film", "Make it interactive"], "no fourth door (revision 2)");
+    // Music is the fourth door (design turn 238a); the drama is still a story, never a door (revision 2).
+    assert.deepEqual(DOOR_CHOICES.map(d => d.label), ["Tell a story", "Make a film", "Make it interactive", "Make music"]);
   });
 
   it("a novel and an audio drama are chosen by their plates; Other is the empty box", () => {

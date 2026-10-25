@@ -185,6 +185,7 @@ export * from "./audiobook-location.js";
 export * from "./audiobook-illustrate.js";
 export * from "./audiobook-listening.js";
 export * from "./world-package.js";
+export * from "./music.js";
 export * from "./world-guide.js";
 export * from "./arke-player-release.js";
 export * from "./audiobook-video.js";

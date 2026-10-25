@@ -31,6 +31,8 @@ import {
   EpisodeSchema,
   ProductionNarrativeSchema,
   AudioDramaRecordSchema,
+  MUSIC_RECORD_FILE,
+  MusicRecordSchema,
   EpisodeScriptSchema,
   EpisodeTakesSchema,
   episodeScriptFile,
@@ -209,7 +211,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 107: a chapter's own audiobook narrator, `chapterNarrators` on the book (SPEC-047 R-195).
 // 108: a world's teasers, `teasers` on the Guide record (design turn 236, SPEC-059 R-24).
 // 109: picture marks — a picture set at a sentence inside its block (design turn 237, SPEC-047 R-202).
-export const SUPPORTED_SCHEMA_VERSION = 109;
+// 110: music productions — `medium: "music"` and `music.json` (design turn 238, SPEC-060 R-1, R-4).
+export const SUPPORTED_SCHEMA_VERSION = 110;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -1163,6 +1166,9 @@ export async function scanWorld(
         : null,
       audioDrama: await exists(join(pdir, "audio-drama.json"))
         ? await tryParse(`productions/${id}/audio-drama.json`, raw => AudioDramaRecordSchema.parse(JSON.parse(raw)))
+        : null,
+      music: await exists(join(pdir, MUSIC_RECORD_FILE))
+        ? await tryParse(`productions/${id}/${MUSIC_RECORD_FILE}`, raw => MusicRecordSchema.parse(JSON.parse(raw)))
         : null,
       story,
       proseStyle,

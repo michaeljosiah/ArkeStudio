@@ -462,6 +462,16 @@ const CLIENT_COMMAND_METADATA = {
   "restore-bible": action("world", "authored-diff", "bible", "authored-change", ["bible"]),
   "set-guide-entry": humanOnly("What a reader of the world may see is the author's to choose (SPEC-059 R-2)."),
   "set-guide-teasers": humanOnly("What anyone sees of a world before installing it is the author's to choose (SPEC-059 R-26)."),
+  // A music production's tracks (SPEC-060 R-5 – R-7). Authored changes Arke can be given (R-19);
+  // until World Chat's model actions exist they are blocked as `no-model-action`, by name.
+  "music-track-add": action("production", "command", "production-store", "authored-change", ["production-metadata", "artifacts"]),
+  "music-track-update": action("production", "command", "production-store", "authored-change", ["production-metadata"]),
+  "music-track-remove": action("production", "command", "production-store", "authored-change", ["production-metadata"]),
+  "music-tracks-reorder": action("production", "command", "production-store", "authored-change", ["production-metadata"]),
+  "music-set-cover": action("production", "command", "production-store", "authored-change", ["production-metadata", "artifacts"]),
+  "music-draft-lyrics": readOnly("Returns a lyrics draft without changing the track."),
+  "read-music-heard-in": readOnly(QUERY),
+  "render-music": readOnly(QUERY),
   "list-guide-voice-lines": readOnly(QUERY),
   "reorder-chapters": action("production", "command", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   "reorder-scenes": action("production", "command", "production-store", "authored-change", ["scenes", "episodes"]),
