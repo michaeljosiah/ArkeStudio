@@ -746,7 +746,7 @@ const ProductionChapterModelActionSchema = z
           viewpointCharacter: z.string().trim().max(200).optional().describe("Character sheet id from the current cast (lowercase kebab-case), or an unambiguous character name. Omit when unknown; close third is prose style, not a character."),
           when: z.string().trim().max(80).optional(),
         }).strict()).min(1).max(100),
-      }).strict().describe("Append a planned outline as one proposal: chapters in order, with synopses and no prose. Existing chapters are kept."),
+      }).strict().describe("Append a planned outline as one proposal: chapters in order, with synopses and no prose. Existing chapters are kept. Readers decide in the first two chapters whether to go on: plan the book's central question into chapters 1 and 2, happening in the present, and end each on a turn."),
       z
         .object({
           operation: z.literal("create"),
