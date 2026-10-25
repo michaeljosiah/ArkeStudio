@@ -6,10 +6,17 @@ import { HarnessRuntimeChanges } from "../src/harness/runtime-change.js";
 it("refuses reconfiguration during cloud turns and prevents new turns during a reserved change", async () => {
   const gate = new HarnessRuntimeChanges();
   let endTurn!: () => void, endChange!: () => void;
-  const adapter = gate.wrap({ sendMessage: async () => {
-    await new Promise<void>(resolve => { endTurn = resolve; });
-    return { sessionId: "cloud", correlationId: "turn" };
-  } } as HarnessAdapter);
+  const raw: HarnessAdapter = {
+    id: "test", capabilities: () => new Set(), readiness: () => ({ ready: true }),
+    createSession: async () => ({ sessionId: "cloud" }),
+    streamEvents: () => ({ async *[Symbol.asyncIterator]() {} }),
+    dispatchAsync: async () => { throw new Error("Coordinator owns async dispatch through sendMessage"); },
+    sendMessage: async () => {
+      await new Promise<void>(resolve => { endTurn = resolve; });
+      return { sessionId: "cloud", correlationId: "turn" };
+    },
+  };
+  const adapter = gate.wrap(raw);
   const turn = adapter.sendMessage({ sessionId: "cloud", parts: [] });
   let applied = false;
   await assert.rejects(gate.run(async () => { applied = true; }), /Finish or cancel writing/);
