@@ -615,7 +615,7 @@ export class LocalSetupService {
           const closureIds = this.pendingClosures.get(id) ?? paused.closureIds;
           recoveredClosures.push({ pausedId: id, componentIds: closureIds });
           for (const member of closureIds) this.pendingClosures.set(member, closureIds);
-        } else if (c.state === "present" || c.state === "paused") {
+        } else if (c.state === "present" || c.state === "paused" || c.state === "ready" && c.entry.spec.kind === "pull") {
           this.set(id, {
             state: c.entry.optional === true ? "available" : "queued",
             bytesDone: 0,

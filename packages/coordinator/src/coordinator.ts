@@ -3523,7 +3523,10 @@ export class Coordinator {
         this.clearLocalResidency("ollama");
         return;
       }
-      if (engine === "ComfyUI" && opts.comfyui?.service.engineIdentity()?.locality !== "local") return;
+      if (engine === "ComfyUI") {
+        if (opts.comfyui?.service.engineStatus().locality === "remote") return;
+        await opts.comfyui?.service.prepareGpuHandover();
+      }
       await opts.dispatchClients?.[engine === "Ollama" ? "ollama" : "comfyui"]?.unload?.(signal);
       this.clearLocalResidency(engine === "Ollama" ? "ollama" : "comfyui");
     }, ["Ollama", "ComfyUI", "Ming"]);

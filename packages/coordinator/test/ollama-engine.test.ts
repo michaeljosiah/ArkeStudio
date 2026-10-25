@@ -113,3 +113,19 @@ it("ignores an old external health response after selecting a different runtime"
     assert.equal(service.baseUrl(), "http://127.0.0.1:24568");
   } finally { await service.dispose(); }
 });
+
+it("does not publish a previous service's completed pull as installed on the new service", async () => {
+  let stream!: ReadableStreamDefaultController<Uint8Array>;
+  const service = new OllamaEngineService({ appRoot: await tempDir("ollama-pull-race-"), port: 24104,
+    fetch: async url => String(url).endsWith("/api/pull")
+      ? new Response(new ReadableStream<Uint8Array>({ start(controller) { stream = controller; } }))
+      : Response.json({ version: "external" }) });
+  try {
+    await service.applySettings({ ...managed, engineUrl: "http://127.0.0.1:24567" });
+    const pull = service.pull("llama3.1:8b", signal(), () => {});
+    const rejected = assert.rejects(pull, /selection changed during download/);
+    await service.applySettings({ ...managed, engineUrl: "http://127.0.0.1:24568" });
+    stream.enqueue(new TextEncoder().encode('{"status":"success"}\n')); stream.close();
+    await rejected;
+  } finally { await service.dispose(); }
+});

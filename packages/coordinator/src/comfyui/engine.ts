@@ -826,6 +826,20 @@ export class ComfyUiEngineService {
     return base === null ? [] : [base];
   }
 
+  /** An unhealthy route disappears from inference, but its process may still hold memory.
+   * Confirm its exit before a handover can treat the missing URL as an empty engine. */
+  prepareGpuHandover(): Promise<void> {
+    const work = this.settingsWork.then(async () => {
+      if (this.resolved.source === "user-url" || !this.supervisor || !["failed", "stopped", "unhealthy"].includes(this.supervisor.status)) return;
+      await this.supervisor.stopAndConfirm();
+      this.currentProcessEpoch = null;
+      this.recordProbe({ version: null, reachable: false, detail: null });
+      await this.publish();
+    });
+    this.settingsWork = work.catch(() => {});
+    return work;
+  }
+
   /** Wait for a spawned child to settle without making coordinator startup wait on it. */
   waitUntilReady(timeoutMs = 120_000): Promise<boolean> {
     if (this.baseUrl() !== null) return Promise.resolve(true);
@@ -904,6 +918,10 @@ export class ComfyUiEngineService {
         case "failed":
           state = "failed";
           detail = supervisor.reason ?? "the engine did not start";
+          break;
+        case "stopped":
+          state = "failed";
+          detail = "The ComfyUI worker stopped. Restart it to resume generation.";
           break;
         default:
           state = "starting";

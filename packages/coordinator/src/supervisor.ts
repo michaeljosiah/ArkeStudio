@@ -139,6 +139,8 @@ export interface SupervisorDeps {
    */
   listDescendants?: (rootPid: number) => Promise<DescendantInfo[]>;
   probe?: ProcessProbe;
+  /** Native kill seam for failure-injection checks; production kills the owned process tree. */
+  kill?: (pid: number) => Promise<void>;
 }
 
 /**
@@ -453,7 +455,7 @@ export class ChildSupervisor extends EventEmitter {
     // unexpected-exit restart budget (or start a replacement behind the terminal status).
     this.terminalStartupChild = child;
     await this.forceStop(child);
-    if (this.child === child) this.child = null;
+    if (this.child === child && (child.exitCode !== null || child.signalCode !== null)) this.child = null;
     this.setStatus(
       "failed",
       this.healthFailure ??
@@ -852,7 +854,7 @@ export class ChildSupervisor extends EventEmitter {
   private async forceStop(child: ChildProcess): Promise<void> {
     if (child.pid === undefined) return;
     // taskkill /T takes the whole tree — a bare kill() orphans grandchildren on Windows.
-    try { await killTree(child.pid); }
+    try { await (this.deps.kill ?? killTree)(child.pid); }
     catch {
       // A timed out taskkill must not abort shutdown before survivor reaping and timer
       // cleanup. The process handle still identifies our own child for a direct fallback.

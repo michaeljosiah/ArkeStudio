@@ -47,6 +47,10 @@ Confirmed supervisor shutdown includes tracked inference descendants. Desktop in
 owns new runtimes until Coordinator construction succeeds and retries failed startup cleanup
 before another initialization can start. Ollama routing changes are also fenced against cloud
 writing turns; unchanged endpoint configuration does not restart the harness.
+Failed-startup children remain owned until actual exit. An unhealthy ComfyUI worker must
+confirm release even after its ready URL disappears; healthy sibling workers remain available.
+Ollama model readiness is rechecked against the selected store, including models downloaded
+earlier in the same session, and an old service's pull cannot mark a new service ready.
 
 ## Ming qualification and delivery boundary
 

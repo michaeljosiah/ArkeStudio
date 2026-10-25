@@ -116,6 +116,7 @@ export class OllamaEngineService {
   }
 
   async pull(model: string, signal: AbortSignal, progress: (done: number, total: number) => void): Promise<void> {
+    const generation = this.generation;
     const response = await this.request("/api/pull", { method: "POST", signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, stream: true }) });
     if (!response.body) throw new Error("Ollama returned no download progress.");
     const reader = response.body.getReader();
@@ -138,6 +139,7 @@ export class OllamaEngineService {
         if (done) { take(buffer); break; }
       }
       if (!success) throw new Error("Ollama's model download ended before confirming success.");
+      if (generation !== this.generation) throw new Error("The Ollama selection changed during download. Install the model on the newly selected service.");
     } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
   }
 
