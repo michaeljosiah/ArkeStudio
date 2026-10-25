@@ -25,6 +25,7 @@ import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 const BELLS = "ar_01J8G0000000000000000000R1";
 const BOARD = "ar_01J8G0000000000000000000B2";
 const CUE = "ar_01J9M00000000000000000C001";
+const SONG = "ar_01J9M00000000000000000S001";
 
 /** One second of a quiet stereo tone, 48 kHz, as the decode step writes it. */
 function toneWav(seconds = 1): Buffer {
@@ -86,6 +87,12 @@ async function withHarness(run: (h: Harness) => Promise<void>, options: { ffmpeg
   await writeFile(join(worldDir, "artifacts", "harbour-reel.wav.json"), JSON.stringify({
     id: CUE, kind: "audio", file: "harbour-reel.wav", hash: "sha256:2222222222222222", origin: { by: "system", producedBy: "sound" }, links: [], production: "saltlight", created: "2026-10-24T10:00:00Z",
     generation: { source: "sound", productionId: "saltlight", name: "Harbour reel", cue: "music", heard: "a reel on the quay", prompt: "a harbour reel", provider: "elevenlabs", model: "sound", outputFormat: "wav", estimatedMicroUsd: 0, costMicroUsd: null },
+  }));
+  // A song kept from Bench's music mode, with the words it was sung from.
+  await writeFile(join(worldDir, "artifacts", "bell-rope-chant.wav"), toneWav());
+  await writeFile(join(worldDir, "artifacts", "bell-rope-chant.wav.json"), JSON.stringify({
+    id: SONG, kind: "audio", file: "bell-rope-chant.wav", hash: "sha256:3333333333333333", origin: { by: "system", producedBy: "bench" }, links: [], created: "2026-10-23T10:00:00Z",
+    generation: { source: "bench", sessionId: "sess_01J9M000000000000000000001", takeId: "tk_01J9M000000000000000000001", takeNumber: 1, brief: "Bell rope chant, slow", references: [], keyframes: [], provider: "elevenlabs", model: "music_v1", params: { kind: "music", lyrics: "[verse]\nHaul on the ropes", count: 1 }, costMicroUsd: 280_000 },
   }));
   await options.prepare?.(worldDir);
   const provider = new FsWorldProvider(root, { clock: () => "2026-10-25T09:00:00.000Z" });
@@ -200,6 +207,13 @@ describe("the album's tracks (238c – 238e, R-5 – R-7)", () => {
       assert.equal((await recordOf(h.worldDir, slug)).tracks.length, 2);
       const meta = JSON.parse(await readFile(join(h.worldDir, "productions", slug, "production.json"), "utf8")) as { kind?: string };
       assert.equal(meta.kind, "album");
+    }));
+
+  it("names a Bench song by its brief and starts its lyrics from the words it was sung from", () =>
+    withHarness(async (h) => {
+      const slug = (await createMusic(h, "Songs", "album")).slug!;
+      await h.send({ kind: "music-track-add", worldId: WORLD_ID, productionId: slug, artifactId: SONG });
+      assert.deepEqual((await recordOf(h.worldDir, slug)).tracks.map((track) => [track.id, track.title, track.lyrics]), [["bell-rope-chant", "Bell rope chant", "[verse]\nHaul on the ropes"]]);
     }));
 
   it("takes music another production made, as an audio drama's cue (codex on PR 2189)", () =>

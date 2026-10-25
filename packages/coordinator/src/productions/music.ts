@@ -89,6 +89,9 @@ export async function addMusicTrack(store: WorldStore, productionId: string, art
   // (SPEC-057 R-40), and an album may take one. Anything else another production owns stays its.
   if (artifact.production !== undefined && artifact.production !== productionId && keptMusic([artifact]).length === 0) throw new MusicRefusal("that take belongs to another production");
   const title = keptMusic([artifact])[0]?.title ?? musicTitleFrom(undefined, artifact.file);
+  // A song made in Bench keeps the words it was sung from, as the track's lyrics to start with.
+  const generation = artifact.generation;
+  const sung = generation !== undefined && "params" in generation && generation.source === "bench" && generation.params.kind === "music" ? generation.params.lyrics.trim() : "";
   let added = "";
   await writeMusic(store, productionId, "music-track-add", (record) => {
     if (record.tracks.length >= MAX_MUSIC_TRACKS) throw new MusicRefusal(`an album holds at most ${MAX_MUSIC_TRACKS} tracks`);
@@ -96,7 +99,7 @@ export async function addMusicTrack(store: WorldStore, productionId: string, art
     if (single && record.tracks.length >= 1 && options.makeAlbum !== true) throw new MusicRefusal("a single holds one track · make it an album to add another");
     added = musicTrackId(title, record.tracks.map((track) => track.id));
     return {
-      record: { ...record, tracks: [...record.tracks, { id: added, title, source: { artifactId }, takes: [] }] },
+      record: { ...record, tracks: [...record.tracks, { id: added, title, source: { artifactId }, takes: [], ...(sung !== "" ? { lyrics: sung } : {}) }] },
       ...(single && record.tracks.length >= 1 ? { kind: "album" as const } : {}),
     };
   });
