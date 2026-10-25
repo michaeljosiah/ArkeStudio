@@ -520,7 +520,7 @@ function MusicExportSheet({ world, production, record, heard, onClose }: { world
   );
   return (
     <PageSheet open onClose={onClose} title={`Export · ${production.meta.title}`} subtitle={`${shape.displayLabel} · ${record.tracks.length} track${record.tracks.length === 1 ? "" : "s"}${total !== null ? ` · ${musicClock(total)}` : ""}`} footer={footer} className="fy-abv-modal">
-      <div className="fy-abv-sheet" data-testid="music-export">
+      <div className="fy-abv-sheet fy-music-export" data-testid="music-export">
         {made === null ? (
           <>
             <div className="fy-abv-opts">

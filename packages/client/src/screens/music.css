@@ -3,7 +3,6 @@
    A cover is 1:1, the fourth picture shape after 2:3 story covers, 9:16 Talls and 16:9 wide.
    Type through the tokens only. */
 .fy-music { position: relative; display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 36px; padding: 28px 40px; align-items: start; }
-.fy-music--open { padding-right: 500px; }
 .fy-music .grow { flex: 1; }
 .fy-music__m { font: var(--type-meta); color: var(--muted-foreground); }
 .fy-music__side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -99,7 +98,6 @@
 @media (max-width: 1099px) {
   .fy-music { grid-template-columns: 240px minmax(0, 1fr); gap: 24px; padding: 24px 32px; }
   .fy-music__cover { width: 240px; }
-  .fy-music--open { padding-right: 32px; }
   .fy-music-panel { position: fixed; z-index: 30; top: 52px; width: min(460px, 100vw); }
   .fy-music-dlg__tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
@@ -110,3 +108,7 @@
   .fy-music-dlg__tiles, .fy-music-dlg__covers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fy-music__search { min-width: 0; flex: 1; }
 }
+
+/* The export sheet's rows (238h): the world's key art and the square cover, small beside their row. */
+.fy-music-export .fy-abv-opt img { width: 44px; height: 25px; object-fit: cover; border-radius: 4px; flex: none; }
+.fy-music-export .fy-abv-opt img.sq { width: 30px; height: 30px; }
