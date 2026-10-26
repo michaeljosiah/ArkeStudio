@@ -43,6 +43,8 @@ import { createStudioStorage, type StudioStorage } from "./application/studio-co
 import { referenceInputProblem, ollamaLlmAvailable } from "@arke-studio/contracts";
 import { LocalGpu } from "./local-ai/gpu.js";
 import type { MingBatchCommand } from "./local-ai/ming.js";
+import { MingSpeechService } from "./local-ai/ming-speech.js";
+import type { MingSynthesis } from "@arke-studio/providers";
 import { withLocalGpu } from "./harness/local-gpu.js";
 import { withModelValidation } from "./harness/model-validation.js";
 import { HarnessModelCatalog, selectHarnessModel, type LanguageModelSelection } from "./harness/model-catalog.js";
@@ -493,7 +495,7 @@ import {
   AUDIO_EXTENSIONS as CLONEABLE_AUDIO_EXTENSIONS,
   audioBytesLookRight,
   clipFor,
-  clipHashOf,
+  readerReferenceHash,
   clipPresent,
   cloneVoice,
   MIN_CLONE_SECONDS,
@@ -1030,7 +1032,9 @@ export interface CoordinatorOptions {
     reconfigureHarness?: (apply?: () => Promise<void>) => Promise<void>;
   };
   /** Ming owns a separate process even when its interpreter belongs to ComfyUI. */
-  ming?: { run(command: MingBatchCommand, signal: AbortSignal): Promise<void>; unload(signal: AbortSignal): Promise<void>; dispose(): Promise<void> };
+  ming?: { readonly running?: boolean; run(command: MingBatchCommand, signal: AbortSignal): Promise<void>; unload(signal: AbortSignal): Promise<void>; dispose(): Promise<void> };
+  /** Real filesystem worker path for a packaged host; never supplied by renderer commands. */
+  mingWorkerPath?: string;
   /**
    * Vendor-side voice state for the hosted readers (SPEC-046 R-13): the calls that save a clip
    * into a Breeze voice slot and remove it, wired by the host from the provider clients. Absent
@@ -1623,7 +1627,7 @@ export class Coordinator {
     if (source.kind === "cloned") {
       const clip = await clipFor(store, source.voice);
       if (clip !== null) {
-        return { narrator: { provider: chosen.provider, model: chosen.model, voiceId: chosen.voiceId, label: chosen.label ?? source.voice.name, cloned: true, clonedVoice: source.voice, clipHash: clipHashOf(clip) }, catalogue };
+        return { narrator: { provider: chosen.provider, model: chosen.model, voiceId: chosen.voiceId, label: chosen.label ?? source.voice.name, cloned: true, clonedVoice: source.voice, clipHash: readerReferenceHash(chosen.provider, clip) }, catalogue };
       }
     }
     const speaks = source.kind === "catalogue" ? chosen : narratorFor(null, narrationCatalogue);
@@ -2905,7 +2909,7 @@ export class Coordinator {
         if (input.defaultNarrator === true && modelOf({ provider: assigned.provider, model })?.speechPlan === "free-plan") return narration;
         return { provider: assigned.provider, model, voiceId: assigned.voiceId, label: assigned.label ?? listed.label, cloned: source.kind === "cloned",
           ...(source.kind === "cloned" ? { clonedVoice: source.voice } : {}),
-          ...(clip !== null ? { clipHash: clipHashOf(clip) } : {}) };
+          ...(clip !== null ? { clipHash: readerReferenceHash(assigned.provider, clip) } : {}) };
       }),
     );
     const isLocal = (voice: { provider: string; model: string }) => voice.provider === "kokoro" && voice.model === "kokoro-82m";
@@ -3468,6 +3472,14 @@ export class Coordinator {
   private backfillStore: WorldStore | null = null;
 
   private readonly localGpu: LocalGpu;
+  private readonly mingSpeech: MingSpeechService | null;
+  mingSpeechStatus(model: string): Promise<{ready: boolean; reason?: string}> {
+    return this.mingSpeech?.status(model) ?? Promise.resolve({ready: false, reason: "Ming is not configured on this host."});
+  }
+  synthesizeMing(input: Parameters<MingSynthesis["synthesize"]>[0], signal: AbortSignal): Promise<Uint8Array> {
+    if (!this.mingSpeech || this.stopping) return Promise.reject(new Error("Ming is stopped or unavailable."));
+    return this.mingSpeech.synthesize(input, AbortSignal.any([signal, this.runtimeStop.signal]));
+  }
   private readonly runtimeStop = new AbortController();
 
   /** Host-only entry for the optional Ming worker; no paths or commands come from the renderer. */
@@ -3531,6 +3543,9 @@ export class Coordinator {
       await opts.dispatchClients?.[engine === "Ollama" ? "ollama" : "comfyui"]?.unload?.(signal);
       this.clearLocalResidency(engine === "Ollama" ? "ollama" : "comfyui");
     }, ["Ollama", "ComfyUI", "Ming"]);
+    this.mingSpeech = opts.appRoot && opts.ming && opts.comfyui ? new MingSpeechService({ appRoot: opts.appRoot,
+      python: () => opts.comfyui!.service.sharedMingPython(), run: (command, signal) => this.generateMingBatch(command, signal),
+      processRunning: () => opts.ming!.running === true, ...(opts.mingWorkerPath ? {worker: opts.mingWorkerPath} : {}) }) : null;
     if (opts.adapter) opts.adapter = withModelValidation(
       withLocalGpu(opts.adapter, this.localGpu, () => { void this.refreshLocalResidency(); }, (model) => this.harnessOllamaModels.add(model)),
       (reference, needsImages, signal) => this.validateLanguageModel(reference, needsImages, signal),
@@ -3739,6 +3754,7 @@ export class Coordinator {
                 if (source.kind !== "cloned") {
                   throw new Error("That cloned voice is no longer in this world — choose another voice.");
                 }
+                if (provider === "ming" && (!source.voice.consent || !source.voice.transcript?.trim())) throw new Error("Clone this recording with permission and its exact spoken words to use Ming 3.");
                 const clip = await clipFor(store, source.voice);
                 if (!clip) {
                   throw new Error(
@@ -3892,6 +3908,7 @@ export class Coordinator {
       ? new VoiceService({
           sidecar: opts.voice.sidecar,
           localPresets: opts.voice.localPresets,
+          ...(this.mingSpeech ? { localReaderAvailability: (model: string) => this.mingSpeechStatus(model) } : {}),
           cloudSources: opts.voice.cloudSources,
           modelEnabled: (model) => !this.readModel.getState().app.models.disabled.includes(model),
           ...(opts.voice.hostedReaders !== undefined ? { hostedReaders: opts.voice.hostedReaders } : {}),
@@ -4305,7 +4322,15 @@ export class Coordinator {
                 },
               },
               onComponentReady: (componentId) => this.onSetupComponentReady(componentId),
-              beforeComponentInstall: async id => { if (id.startsWith("adapter-")) await this.adapterLibrary?.guardInstall(id); },
+              beforeComponentInstall: async id => {
+                if (id.startsWith("adapter-")) await this.adapterLibrary?.guardInstall(id);
+                if (id.startsWith("ming-") && (this.mingSpeech?.busy || this.localGpu.isBusy("Ming"))) throw new Error("Wait for the current Ming reading to stop before changing its files.");
+              },
+              beginFileMutation: id => {
+                if (!id.startsWith("ming-")) return undefined;
+                if (this.localGpu.isBusy("Ming")) throw new Error("Stop the current Ming reading before changing its model files.");
+                return this.mingSpeech?.reserveFileChange();
+              },
               onFileInstalled: async (id, path) => { if (id.startsWith("adapter-")) await this.adapterLibrary?.recordInstalled(id, path); },
             },
           )
@@ -4338,6 +4363,7 @@ export class Coordinator {
 
   private onSetupComponentReady(componentId: string): Promise<void> {
     if (this.stopping) return Promise.resolve();
+    if (componentId.startsWith("ming-")) return this.providerService.validate("ming").then(() => { this.voiceService?.invalidateCatalogue(); });
     if (componentId === "ollama-runtime") return this.opts.ollama?.service.refresh() ?? Promise.resolve();
     if (componentId !== "comfyui-runtime" && !isComfyUiWeightsComponent(componentId)) return Promise.resolve();
     const work = this.comfyUiSetupWork
@@ -14525,6 +14551,7 @@ export class Coordinator {
           return;
         }
         const made = await cloneVoice(store, store.getBundle().clonedVoices, {
+          ...(msg.transcript !== undefined ? { transcript: msg.transcript } : {}),
           sourcePath: clip.path,
           name: msg.name,
           description: msg.description,
@@ -17765,7 +17792,7 @@ export class Coordinator {
         // (SPEC-046 R-39). Absent for a preset, and for a clone whose clip is gone, which the
         // checks below refuse by name.
         const previewClip = source.kind === "cloned" ? await clipFor(store, source.voice) : null;
-        const previewReference = previewClip !== null ? clipHashOf(previewClip) : undefined;
+        const previewReference = previewClip !== null ? readerReferenceHash(msg.provider, previewClip) : undefined;
         if (
           source.kind === "cloned" &&
           (await this.requireVoiceUploadConfirmation({

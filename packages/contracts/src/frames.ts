@@ -3279,6 +3279,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("clone-voice"),
+      transcript: z.string().trim().min(1).max(4000).optional(),
       worldId: UlidSchema,
       /**
        * A clip already staged by `stage-voice-clip`, never a path. The renderer has no path to

@@ -866,6 +866,10 @@ async function initialize(): Promise<{ port: number }> {
   // folder through the coordinator's external-dir resolver.
   const comfyUiWeightEntries = comfyUiWeightCatalogue(COMFYUI_RECIPES);
   const providerClients = createProviderClients({
+    ming: {
+      status: model => coordinator?.mingSpeechStatus(model) ?? Promise.resolve({ready: false, reason: "Arke is starting."}),
+      synthesize: (input, signal) => coordinator?.synthesizeMing(input, signal) ?? Promise.reject(new Error("Arke is not running.")),
+    },
     ollama: () => ollamaEngine.baseUrl(),
     ollamaCleanup: () => ollamaEngine.endpoint(),
     fetch: (url, init) => fetch(url, init),
@@ -1410,6 +1414,7 @@ async function initialize(): Promise<{ port: number }> {
     },
     ollama: { service: ollamaEngine, reconfigureHarness: wiring.reconfigureOllama },
     ming: mingProcess,
+    ...(app.isPackaged ? { mingWorkerPath: join(process.resourcesPath, "ming", "ming-worker.py") } : {}),
     comfyui: {
       service: comfyUiEngine,
       choosePath: async () => {

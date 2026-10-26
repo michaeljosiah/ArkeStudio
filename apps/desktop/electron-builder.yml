@@ -37,6 +37,8 @@ directories:
 files:
   - dist/**
   - "!dist/local-audio-listener.py"
+  - "!dist/ming-worker.py"
+  - "!dist/ming-MIT.txt"
   - assets/**
   # This TTF is a loose resource below, not duplicated inside app.asar.
   - "!assets/Geist-Regular.ttf"
@@ -59,6 +61,10 @@ asarUnpack:
   - "dist/fonts/**"
   - "dist/story-pdf-licenses/**"
 extraResources:
+  - from: ../../packages/coordinator/src/local-ai/ming-worker.py
+    to: ming/ming-worker.py
+  - from: ../../licenses/ming-audition-MIT.txt
+    to: ming/ming-MIT.txt
   # Python cannot read Electron's virtual app.asar filesystem.
   - from: dist/local-audio-listener.py
     to: audio-listener/local-audio-listener.py

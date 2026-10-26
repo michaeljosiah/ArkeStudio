@@ -93,6 +93,8 @@ export interface SetupOptions {
   onComponentReady?: (componentId: string) => Promise<void>;
   /** Application policy rechecked for queued/resumed optional downloads. */
   beforeComponentInstall?: (componentId: string) => Promise<void>;
+  /** Synchronous admission fence for destructive repair/removal; always released after the operation. */
+  beginFileMutation?: (componentId: string) => (() => void) | undefined;
   /** Invoked only for bytes this service actually downloaded and verified. */
   onFileInstalled?: (componentId: string, path: string) => Promise<void>;
 }
@@ -1662,6 +1664,15 @@ export class LocalSetupService {
    * (R-45, D14).
    */
   async remove(componentId: string): Promise<{ freedMb: number; leftovers: NonNullable<SetupComponent["leftovers"]> }> {
+    let release: (() => void) | undefined;
+    try { release = this.opts.beginFileMutation?.(componentId); return await this.removeOnce(componentId); }
+    catch (error) {
+      if (this.components.has(componentId)) { this.set(componentId, {detail: errorText(error)}); this.publish(); }
+      return {freedMb: 0, leftovers: []};
+    } finally { release?.(); }
+  }
+
+  private async removeOnce(componentId: string): Promise<{ freedMb: number; leftovers: NonNullable<SetupComponent["leftovers"]> }> {
     const c = this.components.get(componentId);
     if (!c) return { freedMb: 0, leftovers: [] };
     if (!this.removable(c.entry)) {
@@ -1742,6 +1753,15 @@ export class LocalSetupService {
 
   /** Remove Arke-managed model files so a repair re-download cannot trust corrupt presence. */
   async repair(componentId: string): Promise<boolean> {
+    let release: (() => void) | undefined;
+    try { release = this.opts.beginFileMutation?.(componentId); return await this.repairOnce(componentId); }
+    catch (error) {
+      if (this.components.has(componentId)) { this.set(componentId, {detail: errorText(error)}); this.publish(); }
+      return false;
+    } finally { release?.(); }
+  }
+
+  private async repairOnce(componentId: string): Promise<boolean> {
     const c = this.components.get(componentId);
     if (!c || c.entry.spec.kind !== "files") return false;
     const spec = c.entry.spec;

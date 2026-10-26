@@ -40,7 +40,7 @@ import type { MediaProbe } from "../media/probe.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import { classifyError } from "../queue/classify.js";
 import { cachedVoiceAudioLooksRight, joinSpeech, speechCacheFile } from "../voice/service.js";
-import { clipFor, clipHashOf } from "../voice/library.js";
+import { clipFor, readerReferenceHash } from "../voice/library.js";
 import { piecesFor } from "../voice/pieces.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -408,12 +408,12 @@ export async function prepareChapter(
   // Each cloned reader's recording, hashed once for the chapter (SPEC-046 R-39): the hash keys
   // its cache files and names its parts' jobs, so a voice re-recorded since is read afresh.
   const references = new Map<string, string | null>();
-  const referenceOf = async (voice: ClonedVoice): Promise<string | null> => {
-    if (!references.has(voice.id)) {
+  const referenceOf = async (voice: ClonedVoice, provider: string): Promise<string | null> => {
+    if (!references.has(`${provider}:${voice.id}`)) {
       const clip = await clipFor(store, voice);
-      references.set(voice.id, clip === null ? null : clipHashOf(clip));
+      references.set(`${provider}:${voice.id}`, clip === null ? null : readerReferenceHash(provider, clip));
     }
-    return references.get(voice.id)!;
+    return references.get(`${provider}:${voice.id}`)!;
   };
 
   // A single block made again, re-read or heard is read with its neighbours (design turn 185):
@@ -559,7 +559,7 @@ export async function prepareChapter(
     const local = reader.provider === "kokoro";
     const format = voiceFormatForModel(model);
     const source = voiceSourceFor(clonedVoices, reader.provider, reader.model, reader.voiceId);
-    const reference = source.kind === "cloned" ? await referenceOf(source.voice) : null;
+    const reference = source.kind === "cloned" ? await referenceOf(source.voice, reader.provider) : null;
     // An explicit `Make again`, whatever the block's state (codex on PR 1193): with its kept
     // take retired, the older take of the same words must not be the answer either.
     const remake = only !== undefined;

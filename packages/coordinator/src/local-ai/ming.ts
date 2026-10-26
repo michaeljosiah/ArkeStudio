@@ -16,6 +16,7 @@ export interface MingBatchCommand {
 /** A separate process borrows Python/Torch on disk, never ComfyUI's interpreter state.
  * One process serves a batch of chunks; exit is the release of its CUDA context. */
 export class MingProcess {
+  get running(): boolean { return this.active !== null || this.launching; }
   private active: { child: ChildProcess; closed: Promise<void> } | null = null;
   private launching = false;
   private disposed = false;
@@ -53,7 +54,7 @@ export class MingProcess {
       let child: ChildProcess;
       try { child = this.spawnProcess(command.python, ["-B", command.worker, ...command.args], {
         shell: false, windowsHide: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"], cwd: command.cacheRoot,
-        env: { ...env, HF_HUB_OFFLINE: "1", TRANSFORMERS_OFFLINE: "1", HF_HUB_DISABLE_TELEMETRY: "1", PYTHONNOUSERSITE: "1", PYTHONDONTWRITEBYTECODE: "1", TOKENIZERS_PARALLELISM: "false",
+        env: { ...env, HF_HUB_OFFLINE: "1", TRANSFORMERS_OFFLINE: "1", HF_HUB_DISABLE_TELEMETRY: "1", PYTHONUTF8: "1", PYTHONNOUSERSITE: "1", PYTHONDONTWRITEBYTECODE: "1", TOKENIZERS_PARALLELISM: "false",
           TEMP: cache("temp"), TMP: cache("temp"), TMPDIR: cache("temp"), HF_HOME: cache("hub"), TRITON_CACHE_DIR: cache("triton"), TORCHINDUCTOR_CACHE_DIR: cache("inductor"), TORCH_HOME: cache("torch"), TORCH_EXTENSIONS_DIR: cache("extensions"), USER: "arke-ming" },
       }); } catch (error) { await log.close(); throw error; }
       child.stdout?.on("data", (chunk: Buffer) => log.write(chunk));

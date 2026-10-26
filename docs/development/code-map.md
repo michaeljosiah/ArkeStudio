@@ -23,9 +23,19 @@ The mandatory local-AI launch gate is projected by contracts `setup.ts` and Coor
 Downloads reports the same verdict. Runtime Skip is refused in `setup/local-setup.ts`.
 Tests: contracts `local-ai-setup`, coordinator `setup/local-ai-readiness`, client `launch-lifecycle`.
 
-Ming qualification (0.5B and the original-weight tiny trial) is a standalone offline probe in `scripts/probe-ming-tts.py`, with
-input/environment checks in `scripts/test-probe-ming-tts.py`. It does not register a provider or
-change Voxa. See [audition setup and evidence boundaries](ming-tts-audition.md).
+Ming's optional 0.5B and experimental 7.9B readers are declared in contracts `ming.ts` and providers
+`ming-models.ts` / `clients/ming.ts`. Coordinator `local-ai/ming-catalogue.ts` / `ming-assets.json`
+declare the complete setup closure; `ming-speech.ts` verifies it, chunks narration and owns private
+inputs; `ming-worker.py` executes the locked offline source with private dependency overlays.
+`voice/service.ts` offers saved library voices with consent and a reference transcript; `voice/library.ts`
+and `local-ai/ming-reference.ts` bind clip bytes and words to queued/cache identity. Dispatcher
+rechecks that identity before submit. Client `clone-voice-dialog.tsx` collects the reference words;
+`local-models.tsx` selects the dependency leaf for complete installation. Desktop packages the worker
+outside asar; Node engine builds copy it beside the bundle. Tests: coordinator `ming-speech`,
+`voice/ming`, `queue/dispatcher`; providers `ming`; client `clone-voice`, `local-models`; desktop
+`packaged-runtimes`; root `scripts/test-ming-worker.py`. See [setup and delivery limits](managed-local-runtimes.md#ming-qualification-and-delivery-boundary).
+The standalone audition remains `scripts/probe-ming-tts.py`, with input/environment checks in
+`scripts/test-probe-ming-tts.py`; see [audition evidence](ming-tts-audition.md). Voxa is unchanged.
 
 On-demand story delivery: coordinator `world/undersong-release.ts` pins the public archive;
 `world/story-download.ts` owns pinned single/multipart resumable archives, disk-space inspection, verification

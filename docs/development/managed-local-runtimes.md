@@ -76,11 +76,43 @@ accepts `--overlay`, `--shared-runtime-adapters`, and Tiny's `--python-sdk`, so 
 repeated without private scratch scripts. Pass `--worker` when the host owns process lifetime;
 the host must create a fresh output directory and apply a whole-batch timeout signal.
 
-This change supplies the managed runtime policy and process/GPU backend. It does **not**
-register Ming as a selectable narrator, download its weights/dependency overlay, or claim
-long-read completeness. Shipping that optional reader still requires a pinned wheel/source/
-checkpoint manifest, packaged worker, reference-transcript preparation and the voice-library
-and narration-queue integration. There is no silent fallback to the retired IndexTTS recipe.
+Ming is an optional local reader in **Settings → AI models → Voices**, under ComfyUI. Install
+0.5B (about 3 GB of weights) or 7.9B (about 18 GB) to fetch the whole dependency closure.
+Only Arke-managed Windows x64/NVIDIA ComfyUI is qualified; an explicitly selected personal
+install or URL does not lend its Python to Ming. This is a separate batch worker sharing
+Python/PyTorch/CUDA, rather than a ComfyUI recipe or custom node. Voxa remains the host for
+Kokoro, transcription and interactive speech.
+
+Clone a recording through the existing voice library, give permission, and enter its exact
+spoken words in **Words spoken in the recording**. Existing library voices without these words
+remain readable through their existing readers; re-clone the recording with its words to use
+Ming. The same library voice offers each installed Ming model as a reader in casting and
+narrator selection, and the normal Bench/production queue uses that selection. Missing consent,
+words, recording or model files gives an unavailable reason. No voice is silently reassigned.
+
+`local-ai/ming-assets.json` pins source, checkpoint revisions, all dependency wheels and the
+small Python SDK archive used by 7.9B's Triton compiler. Setup verifies every download. Inference
+rechecks model/source/wheel hashes (using file-identity digest receipts), then extracts a private
+overlay; it never runs pip or downloads anything. Reference bytes and words live only in that
+private batch and the existing saved voice artifact/record. The queued identity hashes both,
+refusing a changed recording or transcript before submission. Hosted reader hashes stay unchanged.
+Model repair/removal is fenced against admitted Ming reads. The packaged worker and upstream
+MIT notice are loose resources, so external Python can read them outside Electron's archive.
+
+Each request accepts at most 1,200 characters and splits at sentence boundaries into chunks
+of at most 240 characters and 40 whitespace-delimited words. A batch loads once, conditions
+every chunk on the original recording, keeps its direction separate from spoken text and joins
+PCM audio with 80 ms gaps. Neutral cloning sends recording plus reference words; FREEFORM sends
+the recording and instruction using upstream's speaker-only task. Direction is best effort:
+accent, emotion and identical delivery across boundaries are listening decisions.
+
+**7.9B is experimental.** The installation-path native test reproduced an accepted 32-word
+passage (~8.16 s, ~246 s generation), while another passage stopped early even after reducing
+chunk size. The 0.5B two-chunk test returned ~15.28 s in ~56 s. Both released their process and
+GPU lane. Decode-ceiling failure, partial chunk completion, invalid audio and an obviously
+short read (12+ words at over eight words/second) refuse the whole result. This last check is
+an omission screen, not transcription or proof that every word was read. Review narration
+before publishing. The retired IndexTTS recipe remains retired.
 
 ## Validation
 
@@ -95,6 +127,14 @@ Run client `test/engine-panes.test.tsx`, contracts `test/ollama.test.ts` and pro
 process, loopback and file-handle access. These regressions use native lightweight stand-ins;
 real model qualification remains separate from CI. Finish with the repository's full gates
 and Windows/Linux CI.
+
+Ming product integration also uses coordinator `test/ming-speech.test.ts`, `test/voice/ming.test.ts`,
+`test/queue/dispatcher.test.ts`, providers `test/ming.test.ts`, client `test/clone-voice.test.tsx` /
+`test/local-models.test.tsx`, and desktop `test/packaged-runtimes.test.mjs`. Run
+`python -B scripts/test-ming-worker.py` from the root for standard-library task mapping, short-read
+and safe-archive tests. These tests require no model downloads; native real-model tests are
+separate. Maintain the lock with `node scripts/update-ming-assets.mjs` only after deliberate
+pin/version edits and repeat native qualification; it fetches publisher metadata and archives.
 
 The first-run gate also uses contracts `test/local-ai-setup.test.ts`, coordinator
 `test/setup/local-ai-readiness.test.ts`, and client `test/launch-lifecycle.test.tsx` /

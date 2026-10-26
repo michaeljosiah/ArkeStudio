@@ -4942,6 +4942,7 @@ export function discardVoiceClip(clipId: string): void {
  * the button rather than being passed along as data that could be forgotten.
  */
 export function cloneVoice(input: {
+  transcript?: string;
   worldId: string;
   clipId: string;
   name: string;
@@ -4952,6 +4953,7 @@ export function cloneVoice(input: {
 }): void {
   send({
     kind: "clone-voice",
+    ...(input.transcript?.trim() ? { transcript: input.transcript.trim() } : {}),
     worldId: input.worldId,
     clipId: input.clipId,
     name: input.name,

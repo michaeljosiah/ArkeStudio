@@ -15,6 +15,7 @@ import { CodexClient, type CodexImageRunner } from "./clients/codex.js";
 import { HiggsfieldClient } from "./clients/higgsfield.js";
 import { KokoroClient, type KokoroSynthesize, type SidecarBaseUrl } from "./clients/kokoro.js";
 import { MistralClient } from "./clients/mistral.js";
+import { MingClient, type MingSynthesis } from "./clients/ming.js";
 import { GoogleClient } from "./clients/google.js";
 import { OllamaClient } from "./clients/ollama.js";
 import { OpenAiClient } from "./clients/openai.js";
@@ -24,6 +25,7 @@ import { missingHiggsfieldRunner } from "./higgsfield-cli.js";
 import type { CommandRunner, FetchLike, ProviderCallCapture, ProviderClient, ProviderTransport } from "./types.js";
 
 export interface ProviderClientDeps {
+  ming?: MingSynthesis;
   fetch: FetchLike;
   /** Desktop-owned cloud HTTP policy. Local engines retain their own scoped transports. */
   transport?: ProviderTransport;
@@ -136,6 +138,7 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
     google: captureProviderClient("google", (fetch) => new GoogleClient(fetch), fetchImpl, capture, undefined, transport),
     breezeblue: captureProviderClient("breezeblue", (fetch) => new BreezeBlueClient(fetch), fetchImpl, capture, undefined, transport),
     fishaudio: captureProviderClient("fishaudio", (fetch) => new FishAudioClient(fetch), fetchImpl, capture, undefined, transport),
+    ...(deps.ming ? { ming: new MingClient(deps.ming) } : {}),
     ollama: captureProviderClient("ollama", (fetch) => new OllamaClient(fetch, deps.ollama ?? (() => null), undefined, deps.ollamaCleanup), fetchImpl, capture),
     ...(deps.voxa === undefined
       ? {}
@@ -187,6 +190,7 @@ export const PROVIDER_DECLARATIONS: Partial<Record<ProviderId, ClientDeclaration
       // "not running" answer every one of their calls already handles, and reading declarations
       // makes no call at all.
       voxa: () => null,
+      ming: { status: async () => ({ready: false}), synthesize: () => Promise.reject(new Error("declarations-only")) },
       comfyui: {
         baseUrl: () => null,
         preflight: () => Promise.reject(new Error("declarations-only")),

@@ -340,6 +340,12 @@ export class ComfyUiEngineService {
     return join(this.deps.appRoot, MANAGED_DIR);
   }
 
+  /** Only the qualified managed interpreter is lent to local speech; URL engines cannot lend files. */
+  async sharedMingPython(): Promise<string | null> {
+    if (this.disposed || this.resolved.source !== "managed") return null;
+    return (await this.portableLayout(this.managedRoot()))?.python ?? null;
+  }
+
   /**
    * The portable build's shape: an embedded interpreter beside the application tree.
    *

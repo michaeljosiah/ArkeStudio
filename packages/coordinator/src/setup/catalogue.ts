@@ -1,4 +1,5 @@
 import type { EngineId, ProviderId } from "@arke-studio/contracts";
+import { mingCatalogue } from "../local-ai/ming-catalogue.js";
 
 /**
  * What setup fetches onto this machine, and where from. The engine ships; the language model
@@ -177,6 +178,7 @@ export function voxaSetupCompleted(
 }
 
 export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
+  ...mingCatalogue(),
   {
     id: "ollama-runtime",
     engine: "ollama",

@@ -72,6 +72,7 @@ export const ProviderIdSchema = z.enum([
   "fishaudio",
   "ollama",
   "kokoro",
+  "ming",
   "whispercpp",
   "comfyui",
 ]);
@@ -184,6 +185,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   },
   ollama: { displayName: "Ollama", capabilities: ["llm"], local: true, credential: "none" },
   kokoro: { displayName: "Kokoro", capabilities: ["voice-tts"], local: true, credential: "none" },
+  ming: { displayName: "Ming 3", capabilities: ["voice-tts", "voice-clone"], local: true, credential: "none" },
   whispercpp: { displayName: "whisper.cpp", capabilities: ["voice-stt"], local: true, credential: "none" },
   /**
    * The engine behind the local recipe catalogue (SPEC-021). Never exposed as an interface —

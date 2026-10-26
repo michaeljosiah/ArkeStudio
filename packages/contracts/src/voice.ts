@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isMingModel, MING_MODELS, MING_REFERENCE_TEXT_CHARS } from "./ming.js";
 import { orderedShots } from "./scene-flow.js";
 import type { ProductionBundle } from "./client-state.js";
 import type { ManifestModel } from "./manifest.js";
@@ -250,6 +251,8 @@ export const ClonedVoiceSchema = z
      * thing to lose over its language.
      */
     language: z.string().regex(/^[a-z]{2}$/).catch("en"),
+    /** Exact words in this recording, for local acoustic prompt conditioning. */
+    transcript: z.string().trim().min(1).max(MING_REFERENCE_TEXT_CHARS).optional().catch(undefined),
     /**
      * What each hosted reader holds of this voice (SPEC-046 R-13, R-16), keyed by provider id.
      * `confirmedAt` is the once-per-vendor answer to "send this recording?"; a reader that keeps
@@ -381,7 +384,7 @@ export function readerName(
   target: { provider: string; model?: string | null },
   row?: Pick<ManifestModel, "displayName"> | null,
 ): string {
-  const named = target.model !== undefined && target.model !== null ? READER_NAMES[target.model] : undefined;
+  const named = target.model !== undefined && target.model !== null ? (isMingModel(target.model) ? MING_MODELS[target.model].label : READER_NAMES[target.model]) : undefined;
   return named ?? row?.displayName ?? target.provider;
 }
 
@@ -456,6 +459,10 @@ export function voiceSourceFor(
   model: string,
   voiceId: string,
 ): VoiceSourceResolution {
+  if (provider === "ming" && isMingModel(model)) {
+    const voice = voices.find(candidate => candidate.id === voiceId);
+    return voice ? { kind: "cloned", voice } : { kind: "missing-clone" };
+  }
   if (provider === "comfyui" && model === RETIRED_LOCAL_VOICE_MODEL) {
     // Historical takes retain the recording's provenance. Eligibility is checked separately;
     // resolving this old source must neither offer a reader nor relabel it as licensed stock.
@@ -548,6 +555,7 @@ export function newClonedVoice(input: {
   consent: boolean;
   /** ISO 639-1; English when not said, which is what every reader assumed before it was asked. */
   language?: string;
+  transcript?: string;
   artifactId?: string;
   created: string;
   taken: readonly string[];
@@ -559,6 +567,7 @@ export function newClonedVoice(input: {
     return { ok: false, reason: "a cloned voice needs a description — it is what the picker matches on" };
   }
   const language = (input.language ?? "en").trim().toLowerCase();
+  if (input.transcript !== undefined && !z.string().trim().min(1).max(MING_REFERENCE_TEXT_CHARS).safeParse(input.transcript).success) return {ok: false, reason: "The reference words must contain 1 to 4,000 characters."};
   if (!/^[a-z]{2}$/.test(language)) return { ok: false, reason: "a cloned voice's language is a two-letter code" };
   const parsedClip = ClonedVoiceSchema.shape.clip.safeParse(input.clip.trim());
   if (!parsedClip.success) return { ok: false, reason: "a cloned voice needs a safe world-relative recording" };
@@ -572,6 +581,7 @@ export function newClonedVoice(input: {
       name,
       clip: parsedClip.data,
       description,
+      ...(input.transcript?.trim() ? { transcript: input.transcript.trim() } : {}),
       attributes: extractVoiceAttributes(description),
       language,
       ...(input.artifactId !== undefined ? { artifactId: input.artifactId } : {}),

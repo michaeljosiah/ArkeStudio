@@ -5,7 +5,7 @@ import {
   FIT_LABEL,
   ROW_STATE_LABEL,
   activationFor,
-  comfyUiWeightsComponentId,
+  modelSetupComponent,
   formatGb,
   localModelRowState,
   residencyNote,
@@ -129,9 +129,7 @@ export function localEntries(
     // and receding hides something actionable (SPEC-033 D8, SPEC-034 R-23). The row state
     // folds the two, so the verdict has to travel beside it.
     const declined = gated?.fit === "unsupported";
-    const component = components.find(
-      (c) => c.provides?.includes(model.id) === true || c.id === comfyUiWeightsComponentId(model.id),
-    );
+    const component = modelSetupComponent(components, model.id);
     return {
       model,
       state: rowState,

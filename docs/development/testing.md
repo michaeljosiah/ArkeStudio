@@ -4,6 +4,11 @@ Managed local runtime checks are listed in [Managed local runtimes](managed-loca
 Use native Windows process/loopback access for the supervisor, Ming cancellation and file-handle
 fixtures; sandbox IPC refusals do not establish an application regression. Model qualification
 is offline and separate from these lightweight native lifecycle tests.
+The [Ming integration checks](managed-local-runtimes.md#validation) cover complete model installation,
+voice reference words, queue identity, chunking, controlled refusal and packaged worker resources.
+The standard-library worker checks run with `python -B scripts/test-ming-worker.py`; CI's Node tests
+exercise the host seams without model downloads. Native tests must also check confirmed process
+exit and GPU-lane release; a returned WAV alone does not prove a complete reading.
 
 Baseline regression checks (#2079) use client `test/art-direction-step.test.tsx` and
 `test/one-register.test.tsx`, contracts `test/world-chat-shape.test.ts`, and coordinator

@@ -142,6 +142,7 @@ const codexImage = lazyCodexImageRunner({
   },
 });
 const providerClients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: providerCalls, codexImage,
+  ming: { status: model => coordinator.mingSpeechStatus(model), synthesize: (input, signal) => coordinator.synthesizeMing(input, signal) },
   ollama: () => ollamaEngine.baseUrl(), ollamaCleanup: () => ollamaEngine.endpoint(),
   comfyui: { ...comfy.client, adapterGuard: (recipe, selections) => coordinator.guardAdapters(recipe, selections) } });
 

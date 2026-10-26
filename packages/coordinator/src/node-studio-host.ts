@@ -72,6 +72,7 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
         return path ? { configuredPath: path } : {};
       } });
     const clients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: calls, codexImage,
+      ming: { status: model => host.coordinator.mingSpeechStatus(model), synthesize: (input, signal) => host.coordinator.synthesizeMing(input, signal) },
       ollama: () => ollama!.baseUrl(), ollamaCleanup: () => ollama!.endpoint(),
       comfyui: { ...comfy.client, adapterGuard: (recipe, selections) => host.coordinator.guardAdapters(recipe, selections) } });
     const host = createStudioHost({
