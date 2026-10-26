@@ -20,8 +20,8 @@ function content(state, draft=''){
   if(state==='denied')result+=assistant('<p>I’ve kept the files. Your export is still waiting for space. You can choose another destination or free space outside Arke.</p>');
   return result;
 }
-function composer(draft='') {
- const state={page:'world',chat:'studio',drafts:{studio:draft},attachments:{},refusals:{},running:{},worldChanged:false,voice:null,readReplies:false,label:'Studio assistant'};
+function composer(draft='',label='studio-live') {
+ const state={page:'world',chat:'studio',drafts:{studio:draft},attachments:{},refusals:{},running:{},worldChanged:false,voice:null,readReplies:false,label};
  const contexts={studio:{title:'Arke',subject:'Studio',hint:'Ask Arke about your studio…'}};
  const oldButton=(label,action,extra='',body=esc(label))=>`<button type="button" data-action="${action}" aria-label="${esc(label)}" ${extra}>${body}</button>`;
  return drawComposer(state,{esc,button:oldButton,icon,contexts});
@@ -30,7 +30,7 @@ function activity(){return `<section class="g239-dialog" aria-label="Activity re
 export function screen({state='ready',device='desktop',width=1360,height=820,label='',draft='',interactive=false}={}) {
  if(state==='activity')return `<div class="g239-scene g239-reference" data-device="${device}" data-state="activity" data-screen-label="${esc(label)}" style="width:${width}px;height:${height}px">${references.notification}</div>`;
  const backdrop=references[device==='phone'?'phone':device==='tablet'?'tablet':'desktop'];
- return `<div class="g239-scene ch227" data-device="${device}" data-state="${state}" data-screen-label="${esc(label)}" style="${interactive?'width:100%;height:100%':`width:${width}px;height:${height}px`}"><div class="g239-page">${backdrop}</div>${state==='closed'?'':`<div class="g239-scrim"></div><section class="gc224 gc224-panel g239-dialog ${device==='phone'?'gc224-phone':''}" role="dialog" aria-label="Arke · Studio assistant" ${device==='desktop'?'':'aria-modal="true"'}><header class="gc224-panel-head g239-head"><div><p>Arke</p><span>Studio assistant</span></div>${ib('history','Conversation history','history')}${ib('close','Close Arke','close')}</header><div class="g239-scope">Studio <span>Setup, local AI &amp; help</span></div><div class="gc224-messages g239-messages" aria-live="polite">${content(state,draft)}</div>${composer(draft)}</section>`}
+ return `<div class="g239-scene ch227" data-device="${device}" data-state="${state}" data-screen-label="${esc(label)}" style="${interactive?'width:100%;height:100%':`width:${width}px;height:${height}px`}"><div class="g239-page">${backdrop}</div>${state==='closed'?'':`<div class="g239-scrim"></div><section class="gc224 gc224-panel g239-dialog ${device==='phone'?'gc224-phone':''}" role="dialog" aria-label="Arke · Studio assistant" ${device==='desktop'?'':'aria-modal="true"'}><header class="gc224-panel-head g239-head"><div><p>Arke</p><span>Studio assistant</span></div>${ib('history','Conversation history','history')}${ib('close','Close Arke','close')}</header><div class="g239-scope">Studio <span>Setup, local AI &amp; help</span></div><div class="gc224-messages g239-messages" aria-live="polite">${content(state,draft)}</div>${composer(draft,label)}</section>`}
 </div>`;
 }
 export const FRAMES=[
