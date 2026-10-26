@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { win32, join } from "node:path";
 import { z } from "zod";
-import { leashChildToParent } from "../job-leash.js";
+import { leashStorageReaderToParent } from "../job-leash.js";
 import type { StorageProbeResult } from "./monitor.js";
 
 const rootSchema = z.object({ rootId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/), path: z.string().min(1).max(32767).refine(win32.isAbsolute) }).strict();
@@ -85,6 +85,7 @@ const unavailable = (state: "unavailable" | "unsupported" = "unavailable", cance
 export async function queryWindowsStorageVolumes(roots: readonly Root[], signal: AbortSignal): Promise<string> {
   const input = JSON.stringify(roots);
   if (Buffer.byteLength(input) > 128 * 1024) throw new Error("Storage probe input exceeds its bound.");
+  const closed = new AbortController();
   let leashed: Promise<unknown> = Promise.resolve();
   const result = new Promise<string>((resolve, reject) => {
     let failure: Error | null = null, output = "";
@@ -96,11 +97,14 @@ export async function queryWindowsStorageVolumes(roots: readonly Root[], signal:
     // The query waits on stdin until kernel lifetime ownership is established. Reflection.Emit
     // starts no compiler helpers, and the close event confirms this one owned reader has exited.
     leashed = (async () => {
-      const leash = child.pid ? await leashChildToParent(child.pid) : { ok: false };
+      const leash = child.pid ? await leashStorageReaderToParent(child.pid, process.pid, AbortSignal.any([signal, closed.signal])) : { ok: false };
       if (leash.ok && !signal.aborted && child.exitCode === null && child.signalCode === null) child.stdin?.end(input);
       else child.kill("SIGKILL");
     })().catch(() => { child.kill("SIGKILL"); });
-    child.once("close", () => failure ? reject(new Error("Native storage measurement unavailable.", { cause: failure })) : resolve(output));
+    child.once("close", () => {
+      closed.abort(); // A cancelled/timed-out reader must not leave its leash helper running.
+      if (failure) reject(new Error("Native storage measurement unavailable.", { cause: failure })); else resolve(output);
+    });
   });
   try { return await result; } finally { await leashed; }
 }

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 
 /**
@@ -36,7 +37,7 @@ try {
     [Reflection.Emit.AssemblyBuilderAccess]::Run)
   $type = $asm.DefineDynamicModule('ArkeLeashModule', $false).DefineType('ArkeLeash', 'Public, Class')
   $ctor = [Runtime.InteropServices.DllImportAttribute].GetConstructor([string])
-  $setLastError = [Runtime.InteropServices.DllImportAttribute].GetField('SetLastError')
+  $fields = [Reflection.FieldInfo[]]@([Runtime.InteropServices.DllImportAttribute].GetField('SetLastError'), [Runtime.InteropServices.DllImportAttribute].GetField('CharSet'))
   foreach ($sig in @(
     @('CreateJobObjectW',         [IntPtr], @([IntPtr], [string])),
     @('SetInformationJobObject',  [bool],   @([IntPtr], [int], [IntPtr], [uint32])),
@@ -47,14 +48,16 @@ try {
   )) {
     $m = $type.DefineMethod($sig[0], 'Public, Static, PinvokeImpl', $sig[1], $sig[2])
     $m.SetCustomAttribute((New-Object Reflection.Emit.CustomAttributeBuilder(
-      $ctor, @('kernel32.dll'), [Reflection.FieldInfo[]]@($setLastError), @($true))))
+      $ctor, @('kernel32.dll'), $fields, @($true, [Runtime.InteropServices.CharSet]::Unicode))))
   }
   $k = $type.CreateType()
   # Heartbeat: everything above is machine-speed work with no I/O, so a timeout that arrives
   # before this marker means PowerShell never got going, not that the leash itself is wedged.
   [Console]::Out.WriteLine('ready')
 
-  $job = $k::CreateJobObjectW([IntPtr]::Zero, $null)
+  $name = if ($env:ARKE_LEASH_JOB_NAME) { $env:ARKE_LEASH_JOB_NAME } else { $null }
+  $job = $k::CreateJobObjectW([IntPtr]::Zero, $name)
+  $reused = $name -and [Runtime.InteropServices.Marshal]::GetLastWin32Error() -eq 183
   if ($job -eq [IntPtr]::Zero) { throw "CreateJobObject failed (Win32 error $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))" }
 
   # JOBOBJECT_EXTENDED_LIMIT_INFORMATION is 144 bytes on 64-bit and 112 on 32-bit; LimitFlags
@@ -70,12 +73,14 @@ try {
   if ($child -eq [IntPtr]::Zero) { throw "OpenProcess(child) failed (Win32 error $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))" }
   if (-not $k::AssignProcessToJobObject($job, $child)) { throw "AssignProcessToJobObject failed (Win32 error $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))" }
 
-  $owner = $k::OpenProcess(0x0040, $false, [int]$env:ARKE_LEASH_OWNER_PID)
-  if ($owner -eq [IntPtr]::Zero) { throw "OpenProcess(owner) failed (Win32 error $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))" }
-  $dup = [Runtime.InteropServices.Marshal]::AllocHGlobal([IntPtr]::Size)
-  if (-not $k::DuplicateHandle($k::GetCurrentProcess(), $job, $owner, $dup, 0, $false, 2)) { throw "DuplicateHandle failed (Win32 error $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))" }
+  if (-not $reused) {
+    $owner = $k::OpenProcess(0x0040, $false, [int]$env:ARKE_LEASH_OWNER_PID)
+    if ($owner -eq [IntPtr]::Zero) { throw "OpenProcess(owner) failed (Win32 error $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))" }
+    $dup = [Runtime.InteropServices.Marshal]::AllocHGlobal([IntPtr]::Size)
+    if (-not $k::DuplicateHandle($k::GetCurrentProcess(), $job, $owner, $dup, 0, $false, 2)) { throw "DuplicateHandle failed (Win32 error $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))" }
+  }
 
-  [Console]::Out.WriteLine('leashed')
+  [Console]::Out.WriteLine($(if ($reused) { 'leashed-reused' } else { 'leashed' }))
 } catch {
   # Written straight to the stream, not through Write-Error: PowerShell serializes its own
   # error stream as CLIXML when stderr is a pipe, which buries the sentence behind a
@@ -157,6 +162,8 @@ export function statedFailure(raw: string): string {
 
 export interface LeashResult {
   ok: boolean;
+  /** An existing shared job was opened; no further handle was duplicated into the owner. */
+  reused?: true;
   /** Stated cause on failure — surfaced once by the supervisor, never thrown. */
   reason?: string;
 }
@@ -167,7 +174,8 @@ interface Attempt {
   readonly retryable: boolean;
 }
 
-function runHelper(childPid: number, ownerPid: number): Promise<Attempt> {
+function runHelper(childPid: number, ownerPid: number, jobName?: string, signal?: AbortSignal): Promise<Attempt> {
+  if (signal?.aborted) return Promise.resolve({ result: { ok: false, reason: "leash cancelled" }, retryable: false });
   return new Promise<Attempt>((resolve) => {
     let helper: ChildProcess;
     try {
@@ -179,6 +187,7 @@ function runHelper(childPid: number, ownerPid: number): Promise<Attempt> {
             ...process.env,
             ARKE_LEASH_OWNER_PID: String(ownerPid),
             ARKE_LEASH_CHILD_PID: String(childPid),
+            ARKE_LEASH_JOB_NAME: jobName ?? "",
           },
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
@@ -208,18 +217,25 @@ function runHelper(childPid: number, ownerPid: number): Promise<Attempt> {
         /* already gone */
       }
     }, budgetMs);
+    const abort = () => { try { helper.kill(); } catch { /* Already exited. */ } };
+    signal?.addEventListener("abort", abort, { once: true });
     helper.once("error", (err) => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
       // A binary that is absent or blocked answers the same way however often it is asked;
       // only a machine that was too busy to answer deserves a second attempt.
       const code = (err as NodeJS.ErrnoException).code;
       const permanent = code === "ENOENT" || code === "EACCES" || code === "EPERM";
       resolve({ result: { ok: false, reason: String(err) }, retryable: !permanent });
     });
-    helper.once("exit", (code) => {
+    helper.once("close", (code) => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      if (signal?.aborted) {
+        resolve({ result: { ok: false, reason: "leash cancelled" }, retryable: false }); return;
+      }
       if (code === 0 && out.includes("leashed")) {
-        resolve({ result: { ok: true }, retryable: false });
+        resolve({ result: { ok: true, ...(out.includes("leashed-reused") ? { reused: true as const } : {}) }, retryable: false });
         return;
       }
       if (timedOut) {
@@ -251,18 +267,32 @@ export async function leashChildToParent(
   childPid: number,
   ownerPid: number = process.pid,
 ): Promise<LeashResult> {
+  return takeLeash(childPid, ownerPid);
+}
+
+// One private kernel object per owner process, reused by every short-lived storage reader.
+// The parent's one handle intentionally lives until exit. A handle per 30-second poll grew
+// without bound; helper-side handles are temporary and close when that helper exits.
+// CreateJobObjectW returns ERROR_ALREADY_EXISTS when it opens this object, so even a helper
+// killed after duplicating cannot make its retry duplicate another parent-side handle.
+// https://learn.microsoft.com/windows/win32/api/jobapi2/nf-jobapi2-createjobobjectw
+const READERS_JOB_TOKEN = randomBytes(32).toString("hex");
+export async function leashStorageReaderToParent(childPid: number, ownerPid: number = process.pid, signal?: AbortSignal): Promise<LeashResult> {
+  return takeLeash(childPid, ownerPid, `Local\\ArkeStorageReaders-${ownerPid}-${READERS_JOB_TOKEN}`, signal);
+}
+
+async function takeLeash(childPid: number, ownerPid: number, jobName?: string, signal?: AbortSignal): Promise<LeashResult> {
   if (process.platform !== "win32") {
     return { ok: false, reason: "job objects are Windows-only" };
   }
-  const first = await runHelper(childPid, ownerPid);
+  const first = await runHelper(childPid, ownerPid, jobName, signal);
   if (first.result.ok || !first.retryable) return first.result;
   // A helper that was starved of CPU says nothing about whether the leash can be taken, and
   // the price of accepting its answer is an orphan that outlives a force-kill. One more try.
-  // If the first attempt was killed after it had already bound the child, the retry adds a
-  // second job object over the same process: Windows nests jobs, both carry kill-on-close,
-  // and both handles die with the owner, so the duplicate costs a handle and changes nothing.
-  const second = await runHelper(childPid, ownerPid);
-  if (second.result.ok) return { ok: true };
+  // An anonymous leash may add a nested job if its first helper bound the child before dying.
+  // Storage readers reopen their one shared job instead, without duplicating another handle.
+  const second = await runHelper(childPid, ownerPid, jobName, signal);
+  if (second.result.ok) return second.result;
   return {
     ok: false,
     reason: `${second.result.reason ?? "unknown"} (retried; first attempt: ${first.result.reason ?? "unknown"})`,

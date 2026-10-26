@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { join } from "node:path";
 import { mkdir, symlink } from "node:fs/promises";
-import { WindowsVolumeProbe } from "../../src/storage/windows-volume.js";
+import { WindowsVolumeProbe, queryWindowsStorageVolumes } from "../../src/storage/windows-volume.js";
 import { tempDir } from "../tmp.js";
 
 const canonical = "\\\\?\\Volume{12345678-1234-1234-1234-123456789abc}\\world";
@@ -11,6 +11,15 @@ const row = (rootId: string, extra: Record<string, unknown> = {}) => ({ rootId, 
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 
 describe("Windows volume identity port", () => {
+  it("drains a cancelled real reader and its pending leash helper", { skip: process.platform !== "win32", timeout: 30_000 }, async () => {
+    const dir = await tempDir("arke-volume-cancel-"), control = new AbortController();
+    const timer = setTimeout(() => control.abort(), 20);
+    try { await assert.rejects(queryWindowsStorageVolumes([{ rootId: "cancelled", path: dir }], control.signal)); }
+    finally { clearTimeout(timer); }
+    const next = JSON.parse(await queryWindowsStorageVolumes([{ rootId: "replacement", path: dir }], new AbortController().signal));
+    assert.equal(next[0]!.state, "measured");
+  });
+
   it("coalesces registered roots and exports opaque volume/root identities with explicit limits", async () => {
     let calls = 0, now = 600_000;
     const port = new WindowsVolumeProbe({ platform: "win32", now: () => now, query: async input => {

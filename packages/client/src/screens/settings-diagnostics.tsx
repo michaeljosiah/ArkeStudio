@@ -87,6 +87,11 @@ export function controlHref(remedy: NonNullable<Finding["remedy"]>): string {
     : control.route;
 }
 
+function followRemedy(navigate: ReturnType<typeof useNavigate>, remedy: NonNullable<Finding["remedy"]>): void {
+  if (remedy.control === "storage-refresh") refreshDiagnostics();
+  else followLink(navigate, controlHref(remedy));
+}
+
 /** The remedy as the registry states it: the control's label, with its place beside it. */
 function Remedy({ finding, snapshot }: { finding: Finding; snapshot: DiagnosticsSnapshot }) {
   const navigate = useNavigate();
@@ -95,12 +100,12 @@ function Remedy({ finding, snapshot }: { finding: Finding; snapshot: Diagnostics
     return absence === null ? null : <span className="fy-diag__place">{absence}</span>;
   }
   const control = CONTROL_REGISTRY[finding.remedy.control];
-  const to = controlHref(finding.remedy);
+  const remedy = finding.remedy;
   return (
     <>
       <span className="fy-diag__place">{control.place}</span>
       {/* A remedy that lives in Activity opens the panel over Settings rather than leaving it. */}
-      <button type="button" className="fy-diag__go" onClick={() => followLink(navigate, to)}>
+      <button type="button" className="fy-diag__go" onClick={() => followRemedy(navigate, remedy)}>
         {control.label}
       </button>
     </>
@@ -154,7 +159,7 @@ function StaleRemeasure({ remedy }: { remedy: NonNullable<Finding["remedy"]> }) 
   const navigate = useNavigate();
   const entry = CONTROL_REGISTRY[remedy.control];
   return (
-    <button type="button" className="fy-set__link" onClick={() => navigate(controlHref(remedy))}>
+    <button type="button" className="fy-set__link" onClick={() => followRemedy(navigate, remedy)}>
       {entry.label}
     </button>
   );
