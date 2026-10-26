@@ -32,6 +32,19 @@ after unconfirmed cleanup and release only after owner-confirmed stop. These est
 interruption actions or successful inference. `test/job-leash.test.ts`
 also verifies shared storage-reader job reuse and kernel cleanup on forced parent death on Windows.
 
+Incident checks (#2194) use contracts `test/recovery-incidents.test.ts`, coordinator
+`test/recovery/history.test.ts` / `history-application.test.ts`, and client
+`test/recovery-history.test.tsx`. Faults cover notification admission before delivery, a newer
+observation/mute during a write, restart identity and budget, lost scope/stale measurements,
+two-reading capacity recovery with remounts, current engine identity, history caps, disk-full,
+malformed/oversized files and shutdown drain. Stalled diagnostic reads/writes bound shutdown waiting and
+report unavailable audit state; an already-issued atomic replacement may finish, with no further
+batch or notification admitted. The native application fixture demonstrates a disk
+warning before opening a world, one persistent incident and an authenticated reconnect snapshot;
+history/notices never enter the world journal. Client checks prove muted warnings stay visible
+and Review only navigates without a mutation command. These checks do not establish OS/toast
+delivery, all lifecycle adapters, host policy commands, or final Studio visual parity.
+
 Managed local runtime checks are listed in [Managed local runtimes](managed-local-runtimes.md#validation).
 Use native Windows process/loopback access for the supervisor, Ming cancellation and file-handle
 fixtures; sandbox IPC refusals do not establish an application regression. Model qualification

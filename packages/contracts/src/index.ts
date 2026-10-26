@@ -227,4 +227,5 @@ export * from "./audiobook-words.js";
 export * from "./ollama.js";
 export * from "./ming.js";
 export * from "./storage-health.js";
+export * from "./recovery-incidents.js";
 export * from "./recovery-policy.js";

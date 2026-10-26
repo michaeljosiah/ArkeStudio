@@ -43,6 +43,7 @@ import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
 import { OllamaRuntimeStatusSchema } from "./ollama.js";
 import { StorageHealthSnapshotSchema } from "./storage-health.js";
+import { RecoveryHistorySnapshotSchema, RecoveryNoticeSchema } from "./recovery-incidents.js";
 import { DiagnosticsSnapshotSchema } from "./diagnostics.js";
 import { BuildReviewSchema, FoundingBuildStateSchema } from "./founding-build.js";
 import { GenesisBlueprintSchema } from "./genesis.js";
@@ -2434,6 +2435,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("comfyui.status"), comfyui: ComfyUiStatusSchema }).strict(),
   z.object({ ...base, type: z.literal("ollama.status"), ollama: OllamaRuntimeStatusSchema }).strict(),
   z.object({ ...base, type: z.literal("storage.health"), health: StorageHealthSnapshotSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.history"), history: RecoveryHistorySnapshotSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.notice"), notice: RecoveryNoticeSchema }).strict(),
   /** Estimate-versus-actual divergence crossed the drift threshold (SPEC-008 R-13, §2.11). */
   z.object({ ...base, type: z.literal("manifest.drift"), reports: z.array(ManifestDriftSchema) }).strict(),
 

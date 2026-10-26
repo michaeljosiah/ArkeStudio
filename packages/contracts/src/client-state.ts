@@ -38,6 +38,7 @@ import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
 import { OllamaRuntimeStatusSchema } from "./ollama.js";
 import { StorageHealthSnapshotSchema } from "./storage-health.js";
+import { RecoveryHistorySnapshotSchema } from "./recovery-incidents.js";
 import { LocalSamplingSettingsSchema } from "./local-sampling.js";
 import { FoundingBuildStateSchema } from "./founding-build.js";
 import { FrameRunStateSchema } from "./frame-run.js";
@@ -564,6 +565,7 @@ export const ClientStateSchema = valueSchema(z
         comfyui: ComfyUiStatusSchema.nullable().default(null),
         ollama: OllamaRuntimeStatusSchema.nullable().optional(),
         storageHealth: StorageHealthSnapshotSchema.nullable().optional(),
+        recoveryHistory: RecoveryHistorySnapshotSchema.nullable().optional(),
         /** Sampling per local recipe and its measured times (design turn 177); absent before the host seeds it. */
         localSampling: LocalSamplingSettingsSchema.optional(),
         adapters: AdapterLibraryStateSchema.nullable().optional(),

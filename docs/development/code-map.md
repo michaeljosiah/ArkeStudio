@@ -35,6 +35,24 @@ owners before setup drains, reports failed native cleanup and permits a later co
 Other service owners, reviewed stop/restart actions, policy/incident UI and broader qualification
 remain outstanding. No completed recovery-agent claim follows from this slice.
 
+Operational incidents (#2194): contracts `recovery-incidents.ts` owns closed numeric facts,
+incident phases, verified resolution and persisted notification-budget decisions. Coordinator
+`recovery/history.ts` correlates the existing primary Diagnostics findings, uses one coalesced
+writer, retains bounded in-memory state after persistence failure and emits notices only after
+their budget marker is flushed. `recovery/history-file.ts` stores at most 1,000 summaries/10 MiB
+outside world and financial journals; resolved summaries age out after 30 days. Restart authority
+remains in its separate control file. Current ComfyUI readiness and two separated fresh high-space
+readings can resolve their matching incident; missing measurements or changed mounts cannot.
+The app-root factory enables history before a world opens. `recovery.history` reaches both state
+folds and reconnect snapshots, with up to 100 summaries plus explicit counts/limits. Activity queries
+actionable global health/storage incidents through existing rows; Review only opens Diagnostics,
+whose existing styles render local history. Neither transient notices nor muted state grants a
+repair. The phone's existing notification opt-in does not subscribe to these host recovery events.
+Tests: contracts `test/recovery-incidents.test.ts`, coordinator `test/recovery/history*.test.ts`,
+client `test/recovery-history.test.tsx`. Full lifecycle/event adapters, host-only policy commands,
+history pagination/export, notification delivery and approved Studio assistant visual acceptance
+remain outstanding (SPEC-061 R-1–R-5/R-15–R-18/R-24–R-28; SPEC-014/032 amendments).
+
 Managed local engines: coordinator `local-ai/ollama.ts` owns portable Ollama and explicit URL
 overrides; `setup/catalogue.ts` / `setup/local-setup.ts` own pinned archives and architecture/
 version receipts. `harness/v2-launch.ts` writes only the selected Ollama endpoint into the

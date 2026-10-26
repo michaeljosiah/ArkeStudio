@@ -436,6 +436,7 @@ async function harness() {
         applySettings: async () => {},
         subscribe: () => () => {},
         dispose: async () => {},
+        beginShutdown: () => {},
       } as never,
     },
     dispatchClients: { mistral, breezeblue: breeze, fishaudio: fish },

@@ -268,6 +268,7 @@ import { buildDiagnosticsBundle } from "./diagnostics.js";
 import { DiagnosticsSnapshotHolder } from "./diagnostics-snapshot.js";
 import type { AppStorageService } from "./storage/service.js";
 import type { RecoveryControlService } from "./recovery/control.js";
+import type { RecoveryHistoryService } from "./recovery/history.js";
 import { SupervisorRecovery } from "./recovery/supervisor.js";
 import {
   highestChapterRank,
@@ -924,6 +925,7 @@ export interface CoordinatorOptions {
   storageHealth?: AppStorageService | null;
   /** Persistent restart authority, separate from removable diagnostic history. */
   recoveryControl?: RecoveryControlService | null;
+  recoveryHistory?: RecoveryHistoryService | null;
   /**
    * The Arke account behind the chrome's control (design turn 151). Absent, Studio has no cloud
    * — `NoArkeCloud`, the local default — and the control says so when pressed.
@@ -4147,6 +4149,7 @@ export class Coordinator {
       // back in would re-trigger its own derivation, and journalling it would record to disk a
       // projection of state the change log already carries.
       onSnapshot: (snapshot) => {
+        if (!this.stopping) this.opts.recoveryHistory?.observeDiagnostics(snapshot);
         // The broadcast runs inside the holder's setImmediate; a snapshot the event schema
         // refuses must degrade to a logged line, never an uncaught exception (R-14's spirit,
         // carried to the wire).
@@ -4565,6 +4568,7 @@ export class Coordinator {
       this.exportReads.set(parsed.exportId, exportReadRecord(parsed, this.exportReads.get(parsed.exportId)));
     }
     this.readModel.apply(parsed);
+    if (parsed.type === "storage.health" || parsed.type === "comfyui.status") this.opts.recoveryHistory?.observeAvailability(this.readModel.getState().app);
     if (parsed.type === "export.progress" && exportStatusChanged) {
       const state = this.readModel.getState();
       if (state.world?.meta.worldId === parsed.worldId && state.worldChat?.messages.some(m => m.productionPlan?.productionId === parsed.productionId)) {
@@ -4603,6 +4607,7 @@ export class Coordinator {
       parsed.type !== "diagnostics.ready" &&
       // Resource readings are replaceable observations, not a second durable operation journal.
       parsed.type !== "storage.health" &&
+      parsed.type !== "recovery.history" && parsed.type !== "recovery.notice" &&
       // Several a second while a world opens, and over once it has (issue 1844).
       parsed.type !== "world.open-progress"
     ) {
@@ -4626,7 +4631,7 @@ export class Coordinator {
     // A tail read that failed transiently (an AV pass holding app.jsonl) would otherwise stick
     // as `unavailable` until the next append; retrying on the next event is still event-driven.
     if (this.diagnosticsLogTail === "unavailable") this.refreshDiagnosticsLogTail();
-    this.diagnosticsSnapshot?.schedule();
+    if (parsed.type !== "recovery.history" && parsed.type !== "recovery.notice") this.diagnosticsSnapshot?.schedule();
     try {
       this.opts.observeEvent?.(parsed);
     } catch {
@@ -4885,6 +4890,17 @@ export class Coordinator {
     await this.seed();
     await this.adapterLibrary?.refresh();
     await this.opts.recoveryControl?.open();
+    if (this.opts.recoveryHistory) {
+      const history = this.opts.recoveryHistory;
+      this.lifecycleDisposers.add(history.subscribe(snapshot => {
+        if (!this.stopping) this.emit({ type: "recovery.history", at: this.nowIso(), history: snapshot });
+      }));
+      this.lifecycleDisposers.add(history.subscribeNotices(notice => {
+        if (!this.stopping) this.emit({ type: "recovery.notice", at: this.nowIso(), notice });
+      }));
+      await history.open();
+      history.observeDiagnostics(this.diagnosticsSnapshot!.currentSnapshot());
+    }
     await this.seedAppConfig();
     if (this.opts.storageHealth) {
       this.lifecycleDisposers.add(this.opts.storageHealth.subscribe(health => {
@@ -23156,6 +23172,7 @@ export class Coordinator {
     this.stopping = true;
     this.opts.storageHealth?.closeAdmission();
     this.opts.recoveryControl?.closeAdmission();
+    this.opts.recoveryHistory?.closeAdmission();
     this.sampleInstallAbort?.abort();
     const audioStudioStopped = this.audioStudioPreviews.stop();
     this.cataloguePreviews?.close();
@@ -23235,7 +23252,7 @@ export class Coordinator {
       await this.opts.adapter?.dispose?.().catch(() => {});
       await this.releaseOllama();
       const runtimeStops = await Promise.allSettled([this.opts.ming?.dispose(), this.opts.ollama?.service.dispose()]);
-      await this.opts.recoveryControl?.stop();
+      await this.opts.recoveryHistory?.stop();
       await this.worldQuery.stop();
       // Provider close is the critical gate: it saves pending state and releases the world lock.
       this.engineClosed = true;
@@ -23250,6 +23267,9 @@ export class Coordinator {
       await this.appLog?.drain();
       const failedRuntimeStops = [...comfyUiStops, ...runtimeStops].filter(result => result.status === "rejected");
       if (failedRuntimeStops.length) throw new AggregateError(failedRuntimeStops.map(result => result.reason), "Local runtime cleanup did not confirm exit.");
+      // Admission closed synchronously above; owner settlement must remain available across
+      // a failed native stop so a later confirmed cleanup can resolve its retained intent.
+      await this.opts.recoveryControl?.stop();
     })();
     try {
       await this.stopPromise;

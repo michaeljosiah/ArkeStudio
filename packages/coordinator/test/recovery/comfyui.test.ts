@@ -12,6 +12,7 @@ import { ChildSupervisor } from "../../src/supervisor.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { LocalGpu } from "../../src/local-ai/gpu.js";
 import { RecoveryControlService } from "../../src/recovery/control.js";
+import { FileRecoveryControlStore } from "../../src/recovery/control-file.js";
 import { SupervisorRecovery } from "../../src/recovery/supervisor.js";
 import { makeTempRoot } from "../world/helpers.js";
 import { until, untilAsync } from "../wait.js";
@@ -126,4 +127,33 @@ it("the production host reports failed ComfyUI exit and permits a later cleanup 
     await assert.rejects(coordinator.stop(), /Local runtime cleanup did not confirm exit/); assert.ok(worker.pid); process.kill(worker.pid!, 0);
     worker.stopAndConfirm = originalStop; await coordinator.stop(); assert.equal(worker.pid, null);
   } finally { if (originalStop) workers[0]!.stopAndConfirm = originalStop; await coordinator.stop(); await provider.close(); }
+});
+
+it("failed shutdown keeps settlement open until the unknown replacement actually exits", { timeout: 50_000 }, async () => {
+  const { root } = await makeTempRoot(), provider = new FsWorldProvider(root), workers: ChildSupervisor[] = [], deps = nativeDeps(root, workers);
+  const env = { COMFYUI_VERSION: "0.37.0", MODE: "healthy" };
+  deps.createSupervisor = spec => {
+      const worker = new ChildSupervisor({ ...spec, command: process.execPath, args: [CHILD], env, probeIntervalMs: 30, readyTimeoutMs: 10000 }, { listDescendants: async () => [] });
+    workers.push(worker); return worker;
+  };
+  const store = new FileRecoveryControlStore(join(root, "operations", "recovery-control.json")), control = new RecoveryControlService({ store });
+  const service = new ComfyUiEngineService(deps);
+  const coordinator = createStudioCoordinator({ provider, adapter: null, appRoot: root, storageHealth: null, recoveryHistory: null, recoveryControl: control,
+    changeLogPath: join(root, "log.jsonl"), appVersion: "recovery-test", comfyui: { service } });
+  type StopSeam = { forceStop(child: unknown): Promise<void> }; let originalStop: StopSeam["forceStop"] | undefined;
+  try {
+    await coordinator.start(0); await until(() => service.baseUrl() !== null, "initial process ready", 15_000);
+    const worker = workers[0]!, seam = worker as unknown as StopSeam; originalStop = seam.forceStop.bind(worker);
+    seam.forceStop = async () => {}; env.MODE = "never-healthy"; process.kill(worker.pid!, "SIGKILL");
+    await until(() => control.snapshot().control.targets[0]?.intent?.phase === "unknown", "replacement retained after unconfirmed cleanup", 25_000);
+    assert.ok(worker.pid); await assert.rejects(coordinator.stop(), /Local runtime cleanup did not confirm exit/);
+    assert.equal(control.snapshot().accepting, false); assert.ok(control.snapshot().control.targets[0]!.intent);
+    seam.forceStop = originalStop; await coordinator.stop(); assert.equal(worker.pid, null);
+    const saved = RecoveryControlSchema.parse(await store.load()); assert.equal(saved.targets[0]!.intent, null); assert.equal(saved.targets[0]!.attempts.length, 1);
+    const restarted = new RecoveryControlService({ store }); await restarted.open();
+    assert.equal(restarted.snapshot().control.targets[0]!.intent, null); await restarted.stop();
+  } finally {
+    if (originalStop) (workers[0] as unknown as StopSeam).forceStop = originalStop;
+    await coordinator.stop(); await provider.close();
+  }
 });
