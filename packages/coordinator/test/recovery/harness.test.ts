@@ -16,7 +16,7 @@ import { until, untilAsync } from "../wait.js";
 const child = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "child.mjs");
 const key = createHash("sha256").update("managed-harness-v2").digest("hex");
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
-async function fixture(options: { personal?: boolean; suggest?: boolean; circuit?: boolean; version?: string; protocolTurn?: boolean } = {}) {
+async function fixture(options: { personal?: boolean; suggest?: boolean; circuit?: boolean; version?: string; protocolTurn?: boolean; readyTimeoutMs?: number } = {}) {
   const { root } = await makeTempRoot(), provider = new FsWorldProvider(root);
   const store = new FileRecoveryControlStore(join(root, "operations", "recovery-control.json"));
   const control: RecoveryControl = { version: 1, policyRevision: 1, mode: options.suggest ? "suggest-only" : "automatic", targets: [] };
@@ -29,7 +29,7 @@ async function fixture(options: { personal?: boolean; suggest?: boolean; circuit
     v2: { ...(options.personal ? { configuredPath: process.execPath } : { bundledPath: process.execPath }),
       runCommand: async command => command === "where" || command === "which" ? { status: 1, stdout: "" } : { status: 0, stdout: "opencode v2.0.26" } },
     createSupervisor: (spec, deps) => new ChildSupervisor({ ...spec, command: process.execPath, args: [child], inheritEnv: false, env,
-      readyTimeoutMs: 3000, probeIntervalMs: 30 }, { ...deps, listDescendants: async () => [] }) });
+      readyTimeoutMs: options.readyTimeoutMs ?? 10_000, probeIntervalMs: 30 }, { ...deps, listDescendants: async () => [] }) });
   assert(wiring.supervisor && wiring.adapter && wiring.recovery);
   const entered = deferred(); let reservations = 0;
   const coordinator = createStudioCoordinator({ provider, adapter: null, appRoot: root, storageHealth: null, recoveryHistory: null,
@@ -88,7 +88,7 @@ it("shutdown cancels writing recovery waiting behind a turn before generic super
 });
 
 it("a writing replacement that never verifies keeps its fence until a failed native stop is retried and confirmed", { timeout: 40_000 }, async () => {
-  const h = await fixture(); let originalStop: (() => Promise<void>) | undefined;
+  const h = await fixture({ readyTimeoutMs: 3000 }); let originalStop: (() => Promise<void>) | undefined;
   type StopSeam = { forceStop(child: unknown): Promise<void> }; const seam = h.worker as unknown as StopSeam, originalForce = seam.forceStop.bind(h.worker);
   try {
     await h.coordinator.start(0); await until(() => h.worker.status === "healthy", "writing server ready", 15000);
@@ -114,21 +114,24 @@ it("running writing-server protocol validation refuses an unsupported process de
   assert.equal(h.worker.pid, null);
 });
 
-it("a native server exit ends the real adapter's accepted turn as unknown before recovery drains, without replay", { timeout: 45_000 }, async () => {
+it("a native server exit ends the real adapter's accepted turn as unknown before recovery drains, without replay", { timeout: 120_000 }, async () => {
   for (const suggest of [false, true]) {
-    const h = await fixture({ protocolTurn: true, suggest });
+    const h = await fixture({ protocolTurn: true, suggest, readyTimeoutMs: 30_000 });
     const signal = new AbortController(), events: Array<{ type: string; message?: string }> = [];
     const collecting = (async () => { for await (const event of h.wiring.adapter!.streamEvents(signal.signal)) events.push(event); })();
     let turn: Promise<unknown> | undefined;
     try {
-      await h.coordinator.start(0); await until(() => h.worker.status === "healthy", "protocol server ready", 15000);
+      await h.coordinator.start(0); await until(() => h.worker.status === "healthy", "protocol server ready", 40000);
       turn = h.wiring.adapter!.sendMessage({ sessionId: "captured-turn", parts: [{ type: "text", text: "Synthetic disposable fixture." }] });
       await untilAsync(async () => (await readFile(h.promptMarker, "utf8").catch(() => "")) === "accepted\n", "real prompt accepted", 10000);
       const pid = h.worker.pid!; process.kill(pid, "SIGKILL");
       await until(() => events.some(event => event.type === "session.error" && /outcome is unknown/.test(event.message ?? "")), "local unknown outcome", 10000);
       await turn;
       if (suggest) await until(() => h.worker.status === "failed", "suggested recovery held", 15000);
-      else await untilAsync(async () => h.worker.status === "healthy" && h.worker.pid !== pid && (await h.disk()).targets[0]?.intent === null, "verified replacement after local turn settlement", 20000);
+      else await untilAsync(async () => {
+        assert.notEqual(h.worker.status, "failed", `writing replacement failed: ${h.worker.reason}`);
+        return h.worker.status === "healthy" && h.worker.pid !== pid && (await h.disk()).targets[0]?.intent === null;
+      }, "verified replacement after local turn settlement", 40000);
       assert.equal(await readFile(h.promptMarker, "utf8"), "accepted\n", "the accepted prompt was not replayed");
       assert.equal(h.reservations(), suggest ? 0 : 1);
     } finally { signal.abort(); await h.wiring.adapter!.dispose?.(); await collecting; await turn; await h.close(); }

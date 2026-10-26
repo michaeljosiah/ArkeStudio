@@ -57,6 +57,12 @@ fields to verify enumeration plus the existing secret/path boundary. The authent
 fixture stalls a preference save while an actual owned child is running, then verifies bounded
 shutdown confirms native exit without acknowledging an unconfirmed save. The supervisor fixture
 ages attempts across a long live session, then exhausts the actual rolling window.
+The host fixture repeats a blocked mode save: the authenticated command must end unconfirmed,
+native exit must complete while the file write stays blocked, and no late saved receipt may appear.
+Control faults cover a stalled read/authority write, bounded owner settlement behind that write,
+no subsequent queued mutation, and unknown intent/attempt retention across reopen. A recovery-port
+check releases a retained lease only after its owner confirms native cleanup, even if the control
+writer remains unavailable; it does not turn that cleanup into fresh startup permission.
 `test/recovery/supervisor.test.ts` additionally uses real native children to check
 GPU waiting, verified replacement, queued startup exits, cancellation, policy/ownership refusal
 and retained unhealthy processes. `test/recovery/application.test.ts` starts the actual host and

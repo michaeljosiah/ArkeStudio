@@ -12,6 +12,69 @@ const context = { ownership: "managed" as const, idle: true, exitConfirmed: true
 const request = { ...identity, context, automatic: true };
 const fresh = (): RecoveryControl => ({ version: 1, policyRevision: 1, mode: "automatic", targets: [] });
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
+
+for (const phase of ["read", "authorize", "begin"] as const) it(`bounds an in-flight ${phase} during shutdown without granting late authority`, { timeout: 5000 }, async () => {
+  const entered = deferred(), finish = deferred(); let disk = fresh(), blocked = phase === "read", now = 2_000_000;
+  const service = new RecoveryControlService({ now: () => now, stopTimeoutMs: 20, store: {
+    load: async () => { if (blocked) { entered.resolve(); await finish.promise; } return disk; },
+    save: async value => { if (blocked) { entered.resolve(); await finish.promise; } disk = structuredClone(value); },
+  } });
+  let pending: Promise<unknown>;
+  if (phase === "read") pending = service.open();
+  else {
+    await service.open();
+    if (phase === "begin") {
+      const grant = await service.authorize(request); assert.equal(grant.status, "authorized"); if (grant.status !== "authorized") return;
+      now += 1000; blocked = true; pending = service.begin(key, grant.intent.id, () => context);
+    } else { blocked = true; pending = service.authorize(request); }
+  }
+  await entered.promise; service.closeAdmission();
+  assert.deepEqual(await pending, phase === "read" ? undefined : { status: "held", reason: "stopped" });
+  await service.stop(); assert.equal(service.snapshot().audit, "unavailable");
+  assert.equal(service.snapshot().reason, phase === "read" ? "read-failed" : "write-failed");
+  finish.resolve(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(service.snapshot().accepting, false);
+  if (phase !== "read") {
+    const restarted = new RecoveryControlService({ store: { load: async () => disk, save: async () => {} } });
+    await restarted.open(); assert.equal(restarted.snapshot().control.targets[0]!.intent!.phase, "unknown");
+    assert.equal(restarted.snapshot().control.targets[0]!.attempts.length, 1); await restarted.stop();
+  }
+});
+
+it("cancels a mode receipt on admission close and bounds blocked control drain without granting late authority", { timeout: 5000 }, async () => {
+  const entered = deferred(), finish = deferred(); let disk = fresh(), saves = 0;
+  const service = new RecoveryControlService({ stopTimeoutMs: 20, store: { load: async () => disk, save: async value => {
+    saves++; if (value.mode === "suggest-only") { entered.resolve(); await finish.promise; } disk = structuredClone(value);
+  } } });
+  await service.open();
+  const mode = service.setMode("suggest-only"); await entered.promise;
+  const pending = service.authorize(request);
+  service.closeAdmission();
+  assert.equal(await mode, false, "an unconfirmed save cannot produce a saved receipt");
+  assert.deepEqual(await pending, { status: "held", reason: "stopped" });
+  await service.stop(); assert.equal(service.snapshot().audit, "unavailable"); assert.equal(service.snapshot().accepting, false);
+  finish.resolve(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(saves, 1, "no queued authority write may follow the late mode replacement");
+  assert.equal(disk.mode, "suggest-only"); assert.equal(disk.targets.length, 0);
+});
+
+it("retains unknown intent and spent attempts when a blocked mode write prevents confirmed-stop settlement", { timeout: 5000 }, async () => {
+  const entered = deferred(), finish = deferred(); let disk = fresh(), block = false, now = 2_000_000;
+  const service = new RecoveryControlService({ now: () => now, stopTimeoutMs: 20, store: { load: async () => disk, save: async value => {
+    if (block) { entered.resolve(); await finish.promise; } disk = structuredClone(value);
+  } } });
+  await service.open(); const grant = await service.authorize(request); assert.equal(grant.status, "authorized"); if (grant.status !== "authorized") return;
+  now += 1000; assert.deepEqual(await service.begin(key, grant.intent.id, () => context), { status: "begin" });
+  block = true; const mode = service.setMode("suggest-only"); await entered.promise; service.closeAdmission();
+  assert.equal(await mode, false); assert.equal(await service.settleFromOwner(key, grant.intent.id, "failed"), false);
+  await service.stop(); assert.equal(service.snapshot().control.targets[0]!.intent!.phase, "unknown");
+  assert.equal(service.snapshot().control.targets[0]!.attempts.length, 1);
+  finish.resolve(); await new Promise(resolve => setImmediate(resolve));
+  const restarted = new RecoveryControlService({ now: () => now, store: { load: async () => disk, save: async value => { disk = structuredClone(value); } } });
+  await restarted.open();
+  assert.equal(restarted.snapshot().control.targets[0]!.intent!.phase, "unknown");
+  assert.deepEqual(await restarted.authorize(request), { status: "held", reason: "pending-outcome" }); await restarted.stop();
+});
 function harness(options: { disk?: RecoveryControl; save?: (value: RecoveryControl) => Promise<void> } = {}) {
   let disk = structuredClone(options.disk ?? fresh()), now = 2_000_000;
   const store: RecoveryControlStore = { load: async () => structuredClone(disk), save: async value => { await options.save?.(value); disk = structuredClone(value); } };

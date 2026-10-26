@@ -13,6 +13,7 @@ import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot } from "../world/helpers.js";
 import { until, untilAsync } from "../wait.js";
 import { RecoveryHistoryService } from "../../src/recovery/history.js";
+import { RecoveryControlService } from "../../src/recovery/control.js";
 import { ComfyUiEngineService } from "../../src/comfyui/engine.js";
 import { ChildSupervisor } from "../../src/supervisor.js";
 
@@ -65,17 +66,21 @@ it("warns about measured disk pressure before opening a world, persists one inci
   const journal = await readFile(log, "utf8"); assert(!journal.includes('"type":"recovery.'));
 });
 
-it("a stalled host history command cannot hold shutdown ahead of confirmed native cleanup", { timeout: 45_000 }, async () => {
+for (const command of ["history", "mode"] as const) it(`a stalled host ${command} command cannot hold shutdown ahead of confirmed native cleanup`, { timeout: 45_000 }, async () => {
   const { root } = await makeTempRoot(), provider = new FsWorldProvider(root), events: DomainEvent[] = [];
   let entered!: () => void, finish!: () => void;
   const writing = new Promise<void>(resolve => { entered = resolve; }), finishWrite = new Promise<void>(resolve => { finish = resolve; });
   const history = new RecoveryHistoryService({ stopTimeoutMs: 20, store: { load: async () => emptyRecoveryHistory(), save: async value => { if (value.preferences.desktopOptIn) { entered(); await finishWrite; } } } });
+  const control = new RecoveryControlService({ stopTimeoutMs: 20, store: {
+    load: async () => ({ version: 1, policyRevision: 1, mode: "automatic", targets: [] }),
+    save: async value => { if (command === "mode" && value.mode === "suggest-only") { entered(); await finishWrite; } },
+  } });
   let worker: ChildSupervisor | undefined;
   const service = new ComfyUiEngineService({ appRoot: root, recipes: [], fileExists: async () => true, listDirectories: async () => [], hashFile: async () => null,
     createProcessEpoch: randomUUID,
     writeTextFile: async () => {}, readNodeRef: async () => null, fetch: async url => url.endsWith("/object_info") ? Response.json({}) : fetch(url), registerSupervisorExitBackstop: () => () => {},
     createSupervisor: spec => worker = new ChildSupervisor({ ...spec, command: process.execPath, args: [join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "child.mjs")], env: { COMFYUI_VERSION: "0.37.0" }, probeIntervalMs: 30, readyTimeoutMs: 10000 }, { listDescendants: async () => [] }) });
-  const coordinator = createStudioCoordinator({ provider, adapter: null, appRoot: root, storageHealth: null, recoveryHistory: history, comfyui: { service }, changeLogPath: join(root, "log.jsonl"), appVersion: "shutdown-test", observeEvent: event => events.push(event) });
+  const coordinator = createStudioCoordinator({ provider, adapter: null, appRoot: root, storageHealth: null, recoveryHistory: history, recoveryControl: control, comfyui: { service }, changeLogPath: join(root, "log.jsonl"), appVersion: "shutdown-test", observeEvent: event => events.push(event) });
   let client: WebSocket | undefined, timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     const session = await coordinator.start(0); await until(() => service.baseUrl() !== null, "owned child ready", 15000);
@@ -83,12 +88,13 @@ it("a stalled host history command cannot hold shutdown ahead of confirmed nativ
     client.on("message", raw => frames.push(FrameSchema.parse(JSON.parse(raw.toString())))); await once(client, "open");
     client.send(JSON.stringify({ kind: "hello", token: session.token, lastSeq: 0 })); await until(() => frames.some(frame => frame.kind === "snapshot"), "authenticated host", 5000);
     const requestId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
-    client.send(JSON.stringify({ kind: "recovery-set-preferences", requestId, preferences: { desktopOptIn: true } })); await writing;
+    client.send(JSON.stringify(command === "mode" ? { kind: "recovery-set-mode", requestId, mode: "suggest-only" }
+      : { kind: "recovery-set-preferences", requestId, preferences: { desktopOptIn: true } })); await writing;
     assert.ok(worker!.pid);
-    // The history wait has its own injected 20 ms bound. Whole-host native cleanup also
+    // The diagnostic writer has its own injected 20 ms bound. Whole-host native cleanup also
     // includes platform process inspection, so permit normal CI load without unblocking I/O.
-    await Promise.race([coordinator.stop(), new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error(`native cleanup did not finish with history I/O blocked (audit ${history.snapshot().audit}, child ${worker!.pid === null ? "exited" : "retained"})`)), 15000); })]);
-    assert.equal(worker!.pid, null); assert.equal(history.snapshot().audit, "unavailable");
+    await Promise.race([coordinator.stop(), new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error(`native cleanup did not finish with ${command} I/O blocked (audit ${command === "mode" ? control.snapshot().audit : history.snapshot().audit}, child ${worker!.pid === null ? "exited" : "retained"})`)), 15000); })]);
+    assert.equal(worker!.pid, null); assert.equal(command === "mode" ? control.snapshot().audit : history.snapshot().audit, "unavailable");
     finish(); await history.flush();
     assert(!events.some(event => event.type === "recovery.command-result" && event.result.requestId === requestId && event.result.status === "saved"));
   } finally { if (timeout) clearTimeout(timeout); finish(); client?.close(); await coordinator.stop(); await provider.close(); }

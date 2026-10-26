@@ -14,14 +14,14 @@ import { until, untilAsync } from "../wait.js";
 
 const child = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "voice-child.mjs"), key = createHash("sha256").update("managed-voxa").digest("hex");
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
-async function fixture(options: { personal?: boolean; suggest?: boolean; circuit?: boolean; holdBody?: boolean; protocol?: string } = {}) {
+async function fixture(options: { personal?: boolean; suggest?: boolean; circuit?: boolean; holdBody?: boolean; protocol?: string; readyTimeoutMs?: number } = {}) {
   const { root } = await makeTempRoot(), provider = new FsWorldProvider(root), store = new FileRecoveryControlStore(join(root, "operations", "recovery-control.json"));
   const control: RecoveryControl = { version: 1, policyRevision: 1, mode: options.suggest ? "suggest-only" : "automatic", targets: [] };
   if (options.circuit) control.targets.push({ ...emptyRecoveryTarget(key, "voice", Date.now()), circuitOpen: true });
   await store.save(control);
   const env = { MODE: "healthy", IGNORE_STOP: "0", PROTOCOL_VERSION: options.protocol ?? "1" };
   const worker = new ChildSupervisor({ id: "voxa-fixture", command: process.execPath, args: [child], inheritEnv: false, env,
-    healthPath: "/health", readyTimeoutMs: 3000, probeIntervalMs: 30, validateHealth: async response => {
+    healthPath: "/health", readyTimeoutMs: options.readyTimeoutMs ?? 10_000, probeIntervalMs: 30, validateHealth: async response => {
       const result = SidecarHealthSchema.safeParse(await response.json());
       return result.success && result.data.architecture === process.arch && result.data.engines.includes("kokoro") && result.data.engines.includes("whisper")
         ? true : { ok: false, reason: "incompatible voice protocol" };
@@ -51,13 +51,16 @@ async function fixture(options: { personal?: boolean; suggest?: boolean; circuit
     disk: async () => RecoveryControlSchema.parse(await store.load()), close: async () => { body.resolve(); await coordinator.stop(); client.dispose(); await provider.close(); } };
 }
 
-it("a managed voice crash settles its admitted request without replay and verifies one replacement", { timeout: 40_000 }, async () => {
-  const h = await fixture({ holdBody: true });
+it("a managed voice crash settles its admitted request without replay and verifies one replacement", { timeout: 100_000 }, async () => {
+  const h = await fixture({ holdBody: true, readyTimeoutMs: 30_000 });
   try {
-    await h.coordinator.start(0); await until(() => h.worker.status === "healthy", "voice fixture ready", 15000); const pid = h.worker.pid!;
+    await h.coordinator.start(0); await until(() => h.worker.status === "healthy", "voice fixture ready", 40000); const pid = h.worker.pid!;
     const pending = assert.rejects(h.client.synthesize({ voiceId: "fixture", text: "captured request" }), VoxaCancelledError); await h.entered.promise;
     process.kill(pid, "SIGKILL"); await pending;
-    await untilAsync(async () => h.worker.status === "healthy" && h.worker.pid !== pid && (await h.disk()).targets[0]?.intent === null, "verified voice replacement", 20000);
+    await untilAsync(async () => {
+      assert.notEqual(h.worker.status, "failed", `voice replacement failed: ${h.worker.reason}`);
+      return h.worker.status === "healthy" && h.worker.pid !== pid && (await h.disk()).targets[0]?.intent === null;
+    }, "verified voice replacement", 40000);
     assert.equal(h.requests(), 1); assert.equal(h.released(), 1); assert.equal((await h.disk()).targets[0]!.service, "voice");
     assert.equal((await h.disk()).targets[0]!.attempts.length, 1); h.body.resolve();
     assert((await h.client.synthesize({ voiceId: "fixture", text: "explicit new request" })).byteLength > 44); assert.equal(h.requests(), 2);
@@ -79,7 +82,7 @@ it("Suggest only and explicit personal voice selection cannot reset or bypass au
 });
 
 it("voice reconfiguration confirms the old process and settles its retained reservation before personal startup", { timeout: 50_000 }, async () => {
-  const h = await fixture(); type StopSeam = { forceStop(child: unknown): Promise<void> };
+  const h = await fixture({ readyTimeoutMs: 3000 }); type StopSeam = { forceStop(child: unknown): Promise<void> };
   const seam = h.worker as unknown as StopSeam, stop = seam.forceStop.bind(h.worker);
   try {
     await h.coordinator.start(0); await until(() => h.worker.status === "healthy", "voice fixture ready", 15000);

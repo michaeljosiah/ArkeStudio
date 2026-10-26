@@ -21,9 +21,31 @@ export class RecoveryControlService {
   private auditFailure: AuditFailure | undefined;
   private closing = false;
   private closed = false;
+  private readonly closingWaiters = new Set<() => void>();
+  private stopped: Promise<void> | null = null;
   private readonly subscribers = new Set<(policy: RecoveryPolicySnapshot) => void>();
 
-  constructor(private readonly deps: { store: RecoveryControlStore; now?: () => number; onChange?: () => void }) {}
+  constructor(private readonly deps: { store: RecoveryControlStore; now?: () => number; onChange?: () => void; stopTimeoutMs?: number }) {}
+  /** Presentation may stop waiting immediately; native-owner settlement gets a bounded
+   * drain after admission closes. An issued file replacement is never called cancelled. */
+  private async duringShutdown<T>(work: Promise<T>, fallback: T, delayMs: number, failure?: "read-failed" | "write-failed"): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let close!: () => void;
+    const ending = new Promise<T>(resolve => {
+      const finish = () => {
+        if (failure) {
+          this.auditAvailable = false; this.auditFailure ??= failure;
+          for (const target of this.control.targets) if (target.intent) target.intent.phase = "unknown";
+        }
+        resolve(fallback);
+      };
+      close = () => { if (delayMs === 0) finish(); else timer = setTimeout(finish, delayMs); };
+      this.closingWaiters.add(close);
+      if (this.closing) close();
+    });
+    try { return await Promise.race([work, ending]); }
+    finally { if (timer) clearTimeout(timer); this.closingWaiters.delete(close); }
+  }
   private now(): number { return (this.deps.now ?? Date.now)(); }
   private serial<T>(action: () => Promise<T>): Promise<T> {
     let value!: T; return this.writes.enqueue(async () => { value = await action(); }).then(() => value);
@@ -44,7 +66,7 @@ export class RecoveryControlService {
         circuitOpen: target.circuitOpen, pendingOutcome: target.intent !== null })) };
   }
   snapshot(): { audit: "starting" | "available" | "unavailable"; accepting: boolean; reason?: AuditFailure; control: RecoveryControl } {
-    return { audit: !this.opened ? "starting" : this.auditAvailable ? "available" : "unavailable", accepting: this.opened && this.auditAvailable && !this.closing && !this.closed, reason: this.auditFailure, control: structuredClone(this.control) };
+    return { audit: !this.auditAvailable ? "unavailable" : !this.opened ? "starting" : "available", accepting: this.opened && this.auditAvailable && !this.closing && !this.closed, reason: this.auditFailure, control: structuredClone(this.control) };
   }
   private failure(error: unknown, fallback: "read-failed" | "write-failed"): AuditFailure {
     if (error instanceof z.ZodError || error instanceof SyntaxError) return "invalid";
@@ -52,7 +74,7 @@ export class RecoveryControlService {
     return code === "ENOSPC" || code === "EDQUOT" ? "disk-full" : code === "EACCES" || code === "EPERM" ? "permission" : fallback;
   }
   open(): Promise<void> {
-    return this.serial(async () => {
+    return this.duringShutdown(this.serial(async () => {
       if (this.opened || this.closing) return;
       try {
         this.control = RecoveryControlSchema.parse(await this.deps.store.load());
@@ -62,14 +84,20 @@ export class RecoveryControlService {
         }
       } catch (error) { this.auditAvailable = false; this.auditFailure = this.failure(error, "read-failed"); }
       this.opened = true; this.changed();
-    });
+    }), undefined, this.deps.stopTimeoutMs ?? 2_000, "read-failed");
   }
   private ready(): Hold | null {
     return this.closing ? { status: "held", reason: "stopped" } : !this.opened || !this.auditAvailable ? { status: "held", reason: "audit-unavailable" } : null;
   }
   private async persist(next: RecoveryControl): Promise<boolean> {
     try {
-      await this.deps.store.save(RecoveryControlSchema.parse(next)); this.control = next; this.changed(); return true;
+      await this.deps.store.save(RecoveryControlSchema.parse(next));
+      this.control = next;
+      if (this.closed || !this.auditAvailable) {
+        for (const target of this.control.targets) if (target.intent) target.intent.phase = "unknown";
+        return false;
+      }
+      this.changed(); return true;
     } catch (error) {
       // A rejected replacement may nevertheless be on disk. Keep both possible intents held;
       // disable further mutations instead of retrying an append or inventing a clean budget.
@@ -87,7 +115,7 @@ export class RecoveryControlService {
    * The caller must later call begin under the same lifecycle owner, then report its outcome. */
   authorize(input: { key: string; service: RecoveryTarget["service"]; context: RecoveryRestartContext; automatic: boolean }): Promise<RecoveryAuthorization> {
     const context = RecoveryRestartContextSchema.parse(input.context);
-    return this.serial(async () => {
+    return this.duringShutdown<RecoveryAuthorization>(this.serial(async () => {
       const held = this.ready(); if (held) return held;
       const now = this.now(), next = structuredClone(this.control);
       let target = next.targets.find(value => value.key === input.key);
@@ -114,13 +142,13 @@ export class RecoveryControlService {
       if (!await this.persist(next)) return { status: "held", reason: "audit-unavailable" };
       if (this.closing) return { status: "held", reason: "stopped", intent: structuredClone(target.intent) };
       return { status: "authorized", intent: structuredClone(target.intent) };
-    });
+    }), { status: "held", reason: "stopped" }, this.deps.stopTimeoutMs ?? 2_000, "write-failed");
   }
 
   /** Final check under the owning service's idle/epoch fence. The owner holds that fence until
    * it synchronously initiates the action; this method creates no competing executor. */
   begin(key: string, intentId: string, current: () => RecoveryRestartContext): Promise<Hold | { status: "begin" }> {
-    return this.serial(async () => {
+    return this.duringShutdown<Hold | { status: "begin" }>(this.serial(async () => {
       const held = this.ready(); if (held) return held;
       const target = this.control.targets.find(value => value.key === key), intent = target?.intent;
       if (!target || intent?.id !== intentId || intent.phase !== "intended") return { status: "held", reason: "pending-outcome" };
@@ -144,13 +172,13 @@ export class RecoveryControlService {
       if (!await this.persist(next)) return { status: "held", reason: "audit-unavailable" };
       const after = check(); if (after) return { status: "held", reason: after };
       return { status: "begin" };
-    });
+    }), { status: "held", reason: "stopped" }, this.deps.stopTimeoutMs ?? 2_000, "write-failed");
   }
 
   /** Trusted owner confirms settled cleanup/current readiness or retains an unknown outcome.
    * This is intentionally absent from renderer commands and diagnostic-assistant tools. */
   settleFromOwner(key: string, intentId: string, outcome: "verified" | "failed" | "not-started" | "unknown"): Promise<boolean> {
-    return this.serial(async () => {
+    return this.duringShutdown(this.serial(async () => {
       if (this.closed || !this.opened || !this.auditAvailable) return false;
       const next = structuredClone(this.control), target = next.targets.find(value => value.key === key);
       if (!target?.intent || target.intent.id !== intentId) return false;
@@ -164,14 +192,14 @@ export class RecoveryControlService {
         if (outcome === "failed" && recentRecoveryAttempts(target, now).length >= 3) target.circuitOpen = true;
       }
       return this.persist(next);
-    });
+    }), false, this.deps.stopTimeoutMs ?? 2_000, "write-failed");
   }
 
   setMode(mode: RecoveryMode): Promise<boolean> {
-    return this.serial(async () => { if (this.ready()) return false; return this.persist({ ...structuredClone(this.control), mode }); });
+    return this.duringShutdown(this.serial(async () => { if (this.ready()) return false; return this.persist({ ...structuredClone(this.control), mode }); }), false, 0);
   }
   markCircuitOpen(identity: Pick<RecoveryTarget, "key" | "service">): Promise<boolean> {
-    return this.serial(async () => {
+    return this.duringShutdown(this.serial(async () => {
       if (this.ready()) return false;
       const next = structuredClone(this.control);
       let target = next.targets.find(value => value.key === identity.key);
@@ -181,10 +209,10 @@ export class RecoveryControlService {
         target = emptyRecoveryTarget(identity.key, identity.service, this.now()); next.targets.push(target);
       }
       target.circuitOpen = true; return this.persist(next);
-    });
+    }), false, this.deps.stopTimeoutMs ?? 2_000, "write-failed");
   }
   setStoppedByUser(identity: Pick<RecoveryTarget, "key" | "service">, stopped: boolean): Promise<boolean> {
-    return this.serial(async () => {
+    return this.duringShutdown(this.serial(async () => {
       if (this.ready()) return false;
       const next = structuredClone(this.control);
       let target = next.targets.find(value => value.key === identity.key);
@@ -194,18 +222,30 @@ export class RecoveryControlService {
         target = emptyRecoveryTarget(identity.key, identity.service, this.now()); next.targets.push(target);
       }
       target.stoppedByUser = stopped; return this.persist(next);
-    });
+    }), false, this.deps.stopTimeoutMs ?? 2_000, "write-failed");
   }
   noteHealth(key: string, healthy: boolean): Promise<boolean> {
-    return this.serial(async () => {
+    return this.duringShutdown(this.serial(async () => {
       if (this.ready()) return false;
       const next = structuredClone(this.control), target = next.targets.find(value => value.key === key), now = this.now();
       if (!target || target.intent || now < target.lastObservedAt) return false;
       target.healthySince = healthy ? target.healthySince ?? now : null; target.lastObservedAt = now;
       if (!target.circuitOpen && target.healthySince !== null && now - target.healthySince >= RECOVERY_POLICY.healthyResetMs) target.consecutiveFailures = 0;
       return this.persist(next);
-    });
+    }), false, this.deps.stopTimeoutMs ?? 2_000, "write-failed");
   }
-  closeAdmission(): void { this.closing = true; }
-  async stop(): Promise<void> { this.closed = true; this.closeAdmission(); await this.writes.drain(); this.subscribers.clear(); }
+  closeAdmission(): void {
+    if (this.closing) return;
+    this.closing = true;
+    for (const close of this.closingWaiters) close();
+    this.closingWaiters.clear();
+  }
+  stop(): Promise<void> {
+    this.stopped ??= (async () => {
+      this.closeAdmission();
+      await this.duringShutdown(this.writes.drain().then(() => true), false, this.deps.stopTimeoutMs ?? 2_000, "write-failed");
+      this.closed = true; this.subscribers.clear();
+    })();
+    return this.stopped;
+  }
 }

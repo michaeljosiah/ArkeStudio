@@ -161,3 +161,25 @@ it("settles an intent flushed after admission closes without starting a child or
   const restored = new RecoveryControlService({ store });
   assert.deepEqual(await policy(restored).allowStart(new AbortController().signal), { ok: true }); await restored.stop();
 });
+
+it("confirmed native cleanup releases its retained lease when a blocked mode write leaves settlement unknown", { timeout: 5000 }, async () => {
+  let now = 2_000_000, released = 0, block = false, finish!: () => void, entered!: () => void;
+  const writing = new Promise<void>(resolve => { entered = resolve; }), saved = new Promise<void>(resolve => { finish = resolve; });
+  let disk: RecoveryControl = { version: 1, policyRevision: 1, mode: "automatic", targets: [] };
+  const control = new RecoveryControlService({ now: () => now, stopTimeoutMs: 20, store: {
+    load: async () => disk, save: async value => { if (block) { entered(); await saved; } disk = structuredClone(value); },
+  } });
+  const port = policy(control, { now: () => now, acquire: async () => () => { released++; } });
+  await control.open();
+  await port.recover({ generation: 1, signal: new AbortController().signal, current: () => true, exitConfirmed: () => true,
+    sleep: async ms => { now += ms; }, held: () => {}, restart: async () => "unknown" });
+  assert.equal(released, 0); block = true;
+  const mode = control.setMode("suggest-only"); await writing; control.closeAdmission(); assert.equal(await mode, false);
+  // Only the lifecycle owner's confirmed stop calls this: an unavailable control write
+  // cannot require already-exited native resources to remain reserved forever.
+  await port.ownerStopped(); assert.equal(released, 1); assert.equal(control.snapshot().audit, "unavailable");
+  assert.equal(control.snapshot().control.targets[0]!.intent!.phase, "unknown"); await control.stop();
+  finish(); await new Promise(resolve => setImmediate(resolve));
+  const restarted = new RecoveryControlService({ store: { load: async () => disk, save: async () => {} } });
+  assert.equal((await policy(restarted).allowStart(new AbortController().signal)).ok, false); await restarted.stop();
+});

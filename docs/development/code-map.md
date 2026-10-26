@@ -80,6 +80,13 @@ acknowledge/advisory snooze controls. Snapshot history stays capped at 100. The 
 normal secret/path boundary, excluding intent capabilities, mappings and session tokens.
 Shutdown starts bounded presentation draining before tracked message handlers. Managed supervisors
 use the durable rolling budget; only supervisors without a recovery port use the legacy lifetime count.
+Recovery mode command waits end unconfirmed as soon as shutdown closes admission. Control reads,
+authority calls and owner settlement get a bounded two-second shutdown drain, retaining unknown
+intents and spent attempts when persistence cannot confirm. Native cleanup remains the lifecycle
+owner's responsibility; only confirmed exit permits its retained resource lease to release.
+After all native owners confirm, control shutdown bounds its remaining writer wait. An already
+issued replacement may finish, but cannot publish a late saved receipt or grant new authority;
+queued mutations stay refused. Restart reads any remaining intent as unknown and holds startup.
 Tests: contracts `test/recovery-incidents.test.ts`, coordinator `test/recovery/history*.test.ts`,
 client `test/recovery-{history,controls}.test.tsx`, desktop `test/background-notifications.test.ts`.
 Full lifecycle/action adapters, action-outcome export and approved Studio assistant visual acceptance
