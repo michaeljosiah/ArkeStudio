@@ -23297,7 +23297,10 @@ export class Coordinator {
       const supervisedStops = await Promise.allSettled([...this.supervisors.values()].map(supervisor => supervisor.stopAndConfirm()));
       await this.opts.adapter?.dispose?.().catch(() => {});
       await this.releaseOllama();
-      const runtimeStops = await Promise.allSettled([this.opts.ming?.dispose(), this.opts.ollama?.service.dispose()]);
+      const runtimeStops = await Promise.allSettled([
+        this.opts.ming?.dispose().then(() => this.localGpu.confirmMingCleanup(AbortSignal.timeout(30_000))),
+        this.opts.ollama?.service.dispose(),
+      ]);
       await historyStopped;
       await this.worldQuery.stop();
       // Provider close is the critical gate: it saves pending state and releases the world lock.

@@ -60,12 +60,19 @@ submitted independently to an explicitly selected service are outside Arke's sch
 
 `local-ai/ming.ts` owns a separate Python process for each batch. A batch can load once and
 read several chunks; its complete process exit releases that model's CUDA context and host
-memory. Cancellation kills the owned tree and waits for close. If exit cannot be confirmed,
-the GPU remains reserved and the next job is refused. A ledger and parent-lifetime leash
-provide orphan cleanup. The worker gets runtime environment variables, offline flags and
+memory. The existing native command executor gates Python behind its private ownership anchor;
+ordinary helper exit is part of batch completion. Cancellation stops that owned tree and waits
+for confirmed exit. If exit cannot be confirmed, the GPU remains reserved and later work stays
+held. Its exact lease remains reachable for a later cleanup confirmation; a new authorized Ming
+reading first confirms the old settled batch's cleanup without replaying it. Shutdown confirms
+that retained lease after native disposal. The ledger/private native job provide orphan cleanup.
+POSIX qualifies ordinary helpers inside the still-live anchor, not deliberate daemon escape.
+The worker gets runtime environment variables, offline flags and
 private caches, without inherited provider credentials. It never installs into shared Python.
 The worker's working directory and bounded `worker.log` stay inside its private cache root;
-model diagnostics and source passages are not forwarded to the application log.
+model diagnostics and source passages are not forwarded to the application log. Streaming does
+not retain command output in memory; an aggregate 32 MiB limit bounds even a noisy worker while
+the existing rotating log owns its on-disk retention.
 
 Desktop, dev and the standalone Node host wire this owner into Coordinator. `generateMingBatch` is a **host-only** API
 accepting a qualified `MingBatchCommand`; paths and commands are never renderer-originated.

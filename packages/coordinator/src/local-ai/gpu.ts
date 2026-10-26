@@ -15,6 +15,8 @@ export class LocalGpu {
   private readonly queue: WaitingTurn[] = [];
   private readonly stopped = new AbortController();
   private readonly ran = new Set<LocalGpuEngine>();
+  private retainedMing: (() => void) | null = null;
+  private mingCleanup: Promise<void> | null = null;
 
   constructor(
     private readonly unload: (engine: LocalGpuEngine, signal: AbortSignal) => Promise<void>,
@@ -74,6 +76,25 @@ export class LocalGpu {
   hasRun(engine: LocalGpuEngine): boolean { return this.ran.has(engine); }
   isBusy(engine: LocalGpuEngine): boolean { return this.owner === engine || this.queue.some(turn => turn.engine === engine); }
 
+  private async settleMingBatch(release: () => void): Promise<void> {
+    try { await this.unload("Ming", AbortSignal.timeout(30_000)); }
+    catch (error) { this.retainedMing = release; throw error; }
+    release();
+  }
+
+  /** Retry only the settled batch owner's cleanup. No inference or old request is replayed.
+   * A failed confirmation keeps the exact retained lease and all queued engines held. */
+  confirmMingCleanup(signal: AbortSignal): Promise<void> {
+    if (this.mingCleanup) return this.mingCleanup;
+    const held = this.retainedMing;
+    if (!held) return Promise.resolve();
+    this.mingCleanup = (async () => {
+      await this.unload("Ming", signal);
+      if (this.retainedMing === held) { this.retainedMing = null; held(); }
+    })().finally(() => { this.mingCleanup = null; });
+    return this.mingCleanup;
+  }
+
   /** A Python batch may retain its weights between chunks, but never beyond confirmed cleanup. */
   async runMingBatch<T>(
     work: (signal: AbortSignal) => Promise<T>,
@@ -81,13 +102,15 @@ export class LocalGpu {
     waiting?: (reason: string | null) => void,
   ): Promise<T> {
     const combined = AbortSignal.any([signal, this.stopped.signal]);
+    // A newly authorized reading may confirm the old settled worker's cleanup first;
+    // it cannot silently regenerate the previous reading or release a possibly live child.
+    combined.throwIfAborted(); await this.confirmMingCleanup(combined);
     const release = await this.acquire("Ming", combined, waiting);
     try { return await work(combined); }
     finally {
       // Cancellation must not cancel cleanup. A rejected cleanup deliberately retains the
       // reservation: another worker cannot safely start while this process might still live.
-      await this.unload("Ming", AbortSignal.timeout(30_000));
-      release();
+      await this.settleMingBatch(release);
     }
   }
 

@@ -46,14 +46,15 @@ interface Active {
   cleaning?: Promise<void>; binding?: Promise<void>; finishing?: boolean; removeBackstop(): void;
 }
 const live = (child: ChildProcess) => child.exitCode === null && child.signalCode === null;
-/** Host-only catalogue commands. There is one executor, no automatic command replay, and
+/** Host-only catalogue commands and the managed Ming batch. There is one executor per owner, no automatic replay, and
  * unresolved cleanup retains the anchor/job for an explicit later owner cleanup attempt. */
 export class SetupProcessRunner {
+  get running(): boolean { return this.active !== null; }
   private active: Active | null = null;
   private closing = false;
   private readonly lifetime = new AbortController();
   private readonly job: SetupProcessJob;
-  constructor(private readonly deps: { ledger?: ChildLedger; job?: SetupProcessJob; cleanupTimeoutMs?: number; readyTimeoutMs?: number } = {}) {
+  constructor(private readonly deps: { ledger?: ChildLedger; job?: SetupProcessJob; cleanupTimeoutMs?: number; readyTimeoutMs?: number; ledgerId?: "setup" | "ming" } = {}) {
     this.job = deps.job ?? new NativeSetupProcessJob();
   }
   private async wait<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -94,13 +95,15 @@ export class SetupProcessRunner {
     }).finally(() => { active.cleaning = undefined; });
     return active.cleaning;
   }
-  async run(command: string, args: readonly string[], signal: AbortSignal, onOutput?: (text: string) => void, captureMode: "full" | "metadata" = "full"): Promise<{ code: number; output: string }> {
+  async run(command: string, args: readonly string[], signal: AbortSignal, onOutput?: (text: string) => void, captureMode: "full" | "metadata" | "stream" = "full",
+    context?: { cwd: string; env: NodeJS.ProcessEnv }): Promise<{ code: number; output: string }> {
     if (this.closing || this.active) throw new SetupProcessCleanupPending(); signal.throwIfAborted();
     const request = JSON.stringify({ command, args }); if (Buffer.byteLength(request) > 64 * 1024) throw new Error("Setup command exceeds its supported bound.");
     const allowed = new Set(["SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PATH", "COMSPEC", "PATHEXT", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "HOME", "TMP", "TEMP", "TMPDIR", "LD_LIBRARY_PATH", "OLLAMA_HOST", "OLLAMA_MODELS"]);
     const env = Object.fromEntries(Object.entries(process.env).filter((row): row is [string, string] => row[1] !== undefined && allowed.has(row[0].toUpperCase())));
     const child = spawn(process.execPath, ["-e", WORKER], { shell: false, windowsHide: true, detached: process.platform !== "win32",
-      stdio: ["pipe", "pipe", "pipe", "pipe"], env: { ...env, ELECTRON_RUN_AS_NODE: "1", ARKE_SETUP_OWNER_PID: String(process.pid), LC_ALL: "C" } });
+      stdio: ["pipe", "pipe", "pipe", "pipe"], ...(context ? { cwd: context.cwd } : {}),
+      env: { ...(context?.env ?? env), ELECTRON_RUN_AS_NODE: "1", ARKE_SETUP_OWNER_PID: String(process.pid), LC_ALL: "C" } });
     child.stdin?.on("error", () => {}); child.once("error", () => {});
     const closed = new Promise<void>(resolve => { child.once("close", () => resolve()); });
     const backstop = () => {
@@ -113,8 +116,10 @@ export class SetupProcessRunner {
     let output = "", outputBytes = 0, protocol = "", ready!: () => void, complete!: (code: number) => void;
     const readyFrame = new Promise<void>(resolve => { ready = resolve; }), completed = new Promise<number>(resolve => { complete = resolve; });
     const capture = (chunk: Buffer) => {
+      // A trusted worker streams into its rotating log without retaining output here.
+      // Metadata/log streams still have an aggregate cap, including on a stalled log disk.
       outputBytes += chunk.length;
-      if (outputBytes > (captureMode === "metadata" ? 32 : 1) * 1024 * 1024) { internal.abort(new Error("Setup program output exceeded its supported bound.")); return; }
+      if (outputBytes > (captureMode === "full" ? 1 : 32) * 1024 * 1024) { internal.abort(new Error("Setup program output exceeded its supported bound.")); return; }
       const text = chunk.toString("utf8"); if (captureMode === "full") output += text; try { onOutput?.(text); } catch { /* Progress presentation cannot grant authority. */ }
     };
     child.stdout?.on("data", capture); child.stderr?.on("data", capture);
@@ -139,7 +144,7 @@ export class SetupProcessRunner {
       if (!child.pid) throw new Error("Setup native process did not start.");
       active.binding = this.job.bind(child.pid, readySignal).then(() => { active.bound = true; });
       await this.wait(active.binding, readySignal);
-      await this.wait(this.deps.ledger?.record({ id: "setup", pid: child.pid, image: process.platform === "linux" ? basename(process.execPath) : basename(process.execPath).toLowerCase(),
+      await this.wait(this.deps.ledger?.record({ id: this.deps.ledgerId ?? "setup", pid: child.pid, image: process.platform === "linux" ? basename(process.execPath) : basename(process.execPath).toLowerCase(),
         ...(process.platform === "linux" ? { imageKind: "executable" as const, processGroupLeader: true as const } : {}), ...ownerStamp(), recordedAt: Date.now() }) ?? Promise.resolve(), readySignal);
       combined.throwIfAborted(); active.launched = true; child.stdin?.write(request + "\n");
       const code = await this.wait(completed, combined);

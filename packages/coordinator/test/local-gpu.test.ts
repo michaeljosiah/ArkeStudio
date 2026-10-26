@@ -49,6 +49,22 @@ it("refuses the next job when Ming cannot confirm release", async () => {
   gpu.stop(); await next;
 });
 
+it("a newly authorized Ming reading confirms the old retained cleanup without replaying its work", async () => {
+  let refuse = true, readings = 0, confirmations = 0;
+  const gpu = new LocalGpu(async engine => {
+    if (engine === "Ming") { confirmations++; if (refuse) throw new Error("Ming exit unconfirmed"); }
+  }, ["Ollama", "ComfyUI", "Ming"]);
+  try {
+    await assert.rejects(gpu.runMingBatch(async () => { readings++; }, new AbortController().signal), /unconfirmed/);
+    assert.equal(readings, 1); assert(gpu.isBusy("Ming"));
+    await assert.rejects(gpu.runMingBatch(async () => { readings++; }, new AbortController().signal), /unconfirmed/);
+    assert.equal(readings, 1, "new work stayed unsubmitted while cleanup was unknown");
+    refuse = false;
+    await gpu.runMingBatch(async () => { assert(confirmations >= 3); readings++; }, new AbortController().signal);
+    assert.equal(readings, 2); assert(!gpu.isBusy("Ming"));
+  } finally { gpu.stop(); }
+});
+
 it("drains and closes the world even when a cancelled Ming batch cannot confirm cleanup", async () => {
   const { root } = await makeTempRoot();
   let closed = false, started = false, refuse = true;

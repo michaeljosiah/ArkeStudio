@@ -135,7 +135,10 @@ Managed local engines: coordinator `local-ai/ollama.ts` owns portable Ollama and
 overrides; `setup/catalogue.ts` / `setup/local-setup.ts` own pinned archives and architecture/
 version receipts. `harness/v2-launch.ts` writes only the selected Ollama endpoint into the
 owned OpenCode profile. `local-ai/gpu.ts` serializes writing, ComfyUI and Ming; `local-ai/ming.ts`
-owns Python batch cancellation/confirmed exit, exposed through Coordinator's host-only
+uses the existing gated `setup/process.ts` native executor for Python batches and ordinary
+helper exit. Its cancellation retains native ownership; `LocalGpu.confirmMingCleanup` retains
+the exact failed-cleanup lease and releases it only after later confirmation, without replay.
+Batch generation is exposed through Coordinator's host-only
 `generateMingBatch`. Desktop/dev/`node-studio-host.ts` compose these services; desktop
 `startup-runtime-owners.ts` retains them across initialization failure until transfer to
 Coordinator. `harness/runtime-change.ts` fences endpoint changes against cloud/local turns.

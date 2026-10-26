@@ -142,6 +142,12 @@ voice reference words, queue identity, chunking, controlled refusal and packaged
 The standard-library worker checks run with `python -B scripts/test-ming-worker.py`; CI's Node tests
 exercise the host seams without model downloads. Native tests must also check confirmed process
 exit and GPU-lane release; a returned WAV alone does not prove a complete reading.
+`test/ming-process.test.ts` uses the real gated native executor with a lightweight Node fixture:
+the same Python command preparation, stripped environment, private working directory and log,
+ordinary helper surviving parent exit, failed cleanup retention and later GPU confirmation.
+`test/local-gpu.test.ts` also proves a newly authorized reading confirms retained cleanup before
+submission, never replays the old reading, and stays held after another failed confirmation.
+These fixtures require no model download and do not establish narration/inference quality.
 
 Baseline regression checks (#2079) use client `test/art-direction-step.test.tsx` and
 `test/one-register.test.tsx`, contracts `test/world-chat-shape.test.ts`, and coordinator

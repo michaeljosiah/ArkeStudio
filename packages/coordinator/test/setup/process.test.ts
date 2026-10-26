@@ -21,12 +21,12 @@ it("streams bounded archive metadata beyond the ordinary log cap without retaini
   } finally { await runner.dispose(); }
 });
 
-it("bounds program output and confirms exit before admitting another command", { timeout: 90000 }, async () => {
+for (const mode of ["full", "stream"] as const) it(`bounds ${mode} program output and confirms exit before admitting another command`, { timeout: 90000 }, async () => {
   const runner = new SetupProcessRunner(); let output = 0;
   try {
     await assert.rejects(runner.run(process.execPath, ["-e", "const b=Buffer.alloc(65536,120);setInterval(()=>process.stdout.write(b),1)"],
-      new AbortController().signal, text => { output += Buffer.byteLength(text); }), /stopped before owned completion/);
-    assert(output > 0 && output <= 1024 * 1024);
+      new AbortController().signal, text => { output += Buffer.byteLength(text); }, mode), /stopped before owned completion/);
+    assert(output > 0 && output <= (mode === "full" ? 1 : 32) * 1024 * 1024);
     assert.equal((await runner.run(process.execPath, ["-e", "process.exit(0)"], new AbortController().signal)).code, 0);
   } finally { await runner.dispose(); }
 });
