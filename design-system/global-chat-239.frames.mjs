@@ -1,0 +1,45 @@
+export const esc = value => String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
+import {references,nativeIcons} from './global-chat-239.references.mjs';
+import {drawComposer} from './global-chat-224.composer.mjs';
+export const icon = name => nativeIcons[name] ?? nativeIcons.chat;
+const ib = (name,label,action,extra='') => `<button class="g239-icon${action==='send'?' g239-send':''}" type="button" aria-label="${esc(label)}" title="${esc(label)}" data-action="${action}" ${extra}>${icon(name)}</button>`;
+const button = (label,action,primary=false) => `<button type="button" class="g239-button${primary?' g239-button--primary':''}" data-action="${action}">${esc(label)}</button>`;
+const assistant = body => `<div class="g239-answer"><div class="g239-answer-label">Arke</div>${body}</div>`;
+const user = text => `<div class="g239-user">${esc(text)}</div>`;
+const welcome = () => `<div class="g239-welcome"><div class="g239-mark">${'<span aria-hidden="true">a</span>'}</div><h3>How can I help?</h3><p>Ask about Arke, your setup or what needs attention.</p><div class="g239-prompts"><button type="button" class="g239-prompt" data-action="diagnose">Check local AI</button><button type="button" class="g239-prompt" data-action="diagnose">Review storage</button><button type="button" class="g239-prompt" data-action="help">Help with Arke</button></div></div>`;
+function storageCard(){return `<div class="g239-fact-card"><div class="g239-fact-head">${icon('warning')}Storage needs attention</div><div class="g239-meta">Media drive · checked just now</div><dl class="g239-facts"><dt>Available</dt><dd>6 GiB</dd><dt>Export + working reserve</dt><dd>9 GiB</dd><dt>Additional space needed</dt><dd>3 GiB</dd></dl><p class="g239-card-note">Your export is waiting. Existing artwork and recordings are kept.</p><div class="g239-actions">${button('Review cleanup','review',true)}${button('Storage settings','settings')}</div></div>`;}
+function repairCard(){return `<div class="g239-fact-card"><div class="g239-awaiting">Needs your approval</div><div class="g239-fact-head">Clear generated previews</div><div class="g239-meta">Estimated space to recover · 3.5 GiB</div><p class="g239-card-note">Expired previews that Arke can make again. No files in use.</p><p class="g239-card-note">Your artwork, takes, recordings and exports stay. Previews will be recreated when needed.</p><div class="g239-actions">${button('Clear previews','approve',true)}${button('Keep files','deny')}</div></div>`;}
+function content(state, draft=''){
+  if(state==='ready')return welcome();
+  if(state==='checking')return user(draft || 'Why has my export stopped?')+assistant(`<div class="g239-status-line"><i class="g239-status-dot"></i>Checking storage and the waiting export…</div>`);
+  if(state==='help')return user('What can you help with here?')+assistant('<p>I can help with Arke, local AI, downloads and storage.</p><p>For a world or production, I’ll help you open its own conversation.</p>');
+  if(state==='handoff')return user('Help me rewrite the opening in The Undersong.')+assistant('<p>Let’s take that to your world’s conversation, where its characters and story belong.</p><div class="g239-fact-card"><div class="g239-fact-head">World Chat</div><div class="g239-meta">The Undersong</div><p class="g239-card-note">Open this conversation and carry over your request as an editable draft.</p><div class="g239-actions">'+button('Open World Chat','handoff',true)+'</div></div><p class="g239-meta">Nothing is sent until you press Send there.</p>');
+  let result=user('Why has my export stopped?')+assistant('<p>The media drive needs more space before your export can continue.</p>'+storageCard());
+  if(state==='repair')return user('Show me what I can clear.')+assistant('<p>I found previews that can be recreated. Review the cleanup before anything is removed.</p>'+repairCard());
+  if(state==='recovered')return user('Clear the expired previews.')+assistant(`<p>The previews have been cleared.</p><div class="g239-fact-card"><div class="g239-fact-head">${icon('check')}Storage checked again</div><dl class="g239-facts"><dt>Space recovered</dt><dd>3.3 GiB</dd><dt>Available now</dt><dd>9.3 GiB</dd><dt>Export + working reserve</dt><dd>9 GiB</dd></dl><p class="g239-card-note">The export has enough estimated space to continue. Its progress remains in Activity.</p></div>`);
+  if(state==='denied')result+=assistant('<p>I’ve kept the files. Your export is still waiting for space. You can choose another destination or free space outside Arke.</p>');
+  return result;
+}
+function composer(draft='') {
+ const state={page:'world',chat:'studio',drafts:{studio:draft},attachments:{},refusals:{},running:{},worldChanged:false,voice:null,readReplies:false,label:'Studio assistant'};
+ const contexts={studio:{title:'Arke',subject:'Studio',hint:'Ask Arke about your studio…'}};
+ const oldButton=(label,action,extra='',body=esc(label))=>`<button type="button" data-action="${action}" aria-label="${esc(label)}" ${extra}>${body}</button>`;
+ return drawComposer(state,{esc,button:oldButton,icon,contexts});
+}
+function activity(){return `<section class="g239-dialog" aria-label="Activity reference"><header class="g239-head"><div class="g239-head-copy"><h2>Activity</h2></div>${ib('close','Close Activity','close')}</header><div class="g239-activity-tabs"><span>Inbox</span><span>What’s new</span><span>Spend</span></div><div class="g239-messages"><div class="g239-meta">All worlds · 1 needs you</div><div class="g239-activity-row"><i class="g239-status-dot"></i><div><p>Chapter export · waiting</p><span class="g239-meta">More space needed on the media drive</span><div class="g239-actions">${button('Review','diagnose')}</div></div></div><div class="g239-activity-row"><i class="g239-status-dot"></i><div><p>Local AI · ready</p><span class="g239-meta">ComfyUI and Ollama are healthy</span></div></div></div></section>`;}
+export function screen({state='ready',device='desktop',width=1360,height=820,label='',draft='',interactive=false}={}) {
+ if(state==='activity')return `<div class="g239-scene g239-reference" data-device="${device}" data-state="activity" data-screen-label="${esc(label)}" style="width:${width}px;height:${height}px">${references.notification}</div>`;
+ const backdrop=references[device==='phone'?'phone':device==='tablet'?'tablet':'desktop'];
+ return `<div class="g239-scene ch227" data-device="${device}" data-state="${state}" data-screen-label="${esc(label)}" style="${interactive?'width:100%;height:100%':`width:${width}px;height:${height}px`}"><div class="g239-page">${backdrop}</div>${state==='closed'?'':`<div class="g239-scrim"></div><section class="gc224 gc224-panel g239-dialog ${device==='phone'?'gc224-phone':''}" role="dialog" aria-label="Arke · Studio assistant" ${device==='desktop'?'':'aria-modal="true"'}><header class="gc224-panel-head g239-head"><div><p>Arke</p><span>Studio assistant</span></div>${ib('history','Conversation history','history')}${ib('close','Close Arke','close')}</header><div class="g239-scope">Studio <span>Setup, local AI &amp; help</span></div><div class="gc224-messages g239-messages" aria-live="polite">${content(state,draft)}</div>${composer(draft)}</section>`}
+</div>`;
+}
+export const FRAMES=[
+  ['a','The current notification reference · 206b',1360,820,'activity','desktop','The actual 206b master drawing, reused intact. Its floating notification card supplies the shell grammar.'],
+  ['b','Global chat · the Studio assistant',1360,820,'ready','desktop','A rounded dialog over the unchanged 227a writing-room drawing, using current Arke icons and the shared 225 composer.'],
+  ['c','A diagnosis in the conversation',1360,820,'diagnosis','desktop','Arke explains the measured cause and affected work. Review cleanup opens a concrete plan; it does not delete files.'],
+  ['d','A repair needs approval',1360,820,'repair','desktop','An exact action, estimated saving and retention promise precede a separate approval. These capabilities are proposed under epic #2194.'],
+  ['e','A world request goes to its own chat',1360,820,'handoff','desktop','An explicit handoff opens World Chat with an editable draft. It does not send, merge transcripts or change permissions.'],
+  ['f','Phone · the rounded dialog remains',390,844,'diagnosis','phone','A modal dialog with a 12px outer gap, all four rounded corners and 44px controls. Transcript scrolls independently above the composer.'],
+  ['g','Tablet · an overlay, with room to read',834,900,'ready','tablet','A 520px dialog overlays the page instead of shrinking it. Background content is inert while the modal dialog is open.'],
+  ['h','Phone · the visible keyboard viewport',390,550,'repair','phone','The reduced viewport represents the area above an on-screen keyboard. Header and composer stay reachable; the transcript scrolls. Physical-device keyboard acceptance remains required.'],
+].map(([letter,title,width,height,state,device,note])=>({id:`239${letter}`,title,width,height,state,device,note,markup:screen({state,device,width,height,label:`239${letter} ${title}`})}));
