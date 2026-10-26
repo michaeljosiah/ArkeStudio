@@ -139,12 +139,16 @@ export const StorageForecastSchema = z.object({
   bytesPerMs: z.number().finite().positive(), timeToReserveMs: z.number().finite().nonnegative(), warning: z.boolean(),
 }).strict();
 export const StorageRootHealthSchema = z.object({
-  rootId: identity, role: StorageRootRoleSchema, state: z.enum(["measured", "stale", "unavailable", "unsupported"]),
+  rootId: identity, role: StorageRootRoleSchema, state: z.enum(["unmeasured", "measured", "stale", "unavailable", "unsupported"]),
   capacity: StorageCapacitySchema.nullable(), source: StorageProbeSourceSchema, limitations: z.array(StorageLimitationSchema).max(5),
   pressure: StoragePressureSchema.nullable(), forecast: StorageForecastSchema.nullable(),
 }).strict();
 export type StorageRootHealth = z.infer<typeof StorageRootHealthSchema>;
-export const StorageHealthSnapshotSchema = z.object({ at: instant, writing: z.boolean(), roots: z.array(StorageRootHealthSchema).max(128) }).strict();
+export const StorageHealthSnapshotSchema = z.object({ at: instant, writing: z.boolean(), roots: z.array(StorageRootHealthSchema).max(128), limited: z.boolean().optional(),
+  admission: z.object({ state: z.enum(["starting", "available", "reconciling", "unavailable"]), reservations: z.number().int().min(0).max(2048), uncertain: z.number().int().min(0).max(2048),
+    reason: z.enum(["invalid", "permission", "disk-full", "read-failed", "write-failed"]).optional(),
+  }).strict().optional(),
+}).strict();
 export type StorageHealthSnapshot = z.infer<typeof StorageHealthSnapshotSchema>;
 
 /** Presentation hysteresis never replaces each operation's fresh admission check (R-14).

@@ -37,6 +37,7 @@ import { EMPTY_BIBLE, WorldBibleSchema } from "./bible.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
 import { OllamaRuntimeStatusSchema } from "./ollama.js";
+import { StorageHealthSnapshotSchema } from "./storage-health.js";
 import { LocalSamplingSettingsSchema } from "./local-sampling.js";
 import { FoundingBuildStateSchema } from "./founding-build.js";
 import { FrameRunStateSchema } from "./frame-run.js";
@@ -562,6 +563,7 @@ export const ClientStateSchema = valueSchema(z
         /** The ComfyUI engine and its recipes (SPEC-021 §2.12) — one result, read everywhere. */
         comfyui: ComfyUiStatusSchema.nullable().default(null),
         ollama: OllamaRuntimeStatusSchema.nullable().optional(),
+        storageHealth: StorageHealthSnapshotSchema.nullable().optional(),
         /** Sampling per local recipe and its measured times (design turn 177); absent before the host seeds it. */
         localSampling: LocalSamplingSettingsSchema.optional(),
         adapters: AdapterLibraryStateSchema.nullable().optional(),

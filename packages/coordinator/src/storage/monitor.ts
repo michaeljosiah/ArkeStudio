@@ -119,6 +119,13 @@ export class StorageMonitor {
           continue;
         }
         if (result.capacity && result.capacity.measuredAt <= reading.minimumAfter) result = missing();
+        const previous = reading.result.capacity;
+        if (previous && result.capacity && result.capacity.measuredAt < previous.measuredAt && previous.measuredAt <= this.now()) {
+          // A host cache may finish after a newer read. It cannot replace that evidence or
+          // reset the rate window; a conflicting older mapping remains explicitly unknown.
+          if (result.capacity.volumeId === previous.volumeId && result.capacity.mappingRevision === previous.mappingRevision) continue;
+          result = missing();
+        }
         reading.result = result;
         const sample = result.capacity;
         if (sample) {
@@ -154,7 +161,8 @@ export class StorageMonitor {
       const reading = this.readings.get(root.rootId)!, result = reading.result, sample = result.capacity;
       const stale = sample !== null && (sample.measuredAt > now || now - sample.measuredAt > STORAGE_POLICY.forecastMaxAgeMs);
       const unavailable = sample !== null && sample.availableBytes === null;
-      return { rootId: root.rootId, role: root.role, ...result, state: stale ? "stale" : unavailable ? "unavailable" : result.state,
+      const unmeasured = reading.attemptedAt === -Infinity && reading.minimumAfter === -Infinity;
+      return { rootId: root.rootId, role: root.role, ...result, state: unmeasured ? "unmeasured" : stale ? "stale" : unavailable ? "unavailable" : result.state,
         forecast: stale ? null : forecastStorage(reading.samples, now), pressure: sample && !stale && !unavailable ? reading.pressure : null };
     });
     return StorageHealthSnapshotSchema.parse({ at: now, writing: this.writing, roots });

@@ -6,9 +6,15 @@ fresh peak-space admission, qualified forecasts and warning hysteresis. Coordina
 `storage/reservations.ts` serializes durable multi-volume admission, changed peaks and owner-confirmed
 settlement; `storage/reservation-file.ts` keeps its flushed app-local control state bounded.
 `storage/windows-volume.ts` reads actual GUID/root identities and caller-available bytes through a
-bounded kernel-leashed native reader. Tests: contracts `test/storage-health.test.ts`, coordinator
-`test/storage/`; requirements SPEC-062 R-1–R-14/R-24. App composition, write-path integration,
-incident notifications, other native host ports and reviewed cleanup remain outstanding.
+bounded kernel-leashed native reader. `storage/service.ts` composes collection and durable planning;
+`application/studio-host.ts` enables it for app-root hosts. Coordinator startup/world switching,
+writing cadence and desktop wake feed it; `storage.health` reaches authenticated snapshots and both
+state folds without entering the world diagnostic journal. Contracts `storage-diagnostics.ts` derives
+measured storage findings for Settings · Diagnostics; its Refresh requests the host collector.
+Tests: contracts `test/storage-{health,diagnostics}.test.ts`, coordinator `test/storage/`, client
+`test/storage-health.test.ts`; requirements SPEC-032 R-17/R-33, SPEC-062 R-1–R-14/R-24.
+Write-path integration, incident notifications, other native host ports and reviewed cleanup remain
+outstanding.
 
 Managed local engines: coordinator `local-ai/ollama.ts` owns portable Ollama and explicit URL
 overrides; `setup/catalogue.ts` / `setup/local-setup.ts` own pinned archives and architecture/

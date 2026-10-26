@@ -390,6 +390,10 @@ export class ReadModel {
         this.state = { ...this.state, app: { ...this.state.app, ollama: event.ollama } };
         return;
       }
+      case "storage.health": {
+        this.state = { ...this.state, app: { ...this.state.app, storageHealth: event.health } };
+        return;
+      }
       case "adapters.changed": {
         this.state = { ...this.state, app: { ...this.state.app, adapters: event.adapters } };
         return;

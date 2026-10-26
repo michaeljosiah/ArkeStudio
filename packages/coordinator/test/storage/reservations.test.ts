@@ -235,6 +235,16 @@ describe("shared storage reservations (SPEC-062 R-8/R-9/R-24)", () => {
 });
 
 describe("bounded storage reservation file", () => {
+  it("classifies control failures without retaining raw paths or native error messages", async () => {
+    for (const [code, reason] of [["EACCES", "permission"], ["EPERM", "permission"], ["ENOSPC", "disk-full"], ["EDQUOT", "disk-full"], ["EIO", "read-failed"]]) {
+      const manager = new StorageReservations({ store: { load: async () => { throw Object.assign(new Error("private/path"), { code }); }, save: async () => {} }, probe: async () => fact() });
+      await manager.open(); assert.equal(manager.snapshot().auditFailure, reason); await manager.stop();
+    }
+    const { manager } = harness({ save: async () => { throw Object.assign(new Error("private/path"), { code: "ENOSPC" }); } });
+    await manager.open(); await manager.reserve(request("first", GiB));
+    assert.equal(manager.snapshot().auditFailure, "disk-full"); assert.equal(manager.snapshot().auditAvailable, false); await manager.stop();
+  });
+
   it("persists and restores a flushed snapshot separately from world records", async () => {
     const path = join(await tempDir("arke-storage-reservations-"), "reservations.json");
     const store = new FileStorageReservationStore(path);

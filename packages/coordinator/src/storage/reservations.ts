@@ -14,6 +14,7 @@ const recordList = z.array(StorageReservationSchema).max(2048)
   .refine(value => new Set(value.map(r => r.id)).size === value.length, "Repeated storage reservation");
 const consumptionSchema = z.object({ volumeId: key, bytes, at: z.number().int().nonnegative().safe() }).strict();
 export type StorageConsumption = z.infer<typeof consumptionSchema>;
+export type StorageAuditFailure = "invalid" | "permission" | "disk-full" | "read-failed" | "write-failed";
 export const StorageReservationFileSchema = z.union([
   z.object({ version: z.literal(2), records: recordList, consumed: z.array(consumptionSchema).max(4096) }).strict(),
   z.object({ version: z.literal(1), records: recordList }).strict().transform(value => ({ ...value, version: 2 as const, consumed: [] as StorageConsumption[] })),
@@ -46,6 +47,7 @@ export class StorageReservations {
   private consumed: StorageConsumption[] = [];
   private opened = false;
   private auditAvailable = true;
+  private auditFailure: StorageAuditFailure | undefined;
   private closing = false;
   private closed = false;
 
@@ -74,14 +76,20 @@ export class StorageReservations {
         // A saved active intent says nothing about what survived the previous host. No automatic release.
         this.records = new Map(data.records.map(record => [record.id, { ...record, state: "uncertain" }]));
         this.consumed = this.recent(data.consumed);
-      } catch { this.auditAvailable = false; }
+      } catch (error) { this.auditAvailable = false; this.auditFailure = this.failureKind(error, "read-failed"); }
       this.opened = true;
       this.changed();
     });
   }
 
-  snapshot(): { auditAvailable: boolean; records: StorageReservation[]; consumed: StorageConsumption[] } {
-    return { auditAvailable: this.opened && this.auditAvailable, records: structuredClone([...this.records.values()]), consumed: structuredClone(this.recent(this.consumed)) };
+  snapshot(): { auditAvailable: boolean; auditFailure?: StorageAuditFailure; records: StorageReservation[]; consumed: StorageConsumption[] } {
+    return { auditAvailable: this.opened && this.auditAvailable, auditFailure: this.auditFailure, records: structuredClone([...this.records.values()]), consumed: structuredClone(this.recent(this.consumed)) };
+  }
+
+  private failureKind(error: unknown, fallback: "read-failed" | "write-failed"): StorageAuditFailure {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) return "invalid";
+    const code = error && typeof error === "object" && "code" in error ? error.code : null;
+    return code === "ENOSPC" || code === "EDQUOT" ? "disk-full" : code === "EACCES" || code === "EPERM" ? "permission" : fallback;
   }
 
   private now(): number { return (this.deps.now ?? Date.now)(); }
@@ -104,12 +112,13 @@ export class StorageReservations {
       this.consumed = consumed;
       this.changed();
       return true;
-    } catch {
+    } catch (error) {
       // Replacement may have reached disk. Keep the union in memory and disable further admission;
       // neither a rejected write nor a caller's retry establishes that the intent did not persist.
       for (const [id, record] of next) this.records.set(id, { ...record, state: "uncertain" });
       this.consumed = consumed;
       this.auditAvailable = false;
+      this.auditFailure = this.failureKind(error, "write-failed");
       this.changed();
       return false;
     }

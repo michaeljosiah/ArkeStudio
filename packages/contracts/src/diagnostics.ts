@@ -5,6 +5,7 @@ import { PROVIDERS, type ProviderId } from "./provider.js";
 import { formatMicroUsd } from "./money.js";
 import { formatGb } from "./runtime-gate.js";
 import type { ClientState } from "./client-state.js";
+import { deriveStorageFindings } from "./storage-diagnostics.js";
 
 /**
  * The diagnostics snapshot (SPEC-032): the set of findings true right now, derived from state
@@ -60,6 +61,7 @@ export const FINDING_SEVERITY_RANK: Record<FindingSeverity, number> = {
  * key the view appends a remedy's target under so the screen opens on the right row.
  */
 export const CONTROL_REGISTRY = {
+  "storage-refresh": { label: "Refresh", place: "Settings · Diagnostics", route: "/settings/diagnostics" },
   /** Stops the supervised child and resolves the selection again (Settings · Providers). */
   "comfyui-restart": {
     label: "Restart",
@@ -182,6 +184,9 @@ export const CONTROL_IDS = Object.keys(CONTROL_REGISTRY) as [ControlId, ...Contr
  * a finding of a kind that declares it references it as a consequence in the same snapshot.
  */
 export const FINDING_KINDS = {
+  "storage-pressure": { subsumes: [] },
+  "storage-capacity-unknown": { subsumes: [] },
+  "storage-control-unavailable": { subsumes: [] },
   /** R-20.1 — non-terminal jobs frozen against the resolved engine while it is not ready. */
   "work-held-by-engine": { subsumes: [] },
   /** R-20.2 — a queue lane paused on a credential with work held behind it. */
@@ -397,6 +402,7 @@ export type DiagnosticsSources = Pick<
   | "health"
   | "env"
   | "runtime"
+  | "storageHealth"
   | "harness"
   | "harnessInfo"
   | "setup"
@@ -423,6 +429,7 @@ export function diagnosticsSources(app: ClientState["app"]): DiagnosticsSources 
     health: app.health,
     env: app.env,
     runtime: app.runtime,
+    storageHealth: app.storageHealth,
     harness: app.harness,
     harnessInfo: app.harnessInfo,
     setup: app.setup,
@@ -1285,6 +1292,7 @@ const STATE_RULES: readonly Rule[] = [
   waitingOnComponent,
   hardwareFacts,
   windowsCommitFacts,
+  { kind: "storage-pressure", run: ctx => deriveStorageFindings(ctx.sources.storageHealth, ctx.now) },
   providerRepeatedFaults,
   spendAbovePrevious,
 ];
@@ -1319,6 +1327,7 @@ function sourceStates(sources: DiagnosticsSources, tails: DiagnosticsTails) {
     { name: "app.health", state: "read" },
     { name: "app.env", state: sources.env === null ? "absent" : "read" },
     { name: "app.runtime", state: sources.runtime === null ? "absent" : "read" },
+    { name: "app.storageHealth", state: sources.storageHealth == null ? "absent" : "read" },
     { name: "app.harness", state: sources.harness === null ? "absent" : "read" },
     { name: "app.harnessInfo", state: sources.harnessInfo === null ? "absent" : "read" },
     { name: "app.setup", state: sources.setup === null ? "absent" : "read" },

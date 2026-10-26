@@ -113,4 +113,17 @@ describe("bounded scoped storage monitor (SPEC-062 R-1–R-5)", () => {
     assert.equal(await monitor.capacity("media", new AbortController().signal, now), null, "an admission replan requires a post-report read");
     await monitor.stop();
   });
+
+  it("does not replace a newer low-space observation with an older host cache", async () => {
+    let now = 600_000, current = result(now, GiB);
+    const monitor = new StorageMonitor({ now: () => now, probe: async () => current, onSnapshot: () => {} });
+    monitor.setRoots([root]); await monitor.start();
+    now += 1_000; current = result(now - 2_000); await monitor.refresh();
+    assert.equal(monitor.snapshot().roots[0]!.capacity!.availableBytes, GiB);
+    assert.equal(monitor.snapshot().roots[0]!.capacity!.measuredAt, 600_000);
+    assert(monitor.snapshot().roots[0]!.pressure?.critical);
+    now += 1_000; current.capacity!.mappingRevision = "older-mount"; await monitor.refresh();
+    assert.equal(monitor.snapshot().roots[0]!.state, "unavailable");
+    await monitor.stop();
+  });
 });

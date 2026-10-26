@@ -21,7 +21,7 @@ import { appendFileSync, existsSync } from "node:fs";
 import { copyFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, safeStorage, shell, Tray } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, safeStorage, shell, Tray } from "electron";
 import electronUpdater from "electron-updater";
 import {
   assembleHarness,
@@ -1603,6 +1603,7 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    powerMonitor.on("resume", () => { void coordinator?.wakeStorage().catch(() => {}); });
     backgroundLogin = isBackgroundLogin(process.platform, process.argv,
       process.platform === "darwin" ? app.getLoginItemSettings() : undefined);
     if (process.platform === "win32") app.setAppUserModelId("studio.arke.app");

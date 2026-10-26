@@ -47,6 +47,7 @@ const CHECK_WORDS: Record<string, string> = {
   "waiting-on-component": "waiting downloads",
   "hardware-unmeasured": "hardware",
   "windows-commit": "Windows memory",
+  "storage-pressure": "storage",
   "provider-repeated-faults": "provider faults",
   "spend-above-previous": "spend",
 };

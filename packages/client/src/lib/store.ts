@@ -1572,6 +1572,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, comfyui: event.comfyui } };
     case "ollama.status":
       return { ...state, app: { ...state.app, ollama: event.ollama } };
+    case "storage.health":
+      return { ...state, app: { ...state.app, storageHealth: event.health } };
     case "adapters.changed":
       return { ...state, app: { ...state.app, adapters: event.adapters } };
     case "harness.status":

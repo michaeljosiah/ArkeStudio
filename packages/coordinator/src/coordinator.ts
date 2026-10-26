@@ -266,6 +266,7 @@ import type { CredentialStore, Cipher } from "./credentials/store.js";
 import { CoalescedReads, ReadStalledError, type ReadTurn } from "./coalesced-reads.js";
 import { buildDiagnosticsBundle } from "./diagnostics.js";
 import { DiagnosticsSnapshotHolder } from "./diagnostics-snapshot.js";
+import type { AppStorageService } from "./storage/service.js";
 import {
   highestChapterRank,
   compileBoard,
@@ -917,6 +918,8 @@ export interface CoordinatorOptions {
   sampleWorldDownload?: StoryDownload;
   /** App root for remembered grants (SPEC-005 R-16). Absent → grants are session-only. */
   appRoot?: string;
+  /** Host-owned scoped resource measurement and capacity planning. Direct fixtures may omit it. */
+  storageHealth?: AppStorageService | null;
   /**
    * The Arke account behind the chrome's control (design turn 151). Absent, Studio has no cloud
    * — `NoArkeCloud`, the local default — and the control says so when pressed.
@@ -1261,6 +1264,30 @@ export class Coordinator {
    * emit during construction; every hook guards, and it exists before the constructor returns.
    */
   private diagnosticsSnapshot: DiagnosticsSnapshotHolder | null = null;
+  private readonly storageWritingJobs = new Set<string>();
+  private readonly storageWritingExports = new Set<string>();
+
+  private syncStorageObservation(event?: DomainEvent): void {
+    const service = this.opts.storageHealth;
+    if (!service || this.stopping) return;
+    service.setWorld(this.opts.provider.openStore?.()?.dir ?? null);
+    const active = (job: Job) => job.status === "submitting" || job.status === "running" || job.finalization?.status === "pending";
+    if (!event) {
+      this.storageWritingJobs.clear();
+      for (const job of this.getState().app.jobs) if (active(job)) this.storageWritingJobs.add(job.id);
+    } else if (event.type === "job.updated") {
+      if (active(event.job)) this.storageWritingJobs.add(event.job.id); else this.storageWritingJobs.delete(event.job.id);
+    } else if (event.type === "export.progress") {
+      if (event.status === "running") this.storageWritingExports.add(event.exportId); else this.storageWritingExports.delete(event.exportId);
+    }
+    service.setWriting(this.storageWritingJobs.size > 0 || this.storageWritingExports.size > 0 || this.getState().app.setup?.running === true);
+  }
+
+  /** Trusted desktop/Node host wake callback. No renderer path or mutation authority. */
+  async wakeStorage(): Promise<void> {
+    if (this.stopping || !this.opts.storageHealth) return;
+    const work = this.opts.storageHealth.wake(); this.trackBackground(work); await work;
+  }
   /**
    * The bounded operational-log tail the derivation reads (SPEC-032 R-18), cached so a
    * derivation per event tick does not become a file read per event tick. Refreshed only when
@@ -4537,6 +4564,8 @@ export class Coordinator {
       // carries the findings — whose firstSeen bookkeeping R-35 says is never written to disk.
       // Journalling the event would have durably recorded both on every generate.
       parsed.type !== "diagnostics.ready" &&
+      // Resource readings are replaceable observations, not a second durable operation journal.
+      parsed.type !== "storage.health" &&
       // Several a second while a world opens, and over once it has (issue 1844).
       parsed.type !== "world.open-progress"
     ) {
@@ -4544,6 +4573,7 @@ export class Coordinator {
       void this.changeLog.append({ kind: "event", event: journalRecord(parsed) });
     }
     this.transport.broadcast(parsed);
+    this.syncStorageObservation(parsed);
     if (parsed.type === "proposal.resolved") {
       const store = this.opts.provider.openStore?.();
       if (store?.worldId === parsed.worldId && !this.stopping) {
@@ -4818,6 +4848,13 @@ export class Coordinator {
     await this.seed();
     await this.adapterLibrary?.refresh();
     await this.seedAppConfig();
+    if (this.opts.storageHealth) {
+      this.lifecycleDisposers.add(this.opts.storageHealth.subscribe(health => {
+        if (!this.stopping) this.emit({ type: "storage.health", at: new Date().toISOString(), health });
+      }));
+      this.syncStorageObservation();
+      this.trackBackground(this.opts.storageHealth.start());
+    }
     for (const run of (await this.audiobookActivity.load()).reverse()) this.readModel.apply({ type: "audiobook.activity", at: run.updatedAt, run });
     // The engine must be resolved BEFORE queue recovery, not after (SPEC-021 §2.11). Recovery
     // asks the service which engine is configured now, and a null answer means "no engine" —
@@ -14351,6 +14388,7 @@ export class Coordinator {
         // Schedules only; the derivation runs on the next immediate, off this handler's path
         // (R-34), and reaches the asker as the ordinary broadcast.
         this.diagnosticsSnapshot?.refresh();
+        if (this.opts.storageHealth) this.trackBackground(this.opts.storageHealth.refresh());
         return;
       }
       case "probe-grouped-read": {
@@ -23078,6 +23116,7 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    this.opts.storageHealth?.closeAdmission();
     this.sampleInstallAbort?.abort();
     const audioStudioStopped = this.audioStudioPreviews.stop();
     this.cataloguePreviews?.close();
@@ -23150,6 +23189,7 @@ export class Coordinator {
       await this.appearanceWrite;
       await this.jobQueue?.waitForIdle();
       await this.jobQueue?.drain();
+      await this.opts.storageHealth?.stop();
       await this.audiobookActivity.drain();
       await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
       await this.opts.adapter?.dispose?.().catch(() => {});
