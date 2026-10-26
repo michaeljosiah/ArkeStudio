@@ -94,7 +94,7 @@ export class SetupProcessRunner {
     }).finally(() => { active.cleaning = undefined; });
     return active.cleaning;
   }
-  async run(command: string, args: readonly string[], signal: AbortSignal, onOutput?: (text: string) => void): Promise<{ code: number; output: string }> {
+  async run(command: string, args: readonly string[], signal: AbortSignal, onOutput?: (text: string) => void, captureMode: "full" | "metadata" = "full"): Promise<{ code: number; output: string }> {
     if (this.closing || this.active) throw new SetupProcessCleanupPending(); signal.throwIfAborted();
     const request = JSON.stringify({ command, args }); if (Buffer.byteLength(request) > 64 * 1024) throw new Error("Setup command exceeds its supported bound.");
     const allowed = new Set(["SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PATH", "COMSPEC", "PATHEXT", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "HOME", "TMP", "TEMP", "TMPDIR", "LD_LIBRARY_PATH", "OLLAMA_HOST", "OLLAMA_MODELS"]);
@@ -114,8 +114,8 @@ export class SetupProcessRunner {
     const readyFrame = new Promise<void>(resolve => { ready = resolve; }), completed = new Promise<number>(resolve => { complete = resolve; });
     const capture = (chunk: Buffer) => {
       outputBytes += chunk.length;
-      if (outputBytes > 1024 * 1024) { internal.abort(new Error("Setup program output exceeded its supported bound.")); return; }
-      const text = chunk.toString("utf8"); output += text; try { onOutput?.(text); } catch { /* Progress presentation cannot grant authority. */ }
+      if (outputBytes > (captureMode === "metadata" ? 32 : 1) * 1024 * 1024) { internal.abort(new Error("Setup program output exceeded its supported bound.")); return; }
+      const text = chunk.toString("utf8"); if (captureMode === "full") output += text; try { onOutput?.(text); } catch { /* Progress presentation cannot grant authority. */ }
     };
     child.stdout?.on("data", capture); child.stderr?.on("data", capture);
     child.stdio[3]?.on("data", (chunk: Buffer) => {

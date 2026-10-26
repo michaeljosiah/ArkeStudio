@@ -15,6 +15,23 @@ const fact = (availableBytes = 10 * GiB, extra: Partial<StorageCapacity> = {}): 
 });
 const request = (id: string, remainingBytes: number | null, rootId = "media"): StorageReservationRequest => ({ id, owner, demands: [{ rootId, remainingBytes }] });
 
+for (const change of ["mapping", "capacity", "unavailable"] as const) it(`revokes flushed admission when a concurrent observation detects ${change} without an explicit invalidation`, async () => {
+  const root = await tempDir("arke-admission-observed-"), entered = deferred(), finish = deferred(); let now = 600_000, changed = false;
+  const storage = new AppStorageService({ appRoot: root, now: () => now, store: {
+    load: async () => ({ version: 2, records: [], consumed: [] }), save: async () => { entered.resolve(); await finish.promise; },
+  }, native: { setRoots: () => {}, stop: async () => {}, probe: async rootId => changed && change === "unavailable"
+    ? { state: "unavailable", source: "host-provided", limitations: ["probe-failed"], capacity: null }
+    : { state: "measured", source: "host-provided", limitations: [], capacity: fact(changed ? GiB : 100 * GiB,
+      { measuredAt: ++now, volumeId: changed && change === "mapping" ? "remounted-volume" : "volume-a", mappingRevision: rootId }) } } });
+  try {
+    await storage.start(); const rootId = storage.snapshot().roots[0]!.rootId;
+    const pending = storage.reservations.reserve(request("pending-observation", 6 * GiB, rootId));
+    await entered.promise; changed = true; now += 1001; await storage.refresh(); finish.resolve();
+    assert.deepEqual(await pending, { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-unavailable" } });
+    assert.equal(storage.reservations.snapshot().records[0]!.state, "uncertain");
+  } finally { finish.resolve(); await storage.stop(); }
+});
+
 for (const replacing of [false, true]) it(`revokes a pending ${replacing ? "replan" : "reservation"} grant when another writer invalidates capacity during its flush`, async () => {
   const root = await tempDir("arke-admission-invalidated-"), entered = deferred(), finish = deferred();
   let now = 600_000, blocked = false;

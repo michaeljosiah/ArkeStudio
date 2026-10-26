@@ -17,6 +17,7 @@ import { SETUP_CATALOGUE, type CatalogueEntry, type DownloadFile } from "./catal
 import { compareComfyUiVersions } from "@arke-studio/contracts";
 import { SetupSpaceHeldError, type SetupFileSpace, type SetupFileSpaceLease } from "../storage/setup-files.js";
 import { SetupProcessCleanupPending } from "./process.js";
+import type { SetupArchiveSpace, SetupArchiveSpaceLease } from "../storage/setup-archive.js";
 
 type TreeSpec = Extract<CatalogueEntry["spec"], { kind: "tree" }>;
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -31,6 +32,8 @@ const errorText = (err: unknown): string => (err instanceof Error ? err.message 
  */
 
 export interface SetupDeps {
+  /** Reads only the verified archive's bounded expansion metadata through the owned executor. */
+  archiveBytes?(archive: string, signal: AbortSignal): Promise<number>;
   /** Confirms cleanup of this owner's retained native commands, never reruns them. */
   confirmProcessCleanup?(): Promise<void>;
   disposeProcesses?(): Promise<void>;
@@ -80,6 +83,7 @@ export interface SetupOptions {
   /** Qualified native volume/reservation port; unsupported hosts retain their existing
    * unknown-capacity policy, without claiming shared admission or verified fit. */
   fileSpace?: SetupFileSpace;
+  archiveSpace?: SetupArchiveSpace;
   /** Where downloaded models live: <appRoot>/models. */
   appRoot: string;
   catalogue?: readonly CatalogueEntry[];
@@ -187,7 +191,11 @@ export class LocalSetupService {
   private readonly nativeRuns = new Set<Promise<unknown>>();
 
   private runProcess(id: string, command: string, args: readonly string[], signal: AbortSignal, onOutput?: (text: string) => void): Promise<{ code: number; output: string }> {
-    const running = this.deps.run(command, args, signal, onOutput).catch(error => {
+    return this.trackNative(id, this.deps.run(command, args, signal, onOutput));
+  }
+
+  private trackNative<T>(id: string, work: Promise<T>): Promise<T> {
+    const running = work.catch(error => {
       if (error instanceof SetupProcessCleanupPending) {
         if (!this.heldNative.has(id)) this.heldNative.set(id, { space: null });
         this.set(id, { state: "failed", detail: error.message }); this.publish();
@@ -791,17 +799,17 @@ export class LocalSetupService {
     // is being written to it; one that cannot be measured blocks nothing, exactly as an
     // unmeasurable disk did before.
     //
-    // Direct files on qualified native ports skip this legacy guard and use actual mounted
-    // volume identity through the shared registry below. Remaining archive/installer/pull
+    // Direct files and staged archives on qualified native ports skip this legacy guard and
+    // use actual mounted volume identity through the shared registry below. Installer/pull
     // paths retain historical Windows drive-root/per-POSIX-destination grouping. A path root
     // does not prove mounted-folder or shared-volume identity; those owners still need phase
-    // accounting and native-cleanup integration before they can claim shared admission.
+    // accounting before they can claim shared admission.
     const headroom = this.opts.headroomMb ?? DEFAULT_HEADROOM_MB;
     const rootOf = (dir: string): string => parse(resolve(dir)).root;
     const volumeKey = (dir: string): string => (process.platform === "win32" ? rootOf(dir) : resolve(dir));
     const volumes = new Map<string, { root: string; dirs: Set<string>; needMb: number; components: Live[] }>();
     for (const c of outstanding) {
-      if (this.opts.fileSpace && c.entry.spec.kind === "files") continue;
+      if (this.opts.fileSpace && c.entry.spec.kind === "files" || this.opts.archiveSpace && (c.entry.spec.kind === "tree" || c.entry.spec.kind === "archive")) continue;
       const dir = this.guardDestinationOf(c.entry);
       if (dir === null) continue; // no mapped folder — install states that, and states it better
       const key = volumeKey(dir);
@@ -906,6 +914,39 @@ export class LocalSetupService {
     }
     const spec = entry.spec;
     let releaseInstall: (() => void) | undefined;
+    let archiveSpace: SetupArchiveSpaceLease | undefined;
+    const reserveArchive = async (file: DownloadFile, target: string) => {
+      if (!this.opts.archiveSpace) return;
+      const owned = await this.ownedDownload(entry.id, file, target), writtenBytes = owned?.receipt.durableBytes ?? 0;
+      const totalBytes = Math.max(writtenBytes, owned?.receipt.totalBytes ?? Math.ceil(file.sizeMb * 1024 * 1024));
+      const expansion = entry.installedMb === undefined ? null : Math.max(0, Math.ceil((entry.installedMb - file.sizeMb) * 1024 * 1024));
+      archiveSpace = await this.opts.archiveSpace.reserve(entry.id, { target, totalBytes, writtenBytes }, expansion,
+        Math.ceil((this.opts.headroomMb ?? DEFAULT_HEADROOM_MB) * 1024 * 1024), this.abort.signal);
+      this.fileSpaceLease = archiveSpace;
+    };
+    const beforeExtraction = async (archive: string) => {
+      if (!archiveSpace) return;
+      let expanded: number;
+      try {
+        if (!this.deps.archiveBytes) throw new Error("Archive reader unavailable.");
+        expanded = await this.trackNative(entry.id, this.deps.archiveBytes(archive, this.abort.signal));
+      } catch (error) {
+        if (error instanceof SetupProcessCleanupPending || this.abort.signal.aborted) throw error;
+        throw new SetupSpaceHeldError({ status: "held", reason: "capacity", admission: { status: "unknown", reason: "unbounded-output" } }, "installation");
+      }
+      await archiveSpace.beforeExtraction(expanded);
+    };
+    const extractionSource = async (file: DownloadFile, target: string): Promise<string> => {
+      if (!archiveSpace) return target;
+      const owned = await this.ownedDownload(entry.id, file, target);
+      if (!owned?.receipt.downloadComplete) throw new Error("The verified archive checkpoint is unavailable.");
+      return owned.receipt.partialPath;
+    };
+    const discardArchive = async () => {
+      if (!archiveSpace) return;
+      const leftovers = await this.discardOwned(entry);
+      if (leftovers.length) { this.set(entry.id, { leftovers }); throw new IncompleteDownloadCleanupError("The verified installation archive could not be released. Its checkpoint remains available for review."); }
+    };
     const release = () => { const held = releaseInstall; releaseInstall = undefined; held?.(); };
     const finishSpace = async () => { const lease = this.fileSpaceLease; this.fileSpaceLease = null; await lease?.settle(); };
     const notifyReady = async () => { await finishSpace(); release(); await this.componentReady(entry.id); };
@@ -983,20 +1024,29 @@ export class LocalSetupService {
         const dir = join(this.opts.appRoot, spec.dir);
         const staged = `${dir}.staging`;
         const archive = join(staged, spec.file.file);
+        await reserveArchive(spec.file, archive);
         if ((await this.ownedDownload(entry.id, spec.file, archive)) === null) {
-          await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
+          // Keep the measured root's identity stable while clearing this installer's old
+          // stage. The admitted reservation also refuses unresolved previous-host owners.
+          if (archiveSpace) {
+            for (const item of await readdir(toExtendedLength(staged))) await rm(toExtendedLength(join(staged, item)), { recursive: true, force: true });
+          } else await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
         }
         this.set(entry.id, { state: "downloading", bytesPerSecond: null, pauseSupported: false, detail: undefined });
         this.publish();
-        const received = await this.download(entry.id, spec.file, archive, 0);
+        const received = await this.download(entry.id, spec.file, archive, 0, archiveSpace !== undefined);
 
         this.set(entry.id, { state: "installing", bytesPerSecond: null, pauseSupported: false, detail: "unpacking" });
         this.publish();
-        const unpacked = await this.runProcess(entry.id, systemTar(), ["-xf", archive, "-C", staged], this.abort.signal);
-        await rm(toExtendedLength(archive), { force: true }).catch(() => {});
+        const source = await extractionSource(spec.file, archive);
+        await beforeExtraction(source);
+        const unpacked = await this.runProcess(entry.id, systemTar(), ["-xf", source, "-C", staged], this.abort.signal);
+        if (unpacked.code !== 0) archiveSpace?.writeFailed(archive);
+        await archiveSpace?.extractionSettled();
+        if (!archiveSpace) await rm(toExtendedLength(archive), { force: true }).catch(() => {});
         const marker = unpacked.code === 0 ? await this.treeMarkerPath(staged, spec.rootMarker) : null;
         if (marker === null) {
-          await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
+          if (!archiveSpace) await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
           this.set(entry.id, {
             state: "failed",
             detail: firstLine(unpacked.output) || `the archive did not contain ${spec.rootMarker}`,
@@ -1004,6 +1054,7 @@ export class LocalSetupService {
           this.publish();
           return;
         }
+        await discardArchive();
         if (spec.version && spec.file.sha256) {
           const receipt = await open(join(staged, ".arke-runtime.json"), "w");
           try {
@@ -1081,19 +1132,24 @@ export class LocalSetupService {
         const dir = this.toolDir(spec);
         const staged = join(dir, ".staging");
         const archive = join(staged, file.file);
+        await reserveArchive(file, archive);
         this.set(entry.id, { state: "downloading", bytesPerSecond: null, pauseSupported: false, detail: undefined });
         this.publish();
-        const received = await this.download(entry.id, file, archive, 0);
+        const received = await this.download(entry.id, file, archive, 0, archiveSpace !== undefined);
 
         this.set(entry.id, { state: "installing", bytesPerSecond: null, pauseSupported: false, detail: "unpacking" });
         this.publish();
         // Extracting into the staging directory keeps a half-unpacked archive from ever looking
         // like presence. `bsdtar` by absolute path, not `tar` off PATH — see systemTar.
-        const unpacked = await this.runProcess(entry.id, systemTar(), ["-xzf", archive, "-C", staged], this.abort.signal);
+        const source = await extractionSource(file, archive);
+        await beforeExtraction(source);
+        const unpacked = await this.runProcess(entry.id, systemTar(), ["-xzf", source, "-C", staged], this.abort.signal);
+        if (unpacked.code !== 0) archiveSpace?.writeFailed(archive);
+        await archiveSpace?.extractionSettled();
         const extracted = join(staged, spec.executable);
         const arrived = unpacked.code === 0 && (await stat(toExtendedLength(extracted)).catch(() => null)) !== null;
         if (!arrived) {
-          await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
+          if (!archiveSpace) await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
           this.set(entry.id, {
             state: "failed",
             detail: firstLine(unpacked.output) || `the archive did not contain ${spec.executable}`,
@@ -1101,6 +1157,7 @@ export class LocalSetupService {
           this.publish();
           return;
         }
+        await discardArchive();
         // Only a complete extraction takes the real path, so presence is never half a tool.
         const target = join(dir, spec.executable);
         await rm(toExtendedLength(target), { force: true }).catch(() => {});
@@ -1224,7 +1281,7 @@ export class LocalSetupService {
   }
 
   /** Stream one file to disk. Returns its complete byte count, including a resumed prefix. */
-  private async download(componentId: string, spec: DownloadFile, target: string, alreadyDone: number): Promise<number> {
+  private async download(componentId: string, spec: DownloadFile, target: string, alreadyDone: number, retainArchive = false): Promise<number> {
     await mkdir(toExtendedLength(dirname(target)), { recursive: true });
     const expectedReceiptPath = this.receiptPath(componentId, spec.url, target);
     const owned = await this.ownedDownload(componentId, spec, target);
@@ -1421,7 +1478,11 @@ export class LocalSetupService {
       await this.opts.beforeComponentInstall?.(componentId);
       if (transfer.abort.signal.aborted || this.abort.signal.aborted || this.disposed) throw new Error("stopped");
       // Only a verified whole file takes the real name. Rename remains the atomic visibility step.
-      if (this.components.get(componentId)?.entry.preserveExistingFiles) {
+      if (retainArchive) {
+        // The verified archive is an intermediate input. Keep the one physical file and
+        // its durable receipt under the same UUID name until native extraction settles.
+        // A space hold/restart can therefore reverify it without another HTTP request.
+      } else if (this.components.get(componentId)?.entry.preserveExistingFiles) {
         // Publishing a hard link fails if a user supplied the destination during transfer.
         // The verified staging file is on this volume; no overwrite window is introduced.
         await link(toExtendedLength(receipt.partialPath), toExtendedLength(target));
@@ -1431,8 +1492,10 @@ export class LocalSetupService {
         await rename(toExtendedLength(receipt.partialPath), toExtendedLength(target));
       }
       landed = true;
-      await this.opts.onFileInstalled?.(componentId, target);
-      await rm(toExtendedLength(receiptPath), { force: true }).catch(() => {});
+      if (!retainArchive) {
+        await this.opts.onFileInstalled?.(componentId, target);
+        await rm(toExtendedLength(receiptPath), { force: true }).catch(() => {});
+      }
     } catch (err) {
       if (err instanceof SetupSpaceHeldError) {
         if (transfer.rangeSupported && receipt.durableBytes > 0) transfer.preserve ??= "pause";

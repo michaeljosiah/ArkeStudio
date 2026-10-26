@@ -59,6 +59,7 @@ export class StorageReservations {
     probe(rootId: string, signal: AbortSignal, after?: number): Promise<StorageCapacity | null>;
     /** Host collector invalidations revoke captured evidence across an awaited flush. */
     capacityEpoch?(): number;
+    capacityCurrent?(rootId: string, fact: StorageCapacity): boolean;
     now?: () => number;
     onChange?: () => void;
     stopTimeoutMs?: number;
@@ -176,7 +177,6 @@ export class StorageReservations {
       const rootIds = new Set([...request.demands.map(d => d.rootId), ...[...this.records.values()].flatMap(r => r.demands.map(d => d.rootId))]);
       if (rootIds.size > 128) return { status: "held", reason: "reservation-limit" };
       const facts = new Map<string, StorageCapacity>();
-      const capacityEpoch = this.deps.capacityEpoch?.();
       const roots = [...rootIds]; let cursor = 0;
       await Promise.all(Array.from({ length: Math.min(4, roots.length) }, async () => {
         while (cursor < roots.length && !combined.aborted) {
@@ -188,7 +188,11 @@ export class StorageReservations {
         }
       }));
       if (this.closing || combined.aborted) return { status: "held", reason: "stopped" };
-      if (this.deps.capacityEpoch?.() !== capacityEpoch) return { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-unavailable" } };
+      // Establish the baseline after collection, whose accepted readings can themselves
+      // invalidate older observations. Every captured root must still match that baseline.
+      const capacityEpoch = this.deps.capacityEpoch?.();
+      const current = () => !this.deps.capacityCurrent || [...facts].every(([rootId, fact]) => this.deps.capacityCurrent!(rootId, fact));
+      if (!current()) return { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-unavailable" } };
       if (replanAfter !== undefined && [...facts.values()].some(fact => fact.measuredAt <= replanAfter)) {
         return { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-stale" } };
       }
@@ -240,7 +244,7 @@ export class StorageReservations {
         return { status: "held", reason: "stopped" };
       }
       const grantedAt = this.now();
-      if (this.deps.capacityEpoch?.() !== capacityEpoch) {
+      if (this.deps.capacityEpoch?.() !== capacityEpoch || !current()) {
         reservation.state = "uncertain"; this.changed();
         return { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-unavailable" } };
       }

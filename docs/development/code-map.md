@@ -24,7 +24,7 @@ measured available/committed/remaining/reserve figures. Capacity admission waits
 collector's coalescing floor for a post-report reading; it stays bounded and cancellable. Storage
 authority also bounds stalled reads/saves during shutdown, retaining uncertain intents and refusing
 late write permission. Unsupported host ports retain their existing unknown-capacity policy and
-do not claim shared admission. Archive extraction, runtime-owned pulls, other write owners,
+do not claim shared admission. Runtime-owned pulls, other write owners,
 restart reconciliation, other native ports and reviewed cleanup remain outstanding.
 Capacity invalidation/root changes revoke captured admission evidence across a reservation flush;
 an already-saved intent remains uncertain until its owner settles it. Completed-only destinations
@@ -39,9 +39,21 @@ group. Commands remain shell-free, output bounded, and actual completion waits f
 leases after unknown native cleanup, including legacy listing/removal/fallback paths, and refuses
 later setup writes until owner cleanup confirms exit. Stop cannot discard their staging while
 cleanup is unknown. Coordinator shutdown still stops other owners after setup failure and retains
-minimum storage/recovery settlement until a later confirmed cleanup. This prerequisite does not
-implement archive expansion-space planning or runtime-owned pull reservations. Tests:
+minimum storage/recovery settlement until a later confirmed cleanup. Tests:
 `test/setup/process.test.ts`, `host-process-cleanup.test.ts` and `local-setup.test.ts`.
+
+`storage/setup-archive.ts` connects tree/tool archives to shared staging-volume admission.
+The known download and declared expansion coexist in one reservation; a larger verified manifest
+grows/rechecks it before native extraction. `setup/archive-manifest.ts` reads numeric-owner
+GNU/BSD listings through the owned executor, bounding entries, bytes, lines and duration without
+retaining member names. A complete archive stays under its durable UUID checkpoint until confirmed
+extraction and successful marker verification, permitting explicit Resume without another HTTP
+request. Same-volume rename/carry creates no second payload copy. Unknown native cleanup retains
+the disk/install lease. Missing expansion facts hold honestly; runtime-owned pulls, legacy native
+installers and other write owners remain outstanding. `StorageMonitor` also revokes admissions when
+accepted native observations discover remounts, unavailable facts or less capacity during a save.
+Captured roots are validated after collection and again after flush, so a fresh requested reading
+can establish new authority while an observation change cannot restore an older grant.
 
 Recovery control foundation (#2194, SPEC-061 R-7/R-11/R-25): contracts `recovery-policy.ts`
 defines the closed restart context and rolling budget. Coordinator `recovery/control.ts` serializes

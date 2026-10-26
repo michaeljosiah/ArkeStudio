@@ -30,6 +30,7 @@ export class StorageMonitor {
   private batch: Promise<void> | null = null;
   private batchAbort: AbortController | null = null;
   private version = 0;
+  private capacityVersion = 0;
   private writing = false;
   private started = false;
   private stopped = false;
@@ -44,13 +45,18 @@ export class StorageMonitor {
   }) {}
   private now(): number { return (this.deps.now ?? Date.now)(); }
   /** Invalidations and root changes revoke facts already captured by an admission writer. */
-  admissionEpoch(): number { return this.version; }
+  admissionEpoch(): number { return this.capacityVersion; }
+  currentCapacity(rootId: string, captured: StorageCapacity): boolean {
+    const current = this.readings.get(rootId)?.result.capacity;
+    return !!current && current.volumeId === captured.volumeId && current.mappingRevision === captured.mappingRevision
+      && current.measuredAt >= captured.measuredAt && current.availableBytes !== null && captured.availableBytes !== null && current.availableBytes >= captured.availableBytes;
+  }
 
   setRoots(roots: readonly StorageMonitoredRoot[]): void {
     const next = rootsSchema.parse(roots);
     if (this.stopped || JSON.stringify(next) === JSON.stringify(this.roots)) return;
     const before = new Map(this.roots.map(root => [root.rootId, root]));
-    this.roots = next; this.version++; this.batchAbort?.abort();
+    this.roots = next; this.version++; this.capacityVersion++; this.batchAbort?.abort();
     const retained = new Map<string, Reading>();
     for (const root of next) {
       const old = before.get(root.rootId), value = this.readings.get(root.rootId);
@@ -77,7 +83,7 @@ export class StorageMonitor {
 
   /** Wake discards the rate window and invalidates facts before any new decision can read them. */
   wake(): Promise<void> {
-    this.version++; this.batchAbort?.abort();
+    this.version++; this.capacityVersion++; this.batchAbort?.abort();
     for (const [id, reading] of this.readings) {
       reading.result = { ...reading.result, capacity: null, state: "unavailable" };
       reading.minimumAfter = Math.max(reading.minimumAfter, this.now());
@@ -91,7 +97,7 @@ export class StorageMonitor {
   invalidate(rootId: string): void {
     const reading = this.readings.get(rootId);
     if (!reading || this.stopped) return;
-    this.version++; this.batchAbort?.abort(); this.pending.add(rootId);
+    this.version++; this.capacityVersion++; this.batchAbort?.abort(); this.pending.add(rootId);
     reading.result = { ...reading.result, state: "unavailable", capacity: null };
     reading.minimumAfter = Math.max(reading.minimumAfter, this.now());
     reading.samples = [];
@@ -129,6 +135,8 @@ export class StorageMonitor {
           if (result.capacity.volumeId === previous.volumeId && result.capacity.mappingRevision === previous.mappingRevision) continue;
           result = missing();
         }
+        if (previous && (!result.capacity || previous.volumeId !== result.capacity.volumeId || previous.mappingRevision !== result.capacity.mappingRevision
+          || result.capacity.availableBytes === null || previous.availableBytes !== null && result.capacity.availableBytes < previous.availableBytes)) this.capacityVersion++;
         reading.result = result;
         const sample = result.capacity;
         if (sample) {

@@ -19,12 +19,12 @@ export interface SetupFileSpace {
 }
 const amount = (bytes: number) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GiB` : bytes >= 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(1)} MiB` : `${bytes} bytes`;
 export class SetupSpaceHeldError extends Error {
-  constructor(readonly result: Extract<StorageReservationResult, { status: "held" }>) {
+  constructor(readonly result: Extract<StorageReservationResult, { status: "held" }>, operation: "download" | "installation" = "download") {
     const admission = result.admission;
     super(admission?.status === "held"
       ? `This download is waiting for disk space: ${amount(admission.availableBytes)} available; ${amount(admission.peakBytes)} estimated remaining files, ${amount(admission.reservedBytes)} already committed and ${amount(admission.reserveBytes)} reserve.`
       : admission?.status === "unknown" && admission.reason === "unbounded-output"
-      ? "The source exceeded its declared file-size budget without a complete length. Review the download before retrying."
+      ? operation === "installation" ? "The archive's expansion size is unavailable. Review the installation before retrying." : "The source exceeded its declared file-size budget without a complete length. Review the download before retrying."
       : result.reason === "capacity" ? "This download is waiting for fresh disk capacity and room for its remaining files."
       : result.reason === "reconciliation-required" ? "Earlier storage accounting needs review before this download can continue."
       : "Storage accounting is unavailable. Review before continuing this download.");

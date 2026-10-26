@@ -268,6 +268,7 @@ import { buildDiagnosticsBundle } from "./diagnostics.js";
 import { DiagnosticsSnapshotHolder } from "./diagnostics-snapshot.js";
 import type { AppStorageService } from "./storage/service.js";
 import { SetupFileStorage } from "./storage/setup-files.js";
+import { SetupArchiveStorage } from "./storage/setup-archive.js";
 import type { RecoveryControlService } from "./recovery/control.js";
 import type { RecoveryHistoryService } from "./recovery/history.js";
 import { recoveryCommand } from "./recovery/commands.js";
@@ -4374,6 +4375,7 @@ export class Coordinator {
             {
               appRoot: opts.appRoot,
               fileSpace: opts.storageHealth?.supportsAdmission ? new SetupFileStorage(opts.storageHealth) : undefined,
+              archiveSpace: opts.storageHealth?.supportsAdmission ? new SetupArchiveStorage(opts.storageHealth) : undefined,
               // The static catalogue plus what the host derives from provider-owned data —
               // the per-recipe weight entries (SPEC-021 §2.4). One list, one service.
               catalogue: [...SETUP_CATALOGUE, ...(opts.setupExtraEntries ?? []), ...adapterSetupEntries(HEARMEMAN_ADAPTERS)],

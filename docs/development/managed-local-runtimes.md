@@ -28,7 +28,13 @@ program itself. Output and shutdown waits are bounded. Unknown cleanup retains t
 or file-mutation reservation, keeps staging intact, and blocks later setup writes until its owner
 confirms exit. It does not automatically rerun an installer or model command. Shutdown still drains
 other native owners after a setup cleanup failure and keeps minimum settlement available for retry.
-This does not yet provide shared archive-expansion or model-pull space planning.
+On qualified native ports, managed tree/tool installs now reserve their archive plus declared
+expansion on the actual staging volume. A bounded verified manifest must pass fresh admission
+before extraction; a larger expansion grows the plan first. Unknown metadata holds the operation.
+A verified archive retains one UUID checkpoint until confirmed extraction/marker verification,
+so explicit Resume can reuse it without HTTP. Publication/carry use rename rather than another
+payload copy. Native cleanup uncertainty retains the disk/install reservation. Shared runtime-pull
+space planning, other write owners and previous-host reconciliation remain unfinished.
 
 Ollama is a pinned, SHA-256-verified portable tree, not a system installer or PATH command.
 Arke owns its process, a private loopback port, `<appRoot>/models/ollama`, and

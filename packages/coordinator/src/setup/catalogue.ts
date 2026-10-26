@@ -257,6 +257,10 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     displayName: "Higgsfield CLI",
     purpose: "Images and video · Higgsfield account",
     sizeMb: 7,
+    // Both pinned archives inspected with the numeric-owner manifest reader (2026-10-26):
+    // amd64 19,051,008 and arm64 17,610,752 expansion bytes including entry allowance.
+    // Keep the 7 MiB declared download plus 19 MiB expansion simultaneously.
+    installedMb: 26,
     optional: true,
     spec: {
       kind: "archive",

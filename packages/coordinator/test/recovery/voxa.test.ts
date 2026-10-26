@@ -81,17 +81,20 @@ it("Suggest only and explicit personal voice selection cannot reset or bypass au
   }
 });
 
-it("voice reconfiguration confirms the old process and settles its retained reservation before personal startup", { timeout: 50_000 }, async () => {
-  const h = await fixture({ readyTimeoutMs: 3000 }); type StopSeam = { forceStop(child: unknown): Promise<void> };
+it("voice reconfiguration confirms the old process and settles its retained reservation before personal startup", { timeout: 120_000 }, async () => {
+  const h = await fixture({ readyTimeoutMs: 30_000 }); type StopSeam = { forceStop(child: unknown): Promise<void> };
   const seam = h.worker as unknown as StopSeam, stop = seam.forceStop.bind(h.worker);
   try {
-    await h.coordinator.start(0); await until(() => h.worker.status === "healthy", "voice fixture ready", 15000);
-    seam.forceStop = async () => {}; h.env.MODE = "never-healthy"; h.env.IGNORE_STOP = "1"; process.kill(h.worker.pid!, "SIGKILL");
-    await untilAsync(async () => (await h.disk()).targets[0]?.intent?.phase === "unknown", "retained unverified voice process", 15000);
+    await h.coordinator.start(0); await until(() => h.worker.status === "healthy", "voice fixture ready", 40_000);
+    // An incompatible response proves the replacement initialized its signal handler before
+    // validation fails. A three-second never-ready clock could kill a starved Linux child
+    // before that handler existed, so it never exercised retained cleanup at all.
+    seam.forceStop = async () => {}; h.env.PROTOCOL_VERSION = "2"; h.env.IGNORE_STOP = "1"; process.kill(h.worker.pid!, "SIGKILL");
+    await untilAsync(async () => (await h.disk()).targets[0]?.intent?.phase === "unknown", "retained unverified voice process", 50_000);
     const retainedPid = h.worker.pid!; assert.ok(retainedPid); assert.equal(h.released(), 0);
     await assert.rejects(h.client.synthesize({ voiceId: "fixture", text: "must remain held" }), VoxaRecoveryHeldError);
     h.selectPersonal(); h.client.cancelPending();
-    const launch = { command: process.execPath, args: [child], env: { ...h.env, MODE: "healthy", IGNORE_STOP: "0" }, inheritEnv: false };
+    const launch = { command: process.execPath, args: [child], env: { ...h.env, MODE: "healthy", PROTOCOL_VERSION: "1", IGNORE_STOP: "0" }, inheritEnv: false };
     await assert.rejects(h.worker.reconfigure(launch), /not confirmed/); assert.equal(h.worker.pid, retainedPid); assert.equal(h.released(), 0); process.kill(retainedPid, 0);
     seam.forceStop = stop; await h.worker.reconfigure(launch);
     assert.equal(h.worker.status, "healthy"); assert.notEqual(h.worker.pid, retainedPid); assert.equal(h.released(), 1);

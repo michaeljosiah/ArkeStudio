@@ -50,6 +50,7 @@ export class AppStorageService {
       store: options.store ?? new FileStorageReservationStore(join(options.appRoot, "operations", "storage-reservations.json")),
       probe: (rootId, signal, after) => this.monitor.capacity(rootId, signal, after), now: options.now,
       capacityEpoch: () => this.monitor.admissionEpoch(),
+      capacityCurrent: (rootId, fact) => this.monitor.currentCapacity(rootId, fact),
       onChange: () => { this.syncRoots(); this.publish(this.monitor.snapshot()); },
     });
     this.monitor = new StorageMonitor({ probe: (rootId, signal, after) => this.native.probe(rootId, signal, after), now: options.now,

@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import type { SetupDeps } from "./local-setup.js";
 import { SetupProcessRunner } from "./process.js";
 import type { ChildLedger } from "../child-ledger.js";
+import { inspectSetupArchive } from "./archive-manifest.js";
+import { systemTar } from "./local-setup.js";
 
 /**
  * The real seams for fetching local runtimes: streamed HTTP, and two foreign programs run as
@@ -13,6 +15,7 @@ export function nodeSetupDeps(options: { ledger?: ChildLedger } = {}): SetupDeps
   return {
     confirmProcessCleanup: () => processes.confirmCleanup(),
     disposeProcesses: () => processes.dispose(),
+    archiveBytes: (archive, signal) => inspectSetupArchive(processes, systemTar(), archive, signal),
     async fetchStream(url, signal, rangeStart, validator) {
       const res = await fetch(url, {
         signal,

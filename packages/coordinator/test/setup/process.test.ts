@@ -12,6 +12,15 @@ import { until } from "../wait.js";
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 const gone = (pid: number) => { try { process.kill(pid, 0); return false; } catch { return true; } };
 
+it("streams bounded archive metadata beyond the ordinary log cap without retaining member names", { timeout: 90000 }, async () => {
+  const runner = new SetupProcessRunner(); let bytes = 0;
+  try {
+    const result = await runner.run(process.execPath, ["-e", "process.stdout.write(Buffer.alloc(2*1024*1024,120))"], new AbortController().signal,
+      text => { bytes += Buffer.byteLength(text); }, "metadata");
+    assert.equal(result.code, 0); assert.equal(bytes, 2 * 1024 * 1024); assert.equal(result.output, "");
+  } finally { await runner.dispose(); }
+});
+
 it("bounds program output and confirms exit before admitting another command", { timeout: 90000 }, async () => {
   const runner = new SetupProcessRunner(); let output = 0;
   try {

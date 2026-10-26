@@ -43,7 +43,7 @@ body reads, transport cancellation, bounded unknown-length responses, valid-pref
 explicit ranged Resume with only the remaining byte reserved. Unavailable qualified native capacity
 cannot start a transfer. `monitor.test.ts` covers post-report admission through the one-second
 coalescing floor and cancellation on stop. `reservations.test.ts` bounds stalled read/save shutdown
-and refuses late grants while retaining uncertain intent on reopen. Archive/pull phases, other
+and refuses late grants while retaining uncertain intent on reopen. Runtime-owned pull phases, other
 landing/scratch/export/import owners and restart reconciliation still need their own acceptance.
 The production-host file fixture additionally stalls progress-accounting persistence while a real
 partial-file handle is admitted, quits with that save still blocked, verifies bounded shutdown and
@@ -62,7 +62,22 @@ The production host test refuses setup cleanup, verifies other native owners sti
 minimum storage/control settlement open until the cleanup retry. `local-setup.test.ts` checks held
 leases/staging, silent/interactive installer refusal, Stop/dispose, read-only listing and removal.
 Ordinary POSIX process-group behavior still requires Linux CI; deliberate daemon escape and complete
-archive/pull space planning are outside these checks. Run affected typechecks after the last test edit.
+runtime-owned pull space planning are outside these checks. Run affected typechecks after the last test edit.
+
+`test/storage/setup-archive.test.ts` runs the actual owned tar reader/extractor with tiny pinned
+archives through tree and single-tool setup. It checks shared expansion reservations against a
+competing file owner, changed expansion before native writes, unknown metadata, held native cleanup,
+and one complete UUID checkpoint reused only by explicit Resume without HTTP. Activation occurs
+after process and reservation settlement. `test/setup/archive-manifest.test.ts` covers supported
+numeric GNU/BSD prefixes, unknown/device records, arithmetic/line bounds and native metadata without
+extraction. Metadata mode retains no member output and has separate total-byte/entry/time bounds.
+Already-cached checksum-pinned Windows ComfyUI/Ollama archives have also been read without extracting
+them or downloading another runtime: expansion estimates were 4,910,957,043 and 2,231,700,495 bytes.
+Both pinned CLI architectures were checksum-verified and inspected, establishing its 26 MiB peak
+declaration. These estimates do not guarantee available space throughout extraction. Linux CI and
+first-run native application acceptance remain distinct; other write owners and reconciliation remain.
+Observation regressions also change mapping/capacity or fail a native read during a pending flush,
+without calling explicit invalidation, and verify the grant is revoked with uncertain intent retained.
 
 Recovery control tests (#2194) use contracts `test/recovery-policy.test.ts` and coordinator
 `test/recovery/control.test.ts`. They inject crash/unknown writes, competing attempts, rolling
