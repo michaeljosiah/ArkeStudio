@@ -50,6 +50,8 @@ export class StorageReservations {
   private auditFailure: StorageAuditFailure | undefined;
   private closing = false;
   private closed = false;
+  private readonly closingWaiters = new Set<() => void>();
+  private stopped: Promise<void> | null = null;
 
   constructor(private readonly deps: {
     store: StorageReservationStore;
@@ -57,7 +59,22 @@ export class StorageReservations {
     probe(rootId: string, signal: AbortSignal, after?: number): Promise<StorageCapacity | null>;
     now?: () => number;
     onChange?: () => void;
+    stopTimeoutMs?: number;
   }) {}
+
+  private async duringShutdown<T>(work: Promise<T>, fallback: T, failure: "read-failed" | "write-failed" = "write-failed"): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined, close!: () => void;
+    const ending = new Promise<T>(resolve => {
+      close = () => { timer = setTimeout(() => {
+        this.auditAvailable = false; this.auditFailure ??= failure;
+        for (const record of this.records.values()) record.state = "uncertain";
+        resolve(fallback);
+      }, this.deps.stopTimeoutMs ?? 2_000); };
+      this.closingWaiters.add(close); if (this.closing) close();
+    });
+    try { return await Promise.race([work, ending]); }
+    finally { if (timer) clearTimeout(timer); this.closingWaiters.delete(close); }
+  }
 
   private serial<T>(action: () => Promise<T>): Promise<T> {
     let result!: T;
@@ -69,7 +86,7 @@ export class StorageReservations {
   }
 
   async open(): Promise<void> {
-    return this.serial(async () => {
+    return this.duringShutdown(this.serial(async () => {
       if (this.opened || this.closing) return;
       try {
         const data = StorageReservationFileSchema.parse(await this.deps.store.load());
@@ -79,7 +96,7 @@ export class StorageReservations {
       } catch (error) { this.auditAvailable = false; this.auditFailure = this.failureKind(error, "read-failed"); }
       this.opened = true;
       this.changed();
-    });
+    }), undefined, "read-failed");
   }
 
   snapshot(): { auditAvailable: boolean; auditFailure?: StorageAuditFailure; records: StorageReservation[]; consumed: StorageConsumption[] } {
@@ -110,6 +127,10 @@ export class StorageReservations {
       await this.deps.store.save([...next.values()], consumed);
       this.records = next;
       this.consumed = consumed;
+      if (this.closed || !this.auditAvailable) {
+        for (const record of this.records.values()) record.state = "uncertain";
+        return false;
+      }
       this.changed();
       return true;
     } catch (error) {
@@ -135,7 +156,7 @@ export class StorageReservations {
 
   private admit(request: StorageReservationRequest, replacing: boolean, signal?: AbortSignal): Promise<StorageReservationResult> {
     request = requestSchema.parse(request);
-    return this.serial(async () => {
+    return this.duringShutdown<StorageReservationResult>(this.serial(async () => {
       if (this.closing || signal?.aborted) return { status: "held", reason: "stopped" };
       if (!this.opened || !this.auditAvailable) return { status: "held", reason: "audit-unavailable" };
       // Idempotent retries must not acquire twice or silently change an existing operation's plan.
@@ -220,24 +241,24 @@ export class StorageReservations {
         return { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-stale" } };
       }
       return { status: "reserved", reservation: structuredClone(reservation) };
-    });
+    }), { status: "held", reason: "stopped" });
   }
 
   /** The owning operation confirms its write/cancellation/checkpoint has settled before release.
    * This removes space planning only; it is never a job/provider replay or completion receipt. */
   settle(id: string, confirmedOwner: StorageReservation["owner"]): Promise<boolean> {
-    return this.serial(async () => {
+    return this.duringShutdown(this.serial(async () => {
       const record = this.records.get(id);
       if (this.closed || !record || !sameOwner(record.owner, confirmedOwner)) return false;
       const next = new Map(this.records); next.delete(id);
       if (!this.auditAvailable) return false;
       return this.persist(next, [...this.recent(this.consumed), ...this.charges(record.demands, this.now())]);
-    });
+    }), false);
   }
 
   /** Written bytes reduce future need; increasing a plan uses replan's fresh admission instead. */
   reduce(id: string, confirmedOwner: StorageReservation["owner"], remaining: Readonly<Record<string, number>>): Promise<boolean> {
-    return this.serial(async () => {
+    return this.duringShutdown(this.serial(async () => {
       const record = this.records.get(id);
       if (this.closing || !this.auditAvailable || !record || record.state !== "active" || !sameOwner(record.owner, confirmedOwner)) return false;
       if (Object.keys(remaining).some(rootId => !record.demands.some(d => d.rootId === rootId))) return false;
@@ -252,9 +273,15 @@ export class StorageReservations {
       }
       const next = new Map(this.records); next.set(id, updated);
       return this.persist(next, [...this.recent(this.consumed), ...this.charges(released, this.now())]);
-    });
+    }), false);
   }
 
-  closeAdmission(): void { this.closing = true; this.control.abort(); }
-  async stop(): Promise<void> { this.closeAdmission(); await this.writes.drain(); this.closed = true; }
+  closeAdmission(): void {
+    if (this.closing) return; this.closing = true; this.control.abort();
+    for (const close of this.closingWaiters) close(); this.closingWaiters.clear();
+  }
+  stop(): Promise<void> {
+    this.stopped ??= (async () => { this.closeAdmission(); await this.duringShutdown(this.writes.drain(), undefined); this.closed = true; })();
+    return this.stopped;
+  }
 }

@@ -33,6 +33,7 @@ export class StorageMonitor {
   private writing = false;
   private started = false;
   private stopped = false;
+  private readonly admissionStopped = new AbortController();
 
   constructor(private readonly deps: {
     /** Bounded and cancellable. The platform port owns any outstanding native read handles. */
@@ -149,10 +150,32 @@ export class StorageMonitor {
     if (this.stopped || signal.aborted || !this.readings.has(rootId)) return null;
     const reading = this.readings.get(rootId)!;
     reading.minimumAfter = Math.max(reading.minimumAfter, after);
-    let sample = this.readings.get(rootId)?.result.capacity;
-    if (!sample || sample.measuredAt <= reading.minimumAfter || sample.measuredAt > this.now() || this.now() - sample.measuredAt > STORAGE_POLICY.admissionMaxAgeMs) await this.refresh();
-    sample = this.readings.get(rootId)?.result.capacity;
-    return signal.aborted || this.stopped || sample && sample.measuredAt <= reading.minimumAfter ? null : sample ? structuredClone(sample) : null;
+    const bounded = AbortSignal.any([signal, this.admissionStopped.signal, AbortSignal.timeout(16_000)]);
+    const wait = (work: Promise<unknown>) => new Promise<void>(resolve => {
+      const done = () => { bounded.removeEventListener("abort", done); resolve(); };
+      bounded.addEventListener("abort", done, { once: true });
+      void work.then(done, done); if (bounded.aborted) done();
+    });
+    while (!bounded.aborted && this.readings.get(rootId) === reading) {
+      let sample = reading.result.capacity;
+      if (sample && sample.measuredAt > reading.minimumAfter && sample.measuredAt <= this.now() && this.now() - sample.measuredAt <= STORAGE_POLICY.admissionMaxAgeMs) return structuredClone(sample);
+      const attemptedBefore = reading.attemptedAt;
+      await wait(this.refresh());
+      if (bounded.aborted || this.readings.get(rootId) !== reading) return null;
+      sample = reading.result.capacity;
+      if (sample && sample.measuredAt > reading.minimumAfter && sample.measuredAt <= this.now() && this.now() - sample.measuredAt <= STORAGE_POLICY.admissionMaxAgeMs) return structuredClone(sample);
+      // A performed, current failed measurement is unavailable. A coalescing cooldown is
+      // merely pending: wait for its eligible refresh instead of invalidating a live lease.
+      if (sample === null && reading.attemptedAt !== attemptedBefore && reading.attemptedAt >= reading.minimumAfter) return null;
+      if (reading.attemptedAt !== attemptedBefore && reading.attemptedAt >= reading.minimumAfter && sample && sample.measuredAt <= reading.minimumAfter) return null;
+      const delay = Math.max(1, 1_000 - (this.now() - reading.attemptedAt));
+      const waitingAt = this.now();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try { await wait(new Promise<void>(resolve => { timer = setTimeout(resolve, Math.min(delay, 1_000)); })); }
+      finally { if (timer) clearTimeout(timer); }
+      if (this.now() <= waitingAt) return null; // A frozen/reversed clock cannot qualify freshness.
+    }
+    return null;
   }
 
   snapshot(): StorageHealthSnapshot {
@@ -185,6 +208,7 @@ export class StorageMonitor {
   }
   async stop(): Promise<void> {
     this.stopped = true;
+    this.admissionStopped.abort();
     if (this.timer) clearTimeout(this.timer); this.timer = null;
     this.batchAbort?.abort(); await this.batch;
   }

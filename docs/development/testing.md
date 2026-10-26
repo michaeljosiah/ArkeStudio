@@ -36,6 +36,19 @@ journal exclusion. Client `test/storage-health.test.ts` checks the matching fold
 `test/storage-diagnostics.test.ts` covers pure findings, stale/unknown facts and typed failures.
 These checks establish observation and Diagnostics composition; write-path protection, recovery
 and visual parity with approved turn 239 require separate end-to-end acceptance.
+`test/storage/setup-files.test.ts` now runs two real streamed file installers against one shared
+volume, verifies the second makes no request while held, and sends authenticated production-host
+Install/Retry commands against a competing owner's intent. It checks known-length growth before
+body reads, transport cancellation, bounded unknown-length responses, valid-prefix retention and
+explicit ranged Resume with only the remaining byte reserved. Unavailable qualified native capacity
+cannot start a transfer. `monitor.test.ts` covers post-report admission through the one-second
+coalescing floor and cancellation on stop. `reservations.test.ts` bounds stalled read/save shutdown
+and refuses late grants while retaining uncertain intent on reopen. Archive/pull phases, other
+landing/scratch/export/import owners and restart reconciliation still need their own acceptance.
+The production-host file fixture additionally stalls progress-accounting persistence while a real
+partial-file handle is admitted, quits with that save still blocked, verifies bounded shutdown and
+the exact retained checkpoint, and refuses late grants after the old write finishes. Completed
+existing files in a partly missing component must remain exact and consume no second reservation.
 
 Recovery control tests (#2194) use contracts `test/recovery-policy.test.ts` and coordinator
 `test/recovery/control.test.ts`. They inject crash/unknown writes, competing attempts, rolling

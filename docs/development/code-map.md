@@ -13,8 +13,19 @@ state folds without entering the world diagnostic journal. Contracts `storage-di
 measured storage findings for Settings · Diagnostics; its Refresh requests the host collector.
 Tests: contracts `test/storage-{health,diagnostics}.test.ts`, coordinator `test/storage/`, client
 `test/storage-health.test.ts`; requirements SPEC-032 R-17/R-33, SPEC-062 R-1–R-14/R-24.
-Write-path integration, incident notifications, other native host ports and reviewed cleanup remain
-outstanding.
+`storage/setup-files.ts` now connects setup's direct HTTP file owner to the shared registry on
+qualified native ports. Actual per-file destinations include mapped model folders; retained prefixes
+and existing files reduce remaining need before HTTP starts. Catalogue peak/headroom is retained
+once, larger declared responses replan before body writes, and unknown-length responses stop at the
+declared file bound with a valid resumable checkpoint where supported. Progress records consumed
+bytes; verified publication/pause/failure settles only after handles/checkpoints close, before
+component activation. Space/audit holds use existing Downloads/Diagnostics state and report the
+measured available/committed/remaining/reserve figures. Capacity admission waits through the
+collector's coalescing floor for a post-report reading; it stays bounded and cancellable. Storage
+authority also bounds stalled reads/saves during shutdown, retaining uncertain intents and refusing
+late write permission. Unsupported host ports retain their existing unknown-capacity policy and
+do not claim shared admission. Archive extraction, runtime-owned pulls, other write owners,
+restart reconciliation, other native ports and reviewed cleanup remain outstanding.
 
 Recovery control foundation (#2194, SPEC-061 R-7/R-11/R-25): contracts `recovery-policy.ts`
 defines the closed restart context and rolling budget. Coordinator `recovery/control.ts` serializes

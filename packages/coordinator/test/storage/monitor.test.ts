@@ -10,6 +10,26 @@ const result = (now: number, availableBytes = 20 * GiB): StorageProbeResult => (
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 
 describe("bounded scoped storage monitor (SPEC-062 R-1–R-5)", () => {
+  it("does not mistake same-tick failure invalidation and cooldown for a performed failed admission probe", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] }); let now = 600_000, probes = 0;
+    const monitor = new StorageMonitor({ now: () => now, probe: async () => { probes++; return result(now); }, onSnapshot: () => {} });
+    monitor.setRoots([root]); await monitor.start(); monitor.invalidate(root.rootId);
+    let ended = false;
+    const pending = monitor.capacity(root.rootId, new AbortController().signal, now).then(value => { ended = true; return value; });
+    await new Promise(resolve => setImmediate(resolve)); assert(!ended); assert.equal(probes, 1);
+    now += 1001; t.mock.timers.tick(1001);
+    assert.equal((await pending)?.measuredAt, now); assert.equal(probes, 2); await monitor.stop();
+  });
+  it("waits for a post-report reading through the coalescing cooldown and cancels admission waits on stop", async () => {
+    let probes = 0;
+    const monitor = new StorageMonitor({ probe: async () => { probes++; return result(Date.now()); }, onSnapshot: () => {} });
+    monitor.setRoots([root]); await monitor.start();
+    const previous = monitor.snapshot().roots[0]!.capacity!.measuredAt;
+    const fresh = await monitor.capacity(root.rootId, new AbortController().signal, previous);
+    assert(fresh && fresh.measuredAt > previous); assert.equal(probes, 2, "the admission did not bypass the one-second collection floor");
+    const pending = monitor.capacity(root.rootId, new AbortController().signal, fresh.measuredAt);
+    await monitor.stop(); assert.equal(await pending, null); assert.equal(probes, 2);
+  });
   it("collects at startup without opening diagnostics and coalesces repeated requests", async () => {
     let now = 600_000, probes = 0; const snapshots: StorageHealthSnapshot[] = [];
     const monitor = new StorageMonitor({ now: () => now, probe: async () => { probes++; return result(now); }, onSnapshot: snapshot => snapshots.push(snapshot) });

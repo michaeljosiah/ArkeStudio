@@ -24,6 +24,7 @@ const rootKey = (path: string) => createHash("sha256").update("storage-root\0" +
 /** Application-local composition for SPEC-061/062. Only trusted owners register paths;
  * snapshots contain handles and measured facts. World/job authorities stay with their owners. */
 export class AppStorageService {
+  readonly supportsAdmission: boolean;
   readonly reservations: StorageReservations;
   private readonly monitor: StorageMonitor;
   private readonly native: StorageNativePort;
@@ -39,6 +40,7 @@ export class AppStorageService {
   private observationsStopped: Promise<unknown> | null = null;
 
   constructor(options: { appRoot: string; native?: StorageNativePort; platform?: string; now?: () => number; store?: StorageReservationStore }) {
+    this.supportsAdmission = options.native !== undefined || (options.platform ?? process.platform) === "win32";
     this.native = options.native ?? ((options.platform ?? process.platform) === "win32" ? new WindowsVolumeProbe({ now: options.now }) : {
       setRoots: () => {},
       probe: async (): Promise<StorageProbeResult> => ({ state: "unsupported", capacity: null, source: "host-provided", limitations: ["unsupported-filesystem"] }),

@@ -18,6 +18,27 @@ function deferred() {
   const promise = new Promise<void>(done => { resolve = done; });
   return { promise, resolve };
 }
+
+for (const phase of ["read", "reserve"] as const) it(`bounds a stalled reservation ${phase} during shutdown without granting late write permission`, { timeout: 5000 }, async () => {
+  const entered = deferred(), finish = deferred(); let disk: unknown = { version: 2, records: [], consumed: [] }, block = phase === "read";
+  const manager = new StorageReservations({ stopTimeoutMs: 20, now: () => 600_000, probe: async () => fact(), store: {
+    load: async () => { if (block) { entered.resolve(); await finish.promise; } return disk; },
+    save: async (records, consumed) => { if (block) { entered.resolve(); await finish.promise; } disk = structuredClone({ version: 2, records, consumed }); },
+  } });
+  let pending: Promise<unknown>;
+  if (phase === "read") pending = manager.open();
+  else { await manager.open(); block = true; pending = manager.reserve(request("stalled", GiB)); }
+  await entered.promise; manager.closeAdmission();
+  assert.deepEqual(await pending, phase === "read" ? undefined : { status: "held", reason: "stopped" });
+  await manager.stop(); assert.equal(manager.snapshot().auditAvailable, false);
+  finish.resolve(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal((await manager.reserve(request("late", 1))).status, "held");
+  if (phase === "reserve") {
+    const restarted = new StorageReservations({ now: () => 600_000, probe: async () => fact(), store: { load: async () => disk, save: async () => {} } });
+    await restarted.open(); assert.equal(restarted.snapshot().records[0]!.state, "uncertain");
+    assert.equal((await restarted.reserve(request("new", 1))).status, "held"); await restarted.stop();
+  }
+});
 function harness(options: { load?: unknown; save?: (records: readonly StorageReservation[]) => Promise<void>; probe?: (root: string, signal: AbortSignal, after?: number) => Promise<StorageCapacity | null>; onChange?: () => void; now?: () => number } = {}) {
   let disk: unknown = Object.hasOwn(options, "load") ? options.load : { version: 1, records: [] };
   const store: StorageReservationStore = {

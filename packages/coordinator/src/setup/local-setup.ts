@@ -15,6 +15,7 @@ import {
 import { toExtendedLength } from "../world/paths.js";
 import { SETUP_CATALOGUE, type CatalogueEntry, type DownloadFile } from "./catalogue.js";
 import { compareComfyUiVersions } from "@arke-studio/contracts";
+import { SetupSpaceHeldError, type SetupFileSpace, type SetupFileSpaceLease } from "../storage/setup-files.js";
 
 type TreeSpec = Extract<CatalogueEntry["spec"], { kind: "tree" }>;
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -72,6 +73,9 @@ export interface SetupDeps {
 }
 
 export interface SetupOptions {
+  /** Qualified native volume/reservation port; unsupported hosts retain their existing
+   * unknown-capacity policy, without claiming shared admission or verified fit. */
+  fileSpace?: SetupFileSpace;
   /** Where downloaded models live: <appRoot>/models. */
   appRoot: string;
   catalogue?: readonly CatalogueEntry[];
@@ -173,6 +177,7 @@ export function systemTar(): string {
 }
 
 export class LocalSetupService {
+  private fileSpaceLease: SetupFileSpaceLease | null = null;
   private readonly components = new Map<string, Live>();
   /** Tree components queued for a replace rather than a first install (SPEC-021 R-20, D18; issue 592). */
   private readonly replacing = new Set<string>();
@@ -751,18 +756,17 @@ export class LocalSetupService {
     // is being written to it; one that cannot be measured blocks nothing, exactly as an
     // unmeasurable disk did before.
     //
-    // Pooling needs to know which destinations share a disk, and only the path root can say.
-    // On Windows it says it exactly: a drive letter or a UNC share IS a volume, so everything
-    // under one root is summed together, which is what sharing a disk means. On a POSIX host
-    // every path roots at `/` and that says nothing about the filesystem underneath — pooling
-    // there would let a full mapped disk block a download to a roomy one, the very thing this
-    // is meant to stop. So where the platform cannot tell us, each destination answers for
-    // itself: never pooled with a disk it may not be on, and never over-stated for its own.
+    // Direct files on qualified native ports skip this legacy guard and use actual mounted
+    // volume identity through the shared registry below. Remaining archive/installer/pull
+    // paths retain historical Windows drive-root/per-POSIX-destination grouping. A path root
+    // does not prove mounted-folder or shared-volume identity; those owners still need phase
+    // accounting and native-cleanup integration before they can claim shared admission.
     const headroom = this.opts.headroomMb ?? DEFAULT_HEADROOM_MB;
     const rootOf = (dir: string): string => parse(resolve(dir)).root;
     const volumeKey = (dir: string): string => (process.platform === "win32" ? rootOf(dir) : resolve(dir));
     const volumes = new Map<string, { root: string; dirs: Set<string>; needMb: number; components: Live[] }>();
     for (const c of outstanding) {
+      if (this.opts.fileSpace && c.entry.spec.kind === "files") continue;
       const dir = this.guardDestinationOf(c.entry);
       if (dir === null) continue; // no mapped folder — install states that, and states it better
       const key = volumeKey(dir);
@@ -863,7 +867,8 @@ export class LocalSetupService {
     const spec = entry.spec;
     let releaseInstall: (() => void) | undefined;
     const release = () => { const held = releaseInstall; releaseInstall = undefined; held?.(); };
-    const notifyReady = async () => { release(); await this.componentReady(entry.id); };
+    const finishSpace = async () => { const lease = this.fileSpaceLease; this.fileSpaceLease = null; await lease?.settle(); };
+    const notifyReady = async () => { await finishSpace(); release(); await this.componentReady(entry.id); };
     try {
       await this.opts.beforeComponentInstall?.(entry.id);
       releaseInstall = await this.opts.beginComponentInstall?.(entry.id, this.abort.signal);
@@ -885,6 +890,20 @@ export class LocalSetupService {
           return;
         }
         const dir = join(filesRoot, spec.dir);
+        if (this.opts.fileSpace) {
+          const files = await Promise.all(this.downloadTargets(entry).map(async ({ spec: file, target }) => {
+            const existing = await stat(toExtendedLength(target)).catch(() => null);
+            const writtenBytes = Math.max(existing?.size ?? 0, this.fileProgress.get(target) ?? 0);
+            const declaredBytes = Math.ceil(file.sizeMb * 1024 * 1024), complete = existing !== null && existing.size > 0;
+            return { target, totalBytes: complete ? writtenBytes : Math.max(writtenBytes, declaredBytes), writtenBytes, declaredBytes, complete };
+          }));
+          // Preserve the catalogue's stricter existing peak estimate without counting it
+          // twice. Direct files have no extraction/final-copy phase; their .partial rename
+          // (or same-volume hard link) publishes those same bytes.
+          const declared = files.reduce((sum, file) => sum + file.declaredBytes, 0), pending = files.find(file => !file.complete);
+          if (pending) pending.totalBytes += Math.max(0, Math.ceil((entry.installedMb ?? entry.sizeMb) * 1024 * 1024) - declared);
+          this.fileSpaceLease = await this.opts.fileSpace.reserve(entry.id, files, Math.ceil((this.opts.headroomMb ?? DEFAULT_HEADROOM_MB) * 1024 * 1024), this.abort.signal);
+        }
         this.set(entry.id, { state: "downloading", bytesPerSecond: null, pauseSupported: false, detail: undefined });
         this.publish();
         let done = 0;
@@ -1090,7 +1109,12 @@ export class LocalSetupService {
       this.publish();
       if (pulled.code === 0) await notifyReady();
     } catch (err) {
-      if (err instanceof DownloadPausedError) {
+      if (err instanceof SetupSpaceHeldError) {
+        const admission = err.result.admission;
+        this.set(entry.id, { state: "blocked", blockedBy: "disk", bytesPerSecond: null, pauseSupported: false, detail: err.message,
+          ...(admission?.status === "held" ? { blockedNeedMb: Math.ceil((admission.reservedBytes + admission.peakBytes) / (1024 * 1024)),
+            blockedFreeMb: Math.floor(admission.availableBytes / (1024 * 1024)), blockedAt: new Date().toISOString() } : {}) });
+      } else if (err instanceof DownloadPausedError) {
         this.set(entry.id, {
           state: "paused",
           bytesPerSecond: null,
@@ -1109,7 +1133,7 @@ export class LocalSetupService {
       }
       this.publish();
     } finally {
-      release();
+      try { await finishSpace(); } finally { release(); }
     }
   }
 
@@ -1281,11 +1305,19 @@ export class LocalSetupService {
           : res.acceptRanges && (receipt.validator !== null || spec.sha256 !== undefined);
         receipt.rangeSupported = transfer.rangeSupported;
         await this.writeReceipt(receiptPath, receipt);
+        if (this.fileSpaceLease && receipt.totalBytes !== null) await this.fileSpaceLease.plan(target, receipt.totalBytes);
         this.set(componentId, { pauseSupported: transfer.rangeSupported });
         this.publish();
 
         for await (const chunk of res.body) {
           if (transfer.abort.signal.aborted || this.abort.signal.aborted || this.disposed) throw new Error("stopped");
+          if (this.fileSpaceLease && resumedAt + received + chunk.byteLength > (receipt.totalBytes ?? Math.ceil(spec.sizeMb * 1024 * 1024))) {
+            if (receipt.totalBytes !== null) {
+              transfer.abort.abort();
+              throw new DiscardDownloadError("The source sent more bytes than its declared complete length. Its download receipt cannot be trusted.");
+            }
+            throw new SetupSpaceHeldError({ status: "held", reason: "capacity", admission: { status: "unknown", reason: "unbounded-output" } });
+          }
           let offset = 0;
           while (offset < chunk.byteLength) {
             const { bytesWritten } = await sink.write(
@@ -1305,6 +1337,7 @@ export class LocalSetupService {
             await sink.sync();
             receipt.durableBytes = resumedAt + received;
             await this.writeReceipt(receiptPath, receipt);
+            await this.fileSpaceLease?.written(target, receipt.durableBytes);
           }
           if (now - lastEmit >= (this.opts.throttleMs ?? DEFAULT_THROTTLE_MS)) {
             lastEmit = now;
@@ -1325,6 +1358,7 @@ export class LocalSetupService {
         receipt.durableBytes = resumedAt + received;
         receipt.downloadComplete = true;
         await this.writeReceipt(receiptPath, receipt);
+        await this.fileSpaceLease?.written(target, receipt.durableBytes);
       }
 
       transfer.receiving = false;
@@ -1352,6 +1386,11 @@ export class LocalSetupService {
       await this.opts.onFileInstalled?.(componentId, target);
       await rm(toExtendedLength(receiptPath), { force: true }).catch(() => {});
     } catch (err) {
+      if (err instanceof SetupSpaceHeldError) {
+        if (transfer.rangeSupported && receipt.durableBytes > 0) transfer.preserve ??= "pause";
+        transfer.abort.abort();
+      }
+      if (["ENOSPC", "EDQUOT", "EIO"].includes(errorCode(err))) this.fileSpaceLease?.writeFailed(target);
       failure = err;
     }
 
@@ -1373,7 +1412,7 @@ export class LocalSetupService {
         await this.writeReceipt(receiptPath, receipt);
         this.set(componentId, { bytesDone: alreadyDone + receipt.durableBytes });
         throw new DownloadPausedError(
-          transfer.preserve === "pause" ? "paused" : "paused when Arke closed",
+          transfer.preserve === "pause" ? failure instanceof SetupSpaceHeldError ? `paused after ${failure.message}` : "paused" : "paused when Arke closed",
           transfer.rangeSupported,
         );
       }
