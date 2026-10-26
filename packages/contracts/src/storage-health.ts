@@ -129,7 +129,10 @@ export interface StoragePressure {
 export function advanceStoragePressure(previous: StoragePressure | null, sample: StorageCapacity, now: number, predictiveWarning: boolean): StoragePressure | null {
   StorageCapacitySchema.parse(sample); instant.parse(now);
   if (sample.availableBytes === null || !fresh(sample, now, STORAGE_POLICY.forecastMaxAgeMs)) return null;
-  const prior = previous && sameVolume(previous, sample) && previous.lastMeasuredAt <= sample.measuredAt ? previous : null;
+  // Concurrent probes may finish in a different order. An older observation cannot resolve a
+  // newer fault or contribute an earlier clear qualification; only a changed mapping starts afresh.
+  if (previous && sameVolume(previous, sample) && sample.measuredAt < previous.lastMeasuredAt) return previous;
+  const prior = previous && sameVolume(previous, sample) ? previous : null;
   const advance = (held: boolean, since: number | null, low: boolean, clear: boolean): [boolean, number | null] => {
     if (low) return [true, null];
     if (!held) return [false, null];

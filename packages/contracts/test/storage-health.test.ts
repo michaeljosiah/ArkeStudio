@@ -117,4 +117,16 @@ describe("storage policy (SPEC-062 R-5–R-14)", () => {
     const remount = advanceStoragePressure(pressure, sample(12 * GiB, 700_000, { mappingRevision: "mount-2" }), 700_000, false)!;
     assert.equal(remount.warning, false);
   });
+
+  it("ignores late older readings instead of clearing or escalating newer pressure", () => {
+    const critical = advanceStoragePressure(null, sample(GiB), 600_000, false)!;
+    const olderHigh = advanceStoragePressure(critical, sample(12 * GiB, 599_999), 600_000, false)!;
+    assert.deepEqual(olderHigh, critical);
+    const qualifying = advanceStoragePressure(critical, sample(12 * GiB, 630_000), 630_000, false)!;
+    const olderLow = advanceStoragePressure(qualifying, sample(GiB, 629_999), 630_000, false)!;
+    assert.deepEqual(olderLow, qualifying);
+    const cleared = advanceStoragePressure(olderLow, sample(12 * GiB, 660_000), 660_000, false)!;
+    assert(!cleared.warning && !cleared.critical);
+    assert.deepEqual(advanceStoragePressure(cleared, sample(GiB, 659_999), 660_000, true), cleared);
+  });
 });
