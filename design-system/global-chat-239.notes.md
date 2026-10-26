@@ -1,9 +1,9 @@
 # Global chat · the Studio assistant in a rounded dialog
 
-Design turn **239**, revision 2, proposed on 26 October 2026. The owner requested a quick
+Design turn **239**, revision 2, approved by the owner on 26 October 2026. The owner requested a quick
 design-master update: global chat should differ from World Chat and production build chat, and
-use the notification dialog's rounded window. This turn is for review; it is not approved or
-implemented by its creation.
+use the notification dialog's rounded window. The owner approved the rendered design and authorized commit, push and merge. Application
+implementation and its acceptance remain separate.
 
 ## Existing sources
 
@@ -14,7 +14,7 @@ ModelChip. Icons are rendered from the current client icon components; the send 
 rendered from Composer. The existing lowercase a remains the Arke welcome mark.
 Reference snapshots carry source names and the native-icon source hash.
 
-## The proposal
+## Approved design
 
 - Use Activity's current desktop geometry from turn 206: 440px floating card, 12px corners,
   full border, existing shadow and gaps around the outside. Leave the underlying page at its
@@ -59,7 +59,7 @@ node design-system/build-review.mjs --check
 
 The generator touches only turn 239, its stylesheet registration and its generated review
 entries. Earlier turns remain historical record. The standalone review includes a bounded
-interactive fixture: close/reopen draft retention, canned diagnostics, review/approve/deny and
+interactive fixture: close/reopen draft retention and Activity return, canned diagnostics, review/approve/deny and
 an explicit handoff. It performs no host/model/media operations. Verify light/dark, desktop,
 tablet, phone and reduced visible height; inspect clipping, independently scrolling messages,
 touch targets, keyboard reachability and focus. A fixture is not application acceptance.
@@ -71,3 +71,8 @@ The optional specialist remains behind Arke's visible conversation and the host'
 
 Browser policy blocked automated local-file preview in this session. Structural/source checks
 are recorded separately from rendered visual and native-device acceptance.
+
+Implementation acceptance requires matched-state captures of the native app and approved master
+at desktop, tablet, phone and reduced keyboard viewport, in light and dark. Compare shell geometry,
+icons, fonts, composer, cards and controls; correct discrepancies until 1:1 parity is demonstrated.
+Owner visual approval of this design does not establish that the implementation matches it.

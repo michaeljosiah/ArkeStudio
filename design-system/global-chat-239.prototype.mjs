@@ -2,13 +2,14 @@ import { screen } from './global-chat-239.frames.mjs';
 
 const host=document.getElementById('g239-prototype');
 const status=document.getElementById('g239-prototype-status');
-let state='ready',draft='';
+let state='ready',draft='',returnState='ready';
 let pending=null;
 const device=()=>host.clientWidth<600?'phone':host.clientWidth<1100?'tablet':'desktop';
 function saveDraft(){const field=host.querySelector('[data-draft]');if(field)draft=field.textContent;}
 function render(next=state){
-  saveDraft();state=next;
+  saveDraft();if(next==='activity'&&state!=='activity')returnState=state;state=next;
   host.innerHTML=screen({state,device:device(),interactive:true,label:'Interactive design fixture · Studio assistant',draft});
+  if(state==='activity'){const close=host.querySelector('[aria-label="Close Activity"]');if(close)close.dataset.action='return-chat';}
   const modal=host.querySelector('[aria-modal=true]');
   const background=host.querySelector('.g239-page');
   if(background)background.inert=Boolean(modal);
@@ -19,7 +20,7 @@ function render(next=state){
 function announce(text){status.textContent=text;}
 function diagnose(){
   clearTimeout(pending);render('checking');announce('Illustrative check in progress; no service is contacted.');
-  pending=setTimeout(()=>{render('diagnosis');announce('Illustrative storage finding. Review cleanup opens a plan without deleting.');},650);
+  pending=setTimeout(()=>{if(state==='activity'){returnState='diagnosis';announce('The illustrative check is complete. Close Activity to return to the finding.');}else{render('diagnosis');announce('Illustrative storage finding. Review cleanup opens a plan without deleting.');}},650);
 }
 host.addEventListener('click',event=>{
   const target=event.target.closest('[data-action],[data-act]');if(!target)return;
@@ -27,7 +28,8 @@ host.addEventListener('click',event=>{
   switch(target.dataset.action ?? target.dataset.act){
     case 'open':render('ready');host.querySelector('[data-draft]')?.focus();announce('Studio assistant opened. The draft is preserved.');break;
     case 'close':clearTimeout(pending);render('closed');host.querySelector('[data-action=open]')?.focus();announce('Dialog closed; draft kept. This never cancels ongoing work.');break;
-    case 'activity':clearTimeout(pending);render('activity');announce('Activity temporarily replaces the chat; return with the Chat control.');break;
+    case 'activity':render('activity');announce('Activity temporarily covers the chat. Close Activity to return to your retained conversation.');break;
+    case 'return-chat':render(returnState);host.querySelector('[data-draft]')?.focus();announce('Returned to the retained conversation and draft.');break;
     case 'diagnose':diagnose();break;
     case 'help':render('help');break;
     case 'review':render('repair');announce('Review only. Clear previews requires a separate approval.');break;
@@ -45,6 +47,7 @@ host.addEventListener('click',event=>{
 });
 host.addEventListener('input',()=>{saveDraft();const send=host.querySelector('[data-action=send]');if(send)send.disabled=!draft.trim();});
 host.addEventListener('keydown',event=>{
+  if(event.key==='Escape'&&state==='activity'){event.preventDefault();host.querySelector('[data-action=return-chat]')?.click();return;}
   if(event.key==='Escape'&&state!=='closed'){event.preventDefault();clearTimeout(pending);render('closed');host.querySelector('[data-action=open]')?.focus();announce('Closed; the draft is kept.');return;}
   if(event.key==='Enter'&&!event.shiftKey&&event.target.matches('[data-draft]')){event.preventDefault();host.querySelector('[data-action=send]')?.click();return;}
   if(event.key==='Tab'){
