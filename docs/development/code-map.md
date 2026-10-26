@@ -1,5 +1,11 @@
 # Code map
 
+Proactive storage policy foundation (epic #2194): contracts `storage-health.ts` defines real-volume
+capacity facts, fresh peak-space admission arithmetic, qualified consumption forecasts and warning
+hysteresis. Tests: contracts `test/storage-health.test.ts`; requirements SPEC-062 R-5–R-14.
+This is a pure foundation: host monitoring, atomic reservation ownership, write-path integration,
+incident notifications and reviewed cleanup are not yet connected by this module.
+
 Managed local engines: coordinator `local-ai/ollama.ts` owns portable Ollama and explicit URL
 overrides; `setup/catalogue.ts` / `setup/local-setup.ts` own pinned archives and architecture/
 version receipts. `harness/v2-launch.ts` writes only the selected Ollama endpoint into the
