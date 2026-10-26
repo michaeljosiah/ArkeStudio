@@ -131,7 +131,7 @@ it("the production host reports failed ComfyUI exit and permits a later cleanup 
 
 it("failed shutdown keeps settlement open until the unknown replacement actually exits", { timeout: 50_000 }, async () => {
   const { root } = await makeTempRoot(), provider = new FsWorldProvider(root), workers: ChildSupervisor[] = [], deps = nativeDeps(root, workers);
-  const env = { COMFYUI_VERSION: "0.37.0", MODE: "healthy" };
+  const env = { COMFYUI_VERSION: "0.37.0", MODE: "healthy", IGNORE_STOP: "0" };
   deps.createSupervisor = spec => {
       const worker = new ChildSupervisor({ ...spec, command: process.execPath, args: [CHILD], env, probeIntervalMs: 30, readyTimeoutMs: 10000 }, { listDescendants: async () => [] });
     workers.push(worker); return worker;
@@ -144,7 +144,9 @@ it("failed shutdown keeps settlement open until the unknown replacement actually
   try {
     await coordinator.start(0); await until(() => service.baseUrl() !== null, "initial process ready", 15_000);
     const worker = workers[0]!, seam = worker as unknown as StopSeam; originalStop = seam.forceStop.bind(worker);
-    seam.forceStop = async () => {}; env.MODE = "never-healthy"; process.kill(worker.pid!, "SIGKILL");
+    // The retained replacement must reject graceful POSIX signals as well as the forced
+    // stop seam; otherwise Linux confirms exit and never exercises the failed-stop retry.
+    seam.forceStop = async () => {}; env.MODE = "never-healthy"; env.IGNORE_STOP = "1"; process.kill(worker.pid!, "SIGKILL");
     await until(() => control.snapshot().control.targets[0]?.intent?.phase === "unknown", "replacement retained after unconfirmed cleanup", 25_000);
     assert.ok(worker.pid); await assert.rejects(coordinator.stop(), /Local runtime cleanup did not confirm exit/);
     assert.equal(control.snapshot().accepting, false); assert.ok(control.snapshot().control.targets[0]!.intent);

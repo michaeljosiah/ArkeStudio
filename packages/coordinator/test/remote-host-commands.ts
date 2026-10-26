@@ -22,6 +22,9 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
 
     const payloads: Record<string, Record<string, unknown>> = {
       "account-open": { page: "account" }, "set-background-notifications": { preference: "off" },
+      "recovery-set-mode": { requestId: worldId, mode: "suggest-only" },
+      "recovery-set-preferences": { requestId: worldId, preferences: { desktopOptIn: true } },
+      "recovery-history-control": { requestId: worldId, command: { action: "clear-resolved" } },
       "set-credential": { provider: "openai", key: "test-secret-only" },
       "set-provider-plan": { provider: "google", plan: "free" },
       "clear-credential": { provider: "openai" },

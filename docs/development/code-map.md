@@ -32,7 +32,7 @@ unconfirmed exit retains that reservation in the owner until confirmed stop. Tes
 Managed Ollama/ComfyUI unexpected exits now use durable policy; failed health retains the live process for review.
 GPU handover preserves a confirmed crashed child's waiting recovery. Host shutdown closes both
 owners before setup drains, reports failed native cleanup and permits a later confirmation retry.
-Other service owners, reviewed stop/restart actions, policy/incident UI and broader qualification
+Other service owners, reviewed stop/restart actions and broader qualification
 remain outstanding. No completed recovery-agent claim follows from this slice.
 
 Operational incidents (#2194): contracts `recovery-incidents.ts` owns closed numeric facts,
@@ -47,10 +47,18 @@ The app-root factory enables history before a world opens. `recovery.history` re
 folds and reconnect snapshots, with up to 100 summaries plus explicit counts/limits. Activity queries
 actionable global health/storage incidents through existing rows; Review only opens Diagnostics,
 whose existing styles render local history. Neither transient notices nor muted state grants a
-repair. The phone's existing notification opt-in does not subscribe to these host recovery events.
+repair. `recovery/commands.ts` routes host-only mode/preferences/acknowledge/snooze/clear commands
+to their separate control/history owners with flushed correlated receipts. `recovery-settings.ts`
+exposes a bounded policy projection without intent capabilities. Settings · Diagnostics uses
+`components/recovery-controls.tsx` for mode, mute, explicit desktop opt-in and reviewed summary
+clearing. Changing mode cannot reset a stop, circuit or pending outcome. `queue-toaster.tsx`
+uses the existing notification drawing for admitted notices; desktop `background-notifications.ts`
+uses generic copy only after the separate opt-in. Both deduplicate live notices in bounded sets;
+opening an alert only navigates. The phone's existing notification opt-in does not subscribe to
+these host recovery events.
 Tests: contracts `test/recovery-incidents.test.ts`, coordinator `test/recovery/history*.test.ts`,
-client `test/recovery-history.test.tsx`. Full lifecycle/event adapters, host-only policy commands,
-history pagination/export, notification delivery and approved Studio assistant visual acceptance
+client `test/recovery-{history,controls}.test.tsx`, desktop `test/background-notifications.test.ts`.
+Full lifecycle/event adapters, complete history pagination/export and approved Studio assistant visual acceptance
 remain outstanding (SPEC-061 R-1–R-5/R-15–R-18/R-24–R-28; SPEC-014/032 amendments).
 
 Managed local engines: coordinator `local-ai/ollama.ts` owns portable Ollama and explicit URL

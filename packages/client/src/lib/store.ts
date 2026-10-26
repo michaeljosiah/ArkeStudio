@@ -234,6 +234,7 @@ interface StoreState {
    * not a part of it — folding it in would make the read model carry its own derivative.
    */
   diagnostics: import("@arke-studio/contracts").DiagnosticsSnapshot | null;
+  recoveryCommandResults: Record<string, import("@arke-studio/contracts").RecoveryCommandResult>;
   /** Build reviews by conversation and request, so a late response cannot erase a newer answer. */
   buildPlans: Record<
     string,
@@ -640,6 +641,7 @@ let current: StoreState = {
   keyArtPlans: {},
   setupStatus: null,
   diagnostics: null,
+  recoveryCommandResults: {},
   reading: {},
   deriving: {},
   casting: {},
@@ -1390,6 +1392,12 @@ export function subscribeJobReady(listener: (job: Job) => void): () => void {
   return () => jobReadyListeners.delete(listener);
 }
 
+const recoveryNoticeListeners = new Set<(notice: import("@arke-studio/contracts").RecoveryNotice, history: import("@arke-studio/contracts").RecoveryHistorySnapshot) => void>();
+const seenRecoveryNotices = new Set<string>();
+export function subscribeRecoveryNotices(listener: (notice: import("@arke-studio/contracts").RecoveryNotice, history: import("@arke-studio/contracts").RecoveryHistorySnapshot) => void): () => void {
+  recoveryNoticeListeners.add(listener); return () => recoveryNoticeListeners.delete(listener);
+}
+
 function queueRequest(command: QueueCommand, characterName?: string): string {
   const requestId = ulid();
   if (current.connection === "open") {
@@ -1576,7 +1584,9 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, storageHealth: event.health } };
     case "recovery.history":
       return { ...state, app: { ...state.app, recoveryHistory: event.history } };
-    case "recovery.notice": return state;
+    case "recovery.policy": return { ...state, app: { ...state.app, recoveryPolicy: event.policy } };
+    case "recovery.notice":
+    case "recovery.command-result": return state;
     case "adapters.changed":
       return { ...state, app: { ...state.app, adapters: event.adapters } };
     case "harness.status":
@@ -1901,6 +1911,17 @@ function handleFrame(json: string): void {
     if (event.type === "audiobook.activity") for (const listener of audiobookActivityListeners) listener(event.run);
     if (event.type === "job.ready") {
       for (const listener of jobReadyListeners) listener(event.job);
+    }
+    if (event.type === "recovery.notice") {
+      const key = `${event.notice.incidentId}:${event.notice.at}:${event.notice.reason}`;
+      if (!seenRecoveryNotices.has(key)) {
+        seenRecoveryNotices.add(key);
+        if (seenRecoveryNotices.size > 256) seenRecoveryNotices.delete(seenRecoveryNotices.values().next().value!);
+        const history = current.state?.app.recoveryHistory;
+        if (history?.audit === "available" && !history.preferences.transientMuted) {
+          for (const listener of recoveryNoticeListeners) try { listener(event.notice, history); } catch { /* Alert delivery cannot interrupt state folding. */ }
+        }
+      }
     }
     if (event.type === "production.create-result") {
       for (const listener of productionCreateListeners) listener(event);
@@ -2887,6 +2908,9 @@ function handleFrame(json: string): void {
     let envCheck = current.envCheck;
     let diagnosticsBundle = current.diagnosticsBundle;
     let diagnostics = current.diagnostics;
+    const recoveryCommandResults = event.type === "recovery.command-result"
+      ? Object.fromEntries([...Object.entries(current.recoveryCommandResults).filter(([id]) => id !== event.result.requestId), [event.result.requestId, event.result] as const].slice(-32))
+      : current.recoveryCommandResults;
     let providerCallsByJob = current.providerCallsByJob;
     if (event.type === "diagnostics.snapshot") {
       diagnostics = event.snapshot;
@@ -3039,6 +3063,7 @@ function handleFrame(json: string): void {
       envCheck,
       diagnosticsBundle,
       diagnostics,
+      recoveryCommandResults,
       providerCallsByJob,
       frameRunQuotes,
       frameRunStartResults,
@@ -6802,6 +6827,17 @@ export function generateDiagnostics(): void {
   send({ kind: "generate-diagnostics" });
 }
 
+/** The returned ID correlates a flushed receipt; sending does not establish persistence. */
+export function setRecoveryMode(mode: import("@arke-studio/contracts").RecoveryMode): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-set-mode", requestId, mode }) ? requestId : null;
+}
+export function setRecoveryPreferences(preferences: { transientMuted?: boolean; desktopOptIn?: boolean }): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-set-preferences", requestId, preferences }) ? requestId : null;
+}
+export function controlRecoveryHistory(command: Extract<ClientMessage, { kind: "recovery-history-control" }>["command"]): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-history-control", requestId, command }) ? requestId : null;
+}
+
 export function listProviderCalls(jobId: string | null): void {
   send({ kind: "list-provider-calls", jobId });
 }
@@ -6908,6 +6944,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     keyArtPlans: {},
     setupStatus: null,
     diagnostics: null,
+    recoveryCommandResults: {},
     reading: {},
   deriving: {},
     casting: {},

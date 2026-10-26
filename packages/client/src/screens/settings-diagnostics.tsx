@@ -15,6 +15,7 @@ import {
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
 import { refreshDiagnostics, useDiagnostics, useClientState } from "../lib/store.js";
+import { RecoveryControls } from "../components/recovery-controls.js";
 
 /**
  * Settings · Diagnostics (SPEC-032 §1.10, design turn 111): the one surface that shows the
@@ -206,6 +207,7 @@ export function SettingsDiagnosticsScreen() {
           <span style={{ flex: 1 }} />
           <span className="fy-diag__meta">not derived yet</span>
         </div>
+        <RecoveryControls />
         <RecoveryHistoryRows history={history} />
       </div>
     );
@@ -254,6 +256,7 @@ export function SettingsDiagnosticsScreen() {
             </div>
           ))
       )}
+      <RecoveryControls />
       <RecoveryHistoryRows history={history} />
     </div>
   );

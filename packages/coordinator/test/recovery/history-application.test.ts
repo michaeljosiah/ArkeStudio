@@ -35,7 +35,19 @@ it("warns about measured disk pressure before opening a world, persists one inci
     const frame = frames.find(frame => frame.kind === "snapshot"); assert(frame?.kind === "snapshot");
     assert(frame.state.app.recoveryHistory!.incidents.some(value => value.id === incident.id));
     assert.equal(events.filter(event => event.type === "recovery.notice" && event.notice.incidentId === incident.id).length, 1);
+    assert.equal(frame.state.app.recoveryPolicy?.mode, "automatic");
+    const modeRequest = "01ARZ3NDEKTSV4RRFFQ69G5FAV", preferencesRequest = "01ARZ3NDEKTSV4RRFFQ69G5FAW", acknowledgeRequest = "01ARZ3NDEKTSV4RRFFQ69G5FAX";
+    for (const command of [
+      { kind: "recovery-set-mode", requestId: modeRequest, mode: "suggest-only" },
+      { kind: "recovery-set-preferences", requestId: preferencesRequest, preferences: { desktopOptIn: true, transientMuted: true } },
+      { kind: "recovery-history-control", requestId: acknowledgeRequest, command: { action: "acknowledge", incidentId: incident.id } },
+    ]) client.send(JSON.stringify(command));
+    await until(() => [modeRequest, preferencesRequest, acknowledgeRequest].every(requestId => frames.some(frame => frame.kind === "event" && frame.event.type === "recovery.command-result" && frame.event.result.requestId === requestId && frame.event.result.status === "saved")), "flushed host recovery settings receipts", 15_000);
+    assert.equal(coordinator.getState().app.recoveryPolicy?.mode, "suggest-only");
+    const updated = RecoveryHistorySchema.parse(JSON.parse(await readFile(path, "utf8")));
+    assert.deepEqual(updated.preferences, { transientMuted: true, desktopOptIn: true }); assert.ok(updated.incidents.find(value => value.id === incident.id)?.acknowledgedAt);
+    assert.notEqual(updated.incidents.find(value => value.id === incident.id)?.phase, "recovered", "acknowledgement did not resolve the fault");
     const saved = await readFile(path, "utf8"); assert(!saved.includes(root)); assert(!saved.includes("the-undersong"));
   } finally { client?.close(); await coordinator.stop(); await provider.close(); }
-  const journal = await readFile(log, "utf8"); assert(!journal.includes('"type":"recovery.history"')); assert(!journal.includes('"type":"recovery.notice"'));
+  const journal = await readFile(log, "utf8"); assert(!journal.includes('"type":"recovery.'));
 });

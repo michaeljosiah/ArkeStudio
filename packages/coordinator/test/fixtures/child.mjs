@@ -55,7 +55,7 @@ if (process.env.DIE_AFTER_MS) {
   setTimeout(() => process.exit(1), Number(process.env.DIE_AFTER_MS));
 }
 
-if (mode === "ignore-stop") {
+if (mode === "ignore-stop" || process.env.IGNORE_STOP === "1") {
   // On POSIX this forces the supervisor down the SIGKILL path; on Windows kill() is already
   // TerminateProcess, so the process simply dies — both end with no orphan.
   process.on("SIGTERM", () => {});

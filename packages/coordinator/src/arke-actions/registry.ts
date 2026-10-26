@@ -703,6 +703,9 @@ const CLIENT_COMMAND_METADATA = {
   "install-update-on-close": globalOnly(GLOBAL_OPERATION),
   "acknowledge-update": globalOnly(GLOBAL_OPERATION),
   "generate-diagnostics": globalOnly(GLOBAL_OPERATION),
+  "recovery-set-mode": humanOnly(HUMAN_DECISION),
+  "recovery-set-preferences": humanOnly(HUMAN_DECISION),
+  "recovery-history-control": humanOnly(HUMAN_DECISION),
   // One real, priced request to learn whether a reader can group (design turn 185): a person runs it.
   "probe-grouped-read": humanOnly("The grouped-read probe spends one request so a person can listen to it."),
   "refresh-diagnostics": readOnly(QUERY),

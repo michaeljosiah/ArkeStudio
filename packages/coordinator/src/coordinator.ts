@@ -269,6 +269,7 @@ import { DiagnosticsSnapshotHolder } from "./diagnostics-snapshot.js";
 import type { AppStorageService } from "./storage/service.js";
 import type { RecoveryControlService } from "./recovery/control.js";
 import type { RecoveryHistoryService } from "./recovery/history.js";
+import { recoveryCommand } from "./recovery/commands.js";
 import { SupervisorRecovery } from "./recovery/supervisor.js";
 import {
   highestChapterRank,
@@ -4607,7 +4608,7 @@ export class Coordinator {
       parsed.type !== "diagnostics.ready" &&
       // Resource readings are replaceable observations, not a second durable operation journal.
       parsed.type !== "storage.health" &&
-      parsed.type !== "recovery.history" && parsed.type !== "recovery.notice" &&
+      !parsed.type.startsWith("recovery.") &&
       // Several a second while a world opens, and over once it has (issue 1844).
       parsed.type !== "world.open-progress"
     ) {
@@ -4631,7 +4632,7 @@ export class Coordinator {
     // A tail read that failed transiently (an AV pass holding app.jsonl) would otherwise stick
     // as `unavailable` until the next append; retrying on the next event is still event-driven.
     if (this.diagnosticsLogTail === "unavailable") this.refreshDiagnosticsLogTail();
-    if (parsed.type !== "recovery.history" && parsed.type !== "recovery.notice") this.diagnosticsSnapshot?.schedule();
+    if (!parsed.type.startsWith("recovery.")) this.diagnosticsSnapshot?.schedule();
     try {
       this.opts.observeEvent?.(parsed);
     } catch {
@@ -4889,7 +4890,14 @@ export class Coordinator {
 
     await this.seed();
     await this.adapterLibrary?.refresh();
-    await this.opts.recoveryControl?.open();
+    if (this.opts.recoveryControl) {
+      const control = this.opts.recoveryControl;
+      this.lifecycleDisposers.add(control.subscribe(policy => {
+        if (!this.stopping) this.emit({ type: "recovery.policy", at: this.nowIso(), policy });
+      }));
+      await control.open();
+      this.emit({ type: "recovery.policy", at: this.nowIso(), policy: control.policySnapshot() });
+    }
     if (this.opts.recoveryHistory) {
       const history = this.opts.recoveryHistory;
       this.lifecycleDisposers.add(history.subscribe(snapshot => {
@@ -14443,6 +14451,13 @@ export class Coordinator {
         // (R-34), and reaches the asker as the ordinary broadcast.
         this.diagnosticsSnapshot?.refresh();
         if (this.opts.storageHealth) this.trackBackground(this.opts.storageHealth.refresh());
+        return;
+      }
+      case "recovery-set-mode":
+      case "recovery-set-preferences":
+      case "recovery-history-control": {
+        const result = await recoveryCommand(msg, { control: this.opts.recoveryControl, history: this.opts.recoveryHistory });
+        if (!this.stopping) this.emit({ type: "recovery.command-result", at: this.nowIso(), result });
         return;
       }
       case "probe-grouped-read": {

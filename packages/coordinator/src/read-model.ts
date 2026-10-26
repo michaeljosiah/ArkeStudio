@@ -398,7 +398,12 @@ export class ReadModel {
         this.state = { ...this.state, app: { ...this.state.app, recoveryHistory: event.history } };
         return;
       }
-      case "recovery.notice": return;
+      case "recovery.policy": {
+        this.state = { ...this.state, app: { ...this.state.app, recoveryPolicy: event.policy } };
+        return;
+      }
+      case "recovery.notice":
+      case "recovery.command-result": return;
       case "adapters.changed": {
         this.state = { ...this.state, app: { ...this.state.app, adapters: event.adapters } };
         return;

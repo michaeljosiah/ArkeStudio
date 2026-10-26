@@ -180,3 +180,41 @@ it("bounds shutdown waiting on nonessential history I/O and suppresses late cont
     assert.equal(writes, blocked === "write" ? 1 : 0); assert.equal(delivered, 0); assert.equal(published, before);
   }
 });
+
+it("carries a pending warning across same-severity evidence updates and delivers only after the latest save", async () => {
+  for (const severity of ["advisory", "degraded"] as const) {
+    const entered = deferred(), finish = deferred(); let writes = 0;
+    const h = harness({ save: async () => { if (++writes === 1) { entered.resolve(); await finish.promise; } } }); await h.service.open();
+    try {
+      h.service.observe([observation({ severity })]); const saving = h.service.flush(); await entered.promise;
+      h.advance(1); h.service.observe([observation({ severity, observedAt: now + 1, evidenceRevision: "c".repeat(64), facts: [{ name: "available-bytes", value: 1024, measuredAt: now + 1 }] })]);
+      assert.equal(h.notices.length, 0); finish.resolve(); await saving;
+      assert.equal(writes, 2); assert.equal(h.notices.length, 1); assert.equal(h.notices[0]!.reason, "first-actionable");
+      assert.equal(h.disk().incidents[0]!.evidenceRevision, "c".repeat(64)); assert.equal(h.disk().incidents[0]!.delivery.lastAt, now);
+    } finally { finish.resolve(); await h.service.stop(); }
+  }
+});
+
+it("delivers a superseding warning once if its evidence returns to the in-flight revision", async () => {
+  const entered = deferred(), finish = deferred(); let writes = 0;
+  const h = harness({ save: async () => { if (++writes === 1) { entered.resolve(); await finish.promise; } } }); await h.service.open();
+  try {
+    h.service.observe([observation()]); const saving = h.service.flush(); await entered.promise;
+    h.service.observe([observation({ evidenceRevision: "c".repeat(64) })]); h.service.observe([observation()]);
+    finish.resolve(); await saving; assert.equal(h.notices.length, 1); assert.equal(writes, 2);
+  } finally { finish.resolve(); await h.service.stop(); }
+});
+
+it("does not carry an old warning across lost evidence or a same-clock severity transition", async () => {
+  for (const change of ["stale", "recovered", "severity"] as const) {
+    const entered = deferred(), finish = deferred(); let writes = 0;
+    const h = harness({ save: async () => { if (++writes === 1) { entered.resolve(); await finish.promise; } } }); await h.service.open();
+    try {
+      h.service.observe([observation()]); const saving = h.service.flush(); await entered.promise;
+      if (change === "severity") { h.service.observe([observation({ severity: "blocking" })]); h.service.observe([observation()]); }
+      else h.service.observe([observation(change === "stale" ? { evidence: "stale" } : { phase: "recovered", resolution: "verified-capacity" })]);
+      finish.resolve(); await saving;
+      assert.equal(h.notices.filter(notice => notice.reason === "first-actionable").length, 0);
+    } finally { finish.resolve(); await h.service.stop(); }
+  }
+});

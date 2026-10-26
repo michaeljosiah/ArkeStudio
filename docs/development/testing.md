@@ -17,7 +17,15 @@ Recovery control tests (#2194) use contracts `test/recovery-policy.test.ts` and 
 `test/recovery/control.test.ts`. They inject crash/unknown writes, competing attempts, rolling
 budgets, clock reversal, deliberate Stop/Suggest only, target changes during flush and shutdown.
 Native filesystem access is needed for atomic control-file replacement. These establish the
-durable gate. `test/recovery/supervisor.test.ts` additionally uses real native children to check
+durable gate. `test/recovery/commands.test.ts` checks flushed policy/presentation receipts,
+held retry controls and failed persistence. `history-application.test.ts` sends the commands
+over the authenticated host socket and verifies disk state and journal exclusion;
+`remote-access.test.ts` refuses them through the real paired-device gateway. Contracts
+`test/recovery-settings.test.ts` closes their argument schemas. Client `test/recovery-controls.test.tsx`
+checks receipt correlation and the summary-clear confirmation, while `recovery-history.test.tsx`
+checks notice mute/replay and read-only Activity navigation. Desktop `background-notifications.test.ts`
+checks the separate opt-in, generic copy, focus, shutdown and Activity-only click.
+`test/recovery/supervisor.test.ts` additionally uses real native children to check
 GPU waiting, verified replacement, queued startup exits, cancellation, policy/ownership refusal
 and retained unhealthy processes. `test/recovery/application.test.ts` starts the actual host and
 managed Ollama owner with a protocol fixture, verifying its flushed outcome and persisted policy.

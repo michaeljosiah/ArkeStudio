@@ -3,7 +3,7 @@ import { z } from "zod";
 import { emptyRecoveryHistory, RecoveryHistorySchema, RecoveryObservationSchema, observeRecoveryIncidents, pruneRecoveryHistory, recoveryFindingFacts, findingRef, primaryFindings,
   recoveryNoticeDecision, recordRecoveryNotice, FINDING_SEVERITY_RANK,
   STORAGE_POLICY, storageWarningFloor,
-  type ClientState, type DiagnosticsSnapshot, type RecoveryHistory, type RecoveryHistorySnapshot, type RecoveryObservation, type RecoveryNotice } from "@arke-studio/contracts";
+  type ClientState, type DiagnosticsSnapshot, type RecoveryHistory, type RecoveryHistorySnapshot, type RecoveryObservation, type RecoveryNotice, type RecoveryIncident } from "@arke-studio/contracts";
 import type { RecoveryHistoryStore } from "./history-file.js";
 
 /** One bounded writer, no append/log recursion, no process/repair authority. Observations keep
@@ -21,6 +21,7 @@ export class RecoveryHistoryService {
   private dirty = false;
   private work: Promise<void> | null = null;
   private pendingNotices = new Map<string, RecoveryNotice>();
+  private inFlightNotices = new Map<string, { notice: RecoveryNotice; incident: RecoveryIncident }>();
   private readonly subscribers = new Set<(snapshot: RecoveryHistorySnapshot) => void>();
   private readonly noticeSubscribers = new Set<(notice: RecoveryNotice) => void>();
   private readonly capacityClears = new Map<string, { mapping: string; first: number }>();
@@ -46,7 +47,7 @@ export class RecoveryHistoryService {
   private failed(error: unknown, fallback: "read-failed" | "write-failed"): void {
     const code = error && typeof error === "object" && "code" in error ? error.code : null;
     this.reason = error instanceof SyntaxError || error instanceof z.ZodError ? "invalid" : code === "ENOSPC" || code === "EDQUOT" ? "disk-full" : code === "EACCES" || code === "EPERM" ? "permission" : fallback;
-    this.audit = "unavailable"; this.pendingNotices.clear(); this.dirty = false; this.changed();
+    this.audit = "unavailable"; this.pendingNotices.clear(); this.inFlightNotices.clear(); this.dirty = false; this.changed();
   }
   open(): Promise<void> {
     if (this.closing) return this.opening ?? Promise.resolve();
@@ -90,6 +91,16 @@ export class RecoveryHistoryService {
       const reason = recoveryNoticeDecision(incident, before.get(incident.id), this.history, now, this.session);
       if (reason) { recordRecoveryNotice(incident, now); this.pendingNotices.set(incident.id, { incidentId: incident.id, reason, at: now }); }
       else if (incident.phase === "recovered") this.pendingNotices.delete(incident.id);
+      else {
+        const pending = this.inFlightNotices.get(incident.id);
+        if (pending && pending.incident.severity === incident.severity && pending.incident.severityTransition === incident.severityTransition && pending.notice.at === incident.delivery.lastAt && incident.evidence === "fresh" &&
+          ["action-available", "needs-user", "unresolved"].includes(incident.phase) &&
+          (pending.incident.evidenceRevision !== incident.evidenceRevision || pending.incident.phase !== incident.phase)) {
+          // This admission has not been delivered yet. Carry it to the next coalesced save
+          // rather than spending its budget and silently dropping a same-severity update.
+          this.pendingNotices.set(incident.id, pending.notice);
+        }
+      }
     }
     this.changed(); this.dirty = true;
     if (this.audit === "available" && !this.work && !this.timer) this.timer = setTimeout(() => { this.timer = null; void this.flush(); }, this.deps.saveDelayMs ?? 1000);
@@ -189,17 +200,23 @@ export class RecoveryHistoryService {
     this.work = (async () => {
       while (this.dirty && this.audit === "available" && !this.stopped) {
         this.dirty = false; const value = structuredClone(this.history), notices = this.pendingNotices; this.pendingNotices = new Map();
+        this.inFlightNotices = new Map([...notices].flatMap(([id, notice]) => {
+          const incident = value.incidents.find(value => value.id === id); return incident ? [[id, { notice, incident }] as const] : [];
+        }));
         try { await this.deps.store.save(value); }
         catch (error) { this.failed(error, "write-failed"); return; }
         if (!this.closing) for (const notice of notices.values()) {
           if (this.closing) break;
           const captured = value.incidents.find(incident => incident.id === notice.incidentId), current = this.history.incidents.find(incident => incident.id === notice.incidentId);
           if (!captured || !current || this.history.preferences.transientMuted || current.evidence !== "fresh" || current.phase !== captured.phase ||
-            current.severity !== captured.severity || current.evidenceRevision !== captured.evidenceRevision || current.delivery.lastAt !== notice.at) continue;
+            current.severity !== captured.severity || current.severityTransition !== captured.severityTransition || current.evidenceRevision !== captured.evidenceRevision || current.delivery.lastAt !== notice.at) continue;
           if (current.severity !== "blocking" && (current.delivery.snoozedSession === this.session || current.delivery.snoozedUntil !== null && this.now() < current.delivery.snoozedUntil)) continue;
+          this.inFlightNotices.delete(notice.incidentId);
+          if (this.pendingNotices.get(notice.incidentId)?.at === notice.at && this.pendingNotices.get(notice.incidentId)?.reason === notice.reason) this.pendingNotices.delete(notice.incidentId);
           try { this.deps.onNotice?.(notice); } catch { /* A delivery failure never refunds its persisted budget. */ }
           for (const listener of this.noticeSubscribers) { if (this.closing) break; try { listener(notice); } catch { /* Delivery cannot grant authority. */ } }
         }
+        this.inFlightNotices.clear();
       }
     })().finally(() => { this.work = null; });
     await this.work;
@@ -216,7 +233,7 @@ export class RecoveryHistoryService {
       const complete = await Promise.race([drained, new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), Math.max(1, Math.min(2000, this.deps.stopTimeoutMs ?? 2000))); })]);
       if (timer) clearTimeout(timer);
       if (!complete) { this.audit = "unavailable"; this.reason = this.work ? "write-failed" : "read-failed"; }
-      this.stopped = true; this.dirty = false; this.pendingNotices.clear(); this.subscribers.clear(); this.noticeSubscribers.clear();
+      this.stopped = true; this.dirty = false; this.pendingNotices.clear(); this.inFlightNotices.clear(); this.subscribers.clear(); this.noticeSubscribers.clear();
     })();
   }
 }

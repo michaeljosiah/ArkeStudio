@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { RecoveryControlSchema, RecoveryRestartContextSchema, RECOVERY_POLICY, decideRecoveryRestart, emptyRecoveryTarget, recentRecoveryAttempts,
-  type RecoveryControl, type RecoveryMode, type RecoveryTarget, type RecoveryRestartContext, type RecoveryHoldReason } from "@arke-studio/contracts";
+  type RecoveryControl, type RecoveryMode, type RecoveryTarget, type RecoveryRestartContext, type RecoveryHoldReason, type RecoveryPolicySnapshot } from "@arke-studio/contracts";
 import { WriteQueue } from "../change-log.js";
 import type { RecoveryControlStore } from "./control-file.js";
 
@@ -21,13 +21,28 @@ export class RecoveryControlService {
   private auditFailure: AuditFailure | undefined;
   private closing = false;
   private closed = false;
+  private readonly subscribers = new Set<(policy: RecoveryPolicySnapshot) => void>();
 
   constructor(private readonly deps: { store: RecoveryControlStore; now?: () => number; onChange?: () => void }) {}
   private now(): number { return (this.deps.now ?? Date.now)(); }
   private serial<T>(action: () => Promise<T>): Promise<T> {
     let value!: T; return this.writes.enqueue(async () => { value = await action(); }).then(() => value);
   }
-  private changed(): void { if (!this.closing) try { this.deps.onChange?.(); } catch { /* Presentation cannot grant mutation. */ } }
+  private changed(): void {
+    if (this.closing) return;
+    try { this.deps.onChange?.(); } catch { /* Presentation cannot grant mutation. */ }
+    const policy = this.policySnapshot();
+    for (const listener of this.subscribers) { if (this.closing) break; try { listener(policy); } catch { /* Presentation cannot grant mutation. */ } }
+  }
+  subscribe(listener: (policy: RecoveryPolicySnapshot) => void): () => void {
+    if (this.closing) return () => {}; this.subscribers.add(listener); return () => this.subscribers.delete(listener);
+  }
+  policySnapshot(): RecoveryPolicySnapshot {
+    const state = this.snapshot();
+    return { audit: state.audit, accepting: state.accepting, mode: state.control.mode, ...(state.reason ? { reason: state.reason } : {}),
+      targets: state.control.targets.map(target => ({ key: target.key, service: target.service, stoppedByUser: target.stoppedByUser,
+        circuitOpen: target.circuitOpen, pendingOutcome: target.intent !== null })) };
+  }
   snapshot(): { audit: "starting" | "available" | "unavailable"; accepting: boolean; reason?: AuditFailure; control: RecoveryControl } {
     return { audit: !this.opened ? "starting" : this.auditAvailable ? "available" : "unavailable", accepting: this.opened && this.auditAvailable && !this.closing && !this.closed, reason: this.auditFailure, control: structuredClone(this.control) };
   }
@@ -192,5 +207,5 @@ export class RecoveryControlService {
     });
   }
   closeAdmission(): void { this.closing = true; }
-  async stop(): Promise<void> { this.closed = true; this.closeAdmission(); await this.writes.drain(); }
+  async stop(): Promise<void> { this.closed = true; this.closeAdmission(); await this.writes.drain(); this.subscribers.clear(); }
 }

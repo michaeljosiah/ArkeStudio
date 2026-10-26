@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { parseHTML } from "linkedom";
 import { emptyRecoveryHistory, observeRecoveryIncident, computeNeedsYou, DomainEventSchema, type RecoveryHistorySnapshot, type ClientMessage } from "@arke-studio/contracts";
-import { __applyForTest, __setStateForTest, __setBridgeForTest } from "../src/lib/store.js";
+import { __applyForTest, __setStateForTest, __setBridgeForTest, __applyEventForTest, subscribeRecoveryNotices } from "../src/lib/store.js";
 import { __resetActivityPanelForTest, openActivityPanel } from "../src/lib/activity-panel.js";
 import { ActivityPanel } from "../src/components/activity-panel.js";
 import { SettingsDiagnosticsScreen } from "../src/screens/settings-diagnostics.js";
@@ -19,6 +19,21 @@ function history(): RecoveryHistorySnapshot {
   return { at: now, audit: "available", incidents: value.incidents, activeCount: 1, resolvedCount: 0, limited: false, preferences: { transientMuted: true, desktopOptIn: false }, overflow: value.overflow };
 }
 function state() { const value = structuredClone(FIXTURE_STATE); value.app.recoveryHistory = history(); return value; }
+
+it("only delivers new admitted notices, keeps muted incidents in state, and does not replay them when unmuted", () => {
+  const value = state(); __setStateForTest(value); let delivered = 0;
+  const unsubscribe = subscribeRecoveryNotices(() => { delivered++; });
+  const notice = (at: number) => ({ type: "recovery.notice" as const, at: new Date(at).toISOString(), notice: { incidentId: "c".repeat(64), reason: "first-actionable" as const, at } });
+  try {
+    __applyEventForTest(notice(now)); assert.equal(delivered, 0);
+    const unmuted = history(); unmuted.preferences.transientMuted = false;
+    __applyEventForTest({ type: "recovery.history", at: new Date(now).toISOString(), history: unmuted });
+    __applyEventForTest(notice(now)); assert.equal(delivered, 0);
+    __applyEventForTest(notice(now + 1)); __applyEventForTest(notice(now + 1)); assert.equal(delivered, 1);
+    __applyEventForTest({ type: "recovery.history", at: new Date(now).toISOString(), history: { ...unmuted, audit: "unavailable" } });
+    __applyEventForTest(notice(now + 2)); assert.equal(delivered, 1);
+  } finally { unsubscribe(); }
+});
 
 it("folds recovery snapshots and keeps muted incidents visible with a read-only global action", () => {
   const value = state(), event = DomainEventSchema.parse({ type: "recovery.history", at: new Date(now).toISOString(), history: history() });
