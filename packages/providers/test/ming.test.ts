@@ -9,8 +9,9 @@ const request = (): SubmitRequest => ({model: "ming-3-0.5b", capability: "voice-
 
 it("sends exact voice bytes, reference words and separate direction to the local host", async () => {
   let seen: Parameters<MingSynthesis["synthesize"]>[0] | undefined;
-  const signal = new AbortController().signal;
-  const client = new MingClient({status: async () => ({ready: true}), synthesize: async (input, abort) => {seen = input; assert.equal(abort, signal); return wav();}});
+  const control = new AbortController(), signal = control.signal;
+  let workerSignal: AbortSignal | undefined;
+  const client = new MingClient({status: async () => ({ready: true}), synthesize: async (input, abort) => {seen = input; workerSignal = abort; assert.equal(abort.aborted, false); return wav();}});
   const input = request(); input.params.instructions = "Quiet, restrained anger."; input.signal = signal;
   const result = await client.submit("", input);
   assert.equal(seen?.text, "Come home.");
@@ -18,6 +19,8 @@ it("sends exact voice bytes, reference words and separate direction to the local
   assert.equal(seen?.reference, input.voiceReference);
   assert.equal(seen?.reference.transcript, "The words in this recording.");
   assert.equal(result.artifacts?.[0]?.contentType, "audio/wav");
+  control.abort();
+  assert.equal(workerSignal?.aborted, true);
 });
 
 it("refuses missing voices, missing reference words and oversized requests before inference", async () => {

@@ -105,6 +105,7 @@ every chunk on the original recording, keeps its direction separate from spoken 
 PCM audio with 80 ms gaps. Neutral cloning sends recording plus reference words; FREEFORM sends
 the recording and instruction using upstream's speaker-only task. Direction is best effort:
 accent, emotion and identical delivery across boundaries are listening decisions.
+Queued reads combine cancellation with a 30-minute whole-batch deadline.
 
 **7.9B is experimental.** The installation-path native test reproduced an accepted 32-word
 passage (~8.16 s, ~246 s generation), while another passage stopped early even after reducing

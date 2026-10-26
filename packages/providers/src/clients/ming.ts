@@ -32,7 +32,8 @@ export class MingClient implements ProviderClient {
     if (!MING_LANGUAGES.includes(language)) refuse("this recording language is unsupported by the local reader.");
     const ready = await this.host.status(request.model);
     if (!ready.ready) refuse(ready.reason ?? "this model is not ready.");
-    const signal = request.signal ?? AbortSignal.timeout(30 * 60_000);
+    const deadline = AbortSignal.timeout(30 * 60_000);
+    const signal = request.signal ? AbortSignal.any([request.signal, deadline]) : deadline;
     const data = await this.host.synthesize({ model: request.model, text: text as string, reference: reference!,
       language,
       ...(typeof instructions === "string" && instructions.trim() ? { instructions: instructions.trim() } : {}) }, signal);
