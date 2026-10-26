@@ -28,6 +28,17 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN GLOBAL CHAT 239
+  { group: "Studio assistant · turn 239", screen: "The current notification reference · 206b", frame: "239a", route: "App chrome / Studio assistant", status: "drawn", checked: "2026-10-26", controls: [], notes: ["Approved 26 October 2026; not built. The actual 206b master drawing, reused intact. Its floating notification card supplies the shell grammar."] },
+  { group: "Studio assistant · turn 239", screen: "Global chat · the Studio assistant", frame: "239b", route: "App chrome / Studio assistant", status: "drawn", checked: "2026-10-26", controls: [], notes: ["Approved 26 October 2026; not built. A rounded dialog over the unchanged 227a writing-room drawing, using current Arke icons and the shared 225 composer."] },
+  { group: "Studio assistant · turn 239", screen: "A diagnosis in the conversation", frame: "239c", route: "App chrome / Studio assistant", status: "drawn", checked: "2026-10-26", controls: [], notes: ["Approved 26 October 2026; not built. Arke explains the measured cause and affected work. Review cleanup opens a concrete plan; it does not delete files."] },
+  { group: "Studio assistant · turn 239", screen: "A repair needs approval", frame: "239d", route: "App chrome / Studio assistant", status: "drawn", checked: "2026-10-26", controls: [], notes: ["Approved 26 October 2026; not built. An exact action, estimated saving and retention promise precede a separate approval. These capabilities are proposed under epic #2194."] },
+  { group: "Studio assistant · turn 239", screen: "A world request goes to its own chat", frame: "239e", route: "App chrome / Studio assistant", status: "drawn", checked: "2026-10-26", controls: [], notes: ["Approved 26 October 2026; not built. An explicit handoff opens World Chat with an editable draft. It does not send, merge transcripts or change permissions."] },
+  { group: "Studio assistant · turn 239", screen: "Phone · the rounded dialog remains", frame: "239f", route: "App chrome / Studio assistant", status: "drawn", checked: "2026-10-26", controls: [], notes: ["Approved 26 October 2026; not built. A modal dialog with a 12px outer gap, all four rounded corners and 44px controls. Transcript scrolls independently above the composer."] },
+  { group: "Studio assistant · turn 239", screen: "Tablet · an overlay, with room to read", frame: "239g", route: "App chrome / Studio assistant", status: "drawn", checked: "2026-10-26", controls: [], notes: ["Approved 26 October 2026; not built. A 520px dialog overlays the page instead of shrinking it. Background content is inert while the modal dialog is open."] },
+  { group: "Studio assistant · turn 239", screen: "Phone · the visible keyboard viewport", frame: "239h", route: "App chrome / Studio assistant", status: "drawn", checked: "2026-10-26", controls: [], notes: ["Approved 26 October 2026; not built. The reduced viewport represents the area above an on-screen keyboard. Header and composer stay reachable; the transcript scrolls. Physical-device keyboard acceptance remains required."] },
+  // END GLOBAL CHAT 239
+
   // BEGIN MUSIC 238
   { group: "Music · turn 238", screen: "New production: Make music", frame: "238a", route: "World / New production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P17."] },
   { group: "Music · turn 238", screen: "Step two: what kind of music", frame: "238b", route: "World / New production", status: "drawn", checked: "2026-10-24", controls: [], notes: ["Approved 24 October 2026 with Player P17."] },
@@ -898,6 +909,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "global-chat-239.review.html", what: "Turn 239: the Studio assistant in a notification-style rounded dialog, diagnosis, reviewed repair, world handoff, phone, tablet and keyboard viewport.", state: "approved 26 October 2026; not built" },
   { file: "music-238.review.html", what: "Turn 238: Music as a production — Make music at the door, an album’s cover and tracks, Add track from Bench or a file, a track open with its lyrics and Heard in, a character’s theme in the Guide, a song teaser, Export → Arke Player for an album, a track’s composer and takes, the track editor, and the album’s sequence.", state: "approved 24 October 2026; not built" },
   { file: "picture-marks-237.review.html", what: "Turn 237: Picture marks — pictures set on the words inside a beat, + Picture at a sentence, a new mark’s panel, and Illustrate choosing pictures from the story under a cap.", state: "approved 24 October 2026; not built" },
   { file: "release-chapters-236.review.html", what: "Turn 236: Releasing chapters — a world’s Guide with its teasers, adding a clip, a character that waits for a chapter, Export → Arke Player releasing new chapters as a part, and the part made beside the releases before it.", state: "approved and built 24 October 2026 (ArkeStudio PR 2173; Player P15 in ArkePlayer PR 11)" },
@@ -1077,6 +1089,9 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="release-chapters-236.css">
 <link rel="stylesheet" href="picture-marks-237.css">
 <link rel="stylesheet" href="music-238.css">
+<link rel="stylesheet" href="global-chat-239.css">
+<link rel="stylesheet" href="../packages/client/src/components/model-chip.css">
+<link rel="stylesheet" href="global-chat-239.reference.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">
