@@ -1,5 +1,14 @@
 # Running and validating changes
 
+Proactive storage service checks (#2194) use contracts `test/storage-health.test.ts` and coordinator
+`test/storage/*.test.ts`. Run coordinator checks with native Windows process/filesystem access:
+the volume fixture exercises a real directory/junction pair through the kernel-leashed reader,
+and reservation persistence uses flushed atomic replacement. Capacity, quota, ENOSPC, forecast,
+concurrency and shutdown faults are injected; no test fills a real volume or removes creative media.
+The Windows native fixture is skipped on other operating systems, where the synthetic service tests
+still run. These checks establish the service boundary; app integration and visual parity with
+approved turn 239 require separate end-to-end acceptance.
+
 Managed local runtime checks are listed in [Managed local runtimes](managed-local-runtimes.md#validation).
 Use native Windows process/loopback access for the supervisor, Ming cancellation and file-handle
 fixtures; sandbox IPC refusals do not establish an application regression. Model qualification

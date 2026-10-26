@@ -1,4 +1,4 @@
-import { open, mkdir, rename, rm } from "node:fs/promises";
+import { open, mkdir, rename, rm, type FileHandle } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { ulid } from "@arke-studio/contracts";
 import { toExtendedLength } from "./paths.js";
@@ -39,6 +39,8 @@ export async function serializeFileMutation<T>(path: string, mutation: () => Pro
 export interface AtomicDeps {
   /** Injectable for the retry unit tests; defaults to fs.rename with prefixing. */
   rename?: (from: string, to: string) => Promise<void>;
+  /** Failure injection for write/flush/close: the stage remains owned by this one write. */
+  stage?: (path: string) => Promise<Pick<FileHandle, "writeFile" | "sync" | "close">>;
 }
 
 /**
@@ -80,16 +82,18 @@ export async function atomicWriteFile(
   const dir = dirname(path);
   await mkdir(toExtendedLength(dir), { recursive: true });
   const tmp = join(dir, `.tmp-${ulid()}`);
-  const handle = await open(toExtendedLength(tmp), "w");
   try {
-    await handle.writeFile(content, typeof content === "string" ? { encoding: "utf8" } : {});
-    await handle.sync(); // flushed before the rename — the journal protocol depends on ordering
-  } finally {
-    await handle.close();
-  }
-  try {
+    const handle = await (deps.stage ?? ((path: string) => open(path, "w")))(toExtendedLength(tmp));
+    try {
+      await handle.writeFile(content, typeof content === "string" ? { encoding: "utf8" } : {});
+      await handle.sync(); // flushed before the rename — the journal protocol depends on ordering
+    } finally {
+      await handle.close();
+    }
     await renameWithRetry(tmp, path, deps);
   } catch (err) {
+    // A full disk can reject write or sync before rename is reached. Clean only this write's
+    // own stage as well, so repeated failed control-state writes cannot accumulate partial files.
     await rm(toExtendedLength(tmp), { force: true }).catch(() => {});
     throw err;
   }

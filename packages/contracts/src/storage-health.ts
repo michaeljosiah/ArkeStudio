@@ -124,6 +124,29 @@ export interface StoragePressure {
   lastMeasuredAt: number;
 }
 
+export const StorageRootRoleSchema = z.enum(["local-ai", "generated-media", "working-files", "downloads", "exports"]);
+export type StorageRootRole = z.infer<typeof StorageRootRoleSchema>;
+export const StorageProbeSourceSchema = z.enum(["windows-volume-api", "linux-mountinfo", "darwin-volume-api", "host-provided"]);
+export type StorageProbeSource = z.infer<typeof StorageProbeSourceSchema>;
+export const StorageLimitationSchema = z.enum(["quota-unavailable", "total-unavailable", "permission-denied", "unsupported-filesystem", "probe-failed", "cancelled"]);
+export type StorageLimitation = z.infer<typeof StorageLimitationSchema>;
+export const StoragePressureSchema = z.object({
+  volumeId: identity, mappingRevision: identity, warning: z.boolean(), critical: z.boolean(),
+  warningClearSince: instant.nullable(), criticalClearSince: instant.nullable(), lastMeasuredAt: instant,
+}).strict();
+export const StorageForecastSchema = z.object({
+  method: z.literal("median-positive-consumption"), from: instant, to: instant, netLossBytes: bytes,
+  bytesPerMs: z.number().finite().positive(), timeToReserveMs: z.number().finite().nonnegative(), warning: z.boolean(),
+}).strict();
+export const StorageRootHealthSchema = z.object({
+  rootId: identity, role: StorageRootRoleSchema, state: z.enum(["measured", "stale", "unavailable", "unsupported"]),
+  capacity: StorageCapacitySchema.nullable(), source: StorageProbeSourceSchema, limitations: z.array(StorageLimitationSchema).max(5),
+  pressure: StoragePressureSchema.nullable(), forecast: StorageForecastSchema.nullable(),
+}).strict();
+export type StorageRootHealth = z.infer<typeof StorageRootHealthSchema>;
+export const StorageHealthSnapshotSchema = z.object({ at: instant, writing: z.boolean(), roots: z.array(StorageRootHealthSchema).max(128) }).strict();
+export type StorageHealthSnapshot = z.infer<typeof StorageHealthSnapshotSchema>;
+
 /** Presentation hysteresis never replaces each operation's fresh admission check (R-14).
  * Null means unknown now; the collector retains the preceding latch rather than declaring recovery. */
 export function advanceStoragePressure(previous: StoragePressure | null, sample: StorageCapacity, now: number, predictiveWarning: boolean): StoragePressure | null {
@@ -131,8 +154,10 @@ export function advanceStoragePressure(previous: StoragePressure | null, sample:
   if (sample.availableBytes === null || !fresh(sample, now, STORAGE_POLICY.forecastMaxAgeMs)) return null;
   // Concurrent probes may finish in a different order. An older observation cannot resolve a
   // newer fault or contribute an earlier clear qualification; only a changed mapping starts afresh.
-  if (previous && sameVolume(previous, sample) && sample.measuredAt < previous.lastMeasuredAt) return previous;
-  const prior = previous && sameVolume(previous, sample) ? previous : null;
+  if (previous && sameVolume(previous, sample) && sample.measuredAt < previous.lastMeasuredAt && previous.lastMeasuredAt <= now) return previous;
+  let prior = previous && sameVolume(previous, sample) ? previous : null;
+  // A wall-clock reversal preserves fault latches but starts clear qualification again.
+  if (prior && prior.lastMeasuredAt > now) prior = { ...prior, warningClearSince: null, criticalClearSince: null };
   const advance = (held: boolean, since: number | null, low: boolean, clear: boolean): [boolean, number | null] => {
     if (low) return [true, null];
     if (!held) return [false, null];

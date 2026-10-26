@@ -129,4 +129,14 @@ describe("storage policy (SPEC-062 R-5–R-14)", () => {
     assert(!cleared.warning && !cleared.critical);
     assert.deepEqual(advanceStoragePressure(cleared, sample(GiB, 659_999), 660_000, true), cleared);
   });
+
+  it("retains faults and restarts clear qualification when the wall clock moves backward", () => {
+    const critical = advanceStoragePressure(null, sample(GiB), 600_000, false)!;
+    const qualifying = advanceStoragePressure(critical, sample(12 * GiB, 630_000), 630_000, false)!;
+    const afterClockChange = advanceStoragePressure(qualifying, sample(12 * GiB, 500_000), 500_000, false)!;
+    assert(afterClockChange.warning && afterClockChange.critical);
+    assert.equal(afterClockChange.warningClearSince, 500_000);
+    const healthy = advanceStoragePressure(null, sample(12 * GiB), 600_000, false)!;
+    assert(advanceStoragePressure(healthy, sample(GiB, 500_000), 500_000, false)!.critical);
+  });
 });

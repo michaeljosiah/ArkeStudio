@@ -1,10 +1,14 @@
 # Code map
 
-Proactive storage policy foundation (epic #2194): contracts `storage-health.ts` defines real-volume
-capacity facts, fresh peak-space admission arithmetic, qualified consumption forecasts and warning
-hysteresis. Tests: contracts `test/storage-health.test.ts`; requirements SPEC-062 R-5–R-14.
-This is a pure foundation: host monitoring, atomic reservation ownership, write-path integration,
-incident notifications and reviewed cleanup are not yet connected by this module.
+Proactive storage services (epic #2194): contracts `storage-health.ts` defines opaque volume facts,
+fresh peak-space admission, qualified forecasts and warning hysteresis. Coordinator
+`storage/monitor.ts` owns bounded polling, wake/failure invalidation and probe coalescing;
+`storage/reservations.ts` serializes durable multi-volume admission, changed peaks and owner-confirmed
+settlement; `storage/reservation-file.ts` keeps its flushed app-local control state bounded.
+`storage/windows-volume.ts` reads actual GUID/root identities and caller-available bytes through a
+bounded kernel-leashed native reader. Tests: contracts `test/storage-health.test.ts`, coordinator
+`test/storage/`; requirements SPEC-062 R-1–R-14/R-24. App composition, write-path integration,
+incident notifications, other native host ports and reviewed cleanup remain outstanding.
 
 Managed local engines: coordinator `local-ai/ollama.ts` owns portable Ollama and explicit URL
 overrides; `setup/catalogue.ts` / `setup/local-setup.ts` own pinned archives and architecture/
