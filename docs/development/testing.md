@@ -13,6 +13,13 @@ journal exclusion. Client `test/storage-health.test.ts` checks the matching fold
 These checks establish observation and Diagnostics composition; write-path protection, recovery
 and visual parity with approved turn 239 require separate end-to-end acceptance.
 
+Recovery control tests (#2194) use contracts `test/recovery-policy.test.ts` and coordinator
+`test/recovery/control.test.ts`. They inject crash/unknown writes, competing attempts, rolling
+budgets, clock reversal, deliberate Stop/Suggest only, target changes during flush and shutdown.
+Native filesystem access is needed for atomic control-file replacement. These establish the
+durable gate, not live supervisor integration or successful inference. `test/job-leash.test.ts`
+also verifies shared storage-reader job reuse and kernel cleanup on forced parent death on Windows.
+
 Managed local runtime checks are listed in [Managed local runtimes](managed-local-runtimes.md#validation).
 Use native Windows process/loopback access for the supervisor, Ming cancellation and file-handle
 fixtures; sandbox IPC refusals do not establish an application regression. Model qualification

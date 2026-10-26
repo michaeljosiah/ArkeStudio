@@ -16,6 +16,14 @@ Tests: contracts `test/storage-{health,diagnostics}.test.ts`, coordinator `test/
 Write-path integration, incident notifications, other native host ports and reviewed cleanup remain
 outstanding.
 
+Recovery control foundation (#2194, SPEC-061 R-7/R-11/R-25): contracts `recovery-policy.ts`
+defines the closed restart context and rolling budget. Coordinator `recovery/control.ts` serializes
+single-use durable intents, unknown-outcome reconciliation, Suggest only/user Stop, final owner-fence
+checks and shutdown; `recovery/control-file.ts` keeps minimal authority in a separate bounded file.
+Tests: contracts `test/recovery-policy.test.ts`, coordinator `test/recovery/control.test.ts`.
+This foundation is not yet connected to live supervisors or the incident/action UI; it does not
+replace existing runtime behavior until that composition and native qualification are delivered.
+
 Managed local engines: coordinator `local-ai/ollama.ts` owns portable Ollama and explicit URL
 overrides; `setup/catalogue.ts` / `setup/local-setup.ts` own pinned archives and architecture/
 version receipts. `harness/v2-launch.ts` writes only the selected Ollama endpoint into the
