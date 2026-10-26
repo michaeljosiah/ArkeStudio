@@ -240,6 +240,16 @@ The product-level explanation is in [the architecture guide](docs/architecture/t
 
 ## Publishing a world to Arke Player
 
+For illustrated narration, assess the image holds, not just the image count. Use recorded take
+lengths when available; keep estimated sentence anchors labelled honestly. After narration and
+again on the exported listening plan, review the opening, every picture-to-picture interval and
+the final hold. Report the longest holds and their story purpose. A 30–60 second still is a useful
+starting point; review holds over 75 seconds, without making that a mandatory cut or image quota.
+Let the passage's action, emotional turns, suspense, humour and intended stillness set the pace.
+Additional views must add a supported reaction, detail or change of focus, preserve reveal timing,
+and avoid near duplicates. Portrait variants and unverified camera motion do not count as new
+moments. A count or chapter-wide average alone does not establish sufficient visual coverage.
+
 Arke Player's Available list and its `Update` come from one list of worlds, shipped in the app and
 fetched from the public ArkeStudio release `arke-player-worlds` (SPEC-058 R-29 – R-36, Player P9
 and P12). A new edition of a world is published in four steps across both repositories; the Player
