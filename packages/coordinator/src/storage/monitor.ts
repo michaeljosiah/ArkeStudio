@@ -43,6 +43,8 @@ export class StorageMonitor {
     initialPressure?: Readonly<Record<string, StoragePressure>>;
   }) {}
   private now(): number { return (this.deps.now ?? Date.now)(); }
+  /** Invalidations and root changes revoke facts already captured by an admission writer. */
+  admissionEpoch(): number { return this.version; }
 
   setRoots(roots: readonly StorageMonitoredRoot[]): void {
     const next = rootsSchema.parse(roots);

@@ -57,6 +57,8 @@ export class StorageReservations {
     store: StorageReservationStore;
     /** Bounded, cancellable read of a registered host handle. Null means mapping unavailable. */
     probe(rootId: string, signal: AbortSignal, after?: number): Promise<StorageCapacity | null>;
+    /** Host collector invalidations revoke captured evidence across an awaited flush. */
+    capacityEpoch?(): number;
     now?: () => number;
     onChange?: () => void;
     stopTimeoutMs?: number;
@@ -174,6 +176,7 @@ export class StorageReservations {
       const rootIds = new Set([...request.demands.map(d => d.rootId), ...[...this.records.values()].flatMap(r => r.demands.map(d => d.rootId))]);
       if (rootIds.size > 128) return { status: "held", reason: "reservation-limit" };
       const facts = new Map<string, StorageCapacity>();
+      const capacityEpoch = this.deps.capacityEpoch?.();
       const roots = [...rootIds]; let cursor = 0;
       await Promise.all(Array.from({ length: Math.min(4, roots.length) }, async () => {
         while (cursor < roots.length && !combined.aborted) {
@@ -185,6 +188,7 @@ export class StorageReservations {
         }
       }));
       if (this.closing || combined.aborted) return { status: "held", reason: "stopped" };
+      if (this.deps.capacityEpoch?.() !== capacityEpoch) return { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-unavailable" } };
       if (replanAfter !== undefined && [...facts.values()].some(fact => fact.measuredAt <= replanAfter)) {
         return { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-stale" } };
       }
@@ -236,6 +240,10 @@ export class StorageReservations {
         return { status: "held", reason: "stopped" };
       }
       const grantedAt = this.now();
+      if (this.deps.capacityEpoch?.() !== capacityEpoch) {
+        reservation.state = "uncertain"; this.changed();
+        return { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-unavailable" } };
+      }
       if ([...facts.values()].some(fact => fact.measuredAt > grantedAt || grantedAt - fact.measuredAt > STORAGE_POLICY.admissionMaxAgeMs)) {
         reservation.state = "uncertain"; this.changed();
         return { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-stale" } };

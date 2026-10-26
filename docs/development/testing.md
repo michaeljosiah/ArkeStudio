@@ -49,6 +49,20 @@ The production-host file fixture additionally stalls progress-accounting persist
 partial-file handle is admitted, quits with that save still blocked, verifies bounded shutdown and
 the exact retained checkpoint, and refuses late grants after the old write finishes. Completed
 existing files in a partly missing component must remain exact and consume no second reservation.
+The mounted-destination fixture keeps a published file on a full volume while downloading a missing
+file to a different volume. Reservation/replan fixtures invalidate another owner's capacity during
+a blocked flush, refresh it, then verify the old grant stays revoked and its intent remains uncertain.
+
+Setup native ownership checks use `test/setup/process.test.ts` and
+`test/setup/host-process-cleanup.test.ts`, with native process/loopback/filesystem access. They run
+literal disposable commands, hold the ownership gate, observe a helper surviving its command's exit,
+bound output, cancel and confirm exit, retain an unconfirmed process, then confirm it without replay.
+Windows additionally force-kills a disposable host and verifies kernel cleanup of its command/helper.
+The production host test refuses setup cleanup, verifies other native owners still stop, and keeps
+minimum storage/control settlement open until the cleanup retry. `local-setup.test.ts` checks held
+leases/staging, silent/interactive installer refusal, Stop/dispose, read-only listing and removal.
+Ordinary POSIX process-group behavior still requires Linux CI; deliberate daemon escape and complete
+archive/pull space planning are outside these checks. Run affected typechecks after the last test edit.
 
 Recovery control tests (#2194) use contracts `test/recovery-policy.test.ts` and coordinator
 `test/recovery/control.test.ts`. They inject crash/unknown writes, competing attempts, rolling

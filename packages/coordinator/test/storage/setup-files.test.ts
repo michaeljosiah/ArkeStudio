@@ -38,6 +38,32 @@ function response(body: AsyncIterable<Uint8Array>, length: number | null = 16) {
   return { ok: true, status: 200, contentLength: length, acceptRanges: true, contentRangeStart: null, validator: '"synthetic-version"', body };
 }
 
+it("a complete file on a full mounted destination does not block a missing file on another volume", async () => {
+  const root = await tempDir("arke-setup-complete-volume-"), directory = join(root, "models", "split");
+  await mkdir(directory, { recursive: true }); await writeFile(join(directory, "complete.bin"), new Uint8Array([1, 2, 3]));
+  let clock = Date.now(), roots: readonly { rootId: string; path: string }[] = [], requests = 0;
+  const storage = new AppStorageService({ appRoot: root, now: () => clock, native: {
+    setRoots: value => { roots = value; }, stop: async () => {}, probe: async rootId => {
+      const path = roots.find(value => value.rootId === rootId)!.path, completeOnly = path.endsWith("split");
+      return { state: "measured", source: "host-provided", limitations: [], capacity: { volumeId: completeOnly ? "full-volume" : "roomy-volume",
+        mappingRevision: rootId, measuredAt: ++clock, availableBytes: completeOnly ? 0 : 100 * GiB, totalBytes: 200 * GiB } };
+    },
+  } });
+  const catalogue: CatalogueEntry = { id: "split", displayName: "Split model", purpose: "Mounted destination fixture", sizeMb: 2,
+    spec: { kind: "files", dir: "split", files: [
+      { url: "https://example.test/complete", file: "complete.bin", sizeMb: 1 },
+      { url: "https://example.test/pending", file: "../pending/weights.bin", sizeMb: 1 },
+    ] } };
+  const service = new LocalSetupService(deps(async url => { assert.equal(url, "https://example.test/pending"); requests++;
+    return response((async function* () { yield new Uint8Array(16); })()); }), () => {},
+    { appRoot: root, catalogue: [catalogue], headroomMb: 1, fileSpace: new SetupFileStorage(storage) });
+  try {
+    await service.run(); assert.equal(service.status().components[0]!.state, "ready"); assert.equal(requests, 1);
+    assert.deepEqual([...await readFile(join(directory, "complete.bin"))], [1, 2, 3]);
+    assert.equal((await readFile(join(root, "models", "pending", "weights.bin"))).length, 16);
+  } finally { await service.dispose(); await storage.stop(); }
+});
+
 it("two actual file installers share one volume's remaining peak before either can overcommit it", async () => {
   const root = await tempDir("arke-setup-space-concurrent-"), h = fixture(root), entered = deferred(), finish = deferred(); let requests = 0;
   const first = new LocalSetupService(deps(async () => { requests++; entered.resolve(); return response((async function* () { await finish.promise; yield new Uint8Array(16); })()); }), () => {},

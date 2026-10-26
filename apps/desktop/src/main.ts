@@ -1384,7 +1384,7 @@ async function initialize(): Promise<{ port: number }> {
     // The ComfyUI runtime entry asks whether an external source was deliberately selected
     // (SPEC-021 D10). A detected install remains an offer and does not suppress managed Download.
     setup: {
-      ...nodeSetupDeps(),
+      ...nodeSetupDeps({ ledger: childLedger }),
       externallyPresent: async (entryId) =>
         entryId === "comfyui-runtime" ? comfyUiEngine.externallySelected() : entryId === "ollama-runtime" ? ollamaEngine.externallySelected() : false,
       ollama: ollamaEngine,

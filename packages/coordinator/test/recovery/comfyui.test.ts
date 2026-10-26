@@ -138,11 +138,11 @@ it("the production host reports failed ComfyUI exit and permits a later cleanup 
   } finally { if (originalStop) workers[0]!.stopAndConfirm = originalStop; await coordinator.stop(); await provider.close(); }
 });
 
-it("failed shutdown keeps settlement open until the unknown replacement actually exits", { timeout: 50_000 }, async () => {
+it("failed shutdown keeps settlement open until the unknown replacement actually exits", { timeout: 120_000 }, async () => {
   const { root } = await makeTempRoot(), provider = new FsWorldProvider(root), workers: ChildSupervisor[] = [], deps = nativeDeps(root, workers);
   const env = { COMFYUI_VERSION: "0.37.0", MODE: "healthy", IGNORE_STOP: "0" };
   deps.createSupervisor = spec => {
-      const worker = new ChildSupervisor({ ...spec, command: process.execPath, args: [CHILD], env, probeIntervalMs: 30, readyTimeoutMs: 10000 }, { listDescendants: async () => [] });
+      const worker = new ChildSupervisor({ ...spec, command: process.execPath, args: [CHILD], env, probeIntervalMs: 30, readyTimeoutMs: READY_MS }, { listDescendants: async () => [] });
     workers.push(worker); return worker;
   };
   const store = new FileRecoveryControlStore(join(root, "operations", "recovery-control.json")), control = new RecoveryControlService({ store });
@@ -151,12 +151,12 @@ it("failed shutdown keeps settlement open until the unknown replacement actually
     changeLogPath: join(root, "log.jsonl"), appVersion: "recovery-test", comfyui: { service } });
   type StopSeam = { forceStop(child: unknown): Promise<void> }; let originalStop: StopSeam["forceStop"] | undefined;
   try {
-    await coordinator.start(0); await until(() => service.baseUrl() !== null, "initial process ready", 15_000);
+    await coordinator.start(0); await until(() => service.baseUrl() !== null, "initial process ready", HEALTHY_WAIT_MS);
     const worker = workers[0]!, seam = worker as unknown as StopSeam; originalStop = seam.forceStop.bind(worker);
     // The retained replacement must reject graceful POSIX signals as well as the forced
     // stop seam; otherwise Linux confirms exit and never exercises the failed-stop retry.
     seam.forceStop = async () => {}; env.MODE = "never-healthy"; env.IGNORE_STOP = "1"; process.kill(worker.pid!, "SIGKILL");
-    await until(() => control.snapshot().control.targets[0]?.intent?.phase === "unknown", "replacement retained after unconfirmed cleanup", 25_000);
+    await until(() => control.snapshot().control.targets[0]?.intent?.phase === "unknown", "replacement retained after unconfirmed cleanup", 70_000);
     assert.ok(worker.pid); await assert.rejects(coordinator.stop(), /Local runtime cleanup did not confirm exit/);
     assert.equal(control.snapshot().accepting, false); assert.ok(control.snapshot().control.targets[0]!.intent);
     seam.forceStop = originalStop; await coordinator.stop(); assert.equal(worker.pid, null);

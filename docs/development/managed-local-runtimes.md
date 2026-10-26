@@ -22,6 +22,14 @@ Shutdown refuses late installation activation and quiesces an admitted Ollama st
 waiting for setup to drain. Healthy inference retains its owned child until normal job draining
 and confirmed process cleanup; quiescing does not discard the child or its exit backstop.
 
+Setup commands also have an owned lifetime. An internal anchor starts the catalogue program only
+after native ownership is established; completion waits for its ordinary helpers as well as the
+program itself. Output and shutdown waits are bounded. Unknown cleanup retains the installation
+or file-mutation reservation, keeps staging intact, and blocks later setup writes until its owner
+confirms exit. It does not automatically rerun an installer or model command. Shutdown still drains
+other native owners after a setup cleanup failure and keeps minimum settlement available for retry.
+This does not yet provide shared archive-expansion or model-pull space planning.
+
 Ollama is a pinned, SHA-256-verified portable tree, not a system installer or PATH command.
 Arke owns its process, a private loopback port, `<appRoot>/models/ollama`, and
 `<appRoot>/runtime-home/ollama`. Logs are `<appRoot>/logs/engines/ollama.log`.

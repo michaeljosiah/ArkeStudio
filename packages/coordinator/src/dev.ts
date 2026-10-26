@@ -185,7 +185,7 @@ const { coordinator, server } = createStudioHost({
   // What the packaged build reads out of its resources, dev reads out of the repo — so
   // Settings · Sample world is a working surface here and not a dead one (SPEC-016 R-6).
   sampleWorldDownload: UNDERSONG_RELEASE,
-  setup: { ...nodeSetupDeps(), ollama: ollamaEngine, externallyPresent: async id => id === "ollama-runtime" ? ollamaEngine.externallySelected() : id === "comfyui-runtime" && comfy.service.externallySelected() },
+  setup: { ...nodeSetupDeps({ ledger }), ollama: ollamaEngine, externallyPresent: async id => id === "ollama-runtime" ? ollamaEngine.externallySelected() : id === "comfyui-runtime" && comfy.service.externallySelected() },
   setupExtraEntries: comfy.weights,
   comfyui: { service: comfy.service },
   ollama: { service: ollamaEngine, reconfigureHarness: wiring.reconfigureOllama },

@@ -26,6 +26,22 @@ authority also bounds stalled reads/saves during shutdown, retaining uncertain i
 late write permission. Unsupported host ports retain their existing unknown-capacity policy and
 do not claim shared admission. Archive extraction, runtime-owned pulls, other write owners,
 restart reconciliation, other native ports and reviewed cleanup remain outstanding.
+Capacity invalidation/root changes revoke captured admission evidence across a reservation flush;
+an already-saved intent remains uncertain until its owner settles it. Completed-only destinations
+are excluded from direct-file admission, so a full old model volume does not block a different
+volume that has room for the missing files.
+
+Setup native ownership: `setup/process.ts` gates catalogue commands behind a private anchor;
+`setup/process-job.ts` binds Windows trees to a reused non-breakaway job, queries active processes
+and confirms termination. Ordinary POSIX helpers share the still-live anchor's private process
+group. Commands remain shell-free, output bounded, and actual completion waits for helper exit.
+`setup/node-deps.ts` injects the host child ledger. `setup/local-setup.ts` retains install/mutation
+leases after unknown native cleanup, including legacy listing/removal/fallback paths, and refuses
+later setup writes until owner cleanup confirms exit. Stop cannot discard their staging while
+cleanup is unknown. Coordinator shutdown still stops other owners after setup failure and retains
+minimum storage/recovery settlement until a later confirmed cleanup. This prerequisite does not
+implement archive expansion-space planning or runtime-owned pull reservations. Tests:
+`test/setup/process.test.ts`, `host-process-cleanup.test.ts` and `local-setup.test.ts`.
 
 Recovery control foundation (#2194, SPEC-061 R-7/R-11/R-25): contracts `recovery-policy.ts`
 defines the closed restart context and rolling budget. Coordinator `recovery/control.ts` serializes

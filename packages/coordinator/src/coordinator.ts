@@ -23239,7 +23239,7 @@ export class Coordinator {
       await this.chapterReviewService?.stop();
       await audioStudioStopped;
       await this.effectAnalysis.stop();
-      const setupStopped = this.setup?.dispose();
+      const setupStopped = Promise.allSettled([this.setup?.dispose()]);
       await this.adapterLibrary?.dispose();
       for (const dispose of this.lifecycleDisposers) dispose();
       this.lifecycleDisposers.clear();
@@ -23278,7 +23278,7 @@ export class Coordinator {
       await connectionsClosed;
       await Promise.allSettled(this.activeMessages);
       await this.openWorldTail;
-      await setupStopped;
+      const setupStops = await setupStopped;
       await Promise.all([...this.stagedClips.keys()].map((clipId) => this.dropStagedClip(clipId)));
 
       // Message handlers have now either committed their queue rows or recorded their refusal.
@@ -23291,7 +23291,6 @@ export class Coordinator {
       await this.appearanceWrite;
       await this.jobQueue?.waitForIdle();
       await this.jobQueue?.drain();
-      await this.opts.storageHealth?.stop();
       await this.audiobookActivity.drain();
       const supervisedStops = await Promise.allSettled([...this.supervisors.values()].map(supervisor => supervisor.stopAndConfirm()));
       await this.opts.adapter?.dispose?.().catch(() => {});
@@ -23310,8 +23309,9 @@ export class Coordinator {
       // called, so a fault recorded in the last moments of a run — the kind most worth having,
       // because the run ended — could still be in the queue when the process left.
       await this.appLog?.drain();
-      const failedRuntimeStops = [...comfyUiStops, ...runtimeStops, ...supervisedStops].filter(result => result.status === "rejected");
+      const failedRuntimeStops = [...setupStops, ...comfyUiStops, ...runtimeStops, ...supervisedStops].filter(result => result.status === "rejected");
       if (failedRuntimeStops.length) throw new AggregateError(failedRuntimeStops.map(result => result.reason), "Local runtime cleanup did not confirm exit.");
+      await this.opts.storageHealth?.stop();
       // Admission closed synchronously above; owner settlement must remain available across
       // a failed native stop so a later confirmed cleanup can resolve its retained intent.
       await this.opts.recoveryControl?.stop();

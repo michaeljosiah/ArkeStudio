@@ -5,6 +5,7 @@ import { writeFile, readFile } from "node:fs/promises";
 import type { StorageCapacity } from "@arke-studio/contracts";
 import { StorageReservations, type StorageReservation, type StorageReservationRequest, type StorageReservationStore } from "../../src/storage/reservations.js";
 import { FileStorageReservationStore } from "../../src/storage/reservation-file.js";
+import { AppStorageService } from "../../src/storage/service.js";
 import { tempDir } from "../tmp.js";
 
 const GiB = 1024 ** 3;
@@ -13,6 +14,32 @@ const fact = (availableBytes = 10 * GiB, extra: Partial<StorageCapacity> = {}): 
   volumeId: "volume-a", mappingRevision: "mount-a", measuredAt: 600_000, availableBytes, totalBytes: 500 * GiB, ...extra,
 });
 const request = (id: string, remainingBytes: number | null, rootId = "media"): StorageReservationRequest => ({ id, owner, demands: [{ rootId, remainingBytes }] });
+
+for (const replacing of [false, true]) it(`revokes a pending ${replacing ? "replan" : "reservation"} grant when another writer invalidates capacity during its flush`, async () => {
+  const root = await tempDir("arke-admission-invalidated-"), entered = deferred(), finish = deferred();
+  let now = 600_000, blocked = false;
+  const storage = new AppStorageService({ appRoot: root, now: () => now, store: {
+    load: async () => ({ version: 2, records: [], consumed: [] }),
+    save: async () => { if (blocked) { entered.resolve(); await finish.promise; } },
+  }, native: { setRoots: () => {}, stop: async () => {}, probe: async rootId => ({ state: "measured", source: "host-provided", limitations: [],
+    capacity: fact(100 * GiB, { measuredAt: ++now, mappingRevision: rootId }) }) } });
+  const hold = storage.acquireRoot(join(root, "models"), "local-ai");
+  try {
+    await storage.start(); const operation = request("flushing", GiB, hold.rootId);
+    if (replacing) assert.equal((await storage.reservations.reserve(operation)).status, "reserved");
+    blocked = true; now += 1001;
+    const pending = replacing ? storage.reservations.replan(operation) : storage.reservations.reserve(operation);
+    await entered.promise;
+    const otherRoot = storage.snapshot().roots.find(value => value.rootId !== hold.rootId)!;
+    storage.writeFailed(otherRoot.rootId); now += 1001;
+    await storage.refresh(); // Even refreshed facts cannot restore the old grant's authority.
+    finish.resolve();
+    assert.deepEqual(await pending, { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-unavailable" } });
+    assert.equal(storage.reservations.snapshot().records[0]!.state, "uncertain");
+    assert.equal((await storage.reservations.reserve(request("competing", 1, hold.rootId))).status, "held");
+    blocked = false; assert.equal(await storage.reservations.settle(operation.id, owner), true);
+  } finally { finish.resolve(); hold.release(); await storage.stop(); }
+});
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>(done => { resolve = done; });

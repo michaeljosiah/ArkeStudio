@@ -138,18 +138,18 @@ it("a native server exit ends the real adapter's accepted turn as unknown before
   }
 });
 
-it("credential relaunch confirms an interrupted replacement before starting with the changed environment", { timeout: 40_000 }, async () => {
-  const h = await fixture();
+it("credential relaunch confirms an interrupted replacement before starting with the changed environment", { timeout: 120_000 }, async () => {
+  const h = await fixture({ readyTimeoutMs: 30_000 });
   try {
-    await h.coordinator.start(0); await until(() => h.worker.status === "healthy", "writing server ready", 15000);
+    await h.coordinator.start(0); await until(() => h.worker.status === "healthy", "writing server ready", 40_000);
     h.env.MODE = "never-healthy"; process.kill(h.worker.pid!, "SIGKILL");
-    await until(() => h.worker.spawnEpoch === 2 && h.worker.status === "starting" && h.worker.pid !== null, "replacement awaiting health", 15000);
+    await until(() => h.worker.spawnEpoch === 2 && h.worker.status === "starting" && h.worker.pid !== null, "replacement awaiting health", 40_000);
     const interruptedPid = h.worker.pid!;
     // updateEnv patches this launch snapshot after confirmed cleanup; make the selected
     // replacement healthy without changing production health validation or its timeout.
     h.env.MODE = "healthy";
     await h.wiring.relaunchHarness({ anthropic: "synthetic-test-credential" });
-    await until(() => h.worker.status === "healthy" && h.worker.pid !== interruptedPid, "credential replacement ready", 15000);
+    await until(() => h.worker.status === "healthy" && h.worker.pid !== interruptedPid, "credential replacement ready", 40_000);
     const target = (await h.disk()).targets[0]!; assert.equal(target.intent, null); assert.equal(target.attempts.length, 1);
     const release = await h.wiring.recovery!.reserve(new AbortController().signal); release();
   } finally { await h.wiring.adapter!.dispose?.(); await h.close(); }

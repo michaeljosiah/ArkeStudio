@@ -8,6 +8,7 @@ import type { DomainEvent, SetupStatus } from "@arke-studio/contracts";
 import { SetupStatusSchema } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { LocalSetupService, systemTar, type SetupDeps } from "../../src/setup/local-setup.js";
+import { SetupProcessCleanupPending } from "../../src/setup/process.js";
 import {
   catalogueTotalMb,
   isVoxaSetupComponentId,
@@ -18,6 +19,92 @@ import {
 } from "../../src/setup/catalogue.js";
 
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const;
+
+it("unconfirmed installer cleanup retains its installation lease and staging bytes, blocking later work without replay", async () => {
+  for (const interactive of [false, true]) {
+    const appRoot = await root(), entries = [catalogue()[0]!, catalogue()[2]!];
+    let acquired = 0, released = 0, commands = 0, confirmed = false;
+    const activated: string[] = [], base = deps();
+    const service = new LocalSetupService({ ...base,
+      run: async () => { commands++; if (interactive && commands === 1) return { code: 1, output: "not installed" }; throw new SetupProcessCleanupPending(); },
+      confirmProcessCleanup: async () => { if (!confirmed) throw new SetupProcessCleanupPending(); },
+    }, () => {}, { appRoot, catalogue: entries, throttleMs: 0,
+      beginComponentInstall: async () => { acquired++; return () => { released++; }; },
+      onComponentReady: async id => { assert.equal(acquired, released); activated.push(id); },
+    });
+    try {
+      await service.run();
+      assert.equal(commands, interactive ? 2 : 1, "an unconfirmed silent launch cannot trigger the interactive fallback");
+      assert.equal(acquired, 1); assert.equal(released, 0); assert.deepEqual(activated, []);
+      assert.equal(service.status().components[0]!.state, "failed");
+      assert.equal(service.status().components[1]!.state, "blocked");
+      assert((await stat(join(appRoot, "models", ".staging", "OllamaSetup.exe"))).size > 0);
+      const before = base.calls.length;
+      await service.run(); assert.equal(base.calls.length, before, "unconfirmed cleanup admits no detection or transfer");
+      await assert.rejects(service.remove(entries[1]!.id), SetupProcessCleanupPending);
+      await assert.rejects(service.repair(entries[1]!.id), SetupProcessCleanupPending);
+      await assert.rejects(service.cancel(), SetupProcessCleanupPending);
+      assert.equal(released, 0);
+      confirmed = true; await service.run();
+      assert.equal(released, acquired); assert.equal(commands, interactive ? 2 : 1, "cleanup never replays the installer");
+      assert.deepEqual(activated, [entries[1]!.id]);
+    } finally { confirmed = true; await service.dispose(); }
+  }
+});
+
+it("Stop retains ownership when cancellation cannot confirm exit, and a later dispose can confirm without deleting staged bytes", async () => {
+  const appRoot = await root(); let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
+  let released = 0, confirmations = 0, allow = false, discarded = 0;
+  const service = new LocalSetupService({ ...deps(), run: async (_command, _args, signal) => {
+    entered(); await new Promise<void>(resolve => { signal.addEventListener("abort", () => resolve(), { once: true }); if (signal.aborted) resolve(); });
+    throw new SetupProcessCleanupPending();
+  }, confirmProcessCleanup: async () => { confirmations++; if (!allow) throw new SetupProcessCleanupPending(); },
+  disposeProcesses: async () => { if (!allow) throw new SetupProcessCleanupPending(); } }, () => {}, {
+    appRoot, catalogue: [catalogue()[0]!], beginComponentInstall: async () => () => { released++; },
+  });
+  const internal = service as unknown as { discardOwned(entry: CatalogueEntry): Promise<unknown[]> };
+  const discard = internal.discardOwned.bind(service); internal.discardOwned = async entry => { discarded++; return discard(entry); };
+  const running = service.run();
+  try {
+    await started; const before = discarded;
+    await assert.rejects(service.cancel(), SetupProcessCleanupPending); await running;
+    assert.equal(confirmations, 0, "the cancellation does not immediately repeat its failed native cleanup");
+    assert.equal(discarded, before); assert.equal(released, 0);
+    await assert.rejects(service.dispose(), SetupProcessCleanupPending); assert.equal(released, 0);
+    allow = true; await service.dispose(); assert.equal(released, 1);
+    assert((await stat(join(appRoot, "models", ".staging", "OllamaSetup.exe"))).size > 0);
+  } finally { allow = true; await service.dispose(); await running; }
+});
+
+it("an unconfirmed read-only model listing blocks later setup until cleanup is confirmed, without replaying a model pull", async () => {
+  let calls = 0, allow = false;
+  const entry: CatalogueEntry = { ...catalogue()[1]!, requires: [], optional: true };
+  const service = new LocalSetupService({ ...deps(), run: async (_command, args) => {
+    calls++; assert.deepEqual(args, ["list"]); if (calls === 1) throw new SetupProcessCleanupPending(); return { code: 0, output: "" };
+  }, confirmProcessCleanup: async () => { if (!allow) throw new SetupProcessCleanupPending(); } }, () => {}, { appRoot: await root(), catalogue: [entry] });
+  try {
+    await service.detect(); assert.equal(service.status().components[0]!.state, "failed");
+    await service.detect(); await service.run(); assert.equal(calls, 1);
+    allow = true; await service.run(); assert.equal(calls, 2); assert.equal(service.status().components[0]!.state, "failed");
+  } finally { allow = true; await service.dispose(); }
+});
+
+it("an unconfirmed model removal retains its file-mutation lease until owner cleanup", async () => {
+  let released = 0, commands = 0, allow = false;
+  const entry: CatalogueEntry = { ...catalogue()[1]!, requires: [], optional: true };
+  const service = new LocalSetupService({ ...deps(), run: async (_command, args) => {
+    if (args[0] === "list") return { code: 0, output: "llama3.1:8b" };
+    commands++; throw new SetupProcessCleanupPending();
+  }, confirmProcessCleanup: async () => { if (!allow) throw new SetupProcessCleanupPending(); } }, () => {}, {
+    appRoot: await root(), catalogue: [entry], beginFileMutation: () => () => { released++; },
+  });
+  try {
+    await service.detect(); assert.equal(service.status().components[0]!.state, "present");
+    assert.equal((await service.remove(entry.id)).freedMb, 0); assert.equal(released, 0);
+    assert.match(service.status().components[0]!.detail!, /has not confirmed native process exit/);
+    allow = true; await service.run(); assert.equal(released, 1); assert.equal(commands, 1);
+  } finally { allow = true; await service.dispose(); }
+});
 
 it("publishes integer byte progress for small files whose catalogue size is a fractional MiB", async () => {
   const entry: CatalogueEntry = { id: "small-file", displayName: "Small file", purpose: "Source fixture", sizeMb: 1,

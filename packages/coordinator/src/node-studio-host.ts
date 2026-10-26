@@ -85,7 +85,7 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
       jobsSeedPath: join(options.appRoot, "queue", "jobs.jsonl"), ledgerSeedPath: join(options.appRoot, "ledger.jsonl"),
       secretRegistry: secrets, providerCalls: calls, validators: clients, dispatchClients: clients, manifest: SHIPPED_MANIFEST,
       voice: { sidecar: null, localPresets: [], cloudSources: cloudVoiceSources(clients) },
-      setup: { ...nodeSetupDeps(), ollama, externallyPresent: async id => id === "ollama-runtime" ? ollama!.externallySelected() : id === "comfyui-runtime" && comfy!.service.externallySelected() },
+      setup: { ...nodeSetupDeps({ ledger }), ollama, externallyPresent: async id => id === "ollama-runtime" ? ollama!.externallySelected() : id === "comfyui-runtime" && comfy!.service.externallySelected() },
       setupExtraEntries: comfy.weights,
       comfyui: { service: comfy.service },
       ollama: { service: ollama, reconfigureHarness: wiring?.reconfigureOllama }, ming,
