@@ -1104,6 +1104,20 @@ Explicit same-file audiobook picture choices preserve the existing generation lo
 
 Audio-only story publication fingerprints exclude chapter pictures, look/own-look choices and their shared update timestamp; all other narration fields and the existing resolved blocks/mix/arrangement, text, metadata, rights and media identities remain checked in `publications/story-review.ts` (#2122, SPEC-048 section2.11). Illustrated outputs retain picture dependencies; coherent capture and immutable ready-edition verification are unchanged.
 
+## Completed generation result storage
+
+Contracts `job.ts` carries the optional pre-submission `resultReceiptId`. Queue
+`artifact-files.ts` owns bounded, hash-verified private completed-response receipts, cancellation
+and enumerated post-filing retirement. `dispatcher.ts` preserves accepted bytes across local
+storage holds and restores the exact result/usage/cost before considering provider recovery.
+`storage/job-artifacts.ts` joins known remaining file writes to shared volume reservations and
+reconciles only its known idle host-file leases, preserving live or unfamiliar owners. The
+production coordinator injects that port and the existing world's ownership recheck. No shell,
+native-worker release, provider replay or generic cleanup authority is added. Queue and storage
+regressions cover disk faults, prefixes, separate volumes, cancellation, restart, rejected journal
+appends and billing. See [filesystem operations](../filesystem-operations.md#jobs-takes-reviews-and-exports)
+for paths, limits and the remaining generation/scratch/admission boundary.
+
 ## System status overview
 
 Approved turn 240: contracts `src/system-resources.ts` owns readings, freshness and conservative

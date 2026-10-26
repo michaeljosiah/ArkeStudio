@@ -452,20 +452,16 @@ describe("the gate's over-limit refusal reaches the user (SPEC-007 R-18)", () =>
       // screen now, so this reads it where it renders — the requirement is that the refusal
       // reaches the user, not that it reaches them on any particular screen.
       //
-      // What carries findability from the hub is the chrome, not a panel on it: the proposals
-      // icon wears the same warning dot as activity whenever something waits and reaches the
-      // proposals screen from anywhere, which is a stronger guarantee than one screen's copy.
+      // Approved turn 240 replaces the proposal shortcut. Activity still carries the waiting
+      // decision from every screen and links to its existing proposal review.
       const hub = renderToString(
         <MemoryRouter initialEntries={[`/w/${WORLD_ID}`]}>
           <App />
         </MemoryRouter>,
       ).replace(/<!-- -->/g, "");
-      assert.match(
-        hub,
-        /title="Proposals — 1 awaiting a decision"/,
-        "the chrome still says something is waiting, so the notice is findable",
-      );
-      assert.match(hub, /fy-iconbtn__dot/, "and wears the warning dot that says so at a glance");
+      const bell = parseHTML(hub).document.querySelector('[data-activity-bell]');
+      assert.equal(bell?.getAttribute('aria-label'), 'Activity — something needs you', "the chrome still makes the waiting decision findable");
+      assert.ok(bell?.querySelector('.fy-iconbtn__dot'), "Activity itself carries the warning dot");
 
       const html = renderToString(
         <MemoryRouter initialEntries={[`/w/${WORLD_ID}/proposals`]}>

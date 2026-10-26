@@ -270,6 +270,7 @@ import type { SystemResourceService } from "./system-resources.js";
 import type { AppStorageService } from "./storage/service.js";
 import { SetupFileStorage } from "./storage/setup-files.js";
 import { SetupArchiveStorage } from "./storage/setup-archive.js";
+import { JobArtifactStorage } from "./storage/job-artifacts.js";
 import type { RecoveryControlService } from "./recovery/control.js";
 import type { RecoveryHistoryService } from "./recovery/history.js";
 import { recoveryCommand } from "./recovery/commands.js";
@@ -3722,6 +3723,7 @@ export class Coordinator {
                 ),
               append: (entry) => this.recordLedger(entry),
             },
+            artifactSpace: opts.storageHealth?.supportsAdmission ? new JobArtifactStorage(opts.storageHealth) : undefined,
             landInWorld: async (worldId, fn) => {
               try {
                 if (worldId === VOICE_PREVIEW_SCOPE && opts.appRoot) {
@@ -3738,13 +3740,13 @@ export class Coordinator {
                 }
                 if (this.opts.provider.withWorldStore) {
                   await this.opts.provider.withWorldStore(worldId, (store) =>
-                    store.ownedWrite(() => fn(store.dir)),
+                    store.ownedWrite(() => fn(store.dir, () => store.assertOwnership())),
                   );
                   return true;
                 }
                 const store = this.opts.provider.openStore?.();
                 if (!store || store.worldId !== worldId) return false;
-                await store.ownedWrite(() => fn(store.dir));
+                await store.ownedWrite(() => fn(store.dir, () => store.assertOwnership()));
                 return true;
               } catch {
                 return false;

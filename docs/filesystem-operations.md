@@ -130,8 +130,33 @@ the sandbox when it is removed.
 
 ## Jobs, takes, reviews, and exports
 
-Provider output is first verified under `W\.staging\<job-id>\`, renamed into its requested
-world-relative landing directory, and then removed from staging.
+Nonempty buffered provider results first retain a private completed-response checkpoint under
+`R\queue\inline-artifacts\<job-id>\result-<nonce>\`: hash-named binary files and a flushed manifest
+written last. The nonce is flushed in the job's pre-submission row; receipts retain the exact
+accepted provider identity and reported usage/cost. Historical attempt-count folding cannot
+rebind it. Both inline and retrieved results use this path, without another generation request.
+
+After verification, output is staged under `W\.staging\<job-id>\` and renamed into its requested
+world-relative landing directory. The owning world rechecks ownership before publication. Valid
+staging bytes and the private checkpoint survive failed filing. Completed staging prefixes are
+verified and reused. Only confirmed successful filing/finalization retires its enumerated current
+checkpoint files; unknown, corrupt, cancelled, previous and legacy copies are retained. There is
+no recursive result-cache cleanup or physical creative-media deletion.
+
+On qualified storage ports, known remaining checkpoint/staging writes share the existing volume
+reservation registry, including a 64 KiB per-file metadata estimate. Already verified bytes are
+not reserved again. Staging and target roots must prove one volume for rename publication;
+different volumes are held rather than silently copied. A full world volume cannot borrow space
+from the app drive. Local persistence/filing retries default to thirty seconds and preserve job,
+provider and charge identities. Cancellation stops future writes and waits for an admitted file
+handle before its reservation settles. Host shutdown drains those handles through the queue.
+
+This covers finite, buffered result writes, not all generation/scratch, streaming downloads,
+pre-dispatch estimates or export/import owners. Checkpoint bounds are 64 artifacts, 1 GiB per
+file, 4 GiB aggregate and 128 KiB metadata. Oversized/uncheckpointed responses remain held while
+Arke is open; closing before a complete receipt can lose the in-memory copy. The durable job
+identity remains; an inline-only result without a valid receipt requires reconciliation and
+is never automatically regenerated. Providers do not universally retain retrievable results.
 
 Implemented landing directories include:
 

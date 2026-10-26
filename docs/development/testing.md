@@ -1505,6 +1505,18 @@ and witnessed terminal errors remain separate. Compare the existing turn-206 Act
 wording at phone, tablet and desktop widths. Synthetic component screenshots do not establish
 native provider recovery; report any controlled live interruption separately.
 
+## Completed result storage
+
+Run coordinator `test/queue/artifact-files.test.ts`, `result-storage.test.ts`,
+`dispatcher.test.ts`, `speech-pricing.test.ts` and `test/storage/job-artifacts.test.ts`, plus
+the shared storage regression directory. These require ordinary native filesystem access for
+atomic temporary-file rename; a restricted sandbox's denied rename is not a disk-full fault.
+The tests inject capacity/accounting failures with small synthetic bytes, never fill a disk,
+contact a provider, run inference or delete source media. They cover exact result recovery after
+provider expiry, rejected accepted-facts appends, ownership loss before publication, complete
+prefix reuse, cancellation, accounting reconciliation and unchanged charge identities. Run all
+affected types after final test edits. Full CI remains necessary for Windows/Linux differences.
+
 ## System status (turn 240)
 
 Run contracts/coordinator/desktop `system-resources.test.ts`, coordinator
