@@ -338,6 +338,11 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
       })
     : null;
   const adapter = rawAdapter === null ? null : runtimeChanges.wrap(rawAdapter);
+  let adapterGeneration = supervisor.spawnEpoch;
+  supervisor.on("status", event => { if (event.status === "starting") adapterGeneration = supervisor.spawnEpoch; });
+  supervisor.on("process-exit", ({ generation }: { generation: number }) => {
+    if (generation === adapterGeneration) rawAdapter?.runtimeExited();
+  });
 
   const logLines: string[] = [];
   if (harness) {

@@ -200,7 +200,7 @@ export class OllamaEngineService {
   private async stopOwned(): Promise<void> {
     const worker = this.supervisor;
     if (worker) await worker.stopAndConfirm();
-    await this.recoveryPort?.ownerStopped(); this.recoveryPort = null;
+    this.recoveryPort = null;
     const release = this.installationLane; this.installationLane = null; release?.();
     this.supervisor = null;
     this.removeBackstop?.(); this.removeBackstop = null;

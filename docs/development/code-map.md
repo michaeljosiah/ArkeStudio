@@ -40,6 +40,14 @@ turns/configuration changes until verified replacement or confirmed cleanup. No 
 The launcher validates the running pinned protocol and process identity over private authenticated
 health. Generic supervisors quiesce before handler drain and confirm native exit during shutdown;
 failed confirmation retains recovery settlement for a later retry.
+The supervisor's generation-bound direct-child exit signal ends the real OpenCode adapter's
+pending turns with an explicit unknown outcome before the writing recovery fence drains. Prompt
+requests from that process generation are cancelled locally, never replayed. Confirmed stop owns
+retained settlement for manual restart, credential relaunch and reconfiguration as well as shutdown.
+Desktop supplies Voxa's dynamic bundled/personal ownership and launch digest before supervised
+startup. `voice/src/index.ts` drains admitted TTS/STT (including queued synthesis, WAV preparation
+and body reads) under one cancellable recovery reservation; native failure cancels requests without
+replay. Personal voice selections retain their managed role's circuit without automatic replacement.
 Other service owners, reviewed stop/restart actions and broader qualification
 remain outstanding. No completed recovery-agent claim follows from this slice.
 

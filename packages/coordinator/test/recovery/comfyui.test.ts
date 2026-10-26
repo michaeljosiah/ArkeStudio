@@ -20,12 +20,15 @@ import { until, untilAsync } from "../wait.js";
 const CHILD = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "child.mjs");
 const settings = { enginePath: null, engineUrl: null, modelsDir: null };
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
-function nativeDeps(root: string, workers: ChildSupervisor[]): EngineServiceDeps {
+// Match the supervisor suite's starved-runner startup/settlement tiers. A startup budget
+// expiring kills a valid child, so extending only the outer poll cannot repair that failure.
+const READY_MS = 30_000, HEALTHY_WAIT_MS = 40_000;
+function nativeDeps(root: string, workers: ChildSupervisor[], readyTimeoutMs = 10_000): EngineServiceDeps {
   return { appRoot: root, recipes: [], fileExists: async () => true, listDirectories: async () => [], hashFile: async () => null,
     writeTextFile: async () => {}, readNodeRef: async () => null, createProcessEpoch: randomUUID,
     fetch: async url => url.endsWith("/object_info") ? Response.json({}) : fetch(url), registerSupervisorExitBackstop: () => () => {},
     createSupervisor: spec => {
-      const worker = new ChildSupervisor({ ...spec, command: process.execPath, args: [CHILD], env: { COMFYUI_VERSION: "0.37.0" }, probeIntervalMs: 30, readyTimeoutMs: 10_000 },
+      const worker = new ChildSupervisor({ ...spec, command: process.execPath, args: [CHILD], env: { COMFYUI_VERSION: "0.37.0" }, probeIntervalMs: 30, readyTimeoutMs },
         { listDescendants: async () => [] }); workers.push(worker); return worker;
     } };
 }
@@ -55,13 +58,13 @@ it("the production host composes managed ComfyUI recovery and verifies its new p
   assert.equal(workers[0]!.pid, null);
 });
 
-it("profile processes retain separate restart targets and a queued crash survives another engine's handover", { timeout: 50_000 }, async () => {
+it("profile processes retain separate restart targets and a queued crash survives another engine's handover", { timeout: 120_000 }, async () => {
   const { root } = await makeTempRoot(), workers: ChildSupervisor[] = [];
-  const service = new ProfiledComfyUiEngineService(nativeDeps(root, workers), "profile-recipe", { id: "comfyui-profile", args: [], customNodesDir: root, nodeRefs: {} });
+  const service = new ProfiledComfyUiEngineService(nativeDeps(root, workers, READY_MS), "profile-recipe", { id: "comfyui-profile", args: [], customNodesDir: root, nodeRefs: {} });
   const gpu = new LocalGpu(async engine => { if (engine === "ComfyUI") await service.prepareGpuHandover(); }, ["ComfyUI", "Ming"]), control = gate(service, gpu);
   let release: (() => void) | undefined;
   try {
-    await service.applySettings(settings); await until(() => service.baseUrls().length === 2, "both profile processes ready", 15_000);
+    await service.applySettings(settings); await until(() => service.baseUrls().length === 2, "both profile processes ready", HEALTHY_WAIT_MS);
     const primary = workers.find(worker => worker.id === "comfyui")!, profile = workers.find(worker => worker.id === "comfyui-profile")!,
       primaryPid = primary.pid!, profilePid = profile.pid!, profileEpoch = service.engineIdentity("profile-recipe")!.processEpoch;
     release = await gpu.acquire("Ming", new AbortController().signal); process.kill(primaryPid, "SIGKILL");
@@ -69,10 +72,16 @@ it("profile processes retain separate restart targets and a queued crash survive
     await service.prepareGpuHandover(); assert.equal(primary.status, "unhealthy"); assert.equal(primary.spawnEpoch, 1);
     assert.equal(profile.pid, profilePid); assert.equal(service.engineIdentity("profile-recipe")!.processEpoch, profileEpoch);
     release(); release = undefined;
-    await until(() => primary.status === "healthy" && control.snapshot().control.targets[0]?.intent === null, "primary replacement ready", 20_000);
+    await until(() => {
+      assert.notEqual(primary.status, "failed", `primary replacement failed: ${primary.reason}; audit=${control.snapshot().audit}`);
+      return primary.status === "healthy" && control.snapshot().control.targets[0]?.intent === null;
+    }, "primary replacement ready", HEALTHY_WAIT_MS);
     assert.notEqual(primary.pid, primaryPid); assert.equal(profile.pid, profilePid);
     process.kill(profilePid, "SIGKILL");
-    await until(() => profile.status === "healthy" && profile.pid !== profilePid && control.snapshot().control.targets.length === 2 && control.snapshot().control.targets.every(value => value.intent === null), "profile replacement ready", 20_000);
+    await until(() => {
+      assert.notEqual(profile.status, "failed", `profile replacement failed: ${profile.reason}; audit=${control.snapshot().audit}`);
+      return profile.status === "healthy" && profile.pid !== profilePid && control.snapshot().control.targets.length === 2 && control.snapshot().control.targets.every(value => value.intent === null);
+    }, "profile replacement ready", HEALTHY_WAIT_MS);
     assert.equal(workers.length, 2); assert.deepEqual(control.snapshot().control.targets.map(value => value.attempts.length), [1, 1]);
     assert.equal(new Set(control.snapshot().control.targets.map(value => value.key)).size, 2);
   } finally { release?.(); await service.dispose(); await control.stop(); gpu.stop(); }

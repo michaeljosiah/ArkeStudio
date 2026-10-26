@@ -11,6 +11,12 @@ const HOLD: Record<RecoveryHoldReason, string> = {
   "target-changed": "The selected service changed.", "too-early": "The restart delay has not elapsed.",
 };
 
+export interface SupervisedRecoveryOwner {
+  ownership(): "managed" | "external";
+  componentDigest(): string;
+  reserve(signal: AbortSignal): Promise<() => void>;
+}
+
 /** Bridges the existing supervisor to durable admission. Native startup remains inside that
  * supervisor, and its owner supplies the same inference-lane lease used by ordinary work.
  * The retained lease stays reachable after unconfirmed cleanup until the owner confirms exit. */

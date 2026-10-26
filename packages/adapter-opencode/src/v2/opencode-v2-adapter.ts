@@ -122,6 +122,21 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   private readonly permissionSessions = new Map<string, string>();
   private readonly preparedPolicies = new PreparedSessionPolicies();
   private disposed = false;
+  private runtimeRequests = new AbortController();
+  private readonly pendingTurns = new Set<string>();
+
+  /** Host-confirmed process exit is stronger evidence than an SSE disconnect. End local
+   * waits with an unknown outcome; never replay a prompt or claim that inference stopped. */
+  runtimeExited(): void {
+    this.runtimeRequests.abort();
+    this.runtimeRequests = new AbortController();
+    // push() deletes settled entries and synchronously notifies listeners; preserve the
+    // interrupted set so a listener cannot add a new turn to this exit's iteration.
+    for (const sessionId of Array.from(this.pendingTurns)) {
+      this.push({ type: "session.error", sessionId,
+        message: "The writing service exited before this turn was confirmed. Its outcome is unknown. The request was not replayed." });
+    }
+  }
 
   // Fan-out: each streamEvents() consumer gets its own queue — the authoring service and the
   // permission pump both listen, and one must never starve the other.
@@ -336,6 +351,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
    * changed. The caller's correlation id stays on this side of the wire.
    */
   async dispatchAsync(input: SendMessageInput): Promise<SendReceipt> {
+    if (this.disposed) throw new Error("The writing adapter is closed.");
     if (input.parts.some(part => part.type === "image") && !this.imageInputForSession(input.sessionId)) {
       throw new Error("This OpenCode session cannot inspect images. Select a model with verified image input.");
     }
@@ -344,14 +360,17 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     void this.pump();
     const correlationId = input.correlationId ?? `corr_${Date.now().toString(36)}`;
     const prompt = imagePrompt(input.parts);
+    const runtime = this.runtimeRequests;
+    this.pendingTurns.add(input.sessionId);
     void (async () => {
       try {
         await this.http.reqData<{ id?: string }>("POST", `/api/session/${input.sessionId}/prompt`, {
           id: freshWireId(),
           ...prompt,
-        });
+        }, { signal: runtime.signal });
         this.trace("dispatch.accepted", { sessionId: input.sessionId });
       } catch (err) {
+        if (runtime.signal.aborted || this.disposed) return;
         this.trace("dispatch.failed", { sessionId: input.sessionId, error: String(err) });
         this.push({
           type: "session.error",
@@ -365,13 +384,13 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
 
   /** Synchronous send: resolves when this session's turn completes (or errors). */
   async sendMessage(input: SendMessageInput): Promise<SendReceipt> {
-    const receipt = await this.dispatchAsync(input);
-    await new Promise<void>((resolve) => {
+    let listener!: (event: HarnessEvent) => void;
+    const completed = new Promise<void>((resolve) => {
       const check = (event: HarnessEvent): boolean =>
         (event.type === "message.completed" || event.type === "session.error" || event.type === "session.ended") &&
         "sessionId" in event &&
         event.sessionId === input.sessionId;
-      const listener = (event: HarnessEvent) => {
+      listener = (event: HarnessEvent) => {
         if (check(event)) {
           this.turnListeners.delete(listener);
           resolve();
@@ -379,7 +398,11 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       };
       this.turnListeners.add(listener);
     });
-    return receipt;
+    try {
+      const receipt = await this.dispatchAsync(input);
+      await completed;
+      return receipt;
+    } finally { this.turnListeners.delete(listener); }
   }
 
   private readonly turnListeners = new Set<(event: HarnessEvent) => void>();
@@ -417,6 +440,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
    * The fetch is bounded so a hung GET can never wedge the caller.
    */
   private async reportCompletedTurn(sessionId: string, mode: "turn-ended" | "resync"): Promise<void> {
+    const runtime = this.runtimeRequests;
     const finishWithAccumulated = (why: string): void => {
       const last = this.normalizeState.textBySession.get(sessionId);
       this.normalizeState.textBySession.delete(sessionId);
@@ -435,7 +459,8 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
           time?: { completed?: number };
           content?: Array<{ type?: string; text?: string }>;
         }>
-      >("GET", `/api/session/${sessionId}/message`, undefined, { signal: AbortSignal.timeout(10_000) });
+      >("GET", `/api/session/${sessionId}/message`, undefined, { signal: AbortSignal.any([runtime.signal, AbortSignal.timeout(10_000)]) });
+      if (runtime.signal.aborted || this.disposed) return;
       const done = Array.isArray(messages)
         ? messages.find((m) => m.type === "assistant" && typeof m.time?.completed === "number")
         : undefined;
@@ -459,6 +484,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       this.trace("turn.completed", { sessionId, messageId: id, chars: text.length });
       this.push({ type: "message.completed", sessionId, correlationId: id, text });
     } catch (err) {
+      if (runtime.signal.aborted || this.disposed) return;
       this.trace("turn.fetch-failed", { sessionId, mode, error: String(err) });
       if (mode === "turn-ended") finishWithAccumulated("completion fetch failed");
     }
@@ -668,6 +694,9 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
 
   private push(event: HarnessEvent): void {
     const parsed = HarnessEventSchema.parse(event);
+    if ((parsed.type === "message.completed" || parsed.type === "session.error" || parsed.type === "session.ended") && "sessionId" in parsed && parsed.sessionId) {
+      this.pendingTurns.delete(parsed.sessionId);
+    }
     if (parsed.type === "permission.requested") {
       this.permissionSessions.set(parsed.permissionId, parsed.sessionId);
     }
@@ -695,8 +724,10 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       let backoff = 500;
       while (!this.disposed && !signal.aborted) {
         const attempt = new AbortController();
+        const runtime = this.runtimeRequests;
         const giveUp = () => attempt.abort();
         signal.addEventListener("abort", giveUp, { once: true });
+        runtime.signal.addEventListener("abort", giveUp, { once: true });
         let watchdog: ReturnType<typeof setTimeout> | undefined;
         const heard = (): void => {
           clearTimeout(watchdog);
@@ -716,6 +747,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
           for (const sessionId of this.sessions.keys()) await this.reportCompletedTurn(sessionId, "resync");
           await this.resyncPendingPermissions();
           for await (const raw of parseSse(stream.body, attempt.signal, heard)) {
+            if (runtime.signal.aborted || this.disposed) break;
             const outcome = normalizeOpenCodeV2(raw, this.normalizeState);
             if (outcome.kind === "turn-succeeded") {
               // Detached, deliberately: awaiting this fetch inside the read loop would let one
@@ -748,6 +780,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
         } finally {
           clearTimeout(watchdog);
           signal.removeEventListener("abort", giveUp);
+          runtime.signal.removeEventListener("abort", giveUp);
         }
         if (this.disposed || signal.aborted) return;
         await new Promise((r) => {
@@ -795,6 +828,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   }
 
   async dispose(): Promise<void> {
+    this.runtimeExited();
     this.disposed = true;
     this.sessions.clear();
     this.sessionWindows.clear();

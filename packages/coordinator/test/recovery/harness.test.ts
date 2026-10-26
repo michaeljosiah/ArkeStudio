@@ -3,6 +3,7 @@ import { it } from "node:test";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFile } from "node:fs/promises";
 import { emptyRecoveryTarget, RecoveryControlSchema, type RecoveryControl } from "@arke-studio/contracts";
 import { assembleHarness } from "../../src/harness/v2-launch.js";
 import { ChildSupervisor } from "../../src/supervisor.js";
@@ -15,13 +16,15 @@ import { until, untilAsync } from "../wait.js";
 const child = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "child.mjs");
 const key = createHash("sha256").update("managed-harness-v2").digest("hex");
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
-async function fixture(options: { personal?: boolean; suggest?: boolean; circuit?: boolean; version?: string } = {}) {
+async function fixture(options: { personal?: boolean; suggest?: boolean; circuit?: boolean; version?: string; protocolTurn?: boolean } = {}) {
   const { root } = await makeTempRoot(), provider = new FsWorldProvider(root);
   const store = new FileRecoveryControlStore(join(root, "operations", "recovery-control.json"));
   const control: RecoveryControl = { version: 1, policyRevision: 1, mode: options.suggest ? "suggest-only" : "automatic", targets: [] };
   if (options.circuit) control.targets.push({ ...emptyRecoveryTarget(key, "harness", Date.now()), circuitOpen: true });
   await store.save(control);
-  const env = { PASSWORD: "synthetic-recovery-fixture", SERVICE_VERSION: options.version ?? "2.0.26", MODE: "healthy" };
+  const promptMarker = join(root, "accepted-prompts.txt");
+  const env = { PASSWORD: "synthetic-recovery-fixture", SERVICE_VERSION: options.version ?? "2.0.26", MODE: "healthy", IGNORE_STOP: "0",
+    ...(options.protocolTurn ? { PROMPT_MARKER: promptMarker } : {}) };
   const wiring = await assembleHarness({ appRoot: root,
     v2: { ...(options.personal ? { configuredPath: process.execPath } : { bundledPath: process.execPath }),
       runCommand: async command => command === "where" || command === "which" ? { status: 1, stdout: "" } : { status: 0, stdout: "opencode v2.0.26" } },
@@ -33,7 +36,7 @@ async function fixture(options: { personal?: boolean; suggest?: boolean; circuit
     harnessInfo: wiring.harnessInfo, harnessRecovery: { ...wiring.recovery, reserve: signal => { reservations++; entered.resolve(); return wiring.recovery!.reserve(signal); } },
     changeLogPath: join(root, "log.jsonl"), appVersion: "harness-recovery-test" });
   coordinator.superviseAs("harness", wiring.supervisor);
-  return { coordinator, provider, wiring, worker: wiring.supervisor, env, entered, store, reservations: () => reservations,
+  return { coordinator, provider, wiring, worker: wiring.supervisor, env, entered, store, promptMarker, reservations: () => reservations,
     disk: async () => RecoveryControlSchema.parse(await store.load()),
     close: async () => { await coordinator.stop(); await provider.close(); } };
 }
@@ -89,7 +92,7 @@ it("a writing replacement that never verifies keeps its fence until a failed nat
   type StopSeam = { forceStop(child: unknown): Promise<void> }; const seam = h.worker as unknown as StopSeam, originalForce = seam.forceStop.bind(h.worker);
   try {
     await h.coordinator.start(0); await until(() => h.worker.status === "healthy", "writing server ready", 15000);
-    seam.forceStop = async () => {}; h.env.MODE = "never-healthy"; process.kill(h.worker.pid!, "SIGKILL");
+    seam.forceStop = async () => {}; h.env.MODE = "never-healthy"; h.env.IGNORE_STOP = "1"; process.kill(h.worker.pid!, "SIGKILL");
     await untilAsync(async () => (await h.disk()).targets[0]?.intent?.phase === "unknown", "retained writing replacement", 15000);
     assert.ok(h.worker.pid); seam.forceStop = originalForce; originalStop = h.worker.stopAndConfirm.bind(h.worker);
     h.worker.stopAndConfirm = async () => { throw new Error("unconfirmed writing process exit"); };
@@ -109,4 +112,42 @@ it("running writing-server protocol validation refuses an unsupported process de
     assert.equal((await h.disk()).targets.length, 0);
   } finally { await h.close(); }
   assert.equal(h.worker.pid, null);
+});
+
+it("a native server exit ends the real adapter's accepted turn as unknown before recovery drains, without replay", { timeout: 45_000 }, async () => {
+  for (const suggest of [false, true]) {
+    const h = await fixture({ protocolTurn: true, suggest });
+    const signal = new AbortController(), events: Array<{ type: string; message?: string }> = [];
+    const collecting = (async () => { for await (const event of h.wiring.adapter!.streamEvents(signal.signal)) events.push(event); })();
+    let turn: Promise<unknown> | undefined;
+    try {
+      await h.coordinator.start(0); await until(() => h.worker.status === "healthy", "protocol server ready", 15000);
+      turn = h.wiring.adapter!.sendMessage({ sessionId: "captured-turn", parts: [{ type: "text", text: "Synthetic disposable fixture." }] });
+      await untilAsync(async () => (await readFile(h.promptMarker, "utf8").catch(() => "")) === "accepted\n", "real prompt accepted", 10000);
+      const pid = h.worker.pid!; process.kill(pid, "SIGKILL");
+      await until(() => events.some(event => event.type === "session.error" && /outcome is unknown/.test(event.message ?? "")), "local unknown outcome", 10000);
+      await turn;
+      if (suggest) await until(() => h.worker.status === "failed", "suggested recovery held", 15000);
+      else await untilAsync(async () => h.worker.status === "healthy" && h.worker.pid !== pid && (await h.disk()).targets[0]?.intent === null, "verified replacement after local turn settlement", 20000);
+      assert.equal(await readFile(h.promptMarker, "utf8"), "accepted\n", "the accepted prompt was not replayed");
+      assert.equal(h.reservations(), suggest ? 0 : 1);
+    } finally { signal.abort(); await h.wiring.adapter!.dispose?.(); await collecting; await turn; await h.close(); }
+  }
+});
+
+it("credential relaunch confirms an interrupted replacement before starting with the changed environment", { timeout: 40_000 }, async () => {
+  const h = await fixture();
+  try {
+    await h.coordinator.start(0); await until(() => h.worker.status === "healthy", "writing server ready", 15000);
+    h.env.MODE = "never-healthy"; process.kill(h.worker.pid!, "SIGKILL");
+    await until(() => h.worker.spawnEpoch === 2 && h.worker.status === "starting" && h.worker.pid !== null, "replacement awaiting health", 15000);
+    const interruptedPid = h.worker.pid!;
+    // updateEnv patches this launch snapshot after confirmed cleanup; make the selected
+    // replacement healthy without changing production health validation or its timeout.
+    h.env.MODE = "healthy";
+    await h.wiring.relaunchHarness({ anthropic: "synthetic-test-credential" });
+    await until(() => h.worker.status === "healthy" && h.worker.pid !== interruptedPid, "credential replacement ready", 15000);
+    const target = (await h.disk()).targets[0]!; assert.equal(target.intent, null); assert.equal(target.attempts.length, 1);
+    const release = await h.wiring.recovery!.reserve(new AbortController().signal); release();
+  } finally { await h.wiring.adapter!.dispose?.(); await h.close(); }
 });

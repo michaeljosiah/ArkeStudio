@@ -11,6 +11,19 @@ runtime check in `v2-launch.test.ts` is separate; a fixture is not a live-model 
 `test/harness/model-routing.test.ts`, `test/supervisor.test.ts` and
 `test/application/studio-lifecycle.test.ts` cover the existing routing and lifecycle contracts.
 
+The native writing fixture also accepts a prompt through the real adapter and exits without
+emitting a terminal stream event. Confirm the local unknown-outcome event releases its turn wait
+before automatic replacement, including Suggest only without replacement, with exactly one
+persisted prompt marker. Credential rotation during replacement startup must confirm the old
+child's exit and settle retained recovery before starting again; it cannot strand the writing fence.
+`test/recovery/voxa.test.ts` uses the production host, actual Voxa client and a native protocol
+stand-in to verify cancellation without replay, policy/personal ownership, compatible running
+health and failed reconfiguration retaining its native handle/reservation until confirmed cleanup.
+Voice package `test/recovery.test.ts` additionally drains queued synthesis, transcription and body
+reads, checks reservation cancellation/disposal, and prevents WAV preprocessing from crossing a
+cancelled request generation. These fixtures qualify lifecycle/protocol behavior, not live model
+quality or real Voxa model loading. Run package typechecks after the final test edit.
+
 Proactive storage service checks (#2194) use contracts `test/storage-health.test.ts` and coordinator
 `test/storage/*.test.ts`. Run coordinator checks with native Windows process/filesystem access:
 the volume fixture exercises a real directory/junction pair through the kernel-leashed reader,

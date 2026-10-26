@@ -349,7 +349,7 @@ export class ChildSupervisor extends EventEmitter {
   async reconfigure(
     patch: Pick<SupervisedSpec, "command" | "args" | "env" | "inheritEnv">,
   ): Promise<void> {
-    await this.stop();
+    await this.stopAndConfirm();
     this.spec.command = patch.command;
     this.spec.args = patch.args;
     this.spec.env = patch.env;
@@ -358,7 +358,7 @@ export class ChildSupervisor extends EventEmitter {
   }
 
   async restart(): Promise<void> {
-    await this.stop();
+    await this.stopAndConfirm();
     await this.start();
   }
 
@@ -433,6 +433,10 @@ export class ChildSupervisor extends EventEmitter {
     // Install exit handling before awaiting the spawn event: a command can spawn and exit in
     // the same turn. Registering afterwards loses that exit and probes a dead child to timeout.
     child.once("exit", (code, signal) => {
+      // Local consumers must end waits tied to this process even when the SSE connection
+      // only reconnects. This confirms the direct child only, not descendant cleanup or
+      // permission to replace it; those checks remain in the supervisor's recovery path.
+      this.emit("process-exit", { generation: epoch });
       if (child.pid !== undefined) {
         void this.deps.ledger?.release(child.pid).catch(() => {});
       }
@@ -885,6 +889,7 @@ export class ChildSupervisor extends EventEmitter {
       throw new Error(`${this.id} has not confirmed process exit; its memory cannot be handed over.`);
     }
     if (this.descendants.length > 0) throw new Error(`${this.id} has not confirmed descendant exit; its memory cannot be handed over.`);
+    await this.recovery?.ownerStopped();
   }
 
   /** Cancel startup/restart waits without killing a healthy child before its jobs drain. */

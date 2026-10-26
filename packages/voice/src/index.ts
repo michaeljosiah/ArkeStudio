@@ -104,6 +104,11 @@ export class VoxaCancelledError extends Error {
   }
 }
 
+export class VoxaRecoveryHeldError extends Error {
+  readonly code = "VOXA_RECOVERY_HELD";
+  constructor() { super("Voxa is recovering. Wait for local voice readiness before trying again."); this.name = "VoxaRecoveryHeldError"; }
+}
+
 export interface VoxaTimeouts {
   health: number;
   voices: number;
@@ -138,6 +143,43 @@ export class VoxaClient {
   private disposed = false;
   private synthesisBusy = false;
   private readonly synthesisWaiters: SynthesisWaiter[] = [];
+  private activeInference = 0;
+  private recoveryWaiting = false;
+  private recoveryHeld = false;
+  private readonly inferenceIdle = new Set<() => void>();
+
+  private inferenceChanged(): void { for (const listener of this.inferenceIdle) listener(); }
+  private admitInference(operation: VoxaOperation): () => void {
+    if (this.disposed) throw new VoxaCancelledError(operation);
+    if (this.recoveryWaiting || this.recoveryHeld) throw new VoxaRecoveryHeldError();
+    this.activeInference++; let released = false;
+    return () => { if (released) return; released = true; this.activeInference--; this.inferenceChanged(); };
+  }
+  private async inference<T>(operation: VoxaOperation, run: (lifecycleSignal: AbortSignal) => Promise<T>): Promise<T> {
+    const release = this.admitInference(operation), lifecycleSignal = this.requests.signal;
+    try { return await run(lifecycleSignal); } finally { release(); }
+  }
+
+  /** One host-owned reservation drains admitted synthesis/transcription, including queued
+   * synthesis and response-body reads. It never submits or replays an inference request. */
+  async reserveRuntime(signal: AbortSignal): Promise<() => void> {
+    signal.throwIfAborted();
+    if (this.disposed) throw new VoxaCancelledError("health");
+    if (this.recoveryWaiting || this.recoveryHeld) throw new VoxaRecoveryHeldError();
+    this.recoveryWaiting = true;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const done = (error?: unknown) => { this.inferenceIdle.delete(check); signal.removeEventListener("abort", abort); error ? reject(error) : resolve(); };
+        const check = () => { if (this.disposed) done(new VoxaCancelledError("health")); else if (this.activeInference === 0) done(); };
+        const abort = () => done(signal.reason ?? new Error("Voxa recovery cancelled."));
+        this.inferenceIdle.add(check); signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) abort(); else check();
+      });
+      signal.throwIfAborted(); if (this.disposed) throw new VoxaCancelledError("health");
+      this.recoveryWaiting = false; this.recoveryHeld = true; let released = false;
+      return () => { if (released) return; released = true; this.recoveryHeld = false; this.inferenceChanged(); };
+    } catch (error) { this.recoveryWaiting = false; this.inferenceChanged(); throw error; }
+  }
 
   constructor(
     private readonly fetchImpl: FetchLike,
@@ -177,31 +219,23 @@ export class VoxaClient {
     input: { voiceId: string; text: string; params?: Record<string, number> },
     options: VoxaRequestOptions = {},
   ): Promise<Uint8Array> {
-    const started = Date.now();
-    const lifecycleSignal = this.requests.signal;
-    const release = await this.acquireSynthesis(options.signal, lifecycleSignal, this.timeouts.tts);
-    try {
-      const remainingMs = Math.max(1, this.timeouts.tts - (Date.now() - started));
-      return await this.request(
-        "tts",
-        "/tts",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ voice: input.voiceId, text: input.text, ...input.params }),
-        },
-        options.signal,
-        async (res) => {
-          if (res.status >= 400) throw new Error(`voxa: synthesis failed (HTTP ${res.status})`);
-          return new Uint8Array(await res.arrayBuffer());
-        },
-        lifecycleSignal,
-        remainingMs,
-        this.timeouts.tts,
-      );
-    } finally {
-      release();
-    }
+    return this.inference("tts", async lifecycleSignal => {
+      const started = Date.now();
+      const release = await this.acquireSynthesis(options.signal, lifecycleSignal, this.timeouts.tts);
+      try {
+        const remainingMs = Math.max(1, this.timeouts.tts - (Date.now() - started));
+        return await this.request(
+          "tts", "/tts",
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ voice: input.voiceId, text: input.text, ...input.params }) },
+          options.signal,
+          async res => {
+            if (res.status >= 400) throw new Error(`voxa: synthesis failed (HTTP ${res.status})`);
+            return new Uint8Array(await res.arrayBuffer());
+          },
+          lifecycleSignal, remainingMs, this.timeouts.tts,
+        );
+      } finally { release(); }
+    });
   }
 
   /**
@@ -210,31 +244,25 @@ export class VoxaClient {
    * as it came.
    */
   async transcribe(audio: Uint8Array, contentType: string, options: VoxaRequestOptions = {}): Promise<string> {
-    if (isWavContentType(contentType)) audio = await transcriptionWav(audio);
-    return this.request(
-      "stt",
-      "/stt",
-      {
-        method: "POST",
-        headers: { "Content-Type": contentType },
-        body: Buffer.from(audio),
-      },
-      options.signal,
-      async (res) => {
+    return this.inference("stt", async lifecycleSignal => {
+      if (isWavContentType(contentType)) audio = await transcriptionWav(audio);
+      return this.request("stt", "/stt", { method: "POST", headers: { "Content-Type": contentType }, body: Buffer.from(audio) }, options.signal, async res => {
         if (res.status >= 400) throw new Error(`voxa: transcription failed (HTTP ${res.status})`);
         const body = (await res.json()) as { text?: string };
         return body.text ?? "";
-      },
-    );
+      }, lifecycleSignal);
+    });
   }
 
   /** Native acoustic word bounds, never the sentence-duration estimate used by older sidecars. */
   async transcribeWords(audio: Uint8Array, options: VoxaRequestOptions = {}): Promise<AcousticWords> {
-    const wav = await transcriptionWav(audio);
-    return this.request("stt", "/stt/words", { method: "POST", headers: { "Content-Type": "audio/wav" }, body: Buffer.from(wav) }, options.signal, async (res, signal) => {
-      if (res.status >= 400) throw new Error(await wordTimingFailure(res, signal));
-      return AcousticWordsSchema.parse(await res.json());
-    }, this.requests.signal, Math.max(this.timeouts.stt, 300_000));
+    return this.inference("stt", async lifecycleSignal => {
+      const wav = await transcriptionWav(audio);
+      return this.request("stt", "/stt/words", { method: "POST", headers: { "Content-Type": "audio/wav" }, body: Buffer.from(wav) }, options.signal, async (res, signal) => {
+        if (res.status >= 400) throw new Error(await wordTimingFailure(res, signal));
+        return AcousticWordsSchema.parse(await res.json());
+      }, lifecycleSignal, Math.max(this.timeouts.stt, 300_000));
+    });
   }
 
   /** Cancel active and queued work before replacing the supervised process. Future calls remain valid. */
@@ -246,6 +274,7 @@ export class VoxaClient {
   dispose(): void {
     this.disposed = true;
     this.requests.abort();
+    this.inferenceChanged();
   }
 
   private resolvedBaseUrl(): string {

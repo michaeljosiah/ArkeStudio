@@ -615,7 +615,7 @@ export class ComfyUiEngineService {
   private async stopSupervision(confirm = false): Promise<void> {
     const supervisor = this.supervisor;
     if ((confirm || this.recoveryPort) && supervisor) await supervisor.stopAndConfirm();
-    await this.recoveryPort?.ownerStopped(); this.recoveryPort = null;
+    this.recoveryPort = null;
     this.supervisor = null;
     const statusListener = this.supervisorStatusListener;
     this.supervisorStatusListener = null;
@@ -861,7 +861,6 @@ export class ComfyUiEngineService {
       // here would lose the queued repair whenever another creative engine takes the card.
       if (this.recoveryPort && this.supervisor.pid === null && this.supervisor.descendantPids.length === 0) return;
       await this.supervisor.stopAndConfirm();
-      await this.recoveryPort?.ownerStopped();
       this.currentProcessEpoch = null;
       this.recordProbe({ version: null, reachable: false, detail: null });
       await this.publish();

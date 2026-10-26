@@ -11,7 +11,7 @@ import { audioMediaOptions, createMediaProcessRunner } from "./media-tools.js";
 import { PublicationHost } from "./publication-host.js";
 import { publicationMedia } from "./publication-media.js";
 import { authenticatedMediaHeaders, desktopTransportOrigins } from "./transport-auth.js";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { createComfyUiFetch } from "./comfyui-transport.js";
 import { ComfyUiDigestCache } from "./comfyui-digest-cache.js";
@@ -1453,6 +1453,11 @@ async function initialize(): Promise<{ port: number }> {
           reason: "the native index binding did not load — search and counts degrade; authoring still works",
         },
     voice: {
+      recovery: {
+        ownership: () => voxaSelection.source === "bundled" ? "managed" : "external",
+        componentDigest: () => createHash("sha256").update(JSON.stringify([expectedArchitecture, voxaSelection.source, voxaLaunch(voxaSelection, voxaSettings)])).digest("hex"),
+        reserve: signal => voxaClient.reserveRuntime(signal),
+      },
       sidecar: voxaSidecar,
       waitUntilReady: waitForKokoroReady,
       sidecarHealth: async () => {

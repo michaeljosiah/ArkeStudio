@@ -270,7 +270,7 @@ import type { AppStorageService } from "./storage/service.js";
 import type { RecoveryControlService } from "./recovery/control.js";
 import type { RecoveryHistoryService } from "./recovery/history.js";
 import { recoveryCommand } from "./recovery/commands.js";
-import { SupervisorRecovery } from "./recovery/supervisor.js";
+import { SupervisorRecovery, type SupervisedRecoveryOwner } from "./recovery/supervisor.js";
 import type { HarnessRecoveryOwner } from "./harness/runtime-change.js";
 import {
   highestChapterRank,
@@ -1133,6 +1133,7 @@ export interface CoordinatorOptions {
   nativeIndex?: { ok: boolean; reason?: string };
   /** SPEC-011: the Voxa sidecar and voice catalogue sources, injected from the desktop. */
   voice?: {
+    recovery?: SupervisedRecoveryOwner;
     sidecar: SidecarLike | null;
     /** Wait for recovered Kokoro work until Voxa can actually synthesize. */
     waitUntilReady?: () => Promise<boolean>;
@@ -1259,7 +1260,6 @@ export class Coordinator {
   readonly serverApplication: StudioServerApplication;
   private readonly changeLog: ChangeLog;
   private readonly supervisors = new Map<HealthComponent, ChildSupervisor>();
-  private readonly supervisedRecovery = new Map<HealthComponent, SupervisorRecovery>();
   private readonly worldQuery: WorldQueryServer;
   private readonly worldChatRunners = new WorldChatRunnerCache<WorldChatRunner>();
   private readonly grants: GrantStore | null;
@@ -4813,13 +4813,16 @@ export class Coordinator {
   /** Attach a supervised child and mirror its lifecycle into component health (R-6). */
   superviseAs(component: Exclude<HealthComponent, "coordinator">, supervisor: ChildSupervisor): void {
     if (this.started || this.stopping || this.supervisors.has(component)) throw new Error("Attach each supervised service once before startup.");
-    if (component === "harness" && this.opts.harnessRecovery && this.opts.recoveryControl && this.opts.appRoot) {
-      const owner = this.opts.harnessRecovery;
+    const harness = this.opts.harnessRecovery;
+    const owner: SupervisedRecoveryOwner | undefined = component === "harness" && harness ? {
+      ownership: () => harness.ownership, componentDigest: () => harness.componentDigest(), reserve: signal => harness.reserve(signal),
+    } : component === "voice" ? this.opts.voice?.recovery : undefined;
+    if (owner && this.opts.recoveryControl && this.opts.appRoot) {
       const recovery = new SupervisorRecovery({ control: this.opts.recoveryControl,
-        identity: { key: createHash("sha256").update("managed-harness-v2").digest("hex"), service: "harness" },
+        identity: { key: createHash("sha256").update(component === "harness" ? "managed-harness-v2" : "managed-voxa").digest("hex"), service: component },
         current: () => !this.stopping && this.supervisors.get(component) === supervisor,
-        ownership: () => owner.ownership, componentDigest: () => owner.componentDigest(), acquire: signal => owner.reserve(signal) });
-      supervisor.setRecoveryPort(recovery); this.supervisedRecovery.set(component, recovery);
+        ownership: () => owner.ownership(), componentDigest: () => owner.componentDigest(), acquire: signal => owner.reserve(signal) });
+      supervisor.setRecoveryPort(recovery);
     }
     this.supervisors.set(component, supervisor);
     supervisor.on("status", ({ status, reason }: { status: SupervisorStatus; reason?: string }) => {
@@ -23288,10 +23291,7 @@ export class Coordinator {
       await this.jobQueue?.drain();
       await this.opts.storageHealth?.stop();
       await this.audiobookActivity.drain();
-      const supervisedStops = await Promise.allSettled([...this.supervisors].map(async ([component, supervisor]) => {
-        await supervisor.stopAndConfirm();
-        await this.supervisedRecovery.get(component)?.ownerStopped();
-      }));
+      const supervisedStops = await Promise.allSettled([...this.supervisors.values()].map(supervisor => supervisor.stopAndConfirm()));
       await this.opts.adapter?.dispose?.().catch(() => {});
       await this.releaseOllama();
       const runtimeStops = await Promise.allSettled([this.opts.ming?.dispose(), this.opts.ollama?.service.dispose()]);
