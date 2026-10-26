@@ -137,7 +137,8 @@ Ming product integration also uses coordinator `test/ming-speech.test.ts`, `test
 `test/local-models.test.tsx`, and desktop `test/packaged-runtimes.test.mjs`. Run
 `python -B scripts/test-ming-worker.py` from the root for standard-library task mapping, short-read
 and safe-archive tests. These tests require no model downloads; native real-model tests are
-separate. Maintain the lock with `node scripts/update-ming-assets.mjs` only after deliberate
+separate. CI shard 1 also runs the standard-library checks on Windows and Linux. Maintain the
+lock with `node scripts/update-ming-assets.mjs` only after deliberate
 pin/version edits and repeat native qualification; it fetches publisher metadata and archives.
 
 The first-run gate also uses contracts `test/local-ai-setup.test.ts`, coordinator

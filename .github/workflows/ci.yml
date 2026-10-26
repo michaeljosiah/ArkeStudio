@@ -95,6 +95,10 @@ jobs:
         if: matrix.shard == 1
         run: python -I -B packages/coordinator/test/media/local_audio_listener_test.py
 
+      - name: Offline Ming task mapping and archive safety (no model or GPU)
+        if: matrix.shard == 1
+        run: python -I -B scripts/test-ming-worker.py
+
       - name: Test
         run: node scripts/ci-test.mjs ${{ matrix.shard }}/4
 
