@@ -39,6 +39,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({
       ok: true,
       pid: process.pid,
+      version: process.env.SERVICE_VERSION,
       protocolVersion: process.env.PROTOCOL_VERSION ? Number(process.env.PROTOCOL_VERSION) : undefined,
       env: {
         ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,

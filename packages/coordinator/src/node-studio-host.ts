@@ -53,7 +53,7 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
     ollama = new OllamaEngineService({ appRoot: options.appRoot, port: await allocateLoopbackPort(), deps: { ledger } });
     ming = new MingProcess(ledger);
     comfy = createNodeComfyUiEngine(options.appRoot, { ledger });
-    await ollama.applySettings(settings.ollama);
+    await ollama.applySettings(settings.ollama, { deferManagedStart: true });
     const chosen = effectiveHarnessEngine(settings.harness.engine, process.env["ARKE_HARNESS"]);
     if (options.adapter === undefined) {
       wiring = await assembleHarness({

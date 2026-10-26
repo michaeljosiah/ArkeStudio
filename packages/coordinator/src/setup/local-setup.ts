@@ -93,6 +93,9 @@ export interface SetupOptions {
   onComponentReady?: (componentId: string) => Promise<void>;
   /** Application policy rechecked for queued/resumed optional downloads. */
   beforeComponentInstall?: (componentId: string) => Promise<void>;
+  /** One owner lease spans writes/extraction; released before ready activation or on failure.
+   * Unlike beforeComponentInstall's policy recheck, this is acquired only once per install. */
+  beginComponentInstall?: (componentId: string, signal: AbortSignal) => Promise<(() => void) | undefined>;
   /** Synchronous admission fence for destructive repair/removal; always released after the operation. */
   beginFileMutation?: (componentId: string) => (() => void) | undefined;
   /** Invoked only for bytes this service actually downloaded and verified. */
@@ -858,8 +861,12 @@ export class LocalSetupService {
 
   private async install(entry: CatalogueEntry): Promise<void> {
     const spec = entry.spec;
+    let releaseInstall: (() => void) | undefined;
+    const release = () => { const held = releaseInstall; releaseInstall = undefined; held?.(); };
+    const notifyReady = async () => { release(); await this.componentReady(entry.id); };
     try {
       await this.opts.beforeComponentInstall?.(entry.id);
+      releaseInstall = await this.opts.beginComponentInstall?.(entry.id, this.abort.signal);
       if (spec.kind === "files") {
         const repairBlock = this.repairBlocks.get(entry.id);
         if (repairBlock !== undefined) {
@@ -904,7 +911,7 @@ export class LocalSetupService {
           ...(entry.caveat !== undefined ? { detail: entry.caveat } : { detail: undefined }),
         });
         this.publish();
-        await this.componentReady(entry.id);
+        await notifyReady();
         return;
       }
 
@@ -957,7 +964,7 @@ export class LocalSetupService {
           ...(entry.caveat !== undefined ? { detail: entry.caveat } : { detail: undefined }),
         });
         this.publish();
-        await this.componentReady(entry.id);
+        await notifyReady();
         return;
       }
 
@@ -992,7 +999,7 @@ export class LocalSetupService {
         await rm(toExtendedLength(staged), { force: true }).catch(() => {});
         this.set(entry.id, { state: "ready", detail: undefined, bytesPerSecond: null, pauseSupported: false });
         this.publish();
-        await this.componentReady(entry.id);
+        await notifyReady();
         return;
       }
 
@@ -1043,7 +1050,7 @@ export class LocalSetupService {
           detail: undefined,
         });
         this.publish();
-        await this.componentReady(entry.id);
+        await notifyReady();
         return;
       }
 
@@ -1066,7 +1073,7 @@ export class LocalSetupService {
         });
         this.set(entry.id, { state: "ready", bytesDone: this.components.get(entry.id)?.bytesTotal ?? 0, detail: undefined });
         this.publish();
-        await this.componentReady(entry.id);
+        await notifyReady();
         return;
       }
       const pulled = await this.deps.run(spec.command, spec.args, this.abort.signal, (text) => {
@@ -1081,7 +1088,7 @@ export class LocalSetupService {
         this.set(entry.id, { state: "ready", bytesDone: this.components.get(entry.id)?.bytesTotal ?? 0, detail: undefined });
       }
       this.publish();
-      if (pulled.code === 0) await this.componentReady(entry.id);
+      if (pulled.code === 0) await notifyReady();
     } catch (err) {
       if (err instanceof DownloadPausedError) {
         this.set(entry.id, {
@@ -1101,6 +1108,8 @@ export class LocalSetupService {
         });
       }
       this.publish();
+    } finally {
+      release();
     }
   }
 

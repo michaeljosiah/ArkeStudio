@@ -20,9 +20,16 @@ Recovery control foundation (#2194, SPEC-061 R-7/R-11/R-25): contracts `recovery
 defines the closed restart context and rolling budget. Coordinator `recovery/control.ts` serializes
 single-use durable intents, unknown-outcome reconciliation, Suggest only/user Stop, final owner-fence
 checks and shutdown; `recovery/control-file.ts` keeps minimal authority in a separate bounded file.
-Tests: contracts `test/recovery-policy.test.ts`, coordinator `test/recovery/control.test.ts`.
-This foundation is not yet connected to live supervisors or the incident/action UI; it does not
-replace existing runtime behavior until that composition and native qualification are delivered.
+`recovery/supervisor.ts` admits the existing owner's restart through the shared GPU lane. The host
+factory enables control; Coordinator connects managed Ollama before its first child starts.
+Desktop/dev/Node select its endpoint early but defer managed startup until this composition.
+Ollama setup holds `beginComponentInstall` / `reserveInstallation` through verified publication,
+so activation cannot race changed files. It drains inference under the GPU lane before stopping;
+unconfirmed exit retains that reservation in the owner until confirmed stop. Tests: contracts `test/recovery-policy.test.ts`, coordinator
+`test/recovery/`, `test/ollama-engine.test.ts` and `test/setup/local-setup.test.ts`.
+Ollama unexpected exits now use durable policy; failed health retains the live process for review.
+Other service owners, reviewed stop/restart actions, policy/incident UI and broader qualification
+remain outstanding. No completed recovery-agent claim follows from this slice.
 
 Managed local engines: coordinator `local-ai/ollama.ts` owns portable Ollama and explicit URL
 overrides; `setup/catalogue.ts` / `setup/local-setup.ts` own pinned archives and architecture/

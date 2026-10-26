@@ -10,6 +10,57 @@ import { tempDir } from "./tmp.js";
 const signal = () => new AbortController().signal;
 const managed = { engineUrl: null, modelsDir: null };
 
+it("holds activation throughout managed-file installation, then allows verified publication to start it", async () => {
+  const workers: Worker[] = [];
+  const service = new OllamaEngineService({ appRoot: await tempDir("ollama-file-fence-"), port: 24113, exists: () => true, registerBackstop: () => () => {},
+    supervise: spec => { const worker = new Worker(spec); workers.push(worker); return worker as unknown as ChildSupervisor; } });
+  let release: (() => void) | undefined;
+  try {
+    await service.applySettings(managed); assert.equal(workers.length, 1);
+    release = await service.reserveInstallation(); assert.equal(workers[0]!.stops, 1);
+    await service.refresh(); assert.equal(workers.length, 1); assert.equal(service.baseUrl(), null);
+    await assert.rejects(service.reserveInstallation(), /already changing/);
+    release(); release(); await service.refresh(); assert.equal(workers.length, 2); assert.equal(service.status().state, "ready");
+  } finally { release?.(); await service.dispose(); }
+});
+
+it("selects the pre-bootstrap endpoint without starting a managed child before recovery composition", async () => {
+  const workers: Worker[] = [];
+  const service = new OllamaEngineService({ appRoot: await tempDir("ollama-bootstrap-"), port: 24112, exists: () => true, registerBackstop: () => () => {},
+    supervise: spec => { const worker = new Worker(spec); workers.push(worker); return worker as unknown as ChildSupervisor; } });
+  try {
+    await service.applySettings(managed, { deferManagedStart: true });
+    assert.equal(service.endpoint(), "http://127.0.0.1:24112"); assert.equal(service.status().state, "starting"); assert.equal(service.baseUrl(), null); assert.equal(workers.length, 0);
+    await service.applySettings(managed); assert.equal(workers.length, 1); assert.equal(service.status().state, "ready");
+  } finally { await service.dispose(); }
+});
+
+it("a managed-file installation leaves the explicitly selected personal endpoint available", async () => {
+  const service = new OllamaEngineService({ appRoot: await tempDir("ollama-personal-install-"), port: 24115,
+    fetch: async () => Response.json({ version: "personal" }),
+  });
+  let release: (() => void) | undefined;
+  try {
+    await service.applySettings({ ...managed, engineUrl: "http://127.0.0.1:11434" });
+    release = await service.reserveInstallation(); await service.refresh();
+    assert.equal(service.baseUrl(), "http://127.0.0.1:11434"); assert.equal(service.status().state, "ready");
+  } finally { release?.(); await service.dispose(); }
+});
+
+it("retains the installation's GPU lane after unconfirmed exit until its owner confirms stop", async () => {
+  const workers: Worker[] = []; let releases = 0;
+  const service = new OllamaEngineService({ appRoot: await tempDir("ollama-install-cleanup-"), port: 24114, exists: () => true, registerBackstop: () => () => {},
+    supervise: spec => { const worker = new Worker(spec); workers.push(worker); return worker as unknown as ChildSupervisor; } });
+  try {
+    await service.applySettings(managed); workers[0]!.refuseStop = true;
+    await assert.rejects(service.reserveInstallation(() => { releases++; }), /exit unconfirmed/);
+    assert.equal(releases, 0); assert.equal(workers.length, 1); assert.equal(service.baseUrl(), null);
+    workers[0]!.refuseStop = false; await service.stopManaged(); assert.equal(releases, 1);
+    await service.stopManaged(); assert.equal(releases, 1);
+  } finally { workers.forEach(worker => { worker.refuseStop = false; }); await service.dispose(); }
+  assert.equal(releases, 1);
+});
+
 it("an older health check cannot overwrite a newer failure for the same selected service", async () => {
   let mode: "ready" | "held" | "failed" = "ready";
   let answer!: (response: Response) => void;

@@ -28,8 +28,8 @@ export class RecoveryControlService {
     let value!: T; return this.writes.enqueue(async () => { value = await action(); }).then(() => value);
   }
   private changed(): void { if (!this.closing) try { this.deps.onChange?.(); } catch { /* Presentation cannot grant mutation. */ } }
-  snapshot(): { audit: "starting" | "available" | "unavailable"; reason?: AuditFailure; control: RecoveryControl } {
-    return { audit: !this.opened ? "starting" : this.auditAvailable ? "available" : "unavailable", reason: this.auditFailure, control: structuredClone(this.control) };
+  snapshot(): { audit: "starting" | "available" | "unavailable"; accepting: boolean; reason?: AuditFailure; control: RecoveryControl } {
+    return { audit: !this.opened ? "starting" : this.auditAvailable ? "available" : "unavailable", accepting: this.opened && this.auditAvailable && !this.closing && !this.closed, reason: this.auditFailure, control: structuredClone(this.control) };
   }
   private failure(error: unknown, fallback: "read-failed" | "write-failed"): AuditFailure {
     if (error instanceof z.ZodError || error instanceof SyntaxError) return "invalid";
@@ -154,6 +154,19 @@ export class RecoveryControlService {
 
   setMode(mode: RecoveryMode): Promise<boolean> {
     return this.serial(async () => { if (this.ready()) return false; return this.persist({ ...structuredClone(this.control), mode }); });
+  }
+  markCircuitOpen(identity: Pick<RecoveryTarget, "key" | "service">): Promise<boolean> {
+    return this.serial(async () => {
+      if (this.ready()) return false;
+      const next = structuredClone(this.control);
+      let target = next.targets.find(value => value.key === identity.key);
+      if (target && target.service !== identity.service) return false;
+      if (!target) {
+        if (next.targets.length >= RECOVERY_POLICY.maxTargets) return false;
+        target = emptyRecoveryTarget(identity.key, identity.service, this.now()); next.targets.push(target);
+      }
+      target.circuitOpen = true; return this.persist(next);
+    });
   }
   setStoppedByUser(identity: Pick<RecoveryTarget, "key" | "service">, stopped: boolean): Promise<boolean> {
     return this.serial(async () => {

@@ -46,6 +46,21 @@ export interface SupervisorStatusEvent {
   reason?: string;
 }
 
+/** The lifecycle owner remains the one executor. A recovery port admits its bounded work;
+ * it cannot supply a command, replace the process identity or replay a provider request. */
+export interface SupervisorRecoveryPort {
+  allowStart(signal: AbortSignal): Promise<{ ok: true } | { ok: false; reason: string }>;
+  recover(work: {
+    generation: number; signal: AbortSignal; current(): boolean; exitConfirmed(): boolean;
+    sleep(ms: number): Promise<void>; held(reason: string): void;
+    restart(canSpawn: () => boolean): Promise<"ready" | "failed" | "unknown">;
+  }): Promise<void>;
+  /** A health probe alone cannot authorize killing a busy or personal process. */
+  mayStopForFailedHealth(): boolean;
+  budgetExhausted(): Promise<void>;
+  ownerStopped(): Promise<void>;
+}
+
 export interface SupervisedSpec {
   id: string;
   /** A host-reserved port, stable across this worker's restarts. Otherwise allocated per spawn. */
@@ -253,6 +268,12 @@ export class ChildSupervisor extends EventEmitter {
   private healthTimer: NodeJS.Timeout | null = null;
   private readonly sleepTimers = new Map<NodeJS.Timeout, () => void>();
   private consecutiveHealthFailures = 0;
+  private recovery: SupervisorRecoveryPort | null = null;
+  private recoveryAbort = new AbortController();
+  private recoveryTask: Promise<void> | null = null;
+  private queuedExit: { code: number | null; signal: NodeJS.Signals | null; epoch: number } | null = null;
+
+  setRecoveryPort(port: SupervisorRecoveryPort): void { this.recovery = port; }
 
   constructor(spec: SupervisedSpec, deps: SupervisorDeps = {}) {
     super();
@@ -313,6 +334,12 @@ export class ChildSupervisor extends EventEmitter {
       return;
     }
     if (this.child !== null) return; // already running — a second start must not double-spawn
+    const epoch = this.launchEpoch, control = new AbortController(); this.recoveryAbort = control;
+    if (this.recovery) {
+      const decision = await this.recovery.allowStart(control.signal);
+      if (control.signal.aborted || epoch !== this.launchEpoch || this.child !== null) return;
+      if (!decision.ok) { this.setStatus("failed", decision.reason); return; }
+    }
     this.stopping = false;
     this.restarts = 0;
     this.terminalStartupChild = null;
@@ -368,7 +395,7 @@ export class ChildSupervisor extends EventEmitter {
    */
   private launchEpoch = 0;
 
-  private async spawnOnce(): Promise<void> {
+  private async spawnOnce(canSpawn?: () => boolean): Promise<void> {
     const command = this.spec.command;
     if (command === null) return;
     const epoch = ++this.launchEpoch;
@@ -378,6 +405,7 @@ export class ChildSupervisor extends EventEmitter {
     this.consecutiveHealthFailures = 0;
     const port = this.spec.port ?? await allocateLoopbackPort();
     if (epoch !== this.launchEpoch || this.stopping) return;
+    if (canSpawn && !canSpawn()) { this.setStatus("failed", `${this.id} recovery is held because its target or policy changed.`); return; }
     this._port = port;
     const args = (this.spec.args ?? []).map((a) => a.replaceAll("{port}", String(port)));
 
@@ -410,12 +438,12 @@ export class ChildSupervisor extends EventEmitter {
         void this.deps.ledger?.release(child.pid).catch(() => {});
       }
       if (this.child === child) this.child = null;
-      if (this.stopping) return;
+      if (this.stopping || epoch !== this.launchEpoch) return;
       if (this.terminalStartupChild === child) {
         this.terminalStartupChild = null;
         return;
       }
-      void this.handleUnexpectedExit(code, signal);
+      this.queueUnexpectedExit(code, signal);
     });
 
     // Both pipes are drained whether or not anyone listens: an unread pipe eventually fills
@@ -733,6 +761,12 @@ export class ChildSupervisor extends EventEmitter {
       return;
     }
 
+    if (this.recovery && !this.recovery.mayStopForFailedHealth()) {
+      this.setStatus("unhealthy", `${this.id} health checks failed. Review restart; the running process has been retained.`);
+      this.scheduleHealthCheck(child, epoch);
+      return;
+    }
+
     // Killing the current child feeds the ordinary unexpected-exit path, preserving its bounded
     // backoff and restart budget instead of creating a second recovery policy for hung health.
     await this.forceStop(child);
@@ -778,9 +812,23 @@ export class ChildSupervisor extends EventEmitter {
     return false;
   }
 
+  private queueUnexpectedExit(code: number | null, signal: NodeJS.Signals | null): void {
+    if (!this.recovery) { void this.handleUnexpectedExit(code, signal); return; }
+    if (this.recoveryTask) { this.queuedExit = { code, signal, epoch: this.launchEpoch }; return; }
+    const epoch = this.launchEpoch;
+    this.recoveryTask = this.handleUnexpectedExit(code, signal).catch(() => {
+      if (!this.stopping && epoch === this.launchEpoch) this.setStatus("failed", `${this.id} recovery could not be verified. Review its status before retrying.`);
+    }).finally(() => {
+      this.recoveryTask = null;
+      const next = this.queuedExit; this.queuedExit = null;
+      if (next && !this.stopping && next.epoch === this.launchEpoch && this.child === null) this.queueUnexpectedExit(next.code, next.signal);
+    });
+  }
+
   private async handleUnexpectedExit(code: number | null, signal: NodeJS.Signals | null): Promise<void> {
     const epoch = this.launchEpoch;
     this.clearHealthTimer();
+    if (this.recovery) this.setStatus("unhealthy", `${this.id} exited; checking recovery.`);
     // The wrapper exiting says nothing about its grandchildren: they survive it, still
     // holding the old port. Clear them out before deciding whether to restart.
     await this.reapSurvivors();
@@ -795,7 +843,28 @@ export class ChildSupervisor extends EventEmitter {
     }
     const why = signal ? `signal ${signal}` : `exit code ${code}`;
     if (this.restarts >= this.spec.maxRestarts) {
+      await this.recovery?.budgetExhausted();
+      if (this.stopping || epoch !== this.launchEpoch) return;
       this.setStatus("failed", `${this.id} exited (${why}) and exceeded its restart budget`);
+      return;
+    }
+    if (this.recovery) {
+      const signal = this.recoveryAbort.signal;
+      await this.recovery.recover({ generation: epoch, signal,
+        current: () => !this.stopping && epoch === this.launchEpoch && this.child === null,
+        exitConfirmed: () => this.child === null && this.descendants.length === 0,
+        sleep: ms => this.sleep(ms),
+        held: reason => { if (!this.stopping && epoch === this.launchEpoch) this.setStatus("failed", reason); },
+        restart: async canSpawn => {
+          if (this.stopping || epoch !== this.launchEpoch || this.child !== null) return "unknown";
+          this.restarts++;
+          await this.spawnOnce(canSpawn);
+          if (this.stopping || this.launchEpoch !== epoch + 1) return "unknown";
+          if (this.child !== null && this.status === "healthy") return "ready";
+          await this.reapSurvivors();
+          return this.child === null && this.descendants.length === 0 ? "failed" : "unknown";
+        },
+      });
       return;
     }
     this.restarts += 1;
@@ -823,6 +892,7 @@ export class ChildSupervisor extends EventEmitter {
   /** Cancel startup/restart waits without killing a healthy child before its jobs drain. */
   quiesce(): void {
     this.stopping = true;
+    this.recoveryAbort.abort(new Error("Worker recovery is stopping."));
     this.terminalStartupChild = null;
     this.launchEpoch += 1; // any in-flight spawn continuation is now superseded
     this.clearHealthTimer();
@@ -852,6 +922,7 @@ export class ChildSupervisor extends EventEmitter {
     }
     // Descendants the tree kill could not reach (the wrapper was already dead) die here.
     await this.reapSurvivors();
+    await this.recoveryTask;
     this.clearSleepTimers();
     if (this._status !== "unconfigured") this.setStatus("stopped", `${this.id} stopped`);
   }

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { normalizeOllamaUrl, type OllamaSettings, type OllamaRuntimeStatus } from "@arke-studio/contracts";
-import { ChildSupervisor, registerExitBackstop, type SupervisorDeps } from "../supervisor.js";
+import { ChildSupervisor, registerExitBackstop, type SupervisorDeps, type SupervisorRecoveryPort } from "../supervisor.js";
 import { OLLAMA_VERSION } from "../setup/catalogue.js";
 
 interface OllamaEngineOptions {
@@ -20,6 +20,10 @@ interface OllamaEngineOptions {
 export class OllamaEngineService {
   private settings: OllamaSettings = { engineUrl: null, modelsDir: null };
   private supervisor: ChildSupervisor | null = null;
+  private recoveryFactory: ((supervisor: ChildSupervisor) => SupervisorRecoveryPort) | null = null;
+  private recoveryPort: SupervisorRecoveryPort | null = null;
+  private installing = false;
+  private installationLane: (() => void) | null = null;
   private removeBackstop: (() => void) | null = null;
   private serial: Promise<void> = Promise.resolve();
   private closing = false;
@@ -31,9 +35,19 @@ export class OllamaEngineService {
 
   constructor(private readonly opts: OllamaEngineOptions) {}
 
+  configureRecovery(factory: (supervisor: ChildSupervisor) => SupervisorRecoveryPort): void {
+    if (this.recoveryFactory || this.supervisor) throw new Error("Configure Ollama recovery once, before managed startup.");
+    this.recoveryFactory = factory;
+  }
+  ownsSupervisor(supervisor: ChildSupervisor): boolean { return this.supervisor === supervisor && !this.closing && !this.installing; }
+  private attachRecovery(supervisor: ChildSupervisor): void {
+    this.recoveryPort = this.recoveryFactory?.(supervisor) ?? null;
+    if (this.recoveryPort) supervisor.setRecoveryPort(this.recoveryPort);
+  }
+
   status(): OllamaRuntimeStatus { return { ...this.current }; }
   endpoint(): string { return this.settings.engineUrl ?? `http://127.0.0.1:${this.opts.port}`; }
-  baseUrl(): string | null { return !this.closing && this.current.state === "ready" ? this.endpoint() : null; }
+  baseUrl(): string | null { return !this.closing && (this.externallySelected() || !this.installing && !this.installationLane) && this.current.state === "ready" ? this.endpoint() : null; }
   executable(): string { return join(this.opts.appRoot, "ollama-runtime", "ollama.exe"); }
   modelsDir(): string | null { return this.settings.modelsDir ?? (this.externallySelected() ? null : join(this.opts.appRoot, "models", "ollama")); }
   externallySelected(): boolean { return this.settings.engineUrl !== null; }
@@ -44,7 +58,7 @@ export class OllamaEngineService {
     for (const listener of this.listeners) listener();
   }
 
-  applySettings(settings: OllamaSettings): Promise<void> {
+  applySettings(settings: OllamaSettings, options: { deferManagedStart?: boolean } = {}): Promise<void> {
     const work = this.serial.then(async () => {
       if (this.closing) return;
       const url = settings.engineUrl === null ? null : normalizeOllamaUrl(settings.engineUrl);
@@ -64,6 +78,7 @@ export class OllamaEngineService {
         }
         return;
       }
+      if (options.deferManagedStart || this.installing) return; // Endpoint selection precedes harness assembly; the coordinator admits startup.
       if (!(this.opts.exists ?? existsSync)(this.executable())) {
         this.publish({ state: "absent", url: null, detail: "Install the Arke-managed Ollama runtime, or explicitly choose an existing service." });
         return;
@@ -72,7 +87,7 @@ export class OllamaEngineService {
         entry[1] !== undefined && ["SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PATH", "PATHEXT", "COMSPEC", "TEMP", "TMP", "USERPROFILE", "LOCALAPPDATA", "APPDATA"].includes(entry[0].toUpperCase())));
       const home = join(this.opts.appRoot, "runtime-home", "ollama");
       await mkdir(home, { recursive: true });
-      if (this.closing) return;
+      if (this.closing || this.installing) return;
       const spec = {
         id: "ollama", command: this.executable(), port: this.opts.port, args: ["serve"], inheritEnv: false,
         env: { ...env, HOME: home, USERPROFILE: home, LOCALAPPDATA: join(home, "local"), APPDATA: join(home, "roaming"),
@@ -88,6 +103,7 @@ export class OllamaEngineService {
       };
       const supervisor = this.opts.supervise?.(spec) ?? new ChildSupervisor(spec, this.opts.deps);
       this.supervisor = supervisor;
+      this.attachRecovery(supervisor);
       this.removeBackstop = (this.opts.registerBackstop ?? registerExitBackstop)(supervisor);
       supervisor.on("status", () => {
         if (this.supervisor !== supervisor || this.closing) return;
@@ -122,7 +138,7 @@ export class OllamaEngineService {
   async refresh(): Promise<void> {
     if (this.closing) return;
     if (this.externallySelected()) await this.checkExternal();
-    else if (!this.supervisor || this.current.state === "failed" || this.current.state === "stopped") await this.applySettings(this.settings);
+    else if (!this.supervisor || !this.recoveryFactory && (this.current.state === "failed" || this.current.state === "stopped")) await this.applySettings(this.settings);
   }
 
   async list(signal: AbortSignal): Promise<readonly string[]> {
@@ -175,8 +191,29 @@ export class OllamaEngineService {
   private async stopOwned(): Promise<void> {
     const worker = this.supervisor;
     if (worker) await worker.stopAndConfirm();
+    await this.recoveryPort?.ownerStopped(); this.recoveryPort = null;
+    const release = this.installationLane; this.installationLane = null; release?.();
     this.supervisor = null;
     this.removeBackstop?.(); this.removeBackstop = null;
+  }
+
+  /** Setup owns the file-change interval. Activation stays closed until verified publication;
+   * quiescing first also cancels a startup/recovery that stopManaged must otherwise await. */
+  async reserveInstallation(releaseLane: () => void = () => {}): Promise<() => void> {
+    if (this.closing || this.installing || this.installationLane) {
+      releaseLane(); throw new Error("Ollama's files are already changing or stopping.");
+    }
+    // Ownership of this reservation transfers here. Failed native cleanup keeps it reachable
+    // until a later stop confirms exit; rejecting setup must not hand over a possibly live GPU.
+    this.installationLane = releaseLane;
+    this.installing = true; this.supervisor?.quiesce();
+    try {
+      await this.stopManaged();
+      const release = this.installationLane; this.installationLane = null; release?.();
+    }
+    catch (error) { this.installing = false; throw error; }
+    let held = true;
+    return () => { if (held) { held = false; this.installing = false; } };
   }
 
   async stopManaged(): Promise<void> {

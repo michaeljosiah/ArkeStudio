@@ -267,6 +267,8 @@ import { CoalescedReads, ReadStalledError, type ReadTurn } from "./coalesced-rea
 import { buildDiagnosticsBundle } from "./diagnostics.js";
 import { DiagnosticsSnapshotHolder } from "./diagnostics-snapshot.js";
 import type { AppStorageService } from "./storage/service.js";
+import type { RecoveryControlService } from "./recovery/control.js";
+import { SupervisorRecovery } from "./recovery/supervisor.js";
 import {
   highestChapterRank,
   compileBoard,
@@ -920,6 +922,8 @@ export interface CoordinatorOptions {
   appRoot?: string;
   /** Host-owned scoped resource measurement and capacity planning. Direct fixtures may omit it. */
   storageHealth?: AppStorageService | null;
+  /** Persistent restart authority, separate from removable diagnostic history. */
+  recoveryControl?: RecoveryControlService | null;
   /**
    * The Arke account behind the chrome's control (design turn 151). Absent, Studio has no cloud
    * — `NoArkeCloud`, the local default — and the control says so when pressed.
@@ -3575,6 +3579,17 @@ export class Coordinator {
       await opts.dispatchClients?.[engine === "Ollama" ? "ollama" : "comfyui"]?.unload?.(signal);
       this.clearLocalResidency(engine === "Ollama" ? "ollama" : "comfyui");
     }, ["Ollama", "ComfyUI", "Ming"]);
+    if (opts.recoveryControl && opts.ollama && opts.appRoot) {
+      const service = opts.ollama.service, control = opts.recoveryControl;
+      // The control file already belongs to this app root. Path spelling or a replacement
+      // supervisor must not mint a fresh budget for its one managed Ollama role.
+      const key = createHash("sha256").update("managed-ollama").digest("hex");
+      service.configureRecovery(supervisor => new SupervisorRecovery({ control, identity: { key, service: "ollama" },
+        current: () => !this.stopping && service.ownsSupervisor(supervisor), ownership: () => service.externallySelected() ? "external" : "managed",
+        componentDigest: () => createHash("sha256").update(JSON.stringify([SETUP_CATALOGUE.find(entry => entry.id === "ollama-runtime"), service.modelsDir()])).digest("hex"),
+        acquire: signal => this.localGpu.acquire("Ollama", signal),
+      }));
+    }
     this.mingSpeech = opts.appRoot && opts.ming && opts.comfyui ? new MingSpeechService({ appRoot: opts.appRoot,
       python: () => opts.comfyui!.service.sharedMingPython(), run: (command, signal) => this.generateMingBatch(command, signal),
       processRunning: () => opts.ming!.running === true, ...(opts.mingWorkerPath ? {worker: opts.mingWorkerPath} : {}) }) : null;
@@ -4357,6 +4372,17 @@ export class Coordinator {
               beforeComponentInstall: async id => {
                 if (id.startsWith("adapter-")) await this.adapterLibrary?.guardInstall(id);
                 if (id.startsWith("ming-") && (this.mingSpeech?.busy || this.localGpu.isBusy("Ming"))) throw new Error("Wait for the current Ming reading to stop before changing its files.");
+                if (id === "ollama-runtime" && this.localGpu.isBusy("Ollama")) throw new Error("Wait for current local work before changing Ollama's files.");
+              },
+              beginComponentInstall: async (id, signal) => {
+                if (id !== "ollama-runtime" || !this.opts.ollama) return undefined;
+                // The earlier busy check is presentation, not an idle fence: a submission may
+                // have arrived since it ran. Drain that work under the ordinary inference lane
+                // before stopping the worker. The owner's file lease then keeps activation
+                // closed without holding the graphics card throughout the download.
+                const release = await this.localGpu.acquire("Ollama", signal);
+                try { signal.throwIfAborted(); } catch (error) { release(); throw error; }
+                return this.opts.ollama.service.reserveInstallation(release);
               },
               beginFileMutation: id => {
                 if (!id.startsWith("ming-")) return undefined;
@@ -4847,6 +4873,7 @@ export class Coordinator {
 
     await this.seed();
     await this.adapterLibrary?.refresh();
+    await this.opts.recoveryControl?.open();
     await this.seedAppConfig();
     if (this.opts.storageHealth) {
       this.lifecycleDisposers.add(this.opts.storageHealth.subscribe(health => {
@@ -23117,6 +23144,7 @@ export class Coordinator {
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
     this.opts.storageHealth?.closeAdmission();
+    this.opts.recoveryControl?.closeAdmission();
     this.sampleInstallAbort?.abort();
     const audioStudioStopped = this.audioStudioPreviews.stop();
     this.cataloguePreviews?.close();
@@ -23195,6 +23223,7 @@ export class Coordinator {
       await this.opts.adapter?.dispose?.().catch(() => {});
       await this.releaseOllama();
       const runtimeStops = await Promise.allSettled([this.opts.ming?.dispose(), this.opts.ollama?.service.dispose()]);
+      await this.opts.recoveryControl?.stop();
       await this.worldQuery.stop();
       // Provider close is the critical gate: it saves pending state and releases the world lock.
       this.engineClosed = true;

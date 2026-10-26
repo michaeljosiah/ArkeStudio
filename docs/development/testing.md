@@ -17,7 +17,14 @@ Recovery control tests (#2194) use contracts `test/recovery-policy.test.ts` and 
 `test/recovery/control.test.ts`. They inject crash/unknown writes, competing attempts, rolling
 budgets, clock reversal, deliberate Stop/Suggest only, target changes during flush and shutdown.
 Native filesystem access is needed for atomic control-file replacement. These establish the
-durable gate, not live supervisor integration or successful inference. `test/job-leash.test.ts`
+durable gate. `test/recovery/supervisor.test.ts` additionally uses real native children to check
+GPU waiting, verified replacement, queued startup exits, cancellation, policy/ownership refusal
+and retained unhealthy processes. `test/recovery/application.test.ts` starts the actual host and
+managed Ollama owner with a protocol fixture, verifying its flushed outcome and persisted policy.
+`test/setup/local-setup.test.ts` checks the file-change lease through writes/rechecks, failure and
+release before activation. `test/ollama-engine.test.ts` checks retained installation reservations
+after unconfirmed cleanup and release only after owner-confirmed stop. These establish the Ollama path, not other recovery owners, reviewed
+interruption actions or successful inference. `test/job-leash.test.ts`
 also verifies shared storage-reader job reuse and kernel cleanup on forced parent death on Windows.
 
 Managed local runtime checks are listed in [Managed local runtimes](managed-local-runtimes.md#validation).

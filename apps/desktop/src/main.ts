@@ -731,7 +731,7 @@ async function initialize(): Promise<{ port: number }> {
   const storedHarness = savedHostSettings.harness;
   const ollamaEngine = new OllamaEngineService({ appRoot, port: await allocateLoopbackPort(), deps: { ledger: childLedger } });
   const transferOllama = startupRuntimeOwners.own(ollamaEngine);
-  await ollamaEngine.applySettings(savedHostSettings.ollama);
+  await ollamaEngine.applySettings(savedHostSettings.ollama, { deferManagedStart: true });
   const chosenHarness = effectiveHarnessEngine(storedHarness?.engine ?? "opencode", process.env["ARKE_HARNESS"]);
 
   const wiring = await assembleHarness({

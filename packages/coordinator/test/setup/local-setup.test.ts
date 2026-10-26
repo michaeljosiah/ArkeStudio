@@ -18,6 +18,24 @@ import {
 
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const;
 
+it("holds one install-owner lease through writes and policy rechecks, releasing before activation and on failure", async () => {
+  for (const fails of [false, true]) {
+    let held = false, acquired = 0, released = 0, policyChecks = 0, activated = 0;
+    const base = deps({ status: fails ? 500 : 200 });
+    const service = new LocalSetupService({ ...base, fetchStream: async (...args) => { assert(held); return base.fetchStream(...args); } }, () => {}, {
+      appRoot: await root(), catalogue: [catalogue()[2]!],
+      beforeComponentInstall: async () => { if (++policyChecks > 1) assert(held, "publication policy recheck keeps the existing lease"); },
+      beginComponentInstall: async () => { assert(!held); held = true; acquired++; return () => { assert(held); held = false; released++; }; },
+      onFileInstalled: async () => { assert(held); },
+      onComponentReady: async () => { assert(!held); activated++; },
+    });
+    try {
+      await service.run(); assert.equal(held, false); assert.equal(acquired, 1); assert.equal(released, 1);
+      assert.equal(activated, fails ? 0 : 1); assert.equal(service.status().components[0]!.state, fails ? "failed" : "ready");
+    } finally { await service.dispose(); }
+  }
+});
+
 it("reconciles models installed this session when the selected Ollama store changes", async () => {
   let models = new Set<string>(), pulls = 0;
   const entry = { ...catalogue()[1]!, requires: [], optional: true };

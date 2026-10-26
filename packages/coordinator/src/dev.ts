@@ -80,7 +80,7 @@ const savedHostSettings = await new AppSettingsFile(join(devRoot, "settings.json
 const storedHarness = savedHostSettings.harness;
 const ollamaEngine = new OllamaEngineService({ appRoot: devRoot, port: await allocateLoopbackPort(), deps: { ledger } });
 const comfy = createNodeComfyUiEngine(devRoot, { ledger });
-await ollamaEngine.applySettings(savedHostSettings.ollama);
+await ollamaEngine.applySettings(savedHostSettings.ollama, { deferManagedStart: true });
 const chosenHarness = effectiveHarnessEngine(storedHarness?.engine ?? "opencode", process.env["ARKE_HARNESS"]);
 
 const wiring = await assembleHarness({
