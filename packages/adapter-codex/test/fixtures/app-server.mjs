@@ -3,6 +3,7 @@ import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 let sequence = 0;
 let imageStarts = 0;
 const scenario = process.env.ARKE_CODEX_TEST_CASE;
+const uncertainScenarios = new Set(['timeout-once', 'announced-timeout-once', 'reject-once', 'recovery-init-fails', 'recovery-exits-after-init']);
 const recovered = !!process.env.ARKE_CODEX_TEST_STATE && existsSync(process.env.ARKE_CODEX_TEST_STATE);
 const threads = new Map();
 const write = data => process.stdout.write(JSON.stringify(data) + '\n');
@@ -11,7 +12,11 @@ const result = (id, result) => write({ id, result });
 const log = data => { if (process.env.ARKE_CODEX_TEST_LOG) appendFileSync(process.env.ARKE_CODEX_TEST_LOG, JSON.stringify(data) + '\n'); };
 const finish = (threadId, turnId) => notify('turn/completed', { threadId, turn: { id: turnId, status: 'completed', items: [] } });
 createInterface({ input: process.stdin }).on('line', line => {
-  const request = JSON.parse(line); log(request);
+  const request = JSON.parse(line);
+  // The parent may interrupt as soon as this log row appears. Commit the once-only fixture
+  // marker first, or a killed child can leave its replacement repeating the scripted hang.
+  if (request.method === 'turn/start' && uncertainScenarios.has(scenario) && !recovered) writeFileSync(process.env.ARKE_CODEX_TEST_STATE, 'uncertain turn was attempted');
+  log(request);
   const { id, method, params = {} } = request;
   if (id === 'tool-request' && !method) {
     const thread = [...threads.values()][0];
@@ -42,8 +47,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   else if (method === 'thread/unsubscribe') result(id, {});
   else if (method === 'turn/start') {
     const thread = threads.get(params.threadId); thread.turn = `turn-${++sequence}`;
-    if (['timeout-once', 'announced-timeout-once', 'reject-once', 'recovery-init-fails', 'recovery-exits-after-init'].includes(scenario) && !recovered) {
-      writeFileSync(process.env.ARKE_CODEX_TEST_STATE, 'uncertain turn was attempted');
+    if (uncertainScenarios.has(scenario) && !recovered) {
       if (scenario === 'announced-timeout-once') {
         notify('turn/started', { threadId: thread.id, turn: { id: thread.turn } });
         notify('item/agentMessage/delta', { threadId: thread.id, turnId: thread.turn, itemId: 'early-answer', delta: 'announced before acknowledgment' });

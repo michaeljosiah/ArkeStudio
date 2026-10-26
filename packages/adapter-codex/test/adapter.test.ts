@@ -171,6 +171,7 @@ for (const scenario of ["timeout-once", "announced-timeout-once"]) for (const di
   const old = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
   const pending = assert.rejects(f.adapter[dispatch]({ sessionId: old.sessionId, parts: [{ type: "text", text: "cancel pending start" }] }), /cancelled/);
   await eventually(async () => (await f.requests()).some(request => request.method === "turn/start"));
+  await access(join(f.root, "restart-state")); // The logged start is a committed fixture milestone.
   if (scenario === "announced-timeout-once") {
     await eventually(() => f.events.some(event => event.type === "message.delta" && event.sessionId === old.sessionId && event.text === "announced before acknowledgment"));
   }
