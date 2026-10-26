@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { basename, join } from "node:path";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { ArtifactCheckpointInvalid, ArtifactResultFiles, ARTIFACT_FILE_OVERHEAD } from "../../src/queue/artifact-files.js";
+import { ArtifactCheckpointInvalid, ArtifactResultFiles, artifactFileMatches, ARTIFACT_FILE_OVERHEAD } from "../../src/queue/artifact-files.js";
 import { atomicWriteFile } from "../../src/world/atomic.js";
 import type { ArtifactWriteSpace } from "../../src/storage/job-artifacts.js";
 import { tempDir } from "../tmp.js";
@@ -10,6 +10,14 @@ import { tempDir } from "../tmp.js";
 const job = { id: "job_result", attempt: 1, provider: "synthetic", providerJobId: "accepted-1", resultReceiptId: "01J8F3K2QW9VZX4N7M0RTYB6HC" };
 const artifacts = [1, 2].map(value => ({ name: `${value}.png`, contentType: "image/png", data: new Uint8Array([value, value + 2]) }));
 const signal = () => new AbortController().signal;
+
+it("treats ordinary different-sized landing files as misses without relaxing private receipt validation", async () => {
+  const root = await tempDir('arke-artifact-size-'), path = join(root, 'existing.bin');
+  await writeFile(path, new Uint8Array(1024 * 1024)); assert.equal(await artifactFileMatches(path, new Uint8Array([1]), signal()), false);
+  await writeFile(path, new Uint8Array([1])); assert.equal(await artifactFileMatches(path, new Uint8Array([1, 2]), signal()), false);
+  assert.equal(await artifactFileMatches(path, new Uint8Array([1]), signal()), true);
+  await mkdir(join(root, 'directory')); await assert.rejects(artifactFileMatches(join(root, 'directory'), new Uint8Array(), signal()), ArtifactCheckpointInvalid);
+});
 
 it("retains complete blobs after ENOSPC and retries only missing bytes before publishing its receipt", async () => {
   const root = await tempDir("arke-result-prefix-"), plans: number[] = [], paths: string[] = []; let failed = false, settled = 0;

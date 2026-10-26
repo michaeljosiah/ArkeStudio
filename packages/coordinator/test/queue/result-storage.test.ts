@@ -73,6 +73,20 @@ it("ownership loss after staging preserves verified bytes, and restart reserves 
   } finally { await queue.dispose(); await next?.dispose(); await queue.waitForIdle(); await next?.waitForIdle(); await h.storage.stop(); }
 });
 
+it("files a smaller regenerated result over its existing ordinary destination after normal storage admission", { timeout: 30_000 }, async () => {
+  const h = await fixture(), directory = join(h.world, 'incoming'), previous = Buffer.concat([pngBytes(), pngBytes()]);
+  await mkdir(directory, { recursive: true }); await writeFile(join(directory, 'result.png'), previous);
+  const queue = h.create();
+  try {
+    await queue.start(); await queue.enqueue(input);
+    await until(() => queue.listJobs()[0]?.error?.includes('waiting for storage') === true, 'new bytes still require admission');
+    assert.deepEqual(await readFile(join(directory, 'result.png')), previous);
+    h.freeWorld(); await until(() => queue.listJobs()[0]?.status === 'succeeded', 'new smaller result replaces the requested destination');
+    assert.deepEqual(await readFile(join(directory, 'result.png')), Buffer.from(pngBytes()));
+    assert.equal(h.fake.submitCount, 1); assert.equal(h.fetches(), 1); assert.equal(h.ledger.length, 1);
+  } finally { await queue.dispose(); await queue.waitForIdle(); await h.storage.stop(); }
+});
+
 it("a pre-upgrade inline receipt survives repeated held restarts without an unmigrated nonce hiding it", { timeout: 30_000 }, async () => {
   const h = await fixture(true), disk = new JobJournal(h.journalPath), at = new Date().toISOString();
   const legacy: Job = { ...input, id: 'jb_01J8F3K2QW9VZX4N7M0RTYB6HD', idempotencyKey: '01J8F3K2QW9VZX4N7M0RTYB6HD',

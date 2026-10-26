@@ -146,6 +146,8 @@ adopted without another payload copy/reservation. When all files are already pub
 settlement needs no new file-space grant. Only confirmed successful filing/finalization retires its enumerated current
 checkpoint files; unknown, corrupt, cancelled, previous and legacy copies are retained. There is
 no recursive result-cache cleanup or physical creative-media deletion.
+An ordinary different-sized file at a requested landing path is a nonmatch and follows normal
+reserved staging/replacement; it does not make the new private result receipt corrupt.
 
 On qualified storage ports, known remaining checkpoint/staging writes share the existing volume
 reservation registry, including a 64 KiB per-file metadata estimate. Already verified bytes are

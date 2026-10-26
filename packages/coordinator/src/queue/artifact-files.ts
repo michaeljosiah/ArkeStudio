@@ -54,7 +54,15 @@ async function readBounded(path: string, maximum: number, signal?: AbortSignal):
 }
 
 export async function artifactFileMatches(path: string, expected: Uint8Array, signal: AbortSignal): Promise<boolean> {
-  try { const data = await readBounded(path, expected.length, signal); return data.length === expected.length && await hash(data, signal) === await hash(expected, signal); }
+  try {
+    signal.throwIfAborted(); const entry = await lstat(toExtendedLength(path));
+    if (!entry.isFile() || entry.isSymbolicLink()) throw new ArtifactCheckpointInvalid();
+    // A replaceable staging/destination file is not a private receipt blob. An ordinary
+    // different-sized previous result is a miss, not corruption of the new saved response.
+    if (entry.size !== expected.length) return false;
+    const data = await readBounded(path, expected.length, signal);
+    return data.length === expected.length && await hash(data, signal) === await hash(expected, signal);
+  }
   catch (error) { if (missing(error)) return false; throw error; }
 }
 

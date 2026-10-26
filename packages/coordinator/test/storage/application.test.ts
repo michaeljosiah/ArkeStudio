@@ -52,7 +52,17 @@ it("the production factory enables scoped observation by default", async () => {
   const coordinator = createStudioCoordinator({ provider, adapter: null, appRoot: root, changeLogPath: join(root, "logs", "coordinator.jsonl"), appVersion: "storage-test" });
   try {
     await coordinator.start(0);
-    await until(() => coordinator.getState().app.storageHealth?.roots[0]?.state === (process.platform === "win32" ? "measured" : "unsupported"), "host default observation", 20_000);
+    await until(() => {
+      const reading = coordinator.getState().app.storageHealth?.roots[0];
+      return reading?.state === "measured" || reading?.state === "unsupported";
+    }, "host default observation", 20_000);
     assert.equal(coordinator.getState().app.storageHealth!.roots.length, 1);
+    const reading = coordinator.getState().app.storageHealth!.roots[0]!;
+    if (process.platform === "win32") { assert.equal(reading.state, "measured"); assert.equal(reading.source, "windows-volume-api"); }
+    else if (process.platform === "linux") {
+      assert.equal(reading.source, "linux-mountinfo");
+      if (reading.state === "measured") { assert(reading.capacity); assert(reading.limitations.includes("quota-unavailable")); }
+      else { assert.equal(reading.capacity, null); assert.deepEqual(reading.limitations, ["unsupported-filesystem"]); }
+    } else { assert.equal(reading.state, "unsupported"); assert.equal(reading.capacity, null); }
   } finally { await coordinator.stop(); await provider.close(); }
 });
