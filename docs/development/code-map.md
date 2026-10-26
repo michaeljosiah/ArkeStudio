@@ -6,7 +6,12 @@ fresh peak-space admission, qualified forecasts and warning hysteresis. Coordina
 `storage/reservations.ts` serializes durable multi-volume admission, changed peaks and owner-confirmed
 settlement; `storage/reservation-file.ts` keeps its flushed app-local control state bounded.
 `storage/windows-volume.ts` reads actual GUID/root identities and caller-available bytes through a
-bounded kernel-leashed native reader. `storage/service.ts` composes collection and durable planning;
+bounded kernel-leashed native reader. `storage/linux-volume.ts` checks bounded mountinfo, native
+device/inode identity and statfs for ext2/3/4, XFS and tmpfs, grouping bind aliases by device.
+Other Linux filesystems remain explicitly unsupported; user/project quota limits are unknown.
+Its single metadata chain remains retained after a bounded observation is abandoned, without
+overlapping replacements or late publication. No native child or shell is started.
+`storage/service.ts` composes collection and durable planning;
 `application/studio-host.ts` enables it for app-root hosts. Coordinator startup/world switching,
 writing cadence and desktop wake feed it; `storage.health` reaches authenticated snapshots and both
 state folds without entering the world diagnostic journal. Contracts `storage-diagnostics.ts` derives

@@ -5,6 +5,7 @@ import { FileStorageReservationStore } from "./reservation-file.js";
 import { StorageReservations, type StorageReservationStore } from "./reservations.js";
 import { StorageMonitor, type StorageProbeResult } from "./monitor.js";
 import { WindowsVolumeProbe } from "./windows-volume.js";
+import { LinuxVolumeProbe } from "./linux-volume.js";
 
 export interface StorageNativePort {
   setRoots(roots: readonly { rootId: string; path: string }[]): void;
@@ -40,8 +41,9 @@ export class AppStorageService {
   private observationsStopped: Promise<unknown> | null = null;
 
   constructor(options: { appRoot: string; native?: StorageNativePort; platform?: string; now?: () => number; store?: StorageReservationStore }) {
-    this.supportsAdmission = options.native !== undefined || (options.platform ?? process.platform) === "win32";
-    this.native = options.native ?? ((options.platform ?? process.platform) === "win32" ? new WindowsVolumeProbe({ now: options.now }) : {
+    const platform = options.platform ?? process.platform;
+    this.supportsAdmission = options.native !== undefined || platform === "win32" || platform === "linux";
+    this.native = options.native ?? (platform === "win32" ? new WindowsVolumeProbe({ now: options.now }) : platform === "linux" ? new LinuxVolumeProbe({ now: options.now }) : {
       setRoots: () => {},
       probe: async (): Promise<StorageProbeResult> => ({ state: "unsupported", capacity: null, source: "host-provided", limitations: ["unsupported-filesystem"] }),
       stop: async () => {},

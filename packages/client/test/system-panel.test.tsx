@@ -44,6 +44,9 @@ it("groups destinations by measured volume without adding capacity, and uses the
   assert(stale.toString().includes('Last: 2 GiB free')); assert.equal(stale.querySelectorAll('.fy-system-storage .fy-system-meter').length, 0);
   const partial = view({ ...storage, storageHealth: { ...storage.storageHealth, roots: [root, { ...root, rootId: 'b', state: 'unavailable' }] } });
   assert(partial.toString().includes('1 destination stale or unavailable'));
+  const quota = view({ ...storage, storageHealth: { ...storage.storageHealth, roots: [root, { ...root, rootId: 'b', limitations: ['quota-unavailable'] }] } });
+  assert.equal(quota.querySelectorAll('.fy-system-drive').length, 1);
+  assert(quota.querySelector('.fy-system-drive')?.textContent?.includes('Quota limit unknown'));
 });
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");

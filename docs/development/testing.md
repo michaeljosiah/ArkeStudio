@@ -29,8 +29,16 @@ Proactive storage service checks (#2194) use contracts `test/storage-health.test
 the volume fixture exercises a real directory/junction pair through the kernel-leashed reader,
 and reservation persistence uses flushed atomic replacement. Capacity, quota, ENOSPC, forecast,
 concurrency and shutdown faults are injected; no test fills a real volume or removes creative media.
-The Windows native fixture is skipped on other operating systems, where the synthetic service tests
-still run. `test/storage/application.test.ts` additionally starts the actual host/coordinator,
+The Windows native fixture is skipped on other operating systems. `test/storage/linux-volume.test.ts`
+checks device sharing across bind aliases, escaped mount points, identity/remount changes,
+unsupported/read-only filesystems, unsafe capacities, bounded metadata, coalescing and slow-read
+abandonment without overlap. Its real directory/symlink fixture runs only on Linux and explicitly
+reports unsupported filesystems; synthetic tests on Windows do not establish Linux qualification.
+The Linux port qualifies ext2/3/4, XFS and tmpfs, with user/project quota limits disclosed as unknown.
+Native filesystem syscalls may outlive the four-second observation deadline; one retained chain
+blocks replacement until actual settlement and cannot publish late. Shutdown abandons observation
+without creating a child process. macOS and other Linux filesystem ports remain outstanding.
+`test/storage/application.test.ts` additionally starts the actual host/coordinator,
 opens a disposable world, wakes collection and checks the authenticated reconnect snapshot and
 journal exclusion. Client `test/storage-health.test.ts` checks the matching fold; contracts
 `test/storage-diagnostics.test.ts` covers pure findings, stale/unknown facts and typed failures.
