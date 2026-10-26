@@ -193,6 +193,7 @@ const { coordinator, server } = createStudioHost({
   authoring: { agentForPurpose, roster: ROSTER, skillFor },
   ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
   harnessLaunchEngine: chosenHarness,
+  harnessRecovery: wiring.recovery,
   ...(wiring.unavailableReason ? { harnessUnavailableReason: wiring.unavailableReason } : {}),
   ...(process.env["ARKE_HARNESS"] === chosenHarness ? { harnessEngineOverride: chosenHarness } : {}),
   relaunchHarness: wiring.relaunchHarness,

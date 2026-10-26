@@ -1,5 +1,16 @@
 # Running and validating changes
 
+Managed writing recovery (#2194) uses coordinator `test/recovery/harness.test.ts`,
+`test/harness-runtime-change.test.ts` and `test/v2-launch.test.ts`. The native fixture assembles
+the actual launcher with a protocol stand-in, starts the production host, crashes its child,
+waits behind an admitted turn and reads flushed recovery control. It verifies no turn replay,
+Suggest only, personal-path refusal with a retained circuit, cancellation before shutdown drain,
+retained failed health/native-stop retry and runtime protocol refusal despite discovery metadata.
+These tests need native filesystem/process access and make no paid request. The optional pinned
+runtime check in `v2-launch.test.ts` is separate; a fixture is not a live-model qualification.
+`test/harness/model-routing.test.ts`, `test/supervisor.test.ts` and
+`test/application/studio-lifecycle.test.ts` cover the existing routing and lifecycle contracts.
+
 Proactive storage service checks (#2194) use contracts `test/storage-health.test.ts` and coordinator
 `test/storage/*.test.ts`. Run coordinator checks with native Windows process/filesystem access:
 the volume fixture exercises a real directory/junction pair through the kernel-leashed reader,

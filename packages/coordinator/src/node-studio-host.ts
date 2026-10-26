@@ -91,6 +91,7 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
       ollama: { service: ollama, reconfigureHarness: wiring?.reconfigureOllama }, ming,
       authoring: { agentForPurpose, roster: ROSTER, skillFor },
       harnessLaunchEngine: chosen, relaunchHarness: wiring?.relaunchHarness,
+      harnessRecovery: wiring?.recovery,
       ...(wiring?.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
       harnessUnavailableReason: wiring?.unavailableReason ?? (options.adapter === null ? "AI is disabled for this server." : undefined),
     });

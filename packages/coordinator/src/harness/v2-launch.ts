@@ -1,4 +1,5 @@
 import { mkdir, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { HarnessEngine } from "@arke-studio/contracts";
 import {
@@ -23,10 +24,10 @@ import {
 } from "@arke-studio/adapter-claude";
 import { CodexAdapter, codexCredentialEnv, discoverCodex, type CodexDiscoveryOptions, type DiscoveredCodex } from "@arke-studio/adapter-codex";
 import type { CodexImageRunner } from "@arke-studio/providers";
-import { ChildSupervisor, type SupervisorDeps } from "../supervisor.js";
+import { ChildSupervisor, type SupervisedSpec, type SupervisorDeps } from "../supervisor.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { ownedChildHooks } from "./owned-child.js";
-import { HarnessRuntimeChanges } from "./runtime-change.js";
+import { HarnessRuntimeChanges, type HarnessRecoveryOwner } from "./runtime-change.js";
 
 // This package owns shared desktop/dev composition, so every adapter is a runtime dependency.
 // Keep concrete adapter imports here; Coordinator itself consumes the HarnessAdapter contract.
@@ -165,6 +166,8 @@ export interface AssembleHarnessOptions {
   engine?: HarnessEngine;
   /** Ledger for orphan sweeps; absent in bare test hosts. */
   deps?: SupervisorDeps;
+  /** Native owner seam used by lifecycle acceptance fixtures; production uses ChildSupervisor. */
+  createSupervisor?: (spec: SupervisedSpec, deps: SupervisorDeps) => ChildSupervisor;
   v2?: DiscoveryOptions;
   /**
    * The bring-your-own harness, off unless asked for, and never a fallback: OpenCode is the
@@ -190,6 +193,7 @@ export interface AssembleHarnessOptions {
 }
 
 export interface AssembledHarness {
+  recovery?: HarnessRecoveryOwner;
   reconfigureOllama?: (apply?: () => Promise<void>) => Promise<void>;
   harness: DiscoveredHarness | null;
   isV2: boolean;
@@ -297,7 +301,7 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
   };
   await configureOllama();
 
-  const supervisor = new ChildSupervisor(
+  const supervisor = (opts.createSupervisor ?? ((spec, deps) => new ChildSupervisor(spec, deps)))(
     {
       id: "opencode",
       command: harness?.discovery.command ?? null,
@@ -313,6 +317,11 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
         ...v2ProfileEnv(profileDir),
       },
       healthPath: "/api/info",
+      validateHealth: async response => {
+        const info = await response.json() as { version?: unknown; pid?: unknown };
+        return info.version === OPENCODE2_PINNED_VERSION && typeof info.pid === "number" && Number.isSafeInteger(info.pid) && info.pid > 0
+          ? true : { ok: false, reason: "OpenCode did not report the supported server protocol. Review its installation." };
+      },
       readyTimeoutMs: 30_000,
       healthHeaders: password.healthHeaders, onStdoutLine: password.onStdoutLine,
     },
@@ -344,6 +353,9 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     isV2,
     supervisor,
     adapter,
+    ...(harness ? { recovery: { ownership: harness.discovery.source === "bundled" ? "managed" as const : "external" as const,
+      componentDigest: () => createHash("sha256").update(JSON.stringify([harness.generation, harness.discovery.command, harness.discovery.version, opts.ollamaEndpoint?.()])).digest("hex"),
+      reserve: (signal: AbortSignal) => runtimeChanges.reserveRecovery(signal) } } : {}),
     ...(harness ? { harnessInfo: harnessInfoFrom(harness) } : {}),
     // The PATCH form, deliberately: it names every managed variable, so a cleared key is a
     // deletion the merge honours rather than an omission it preserves.

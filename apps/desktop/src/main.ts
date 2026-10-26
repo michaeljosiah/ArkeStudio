@@ -1228,6 +1228,7 @@ async function initialize(): Promise<{ port: number }> {
     authoring: { agentForPurpose, roster: ROSTER, skillFor },
     ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
     harnessLaunchEngine: chosenHarness,
+    harnessRecovery: wiring.recovery,
     ...(wiring.unavailableReason ? { harnessUnavailableReason: wiring.unavailableReason } : {}),
     ...(process.env["ARKE_HARNESS"] === chosenHarness ? { harnessEngineOverride: chosenHarness } : {}),
     // Stored LLM keys reach the harness as spawn environment (SPEC-005 D5) — under v2's

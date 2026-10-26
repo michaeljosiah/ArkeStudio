@@ -271,6 +271,7 @@ import type { RecoveryControlService } from "./recovery/control.js";
 import type { RecoveryHistoryService } from "./recovery/history.js";
 import { recoveryCommand } from "./recovery/commands.js";
 import { SupervisorRecovery } from "./recovery/supervisor.js";
+import type { HarnessRecoveryOwner } from "./harness/runtime-change.js";
 import {
   highestChapterRank,
   compileBoard,
@@ -898,6 +899,7 @@ async function landUploadedImage(
 }
 
 export interface CoordinatorOptions {
+  harnessRecovery?: HarnessRecoveryOwner;
   /** Explicit local infrastructure, normally supplied by desktop/dev composition. */
   storage?: StudioStorage;
   /** Host-minted session capability. Omission creates a fresh capability, never an open socket. */
@@ -1257,6 +1259,7 @@ export class Coordinator {
   readonly serverApplication: StudioServerApplication;
   private readonly changeLog: ChangeLog;
   private readonly supervisors = new Map<HealthComponent, ChildSupervisor>();
+  private readonly supervisedRecovery = new Map<HealthComponent, SupervisorRecovery>();
   private readonly worldQuery: WorldQueryServer;
   private readonly worldChatRunners = new WorldChatRunnerCache<WorldChatRunner>();
   private readonly grants: GrantStore | null;
@@ -4809,6 +4812,15 @@ export class Coordinator {
 
   /** Attach a supervised child and mirror its lifecycle into component health (R-6). */
   superviseAs(component: Exclude<HealthComponent, "coordinator">, supervisor: ChildSupervisor): void {
+    if (this.started || this.stopping || this.supervisors.has(component)) throw new Error("Attach each supervised service once before startup.");
+    if (component === "harness" && this.opts.harnessRecovery && this.opts.recoveryControl && this.opts.appRoot) {
+      const owner = this.opts.harnessRecovery;
+      const recovery = new SupervisorRecovery({ control: this.opts.recoveryControl,
+        identity: { key: createHash("sha256").update("managed-harness-v2").digest("hex"), service: "harness" },
+        current: () => !this.stopping && this.supervisors.get(component) === supervisor,
+        ownership: () => owner.ownership, componentDigest: () => owner.componentDigest(), acquire: signal => owner.reserve(signal) });
+      supervisor.setRecoveryPort(recovery); this.supervisedRecovery.set(component, recovery);
+    }
     this.supervisors.set(component, supervisor);
     supervisor.on("status", ({ status, reason }: { status: SupervisorStatus; reason?: string }) => {
       // A healthy harness process is probed before it counts (SPEC-005 R-2): the adapter asks
@@ -23211,6 +23223,7 @@ export class Coordinator {
     // Setup completion can be awaiting startup: cancel that wait before setup itself drains.
     this.opts.ollama?.service.beginShutdown();
     this.opts.comfyui?.service.beginShutdown();
+    for (const supervisor of this.supervisors.values()) supervisor.quiesce();
     for (const controller of this.performanceGenerations.values()) controller.abort();
     for (const controller of this.keyArtPromptDrafts.values()) controller.abort();
     this.keyArtPromptReviews.clear();
@@ -23275,7 +23288,10 @@ export class Coordinator {
       await this.jobQueue?.drain();
       await this.opts.storageHealth?.stop();
       await this.audiobookActivity.drain();
-      await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
+      const supervisedStops = await Promise.allSettled([...this.supervisors].map(async ([component, supervisor]) => {
+        await supervisor.stopAndConfirm();
+        await this.supervisedRecovery.get(component)?.ownerStopped();
+      }));
       await this.opts.adapter?.dispose?.().catch(() => {});
       await this.releaseOllama();
       const runtimeStops = await Promise.allSettled([this.opts.ming?.dispose(), this.opts.ollama?.service.dispose()]);
@@ -23292,7 +23308,7 @@ export class Coordinator {
       // called, so a fault recorded in the last moments of a run — the kind most worth having,
       // because the run ended — could still be in the queue when the process left.
       await this.appLog?.drain();
-      const failedRuntimeStops = [...comfyUiStops, ...runtimeStops].filter(result => result.status === "rejected");
+      const failedRuntimeStops = [...comfyUiStops, ...runtimeStops, ...supervisedStops].filter(result => result.status === "rejected");
       if (failedRuntimeStops.length) throw new AggregateError(failedRuntimeStops.map(result => result.reason), "Local runtime cleanup did not confirm exit.");
       // Admission closed synchronously above; owner settlement must remain available across
       // a failed native stop so a later confirmed cleanup can resolve its retained intent.

@@ -32,6 +32,14 @@ unconfirmed exit retains that reservation in the owner until confirmed stop. Tes
 Managed Ollama/ComfyUI unexpected exits now use durable policy; failed health retains the live process for review.
 GPU handover preserves a confirmed crashed child's waiting recovery. Host shutdown closes both
 owners before setup drains, reports failed native cleanup and permits a later confirmation retry.
+The assembled OpenCode v2 server now declares its recovery ownership and configuration digest.
+Desktop/dev/Node pass that owner through `harnessRecovery`; `superviseAs` attaches the durable
+policy before startup. Only the bundled source may restart automatically. `harness/runtime-change.ts`
+reserves one cancellable writing fence, waiting for admitted cloud/local turns and blocking new
+turns/configuration changes until verified replacement or confirmed cleanup. No turn is replayed.
+The launcher validates the running pinned protocol and process identity over private authenticated
+health. Generic supervisors quiesce before handler drain and confirm native exit during shutdown;
+failed confirmation retains recovery settlement for a later retry.
 Other service owners, reviewed stop/restart actions and broader qualification
 remain outstanding. No completed recovery-agent claim follows from this slice.
 
