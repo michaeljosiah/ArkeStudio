@@ -1807,6 +1807,7 @@ describe("the provider table and the registry cannot drift apart (issue 462)", (
       higgsfield: unreachable as unknown as CommandRunner,
       codexImage: { status: unreachable, generate: unreachable },
       voxa: () => null,
+      ming: { status: unreachable, synthesize: unreachable },
       comfyui: { baseUrl: () => null, preflight: unreachable as unknown as () => Promise<never> },
     });
 
@@ -1828,6 +1829,10 @@ describe("the provider table and the registry cannot drift apart (issue 462)", (
   it("declares every provider in the declarations table too", () => {
     const missing = (Object.keys(PROVIDERS) as ProviderId[]).filter((id) => PROVIDER_DECLARATIONS[id] === undefined);
     assert.deepEqual(missing, [], "reconciliation strategy is chosen from declarations; an absent row has none");
+  });
+
+  it("keeps Ming absent without host synthesis wiring", () => {
+    assert.equal(createProviderClients({ fetch: unreachable as unknown as FetchLike }).ming, undefined);
   });
 
   it("uses the engine-specific fetch for ComfyUI without changing cloud transports", async () => {

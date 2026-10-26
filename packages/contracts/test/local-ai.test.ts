@@ -90,7 +90,7 @@ describe("eligibility refuses what cannot run now (SPEC-034 R-15a)", () => {
   it("requires a successful Ming probe and each model's complete installation independently", () => {
     const model = {...KOKORO, provider: "ming" as const, id: "ming-3-0.5b"};
     const providers = [{id: "ming" as const, configured: true, validation: "valid" as const, fault: null, probes: [{capability: "voice-tts" as const, available: true}]}];
-    const component = (id: string) => SetupComponentSchema.parse({id, displayName: id, purpose: "Speech", state: "ready", sizeMb: 1, installLocation: null, optional: true, provides: [model.id]});
+    const component = (id: string) => SetupComponentSchema.parse({id, displayName: id, purpose: "Speech", state: "ready", sizeMb: 1, installLocation: null, provides: [model.id]});
     const components = [component("ming-model-dense"), component("ming-runtime-dense")];
     assert.equal(modelEligible(model, {...base, providers, components}), true);
     assert.equal(modelEligible({...model, id: "ming-3-7.9b"}, {...base, providers, components}), false);
