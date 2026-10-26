@@ -76,7 +76,7 @@ accepts `--overlay`, `--shared-runtime-adapters`, and Tiny's `--python-sdk`, so 
 repeated without private scratch scripts. Pass `--worker` when the host owns process lifetime;
 the host must create a fresh output directory and apply a whole-batch timeout signal.
 
-Ming is an optional local reader in **Settings → AI models → Voices**, under ComfyUI. Install
+Ming is an optional local reader in **Settings → AI models → Text-to-Speech**, under ComfyUI. Install
 0.5B (about 3 GB of weights) or 7.9B (about 18 GB) to fetch the whole dependency closure.
 Only Arke-managed Windows x64/NVIDIA ComfyUI is qualified; an explicitly selected personal
 install or URL does not lend its Python to Ming. This is a separate batch worker sharing
@@ -113,6 +113,9 @@ GPU lane. Decode-ceiling failure, partial chunk completion, invalid audio and an
 short read (12+ words at over eight words/second) refuse the whole result. This last check is
 an omission screen, not transcription or proof that every word was read. Review narration
 before publishing. The retired IndexTTS recipe remains retired.
+The post-integration inventory again matched all 57,017 shared-runtime file names, sizes and
+modification times plus all 892 selected metadata/interpreter hashes. This is not a complete
+hash of every binary or an image/video workflow test.
 
 ## Validation
 
