@@ -152,7 +152,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "preview-direction": "studio", "set-audiobook-reading-note": "studio", "draft-audiobook-speaker-notes": "studio",
   "export-manuscript": "studio", "import-manuscript": "studio", "reread-manuscript": "studio",
   "cancel-manuscript": "studio", "resolve-extraction": "studio", "check-updates": "studio",
-  "acknowledge-update": "studio", "refresh-diagnostics": "studio", "bench-open": "studio",
+  "acknowledge-update": "studio", "refresh-diagnostics": "studio", "refresh-system-resources": "studio", "bench-open": "studio",
   "bench-open-subject": "studio", "bench-rebuild-subject": "studio", "bench-new-session": "studio",
   "bench-close": "studio", "bench-set-title": "studio", "bench-compose": "studio",
   "bench-add-reference": "studio", "bench-remove-reference": "studio", "bench-enhance-brief": "studio",

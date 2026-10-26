@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { useNavigate } from "react-router";
+import { useEffect, useRef } from "react";
+import { useLocation, useNavigate } from "react-router";
 import { followLink } from "../lib/activity-panel.js";
 import {
   CONTROL_REGISTRY,
@@ -118,7 +118,7 @@ function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: Di
   const explains = consequencesOf(snapshot, finding);
   const stale = finding.stale;
   return (
-    <div className="fy-set__row fy-set__row--stack" data-testid="diag-finding" data-kind={finding.kind}>
+    <div className="fy-set__row fy-set__row--stack" id={`diag-${findingRef(finding)}`} tabIndex={-1} data-testid="diag-finding" data-kind={finding.kind}>
       <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
         <span className={cx("fy-set__dot", dotClass(finding.severity))} />
         <span className="fy-diag__title">{finding.title}</span>
@@ -169,6 +169,12 @@ function StaleRemeasure({ remedy }: { remedy: NonNullable<Finding["remedy"]> }) 
 
 export function SettingsDiagnosticsScreen() {
   const snapshot = useDiagnostics();
+  const target = new URLSearchParams(useLocation().search).get("finding"), focused = useRef<string | null>(null);
+  useEffect(() => {
+    if (!target || focused.current === target) return;
+    const row = document.getElementById(`diag-${target}`);
+    if (row) { row.scrollIntoView?.({ block: "center" }); row.focus({ preventScroll: true }); focused.current = target; }
+  }, [target, snapshot]);
   const history = useClientState()?.app.recoveryHistory;
   const now = Date.now();
   // Opening the screen is the demand (R-33): a quiet session's staleness marks and derivation

@@ -16,7 +16,8 @@ import { until, untilAsync } from "../wait.js";
 const child = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "child.mjs");
 const key = createHash("sha256").update("managed-harness-v2").digest("hex");
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
-async function fixture(options: { personal?: boolean; suggest?: boolean; circuit?: boolean; version?: string; protocolTurn?: boolean; readyTimeoutMs?: number } = {}) {
+async function fixture(options: { personal?: boolean; suggest?: boolean; circuit?: boolean; version?: string; protocolTurn?: boolean; readyTimeoutMs?: number;
+  healthGate?: { held: boolean; observed: boolean } } = {}) {
   const { root } = await makeTempRoot(), provider = new FsWorldProvider(root);
   const store = new FileRecoveryControlStore(join(root, "operations", "recovery-control.json"));
   const control: RecoveryControl = { version: 1, policyRevision: 1, mode: options.suggest ? "suggest-only" : "automatic", targets: [] };
@@ -29,7 +30,13 @@ async function fixture(options: { personal?: boolean; suggest?: boolean; circuit
     v2: { ...(options.personal ? { configuredPath: process.execPath } : { bundledPath: process.execPath }),
       runCommand: async command => command === "where" || command === "which" ? { status: 1, stdout: "" } : { status: 0, stdout: "opencode v2.0.26" } },
     createSupervisor: (spec, deps) => new ChildSupervisor({ ...spec, command: process.execPath, args: [child], inheritEnv: false, env,
-      readyTimeoutMs: options.readyTimeoutMs ?? 10_000, probeIntervalMs: 30 }, { ...deps, listDescendants: async () => [] }) });
+      readyTimeoutMs: options.readyTimeoutMs ?? 10_000, probeIntervalMs: 30,
+      validateHealth: options.healthGate ? async response => {
+        const result = await spec.validateHealth!(response);
+        if (result === true && options.healthGate!.held) { options.healthGate!.observed = true; return false; }
+        return result;
+      } : spec.validateHealth,
+    }, { ...deps, listDescendants: async () => [] }) });
   assert(wiring.supervisor && wiring.adapter && wiring.recovery);
   const entered = deferred(); let reservations = 0;
   const coordinator = createStudioCoordinator({ provider, adapter: null, appRoot: root, storageHealth: null, recoveryHistory: null,
@@ -138,16 +145,20 @@ it("a native server exit ends the real adapter's accepted turn as unknown before
   }
 });
 
-it("credential relaunch confirms an interrupted replacement before starting with the changed environment", { timeout: 120_000 }, async () => {
-  const h = await fixture({ readyTimeoutMs: 30_000 });
+it("credential relaunch confirms an interrupted replacement before starting with the changed environment", { timeout: 180_000 }, async () => {
+  const healthGate = { held: false, observed: false };
+  // This fixture intentionally holds valid readiness until credential rotation interrupts it.
+  // Observe a real initialized response, rather than polling a transient numeric launch epoch.
+  const h = await fixture({ readyTimeoutMs: 120_000, healthGate });
   try {
     await h.coordinator.start(0); await until(() => h.worker.status === "healthy", "writing server ready", 40_000);
-    h.env.MODE = "never-healthy"; process.kill(h.worker.pid!, "SIGKILL");
-    await until(() => h.worker.spawnEpoch === 2 && h.worker.status === "starting" && h.worker.pid !== null, "replacement awaiting health", 40_000);
+    const initialEpoch = h.worker.spawnEpoch;
+    healthGate.held = true; process.kill(h.worker.pid!, "SIGKILL");
+    await until(() => healthGate.observed && h.worker.spawnEpoch > initialEpoch && h.worker.status === "starting" && h.worker.pid !== null, "initialized replacement awaiting health", 40_000);
     const interruptedPid = h.worker.pid!;
-    // updateEnv patches this launch snapshot after confirmed cleanup; make the selected
-    // replacement healthy without changing production health validation or its timeout.
-    h.env.MODE = "healthy";
+    // Release only the test's readiness gate. The next child still passes the actual pinned
+    // protocol validator; no production validation or timeout changes.
+    healthGate.held = false;
     await h.wiring.relaunchHarness({ anthropic: "synthetic-test-credential" });
     await until(() => h.worker.status === "healthy" && h.worker.pid !== interruptedPid, "credential replacement ready", 40_000);
     const target = (await h.disk()).targets[0]!; assert.equal(target.intent, null); assert.equal(target.attempts.length, 1);

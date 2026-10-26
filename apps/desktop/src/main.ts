@@ -1,4 +1,5 @@
 import { createWindowsCommitProbe } from "./windows-commit.js";
+import { createDesktopGpuProbe } from "./system-resources.js";
 import { StartupRuntimeOwners } from "./startup-runtime-owners.js";
 import { pathToFileURL } from "node:url";
 import { webWindowOpenHandler } from "./external-links.js";
@@ -36,6 +37,8 @@ import {
   Coordinator,
   UNDERSONG_RELEASE,
   createStudioHost,
+  SystemResourceService,
+  createNodeSystemResourceProbe,
   localAudioListenerOptions,
   createNodeEffectRasterHost,
   createNodeEffectAudioAnalysisHost,
@@ -718,6 +721,9 @@ async function initialize(): Promise<{ port: number }> {
   const childLedger = new ChildLedger(join(appRoot, "run", "children.json"));
   const mingProcess = new MingProcess(childLedger);
   const transferMing = startupRuntimeOwners.own(mingProcess);
+  const systemGpuProbe = createDesktopGpuProbe({ ledger: childLedger });
+  // Keep this observation reader owned through normal quit, startup failure and cleanup retry.
+  startupRuntimeOwners.own(systemGpuProbe);
   const swept = await childLedger.reapStale();
   if (swept.reaped.length > 0) {
     const named = swept.reaped.map((r) => `${r.id} (pid ${r.pid})`).join(", ");
@@ -1222,6 +1228,7 @@ async function initialize(): Promise<{ port: number }> {
     jobsSeedPath: join(appRoot, "queue", "jobs.jsonl"),
     ledgerSeedPath: join(appRoot, "ledger.jsonl"),
     appRoot,
+    systemResources: new SystemResourceService(createNodeSystemResourceProbe({ gpu: systemGpuProbe, mingRunning: () => mingProcess.running })),
     // The full story is an explicit, integrity-pinned download (SPEC-016 R-6, R-8).
     // Test fixtures are never installer resources.
     sampleWorldDownload: UNDERSONG_RELEASE,

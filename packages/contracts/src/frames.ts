@@ -4176,6 +4176,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * finally looks. Coalesced like any other trigger; never a timer.
    */
   z.object({ kind: z.literal("refresh-diagnostics") }).strict(),
+  /** Turn 240: resource-only UI observations never accelerate storage or provider probing. */
+  z.object({ kind: z.literal("refresh-system-resources") }).strict(),
   /** Host presentation/policy controls; opening an incident never invokes these. */
   z.object({ kind: z.literal("recovery-set-mode"), requestId: UlidSchema, mode: RecoveryModeSchema }).strict(),
   z.object({ kind: z.literal("recovery-set-preferences"), requestId: UlidSchema,

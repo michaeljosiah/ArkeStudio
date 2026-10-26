@@ -394,6 +394,10 @@ export class ReadModel {
         this.state = { ...this.state, app: { ...this.state.app, storageHealth: event.health } };
         return;
       }
+      case "system.resources": {
+        this.state = { ...this.state, app: { ...this.state.app, systemResources: event.resources } };
+        return;
+      }
       case "recovery.history": {
         this.state = { ...this.state, app: { ...this.state.app, recoveryHistory: event.history } };
         return;

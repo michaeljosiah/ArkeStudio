@@ -230,3 +230,5 @@ export * from "./storage-health.js";
 export * from "./recovery-incidents.js";
 export * from "./recovery-policy.js";
 export * from "./recovery-settings.js";
+export * from "./system-resources.js";
+export { deriveStorageFindings } from "./storage-diagnostics.js";

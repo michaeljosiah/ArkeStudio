@@ -43,6 +43,7 @@ import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
 import { OllamaRuntimeStatusSchema } from "./ollama.js";
 import { StorageHealthSnapshotSchema } from "./storage-health.js";
+import { SystemResourcesSchema } from "./system-resources.js";
 import { RecoveryHistorySnapshotSchema, RecoveryNoticeSchema } from "./recovery-incidents.js";
 import { RecoveryPolicySnapshotSchema, RecoveryCommandResultSchema, RecoveryHistoryPageSchema } from "./recovery-settings.js";
 import { DiagnosticsSnapshotSchema } from "./diagnostics.js";
@@ -2436,6 +2437,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("comfyui.status"), comfyui: ComfyUiStatusSchema }).strict(),
   z.object({ ...base, type: z.literal("ollama.status"), ollama: OllamaRuntimeStatusSchema }).strict(),
   z.object({ ...base, type: z.literal("storage.health"), health: StorageHealthSnapshotSchema }).strict(),
+  z.object({ ...base, type: z.literal("system.resources"), resources: SystemResourcesSchema }).strict(),
   z.object({ ...base, type: z.literal("recovery.history"), history: RecoveryHistorySnapshotSchema }).strict(),
   z.object({ ...base, type: z.literal("recovery.notice"), notice: RecoveryNoticeSchema }).strict(),
   z.object({ ...base, type: z.literal("recovery.policy"), policy: RecoveryPolicySnapshotSchema }).strict(),

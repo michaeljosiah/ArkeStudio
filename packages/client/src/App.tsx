@@ -82,6 +82,7 @@ import { StoryStructureScreen } from "./screens/development.js";
 import { BranchMapScreen } from "./screens/branch-map.js";
 import { QueueToaster } from "./components/queue-toaster.js";
 import { ActivityPanel } from "./components/activity-panel.js";
+import { SystemPanel } from "./components/system-panel.js";
 import { openActivityPanel, openActivityPanelOnArrival } from "./lib/activity-panel.js";
 import { ImageContextMenu } from "./components/image-context-menu.js";
 import { UpdateAnnouncement } from "./components/update-announcement.js";
@@ -263,6 +264,7 @@ function AppRoutes() {
       <SessionRefusal />
       <QueueToaster />
       <ActivityPanel />
+      <SystemPanel />
       {/* Right-click any picture, anywhere, and copy it. One listener rather than a control on
           each of the twenty-odd frames that draw one. */}
       <ImageContextMenu />

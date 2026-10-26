@@ -266,6 +266,7 @@ import type { CredentialStore, Cipher } from "./credentials/store.js";
 import { CoalescedReads, ReadStalledError, type ReadTurn } from "./coalesced-reads.js";
 import { buildDiagnosticsBundle } from "./diagnostics.js";
 import { DiagnosticsSnapshotHolder } from "./diagnostics-snapshot.js";
+import type { SystemResourceService } from "./system-resources.js";
 import type { AppStorageService } from "./storage/service.js";
 import { SetupFileStorage } from "./storage/setup-files.js";
 import { SetupArchiveStorage } from "./storage/setup-archive.js";
@@ -928,6 +929,8 @@ export interface CoordinatorOptions {
   appRoot?: string;
   /** Host-owned scoped resource measurement and capacity planning. Direct fixtures may omit it. */
   storageHealth?: AppStorageService | null;
+  /** Turn 240: on-demand, host-owned observations; never world or financial authority. */
+  systemResources?: SystemResourceService | null;
   /** Persistent restart authority, separate from removable diagnostic history. */
   recoveryControl?: RecoveryControlService | null;
   recoveryHistory?: RecoveryHistoryService | null;
@@ -4615,6 +4618,7 @@ export class Coordinator {
       parsed.type !== "diagnostics.ready" &&
       // Resource readings are replaceable observations, not a second durable operation journal.
       parsed.type !== "storage.health" &&
+      parsed.type !== "system.resources" &&
       !parsed.type.startsWith("recovery.") &&
       // Several a second while a world opens, and over once it has (issue 1844).
       parsed.type !== "world.open-progress"
@@ -4929,6 +4933,11 @@ export class Coordinator {
       history.observeDiagnostics(this.diagnosticsSnapshot!.currentSnapshot());
     }
     await this.seedAppConfig();
+    if (this.opts.systemResources) {
+      this.lifecycleDisposers.add(this.opts.systemResources.subscribe(resources => {
+        if (!this.stopping) this.emit({ type: "system.resources", at: this.nowIso(), resources });
+      }));
+    }
     if (this.opts.storageHealth) {
       this.lifecycleDisposers.add(this.opts.storageHealth.subscribe(health => {
         if (!this.stopping) this.emit({ type: "storage.health", at: new Date().toISOString(), health });
@@ -14475,6 +14484,10 @@ export class Coordinator {
         if (this.opts.storageHealth) this.trackBackground(this.opts.storageHealth.refresh());
         return;
       }
+      case "refresh-system-resources": {
+        if (this.opts.systemResources) this.trackBackground(this.opts.systemResources.refresh());
+        return;
+      }
       case "recovery-history-read": {
         const page = this.opts.recoveryHistory?.page(msg.query) ?? { status: "unavailable" as const, filter: msg.query.filter, pageSize: msg.query.pageSize, offset: 0,
           at: Date.now(), audit: "unavailable" as const, incidents: [], totalCount: 0, revision: null, nextCursor: null, previousCursor: null };
@@ -23213,6 +23226,7 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    const systemResourcesStopped = this.opts.systemResources?.stop();
     this.opts.storageHealth?.closeAdmission();
     this.opts.recoveryControl?.closeAdmission();
     this.opts.recoveryHistory?.closeAdmission();
@@ -23317,6 +23331,7 @@ export class Coordinator {
       const failedRuntimeStops = [...setupStops, ...comfyUiStops, ...runtimeStops, ...supervisedStops].filter(result => result.status === "rejected");
       if (failedRuntimeStops.length) throw new AggregateError(failedRuntimeStops.map(result => result.reason), "Local runtime cleanup did not confirm exit.");
       await this.opts.storageHealth?.stop();
+      await systemResourcesStopped;
       // Admission closed synchronously above; owner settlement must remain available across
       // a failed native stop so a later confirmed cleanup can resolve its retained intent.
       await this.opts.recoveryControl?.stop();

@@ -39,11 +39,8 @@ function desktopChromeAt(path: string): string {
   return document.toString();
 }
 
-function proposalControl(html: string): string {
-  const label = html.indexOf('aria-label="Proposals');
-  const start = html.lastIndexOf("<button", label);
-  const end = html.indexOf("</button>", label);
-  return html.slice(start, end);
+function systemControl(html: string): string {
+  return parseHTML(html).document.querySelector('[data-system-trigger]')?.outerHTML ?? '';
 }
 
 /**
@@ -128,74 +125,28 @@ describe("app chrome", () => {
       assert.equal(count(html, 'aria-label="Arke account"'), 1, "one account control, and it never opens a page");
     });
 
-    it(`${screen.id} puts proposals before activity, never between it and settings`, () => {
+    it(`${screen.id} puts System before Activity without a proposal shortcut`, () => {
       const html = renderAt(screen.samplePath);
       if (WITHOUT_CHROME.has(screen.id) || WITHOUT_CONTROLS.has(screen.id)) return;
-      const proposals = html.indexOf('aria-label="Proposals');
-      if (proposals < 0) return; // no world open: the icon has nowhere to go, which is its own test
-      const activity = html.indexOf('aria-label="Activity');
-      assert.ok(
-        proposals < activity,
-        "proposals prepends — activity and settings are a settled pair and splitting them reopens it",
-      );
-      assert.equal(parseHTML(html).document.querySelectorAll('button.fy-iconbtn[aria-label^="Proposals"]').length, 1, "one way to proposals, not two");
+      const document = parseHTML(html).document;
+      assert.equal(document.querySelectorAll('[data-system-trigger]').length, 1);
+      assert.equal(document.querySelector('button.fy-iconbtn[aria-label^="Proposals"]'), null);
+      assert.ok(html.indexOf('data-system-trigger') < html.indexOf('aria-label="Activity'));
     });
   }
 
-  it("shows proposals only while a world is open, and dots it only when something waits", () => {
-    const world = renderAt(`/w/${FIXTURE_WORLD_ID}`);
-    assert.ok(world.includes('aria-label="Proposals'), "a world is open, so the icon exists");
-    assert.ok(
-      world.includes("Proposals — 1 awaiting a decision"),
-      "the title counts what waits rather than saying something vague",
-    );
-    assert.ok(
-      world.indexOf("fy-iconbtn__dot") > 0,
-      "and the dot is lit, the same signal activity uses",
-    );
-  });
-
-  it("says plainly when nothing is waiting", () => {
-    __setStateForTest({
-      ...FIXTURE_STATE,
-      world: { ...FIXTURE_STATE.world!, proposals: [] },
-    });
-    const html = renderAt(`/w/${FIXTURE_WORLD_ID}`);
+  it("keeps System available with and without a world, independently of proposal decisions", () => {
+    assert.ok(systemControl(renderAt(`/w/${FIXTURE_WORLD_ID}`)));
+    assert.ok(!systemControl(renderAt(`/w/${FIXTURE_WORLD_ID}`)).includes('fy-iconbtn__dot'));
+    __setStateForTest({ ...FIXTURE_STATE, world: null });
+    assert.ok(systemControl(renderAt('/worlds')));
     __setStateForTest(FIXTURE_STATE);
-    assert.ok(html.includes("Proposals — nothing waiting"), "the icon stays, the claim changes");
-    assert.ok(!proposalControl(html).includes("fy-iconbtn__dot"), "the proposal control itself is unlit");
   });
 
-  it("does not dot an attended draft, but dots the same draft when its conversation closes", () => {
-    const conversation = {
-      id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC",
-      title: "Held here",
-      status: "open" as const,
-      updatedAt: "2026-09-03T12:00:00.000Z",
-      pointCount: 1,
-      openProposalCount: 1,
-      notCarried: [],
-    };
-    const staged = FIXTURE_STATE.world!.proposals[0]!;
-    const proposal = {
-      ...staged,
-      proposal: {
-        ...staged.proposal,
-        decision: { mode: "attended" as const, owner: { kind: "world-chat" as const, conversationId: conversation.id } },
-      },
-    };
-    __setStateForTest({ ...FIXTURE_STATE, world: { ...FIXTURE_STATE.world!, proposals: [proposal], conversations: [conversation] } });
-    const attended = renderAt(`/w/${FIXTURE_WORLD_ID}`);
-    __setStateForTest({
-      ...FIXTURE_STATE,
-      world: { ...FIXTURE_STATE.world!, proposals: [proposal], conversations: [{ ...conversation, status: "closed" }] },
-    });
-    const orphaned = renderAt(`/w/${FIXTURE_WORLD_ID}`);
-    __setStateForTest(FIXTURE_STATE);
-    assert.ok(proposalControl(attended).includes("Proposals — nothing waiting"));
-    assert.ok(!proposalControl(attended).includes("fy-iconbtn__dot"));
-    assert.ok(proposalControl(orphaned).includes("Proposals — 1 awaiting a decision"));
-    assert.ok(proposalControl(orphaned).includes("fy-iconbtn__dot"));
+  it("retains the proposal review route and waiting decisions", () => {
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/proposals`);
+    assert.ok(html.includes('data-screen="proposals"'));
+    assert.equal(parseHTML(html).document.querySelector('.fy-proposals__count')?.textContent, '1 waiting');
+    assert.ok(systemControl(html));
   });
-
 });

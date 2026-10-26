@@ -7,10 +7,12 @@ import { FileRecoveryControlStore } from "../recovery/control-file.js";
 import { RecoveryHistoryService } from "../recovery/history.js";
 import { FileRecoveryHistoryStore } from "../recovery/history-file.js";
 import { join } from "node:path";
+import { SystemResourceService } from "../system-resources.js";
 
 /** Production desktop/dev assembly. Direct Coordinator construction remains supported by fixtures. */
 export function createStudioCoordinator(options: CoordinatorOptions): Coordinator {
   return new Coordinator({ ...options, storage: options.storage ?? createStudioStorage(options),
+    systemResources: options.systemResources === undefined && options.appRoot ? new SystemResourceService() : options.systemResources,
     storageHealth: options.storageHealth === undefined && options.appRoot ? new AppStorageService({ appRoot: options.appRoot }) : options.storageHealth,
     recoveryControl: options.recoveryControl === undefined && options.appRoot ? new RecoveryControlService({ store: new FileRecoveryControlStore(join(options.appRoot, "operations", "recovery-control.json")) }) : options.recoveryControl,
     recoveryHistory: options.recoveryHistory === undefined && options.appRoot ? new RecoveryHistoryService({ store: new FileRecoveryHistoryStore(join(options.appRoot, "operations", "recovery-history.json")) }) : options.recoveryHistory });

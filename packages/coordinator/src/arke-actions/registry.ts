@@ -710,6 +710,7 @@ const CLIENT_COMMAND_METADATA = {
   // One real, priced request to learn whether a reader can group (design turn 185): a person runs it.
   "probe-grouped-read": humanOnly("The grouped-read probe spends one request so a person can listen to it."),
   "refresh-diagnostics": readOnly(QUERY),
+  "refresh-system-resources": humanOnly("The System overview samples local host resources as a bounded UI observation."),
   "open-data-folder": globalOnly(GLOBAL_OPERATION),
   "bench-open": humanOnly("Opening or implicitly creating a Bench session is a human workspace control."),
   "bench-open-subject": humanOnly("Opening a subject in Bench is a human handoff control, not an action on that subject."),

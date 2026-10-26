@@ -1584,6 +1584,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, ollama: event.ollama } };
     case "storage.health":
       return { ...state, app: { ...state.app, storageHealth: event.health } };
+    case "system.resources":
+      return { ...state, app: { ...state.app, systemResources: event.resources } };
     case "recovery.history":
       return { ...state, app: { ...state.app, recoveryHistory: event.history } };
     case "recovery.policy": return { ...state, app: { ...state.app, recoveryPolicy: event.policy } };
@@ -3680,6 +3682,9 @@ export function useDiagnostics(): import("@arke-studio/contracts").DiagnosticsSn
 /** Ask for a fresh derivation — R-33's on-demand half, sent when the Diagnostics view opens. */
 export function refreshDiagnostics(): void {
   send({ kind: "refresh-diagnostics" });
+}
+export function refreshSystemResources(): void {
+  send({ kind: "refresh-system-resources" });
 }
 
 function genesisChatBusy(genesisId: string): boolean {

@@ -1504,3 +1504,23 @@ review flags, exact saved-take/part preservation and explicitly confirmed recove
 and witnessed terminal errors remain separate. Compare the existing turn-206 Activity interruption
 wording at phone, tablet and desktop widths. Synthetic component screenshots do not establish
 native provider recovery; report any controlled live interruption separately.
+
+## System status (turn 240)
+
+Run contracts/coordinator/desktop `system-resources.test.ts`, coordinator
+`system-resources-application.test.ts`, and client `system-panel.test.tsx`, `chrome.test.tsx`
+and `settings-diagnostics-refresh.test.tsx`. Run client tests with `packages/client` as cwd.
+The transport fixture needs ordinary native filesystem/loopback access for atomic temporary
+world writes and authenticated WebSockets. The resource unit tests inject missing, reversed,
+future/stale and uncooperative measurements, plus retained cleanup failure. They run no models
+and fill no disk. Existing owned-process lifecycle tests qualify the reused GPU reader's job,
+parent-lifetime and native cleanup boundary. Typecheck affected consumers after final test edits.
+
+The deterministic actual-component review is built by
+`node design-system/system-status-240.native-build.mjs` and served by
+`node design-system/system-status-240.serve.mjs`. Compare native SystemPanel/AppChrome/PageSheet
+against approved turn 240 at desktop/tablet/phone/reduced height in light/dark. Verify fixed
+header/footer, independent body scroll, native modal Tab/Escape/focus return, unavailable/stale
+readings, no refresh-time future-clock flicker and the existing Diagnostics handoff. This fixture
+is separate from live-host collection and packaged Electron/physical-device keyboard acceptance;
+see [system status](system-status.md).

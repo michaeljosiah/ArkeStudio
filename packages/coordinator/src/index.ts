@@ -1,4 +1,6 @@
 export { AppLog } from "./app-log.js";
+export { SystemResourceService, createNodeSystemResourceProbe } from "./system-resources.js";
+export { SetupProcessRunner } from "./setup/process.js";
 export { OllamaEngineService } from "./local-ai/ollama.js";
 export { MingProcess, type MingBatchCommand } from "./local-ai/ming.js";
 export { RemoteDevices, writeRemotePrivate } from "./remote-access/devices.js";

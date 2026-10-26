@@ -1103,3 +1103,15 @@ take selection or acoustic word-timing record is changed. Tests: coordinator
 Explicit same-file audiobook picture choices preserve the existing generation look/shot, focus and motion, and may record a separate current-look review (SPEC-047 R-98/R-103, #2125). `setAudiobookPicture` fences source/selection/look freshness; `pictureLookChanged` applies that review consistently in the existing picker and illustrated EPUB preflight. `writeAudiobook` raises reader boundary105 before the first review field.
 
 Audio-only story publication fingerprints exclude chapter pictures, look/own-look choices and their shared update timestamp; all other narration fields and the existing resolved blocks/mix/arrangement, text, metadata, rights and media identities remain checked in `publications/story-review.ts` (#2122, SPEC-048 section2.11). Illustrated outputs retain picture dependencies; coherent capture and immutable ready-edition verification are unchanged.
+
+## System status overview
+
+Approved turn 240: contracts `src/system-resources.ts` owns readings, freshness and conservative
+per-volume grouping. Coordinator `src/system-resources.ts` owns bounded/coalesced observations;
+`application/studio-host.ts` composes OS collection. Desktop `src/system-resources.ts` uses the
+existing owned native-command executor for fixed GPU counters, retained by StartupRuntimeOwners.
+Client `components/system-panel.tsx`/CSS and `lib/system-panel.ts` own the rounded overview;
+`components/chrome.tsx` replaces only the proposal shortcut. Readings fold through the existing
+authenticated event/snapshot path, without becoming journal or support-export data. The existing
+Diagnostics route receives a finding reference for warning focus. See [system status](system-status.md)
+for collection limits, ownership, unavailable data and validation.

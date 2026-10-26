@@ -153,9 +153,10 @@ it("failed shutdown keeps settlement open until the unknown replacement actually
   try {
     await coordinator.start(0); await until(() => service.baseUrl() !== null, "initial process ready", HEALTHY_WAIT_MS);
     const worker = workers[0]!, seam = worker as unknown as StopSeam; originalStop = seam.forceStop.bind(worker);
-    // The retained replacement must reject graceful POSIX signals as well as the forced
-    // stop seam; otherwise Linux confirms exit and never exercises the failed-stop retry.
-    seam.forceStop = async () => {}; env.MODE = "never-healthy"; env.IGNORE_STOP = "1"; process.kill(worker.pid!, "SIGKILL");
+    // A native incompatible response proves the replacement initialized its signal handlers.
+    // Waiting for a never-ready clock could kill a starved child before that fixture existed.
+    // Retain it by refusing the forced stop, including on POSIX where graceful signals differ.
+    seam.forceStop = async () => {}; env.COMFYUI_VERSION = "0.0.0"; env.IGNORE_STOP = "1"; process.kill(worker.pid!, "SIGKILL");
     await until(() => control.snapshot().control.targets[0]?.intent?.phase === "unknown", "replacement retained after unconfirmed cleanup", 70_000);
     assert.ok(worker.pid); await assert.rejects(coordinator.stop(), /Local runtime cleanup did not confirm exit/);
     assert.equal(control.snapshot().accepting, false); assert.ok(control.snapshot().control.targets[0]!.intent);

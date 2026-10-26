@@ -54,7 +54,7 @@ export class SetupProcessRunner {
   private closing = false;
   private readonly lifetime = new AbortController();
   private readonly job: SetupProcessJob;
-  constructor(private readonly deps: { ledger?: ChildLedger; job?: SetupProcessJob; cleanupTimeoutMs?: number; readyTimeoutMs?: number; ledgerId?: "setup" | "ming" } = {}) {
+  constructor(private readonly deps: { ledger?: ChildLedger; job?: SetupProcessJob; cleanupTimeoutMs?: number; readyTimeoutMs?: number; ledgerId?: "setup" | "ming" | "system-probe" } = {}) {
     this.job = deps.job ?? new NativeSetupProcessJob();
   }
   private async wait<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
