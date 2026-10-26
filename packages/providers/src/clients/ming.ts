@@ -28,7 +28,7 @@ export class MingClient implements ProviderClient {
     if (!reference!.transcript?.trim() || reference!.transcript!.length > MING_REFERENCE_TEXT_CHARS) refuse("add the words spoken in the recording when cloning this voice.");
     const instructions = request.params["instructions"];
     if (instructions !== undefined && (typeof instructions !== "string" || instructions.length > 300)) refuse("the delivery instruction is too long.");
-    const language = typeof request.params["language"] === "string" ? request.params["language"] : "en";
+    const language = typeof request.params["language"] === "string" ? request.params["language"] : reference!.language ?? "en";
     if (!MING_LANGUAGES.includes(language)) refuse("this recording language is unsupported by the local reader.");
     const ready = await this.host.status(request.model);
     if (!ready.ready) refuse(ready.reason ?? "this model is not ready.");

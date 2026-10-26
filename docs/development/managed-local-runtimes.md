@@ -89,13 +89,16 @@ remain readable through their existing readers; re-clone the recording with its 
 Ming. The same library voice offers each installed Ming model as a reader in casting and
 narrator selection, and the normal Bench/production queue uses that selection. Missing consent,
 words, recording or model files gives an unavailable reason. No voice is silently reassigned.
+Ming starts unavailable until a successful runtime probe. Each model also requires its own
+complete installation; a ready 0.5B reader cannot enable missing 7.9B weights.
 
 `local-ai/ming-assets.json` pins source, checkpoint revisions, all dependency wheels and the
 small Python SDK archive used by 7.9B's Triton compiler. Setup verifies every download. Inference
 rechecks model/source/wheel hashes (using file-identity digest receipts), then extracts a private
 overlay; it never runs pip or downloads anything. Reference bytes and words live only in that
-private batch and the existing saved voice artifact/record. The queued identity hashes both,
-refusing a changed recording or transcript before submission. Hosted reader hashes stay unchanged.
+private batch and the existing saved voice artifact/record. The queued identity hashes recording,
+reference words and saved language, refusing changes before submission. Audiobook preparation
+carries that language into each Ming part job. Hosted reader hashes stay unchanged.
 Model repair/removal is fenced against admitted Ming reads. The packaged worker and upstream
 MIT notice are loose resources, so external Python can read them outside Electron's archive.
 

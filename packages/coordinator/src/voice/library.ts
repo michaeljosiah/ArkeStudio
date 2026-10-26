@@ -533,6 +533,7 @@ export async function clipFor(store: WorldStore, voice: ClonedVoice): Promise<Di
         contentType,
         data,
           ...(voice.transcript !== undefined ? { transcript: voice.transcript } : {}),
+          language: voice.language,
       };
     } finally {
       await handle.close();

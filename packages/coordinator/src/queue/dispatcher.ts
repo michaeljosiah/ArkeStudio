@@ -69,6 +69,7 @@ export interface DispatchImageReference {
 
 export interface DispatchVoiceReference {
   transcript?: string;
+  language?: string;
   name: string;
   contentType: "audio/wav" | "audio/mpeg";
   data: Uint8Array;

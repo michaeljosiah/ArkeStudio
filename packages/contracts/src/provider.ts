@@ -99,6 +99,8 @@ export interface ProviderInfo {
   /** Keyless runtime provider. Concrete engine locality may still be remote (ComfyUI URL). */
   local: boolean;
   credential: CredentialKind;
+  /** Optional runtimes must witness readiness before an untested status can enable work. */
+  requiresReadinessProbe?: true;
   /** How the key is entered — a hint for the Settings form, not a behaviour switch. */
   keyHint?: string;
   /**
@@ -185,7 +187,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   },
   ollama: { displayName: "Ollama", capabilities: ["llm"], local: true, credential: "none" },
   kokoro: { displayName: "Kokoro", capabilities: ["voice-tts"], local: true, credential: "none" },
-  ming: { displayName: "Ming 3", capabilities: ["voice-tts", "voice-clone"], local: true, credential: "none" },
+  ming: { displayName: "Ming 3", capabilities: ["voice-tts", "voice-clone"], local: true, credential: "none", requiresReadinessProbe: true },
   whispercpp: { displayName: "whisper.cpp", capabilities: ["voice-stt"], local: true, credential: "none" },
   /**
    * The engine behind the local recipe catalogue (SPEC-021). Never exposed as an interface —
@@ -400,7 +402,7 @@ export function deriveCapabilityAvailability(statuses: ProviderStatus[]): Capabi
       const unlocked =
         status.configured &&
         !credentialFaulted(status) &&
-        (status.validation === "valid" ? (probe?.available ?? false) : status.validation === "untested");
+        (status.validation === "valid" ? (probe?.available ?? false) : status.validation === "untested" && !PROVIDERS[status.id].requiresReadinessProbe);
       if (unlocked) via.push(status.id);
     }
     if (via.length > 0) return { capability, available: true, via };

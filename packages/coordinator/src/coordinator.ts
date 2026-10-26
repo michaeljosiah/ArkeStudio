@@ -1518,6 +1518,11 @@ export class Coordinator {
       if (input.capability !== "voice-tts") continue;
       if (!supportsVoiceUse(input, "preview")) throw new Error("This provider no longer supports speech. Choose an available voice reader.");
       if (this.readModel.getState().app.models.disabled.includes(input.model)) throw new Error("That voice model is turned off in AI models.");
+      if (input.provider === "ming") {
+        const status = await this.mingSpeechStatus(input.model);
+        if (!status.ready) throw new Error(status.reason ?? "Install this Ming model before reading.");
+        continue;
+      }
       if (input.provider !== "google") continue;
       const model = this.opts.manifest?.models.find(row => row.id === input.model && row.provider === input.provider);
       if (!model) throw new Error("That Gemini voice model is unavailable.");
@@ -10028,6 +10033,7 @@ export class Coordinator {
           chosen !== undefined &&
             modelEligible(chosen, {
               providers: state.providers,
+              components: state.setup?.components ?? [],
               disabled: state.models.disabled,
               recipes: state.comfyui?.recipes ?? [],
               comfyUiLocality: state.comfyui?.engine.locality,
@@ -11741,6 +11747,7 @@ export class Coordinator {
               boardPanelCap: videoModel?.limits.storyboardPanels,
               eligible: modelEligible(model, {
                 providers: app.providers,
+                components: app.setup?.components ?? [],
                 disabled: app.models.disabled,
                 recipes: app.comfyui?.recipes ?? [],
                 comfyUiLocality: app.comfyui?.engine.locality,
@@ -20831,7 +20838,7 @@ export class Coordinator {
       const app = this.readModel.getState().app;
       if (!model || !["image", "video"].includes(model.capability) || settings?.models.disabled.includes(model.id) || !modelEligible(model, {
         providers: app.providers, disabled: app.models.disabled, recipes: app.comfyui?.recipes ?? [],
-        comfyUiLocality: app.comfyui?.engine.locality, gated: app.runtime?.models ?? [],
+        comfyUiLocality: app.comfyui?.engine.locality, gated: app.runtime?.models ?? [], components: app.setup?.components ?? [],
       })) throw new Error("Choose an enabled, eligible production model.");
       return model;
     };
@@ -21995,7 +22002,7 @@ export class Coordinator {
   private benchModelEligible(model: ManifestModel): boolean {
     const app = this.readModel.getState().app;
     return modelEligible(model, { providers: app.providers, disabled: app.models.disabled,
-      recipes: app.comfyui?.recipes ?? [], comfyUiLocality: app.comfyui?.engine.locality, gated: app.runtime?.models ?? [] });
+      recipes: app.comfyui?.recipes ?? [], comfyUiLocality: app.comfyui?.engine.locality, gated: app.runtime?.models ?? [], components: app.setup?.components ?? [] });
   }
 
   private benchGenerationRoutes() {

@@ -163,6 +163,8 @@ type Format = "wav" | "mp3" | "flac";
 /** The reader that will actually speak a block, after the catalogue has been asked. */
 export interface Speaking extends PlannedBlock {
   reader: AudiobookReader;
+  /** The saved recording's language, frozen with this preparation. */
+  language?: string;
   model: ManifestModel;
   local: boolean;
   /** The library voice the reader is, when it is one: its recording is what leaves the machine. */
@@ -580,6 +582,7 @@ export async function prepareChapter(
       // writing that here would put it over the first block's, which a split or Reset wants back.
       ...(held !== null && override?.directions === undefined && planned.block.shaped !== true && audiobookDirectionFor(record, planned.block) === null ? { carried: held } : {}),
       reader,
+      ...(language !== undefined ? { language } : {}),
       model,
       local,
       clone: source.kind === "cloned" ? source.voice : null,
@@ -1364,6 +1367,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
               model: block.model.id,
               params: {
                 voiceId: block.reader.voiceId,
+                ...(block.model.provider === "ming" && block.language !== undefined ? { language: block.language } : {}),
                 text: part,
                 ...(block.styledParts?.[index] !== undefined ? { turns: block.styledParts[index] } : {}),
                 audioFormat: block.format,

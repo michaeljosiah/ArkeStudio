@@ -130,6 +130,7 @@ export function eligibilityInputs(state: ReturnType<typeof useStore>["state"]): 
     providers: state?.app.providers ?? [],
     disabled: state?.app.models.disabled ?? [],
     recipes: state?.app.comfyui?.recipes ?? [],
+      components: state?.app.setup?.components ?? [],
     comfyUiLocality: state?.app.comfyui?.engine.locality,
     gated: state?.app.runtime?.models ?? [],
   };
