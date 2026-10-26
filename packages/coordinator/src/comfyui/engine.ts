@@ -340,6 +340,12 @@ export class ComfyUiEngineService {
     return join(this.deps.appRoot, MANAGED_DIR);
   }
 
+  /** Only the qualified managed interpreter is lent to local speech; URL engines cannot lend files. */
+  async sharedMingPython(): Promise<string | null> {
+    if (this.disposed || this.resolved.source !== "managed") return null;
+    return (await this.portableLayout(this.managedRoot()))?.python ?? null;
+  }
+
   /**
    * The portable build's shape: an embedded interpreter beside the application tree.
    *
@@ -587,8 +593,9 @@ export class ComfyUiEngineService {
     void supervisor.start().catch(() => {});
   }
 
-  private async stopSupervision(): Promise<void> {
+  private async stopSupervision(confirm = false): Promise<void> {
     const supervisor = this.supervisor;
+    if (confirm && supervisor) await supervisor.stopAndConfirm();
     this.supervisor = null;
     const statusListener = this.supervisorStatusListener;
     this.supervisorStatusListener = null;
@@ -657,7 +664,7 @@ export class ComfyUiEngineService {
     if (this.disposed || this.resolved.source !== "managed" || this.supervisor === null) return false;
     this.cancelHashing();
     this.invalidateVerification();
-    await this.stopSupervision();
+    await this.stopSupervision(true);
     this.recordProbe({ version: null, reachable: false, detail: null });
     await this.publish();
     return true;
@@ -669,9 +676,9 @@ export class ComfyUiEngineService {
     if (this.disposed) return;
     this.nodeClasses = null;
     this.invalidateVerification();
-    this.settings = settings;
     this.stopUrlProbe();
-    await this.stopSupervision();
+    await this.stopSupervision(true);
+    this.settings = settings;
     if (this.disposed) {
       this.resolved = { source: "absent", root: null, url: null, problem: null };
       return;
@@ -825,6 +832,20 @@ export class ComfyUiEngineService {
     return base === null ? [] : [base];
   }
 
+  /** An unhealthy route disappears from inference, but its process may still hold memory.
+   * Confirm its exit before a handover can treat the missing URL as an empty engine. */
+  prepareGpuHandover(): Promise<void> {
+    const work = this.settingsWork.then(async () => {
+      if (this.resolved.source === "user-url" || !this.supervisor || !["failed", "stopped", "unhealthy"].includes(this.supervisor.status)) return;
+      await this.supervisor.stopAndConfirm();
+      this.currentProcessEpoch = null;
+      this.recordProbe({ version: null, reachable: false, detail: null });
+      await this.publish();
+    });
+    this.settingsWork = work.catch(() => {});
+    return work;
+  }
+
   /** Wait for a spawned child to settle without making coordinator startup wait on it. */
   waitUntilReady(timeoutMs = 120_000): Promise<boolean> {
     if (this.baseUrl() !== null) return Promise.resolve(true);
@@ -903,6 +924,10 @@ export class ComfyUiEngineService {
         case "failed":
           state = "failed";
           detail = supervisor.reason ?? "the engine did not start";
+          break;
+        case "stopped":
+          state = "failed";
+          detail = "The ComfyUI worker stopped. Restart it to resume generation.";
           break;
         default:
           state = "starting";

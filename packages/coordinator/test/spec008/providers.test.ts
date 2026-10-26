@@ -46,6 +46,18 @@ async function makeService(probes: CapabilityProbe[] | Error, before?: () => Pro
 }
 
 describe("provider statuses and availability (R-1..R-4, §3.2)", () => {
+  it("does not offer optional Ming speech or cloning before a witnessed model-readiness probe", async () => {
+    let ready = false;
+    const service = new ProviderService(null, {ming: {validateKey: async () => ["voice-tts", "voice-clone"].map(capability => ({capability: capability as "voice-tts" | "voice-clone", available: ready}))}}, null);
+    await service.init();
+    const available = () => deriveCapabilityAvailability(service.list()).find(row => row.capability === "voice-clone")!.available;
+    assert.equal(available(), false);
+    await service.validate("ming");
+    assert.equal(available(), false);
+    ready = true;
+    await service.validate("ming");
+    assert.equal(available(), true);
+  });
   it("keeps recent Ollama availability through one transient miss, then expires it", async () => {
     let now = "2026-10-03T10:00:00.000Z";
     let probes: CapabilityProbe[] = [{ capability: "llm", available: false, transientFailure: true }];

@@ -13,7 +13,8 @@ licence source in `apps/desktop/runtime-sources.json`, and rerun the real-binary
 [testing](testing.md#writing-engines-and-model-control) before moving the pin. Stable v2 uses
 `@opencode/cli-windows-x64` and extracts `package/bin/opencode.exe`; staging renames it to
 `opencode2.exe` to preserve Studio's installed paths. PATH discovery checks both command names
-and keeps v2 binaries out of the v1 adapter. OpenCode remains the bundled default while the
+and accepts only the pinned v2 release. OpenCode v1 has no adapter, fallback or launch override.
+OpenCode remains the bundled default while the
 Arke replacement in [issue #1698](https://github.com/michaeljosiah/ArkeStudio/issues/1698) is deferred.
 
 Commands below run from the repository root unless stated otherwise. Read the script before running a generator: regeneration can fetch remote data or change many files and is not part of ordinary documentation validation.
@@ -22,6 +23,7 @@ Commands below run from the repository root unless stated otherwise. Read the sc
 |---|---|---|
 | `packages/providers/src/fal-catalogue.generated.ts` | `packages/providers/scripts/sync-fal-catalogue.mjs`; public FAL catalogue plus script-curated capabilities | `node packages/providers/scripts/sync-fal-catalogue.mjs`; review prices, route IDs and curated constraints, then run provider checks. Do not hand-edit generated output. |
 | Shipped model manifest | `packages/providers/src/manifest-data.ts` and generated catalogue | Change the appropriate source; follow registry/provider consumers and tests. |
+| Ming source, wheels and checkpoints | Coordinator `local-ai/ming-assets.json`; `scripts/update-ming-assets.mjs` | Edit explicit revisions/package versions, run `node scripts/update-ming-assets.mjs`, review every URL/hash/size and repeat managed-runtime qualification. No Torch/CUDA wheels belong in this overlay. Inference extracts original archives privately; setup never changes ComfyUI packages. |
 | Krea 2 custom node | `vendor/comfyui/ComfyUI-ConditioningKrea2Rebalance/manifest.json` pins the upstream commit and every redistributed file | Keep source, licence and hashes together; update the recipe pin when upgrading. Install with `scripts/install-comfyui-krea2.mjs`; see [Krea 2](krea2.md). |
 | Story download | coordinator `src/world/story-download.ts`, `src/world/undersong-release.ts`, `scripts/package-story-world.mts` | Explicit release download with pinned size/hash and isolated installation. Full media is a GitHub release asset, never an installer resource. See [story releases](story-releases.md). |
 | Test world | `fixtures/worlds/the-undersong`, coordinator `src/world/sample-world.ts` | Lightweight test/dev fixture only. Do not replace it with the full downloadable story. |

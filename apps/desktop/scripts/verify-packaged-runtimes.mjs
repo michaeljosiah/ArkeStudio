@@ -9,6 +9,7 @@ export default async function verifyPackagedRuntimes(context) {
   if (!arch) throw new Error(`unsupported Electron package architecture ${context.arch}`);
   const resources = join(context.appOutDir, "resources");
   assertAudioListenerWorker(resources);
+  assertMingWorker(resources);
   assertStoryPdfAssets(resources);
   const voxa = join(resources, "voxa");
   const espeak = join(resources, "espeak-ng");
@@ -108,6 +109,20 @@ export function assertAudioListenerWorker(resources) {
   const installed = join(resources, "audio-listener", "local-audio-listener.py");
   const digest = path => createHash("sha256").update(readFileSync(path)).digest("hex");
   if (!existsSync(installed) || digest(installed) !== digest(source)) throw new Error("Packaged audio listener worker is missing or differs from source; check electron-builder.yml extraResources");
+}
+
+/** Python needs a loose worker and its adapter's upstream notice outside app.asar. */
+export function assertMingWorker(resources) {
+  for (const [source, target] of [
+    ["../../../packages/coordinator/src/local-ai/ming-worker.py", "ming-worker.py"],
+    ["../../../licenses/ming-audition-MIT.txt", "ming-MIT.txt"],
+  ]) {
+    const expected = fileURLToPath(new URL(source, import.meta.url));
+    const installed = join(resources, "ming", target);
+    const digest = path => createHash("sha256").update(readFileSync(path)).digest("hex");
+    if (!existsSync(installed) || digest(installed) !== digest(expected))
+      throw new Error(`Packaged Ming asset is missing or differs from source: ${target}`);
+  }
 }
 
 /** PDF support must run offline from the installed worker and the exact reviewed font faces. */

@@ -37,11 +37,11 @@ function waitForStatus(sup: ChildSupervisor, wanted: string, timeoutMs = 40_000)
 }
 
 describe("the v2 launch protocol (issue 327 §4)", () => {
-  for (const version of ["2.0.25", "2.0.27"]) {
+  for (const version of ["1.18.18", "2.0.25", "2.0.27"]) {
     it(`reports unsupported ${version} without a fallback and creates no launchable child`, async () => {
       const appRoot = await tempDir("v2-rejected-");
       const wiring = await assembleHarness({ appRoot,
-        v1: { runCommand: async () => ({ status: 1, stdout: "" }) },
+
         v2: { runCommand: async (command, args) => {
           if (command === "where" || command === "which") return args[0] === "opencode"
             ? { status: 0, stdout: "C:\\bin\\opencode.exe\n" } : { status: 1, stdout: "" };
@@ -71,7 +71,7 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
     const launch = () => assembleHarness({ appRoot,
       v2: { runCommand: async (command) => command === "where" || command === "which"
         ? { status: 0, stdout: "C:/bin/opencode2.exe" } : { status: 0, stdout: "opencode v2.0.26" } },
-      v1: { runCommand: async () => ({ status: 1, stdout: "" }) },
+
     });
     await writeFile(path, JSON.stringify({ providers: { ollama, custom }, model: "custom/configured" }));
     await launch();
@@ -83,6 +83,23 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
     await writeFile(path, original);
     await launch();
     assert.equal(await readFile(path, "utf8"), original, "user model configuration is not the generated inventory");
+  });
+
+  it("points native Ollama discovery at the selected service without generating a model inventory", async () => {
+    const appRoot = await tempDir("v2-owned-ollama-");
+    let endpoint = "http://127.0.0.1:24567";
+    const wiring = await assembleHarness({ appRoot, ollamaEndpoint: () => endpoint,
+      v2: { runCommand: async command => command === "where" || command === "which"
+        ? { status: 0, stdout: "C:/bin/opencode2.exe" } : { status: 0, stdout: "opencode v2.0.26" } },
+
+    });
+    try {
+      const path = join(harnessProfileDir(appRoot), ".config", "opencode", "opencode.json");
+      assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { providers: { ollama: { settings: { baseURL: `${endpoint}/v1` } } } });
+      endpoint = "http://localhost:11434";
+      await wiring.reconfigureOllama!();
+      assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { providers: { ollama: { settings: { baseURL: `${endpoint}/v1` } } } });
+    } finally { await wiring.supervisor?.stop(); }
   });
 
   it("boots the pinned native runtime through the shared launcher and authenticated readiness route", {
@@ -104,7 +121,7 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
       wiring = await assembleHarness({
         appRoot,
         v2: { configuredPath: process.env["ARKE_TEST_OPENCODE2"]! },
-        v1: { runCommand: async () => ({ status: 1, stdout: "" }) },
+
       });
     } finally {
       for (const [key, value] of Object.entries(inherited)) {
@@ -257,7 +274,7 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
     const nothing = async () => ({ status: 1, stdout: "" });
     const wiring = await assembleHarness({
       appRoot: await tempDir("v2-launch-"),
-      v1: { runCommand: nothing },
+
       v2: { runCommand: nothing },
     });
     assert.equal(wiring.harness, null);
@@ -269,28 +286,4 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
     assert.equal(wiring.supervisor.status, "unconfigured");
   });
 
-  it("names the legacy knob's fate instead of routing around it silently", async () => {
-    const machine = (answers: Record<string, string>) => async (command: string, args: string[]) => {
-      if (command === "where" || command === "which") {
-        const target = args[0]!;
-        return answers[target] !== undefined
-          ? { status: 0, stdout: `C:\\bin\\${target}.exe\n` }
-          : { status: 1, stdout: "" };
-      }
-      const name = command.replace(/^C:\\bin\\/, "").replace(/\.exe$/, "");
-      return answers[name] !== undefined ? { status: 0, stdout: answers[name]! } : { status: 1, stdout: "" };
-    };
-    // A configured v1 path exists, but v2 on PATH wins: the pass-over is stated (R-4).
-    const both = { opencode: "opencode v1.18.18", opencode2: "opencode2 v2.0.26" };
-    const wiring = await assembleHarness({
-      appRoot: await tempDir("v2-launch-"),
-      v1: { configuredPath: process.execPath, runCommand: machine(both) },
-      v2: { runCommand: machine(both) },
-    });
-    assert.equal(wiring.isV2, true);
-    assert.ok(
-      wiring.logLines.some((l) => l.includes("configured OpenCode path passed over")),
-      `the pass-over is stated: ${wiring.logLines.join(" | ")}`,
-    );
-  });
 });

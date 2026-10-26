@@ -2078,7 +2078,7 @@ export function SettingsHarnessScreen() {
   const generation = state?.app.harnessInfo?.generation;
   const runningEngine = generation === "claude" || generation === "codex"
     ? generation
-    : generation === "v1" || generation === "v2" ? "opencode" : harness?.launchEngine ?? null;
+    : generation === "v2" ? "opencode" : harness?.launchEngine ?? null;
   const harnessHealth = state?.app.health.harness;
   const activeStatus = harnessHealth?.status === "healthy" ? "running now"
     : harnessHealth?.status === "starting" ? "starting" : "unavailable";

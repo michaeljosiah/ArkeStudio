@@ -180,6 +180,22 @@ const INPUT: EnqueueInput = {
 // for seconds at a time — the settle tier from supervisor.test.ts's budget note.
 const FOLD_MS = 30_000;
 
+it("freezes Ming reference words with the recording and refuses an intervening edit before inference", async () => {
+  const ming = new FakeProvider({});
+  let reads = 0;
+  const h = await makeHarness({ming}, {readVoiceReference: async () => ({name: "clip.wav", contentType: "audio/wav", data: new Uint8Array([1, 2, 3]), transcript: ++reads === 1 ? "Original words." : "Changed words."})});
+  try {
+    await h.queue.start();
+    const job = await h.queue.enqueue({...INPUT, provider: "ming", model: "ming-3-0.5b", capability: "voice-tts", voiceReference: true,
+      estimatedMicroUsd: 0, params: {voiceId: "narrator", text: "Come home."}});
+    assert.match(String(job.params["voiceClipHash"]), /^sha256:/);
+    await until(() => foldedJob(h, job.id)?.status === "failed", "changed Ming reference refusal", FOLD_MS);
+    assert.equal(ming.submitCount, 0);
+    assert.match(foldedJob(h, job.id)!.error!, /reference changed/);
+    assert.equal((await readFile(h.journalPath, "utf8")).includes("Original words."), false, "the reference transcript never enters the journal");
+  } finally { await h.queue.dispose(); }
+});
+
 function foldedJob(h: Harness, id: string): Job | undefined {
   return h.queue.listJobs().find((j) => j.id === id);
 }

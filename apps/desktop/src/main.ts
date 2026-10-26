@@ -1,4 +1,5 @@
 import { createWindowsCommitProbe } from "./windows-commit.js";
+import { StartupRuntimeOwners } from "./startup-runtime-owners.js";
 import { pathToFileURL } from "node:url";
 import { webWindowOpenHandler } from "./external-links.js";
 import { storyPublicationFileFilter } from "./story-publication-file.js";
@@ -29,6 +30,9 @@ import {
   ChildLedger,
   ChildSupervisor,
   ComfyUiEngineService,
+  OllamaEngineService,
+  MingProcess,
+  allocateLoopbackPort,
   Coordinator,
   UNDERSONG_RELEASE,
   createStudioHost,
@@ -225,6 +229,7 @@ let backgroundLogin = false;
 let windowPresentation: StartupWindowPresentation | null = null;
 let startupController: StartupController | null = null;
 let startupProvider: FsWorldProvider | null = null;
+const startupRuntimeOwners = new StartupRuntimeOwners();
 let providerTransport: CloudProviderTransport | null = null;
 let startupState: StartupState = { status: "initializing" };
 let transportSession: { port: number; token: string } | null = null;
@@ -711,35 +716,29 @@ async function initialize(): Promise<{ port: number }> {
   // Stop-Process); the ledger sweep reaps them before this run spawns its own (R-5). One of
   // those orphans once held a file lock that broke packaging — this is not hypothetical.
   const childLedger = new ChildLedger(join(appRoot, "run", "children.json"));
+  const mingProcess = new MingProcess(childLedger);
+  const transferMing = startupRuntimeOwners.own(mingProcess);
   const swept = await childLedger.reapStale();
   if (swept.reaped.length > 0) {
     const named = swept.reaped.map((r) => `${r.id} (pid ${r.pid})`).join(", ");
     console.log(`[arke] reaped ${swept.reaped.length} orphaned child process(es): ${named}`);
   }
 
-  // Harness assembly (SPEC-005 R-1, issue 327 §3–§4): both generations resolved, v2
-  // preferred, v1 the escape hatch (ARKE_OPENCODE_GENERATION=v1 until the Settings toggle
-  // lands). One seam builds the whole launch — discovery, password protocol, redirected
-  // profile, adapter, config writer — so dev and desktop cannot drift. Absent → authoring
-  // degrades with the reason stated (R-4). The trace file answers "what did the app hear,
-  // and when" whenever a chat sticks, without a debugger.
-  /*
-   * Read before the harness is assembled, because the stored choice decides which lane launches.
-   * The same file the coordinator writes through, so Settings and launch cannot disagree.
-   */
+  // Harness assembly (SPEC-005 R-1).
+  // Only the pinned OpenCode v2 runtime is supported.
   const hostSettings = new AppSettingsFile(join(appRoot, "settings.json"));
-  const storedHarness = (await hostSettings.load().catch(() => null))?.harness ?? null;
+  const savedHostSettings = await hostSettings.load();
+  const storedHarness = savedHostSettings.harness;
+  const ollamaEngine = new OllamaEngineService({ appRoot, port: await allocateLoopbackPort(), deps: { ledger: childLedger } });
+  const transferOllama = startupRuntimeOwners.own(ollamaEngine);
+  await ollamaEngine.applySettings(savedHostSettings.ollama);
   const chosenHarness = effectiveHarnessEngine(storedHarness?.engine ?? "opencode", process.env["ARKE_HARNESS"]);
 
   const wiring = await assembleHarness({
     appRoot,
+    ollamaEndpoint: () => ollamaEngine.endpoint(),
     engine: chosenHarness,
     deps: { ledger: childLedger },
-    preferV1: process.env["ARKE_OPENCODE_GENERATION"] === "v1",
-    v1: {
-      ...(process.env["ARKE_OPENCODE_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE_CMD"] } : {}),
-      ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode", "opencode.exe") } : {}),
-    },
     v2: {
       ...(process.env["ARKE_OPENCODE2_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE2_CMD"] } : {}),
       ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode2", "opencode2.exe") } : {}),
@@ -867,6 +866,12 @@ async function initialize(): Promise<{ port: number }> {
   // folder through the coordinator's external-dir resolver.
   const comfyUiWeightEntries = comfyUiWeightCatalogue(COMFYUI_RECIPES);
   const providerClients = createProviderClients({
+    ming: {
+      status: model => coordinator?.mingSpeechStatus(model) ?? Promise.resolve({ready: false, reason: "Arke is starting."}),
+      synthesize: (input, signal) => coordinator?.synthesizeMing(input, signal) ?? Promise.reject(new Error("Arke is not running.")),
+    },
+    ollama: () => ollamaEngine.baseUrl(),
+    ollamaCleanup: () => ollamaEngine.endpoint(),
     fetch: (url, init) => fetch(url, init),
     transport: providerTransport,
     higgsfield: lazyHiggsfieldRunner(findHiggsfield),
@@ -1380,7 +1385,8 @@ async function initialize(): Promise<{ port: number }> {
     setup: {
       ...nodeSetupDeps(),
       externallyPresent: async (entryId) =>
-        entryId === "comfyui-runtime" ? comfyUiEngine.externallySelected() : false,
+        entryId === "comfyui-runtime" ? comfyUiEngine.externallySelected() : entryId === "ollama-runtime" ? ollamaEngine.externallySelected() : false,
+      ollama: ollamaEngine,
     },
     // Breeze and Fish keep a cloned voice on the account — a slot, a model; the library asks for
     // it here (SPEC-046 R-13). A reader whose client carries no slot calls keeps none.
@@ -1406,6 +1412,9 @@ async function initialize(): Promise<{ port: number }> {
         return client.hasVoice(key, voiceId, signal);
       },
     },
+    ollama: { service: ollamaEngine, reconfigureHarness: wiring.reconfigureOllama },
+    ming: mingProcess,
+    ...(app.isPackaged ? { mingWorkerPath: join(process.resourcesPath, "ming", "ming-worker.py") } : {}),
     comfyui: {
       service: comfyUiEngine,
       choosePath: async () => {
@@ -1510,6 +1519,7 @@ async function initialize(): Promise<{ port: number }> {
   });
   coordinator = studioHost.coordinator;
   studioServer = studioHost.server;
+  transferMing(); transferOllama();
   startupProvider = null;
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,
@@ -1551,7 +1561,8 @@ async function shutdownConfirmed(): Promise<void> {
         await publicationHost?.stop();
         await (studioServer?.stop() ?? startupProvider?.close() ?? Promise.resolve());
       } finally {
-        await closeProviderTransport();
+        try { await startupRuntimeOwners.close(); }
+        finally { await closeProviderTransport(); }
       }
     });
   } finally {
@@ -1608,7 +1619,8 @@ if (!gotLock) {
           if (started) await started.stop();
           else await provider?.close();
         } finally {
-          await closeProviderTransport();
+          try { await startupRuntimeOwners.close(); }
+          finally { await closeProviderTransport(); }
         }
         coordinator = null;
         studioServer = null;

@@ -4,9 +4,9 @@ import { EngineIdSchema } from "./local-ai.js";
 import { ProviderIdSchema } from "./provider.js";
 
 /**
- * Local runtimes fetched during setup: the writing runtime (Ollama and one model) and the two
- * voice models. Each one is optional, individually skippable, and never blocks the app — the
- * user can continue while they arrive.
+ * Local runtimes and model downloads. ComfyUI and Ollama must be installed and healthy before
+ * local AI setup completes; optional components can be skipped. Transfers run behind the
+ * interactive core, with runtime health reported separately from file presence.
  *
  * A component is a *thing that must be on this machine*, not a thing we generate. Presence is
  * detected before anything is fetched, so a second launch downloads nothing.
@@ -158,6 +158,41 @@ export const SetupComponentSchema = z
   .strict();
 export type SetupComponent = z.infer<typeof SetupComponentSchema>;
 
+export const LOCAL_AI_RUNTIMES = { comfyui: "comfyui-runtime", ollama: "ollama-runtime" } as const;
+export function isRequiredLocalRuntime(componentId: string): boolean {
+  return Object.values(LOCAL_AI_RUNTIMES).some(id => id === componentId);
+}
+
+const LocalAiEngineCheckSchema = z.object({
+  installed: z.boolean(),
+  healthy: z.boolean(),
+  detail: z.string().nullable(),
+}).strict();
+export const LocalAiSetupReadinessSchema = z.object({
+  ready: z.boolean(),
+  engines: z.object({ comfyui: LocalAiEngineCheckSchema, ollama: LocalAiEngineCheckSchema }).strict(),
+}).strict();
+export type LocalAiSetupReadiness = z.infer<typeof LocalAiSetupReadinessSchema>;
+
+/** SPEC-033: installation and a healthy selected service are separate, mandatory checks. */
+export function localAiSetupReadiness(
+  components: readonly SetupComponent[],
+  comfyui?: { state: string; source: string; detail: string | null },
+  ollama?: { state: string; source: string; detail: string | null },
+): LocalAiSetupReadiness {
+  const check = (id: string, engine: typeof comfyui) => {
+    const component = components.find(c => c.id === id);
+    const installed = component !== undefined && componentIsSettled(component.state);
+    const healthy = engine?.state === "ready" && ["managed", "user-path", "user-url"].includes(engine.source);
+    return { installed, healthy,
+      detail: !installed ? component?.detail ?? "Waiting for installation."
+        : !healthy ? engine?.detail ?? (engine ? "Waiting for the selected service to become healthy."
+          : "This host has not configured this runtime service.") : null };
+  };
+  const engines = { comfyui: check(LOCAL_AI_RUNTIMES.comfyui, comfyui), ollama: check(LOCAL_AI_RUNTIMES.ollama, ollama) };
+  return { ready: Object.values(engines).every(engine => engine.installed && engine.healthy), engines };
+}
+
 /**
  * What one activation actually costs (SPEC-033 R-40, R-41).
  *
@@ -261,6 +296,8 @@ export const SetupStatusSchema = z
     components: z.array(SetupComponentSchema),
     /** True while any component is downloading or installing. */
     running: z.boolean(),
+    /** Coordinator-owned runtime health gate; absent on hosts without local setup support. */
+    localAi: LocalAiSetupReadinessSchema.optional(),
     /** Free disk at the last check — the guard's evidence, shown rather than assumed. */
     diskFreeMb: z.number().int().min(0).nullable(),
     /**

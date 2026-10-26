@@ -36,6 +36,7 @@ import { ArtDirectionRecordSchema, ResolvedArtDirectionSchema } from "./art-dire
 import { EMPTY_BIBLE, WorldBibleSchema } from "./bible.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
+import { OllamaRuntimeStatusSchema } from "./ollama.js";
 import { LocalSamplingSettingsSchema } from "./local-sampling.js";
 import { FoundingBuildStateSchema } from "./founding-build.js";
 import { FrameRunStateSchema } from "./frame-run.js";
@@ -521,7 +522,7 @@ export const ClientStateSchema = valueSchema(z
          */
         harnessInfo: z
           .object({
-            generation: z.enum(["v2", "v1", "claude", "codex"]),
+            generation: z.enum(["v2", "claude", "codex"]),
             source: z.enum(["configured", "path", "bundled"]),
             version: z.string().nullable(),
             beta: z.boolean(),
@@ -560,6 +561,7 @@ export const ClientStateSchema = valueSchema(z
         harness: HarnessStatusSchema.nullable().default(null),
         /** The ComfyUI engine and its recipes (SPEC-021 §2.12) — one result, read everywhere. */
         comfyui: ComfyUiStatusSchema.nullable().default(null),
+        ollama: OllamaRuntimeStatusSchema.nullable().optional(),
         /** Sampling per local recipe and its measured times (design turn 177); absent before the host seeds it. */
         localSampling: LocalSamplingSettingsSchema.optional(),
         adapters: AdapterLibraryStateSchema.nullable().optional(),

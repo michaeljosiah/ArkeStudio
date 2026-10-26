@@ -49,6 +49,7 @@ export { FalClient } from "./clients/fal.js";
 export { HiggsfieldClient } from "./clients/higgsfield.js";
 export { KokoroClient, type KokoroSynthesize, type SidecarBaseUrl } from "./clients/kokoro.js";
 export { MistralClient, VOXTRAL_MODEL, VOXTRAL_PRESETS } from "./clients/mistral.js";
+export { MingClient, type MingSynthesis } from "./clients/ming.js";
 export { OllamaClient } from "./clients/ollama.js";
 export { OpenAiClient } from "./clients/openai.js";
 export { CodexClient, type CodexImageRunner } from "./clients/codex.js";

@@ -483,7 +483,14 @@
   font-size: var(--text-xs);
   color: var(--launch-ink-faint);
   text-align: right;
+  overflow-wrap: anywhere;
 }
+.fy-launch__runtime-actions { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 16px; }
+.fy-launch__runtime-actions button {
+  min-height: 44px; padding: 0; border: 0; background: none; color: var(--launch-ink-active);
+  font: inherit; text-decoration: underline; cursor: pointer;
+}
+.fy-launch__runtime-actions p { color: var(--launch-ink-faint); font-size: var(--text-sm); }
 .fy-launch__dot {
   width: 18px;
   height: 18px;

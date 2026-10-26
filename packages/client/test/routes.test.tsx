@@ -131,6 +131,10 @@ describe("screen inventory", () => {
       app: {
         ...FIXTURE_STATE.app,
         setup: {
+          localAi: { ready: true, engines: {
+            comfyui: { installed: true, healthy: true, detail: null },
+            ollama: { installed: true, healthy: true, detail: null },
+          } },
           running: true,
           diskFreeMb: 100_000,
       diskCheckedAt: null,

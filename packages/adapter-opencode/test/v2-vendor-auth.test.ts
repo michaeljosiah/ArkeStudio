@@ -243,14 +243,10 @@ describe("vendor-auth over the wire (SPEC-030 §2.2, §3.2)", () => {
   });
 
   it("reads the v2 error envelope into human detail — the route never has to stand in for it", () => {
-    // The measured v2 shape ({_tag, message}) and the v1 shape both parse; junk falls back.
+    // The measured v2 shape ({_tag, message}) parses; junk falls back.
     assert.equal(
       errorDetailFrom(JSON.stringify({ _tag: "InvalidRequestError", message: "methodID not found" })),
       "InvalidRequestError: methodID not found",
-    );
-    assert.equal(
-      errorDetailFrom(JSON.stringify({ name: "NotFound", data: { message: "no such session" } })),
-      "NotFound: no such session",
     );
     assert.equal(errorDetailFrom("plain text"), "plain text");
   });

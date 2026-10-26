@@ -42,6 +42,9 @@ import { createLocalEnginePolicy, LOCAL_ENGINE_CONTEXT } from "./application/loc
 import { createStudioStorage, type StudioStorage } from "./application/studio-composition.js";
 import { referenceInputProblem, ollamaLlmAvailable } from "@arke-studio/contracts";
 import { LocalGpu } from "./local-ai/gpu.js";
+import type { MingBatchCommand } from "./local-ai/ming.js";
+import { MingSpeechService } from "./local-ai/ming-speech.js";
+import type { MingSynthesis } from "@arke-studio/providers";
 import { withLocalGpu } from "./harness/local-gpu.js";
 import { withModelValidation } from "./harness/model-validation.js";
 import { HarnessModelCatalog, selectHarnessModel, type LanguageModelSelection } from "./harness/model-catalog.js";
@@ -256,6 +259,8 @@ import {
 import { recordBenchOutcome, serialiseSceneConversation } from "./bench/outcome.js";
 import type { AppLog } from "./app-log.js";
 import { type AppSettingsFile, routingFaults } from "./app-settings.js";
+import type { OllamaEngineService } from "./local-ai/ollama.js";
+import { normalizeOllamaUrl } from "@arke-studio/contracts";
 import { AskService } from "./canon/ask.js";
 import type { CredentialStore, Cipher } from "./credentials/store.js";
 import { CoalescedReads, ReadStalledError, type ReadTurn } from "./coalesced-reads.js";
@@ -490,7 +495,7 @@ import {
   AUDIO_EXTENSIONS as CLONEABLE_AUDIO_EXTENSIONS,
   audioBytesLookRight,
   clipFor,
-  clipHashOf,
+  readerReferenceHash,
   clipPresent,
   cloneVoice,
   MIN_CLONE_SECONDS,
@@ -621,6 +626,7 @@ import { FoundingBuildService } from "./world/founding-build.js";
 import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
 import { NoArkeCloud, type AccountService } from "./account.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
+import { localAiSetupReadiness, type SetupStatus } from "@arke-studio/contracts";
 import {
   SETUP_CATALOGUE,
   VOXA_SETUP_COMPONENT_IDS,
@@ -967,7 +973,7 @@ export interface CoordinatorOptions {
    * into app state so Settings can name it (issue 327 §9, SPEC-005 R-1).
    */
   harnessInfo?: {
-    generation: "v2" | "v1" | "claude" | "codex";
+    generation: "v2" | "claude" | "codex";
     source: "configured" | "path" | "bundled";
     version: string | null;
     beta: boolean;
@@ -1021,6 +1027,14 @@ export interface CoordinatorOptions {
     choosePath?: () => Promise<string | null>;
     chooseModelsDir?: () => Promise<string | null>;
   };
+  ollama?: {
+    service: OllamaEngineService;
+    reconfigureHarness?: (apply?: () => Promise<void>) => Promise<void>;
+  };
+  /** Ming owns a separate process even when its interpreter belongs to ComfyUI. */
+  ming?: { readonly running?: boolean; run(command: MingBatchCommand, signal: AbortSignal): Promise<void>; unload(signal: AbortSignal): Promise<void>; dispose(): Promise<void> };
+  /** Real filesystem worker path for a packaged host; never supplied by renderer commands. */
+  mingWorkerPath?: string;
   /**
    * Vendor-side voice state for the hosted readers (SPEC-046 R-13): the calls that save a clip
    * into a Breeze voice slot and remove it, wired by the host from the provider clients. Absent
@@ -1504,6 +1518,11 @@ export class Coordinator {
       if (input.capability !== "voice-tts") continue;
       if (!supportsVoiceUse(input, "preview")) throw new Error("This provider no longer supports speech. Choose an available voice reader.");
       if (this.readModel.getState().app.models.disabled.includes(input.model)) throw new Error("That voice model is turned off in AI models.");
+      if (input.provider === "ming") {
+        const status = await this.mingSpeechStatus(input.model);
+        if (!status.ready) throw new Error(status.reason ?? "Install this Ming model before reading.");
+        continue;
+      }
       if (input.provider !== "google") continue;
       const model = this.opts.manifest?.models.find(row => row.id === input.model && row.provider === input.provider);
       if (!model) throw new Error("That Gemini voice model is unavailable.");
@@ -1613,7 +1632,7 @@ export class Coordinator {
     if (source.kind === "cloned") {
       const clip = await clipFor(store, source.voice);
       if (clip !== null) {
-        return { narrator: { provider: chosen.provider, model: chosen.model, voiceId: chosen.voiceId, label: chosen.label ?? source.voice.name, cloned: true, clonedVoice: source.voice, clipHash: clipHashOf(clip) }, catalogue };
+        return { narrator: { provider: chosen.provider, model: chosen.model, voiceId: chosen.voiceId, label: chosen.label ?? source.voice.name, cloned: true, clonedVoice: source.voice, clipHash: readerReferenceHash(chosen.provider, clip) }, catalogue };
       }
     }
     const speaks = source.kind === "catalogue" ? chosen : narratorFor(null, narrationCatalogue);
@@ -2895,7 +2914,7 @@ export class Coordinator {
         if (input.defaultNarrator === true && modelOf({ provider: assigned.provider, model })?.speechPlan === "free-plan") return narration;
         return { provider: assigned.provider, model, voiceId: assigned.voiceId, label: assigned.label ?? listed.label, cloned: source.kind === "cloned",
           ...(source.kind === "cloned" ? { clonedVoice: source.voice } : {}),
-          ...(clip !== null ? { clipHash: clipHashOf(clip) } : {}) };
+          ...(clip !== null ? { clipHash: readerReferenceHash(assigned.provider, clip) } : {}) };
       }),
     );
     const isLocal = (voice: { provider: string; model: string }) => voice.provider === "kokoro" && voice.model === "kokoro-82m";
@@ -3458,6 +3477,27 @@ export class Coordinator {
   private backfillStore: WorldStore | null = null;
 
   private readonly localGpu: LocalGpu;
+  private readonly mingSpeech: MingSpeechService | null;
+  mingSpeechStatus(model: string): Promise<{ready: boolean; reason?: string}> {
+    return this.mingSpeech?.status(model) ?? Promise.resolve({ready: false, reason: "Ming is not configured on this host."});
+  }
+  synthesizeMing(input: Parameters<MingSynthesis["synthesize"]>[0], signal: AbortSignal): Promise<Uint8Array> {
+    if (!this.mingSpeech || this.stopping) return Promise.reject(new Error("Ming is stopped or unavailable."));
+    return this.mingSpeech.synthesize(input, AbortSignal.any([signal, this.runtimeStop.signal]));
+  }
+  private readonly runtimeStop = new AbortController();
+
+  /** Host-only entry for the optional Ming worker; no paths or commands come from the renderer. */
+  runMingBatch<T>(work: (signal: AbortSignal) => Promise<T>, signal: AbortSignal, waiting?: (reason: string | null) => void): Promise<T> {
+    if (!this.opts.ming) return Promise.reject(new Error("The Ming worker is not configured."));
+    const task = this.localGpu.runMingBatch(work, AbortSignal.any([signal, this.runtimeStop.signal]), waiting);
+    this.trackBackground(task);
+    return task;
+  }
+
+  generateMingBatch(command: MingBatchCommand, signal: AbortSignal, waiting?: (reason: string | null) => void): Promise<void> {
+    return this.runMingBatch(combined => this.opts.ming!.run(command, combined), signal, waiting);
+  }
   private readonly effectAnalysis: EditorEffectAnalysisService;
   private readonly effectDependencies: EditorEffectDependencies;
   /**
@@ -3493,10 +3533,24 @@ export class Coordinator {
     // comes up settles both from its failure paths below, and a session on it fails at creation.
     if (!opts.adapter) this.settleHarnessGates();
     this.localGpu = new LocalGpu(async (engine, signal) => {
-      if (engine === "ComfyUI" && opts.comfyui?.service.engineIdentity()?.locality !== "local") return;
+      if (engine === "Ming") { await opts.ming?.unload(signal); return; }
+      if (engine === "Ollama" && opts.ollama && opts.ollama.service.baseUrl() === null && !opts.ollama.service.externallySelected()) {
+        // An uninstalled runtime owns no memory. A failed owned child must confirm exit;
+        // a nullable endpoint by itself is not evidence that it released its allocations.
+        await opts.ollama.service.stopManaged();
+        this.clearLocalResidency("ollama");
+        return;
+      }
+      if (engine === "ComfyUI") {
+        if (opts.comfyui?.service.engineStatus().locality === "remote") return;
+        await opts.comfyui?.service.prepareGpuHandover();
+      }
       await opts.dispatchClients?.[engine === "Ollama" ? "ollama" : "comfyui"]?.unload?.(signal);
       this.clearLocalResidency(engine === "Ollama" ? "ollama" : "comfyui");
-    });
+    }, ["Ollama", "ComfyUI", "Ming"]);
+    this.mingSpeech = opts.appRoot && opts.ming && opts.comfyui ? new MingSpeechService({ appRoot: opts.appRoot,
+      python: () => opts.comfyui!.service.sharedMingPython(), run: (command, signal) => this.generateMingBatch(command, signal),
+      processRunning: () => opts.ming!.running === true, ...(opts.mingWorkerPath ? {worker: opts.mingWorkerPath} : {}) }) : null;
     if (opts.adapter) opts.adapter = withModelValidation(
       withLocalGpu(opts.adapter, this.localGpu, () => { void this.refreshLocalResidency(); }, (model) => this.harnessOllamaModels.add(model)),
       (reference, needsImages, signal) => this.validateLanguageModel(reference, needsImages, signal),
@@ -3705,6 +3759,7 @@ export class Coordinator {
                 if (source.kind !== "cloned") {
                   throw new Error("That cloned voice is no longer in this world — choose another voice.");
                 }
+                if (provider === "ming" && (!source.voice.consent || !source.voice.transcript?.trim())) throw new Error("Clone this recording with permission and its exact spoken words to use Ming 3.");
                 const clip = await clipFor(store, source.voice);
                 if (!clip) {
                   throw new Error(
@@ -3858,6 +3913,7 @@ export class Coordinator {
       ? new VoiceService({
           sidecar: opts.voice.sidecar,
           localPresets: opts.voice.localPresets,
+          ...(this.mingSpeech ? { localReaderAvailability: (model: string) => this.mingSpeechStatus(model) } : {}),
           cloudSources: opts.voice.cloudSources,
           modelEnabled: (model) => !this.readModel.getState().app.models.disabled.includes(model),
           ...(opts.voice.hostedReaders !== undefined ? { hostedReaders: opts.voice.hostedReaders } : {}),
@@ -4229,7 +4285,7 @@ export class Coordinator {
       changed: (adapters) => {
         this.emit({ type: "adapters.changed", at: new Date().toISOString(), adapters });
         if (this.setup) {
-          const setup = this.visibleAdapterSetup(this.setup.status());
+          const setup = this.projectSetup(this.setup.status());
           this.readModel.setSetup(setup);
           this.emit({ type: "setup.status", at: new Date().toISOString(), setup });
         }
@@ -4240,7 +4296,7 @@ export class Coordinator {
         ? new LocalSetupService(
             opts.setup,
             (event) => {
-              if (event.type === "setup.status") event = { ...event, setup: this.visibleAdapterSetup(event.setup) };
+              if (event.type === "setup.status") event = { ...event, setup: this.projectSetup(event.setup) };
               // The snapshot carries it too: a window that opens mid-download still sees it.
               if (event.type === "setup.status") {
                 const previous = this.readModel.getState().app.setup;
@@ -4271,11 +4327,21 @@ export class Coordinator {
                 },
               },
               onComponentReady: (componentId) => this.onSetupComponentReady(componentId),
-              beforeComponentInstall: async id => { if (id.startsWith("adapter-")) await this.adapterLibrary?.guardInstall(id); },
+              beforeComponentInstall: async id => {
+                if (id.startsWith("adapter-")) await this.adapterLibrary?.guardInstall(id);
+                if (id.startsWith("ming-") && (this.mingSpeech?.busy || this.localGpu.isBusy("Ming"))) throw new Error("Wait for the current Ming reading to stop before changing its files.");
+              },
+              beginFileMutation: id => {
+                if (!id.startsWith("ming-")) return undefined;
+                if (this.localGpu.isBusy("Ming")) throw new Error("Stop the current Ming reading before changing its model files.");
+                return this.mingSpeech?.reserveFileChange();
+              },
               onFileInstalled: async (id, path) => { if (id.startsWith("adapter-")) await this.adapterLibrary?.recordInstalled(id, path); },
             },
           )
         : null;
+    // Seed before transport opens: an early snapshot must not bypass the gate during detect().
+    if (this.setup) this.readModel.setSetup(this.projectSetup(this.setup.status()));
     this.askService = opts.authoring
       ? new AskService(opts.adapter, {
           sessionInput: this.sessionInput,
@@ -4301,6 +4367,9 @@ export class Coordinator {
   private readonly pendingVoiceReads = new Map<string, { token: string; inputs: EnqueueInput[] }>();
 
   private onSetupComponentReady(componentId: string): Promise<void> {
+    if (this.stopping) return Promise.resolve();
+    if (componentId.startsWith("ming-")) return this.providerService.validate("ming").then(() => { this.voiceService?.invalidateCatalogue(); });
+    if (componentId === "ollama-runtime") return this.opts.ollama?.service.refresh() ?? Promise.resolve();
     if (componentId !== "comfyui-runtime" && !isComfyUiWeightsComponent(componentId)) return Promise.resolve();
     const work = this.comfyUiSetupWork
       .catch(() => {})
@@ -4319,6 +4388,14 @@ export class Coordinator {
     this.comfyUiSetupWork = work.catch(() => {});
     this.trackBackground(this.comfyUiSetupWork);
     return work;
+  }
+
+  private publishSetupReadiness(): void {
+    if (!this.setup || this.stopping) return;
+    const setup = this.projectSetup(this.setup.status());
+    if (JSON.stringify(setup.localAi) === JSON.stringify(this.readModel.getState().app.setup?.localAi)) return;
+    this.readModel.setSetup(setup);
+    this.emit({ type: "setup.status", at: this.nowIso(), setup });
   }
 
   getState(): ClientState {
@@ -4752,6 +4829,16 @@ export class Coordinator {
       const settings = await this.appSettings.load();
       await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
     }
+    if (this.opts.ollama && this.appSettings) {
+      const settings = await this.appSettings.load();
+      await this.opts.ollama.service.applySettings(settings.ollama);
+      const publish = () => { if (!this.stopping) {
+        this.emit({ at: this.nowIso(), type: "ollama.status", ollama: this.opts.ollama!.service.status() });
+        this.publishSetupReadiness();
+      } };
+      this.lifecycleDisposers.add(this.opts.ollama.service.subscribe(publish));
+      publish();
+    }
     // Reconcile every non-terminal job before accepting new work (SPEC-009 R-18). The report
     // reaches clients as an event; the folded jobs seed the read model.
     if (this.jobQueue) {
@@ -4836,8 +4923,8 @@ export class Coordinator {
       this.emit({ at: new Date().toISOString(), type: "env.check", ...envCheck });
     }
 
-    // Local runtimes arrive in the background (R-5 revised): the app is usable throughout, and
-    // every component can be skipped. Detection runs first, so a second launch fetches nothing.
+    // Downloads run behind the interactive core. The launch gate separately requires both
+    // runtimes healthy; optional components can be skipped. Detection avoids repeat downloads.
     void this.setup?.run();
 
     // An external image login restores itself without holding the transport behind a slow
@@ -4853,6 +4940,7 @@ export class Coordinator {
     // starting → healthy → failed. Both in the background: the app never waits on an engine.
     if (this.opts.comfyui) {
       const unsubscribe = this.opts.comfyui.service.subscribe(() => {
+        this.publishSetupReadiness();
         this.trackBackground(
           this.retireAndReleaseComfyUi()
             .then(() => this.refreshComfyUi())
@@ -5762,7 +5850,7 @@ export class Coordinator {
     // harnessInfo, but Settings must still attach its health failure to the engine we tried.
     const generation = this.opts.harnessInfo?.generation;
     this.launchEngine = generation === "claude" || generation === "codex" ? generation
-      : generation === "v1" || generation === "v2" ? "opencode"
+      : generation === "v2" ? "opencode"
       : this.opts.harnessLaunchEngine ?? this.opts.harnessEngineOverride ?? settings?.harness.engine ?? "opencode";
     // Read once here so the first session of the run already carries the user's choices —
     // not the second, after something happened to touch settings.
@@ -6367,16 +6455,20 @@ export class Coordinator {
     patch: Partial<import("@arke-studio/contracts").ComfyUiSettings>,
   ): Promise<void> {
     if (!this.appSettings || !this.opts.comfyui) return;
-    const settings = await this.appSettings.setComfyUi(patch);
-    this.jobQueue?.resetProviderTransport("comfyui");
-    await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
-    // Work in flight against the engine that just stopped being the configured one is failed
-    // here, with the reason (SPEC-021 §2.11). Without this the poll loop keeps asking the NEW
-    // engine about a prompt id only the OLD one ever issued — which reads as "the engine no
-    // longer knows this prompt" and looks like the engine lost the job.
-    await this.retireAndReleaseComfyUi();
-    await this.setup?.detect().catch(() => {});
-    await this.refreshComfyUi();
+    if (this.localGpu.isBusy("ComfyUI")) throw new Error("Finish or cancel ComfyUI work before changing its runtime.");
+    const release = await this.localGpu.acquire("ComfyUI", this.runtimeStop.signal);
+    try {
+      if (this.opts.comfyui.service.engineStatus().source === "user-url") await this.opts.dispatchClients?.comfyui?.unload?.(this.runtimeStop.signal);
+      const previous = (await this.appSettings.load()).comfyui;
+      const settings = await this.appSettings.setComfyUi(patch);
+      this.runtimeStop.signal.throwIfAborted();
+      this.jobQueue?.resetProviderTransport("comfyui");
+      try { await this.opts.comfyui.service.applySettings(settings.comfyui); }
+      catch (error) { await this.appSettings.setComfyUi(previous); throw error; }
+      await this.retireAndReleaseComfyUi();
+      await this.setup?.detect().catch(() => {});
+      await this.refreshComfyUi();
+    } finally { release(); }
   }
 
   /**
@@ -6549,9 +6641,11 @@ export class Coordinator {
     return work;
   }
 
-  private visibleAdapterSetup(setup: import("@arke-studio/contracts").SetupStatus): import("@arke-studio/contracts").SetupStatus {
-    return this.readModel.getState().app.adapters?.adultContent.enabled ? setup :
-      { ...setup, components: setup.components.filter(row => !row.id.startsWith("adapter-")) };
+  private projectSetup(setup: SetupStatus): SetupStatus {
+    const components = this.readModel.getState().app.adapters?.adultContent.enabled ? setup.components
+      : setup.components.filter(row => !row.id.startsWith("adapter-"));
+    return { ...setup, components, localAi: localAiSetupReadiness(components,
+      this.opts.comfyui?.service.engineStatus(), this.opts.ollama?.service.status()) };
   }
 
   /** Release recovered work when a host-owned runtime reports capability readiness. */
@@ -9939,6 +10033,7 @@ export class Coordinator {
           chosen !== undefined &&
             modelEligible(chosen, {
               providers: state.providers,
+              components: state.setup?.components ?? [],
               disabled: state.models.disabled,
               recipes: state.comfyui?.recipes ?? [],
               comfyUiLocality: state.comfyui?.engine.locality,
@@ -10252,6 +10347,53 @@ export class Coordinator {
         await this.applyComfyUiPatch({ enginePath: null, engineUrl: null });
         return;
       }
+      case "set-ollama-url":
+      case "clear-ollama-engine": {
+        const service = this.opts.ollama?.service;
+        const settingsFile = this.appSettings;
+        if (!service || !settingsFile) return;
+        const engineUrl = msg.kind === "clear-ollama-engine" ? null : normalizeOllamaUrl(msg.url);
+        if (msg.kind === "set-ollama-url" && engineUrl === null) return;
+        if ((await settingsFile.load()).ollama.engineUrl === engineUrl) return;
+        if (this.localGpu.isBusy("Ollama")) {
+          this.emit({ at: this.nowIso(), type: "ollama.status", ollama: { ...service.status(), detail: "Finish or cancel local language work before changing its runtime." } });
+          return;
+        }
+        const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
+        try {
+          const apply = async () => {
+            if (service.baseUrl() !== null || service.externallySelected()) await this.opts.dispatchClients?.ollama?.unload?.(this.runtimeStop.signal);
+            const previous = (await settingsFile.load()).ollama;
+            const settings = await settingsFile.setOllama({ engineUrl });
+            this.runtimeStop.signal.throwIfAborted();
+            try { await service.applySettings(settings.ollama); }
+            catch (error) { await settingsFile.setOllama(previous); throw error; }
+            await this.setup?.detect();
+          };
+          if (this.opts.ollama?.reconfigureHarness) await this.opts.ollama.reconfigureHarness(apply);
+          else await apply();
+        } finally { release(); }
+        return;
+      }
+      case "ollama-refresh": {
+        if (this.localGpu.isBusy("Ollama")) return;
+        const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
+        try { await this.opts.ollama?.service.refresh(); }
+        finally { release(); }
+        return;
+      }
+      case "ollama-update-runtime": {
+        const service = this.opts.ollama?.service;
+        if (!service || !this.setup || !this.appSettings || this.localGpu.isBusy("Ollama")) return;
+        // A selected user service is never stopped or modified by a managed-runtime update.
+        const external = service.externallySelected();
+        const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
+        try {
+          if (!external) await service.stopManaged();
+          await this.setup.updateTree("ollama-runtime");
+        } finally { try { if (!external && !this.stopping) await service.refresh(); } finally { release(); } }
+        return;
+      }
       case "use-detected-comfyui": {
         // Only a location the host itself just discovered and published (SPEC-021 D10): the
         // renderer selects among offers, it does not originate paths.
@@ -10287,9 +10429,7 @@ export class Coordinator {
         if (!this.appSettings || !this.opts.comfyui) return;
         // Re-applying the settings *is* the restart: `applySettingsOnce` stops supervision,
         // resolves the selection again and starts the child, whether or not anything changed.
-        const settings = await this.appSettings.load();
-        await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
-        await this.refreshComfyUi();
+        await this.applyComfyUiPatch({});
         return;
       }
       case "comfyui-refresh": {
@@ -10311,18 +10451,22 @@ export class Coordinator {
       case "comfyui-update-runtime": {
         const service = this.opts.comfyui?.service;
         if (!service || !this.setup || !this.appSettings) return;
-        // Stop only the managed child (SPEC-021 R-20): a user-directed engine is supervised
-        // identically and is somebody else's work, and the case this serves is a stale managed tree
-        // behind a selected user engine. The swap runs with the files closed; the engine comes back
-        // through the same path Settings uses, and only if it was the one stopped.
-        const stopped = await service.stopManagedSupervision().catch(() => false);
-        await this.setup.updateTree("comfyui-runtime").catch(() => false);
-        await this.setup.detect().catch(() => {});
-        if (stopped) {
-          const settings = await this.appSettings.load();
-          await service.applySettings(settings.comfyui).catch(() => {});
-        }
-        await this.refreshComfyUi();
+        if (this.localGpu.isBusy("ComfyUI")) throw new Error("Finish or cancel ComfyUI work before updating its runtime.");
+        const release = await this.localGpu.acquire("ComfyUI", this.runtimeStop.signal);
+        try {
+          // Only Arke's managed child is stopped; an explicitly selected URL/path keeps
+          // its owner's lifecycle. Ming has already exited before the tree can move.
+          const stopped = await service.stopManagedSupervision();
+          try { await this.setup.updateTree("comfyui-runtime"); }
+          finally {
+            if (stopped && !this.stopping) {
+              const settings = await this.appSettings.load();
+              await service.applySettings(settings.comfyui);
+            }
+          }
+          await this.setup.detect();
+          await this.refreshComfyUi();
+        } finally { release(); }
         return;
       }
       case "repair-voice-models": {
@@ -11603,6 +11747,7 @@ export class Coordinator {
               boardPanelCap: videoModel?.limits.storyboardPanels,
               eligible: modelEligible(model, {
                 providers: app.providers,
+                components: app.setup?.components ?? [],
                 disabled: app.models.disabled,
                 recipes: app.comfyui?.recipes ?? [],
                 comfyUiLocality: app.comfyui?.engine.locality,
@@ -14413,6 +14558,7 @@ export class Coordinator {
           return;
         }
         const made = await cloneVoice(store, store.getBundle().clonedVoices, {
+          ...(msg.transcript !== undefined ? { transcript: msg.transcript } : {}),
           sourcePath: clip.path,
           name: msg.name,
           description: msg.description,
@@ -17653,7 +17799,7 @@ export class Coordinator {
         // (SPEC-046 R-39). Absent for a preset, and for a clone whose clip is gone, which the
         // checks below refuse by name.
         const previewClip = source.kind === "cloned" ? await clipFor(store, source.voice) : null;
-        const previewReference = previewClip !== null ? clipHashOf(previewClip) : undefined;
+        const previewReference = previewClip !== null ? readerReferenceHash(msg.provider, previewClip) : undefined;
         if (
           source.kind === "cloned" &&
           (await this.requireVoiceUploadConfirmation({
@@ -20692,7 +20838,7 @@ export class Coordinator {
       const app = this.readModel.getState().app;
       if (!model || !["image", "video"].includes(model.capability) || settings?.models.disabled.includes(model.id) || !modelEligible(model, {
         providers: app.providers, disabled: app.models.disabled, recipes: app.comfyui?.recipes ?? [],
-        comfyUiLocality: app.comfyui?.engine.locality, gated: app.runtime?.models ?? [],
+        comfyUiLocality: app.comfyui?.engine.locality, gated: app.runtime?.models ?? [], components: app.setup?.components ?? [],
       })) throw new Error("Choose an enabled, eligible production model.");
       return model;
     };
@@ -21856,7 +22002,7 @@ export class Coordinator {
   private benchModelEligible(model: ManifestModel): boolean {
     const app = this.readModel.getState().app;
     return modelEligible(model, { providers: app.providers, disabled: app.models.disabled,
-      recipes: app.comfyui?.recipes ?? [], comfyUiLocality: app.comfyui?.engine.locality, gated: app.runtime?.models ?? [] });
+      recipes: app.comfyui?.recipes ?? [], comfyUiLocality: app.comfyui?.engine.locality, gated: app.runtime?.models ?? [], components: app.setup?.components ?? [] });
   }
 
   private benchGenerationRoutes() {
@@ -22939,6 +23085,9 @@ export class Coordinator {
     // reload timer that would have settled it is cleared below, and nothing else fires.
     this.settleHarnessGates();
     this.localGpu.stop();
+    this.runtimeStop.abort(new Error("Local runtimes are stopping."));
+    // Setup completion can be awaiting startup: cancel that wait before setup itself drains.
+    this.opts.ollama?.service.beginShutdown();
     for (const controller of this.performanceGenerations.values()) controller.abort();
     for (const controller of this.keyArtPromptDrafts.values()) controller.abort();
     this.keyArtPromptReviews.clear();
@@ -23005,6 +23154,7 @@ export class Coordinator {
       await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
       await this.opts.adapter?.dispose?.().catch(() => {});
       await this.releaseOllama();
+      const runtimeStops = await Promise.allSettled([this.opts.ming?.dispose(), this.opts.ollama?.service.dispose()]);
       await this.worldQuery.stop();
       // Provider close is the critical gate: it saves pending state and releases the world lock.
       this.engineClosed = true;
@@ -23017,6 +23167,8 @@ export class Coordinator {
       // called, so a fault recorded in the last moments of a run — the kind most worth having,
       // because the run ended — could still be in the queue when the process left.
       await this.appLog?.drain();
+      const failedRuntimeStops = runtimeStops.filter(result => result.status === "rejected");
+      if (failedRuntimeStops.length) throw new AggregateError(failedRuntimeStops.map(result => result.reason), "Local runtime cleanup did not confirm exit.");
     })();
     try {
       await this.stopPromise;

@@ -42,12 +42,14 @@ export class ProviderService {
     const configured = new Set(this.credentials ? await this.credentials.configuredProviders() : []);
     for (const id of Object.keys(PROVIDERS) as ProviderId[]) {
       const credential = PROVIDERS[id].credential;
+      const requiresProbe = PROVIDERS[id].requiresReadinessProbe === true;
       this.statuses.set(id, {
         id,
-        configured: credential === "none" || (credential === "in-app" && configured.has(id)),
+        configured: (credential === "none" && (!requiresProbe || this.validators[id] !== undefined)) || (credential === "in-app" && configured.has(id)),
         credentialFingerprint: credential === "in-app" && configured.has(id) ? await this.credentials?.fingerprint(id).catch(() => undefined) : undefined,
-        validation: "untested",
-        probes: [],
+        validation: requiresProbe ? "invalid" : "untested",
+        probes: requiresProbe ? PROVIDERS[id].capabilities.map(capability => ({capability, available: false,
+          reason: `${PROVIDERS[id].displayName} is awaiting its runtime and model installation check`})) : [],
         fault: null,
       });
     }

@@ -1,4 +1,6 @@
 export { AppLog } from "./app-log.js";
+export { OllamaEngineService } from "./local-ai/ollama.js";
+export { MingProcess, type MingBatchCommand } from "./local-ai/ming.js";
 export { RemoteDevices, writeRemotePrivate } from "./remote-access/devices.js";
 export { RemoteGateway, type RemoteTrace } from "./remote-access/gateway.js";
 export { AppSettingsFile, routingFaults } from "./app-settings.js";
@@ -358,6 +360,9 @@ export {
 } from "./comfyui/engine.js";
 export { ProfiledComfyUiEngineService } from "./comfyui/profiled-engine.js";
 export { CUSTOM_NODE_IDENTITY_FILE, readCustomNodeRef } from "./comfyui/node-ref.js";
+export { ComfyUiDigestCache } from "./comfyui/digest-cache.js";
+export { createComfyUiFetch, comfyUiLoopbackAddresses } from "./comfyui/node-transport.js";
+export { comfyUiWeightCatalogue } from "./comfyui/setup.js";
 export { sanitizeComfyUiMedia, type SanitizeResult } from "./comfyui/sanitize.js";
 export { GrantStore, type RememberedGrant } from "./harness/grants.js";
 export { WorldQueryServer } from "./harness/world-query.js";

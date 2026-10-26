@@ -1,5 +1,15 @@
 # Running and validating changes
 
+Managed local runtime checks are listed in [Managed local runtimes](managed-local-runtimes.md#validation).
+Use native Windows process/loopback access for the supervisor, Ming cancellation and file-handle
+fixtures; sandbox IPC refusals do not establish an application regression. Model qualification
+is offline and separate from these lightweight native lifecycle tests.
+The [Ming integration checks](managed-local-runtimes.md#validation) cover complete model installation,
+voice reference words, queue identity, chunking, controlled refusal and packaged worker resources.
+The standard-library worker checks run with `python -B scripts/test-ming-worker.py`; CI's Node tests
+exercise the host seams without model downloads. Native tests must also check confirmed process
+exit and GPU-lane release; a returned WAV alone does not prove a complete reading.
+
 Baseline regression checks (#2079) use client `test/art-direction-step.test.tsx` and
 `test/one-register.test.tsx`, contracts `test/world-chat-shape.test.ts`, and coordinator
 `test/productions/audiobook-video.test.ts` / `test/world/store.test.ts`. Keep empty and accepted
@@ -659,6 +669,9 @@ and client `test/harness-model-controls.test.tsx`, `test/agents.test.tsx`,
 `test/settings-general.test.tsx`, `test/production-setup.test.tsx`. Catalog tests cover
 canonical/legacy references, discovery failure and retry, precedence and Stage image capability.
 Adapter tests exercise captured settings, confined tool access, cancellation and final-turn events.
+OpenCode discovery tests require v2 2.0.26 and prove a v1-only installation cannot launch.
+Coordinator `test/studio-server.test.ts` also proves the real Node composition can satisfy the
+mandatory readiness gate with explicitly selected healthy ComfyUI and Ollama services.
 
 For an OpenCode v2 pin change, stage the exact runtime and qualify the actual binary:
 

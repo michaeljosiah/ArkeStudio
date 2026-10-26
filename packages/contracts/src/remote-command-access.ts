@@ -19,6 +19,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "clear-voxa-executable": "host", "use-bundled-voxa": "host", "restart-voxa": "host",
   "choose-comfyui-path": "host", "choose-comfyui-models-dir": "host", "clear-comfyui-models-dir": "host",
   "set-comfyui-url": "host", "clear-comfyui-engine": "host", "use-detected-comfyui": "host",
+  "set-ollama-url": "host", "clear-ollama-engine": "host", "ollama-update-runtime": "host", "ollama-refresh": "studio",
   "comfyui-restart": "host", "setup-install": "host", "setup-remove": "host",
   "repair-voice-models": "host", "open-model-folder": "host", "open-engine-log": "host",
   "set-background-notifications": "host", "account-sign-in": "host", "account-create": "host",

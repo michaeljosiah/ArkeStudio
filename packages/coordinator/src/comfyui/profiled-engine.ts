@@ -41,6 +41,16 @@ export class ProfiledComfyUiEngineService extends ComfyUiEngineService {
     return super.isManagedEndpointGone(url) || this.worker.isManagedEndpointGone(url);
   }
 
+  override prepareGpuHandover(): Promise<void> {
+    const work = this.profileWork.then(async () => {
+      const results = await Promise.allSettled([super.prepareGpuHandover(), this.worker.prepareGpuHandover()]);
+      const failure = results.find(result => result.status === "rejected");
+      if (failure?.status === "rejected") throw failure.reason;
+    });
+    this.profileWork = work.catch(() => {});
+    return work;
+  }
+
   override instanceId(model?: string): string | null {
     return model === this.model ? this.worker.instanceId() : super.instanceId();
   }

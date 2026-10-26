@@ -8,6 +8,8 @@ import {
   type BenchPreset,
   type Capability,
   type ComfyUiSettings,
+  type OllamaSettings,
+  OllamaSettingsSchema,
   type HarnessEngine,
   type ModelManifest,
   type RoutingFault,
@@ -322,6 +324,14 @@ export class AppSettingsFile {
   async setComfyUi(patch: Partial<ComfyUiSettings>): Promise<AppSettings> {
     return this.mutate((current) => {
       const settings: AppSettings = { ...current, comfyui: { ...current.comfyui, ...patch } };
+      return { settings, value: settings };
+    });
+  }
+
+  async setOllama(patch: Partial<OllamaSettings>): Promise<AppSettings> {
+    return this.mutate((current) => {
+      const ollama = OllamaSettingsSchema.parse({ ...current.ollama, ...patch });
+      const settings: AppSettings = { ...current, ollama };
       return { settings, value: settings };
     });
   }

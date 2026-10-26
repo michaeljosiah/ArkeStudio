@@ -4,7 +4,7 @@ import { readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ClientMessage, DomainEvent, ManifestModel, WorldMeta } from "@arke-studio/contracts";
 import { imageConstraintSuffix } from "@arke-studio/contracts";
-import { buildSessionConfig } from "@arke-studio/adapter-opencode";
+import { buildSessionConfigV2 } from "@arke-studio/adapter-opencode";
 import type { HarnessEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -373,7 +373,7 @@ function directorAdapter(reply: string | null) {
 
 describe("the art director", () => {
   const director = async (reply: string | null) =>
-    makeArtDirector(directorAdapter(reply), () => buildSessionConfig({}), await tempDir("art-"));
+    makeArtDirector(directorAdapter(reply), () => buildSessionConfigV2({}), await tempDir("art-"));
 
   it("tells the model only what the world says about itself", () => {
     const brief = worldBrief(meta(), ["The tide is law in the harbour", "Bell-ringers are sworn, not hired"]);
@@ -393,12 +393,12 @@ describe("the art director", () => {
 
   it("cleans only its scratch directory after success, timeout and session-creation failure",async()=>{
     const root=await tempDir("art-cleanup-");await writeFile(join(root,"keep.txt"),"unrelated");
-    const run=makeArtDirector(directorAdapter('{"prompt":"A harbour"}'),()=>buildSessionConfig({}),root);
+    const run=makeArtDirector(directorAdapter('{"prompt":"A harbour"}'),()=>buildSessionConfigV2({}),root);
     assert.equal(await run("brief"),"A harbour");assert.deepEqual(await readdir(root),["keep.txt"]);
-    const timed=makeArtDirector(directorAdapter(null),()=>buildSessionConfig({}),root,{timeoutMs:5});
+    const timed=makeArtDirector(directorAdapter(null),()=>buildSessionConfigV2({}),root,{timeoutMs:5});
     await assert.rejects(timed("brief"),/stopped/);assert.deepEqual(await readdir(root),["keep.txt"]);
     const failing={...directorAdapter(null),async createSession(){throw new Error("create failed");}};
-    await assert.rejects(makeArtDirector(failing,()=>buildSessionConfig({}),root)("brief"),/create failed/);assert.deepEqual(await readdir(root),["keep.txt"]);
+    await assert.rejects(makeArtDirector(failing,()=>buildSessionConfigV2({}),root)("brief"),/create failed/);assert.deepEqual(await readdir(root),["keep.txt"]);
   });
 
   it("returns null rather than nonsense when the answer is not a prompt", async () => {

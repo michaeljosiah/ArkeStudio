@@ -18,6 +18,27 @@ import {
 
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const;
 
+it("reconciles models installed this session when the selected Ollama store changes", async () => {
+  let models = new Set<string>(), pulls = 0;
+  const entry = { ...catalogue()[1]!, requires: [], optional: true };
+  const service = new LocalSetupService({ ...deps(), ollama: {
+    modelsDir: () => null, list: async () => [...models],
+    pull: async model => { pulls++; models.add(model); }, remove: async model => { models.delete(model); },
+  } }, () => {}, { appRoot: await root(), catalogue: [entry] });
+  try {
+    service.retry(entry.id); await service.run();
+    assert.equal(service.status().components[0]!.state, "ready");
+    const previous = models;
+    models = new Set();
+    await service.detect();
+    assert.equal(service.status().components[0]!.state, "available");
+    service.installClosure(entry.id); await service.run();
+    assert.equal(service.status().components[0]!.state, "ready");
+    assert.equal(pulls, 2);
+    assert.deepEqual([...models], [...previous]);
+  } finally { await service.dispose(); }
+});
+
 it("keeps catalogue requirements in snapshots independently of transfer detail", async () => {
   const entry = SETUP_CATALOGUE.find(entry => entry.id === "ollama-gemma4-12b-balanced")!;
   const service = new LocalSetupService(deps(), () => {}, { appRoot: await root(), catalogue: [entry] });

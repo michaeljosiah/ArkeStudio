@@ -2,6 +2,7 @@ import { ModelManifestSchema, type ModelManifest } from "@arke-studio/contracts"
 import { BREEZE_DELIVERY, BREEZE_SOUNDS, ELEVEN_V3_SOUNDS, ELEVEN_V4_SOUNDS, FISH_DELIVERY, FISH_SOUNDS } from "./voice-direction.js";
 import { COMFYUI_MANIFEST_MODELS } from "./comfyui/recipes.js";
 import { geminiSpeechModel } from "./gemini-tts-models.js";
+import { MING_MANIFEST_MODELS } from "./ming-models.js";
 import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.generated.js";
 
 /**
@@ -73,6 +74,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     // Rows like any other — capability copy, estimates and pass packing need no special case —
     // and deliberately no graph: the projection in comfyui/recipes.ts is the whole boundary.
     ...COMFYUI_MANIFEST_MODELS,
+      ...MING_MANIFEST_MODELS,
     // ---- image ------------------------------------------------------------
     // A stable route to Codex's built-in image tool, not a selectable inference model.
     // Four references is what has been verified through Arke's own adapter: on 2026-10-07 two,

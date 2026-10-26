@@ -247,9 +247,9 @@ describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
     // Studio wrote the confinement config into the working directory (R-5, R-9, R-10).
     const config = JSON.parse(
       await readFile(join(dir, ".proposals", proposal.id, "opencode.json"), "utf8"),
-    ) as { agent: Record<string, { tools: Record<string, boolean> }>; mcp: Record<string, unknown> };
-    assert.equal(config.agent["sheet-editor"]!.tools["bash"], false);
-    assert.ok(config.mcp["arke-world"]);
+    ) as { agents: Record<string, { permissions: { action: string; resource: string; effect: string }[] }>; mcp: { servers: Record<string, unknown> } };
+    assert.ok(config.agents["sheet-editor"]!.permissions.some(rule => rule.action === "shell" && rule.effect === "deny"));
+    assert.ok(config.mcp.servers["arke-world"]);
 
     // The proposal is intact and still staged (R-12).
     assert.ok(store.getBundle().proposals.some((p) => p.proposal.id === proposal.id));

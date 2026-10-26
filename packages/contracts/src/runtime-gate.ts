@@ -2,6 +2,8 @@ import type { Capability } from "./provider.js";
 import type { ManifestModel, ModelManifest } from "./manifest.js";
 import { PROVIDERS, deriveCapabilityAvailability, type ProviderId, type ProviderStatus } from "./provider.js";
 import type { RecipeReadiness } from "./comfyui.js";
+import { activationFor } from "./local-ai.js";
+import type { SetupComponent } from "./setup.js";
 import type {
   FitVerdict,
   LocalRuntimeModel,
@@ -311,6 +313,8 @@ export interface EligibilityInputs {
   readonly disabled: readonly string[];
   /** ComfyUI's own recipe answers, keyed by recipe id — which is the model id. */
   readonly recipes: readonly RecipeReadiness[];
+  /** Optional managed model installations, where capability readiness alone is insufficient. */
+  readonly components?: readonly SetupComponent[];
   /** Where the resolved ComfyUI engine runs, which changes what an unknown recipe means. */
   readonly comfyUiLocality: "local" | "remote" | undefined;
   /**
@@ -338,6 +342,7 @@ export function modelEligible(model: ManifestModel, inputs: EligibilityInputs): 
   // as much as to hardware.
   if (local) {
     const status = inputs.providers.find((p) => p.id === model.provider);
+    if (PROVIDERS[model.provider].requiresReadinessProbe && status?.validation !== "valid") return false;
     if (status?.validation === "invalid" || (status?.fault ?? null) !== null) return false;
   }
   // A local recipe below readiness is not usable — it stays visible in the picker as a disabled
@@ -354,5 +359,6 @@ export function modelEligible(model: ManifestModel, inputs: EligibilityInputs): 
       return false;
     }
   }
+  if (model.provider === "ming" && activationFor("ming", model.id, {components: inputs.components ?? []}) !== "ready") return false;
   return true;
 }

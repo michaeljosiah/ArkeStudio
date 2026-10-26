@@ -8,6 +8,11 @@ import { StartupScreen } from "../src/screens/launch.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
+const localAi = { ready: true, engines: {
+  comfyui: { installed: true, healthy: true, detail: null },
+  ollama: { installed: true, healthy: true, detail: null },
+} };
+
 const dom = parseHTML("<html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true });
 const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0));
@@ -42,7 +47,7 @@ it("accepts Continue before the snapshot, holds the press, then enters the ready
 for (const componentState of ["queued", "downloading", "paused", "installing"] as const) {
   it("keeps " + componentState + " setup on the surface until settled", async () => {
     const state = structuredClone(FIXTURE_STATE);
-    state.app.setup = { running: false, diskFreeMb: 100000, diskCheckedAt: null, components: [{
+    state.app.setup = { localAi, running: false, diskFreeMb: 100000, diskCheckedAt: null, components: [{
       id: "voxa-kokoro", displayName: "Voxa", state: componentState, purpose: "Voice", sizeMb: 88,
       installLocation: "models", bytesDone: 20, bytesTotal: 100, bytesPerSecond: null, pauseSupported: true,
     }] };
@@ -62,12 +67,49 @@ for (const componentState of ["queued", "downloading", "paused", "installing"] a
 
 it("skips the setup panel when its running flag has no fetching components", async () => {
   const state = structuredClone(FIXTURE_STATE);
-  state.app.setup = { running: true, diskFreeMb: 100000, diskCheckedAt: null, components: [] };
+  state.app.setup = { localAi, running: true, diskFreeMb: 100000, diskCheckedAt: null, components: [] };
   __setStateForTest(state);
   const { element, unmount } = await mount();
   try {
     await act(async () => { element.querySelector<HTMLButtonElement>(".fy-launch__action")!.click(); await flush(); });
     assert.equal(where, "/worlds");
     assert.ok(!element.textContent?.includes("Setting up your studio"));
+  } finally { await unmount(); }
+});
+
+for (const engine of ["comfyui", "ollama"] as const) {
+  it("holds local setup with installed files until " + engine + " becomes healthy", async () => {
+    const state = structuredClone(FIXTURE_STATE);
+    const checks = structuredClone(localAi);
+    checks.ready = false;
+    checks.engines[engine] = { installed: true, healthy: false, detail: null };
+    state.app.setup = { localAi: checks, running: false, diskFreeMb: 100000, diskCheckedAt: null, components: [] };
+    __setStateForTest(state);
+    const { element, unmount } = await mount();
+    try {
+      await act(async () => { element.querySelector<HTMLButtonElement>(".fy-launch__action")!.click(); await flush(); });
+      assert.equal(where, "/starting");
+      assert.ok(element.textContent?.includes("Setting up your studio"));
+      assert.ok(!element.textContent?.includes("100%"));
+      assert.equal(element.querySelector<HTMLButtonElement>(".fy-launch__once button")!.disabled, true);
+      assert.ok(element.textContent?.includes("Runtime settings"));
+      await act(async () => {
+        state.app.setup!.localAi = localAi;
+        __setStateForTest(state); await flush();
+      });
+      assert.equal(where, "/worlds");
+    } finally { await unmount(); }
+  });
+}
+
+it("fails closed while runtime checks are missing, even when no download is running", async () => {
+  const state = structuredClone(FIXTURE_STATE);
+  state.app.setup = { running: false, diskFreeMb: 100000, diskCheckedAt: null, components: [] };
+  __setStateForTest(state);
+  const { element, unmount } = await mount();
+  try {
+    await act(async () => { element.querySelector<HTMLButtonElement>(".fy-launch__action")!.click(); await flush(); });
+    assert.equal(where, "/starting");
+    assert.equal(element.querySelector<HTMLButtonElement>(".fy-launch__once button")!.disabled, true);
   } finally { await unmount(); }
 });

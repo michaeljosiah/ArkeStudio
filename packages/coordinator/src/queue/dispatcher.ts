@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { mingReferenceHash } from "../local-ai/ming-reference.js";
 import { dirname, extname, join } from "node:path";
 import {
   canDeleteJob,
@@ -67,6 +68,8 @@ export interface DispatchImageReference {
 }
 
 export interface DispatchVoiceReference {
+  transcript?: string;
+  language?: string;
   name: string;
   contentType: "audio/wav" | "audio/mpeg";
   data: Uint8Array;
@@ -692,6 +695,13 @@ export class JobQueue {
     }
     const durableParams = { ...input.params };
     if (input.voiceReference === true) durableParams["voiceReference"] = true;
+    if (input.provider === "ming") {
+      if (input.voiceReference !== true || !this.opts.readVoiceReference) throw new Error("Ming requires a host-resolved saved voice recording.");
+      const reference = await this.opts.readVoiceReference(input.worldId, input.provider, input.model, String(input.params["voiceId"]));
+      const identity = mingReferenceHash(reference);
+      if (input.params["voiceClipHash"] !== undefined && input.params["voiceClipHash"] !== identity) throw new Error("This Ming voice reference changed. Prepare the reading again.");
+      durableParams["voiceClipHash"] = identity;
+    }
     // Admission before durability (SPEC-021 R-16): a dispatch the coordinator knows cannot run
     // is refused with the readiness reason, and nothing is journalled for it.
     const admitted = await this.opts.admit?.(input);
@@ -1085,6 +1095,7 @@ export class JobQueue {
       this.submitAborts.set(job.id, reading);
       try {
         voiceReference = await this.opts.readVoiceReference(job.worldId, job.provider, job.model, voiceId, reading.signal);
+        if (job.provider === "ming" && job.params["voiceClipHash"] !== mingReferenceHash(voiceReference)) throw new Error("This Ming voice reference changed after it was queued. Prepare the reading again.");
       } catch (error) {
         if (!this.disposed && !this.cancelling.has(job.id) && this.stillQueued(job)) {
           const message = describeCoordinatorError(error);

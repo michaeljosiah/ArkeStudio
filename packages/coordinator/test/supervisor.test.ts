@@ -5,7 +5,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./tmp.js";
 import { until, untilAsync } from "./wait.js";
-import { ChildLedger, type ChildRecord } from "../src/child-ledger.js";
+import { ChildLedger, killTree, type ChildRecord } from "../src/child-ledger.js";
 import {
   ChildSupervisor,
   allocateLoopbackPort,
@@ -68,6 +68,57 @@ const SHIM_READY_MS = 30_000;
 const HEALTHY_WAIT_MS = 40_000;
 
 describe("ChildSupervisor", () => {
+  it("quiesces a native startup without waiting for readiness or losing the child", { timeout: 20000 }, async () => {
+    const sup = new ChildSupervisor({ id: "quiesce-start", command: process.execPath, args: [CHILD],
+      env: { MODE: "never-healthy" }, readyTimeoutMs: 30000, probeIntervalMs: 100 });
+    try {
+      const starting = sup.start();
+      await until(() => sup.pid !== null, "native startup child", SETTLE_WAIT_MS);
+      const pid = sup.pid!;
+      sup.quiesce();
+      await starting;
+      assert.equal(sup.pid, pid, "ownership survives cancellation of the readiness wait");
+      assert.equal(processGone(pid), false);
+      await sup.stopAndConfirm();
+      assert.ok(processGone(pid));
+    } finally { await sup.stopAndConfirm(); }
+  });
+  it("retains a failed-startup child until a later cleanup confirms native exit", { timeout: 60_000 }, async () => {
+    let refuse = true;
+    const sup = new ChildSupervisor({ id: "failed-start", command: process.execPath, args: [CHILD],
+      env: { MODE: "ignore-stop" }, readyTimeoutMs: 10_000, validateHealth: async () => ({ ok: false, reason: "incompatible test runtime" }),
+    }, { kill: async pid => { if (!refuse) await killTree(pid); } });
+    try {
+      await sup.start();
+      assert.equal(sup.status, "failed");
+      const pid = sup.pid!;
+      assert.ok(pid);
+      assert.equal(processGone(pid), false);
+      await sup.start();
+      assert.equal(sup.pid, pid, "a failed startup cannot be replaced while its child is still live");
+      await assert.rejects(sup.stopAndConfirm(), /has not confirmed process exit/);
+      assert.equal(sup.pid, pid);
+      refuse = false;
+      await sup.stopAndConfirm();
+      assert.equal(processGone(pid), true);
+    } finally { refuse = false; await sup.stopAndConfirm(); }
+  });
+  it("preserves a host-reserved port and expands it in environment across restarts", async () => {
+    const port = await allocateLoopbackPort();
+    const sup = new ChildSupervisor({ id: "reserved", command: process.execPath, args: [CHILD], port,
+      env: { PORT: "{port}", MODE: "healthy", OPENAI_API_KEY: "port-{port}" }, healthPath: "/health", readyTimeoutMs: 10_000 });
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await sup.start();
+        assert.equal(sup.status, "healthy");
+        assert.equal(sup.port, port);
+        const result = await fetch(`http://127.0.0.1:${port}/health`).then(response => response.json()) as { pid: number; env: { OPENAI_API_KEY: string } };
+        assert.equal(result.env.OPENAI_API_KEY, `port-${port}`);
+        await sup.stopAndConfirm();
+        assert.ok(processGone(result.pid));
+      }
+    } finally { await sup.stopAndConfirm(); }
+  });
   it("allocates distinct loopback ports", async () => {
     const a = await allocateLoopbackPort();
     const b = await allocateLoopbackPort();
@@ -215,7 +266,7 @@ describe("ChildSupervisor", () => {
     try {
       assert.equal(sup.status, "failed");
       assert.match(sup.reason ?? "", /did not become healthy/);
-      assert.equal(sup.pid, null);
+      await until(() => sup.pid === null, "the failed-startup child to confirm exit", SETTLE_WAIT_MS);
     } finally {
       await sup.stop();
     }

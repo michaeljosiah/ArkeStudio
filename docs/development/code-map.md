@@ -1,5 +1,42 @@
 # Code map
 
+Managed local engines: coordinator `local-ai/ollama.ts` owns portable Ollama and explicit URL
+overrides; `setup/catalogue.ts` / `setup/local-setup.ts` own pinned archives and architecture/
+version receipts. `harness/v2-launch.ts` writes only the selected Ollama endpoint into the
+owned OpenCode profile. `local-ai/gpu.ts` serializes writing, ComfyUI and Ming; `local-ai/ming.ts`
+owns Python batch cancellation/confirmed exit, exposed through Coordinator's host-only
+`generateMingBatch`. Desktop/dev/`node-studio-host.ts` compose these services; desktop
+`startup-runtime-owners.ts` retains them across initialization failure until transfer to
+Coordinator. `harness/runtime-change.ts` fences endpoint changes against cloud/local turns.
+Node hosts compose ComfyUI through `comfyui/node-engine.ts`; its scoped HTTP transport,
+digest cache and weight catalogue live beside the engine and are also reused by desktop.
+OpenCode has only the pinned v2 adapter; discovery refuses v1 and other unqualified releases.
+Contracts `ollama.ts`, wire status
+folds and client `screens/engine-panes.tsx` expose runtime ownership. Tests: coordinator
+`ollama-engine`, `ming-process`, `local-gpu`, `supervisor`, `v2-launch` and `setup/comfyui-setup`;
+client `engine-panes`; contracts `ollama`; providers `clients`. See
+[managed runtime policy and delivery boundary](managed-local-runtimes.md).
+
+The mandatory local-AI launch gate is projected by contracts `setup.ts` and Coordinator onto
+`setup.localAi`, seeded before detection and refreshed by both engine subscriptions. Client
+`screens/launch.tsx` holds continuation until both installation and health checks pass;
+Downloads reports the same verdict. Runtime Skip is refused in `setup/local-setup.ts`.
+Tests: contracts `local-ai-setup`, coordinator `setup/local-ai-readiness`, client `launch-lifecycle`.
+
+Ming's optional 0.5B and experimental 7.9B readers are declared in contracts `ming.ts` and providers
+`ming-models.ts` / `clients/ming.ts`. Coordinator `local-ai/ming-catalogue.ts` / `ming-assets.json`
+declare the complete setup closure; `ming-speech.ts` verifies it, chunks narration and owns private
+inputs; `ming-worker.py` executes the locked offline source with private dependency overlays.
+`voice/service.ts` offers saved library voices with consent and a reference transcript; `voice/library.ts`
+and `local-ai/ming-reference.ts` bind clip bytes and words to queued/cache identity. Dispatcher
+rechecks that identity before submit. Client `clone-voice-dialog.tsx` collects the reference words;
+`local-models.tsx` selects the dependency leaf for complete installation. Desktop packages the worker
+outside asar; Node engine builds copy it beside the bundle. Tests: coordinator `ming-speech`,
+`voice/ming`, `queue/dispatcher`; providers `ming`; client `clone-voice`, `local-models`; desktop
+`packaged-runtimes`; root `scripts/test-ming-worker.py`. See [setup and delivery limits](managed-local-runtimes.md#ming-qualification-and-delivery-boundary).
+The standalone audition remains `scripts/probe-ming-tts.py`, with input/environment checks in
+`scripts/test-probe-ming-tts.py`; see [audition evidence](ming-tts-audition.md). Voxa is unchanged.
+
 On-demand story delivery: coordinator `world/undersong-release.ts` pins the public archive;
 `world/story-download.ts` owns pinned single/multipart resumable archives, disk-space inspection, verification
 and extraction, then `world/sample-world.ts` installs an independent copy. Contracts
@@ -897,10 +934,10 @@ Regressions are in coordinator `retrieval.test.ts`,
 `turn-result.test.ts`, `run.test.ts` and `world/schema-version.test.ts`.
 
 Proposal cancellation (#1981): `harness/authoring.ts` retains the active-run guard through the
-writer's terminal event and interrupt acknowledgement. The v1 adapter scopes abort to the same
-directory and execution API as prompt_async, waits for pending prompt admission, and translates
-MessageAbortedError to cancellation. Requests are bounded; partial proposal files remain intact.
-Tests: coordinator `test/harness/authoring.test.ts`, adapter-opencode `test/adapter.test.ts`.
+writer's terminal event and interrupt acknowledgement. OpenCode uses only the pinned v2 adapter
+and its execution interruption protocol; the v1 adapter and fallback are removed. Requests are
+bounded; partial proposal files remain intact. Tests: coordinator `test/harness/authoring.test.ts`,
+adapter-opencode `test/v2-adapter.test.ts`.
 
 Ready EPUB editions (#2062) expose Preview EPUB from `StoryEditionFiles`, in both the
 world-independent Publications library and Publish. The shared `StoryBookPreview` reads only

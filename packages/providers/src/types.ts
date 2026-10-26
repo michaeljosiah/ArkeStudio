@@ -90,6 +90,9 @@ export interface PreparedVideoSource {
 }
 
 export interface PreparedVoiceReference {
+  /** Exact reference words for local acoustic conditioning; ephemeral with the clip bytes. */
+  transcript?: string;
+  language?: string;
   /** Opaque, content-addressed upload name. It carries no world, character, or local path. */
   name: string;
   contentType: "audio/wav" | "audio/mpeg";

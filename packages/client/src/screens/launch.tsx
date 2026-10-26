@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import type { ComponentHealth } from "@arke-studio/contracts";
+import { LOCAL_AI_RUNTIMES, type ComponentHealth } from "@arke-studio/contracts";
+import { isRemoteSession } from "../lib/remote-session.js";
 import type { StartupState } from "../arke-bridge.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { ArrowRight, Check, CircleAlert, Cloud, Laptop, LinkOff, Unplug } from "../components/icons.js";
-import { reconnectNow, useEnvCheck, useSetup, useStore } from "../lib/store.js";
+import { reconnectNow, refreshComfyUi, refreshOllama, restartComfyUi, setupRetry, useEnvCheck, useSetup, useStore } from "../lib/store.js";
 
 /**
  * The launch surface (design master turn 158; supersedes 76a, carries 76b and 15a).
@@ -217,14 +218,21 @@ export function StartupScreen() {
   }, [connection]);
 
   const ready = connection === "open" && state !== null;
-  // Nothing left to fetch and somewhere to go: the only state where the press goes straight in.
-  const settled = ready && !fetching;
-  const steps = setupSteps(connection, state, env !== null);
+  // Only the coordinator's installation + health verdict can complete local setup.
+  const localAiPending = setup !== null && setup.localAi?.ready !== true;
+  const settled = ready && !fetching && !localAiPending;
+  const runtimeSteps = setup === null ? [] : Object.entries(LOCAL_AI_RUNTIMES).map(([id]) => {
+    const check = setup.localAi?.engines[id as keyof typeof LOCAL_AI_RUNTIMES];
+    return { label: id === "comfyui" ? "ComfyUI" : "Ollama",
+      state: check?.installed && check.healthy ? "ready" : check?.detail ?? "Waiting for runtime checks.",
+      settled: check?.installed === true && check.healthy };
+  });
+  const steps = [...setupSteps(connection, state, env !== null), ...runtimeSteps];
   const components = setup?.components ?? [];
 
   // One bar over the whole job. A check counts 1 once settled; a component counts its own
   // fraction of bytes — and counts as done when it is skipped, blocked or failed, because
-  // those are settled outcomes too and the bar must not stall on something never coming.
+  // those are settled transfer outcomes. Required runtime health steps remain incomplete.
   const parts = steps.length + components.length;
   const doneParts =
     steps.filter((s) => s.settled).length +
@@ -240,7 +248,7 @@ export function StartupScreen() {
             : 1),
       0,
     );
-  const percent = parts === 0 ? 0 : Math.round((doneParts / parts) * 100);
+  const percent = parts === 0 ? 0 : Math.min(localAiPending ? 99 : 100, Math.round((doneParts / parts) * 100));
 
   // What is happening right now, in the product's words — one line, never a list.
   const active =
@@ -259,10 +267,9 @@ export function StartupScreen() {
   const speed = active?.bytesPerSecond ?? null;
   const remaining = speed !== null && speed > 0 ? Math.round((totalBytes - doneBytes) / speed) : null;
 
-  // Setup happens once. Every start after it detects the runtimes already on this machine and
-  // fetches nothing, so the setup panel is kept for the start that is actually doing the work:
-  // something queued, downloading, paused or installing.
-  const setupRun = fetching;
+  // Detection reuses installed files. Hold setup while a transfer or required health check
+  // remains outstanding, including a failed engine with no download left running.
+  const setupRun = fetching || localAiPending;
 
   const destination = (): string | null => {
     if (!state) return null;
@@ -383,17 +390,38 @@ export function StartupScreen() {
                   </li>
                 ))}
               </ul>
+              {localAiPending && <div className="fy-launch__runtime-actions">
+                {!isRemoteSession() && Object.entries(LOCAL_AI_RUNTIMES).map(([id, componentId]) => {
+                  const component = components.find(c => c.id === componentId);
+                  const check = setup?.localAi?.engines[id as keyof typeof LOCAL_AI_RUNTIMES];
+                  const engineState = id === "comfyui" ? state?.app.comfyui?.engine.state : state?.app.ollama?.state;
+                  const retryInstall = component && ["failed", "blocked", "skipped", "available"].includes(component.state);
+                  if (component?.state === "paused") return <SetupTransferControl key={id} component={component} />;
+                  if (!retryInstall && (!check?.installed || check.healthy || engineState === "starting")) return null;
+                  return <button key={id} type="button" onClick={() => {
+                    if (!check?.installed) setupRetry(componentId);
+                    else if (id === "comfyui") {
+                      if (state?.app.comfyui?.engine.source === "user-url") refreshComfyUi();
+                      else restartComfyUi();
+                    }
+                    else refreshOllama();
+                  }}>Retry {id === "comfyui" ? "ComfyUI" : "Ollama"}</button>;
+                })}
+                <button type="button" onClick={() => navigate("/settings/providers")}>Runtime settings</button>
+                <button type="button" onClick={() => navigate("/settings/downloads")}>Downloads</button>
+                {isRemoteSession() && <p>Finish local AI setup on the computer running Arke Studio.</p>}
+              </div>}
             </section>
             <div className="fy-launch__once">
               <span>One-time setup.</span>
               <button
                 type="button"
                 className="fy-launch__action fy-launch__action--line"
-                disabled={!ready}
-                title={ready ? undefined : "Waiting for the studio core"}
+                disabled={!ready || localAiPending}
+                title={localAiPending ? "ComfyUI and Ollama must be installed, running and healthy" : ready ? undefined : "Waiting for the studio core"}
                 onClick={background}
               >
-                Continue in the background
+                {localAiPending ? "Waiting for local AI" : "Continue in the background"}
                 <ArrowRight size={16} />
               </button>
             </div>
