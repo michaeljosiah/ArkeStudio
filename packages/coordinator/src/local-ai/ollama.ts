@@ -141,6 +141,15 @@ export class OllamaEngineService {
     else if (!this.supervisor || !this.recoveryFactory && (this.current.state === "failed" || this.current.state === "stopped")) await this.applySettings(this.settings);
   }
 
+  /** Another engine owns the inference lane here. A confirmed crashed child may keep its
+   * queued recovery; a live unusable managed child must exit before memory can be handed over. */
+  async prepareGpuHandover(): Promise<void> {
+    if (this.externallySelected()) return;
+    if (this.recoveryPort && this.supervisor?.pid === null && this.supervisor.descendantPids.length === 0) return;
+    this.supervisor?.quiesce();
+    await this.stopManaged();
+  }
+
   async list(signal: AbortSignal): Promise<readonly string[]> {
     const response = await this.request("/api/tags", { signal });
     const value = await response.json() as { models?: Array<{ name?: string }> };

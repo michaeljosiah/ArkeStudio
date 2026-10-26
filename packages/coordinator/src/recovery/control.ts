@@ -8,7 +8,7 @@ import type { RecoveryControlStore } from "./control-file.js";
 type Intent = NonNullable<RecoveryTarget["intent"]>;
 type Hold = { status: "held"; reason: RecoveryHoldReason };
 type AuditFailure = "invalid" | "permission" | "disk-full" | "read-failed" | "write-failed";
-export type RecoveryAuthorization = Hold | { status: "authorized"; intent: Intent };
+export type RecoveryAuthorization = (Hold & { intent?: Intent }) | { status: "authorized"; intent: Intent };
 
 /** Durable restart gate for lifecycle owners (SPEC-061 R-11/R-25).
  * Only lifecycle owners call it, under their existing fence. It never spawns, kills, retries a
@@ -97,7 +97,7 @@ export class RecoveryControlService {
       target.intent = { id: randomBytes(32).toString("hex"), action: "restart-managed-runtime", generation: context.generation,
         componentDigest: context.componentDigest, automatic: input.automatic, authorizedAt: now, notBefore: now + decision.delayMs, phase: "intended" };
       if (!await this.persist(next)) return { status: "held", reason: "audit-unavailable" };
-      if (this.closing) return { status: "held", reason: "stopped" };
+      if (this.closing) return { status: "held", reason: "stopped", intent: structuredClone(target.intent) };
       return { status: "authorized", intent: structuredClone(target.intent) };
     });
   }

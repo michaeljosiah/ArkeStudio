@@ -21,13 +21,17 @@ defines the closed restart context and rolling budget. Coordinator `recovery/con
 single-use durable intents, unknown-outcome reconciliation, Suggest only/user Stop, final owner-fence
 checks and shutdown; `recovery/control-file.ts` keeps minimal authority in a separate bounded file.
 `recovery/supervisor.ts` admits the existing owner's restart through the shared GPU lane. The host
-factory enables control; Coordinator connects managed Ollama before its first child starts.
+factory enables control; Coordinator connects managed Ollama and ComfyUI before their first child starts.
+ComfyUI's primary and isolated recipe processes each retain a stable recovery target;
+`comfyui/profiled-engine.ts` propagates the factory and early shutdown fence to both owners.
 Desktop/dev/Node select its endpoint early but defer managed startup until this composition.
 Ollama setup holds `beginComponentInstall` / `reserveInstallation` through verified publication,
 so activation cannot race changed files. It drains inference under the GPU lane before stopping;
 unconfirmed exit retains that reservation in the owner until confirmed stop. Tests: contracts `test/recovery-policy.test.ts`, coordinator
 `test/recovery/`, `test/ollama-engine.test.ts` and `test/setup/local-setup.test.ts`.
-Ollama unexpected exits now use durable policy; failed health retains the live process for review.
+Managed Ollama/ComfyUI unexpected exits now use durable policy; failed health retains the live process for review.
+GPU handover preserves a confirmed crashed child's waiting recovery. Host shutdown closes both
+owners before setup drains, reports failed native cleanup and permits a later confirmation retry.
 Other service owners, reviewed stop/restart actions, policy/incident UI and broader qualification
 remain outstanding. No completed recovery-agent claim follows from this slice.
 

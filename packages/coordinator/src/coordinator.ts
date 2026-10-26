@@ -3568,7 +3568,7 @@ export class Coordinator {
       if (engine === "Ollama" && opts.ollama && opts.ollama.service.baseUrl() === null && !opts.ollama.service.externallySelected()) {
         // An uninstalled runtime owns no memory. A failed owned child must confirm exit;
         // a nullable endpoint by itself is not evidence that it released its allocations.
-        await opts.ollama.service.stopManaged();
+        await opts.ollama.service.prepareGpuHandover();
         this.clearLocalResidency("ollama");
         return;
       }
@@ -3589,6 +3589,17 @@ export class Coordinator {
         componentDigest: () => createHash("sha256").update(JSON.stringify([SETUP_CATALOGUE.find(entry => entry.id === "ollama-runtime"), service.modelsDir()])).digest("hex"),
         acquire: signal => this.localGpu.acquire("Ollama", signal),
       }));
+    }
+    if (opts.recoveryControl && opts.comfyui && opts.appRoot) {
+      const control = opts.recoveryControl;
+      opts.comfyui.service.configureRecovery((owner, supervisor) => {
+        const key = createHash("sha256").update(`managed-comfyui:${owner.recoveryTarget().role}`).digest("hex");
+        return new SupervisorRecovery({ control, identity: { key, service: "comfyui" },
+          current: () => !this.stopping && owner.ownsSupervisor(supervisor), ownership: () => owner.recoveryTarget().ownership,
+          componentDigest: () => createHash("sha256").update(JSON.stringify([SETUP_CATALOGUE.find(entry => entry.id === "comfyui-runtime"), owner.recoveryTarget().configurationDigest])).digest("hex"),
+          acquire: signal => this.localGpu.acquire("ComfyUI", signal),
+        });
+      });
     }
     this.mingSpeech = opts.appRoot && opts.ming && opts.comfyui ? new MingSpeechService({ appRoot: opts.appRoot,
       python: () => opts.comfyui!.service.sharedMingPython(), run: (command, signal) => this.generateMingBatch(command, signal),
@@ -10451,11 +10462,11 @@ export class Coordinator {
         if (!service || !this.setup || !this.appSettings || this.localGpu.isBusy("Ollama")) return;
         // A selected user service is never stopped or modified by a managed-runtime update.
         const external = service.externallySelected();
-        const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
         try {
-          if (!external) await service.stopManaged();
+          // Setup's installation owner acquires/drains the lane and confirms stop. Taking an
+          // outer lease here would reject our own busy check, then deadlock on reacquisition.
           await this.setup.updateTree("ollama-runtime");
-        } finally { try { if (!external && !this.stopping) await service.refresh(); } finally { release(); } }
+        } finally { if (!external && !this.stopping) await service.refresh(); }
         return;
       }
       case "use-detected-comfyui": {
@@ -23155,6 +23166,7 @@ export class Coordinator {
     this.runtimeStop.abort(new Error("Local runtimes are stopping."));
     // Setup completion can be awaiting startup: cancel that wait before setup itself drains.
     this.opts.ollama?.service.beginShutdown();
+    this.opts.comfyui?.service.beginShutdown();
     for (const controller of this.performanceGenerations.values()) controller.abort();
     for (const controller of this.keyArtPromptDrafts.values()) controller.abort();
     this.keyArtPromptReviews.clear();
@@ -23211,7 +23223,7 @@ export class Coordinator {
       // Only now may queue disposal cancel execution and suppress further journal transitions.
       await this.jobQueue?.dispose();
       this.opts.voice?.dispose?.();
-      await this.opts.comfyui?.service.dispose().catch(() => {});
+      const comfyUiStops = await Promise.allSettled([this.opts.comfyui?.service.dispose()]);
       await Promise.allSettled(this.backgroundWork);
       await Promise.allSettled(this.carrying.values());
       await this.appearanceWrite;
@@ -23236,7 +23248,7 @@ export class Coordinator {
       // called, so a fault recorded in the last moments of a run — the kind most worth having,
       // because the run ended — could still be in the queue when the process left.
       await this.appLog?.drain();
-      const failedRuntimeStops = runtimeStops.filter(result => result.status === "rejected");
+      const failedRuntimeStops = [...comfyUiStops, ...runtimeStops].filter(result => result.status === "rejected");
       if (failedRuntimeStops.length) throw new AggregateError(failedRuntimeStops.map(result => result.reason), "Local runtime cleanup did not confirm exit.");
     })();
     try {

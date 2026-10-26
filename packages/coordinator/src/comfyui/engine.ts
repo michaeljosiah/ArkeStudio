@@ -14,7 +14,9 @@ import type {
   WindowsCommitSnapshot,
 } from "@arke-studio/contracts";
 import { COMFYUI_VERSION_FLOOR, compareComfyUiVersions, meetsComfyUiVersion } from "@arke-studio/contracts";
-import type { ChildSupervisor, SupervisedSpec } from "../supervisor.js";
+import type { ChildSupervisor, SupervisedSpec, SupervisorRecoveryPort } from "../supervisor.js";
+
+export type ComfyUiRecoveryFactory = (owner: ComfyUiEngineService, supervisor: ChildSupervisor) => SupervisorRecoveryPort;
 
 /**
  * The ComfyUI engine service (SPEC-021 §2.2, §2.5, §2.12): resolve where the engine is, keep it
@@ -250,6 +252,8 @@ export class ComfyUiEngineService {
   private settings: ComfyUiSettings = { enginePath: null, engineUrl: null, modelsDir: null };
   private resolved: ResolvedEngine = { source: "absent", root: null, url: null, problem: null };
   private supervisor: ChildSupervisor | null = null;
+  private recoveryFactory: ComfyUiRecoveryFactory | null = null;
+  private recoveryPort: SupervisorRecoveryPort | null = null;
   private supervisorStatusListener: (() => void) | null = null;
   private supervisorExitBackstop: (() => void) | null = null;
   private detected: ComfyUiDetectedInstall[] = [];
@@ -304,9 +308,22 @@ export class ComfyUiEngineService {
   private readonly subscribers = new Set<() => void>();
   private readonly readinessWaiters = new Set<(ready: boolean) => void>();
   private disposed = false;
+  private quiescing = false;
   private disposePromise: Promise<void> | null = null;
 
   constructor(private readonly deps: EngineServiceDeps) {}
+
+  configureRecovery(factory: ComfyUiRecoveryFactory): void {
+    if (this.recoveryFactory || this.supervisor || this.disposed || this.quiescing) throw new Error("Configure ComfyUI recovery once, before managed startup.");
+    this.recoveryFactory = factory;
+  }
+  ownsSupervisor(supervisor: ChildSupervisor): boolean { return !this.disposed && !this.quiescing && this.supervisor === supervisor; }
+  /** Host-only recovery identity; paths remain inside the configuration digest. Each process
+   * profile has a stable role even when its native process/queue epoch is replaced. */
+  recoveryTarget(): { role: string; ownership: "managed" | "external"; configurationDigest: string } {
+    return { role: this.deps.launch?.id ?? "comfyui", ownership: this.resolved.source === "managed" ? "managed" : "external",
+      configurationDigest: createHash("sha256").update(JSON.stringify([this.settings, this.deps.launch ?? null])).digest("hex") };
+  }
 
   private recordProbe(next: SystemStatsProbe): void {
     this.probed = next;
@@ -482,7 +499,7 @@ export class ComfyUiEngineService {
   // ---- supervision (§2.8) --------------------------------------------------
 
   private async startSupervision(root: string): Promise<void> {
-    if (this.disposed) return;
+    if (this.disposed || this.quiescing) return;
     this.profileMissingFile = null;
     if (this.deps.launch) {
       const models = this.modelsDir();
@@ -495,7 +512,7 @@ export class ComfyUiEngineService {
       }
     }
     const layout = await this.portableLayout(root);
-    if (layout === null || this.disposed) return; // resolve() already recorded the problem
+    if (layout === null || this.disposed || this.quiescing) return; // resolve() already recorded the problem
     const args = ["-s", layout.main, "--port", "{port}", "--listen", "127.0.0.1", "--disable-metadata"];
     if (this.deps.launch) args.push(...this.deps.launch.args);
     // A models override reaches a spawned engine through an extra-model-paths file — the
@@ -518,7 +535,7 @@ export class ComfyUiEngineService {
           "",
         ].join("\n"),
       );
-      if (this.disposed) return;
+      if (this.disposed || this.quiescing) return;
       args.push("--extra-model-paths-config", yamlPath);
     }
     const supervisor = this.deps.createSupervisor({
@@ -562,7 +579,7 @@ export class ComfyUiEngineService {
     this.currentProcessEpoch = createProcessEpoch();
     let currentSupervisorEpoch = observedEpoch();
     const statusListener = () => {
-      if (this.disposed) return;
+      if (this.disposed || this.quiescing || this.supervisor !== supervisor) return;
       if (supervisor.status === "starting") {
         const epoch = observedEpoch();
         if (epoch !== null && epoch !== currentSupervisorEpoch) {
@@ -585,6 +602,8 @@ export class ComfyUiEngineService {
     };
     supervisor.on("status", statusListener);
     this.supervisor = supervisor;
+    this.recoveryPort = this.recoveryFactory?.(this, supervisor) ?? null;
+    if (this.recoveryPort) supervisor.setRecoveryPort(this.recoveryPort);
     this.supervisorStatusListener = statusListener;
     this.supervisorExitBackstop = this.deps.registerSupervisorExitBackstop(supervisor);
     // Fire and observe, never await: start() resolves only after the health probe settles, and
@@ -595,7 +614,8 @@ export class ComfyUiEngineService {
 
   private async stopSupervision(confirm = false): Promise<void> {
     const supervisor = this.supervisor;
-    if (confirm && supervisor) await supervisor.stopAndConfirm();
+    if ((confirm || this.recoveryPort) && supervisor) await supervisor.stopAndConfirm();
+    await this.recoveryPort?.ownerStopped(); this.recoveryPort = null;
     this.supervisor = null;
     const statusListener = this.supervisorStatusListener;
     this.supervisorStatusListener = null;
@@ -610,7 +630,7 @@ export class ComfyUiEngineService {
 
   /** Weight completion may activate a profile that had no process to supervise at startup. */
   async activateInstalledProfile(): Promise<void> {
-    if (this.deps.launch && this.supervisor === null && this.resolved.source !== "user-url" && !this.disposed) {
+    if (this.deps.launch && this.supervisor === null && this.resolved.source !== "user-url" && !this.disposed && !this.quiescing) {
       await this.applySettings(this.settings);
     }
   }
@@ -625,7 +645,7 @@ export class ComfyUiEngineService {
    * process holding a port, invisible to stop() and to dispose().
    */
   applySettings(settings: ComfyUiSettings): Promise<void> {
-    if (this.disposed) return Promise.resolve();
+    if (this.disposed || this.quiescing) return Promise.resolve();
     // Invalidate immediately, before the serialized stop/resolve work begins: an in-flight
     // checkpoint hash must not publish an old engine's verdict while this change waits its turn.
     this.cancelHashing();
@@ -673,21 +693,21 @@ export class ComfyUiEngineService {
   private settingsWork: Promise<void> = Promise.resolve();
 
   private async applySettingsOnce(settings: ComfyUiSettings): Promise<void> {
-    if (this.disposed) return;
+    if (this.disposed || this.quiescing) return;
     this.nodeClasses = null;
     this.invalidateVerification();
     this.stopUrlProbe();
     await this.stopSupervision(true);
     this.settings = settings;
-    if (this.disposed) {
+    if (this.disposed || this.quiescing) {
       this.resolved = { source: "absent", root: null, url: null, problem: null };
       return;
     }
     this.recordProbe({ version: null, reachable: false, detail: null });
     this.resolved = await this.resolve();
-    if (this.disposed) return;
+    if (this.disposed || this.quiescing) return;
     this.detected = this.resolved.source === "absent" ? await this.detectExisting() : [];
-    if (this.disposed) return;
+    if (this.disposed || this.quiescing) return;
     if (
       (this.resolved.source === "user-path" || this.resolved.source === "managed") &&
       this.resolved.problem === null
@@ -837,7 +857,11 @@ export class ComfyUiEngineService {
   prepareGpuHandover(): Promise<void> {
     const work = this.settingsWork.then(async () => {
       if (this.resolved.source === "user-url" || !this.supervisor || !["failed", "stopped", "unhealthy"].includes(this.supervisor.status)) return;
+      // A crashed child waiting for this same GPU lane needs no kill. Cancelling its recovery
+      // here would lose the queued repair whenever another creative engine takes the card.
+      if (this.recoveryPort && this.supervisor.pid === null && this.supervisor.descendantPids.length === 0) return;
       await this.supervisor.stopAndConfirm();
+      await this.recoveryPort?.ownerStopped();
       this.currentProcessEpoch = null;
       this.recordProbe({ version: null, reachable: false, detail: null });
       await this.publish();
@@ -1454,8 +1478,15 @@ export class ComfyUiEngineService {
     }
   }
 
+  /** Close startup/recovery synchronously while admitted jobs retain their existing process. */
+  beginShutdown(): void {
+    this.quiescing = true; this.stopUrlProbe(); this.hashAbort.abort(); this.supervisor?.quiesce();
+    for (const waiter of this.readinessWaiters) waiter(false);
+  }
+
   async dispose(): Promise<void> {
     if (this.disposePromise !== null) return this.disposePromise;
+    this.beginShutdown();
     this.disposed = true;
     this.stopUrlProbe();
     this.hashAbort.abort();
@@ -1468,7 +1499,7 @@ export class ComfyUiEngineService {
       await this.settingsWork;
       this.resolved = { source: "absent", root: null, url: null, problem: null };
       await this.stopSupervision();
-    })();
+    })().catch(error => { this.disposePromise = null; throw error; });
     return this.disposePromise;
   }
 }

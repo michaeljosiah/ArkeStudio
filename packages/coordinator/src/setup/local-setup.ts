@@ -245,7 +245,7 @@ export class LocalSetupService {
         files: entry.spec.kind === "files" && location ? entry.spec.files.map((file) => {
           const target = join(location, file.file);
           return { key: createHash("sha256").update(JSON.stringify([target, file.sha256 ?? file.url, file.sizeMb])).digest("hex"), sizeMb: file.sizeMb,
-            bytesDone: componentIsSettled(c.state) ? file.sizeMb * 1024 * 1024 : Math.min(file.sizeMb * 1024 * 1024, this.fileProgress.get(target) ?? 0) };
+            bytesDone: Math.floor(componentIsSettled(c.state) ? file.sizeMb * 1024 * 1024 : Math.min(file.sizeMb * 1024 * 1024, this.fileProgress.get(target) ?? 0)) };
         }) : undefined,
       }; }),
       running: this.running,

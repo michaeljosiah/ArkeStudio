@@ -26,6 +26,10 @@ export class SupervisorRecovery implements SupervisorRecoveryPort {
   private now(): number { return (this.deps.now ?? Date.now)(); }
 
   async allowStart(signal: AbortSignal): Promise<{ ok: true } | { ok: false; reason: string }> {
+    if (signal.aborted || !this.deps.current()) return { ok: false, reason: HOLD.stopped };
+    // This gate owns managed restart authority. A deliberate personal-path selection may
+    // perform ordinary startup without resetting or inheriting the managed role's circuit.
+    if (this.deps.ownership() !== "managed") return { ok: true };
     await this.deps.control.open();
     if (signal.aborted || !this.deps.current()) return { ok: false, reason: HOLD.stopped };
     const snapshot = this.deps.control.snapshot();
@@ -58,7 +62,15 @@ export class SupervisorRecovery implements SupervisorRecoveryPort {
       const context = () => ({ ownership: this.deps.ownership(), idle: !work.signal.aborted && this.deps.current(),
         exitConfirmed: work.exitConfirmed(), generation: work.generation, componentDigest: this.deps.componentDigest() });
       const grant = await this.deps.control.authorize({ ...this.deps.identity, context: context(), automatic: true });
-      if (grant.status !== "authorized") { work.held(HOLD[grant.reason]); return; }
+      if (grant.status !== "authorized") {
+        // A flush may finish after shutdown closed admission. No authority was granted, but
+        // this owner still knows the saved intent never started and must settle it on drain.
+        if (grant.intent) {
+          intentId = grant.intent.id;
+          await this.deps.control.settleFromOwner(this.deps.identity.key, intentId, "not-started");
+        }
+        work.held(HOLD[grant.reason]); return;
+      }
       intentId = grant.intent.id;
       await work.sleep(Math.max(0, grant.intent.notBefore - this.now()));
       if (!work.current() || work.signal.aborted || !this.deps.current()) {

@@ -40,6 +40,7 @@ const server = http.createServer((req, res) => {
       ok: true,
       pid: process.pid,
       version: process.env.SERVICE_VERSION,
+      system: process.env.COMFYUI_VERSION ? { comfyui_version: process.env.COMFYUI_VERSION } : undefined,
       protocolVersion: process.env.PROTOCOL_VERSION ? Number(process.env.PROTOCOL_VERSION) : undefined,
       env: {
         ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,

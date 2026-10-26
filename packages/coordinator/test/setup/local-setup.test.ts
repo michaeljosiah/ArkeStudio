@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainEvent, SetupStatus } from "@arke-studio/contracts";
+import { SetupStatusSchema } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { LocalSetupService, systemTar, type SetupDeps } from "../../src/setup/local-setup.js";
 import {
@@ -17,6 +18,16 @@ import {
 } from "../../src/setup/catalogue.js";
 
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const;
+
+it("publishes integer byte progress for small files whose catalogue size is a fractional MiB", async () => {
+  const entry: CatalogueEntry = { id: "small-file", displayName: "Small file", purpose: "Source fixture", sizeMb: 1,
+    spec: { kind: "files", dir: "small", files: [{ url: "https://example.test/source.py", file: "source.py", sizeMb: 0.00001 }] } };
+  const service = new LocalSetupService({ ...deps(), externallyPresent: async () => true }, () => {}, { appRoot: await root(), catalogue: [entry] });
+  try {
+    await service.detect(); const status = SetupStatusSchema.parse(service.status());
+    assert.equal(status.components[0]!.files![0]!.bytesDone, 10);
+  } finally { await service.dispose(); }
+});
 
 it("holds one install-owner lease through writes and policy rechecks, releasing before activation and on failure", async () => {
   for (const fails of [false, true]) {

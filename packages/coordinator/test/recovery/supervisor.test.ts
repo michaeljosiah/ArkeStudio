@@ -122,3 +122,20 @@ it("retains an unresolved cleanup's GPU lease until the lifecycle owner confirms
   await port.ownerStopped(); assert.equal(released, 1); assert.equal(h.service.snapshot().control.targets[0]!.intent, null);
   await port.ownerStopped(); assert.equal(released, 1); await h.service.stop();
 });
+
+it("settles an intent flushed after admission closes without starting a child or blocking the next launch", async () => {
+  let entered!: () => void, finish!: () => void, releases = 0, starts = 0, saves = 0;
+  const saving = new Promise<void>(resolve => { entered = resolve; }), saved = new Promise<void>(resolve => { finish = resolve; });
+  let disk: RecoveryControl = { version: 1, policyRevision: 1, mode: "automatic", targets: [] };
+  const store = { load: async () => structuredClone(disk), save: async (value: RecoveryControl) => {
+    if (++saves === 1) { entered(); await saved; } disk = structuredClone(value);
+  } };
+  const control = new RecoveryControlService({ store }), port = policy(control, { acquire: async () => () => { releases++; } }), abort = new AbortController();
+  const recovering = port.recover({ generation: 1, signal: abort.signal, current: () => !abort.signal.aborted, exitConfirmed: () => true,
+    sleep: async () => { throw new Error("closed admission must not enter backoff"); }, held: () => {}, restart: async () => { starts++; return "ready"; } });
+  await saving; control.closeAdmission(); abort.abort(); finish(); await recovering; await port.ownerStopped();
+  assert.equal(starts, 0); assert.equal(releases, 1); assert.equal(disk.targets[0]!.intent, null); assert.equal(disk.targets[0]!.attempts.length, 1);
+  await control.stop();
+  const restored = new RecoveryControlService({ store });
+  assert.deepEqual(await policy(restored).allowStart(new AbortController().signal), { ok: true }); await restored.stop();
+});

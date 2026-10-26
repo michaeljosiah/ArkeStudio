@@ -21,9 +21,14 @@ durable gate. `test/recovery/supervisor.test.ts` additionally uses real native c
 GPU waiting, verified replacement, queued startup exits, cancellation, policy/ownership refusal
 and retained unhealthy processes. `test/recovery/application.test.ts` starts the actual host and
 managed Ollama owner with a protocol fixture, verifying its flushed outcome and persisted policy.
+It also updates an installed runtime through the real command with a tiny pinned archive, proving
+setup owns the inference reservation and activation. `test/recovery/comfyui.test.ts` exercises
+production-host recovery, isolated profile budgets, queued handover, personal-path refusal,
+early shutdown fencing and failed native cleanup/reporting/retry. A blocked authorization flush
+checks that clean shutdown settles its unstarted intent while preserving the spent attempt.
 `test/setup/local-setup.test.ts` checks the file-change lease through writes/rechecks, failure and
 release before activation. `test/ollama-engine.test.ts` checks retained installation reservations
-after unconfirmed cleanup and release only after owner-confirmed stop. These establish the Ollama path, not other recovery owners, reviewed
+after unconfirmed cleanup and release only after owner-confirmed stop. These establish the Ollama/ComfyUI paths, not other recovery owners, reviewed
 interruption actions or successful inference. `test/job-leash.test.ts`
 also verifies shared storage-reader job reuse and kernel cleanup on forced parent death on Windows.
 
