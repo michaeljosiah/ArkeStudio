@@ -9,6 +9,7 @@ import { isStoryReleaseAuthoredPath, isStoryReleaseHistoryFile, isStoryReleaseLe
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { installSampleWorld } from "../../src/world/sample-world.js";
 import { tempDir } from "../tmp.js";
+import { untilAsync } from "../wait.js";
 import { FIXTURE_WORLD } from "./helpers.js";
 import { containedWorldFilePath } from "../../src/world/contained-file.js";
 
@@ -152,7 +153,7 @@ async function interruptDownload(source: StoryDownload, data: Buffer, root: stri
   const request: typeof fetch = async () => new Response(new ReadableStream({ start(c) { stream = c; c.enqueue(new Uint8Array(data.subarray(0, offset))); } }));
   const failed = assert.rejects(downloadStory(source, root, { signal: control.signal, fetch: request }));
   const file = join(root, `story-${source.sha256}.part`);
-  for (let i = 0; i < 1000 && (await stat(file).catch(() => null))?.size !== offset; i++) await nextTurn();
+  await untilAsync(async () => (await stat(file)).size === offset, "download prefix reached disk").catch(async error => { control.abort(); await failed; throw error; });
   assert.equal((await stat(file)).size, offset, "the prefix has reached disk before interruption");
   if (network) stream.error(new Error("connection lost")); else control.abort();
   await failed;
@@ -299,9 +300,10 @@ for (const mismatch of ["cached-part", "received-part", "whole-digest", "oversiz
   assert.deepEqual(await readdir(root), []);
 });
 
-for (const interruption of ["short", "cancel", "network"] as const) it(`retains and resumes a ${interruption} second part without redownloading the first`, async () => {
+for (const interruption of ["short", "cancel", "network"] as const) it(`retains and resumes a ${interruption} second part without redownloading the first`, async t => {
   const { source, data, buffers, fetcher, calls } = await multipartArchive(), root = await tempDir("story-part-interrupted-");
   const control = new AbortController(), file = join(root, `story-${source.sha256}.part`);
+  t.after(() => control.abort());
   let stream!: ReadableStreamDefaultController<Uint8Array>;
   const request: typeof fetch = async (url, init) => {
     if (String(url) !== source.parts[1]!.url) return fetcher(url, init);
@@ -309,7 +311,7 @@ for (const interruption of ["short", "cancel", "network"] as const) it(`retains 
   };
   const failed = assert.rejects(downloadStory(source, root, { signal: control.signal, fetch: request }));
   const retained = buffers[0].length + 7;
-  for (let i = 0; i < 1000 && (await stat(file).catch(() => null))?.size !== retained; i++) await nextTurn();
+  await untilAsync(async () => (await stat(file)).size === retained, "second-part prefix reached disk");
   assert.equal((await stat(file)).size, retained);
   if (interruption === "cancel") control.abort();
   if (interruption === "network") stream.error(new Error("connection lost"));
