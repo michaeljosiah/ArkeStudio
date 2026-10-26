@@ -135,11 +135,15 @@ Nonempty buffered provider results first retain a private completed-response che
 written last. The nonce is flushed in the job's pre-submission row; receipts retain the exact
 accepted provider identity and reported usage/cost. Historical attempt-count folding cannot
 rebind it. Both inline and retrieved results use this path, without another generation request.
+Verified pre-upgrade inline receipts retain their legacy identity through repeated held restarts;
+they are not hidden behind an unmigrated nonce or automatically removed.
 
 After verification, output is staged under `W\.staging\<job-id>\` and renamed into its requested
 world-relative landing directory. The owning world rechecks ownership before publication. Valid
 staging bytes and the private checkpoint survive failed filing. Completed staging prefixes are
-verified and reused. Only confirmed successful filing/finalization retires its enumerated current
+verified and reused. Matching files already published by a partial filing are verified again and
+adopted without another payload copy/reservation. When all files are already published, job
+settlement needs no new file-space grant. Only confirmed successful filing/finalization retires its enumerated current
 checkpoint files; unknown, corrupt, cancelled, previous and legacy copies are retained. There is
 no recursive result-cache cleanup or physical creative-media deletion.
 

@@ -11,6 +11,11 @@ runtime check in `v2-launch.test.ts` is separate; a fixture is not a live-model 
 `test/harness/model-routing.test.ts`, `test/supervisor.test.ts` and
 `test/application/studio-lifecycle.test.ts` cover the existing routing and lifecycle contracts.
 
+Recovery `test/recovery/supervisor.test.ts` additionally injects early timer wakes and frozen/
+reversed clocks. Recovery waits out the existing flushed intent's minimum deadline, with at most
+eight wake checks, without creating another attempt or weakening `begin()` validation. The native
+ComfyUI profile test exercises the same handover/restart path that exposed an early-wake CI failure.
+
 The native writing fixture also accepts a prompt through the real adapter and exits without
 emitting a terminal stream event. Confirm the local unknown-outcome event releases its turn wait
 before automatic replacement, including Suggest only without replacement, with exactly one
@@ -1522,7 +1527,8 @@ atomic temporary-file rename; a restricted sandbox's denied rename is not a disk
 The tests inject capacity/accounting failures with small synthetic bytes, never fill a disk,
 contact a provider, run inference or delete source media. They cover exact result recovery after
 provider expiry, rejected accepted-facts appends, ownership loss before publication, complete
-prefix reuse, cancellation, accounting reconciliation and unchanged charge identities. Run all
+prefix reuse, repeated legacy receipt recovery, partial publication and all-published adoption
+without another payload grant, cancellation, accounting reconciliation and unchanged charge identities. Run all
 affected types after final test edits. Full CI remains necessary for Windows/Linux differences.
 
 ## System status (turn 240)

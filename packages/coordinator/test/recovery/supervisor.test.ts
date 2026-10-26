@@ -22,6 +22,30 @@ const policy = (service: RecoveryControlService, options: { acquire?: (signal: A
   new SupervisorRecovery({ control: service, identity, componentDigest: () => digest, current: options.current ?? (() => true), ownership: options.ownership ?? (() => "managed"),
     acquire: options.acquire ?? (async () => () => {}), now: options.now });
 
+it("an early timer wake waits out the same durable intent without consuming another restart attempt", async () => {
+  let now = 2_000_000, starts = 0; const waits: number[] = [], h = control({ now: () => now }), port = policy(h.service, { now: () => now });
+  try {
+    await port.recover({ generation: 1, signal: new AbortController().signal, current: () => true, exitConfirmed: () => true,
+      sleep: async ms => { waits.push(ms); now += waits.length === 1 ? ms - 1 : ms; }, held: reason => assert.fail(reason),
+      restart: async () => { starts++; assert(now >= h.service.snapshot().control.targets[0]!.intent!.notBefore); return "ready"; } });
+    assert.deepEqual(waits, [1000, 1]); assert.equal(starts, 1);
+    const target = h.service.snapshot().control.targets[0]!; assert.equal(target.attempts.length, 1); assert.equal(target.intent, null);
+  } finally { await h.service.stop(); }
+});
+
+it("frozen or reversed recovery clocks never spin forever or bypass the persisted minimum delay", async () => {
+  for (const reversed of [false, true]) {
+    let now = 2_000_000, wakes = 0, held = "", starts = 0;
+    const h = control({ now: () => now }), port = policy(h.service, { now: () => now });
+    try {
+      await port.recover({ generation: 1, signal: new AbortController().signal, current: () => true, exitConfirmed: () => true,
+        sleep: async () => { wakes++; if (reversed) now--; }, held: reason => { held = reason; }, restart: async () => { starts++; return "ready"; } });
+      assert.equal(starts, 0); assert.equal(wakes, reversed ? 1 : 8); assert.match(held, reversed ? /backwards/ : /delay/);
+      assert.equal(h.service.snapshot().control.targets[0]!.attempts.length, 1);
+    } finally { await h.service.stop(); }
+  }
+});
+
 it("ages managed attempts within one live supervisor and opens its circuit only for a full rolling window", { timeout: 40_000 }, async () => {
   let now = 2_000_000; const h = control({ now: () => now }), port = policy(h.service, { now: () => now });
   const accelerated: SupervisorRecoveryPort = { allowStart: signal => port.allowStart(signal), recover: work => port.recover({ ...work, sleep: async ms => { now += ms; } }),

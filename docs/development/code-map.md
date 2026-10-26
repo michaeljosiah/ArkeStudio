@@ -1115,6 +1115,9 @@ Contracts `job.ts` carries the optional pre-submission `resultReceiptId`. Queue
 `artifact-files.ts` owns bounded, hash-verified private completed-response receipts, cancellation
 and enumerated post-filing retirement. `dispatcher.ts` preserves accepted bytes across local
 storage holds and restores the exact result/usage/cost before considering provider recovery.
+Verified legacy inline receipts retain their old identity across repeated held restarts.
+Partial publication verifies/reuses matching destination files as well as staging prefixes;
+already-published bytes need no second payload reservation or copy.
 `storage/job-artifacts.ts` joins known remaining file writes to shared volume reservations and
 reconciles only its known idle host-file leases, preserving live or unfamiliar owners. The
 production coordinator injects that port and the existing world's ownership recheck. No shell,

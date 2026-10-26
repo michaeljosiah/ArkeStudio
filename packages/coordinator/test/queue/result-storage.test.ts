@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { join } from "node:path";
-import { readFile, readdir } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import type { Job, LedgerEntry } from "@arke-studio/contracts";
 import { JobQueue, type EnqueueInput } from "../../src/queue/dispatcher.js";
 import { JobJournal, type JobStateStore } from "../../src/queue/journal.js";
@@ -70,6 +70,66 @@ it("ownership loss after staging preserves verified bytes, and restart reserves 
     next = h.create(); await next.start(); await until(() => next!.listJobs()[0]?.status === 'succeeded', 'same verified staging prefix filed');
     assert.equal(plans[0], pngBytes().length + 2 * 64 * 1024); assert.equal(plans.at(-1), 64 * 1024);
     assert.equal(h.fake.submitCount, 1); assert.equal(h.fetches(), 1); assert.deepEqual([...await readFile(join(h.world, 'incoming', 'result.png'))], [...pngBytes()]);
+  } finally { await queue.dispose(); await next?.dispose(); await queue.waitForIdle(); await next?.waitForIdle(); await h.storage.stop(); }
+});
+
+it("a pre-upgrade inline receipt survives repeated held restarts without an unmigrated nonce hiding it", { timeout: 30_000 }, async () => {
+  const h = await fixture(true), disk = new JobJournal(h.journalPath), at = new Date().toISOString();
+  const legacy: Job = { ...input, id: 'jb_01J8F3K2QW9VZX4N7M0RTYB6HD', idempotencyKey: '01J8F3K2QW9VZX4N7M0RTYB6HD',
+    status: 'running', providerJobId: 'legacy-accepted', providerResultKind: 'inline', providerCostMicroUsd: 37, attempt: 1, error: null, createdAt: at, updatedAt: at };
+  const directory = join(h.root, 'queue', 'inline-artifacts', legacy.id);
+  await disk.append(legacy); await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, '0.bin'), pngBytes());
+  await writeFile(join(directory, 'manifest.json'), JSON.stringify({ remoteId: legacy.providerJobId, artifacts: [{ name: 'result.png', contentType: 'image/png' }] }));
+  const queues: JobQueue[] = [];
+  try {
+    for (let restart = 0; restart < 2; restart++) {
+      const queue = h.create(); queues.push(queue); await queue.start();
+      await until(() => queue.listJobs()[0]?.error?.includes('waiting for storage') === true, 'legacy result retained during destination hold');
+      assert.equal(queue.listJobs()[0]!.resultReceiptId, undefined); await queue.dispose(); await queue.waitForIdle();
+    }
+    h.freeWorld(); const final = h.create(); queues.push(final); await final.start();
+    await until(() => final.listJobs()[0]?.status === 'succeeded', 'same legacy result filed after another restart');
+    assert.equal(h.fake.submitCount, 0); assert.equal(h.fake.pollCount, 0); assert.equal(h.fetches(), 0);
+    assert.deepEqual(await readFile(join(h.world, 'incoming', 'result.png')), Buffer.from(pngBytes()));
+    assert.deepEqual(await readFile(join(directory, '0.bin')), Buffer.from(pngBytes())); assert.equal(h.ledger[0]!.actualMicroUsd, 37);
+  } finally { for (const queue of queues) { await queue.dispose(); await queue.waitForIdle(); } await h.storage.stop(); }
+});
+
+it("a partial publication reuses its verified destination and reserves only the remaining rename after restart", { timeout: 30_000 }, async () => {
+  let narrow = false, checks = 0; const plans: number[] = [];
+  const h = await fixture(false, { async reserve(_id, demands, _signal, sameVolume) {
+    const need = demands.reduce((sum, value) => sum + value.remainingBytes, 0);
+    if (sameVolume) { plans.push(need); if (narrow && need > 64 * 1024) throw new ArtifactStorageHeld(); }
+    return { async consumed() {}, writeFailed() {}, async settle() {} };
+  } }); h.artifacts.push({ name: 'second.png', contentType: 'image/png', data: pngBytes() });
+  const queue = h.create(undefined, async () => { if (++checks >= 3) throw new Error('owner lost after first rename'); }); let next: JobQueue | undefined;
+  try {
+    await queue.start(); const job = await queue.enqueue(input);
+    await until(() => queue.listJobs()[0]?.error?.includes('waiting for the owning world') === true, 'partial rename retained');
+    const destination = join(h.world, 'incoming', 'result.png'), before = await stat(destination);
+    assert.deepEqual(await readFile(join(h.world, '.staging', job.id, 'second.png')), Buffer.from(pngBytes()));
+    await queue.dispose(); await queue.waitForIdle(); narrow = true;
+    next = h.create(); await next.start(); await until(() => next!.listJobs()[0]?.status === 'succeeded', 'remaining rename needs no duplicate payload');
+    assert.equal(plans.at(-1), 64 * 1024); assert.equal((await stat(destination)).ino, before.ino);
+    assert.deepEqual(next.listJobs()[0]!.landedFiles, ['incoming/result.png', 'incoming/second.png']);
+    assert.equal(h.fake.submitCount, 1); assert.equal(h.fetches(), 1); assert.equal(h.ledger.length, 1);
+  } finally { await queue.dispose(); await next?.dispose(); await queue.waitForIdle(); await next?.waitForIdle(); await h.storage.stop(); }
+});
+
+it("already-published exact bytes need no new storage grant when only job settlement remains", { timeout: 30_000 }, async () => {
+  let published = false, renames = 0, worldReservations = 0;
+  const h = await fixture(false, { async reserve(_id, _demands, _signal, sameVolume) {
+    if (sameVolume) { worldReservations++; if (published) throw new ArtifactStorageHeld(); }
+    return { async consumed(_directory, bytes) { if (sameVolume && bytes === 64 * 1024 && ++renames === 2) { published = true; throw new Error('accounting failed after both renames'); } }, writeFailed() {}, async settle() {} };
+  } }); h.artifacts.push({ name: 'second.png', contentType: 'image/png', data: pngBytes() });
+  const queue = h.create(undefined, async () => { if (published) throw new Error('hold settlement until reopen'); }); let next: JobQueue | undefined;
+  try {
+    await queue.start(); await queue.enqueue(input); await until(() => published && queue.listJobs()[0]?.error?.includes('waiting') === true, 'both outputs retained before settlement');
+    await queue.dispose(); await queue.waitForIdle(); const before = worldReservations;
+    next = h.create(); await next.start(); await until(() => next!.listJobs()[0]?.status === 'succeeded', 'verified published files adopted without writes');
+    assert.equal(worldReservations, before); assert.deepEqual(next.listJobs()[0]!.landedFiles, ['incoming/result.png', 'incoming/second.png']);
+    assert.equal(h.fake.submitCount, 1); assert.equal(h.fetches(), 1); assert.equal(h.ledger.length, 1);
   } finally { await queue.dispose(); await next?.dispose(); await queue.waitForIdle(); await next?.waitForIdle(); await h.storage.stop(); }
 });
 

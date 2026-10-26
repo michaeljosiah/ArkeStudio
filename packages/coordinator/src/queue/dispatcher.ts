@@ -1719,7 +1719,9 @@ export class JobQueue {
     suppliedArtifacts?: DispatchArtifact[],
     fetchAttempt = 1,
   ): Promise<void> {
-    if (!job.resultReceiptId && job.landing) {
+    // A verified legacy inline receipt remains authoritative until filing succeeds. Minting
+    // a nonce here without migrating supplied bytes would hide it on the next restart.
+    if (!job.resultReceiptId && job.landing && suppliedArtifacts === undefined) {
       job = { ...job, resultReceiptId: ulid() };
       await this.persistUsage(job); // Legacy accepted work gains a durable local receipt identity, never another submit.
     }
@@ -1814,30 +1816,35 @@ export class JobQueue {
             await mkdir(toExtendedLength(targetDir), { recursive: true });
             const entries = [];
             for (const [index, artifact] of artifacts.entries()) {
-              const name = landedName(job, artifact, index), from = join(stagingDir, name);
-              entries.push({ artifact, name, from, ready: await artifactFileMatches(from, artifact.data, signal) });
+              const name = landedName(job, artifact, index), from = join(stagingDir, name), to = join(targetDir, name), rel = `${landing.dir}/${name}`;
+              const published = await artifactFileMatches(to, artifact.data, signal);
+              entries.push({ artifact, name, from, to, rel, published, ready: published || await artifactFileMatches(from, artifact.data, signal) });
             }
-            const remainingBytes = entries.reduce((sum, value) => sum + ARTIFACT_FILE_OVERHEAD + (value.ready ? 0 : value.artifact.data.length + ARTIFACT_FILE_OVERHEAD), 0);
-            lease = await this.opts.artifactSpace?.reserve(job.id, [
+            const remainingBytes = entries.reduce((sum, value) => sum + (value.published ? 0 : ARTIFACT_FILE_OVERHEAD + (value.ready ? 0 : value.artifact.data.length + ARTIFACT_FILE_OVERHEAD)), 0);
+            lease = remainingBytes ? await this.opts.artifactSpace?.reserve(job.id, [
               { directory: stagingDir, remainingBytes, role: "generated-media" },
               { directory: targetDir, remainingBytes: 0, role: "generated-media" },
-            ], signal, true);
+            ], signal, true) : undefined;
             await verifyOwner();
-            const staged: Array<{ from: string; to: string; rel: string }> = [];
-            for (const { artifact, name, from, ready } of entries) {
+            for (const { artifact, from, ready } of entries) {
               signal.throwIfAborted();
               if (!ready) {
                 await atomicWriteFile(from, artifact.data);
                 await lease?.consumed(stagingDir, artifact.data.length + ARTIFACT_FILE_OVERHEAD);
               }
-              staged.push({ from, to: join(targetDir, name), rel: `${landing.dir}/${name}` });
             }
             if (this.disposed || !this.stillActiveRun(job)) return; // killed/retired during staging
-            for (const s of staged) {
+            for (const s of entries) {
               signal.throwIfAborted();
               await verifyOwner();
-              await rename(toExtendedLength(s.from), toExtendedLength(s.to));
-              await lease?.consumed(stagingDir, ARTIFACT_FILE_OVERHEAD);
+              if (s.published) {
+                // A previous partial rename already occupied these bytes. Verify again at
+                // adoption; it needs neither another payload copy nor a new space grant.
+                if (!await artifactFileMatches(s.to, s.artifact.data, signal)) throw new ArtifactCheckpointInvalid();
+              } else {
+                await rename(toExtendedLength(s.from), toExtendedLength(s.to));
+                await lease?.consumed(stagingDir, ARTIFACT_FILE_OVERHEAD);
+              }
               landed.push(s.rel);
             }
             filed = true;

@@ -78,7 +78,16 @@ export class SupervisorRecovery implements SupervisorRecoveryPort {
         work.held(HOLD[grant.reason]); return;
       }
       intentId = grant.intent.id;
-      await work.sleep(Math.max(0, grant.intent.notBefore - this.now()));
+      // Timers may wake a millisecond early. Keep the same flushed intent and recheck its
+      // deadline rather than converting timer rounding into a permanent failed recovery.
+      // Bound repeated early/frozen wakes; begin() still owns the clock/policy authority.
+      let observed = this.now();
+      for (let wake = 0; observed < grant.intent.notBefore && wake < 8; wake++) {
+        await work.sleep(Math.max(1, grant.intent.notBefore - observed));
+        if (!work.current() || work.signal.aborted || !this.deps.current()) break;
+        const next = this.now(); if (next < observed) break;
+        observed = next;
+      }
       if (!work.current() || work.signal.aborted || !this.deps.current()) {
         await this.deps.control.settleFromOwner(this.deps.identity.key, intentId, "not-started"); return;
       }
