@@ -348,7 +348,8 @@ describe("the render and Export → Arke Player (238h, R-8, R-15 – R-17)", () 
     assert.deepEqual(musicDocumentSections({ ...record.tracks[1]!, sections: [{ label: "Chorus", atMs: 5000 }, { label: "Intro", atMs: 500 }, { label: "Verse", atMs: 2000 }, { label: "Outro", atMs: 9500 }] }, 8000), [{ label: "Verse", at: 1000 }, { label: "Chorus", at: 4000 }]);
   });
 
-  it("makes a production package of the album alone, read back by the shared reader and listed", () => {
+  it("makes a production package of the album alone, read back by the shared reader and listed", (t) => {
+    t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-25T09:00:00.000Z") });
     const calls: string[][] = [];
     return withHarness(async (h) => {
       const slug = (await createMusic(h, "Songs of the Drowned Quarter", "album")).slug!;
