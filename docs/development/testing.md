@@ -1531,6 +1531,25 @@ prefix reuse, repeated legacy receipt recovery, partial publication and all-publ
 without another payload grant, cancellation, accounting reconciliation and unchanged charge identities. Run all
 affected types after final test edits. Full CI remains necessary for Windows/Linux differences.
 
+Regeneration also covers a larger ordinary destination being replaced by a smaller valid result
+after normal capacity admission. Different-sized staging/destination files are cache misses;
+private receipt blobs retain strict bounds/digest validation. The Linux production-factory test
+requires its actual `linux-mountinfo` source and measured/quota-limited or explicitly unsupported
+facts, rather than the historical unsupported-only expectation.
+
+## Studio operational session boundary
+
+Run contracts `test/confinement.test.ts` and coordinator `test/harness/operational-confinement.test.ts`,
+`test/harness/session-files.test.ts` and `test/local-gpu.test.ts`. Native filesystem access is needed
+for role-root identity, preparation writes and the existing host/queue cleanup cases. Operational
+tool refusals are exercised through the actual OpenCode v2, Claude and Codex gates, including
+research enabled and rewritten briefs. Configuration tests inspect what reaches adapter preparation
+and pin the same operational role at creation, excluding world/author notes, query URLs, skills
+and other-role overrides. GPU tests verify background sessions wait behind normal creative work,
+preserve FIFO within each priority and cancel without releasing the admitted owner's lane.
+These tests make no model call and do not qualify the still-unimplemented Studio conversation,
+delegation dispatcher, repair registry, cloud/spend approval or matched turn-239 visual gate.
+
 ## System status (turn 240)
 
 Run contracts/coordinator/desktop `system-resources.test.ts`, coordinator

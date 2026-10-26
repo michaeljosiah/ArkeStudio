@@ -3,6 +3,7 @@ export type LocalGpuEngine = "Ollama" | "ComfyUI" | "Ming";
 
 interface WaitingTurn {
   engine: LocalGpuEngine;
+  priority: "normal" | "background";
   signal: AbortSignal;
   waiting: (reason: string | null) => void;
   resolve: (release: () => void) => void;
@@ -23,12 +24,12 @@ export class LocalGpu {
     private readonly engines: readonly LocalGpuEngine[] = ["Ollama", "ComfyUI"],
   ) {}
 
-  acquire(engine: LocalGpuEngine, signal: AbortSignal, waiting: (reason: string | null) => void = () => {}): Promise<() => void> {
+  acquire(engine: LocalGpuEngine, signal: AbortSignal, waiting: (reason: string | null) => void = () => {}, priority: "normal" | "background" = "normal"): Promise<() => void> {
     if (!this.engines.includes(engine)) return Promise.reject(new Error(`${engine} is not registered for local inference.`));
     const combined = AbortSignal.any([signal, this.stopped.signal]);
     if (combined.aborted) return Promise.reject(combined.reason);
     return new Promise((resolve, reject) => {
-      const turn: WaitingTurn = { engine, signal: combined, waiting, resolve, reject, abort: () => {
+      const turn: WaitingTurn = { engine, priority, signal: combined, waiting, resolve, reject, abort: () => {
         const index = this.queue.indexOf(turn);
         if (index < 0) return;
         this.queue.splice(index, 1);
@@ -36,7 +37,8 @@ export class LocalGpu {
         reject(combined.reason);
       } };
       combined.addEventListener("abort", turn.abort, { once: true });
-      this.queue.push(turn);
+      const background = priority === "normal" ? this.queue.findIndex(value => value.priority === "background") : -1;
+      if (background < 0) this.queue.push(turn); else this.queue.splice(background, 0, turn);
       this.pump();
     });
   }

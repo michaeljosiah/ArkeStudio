@@ -13,6 +13,40 @@ import { makeTempRoot } from "./world/helpers.js";
 import { tempDir } from "./tmp.js";
 import { until } from "./wait.js";
 
+it("runs queued creative work before background explanations without preempting the current owner", async () => {
+  const gpu = new LocalGpu(async () => {}, ["Ollama", "ComfyUI", "Ming"]), signal = new AbortController().signal;
+  const owner = await gpu.acquire("ComfyUI", signal), order: string[] = [];
+  const next = (name: string, priority: "normal" | "background") => gpu.acquire("Ollama", signal, () => {}, priority).then(release => { order.push(name); release(); });
+  const work = [next("explain-1", "background"), next("creative-1", "normal"), next("explain-2", "background"), next("creative-2", "normal")];
+  assert.deepEqual(order, []); assert(gpu.isBusy("ComfyUI"));
+  owner(); await Promise.all(work); assert.deepEqual(order, ["creative-1", "creative-2", "explain-1", "explain-2"]); gpu.stop();
+});
+
+it("cancels a queued background explanation without releasing the admitted owner or bypassing retained cleanup", async () => {
+  const gpu = new LocalGpu(async () => {}), owner = await gpu.acquire("ComfyUI", new AbortController().signal), stop = new AbortController();
+  const explanation = assert.rejects(gpu.acquire("Ollama", stop.signal, () => {}, "background"), /explanation cancelled/);
+  stop.abort(new Error("explanation cancelled")); await explanation; assert(gpu.isBusy("ComfyUI"));
+  let admitted = false; const creative = gpu.acquire("Ollama", new AbortController().signal).then(release => { admitted = true; release(); });
+  assert.equal(admitted, false); owner(); await creative; assert(admitted); gpu.stop();
+});
+
+it("carries a prepared Studio session's background priority through the shared harness wrapper", async () => {
+  const gpu = new LocalGpu(async () => {}), signal = new AbortController().signal, owner = await gpu.acquire("ComfyUI", signal), sent: string[] = [];
+  const raw: HarnessAdapter = { id: "test", capabilities: () => new Set(), readiness: () => ({ ready: true }),
+    createSession: async input => ({ sessionId: input.title! }),
+    sendMessage: async input => { sent.push(input.sessionId); return { sessionId: input.sessionId, correlationId: "test" }; },
+    dispatchAsync: async () => { throw new Error("Only the shared wrapper dispatches"); }, streamEvents: () => ({ async *[Symbol.asyncIterator]() {} }) };
+  const adapter = withLocalGpu(raw, gpu);
+  try {
+    for (const title of ["explanation", "creative"]) {
+      adapter.prepareSession!({ preparationId: title, model: "ollama/test", inferencePriority: title === "explanation" ? "background" : "normal" });
+      await adapter.createSession({ purpose: "ask", title, preparationId: title });
+    }
+    const background = adapter.sendMessage({ sessionId: "explanation", parts: [] }), creative = adapter.sendMessage({ sessionId: "creative", parts: [] });
+    assert.deepEqual(sent, []); owner(); await Promise.all([background, creative]); assert.deepEqual(sent, ["creative", "explanation"]);
+  } finally { owner(); gpu.stop(); await adapter.dispose?.(); }
+});
+
 it("keeps a Ming batch on the card through cancellation and confirmed process cleanup", async () => {
   const unloaded: string[] = [];
   let finishCleanup!: () => void;

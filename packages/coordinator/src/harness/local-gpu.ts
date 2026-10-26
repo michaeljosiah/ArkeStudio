@@ -13,6 +13,7 @@ export function withLocalGpu(
 ): HarnessAdapter {
   const prepared = new Map<string, SessionConfigInput>();
   const models = new Map<string, string | undefined>();
+  const priorities = new Map<string, "normal" | "background">();
   const turns = new Map<string, { abort: AbortController; started: boolean }>();
   const closed = new AbortController();
   const events = new EventEmitter();
@@ -50,7 +51,7 @@ export function withLocalGpu(
       if (local) release = await gpu.acquire("Ollama", signal, (reason) => publish({
         type: "tool.activity", sessionId: input.sessionId, tool: "local-inference",
         summary: reason ?? "Writing with Ollama",
-      }));
+      }), priorities.get(input.sessionId));
       signal.throwIfAborted();
       if (local && model !== undefined) onLocalModel(model.replace(/^ollama\//, ""));
       turn.started = true;
@@ -67,6 +68,7 @@ export function withLocalGpu(
       const config = input.preparationId ? prepared.get(input.preparationId) : undefined;
       const session = await adapter.createSession(input);
       models.set(session.sessionId, config?.model ?? (input.agent ? config?.agents?.[input.agent]?.model : undefined));
+      priorities.set(session.sessionId, config?.inferencePriority ?? "normal");
       if (input.preparationId) prepared.delete(input.preparationId);
       return session;
     },
@@ -100,7 +102,7 @@ export function withLocalGpu(
     async dispose() {
       closed.abort();
       await adapter.dispose?.();
-      prepared.clear(); models.clear();
+      prepared.clear(); models.clear(); priorities.clear();
     },
   };
   // Preserve optional adapter capabilities and bind their private state to the real adapter.

@@ -1126,6 +1126,21 @@ regressions cover disk faults, prefixes, separate volumes, cancellation, restart
 appends and billing. See [filesystem operations](../filesystem-operations.md#jobs-takes-reviews-and-exports)
 for paths, limits and the remaining generation/scratch/admission boundary.
 
+## Studio operational session boundary
+
+Studio assistant session boundary (SPEC-061 R-21–R-23): contracts `roster.ts` declares
+`studio-assistant` and `diagnostic-specialist` as operational roles; `confinement.ts` denies
+filesystem/world/web/native delegation tools independently of editable briefs/research settings.
+Coordinator `harness/session-files.ts` applies an operational configuration allowlist after
+world/Settings enrichment, pins that same role at creation and strips world/author memory,
+query URLs, skills and other-role overrides before adapter preparation/file writes.
+`agent-session.ts` carries background inference priority through `harness/local-gpu.ts` into
+`local-ai/gpu.ts`: normal creative/recovery waiters precede background explanations, without
+preempting any admitted owner. Tests cover actual OpenCode v2/Claude/Codex gates, role pinning,
+configuration isolation, normal FIFO/background ordering and cancellation. These are session
+prerequisites; the Studio conversation, diagnostic tool/delegation dispatcher, reviewed repair
+registry and turn-239 dialog/visual acceptance remain unfinished.
+
 ## System status overview
 
 Approved turn 240: contracts `src/system-resources.ts` owns readings, freshness and conservative

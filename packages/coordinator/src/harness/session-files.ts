@@ -1,10 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
-import type { CreateSessionInput, HarnessAdapter, SessionConfigInput, SessionRef } from "@arke-studio/contracts";
+import { ROSTER, type CreateSessionInput, type HarnessAdapter, type SessionConfigInput, type SessionRef } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { loadSkillBodies } from "./skills.js";
 
 const setupByDir = new Map<string, Promise<void>>();
+
+/** Scope after Settings/world enrichment, before any adapter sees or writes configuration.
+ * Operational roles receive selected-role settings, never another world's notes or tools. */
+export function scopeSessionInput(input: SessionConfigInput): SessionConfigInput {
+  if (!ROSTER.some(member => member.name === input.agent && member.operationalOnly)) return input;
+  // An allowlist also excludes future world-bearing configuration fields by default.
+  return { agent: input.agent, preparationId: input.preparationId, model: input.model, modelVariant: input.modelVariant,
+    researchWeb: false, inferencePriority: "background",
+    ...(input.agent && input.agents?.[input.agent] ? { agents: { [input.agent]: input.agents[input.agent]! } } : {}) };
+}
 
 async function serialized<T>(dir: string, work: () => Promise<T>): Promise<T> {
   const absolute = resolve(dir).replaceAll("\\", "/");
@@ -53,7 +63,8 @@ export async function writeSessionFiles(
     }),
   ]);
   const preparationId = randomUUID();
-  const prepared = { ...input, preparationId, skillBodies: await loadSkillBodies(input) };
+  const scoped = scopeSessionInput(input);
+  const prepared = { ...scoped, preparationId, skillBodies: await loadSkillBodies(scoped) };
   // Both seams, always. A harness takes its settings as files or as call options, and a
   // caller offering only one silently configures nothing for the harnesses using the other.
   try {
@@ -86,17 +97,19 @@ export async function createPreparedSession(
     if (signal?.aborted) stop();
     else signal?.addEventListener("abort", stop, { once: true });
     try {
-      let model: string | undefined;
+      let model: string | undefined, agent = session.agent;
       const config = Promise.resolve(input).then(value => {
-        model = value.model ?? value.agents?.[session.agent ?? "sheet-editor"]?.model;
-        return value;
+        agent ??= value.agent;
+        const scoped = scopeSessionInput({ ...value, agent });
+        model = scoped.model ?? scoped.agents?.[agent ?? "sheet-editor"]?.model;
+        return scoped;
       });
       const preparationId = await writeSessionFiles(adapter, dir, config, abort.signal);
       try {
         // A stop that landed while the files were written creates nothing: not every adapter
         // refuses an already-fired signal, and a session opened for a stopped run is an orphan.
         abort.signal.throwIfAborted();
-        const created = await adapter.createSession({ ...session, cwd: dir, preparationId, signal: abort.signal });
+        const created = await adapter.createSession({ ...session, ...(agent ? { agent } : {}), cwd: dir, preparationId, signal: abort.signal });
         return { ...created, ...(model !== undefined ? { model } : {}) };
       } finally {
         adapter.abandonSessionPreparation?.(preparationId);

@@ -623,7 +623,7 @@ describe("v2 session config (issue 327 §7)", () => {
   it("orders the confinement block deny-first, managed re-allows after", () => {
     const config = buildSessionConfigV2({ defaultAgent: "scene-writer" });
     const agents = config["agents"] as Record<string, { permissions: Array<{ action: string; resource: string; effect: string }> }>;
-    const someAgent = Object.values(agents)[0]!;
+    const someAgent = agents["scene-writer"]!;
     const external = someAgent.permissions.filter((r) => r.action === "external_directory");
     assert.ok(external.length >= 2, "the confinement block exists");
     assert.deepEqual(external[0], { action: "external_directory", resource: "*", effect: "deny" });
