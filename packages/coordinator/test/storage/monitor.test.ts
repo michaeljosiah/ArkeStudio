@@ -99,4 +99,18 @@ describe("bounded scoped storage monitor (SPEC-062 R-1–R-5)", () => {
     assert.equal(roots[0]!.state, "unsupported"); assert.equal(roots[1]!.state, "unavailable");
     await monitor.stop();
   });
+
+  it("carries an invalidation fence through a cached host read and refuses older measurements", async () => {
+    let now = 600_000, observedAfter: number | undefined, stamp = now;
+    const monitor = new StorageMonitor({ now: () => now, probe: async (_root, _signal, after) => { observedAfter = after; return result(stamp); }, onSnapshot: () => {} });
+    monitor.setRoots([root]); await monitor.start();
+    now += 100; monitor.invalidate("media");
+    now += 1_000; await monitor.refresh();
+    assert.equal(observedAfter, 600_100); assert.equal(monitor.snapshot().roots[0]!.capacity, null);
+    now += 1_000; stamp = now; await monitor.refresh();
+    assert.equal(monitor.snapshot().roots[0]!.capacity!.measuredAt, now);
+    now += 100;
+    assert.equal(await monitor.capacity("media", new AbortController().signal, now), null, "an admission replan requires a post-report read");
+    await monitor.stop();
+  });
 });

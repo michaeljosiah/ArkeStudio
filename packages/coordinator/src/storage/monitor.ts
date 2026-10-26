@@ -16,6 +16,7 @@ interface Reading {
   samples: StorageCapacity[];
   pressure: StoragePressure | null;
   attemptedAt: number;
+  minimumAfter: number;
 }
 const missing = (): StorageProbeResult => ({ state: "unavailable", source: "host-provided", limitations: ["probe-failed"], capacity: null });
 
@@ -35,7 +36,7 @@ export class StorageMonitor {
 
   constructor(private readonly deps: {
     /** Bounded and cancellable. The platform port owns any outstanding native read handles. */
-    probe(rootId: string, signal: AbortSignal): Promise<StorageProbeResult>;
+    probe(rootId: string, signal: AbortSignal, after?: number): Promise<StorageProbeResult>;
     onSnapshot(snapshot: StorageHealthSnapshot): void;
     now?: () => number;
     initialPressure?: Readonly<Record<string, StoragePressure>>;
@@ -51,7 +52,7 @@ export class StorageMonitor {
     for (const root of next) {
       const old = before.get(root.rootId), value = this.readings.get(root.rootId);
       retained.set(root.rootId, old?.revision === root.revision && value ? value : {
-        result: missing(), samples: [], pressure: value?.pressure ?? this.deps.initialPressure?.[root.rootId] ?? null, attemptedAt: -Infinity,
+        result: missing(), samples: [], pressure: value?.pressure ?? this.deps.initialPressure?.[root.rootId] ?? null, attemptedAt: -Infinity, minimumAfter: old ? this.now() : -Infinity,
       });
     }
     this.readings = retained;
@@ -76,6 +77,7 @@ export class StorageMonitor {
     this.version++; this.batchAbort?.abort();
     for (const [id, reading] of this.readings) {
       reading.result = { ...reading.result, capacity: null, state: "unavailable" };
+      reading.minimumAfter = Math.max(reading.minimumAfter, this.now());
       reading.samples = []; this.pending.add(id);
     }
     this.publish();
@@ -88,6 +90,7 @@ export class StorageMonitor {
     if (!reading || this.stopped) return;
     this.version++; this.batchAbort?.abort(); this.pending.add(rootId);
     reading.result = { ...reading.result, state: "unavailable", capacity: null };
+    reading.minimumAfter = Math.max(reading.minimumAfter, this.now());
     reading.samples = [];
     this.publish();
     if (this.started) this.reschedule();
@@ -109,12 +112,13 @@ export class StorageMonitor {
         this.pending.delete(root.rootId);
         reading.attemptedAt = this.now();
         let result: StorageProbeResult;
-        try { result = StorageProbeResultSchema.parse(await this.deps.probe(root.rootId, control.signal)); }
+        try { result = StorageProbeResultSchema.parse(await this.deps.probe(root.rootId, control.signal, Number.isFinite(reading.minimumAfter) ? reading.minimumAfter : undefined)); }
         catch { result = missing(); }
         if (this.stopped || control.signal.aborted || version !== this.version) {
           if (this.readings.get(root.rootId) === reading) this.pending.add(root.rootId);
           continue;
         }
+        if (result.capacity && result.capacity.measuredAt <= reading.minimumAfter) result = missing();
         reading.result = result;
         const sample = result.capacity;
         if (sample) {
@@ -134,12 +138,14 @@ export class StorageMonitor {
   }
 
   /** Admission reads refresh stale facts, then the reservation owner checks all ages again. */
-  async capacity(rootId: string, signal: AbortSignal): Promise<StorageCapacity | null> {
+  async capacity(rootId: string, signal: AbortSignal, after = -Infinity): Promise<StorageCapacity | null> {
     if (this.stopped || signal.aborted || !this.readings.has(rootId)) return null;
+    const reading = this.readings.get(rootId)!;
+    reading.minimumAfter = Math.max(reading.minimumAfter, after);
     let sample = this.readings.get(rootId)?.result.capacity;
-    if (!sample || sample.measuredAt > this.now() || this.now() - sample.measuredAt > STORAGE_POLICY.admissionMaxAgeMs) await this.refresh();
+    if (!sample || sample.measuredAt <= reading.minimumAfter || sample.measuredAt > this.now() || this.now() - sample.measuredAt > STORAGE_POLICY.admissionMaxAgeMs) await this.refresh();
     sample = this.readings.get(rootId)?.result.capacity;
-    return signal.aborted || this.stopped ? null : sample ? structuredClone(sample) : null;
+    return signal.aborted || this.stopped || sample && sample.measuredAt <= reading.minimumAfter ? null : sample ? structuredClone(sample) : null;
   }
 
   snapshot(): StorageHealthSnapshot {

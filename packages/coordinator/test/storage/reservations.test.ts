@@ -18,13 +18,13 @@ function deferred() {
   const promise = new Promise<void>(done => { resolve = done; });
   return { promise, resolve };
 }
-function harness(options: { load?: unknown; save?: (records: readonly StorageReservation[]) => Promise<void>; probe?: (root: string, signal: AbortSignal) => Promise<StorageCapacity | null>; onChange?: () => void } = {}) {
+function harness(options: { load?: unknown; save?: (records: readonly StorageReservation[]) => Promise<void>; probe?: (root: string, signal: AbortSignal, after?: number) => Promise<StorageCapacity | null>; onChange?: () => void; now?: () => number } = {}) {
   let disk: unknown = Object.hasOwn(options, "load") ? options.load : { version: 1, records: [] };
   const store: StorageReservationStore = {
     load: async () => structuredClone(disk),
-    save: async records => { await options.save?.(records); disk = structuredClone({ version: 1, records }); },
+    save: async (records, consumed) => { await options.save?.(records); disk = structuredClone({ version: 2, records, consumed }); },
   };
-  const manager = new StorageReservations({ store, now: () => 600_000, probe: options.probe ?? (async () => fact()), onChange: options.onChange });
+  const manager = new StorageReservations({ store, now: options.now ?? (() => 600_000), probe: options.probe ?? (async () => fact()), onChange: options.onChange });
   return { manager, disk: () => structuredClone(disk) };
 }
 
@@ -84,11 +84,12 @@ describe("shared storage reservations (SPEC-062 R-8/R-9/R-24)", () => {
   });
 
   it("does not count written bytes twice and rechecks growth without counting the old plan twice", async () => {
-    let available = 10 * GiB;
-    const { manager } = harness({ probe: async () => fact(available) }); await manager.open();
+    let available = 10 * GiB, now = 600_000;
+    const { manager } = harness({ now: () => now, probe: async (_root, _signal, after) => { if (after !== undefined) now = Math.max(now, after + 1); return fact(available, { measuredAt: now }); } }); await manager.open();
     assert.equal((await manager.reserve(request("first", 6 * GiB))).status, "reserved");
     available = 6 * GiB;
     assert.equal(await manager.reduce("first", owner, { media: 2 * GiB }), true);
+    now++;
     assert.equal((await manager.reserve(request("second", 3 * GiB))).status, "reserved");
     assert.equal(await manager.settle("second", owner), true);
     assert.equal((await manager.replan(request("first", 5 * GiB))).status, "reserved");
@@ -177,6 +178,60 @@ describe("shared storage reservations (SPEC-062 R-8/R-9/R-24)", () => {
     assert(maximum <= 4); assert(manager.snapshot().auditAvailable);
     await manager.stop();
   });
+
+  it("retains the intent as uncertain if its save outlives measurement freshness", async () => {
+    let now = 600_000;
+    const { manager } = harness({ now: () => now, save: async () => { now += 5_001; } }); await manager.open();
+    assert.deepEqual(await manager.reserve(request("first", GiB)), { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-stale" } });
+    assert.equal(manager.snapshot().records[0]!.state, "uncertain"); await manager.stop();
+  });
+
+  it("keeps consumed bytes charged against a cached reading after progress releases remaining need", async () => {
+    let now = 600_000, cached = fact();
+    const { manager } = harness({ now: () => now, probe: async () => cached }); await manager.open();
+    assert.equal((await manager.reserve(request("first", 6 * GiB))).status, "reserved");
+    now += 100; assert.equal(await manager.reduce("first", owner, { media: GiB }), true);
+    const blocked = await manager.reserve(request("second", 6 * GiB));
+    assert.equal(blocked.status, "held");
+    assert(blocked.status === "held" && blocked.admission?.status === "held");
+    assert.equal(blocked.admission.reservedBytes, 6 * GiB, "one remaining plus five written since measurement");
+    now++; cached = fact(5 * GiB, { measuredAt: now });
+    assert.equal((await manager.reserve(request("second", 6 * GiB))).status, "held");
+    assert.equal((await manager.reserve(request("third", 3 * GiB))).status, "reserved", "fresh capacity already includes the written bytes");
+    await manager.stop();
+  });
+
+  it("persists settlement accounting for cached aliases even when no reservation remains", async () => {
+    let now = 600_000, cached = fact();
+    const initial = harness({ now: () => now, probe: async () => cached }); await initial.manager.open();
+    assert.equal((await initial.manager.reserve(request("first", 6 * GiB))).status, "reserved");
+    now += 100; assert.equal(await initial.manager.settle("first", owner), true); await initial.manager.stop();
+    const restored = harness({ now: () => now, load: initial.disk(), probe: async () => cached }); await restored.manager.open();
+    assert.equal(restored.manager.snapshot().records.length, 0);
+    assert.equal((await restored.manager.reserve(request("second", 6 * GiB, "alias"))).status, "held");
+    now++; cached = fact(4 * GiB, { measuredAt: now });
+    assert.equal((await restored.manager.reserve(request("third", 3 * GiB, "alias"))).status, "reserved");
+    now += 5_001;
+    assert.deepEqual(restored.manager.snapshot().consumed, []);
+    assert.equal((await restored.manager.reserve(request("fourth", GiB))).status, "held", "expired accounting does not make the stale reading valid");
+    await restored.manager.stop();
+  });
+
+  it("requires a post-report measurement when a changed estimate can hide prior writes", async () => {
+    let now = 600_000, cached = fact(), honorAfter = false;
+    const { manager } = harness({ now: () => now, probe: async (_root, _signal, after) => {
+      if (honorAfter && after !== undefined) { now = after + 1; cached = fact(8 * GiB, { measuredAt: now }); }
+      return cached;
+    } }); await manager.open();
+    assert.equal((await manager.reserve(request("first", 6 * GiB))).status, "reserved");
+    now += 100;
+    assert.equal((await manager.replan(request("first", 8 * GiB))).status, "held");
+    assert.equal(manager.snapshot().records[0]!.demands[0]!.remainingBytes, 6 * GiB);
+    honorAfter = true;
+    assert.equal((await manager.replan(request("first", 8 * GiB))).status, "held", "actual free space is now eight and still needs a reserve");
+    assert.equal((await manager.replan(request("first", GiB))).status, "reserved");
+    await manager.stop();
+  });
 });
 
 describe("bounded storage reservation file", () => {
@@ -188,7 +243,7 @@ describe("bounded storage reservation file", () => {
     const restored = new StorageReservations({ store, now: () => 600_000, probe: async () => fact() });
     await restored.open(); assert.equal(restored.snapshot().records[0]!.state, "uncertain");
     assert.equal(await restored.settle("first", owner), true); await restored.stop();
-    assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { version: 1, records: [] });
+    assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { version: 2, records: [], consumed: [{ volumeId: "volume-a", bytes: GiB, at: 600_000 }] });
   });
 
   it("treats oversized, torn and duplicate files as unknown without clearing them", async () => {

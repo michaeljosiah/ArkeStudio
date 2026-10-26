@@ -1,6 +1,6 @@
 import { open } from "node:fs/promises";
 import { atomicWriteFile } from "../world/atomic.js";
-import { StorageReservationFileSchema, type StorageReservation, type StorageReservationStore } from "./reservations.js";
+import { StorageReservationFileSchema, type StorageReservation, type StorageReservationStore, type StorageConsumption } from "./reservations.js";
 
 const CAP_BYTES = 1024 * 1024;
 
@@ -23,8 +23,8 @@ export class FileStorageReservationStore implements StorageReservationStore {
       return StorageReservationFileSchema.parse(JSON.parse(buffer.subarray(0, size).toString("utf8")));
     } finally { await file.close(); }
   }
-  async save(records: readonly StorageReservation[]): Promise<void> {
-    const data = StorageReservationFileSchema.parse({ version: 1, records });
+  async save(records: readonly StorageReservation[], consumed: readonly StorageConsumption[]): Promise<void> {
+    const data = StorageReservationFileSchema.parse({ version: 2, records, consumed });
     const body = JSON.stringify(data) + "\n";
     if (Buffer.byteLength(body) > CAP_BYTES) throw new Error("Storage reservation history exceeds its bound.");
     await atomicWriteFile(this.path, body);

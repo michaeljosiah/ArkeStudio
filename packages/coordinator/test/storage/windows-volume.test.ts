@@ -39,7 +39,7 @@ describe("Windows volume identity port", () => {
   });
 
   it("keeps malformed, duplicate, foreign, denied and failed reads unavailable", async () => {
-    for (const text of ["{", JSON.stringify([row("media"), row("media")]), JSON.stringify([row("foreign")]), JSON.stringify([row("media", { availableBytes: -1 })]), JSON.stringify([row("media", { canonical: "C:\\private" })])]) {
+    for (const text of ["{", JSON.stringify([row("media"), row("media")]), JSON.stringify([row("foreign")]), JSON.stringify([row("media"), row("foreign")]), JSON.stringify([row("media", { availableBytes: -1 })]), JSON.stringify([row("media", { canonical: "C:\\private" })])]) {
       const port = new WindowsVolumeProbe({ platform: "win32", query: async () => text }); port.setRoots([roots[0]!]);
       assert.equal((await port.probe("media", new AbortController().signal)).capacity, null); await port.stop();
     }
@@ -63,6 +63,44 @@ describe("Windows volume identity port", () => {
     port.setRoots([roots[0]!]); const pending = port.probe("media", new AbortController().signal); await entered.promise;
     port.setRoots([]); const stopping = port.stop(); assert(aborted); finish.resolve(); await stopping;
     assert.equal((await pending).capacity, null);
+  });
+
+  it("does not let abandoned observation work seed a replacement batch's cache", async () => {
+    const entered = deferred(), finish = deferred(); let calls = 0, aborted = false;
+    const port = new WindowsVolumeProbe({ platform: "win32", now: () => 600_000, query: async (_roots, signal) => {
+      calls++;
+      if (calls === 1) { entered.resolve(); signal.addEventListener("abort", () => { aborted = true; }, { once: true }); await finish.promise; return JSON.stringify([row("media")]); }
+      return JSON.stringify([row("media", { availableBytes: 5 * 1024 ** 3 })]);
+    } }); port.setRoots([roots[0]!]);
+    const control = new AbortController(), old = port.probe("media", control.signal); await entered.promise;
+    control.abort(); assert(aborted); assert.equal((await old).capacity, null);
+    assert.equal((await port.probe("media", new AbortController().signal)).capacity!.availableBytes, 5 * 1024 ** 3);
+    finish.resolve(); await new Promise(resolve => setImmediate(resolve));
+    assert.equal((await port.probe("media", new AbortController().signal)).capacity!.availableBytes, 5 * 1024 ** 3);
+    assert.equal(calls, 2); await port.stop();
+  });
+
+  it("continues a coalesced read for callers that remain active", async () => {
+    const entered = deferred(), finish = deferred(); let calls = 0, aborted = false;
+    const port = new WindowsVolumeProbe({ platform: "win32", now: () => 600_000, query: async (_roots, signal) => {
+      calls++; signal.addEventListener("abort", () => { aborted = true; }, { once: true }); entered.resolve(); await finish.promise;
+      return JSON.stringify([row("media")]);
+    } }); port.setRoots([roots[0]!]);
+    const control = new AbortController();
+    const cancelled = port.probe("media", control.signal), active = port.probe("media", new AbortController().signal);
+    await entered.promise; control.abort(); assert.equal(aborted, false); assert.equal((await cancelled).capacity, null);
+    finish.resolve(); assert.equal((await active).state, "measured");
+    assert.equal((await port.probe("media", new AbortController().signal)).state, "measured");
+    assert.equal(calls, 1); await port.stop();
+  });
+
+  it("bypasses a completed cache whose measurement predates a failure or wake fence", async () => {
+    let now = 600_000, calls = 0;
+    const port = new WindowsVolumeProbe({ platform: "win32", now: () => now, query: async () => { calls++; return JSON.stringify([row("media", { measuredAt: now })]); } });
+    port.setRoots([roots[0]!]); await port.probe("media", new AbortController().signal);
+    now += 100;
+    const next = await port.probe("media", new AbortController().signal, 600_050);
+    assert.equal(next.capacity!.measuredAt, now); assert.equal(calls, 2); await port.stop();
   });
 
   it("measures real Windows junction aliases without creating a compiler or temporary assembly", { skip: process.platform !== "win32" }, async () => {

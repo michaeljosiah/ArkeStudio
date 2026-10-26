@@ -10,13 +10,20 @@ export const StorageReservationSchema = z.object({
   id: key, owner, state: z.enum(["active", "uncertain"]), demands: z.array(demand).min(1).max(32),
 }).strict().refine(value => new Set(value.demands.map(d => d.rootId)).size === value.demands.length, "Repeated storage root");
 export type StorageReservation = z.infer<typeof StorageReservationSchema>;
-export const StorageReservationFileSchema = z.object({ version: z.literal(1), records: z.array(StorageReservationSchema).max(2048) }).strict()
+const recordList = z.array(StorageReservationSchema).max(2048)
+  .refine(value => new Set(value.map(r => r.id)).size === value.length, "Repeated storage reservation");
+const consumptionSchema = z.object({ volumeId: key, bytes, at: z.number().int().nonnegative().safe() }).strict();
+export type StorageConsumption = z.infer<typeof consumptionSchema>;
+export const StorageReservationFileSchema = z.union([
+  z.object({ version: z.literal(2), records: recordList, consumed: z.array(consumptionSchema).max(4096) }).strict(),
+  z.object({ version: z.literal(1), records: recordList }).strict().transform(value => ({ ...value, version: 2 as const, consumed: [] as StorageConsumption[] })),
+])
   .refine(value => new Set(value.records.map(r => r.id)).size === value.records.length, "Repeated storage reservation");
 
 export interface StorageReservationStore {
   load(): Promise<unknown>;
   /** Resolves only after the snapshot's file is flushed and replaced; failure has an unknown outcome. */
-  save(records: readonly StorageReservation[]): Promise<void>;
+  save(records: readonly StorageReservation[], consumed: readonly StorageConsumption[]): Promise<void>;
 }
 
 export type StorageReservationResult =
@@ -36,6 +43,7 @@ export class StorageReservations {
   private readonly writes = new WriteQueue();
   private readonly control = new AbortController();
   private records = new Map<string, StorageReservation>();
+  private consumed: StorageConsumption[] = [];
   private opened = false;
   private auditAvailable = true;
   private closing = false;
@@ -44,7 +52,7 @@ export class StorageReservations {
   constructor(private readonly deps: {
     store: StorageReservationStore;
     /** Bounded, cancellable read of a registered host handle. Null means mapping unavailable. */
-    probe(rootId: string, signal: AbortSignal): Promise<StorageCapacity | null>;
+    probe(rootId: string, signal: AbortSignal, after?: number): Promise<StorageCapacity | null>;
     now?: () => number;
     onChange?: () => void;
   }) {}
@@ -65,27 +73,42 @@ export class StorageReservations {
         const data = StorageReservationFileSchema.parse(await this.deps.store.load());
         // A saved active intent says nothing about what survived the previous host. No automatic release.
         this.records = new Map(data.records.map(record => [record.id, { ...record, state: "uncertain" }]));
+        this.consumed = this.recent(data.consumed);
       } catch { this.auditAvailable = false; }
       this.opened = true;
       this.changed();
     });
   }
 
-  snapshot(): { auditAvailable: boolean; records: StorageReservation[] } {
-    return { auditAvailable: this.opened && this.auditAvailable, records: structuredClone([...this.records.values()]) };
+  snapshot(): { auditAvailable: boolean; records: StorageReservation[]; consumed: StorageConsumption[] } {
+    return { auditAvailable: this.opened && this.auditAvailable, records: structuredClone([...this.records.values()]), consumed: structuredClone(this.recent(this.consumed)) };
   }
 
-  private async persist(next: Map<string, StorageReservation>): Promise<boolean> {
+  private now(): number { return (this.deps.now ?? Date.now)(); }
+  private recent(entries: readonly StorageConsumption[]): StorageConsumption[] {
+    // Any older reading is already outside admission's freshness window. Future markers remain
+    // conservative if the wall clock moved backwards; they are never silently credited.
+    const now = this.now();
+    return entries.filter(entry => now - entry.at <= STORAGE_POLICY.admissionMaxAgeMs);
+  }
+  private charges(demands: readonly { volumeId: string; remainingBytes: number }[], at: number): StorageConsumption[] {
+    return demands.filter(d => d.remainingBytes > 0).map(d => ({ volumeId: d.volumeId, bytes: d.remainingBytes, at }));
+  }
+
+  private async persist(next: Map<string, StorageReservation>, consumed = this.consumed): Promise<boolean> {
+    consumed = this.recent(consumed);
     try {
-      StorageReservationFileSchema.parse({ version: 1, records: [...next.values()] });
-      await this.deps.store.save([...next.values()]);
+      StorageReservationFileSchema.parse({ version: 2, records: [...next.values()], consumed });
+      await this.deps.store.save([...next.values()], consumed);
       this.records = next;
+      this.consumed = consumed;
       this.changed();
       return true;
     } catch {
       // Replacement may have reached disk. Keep the union in memory and disable further admission;
       // neither a rejected write nor a caller's retry establishes that the intent did not persist.
       for (const [id, record] of next) this.records.set(id, { ...record, state: "uncertain" });
+      this.consumed = consumed;
       this.auditAvailable = false;
       this.changed();
       return false;
@@ -113,6 +136,11 @@ export class StorageReservations {
       }
       if (!replacing && this.records.size >= 2048) return { status: "held", reason: "reservation-limit" };
       const combined = signal ? AbortSignal.any([signal, this.control.signal]) : this.control.signal;
+      const replanAfter = replacing ? this.now() : undefined;
+      // A changed estimate can hide consumption even when the new peak grew. Replan therefore
+      // requires a measurement after the owner fenced/reported its old phase, rather than
+      // guessing how much was written from the difference between two estimates.
+      const consumed = [...this.recent(this.consumed), ...(previous ? this.charges(previous.demands, replanAfter!) : [])];
       const rootIds = new Set([...request.demands.map(d => d.rootId), ...[...this.records.values()].flatMap(r => r.demands.map(d => d.rootId))]);
       if (rootIds.size > 128) return { status: "held", reason: "reservation-limit" };
       const facts = new Map<string, StorageCapacity>();
@@ -121,12 +149,15 @@ export class StorageReservations {
         while (cursor < roots.length && !combined.aborted) {
           const rootId = roots[cursor++]!;
           try {
-            const fact = await this.deps.probe(rootId, combined);
+            const fact = await this.deps.probe(rootId, combined, replanAfter);
             if (fact) facts.set(rootId, StorageCapacitySchema.parse(fact));
           } catch { /* A failed collector is unavailable, not an assertion of fit. */ }
         }
       }));
       if (this.closing || combined.aborted) return { status: "held", reason: "stopped" };
+      if (replanAfter !== undefined && [...facts.values()].some(fact => fact.measuredAt <= replanAfter)) {
+        return { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-stale" } };
+      }
       // Revalidate every outstanding mapping before using its old volume for concurrent accounting.
       // If a mapping vanished, it could now share any destination; no new fit claim is justified.
       for (const record of this.records.values()) for (const d of record.demands) {
@@ -150,23 +181,34 @@ export class StorageReservations {
         if (pending.some(r => r.state === "uncertain")) return { status: "held", reason: "reconciliation-required", volumeId };
         const own = demands.filter(d => d.volumeId === volumeId), other = pending.flatMap(r => r.demands.filter(d => d.volumeId === volumeId));
         const readings = [...own, ...other].map(d => facts.get(d.rootId)!);
-        const sample = readings[0]!;
-        // Different roots can have different quota limits. The lowest available reading wins.
-        const capacity = { ...sample, measuredAt: Math.min(...readings.map(r => r.measuredAt)),
-          availableBytes: readings.some(r => r.availableBytes === null) ? null : Math.min(...readings.map(r => r.availableBytes!)) };
+        const now = this.now();
+        if (readings.some(r => r.measuredAt > now || now - r.measuredAt > STORAGE_POLICY.admissionMaxAgeMs)) {
+          return { status: "held", reason: "capacity", volumeId, admission: { status: "unknown", reason: "capacity-stale" } };
+        }
+        const adjusted = readings.map(reading => ({ reading, debit: bytes.parse(consumed.filter(entry => entry.volumeId === volumeId && entry.at >= reading.measuredAt).reduce((sum, entry) => sum + entry.bytes, 0)) }));
+        adjusted.sort((a, b) => ((a.reading.availableBytes ?? 0) - a.debit) - ((b.reading.availableBytes ?? 0) - b.debit));
+        const sample = adjusted[0]!;
+        // Quotas differ by root. Compare usable capacity after accounting for writes newer than
+        // each reading, while retaining the original measured available figure in the verdict.
+        const capacity = { ...sample.reading, availableBytes: readings.some(r => r.availableBytes === null) ? null : sample.reading.availableBytes };
         const admission = evaluateStorageAdmission({ capacity, volumeId, mappingRevision: capacity.mappingRevision,
-          reservedBytes: bytes.parse(other.reduce((sum, d) => sum + d.remainingBytes, 0)),
+          reservedBytes: bytes.parse(other.reduce((sum, d) => sum + d.remainingBytes, sample.debit)),
           remainingPeakBytes: bytes.parse(own.reduce((sum, d) => sum + d.remainingBytes, 0)),
-          reserveBytes: Math.max(...[...own, ...other].map(d => d.reserveBytes)), now: (this.deps.now ?? Date.now)() });
+          reserveBytes: Math.max(...[...own, ...other].map(d => d.reserveBytes)), now });
         if (admission.status !== "fits") return { status: "held", reason: "capacity", volumeId, admission };
       }
       const reservation: StorageReservation = { id: request.id, owner: request.owner, state: "active", demands };
       const next = new Map(this.records); next.set(reservation.id, reservation);
-      if (!await this.persist(next)) return { status: "held", reason: "audit-unavailable" };
+      if (!await this.persist(next, consumed)) return { status: "held", reason: "audit-unavailable" };
       if (this.closing || combined.aborted) {
         reservation.state = "uncertain";
         this.changed();
         return { status: "held", reason: "stopped" };
+      }
+      const grantedAt = this.now();
+      if ([...facts.values()].some(fact => fact.measuredAt > grantedAt || grantedAt - fact.measuredAt > STORAGE_POLICY.admissionMaxAgeMs)) {
+        reservation.state = "uncertain"; this.changed();
+        return { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-stale" } };
       }
       return { status: "reserved", reservation: structuredClone(reservation) };
     });
@@ -180,7 +222,7 @@ export class StorageReservations {
       if (this.closed || !record || !sameOwner(record.owner, confirmedOwner)) return false;
       const next = new Map(this.records); next.delete(id);
       if (!this.auditAvailable) return false;
-      return this.persist(next);
+      return this.persist(next, [...this.recent(this.consumed), ...this.charges(record.demands, this.now())]);
     });
   }
 
@@ -191,12 +233,16 @@ export class StorageReservations {
       if (this.closing || !this.auditAvailable || !record || record.state !== "active" || !sameOwner(record.owner, confirmedOwner)) return false;
       if (Object.keys(remaining).some(rootId => !record.demands.some(d => d.rootId === rootId))) return false;
       const updated = structuredClone(record);
+      const released: Array<{ volumeId: string; remainingBytes: number }> = [];
       for (const d of updated.demands) {
         const value = Object.hasOwn(remaining, d.rootId) ? remaining[d.rootId] : undefined;
-        if (value !== undefined) { bytes.parse(value); if (value > d.remainingBytes) return false; d.remainingBytes = value; }
+        if (value !== undefined) {
+          bytes.parse(value); if (value > d.remainingBytes) return false;
+          released.push({ volumeId: d.volumeId, remainingBytes: d.remainingBytes - value }); d.remainingBytes = value;
+        }
       }
       const next = new Map(this.records); next.set(id, updated);
-      return this.persist(next);
+      return this.persist(next, [...this.recent(this.consumed), ...this.charges(released, this.now())]);
     });
   }
 

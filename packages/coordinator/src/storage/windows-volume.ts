@@ -50,6 +50,7 @@ $rows = @(foreach ($root in $roots) {
     $id = New-Object byte[] 24
     [Runtime.InteropServices.Marshal]::Copy($info, $id, 0, 24)
     [uint64]$available = 0; [uint64]$total = 0; [uint64]$free = 0
+    $measuredAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     if (-not $k::GetDiskFreeSpaceExW($name.ToString(), [ref]$available, [ref]$total, [ref]$free)) { throw 'capacity' }
     # Reopen the registered path so a junction retarget or directory replacement is detected too.
     $again = $k::CreateFileW([string]$root.path, 0, 7, [IntPtr]::Zero, 3, 0x02000000, [IntPtr]::Zero)
@@ -61,7 +62,7 @@ $rows = @(foreach ($root in $roots) {
     if ([Convert]::ToBase64String($againId) -cne [Convert]::ToBase64String($id)) { throw 'changed' }
     $after = New-Object Text.StringBuilder(32768)
     if ($k::GetFinalPathNameByHandleW($again, $after, 32768, 1) -eq 0 -or $after.ToString() -cne $name.ToString()) { throw 'changed' }
-    [pscustomobject]@{rootId=$root.rootId;state='measured';error=0;canonical=$name.ToString();fileId=[Convert]::ToBase64String($id);availableBytes=$available;measuredAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}
+    [pscustomobject]@{rootId=$root.rootId;state='measured';error=0;canonical=$name.ToString();fileId=[Convert]::ToBase64String($id);availableBytes=$available;measuredAt=$measuredAt}
   } catch {
     $code = if ($_.Exception.Message -eq 'changed') { 0 } else { [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
     $state = if ($_.Exception.Message -eq 'identity') { 'unsupported' } else { 'unavailable' }
@@ -109,7 +110,7 @@ export class WindowsVolumeProbe {
   private roots: Root[] = [];
   private version = 0;
   private cache: { at: number; rows: Map<string, StorageProbeResult> } | null = null;
-  private pending: Promise<Map<string, StorageProbeResult>> | null = null;
+  private pending: { work: Promise<Map<string, StorageProbeResult>>; control: AbortController; users: Set<symbol>; done: boolean } | null = null;
   private active = new Map<AbortController, Promise<unknown>>();
   private stopped = false;
   constructor(private readonly deps: { platform?: string; now?: () => number; query?: (roots: readonly Root[], signal: AbortSignal) => Promise<string> } = {}) {}
@@ -120,21 +121,24 @@ export class WindowsVolumeProbe {
     this.roots = parsed; this.version++; this.cache = null; this.pending = null;
     for (const control of this.active.keys()) control.abort();
   }
-  async probe(rootId: string, signal: AbortSignal): Promise<StorageProbeResult> {
+  async probe(rootId: string, signal: AbortSignal, after = -Infinity): Promise<StorageProbeResult> {
     if (this.stopped || signal.aborted) return unavailable("unavailable", true);
     if ((this.deps.platform ?? process.platform) !== "win32") return unavailable("unsupported");
     if (!this.roots.some(root => root.rootId === rootId)) return unavailable();
     const now = (this.deps.now ?? Date.now)();
-    if (this.cache && now >= this.cache.at && now - this.cache.at < 1_000) return structuredClone(this.cache.rows.get(rootId) ?? unavailable());
+    const cached = this.cache?.rows.get(rootId);
+    if (this.cache && now >= this.cache.at && now - this.cache.at < 1_000 && (cached?.capacity ? cached.capacity.measuredAt > after : this.cache.at > after)) return structuredClone(cached ?? unavailable());
+    const user = Symbol();
     if (!this.pending) {
       const version = this.version, roots = this.roots, control = new AbortController();
+      const entry = { work: null! as Promise<Map<string, StorageProbeResult>>, control, users: new Set([user]), done: false };
       const work = (async () => {
         const mapped = new Map<string, StorageProbeResult>();
         try {
           const rows = z.array(rowSchema).max(128).parse(JSON.parse(await (this.deps.query ?? queryWindowsStorageVolumes)(roots, control.signal)));
           if (new Set(rows.map(row => row.rootId)).size !== rows.length) throw new Error("Repeated native storage result.");
+          if (rows.some(row => !roots.some(root => root.rootId === row.rootId))) throw new Error("Unexpected native storage result.");
           for (const row of rows) {
-            if (!roots.some(root => root.rootId === row.rootId)) throw new Error("Unexpected native storage result.");
             const guid = row.canonical?.match(/^\\\\\?\\Volume\{[a-f0-9-]{36}\}\\/i)?.[0];
             if (row.state === "measured" && guid && row.fileId && row.availableBytes !== undefined && row.measuredAt !== undefined) {
               mapped.set(row.rootId, { state: "measured", source: "windows-volume-api", limitations: ["total-unavailable"], capacity: {
@@ -145,16 +149,28 @@ export class WindowsVolumeProbe {
               } });
             } else mapped.set(row.rootId, row.error === 5 ? { ...unavailable(), limitations: ["permission-denied"] } : unavailable(row.state === "unsupported" ? "unsupported" : "unavailable"));
           }
-        } catch { /* No raw native output, path or exception enters operational diagnostics. */ }
-        if (this.stopped || control.signal.aborted || this.version !== version) return new Map<string, StorageProbeResult>();
+        } catch { mapped.clear(); /* A rejected response grants no partial measurement. */ }
+        if (this.stopped || control.signal.aborted || this.version !== version || entry.users.size === 0) return new Map<string, StorageProbeResult>();
         this.cache = { at: (this.deps.now ?? Date.now)(), rows: mapped }; return mapped;
       })();
-      this.pending = work;
+      entry.work = work; this.pending = entry;
       this.active.set(control, work);
-      void work.finally(() => { this.active.delete(control); if (this.pending === work) this.pending = null; });
-    }
-    const rows = await this.pending;
-    return this.stopped || signal.aborted ? unavailable("unavailable", true) : structuredClone(rows.get(rootId) ?? unavailable());
+      void work.finally(() => { entry.done = true; this.active.delete(control); if (this.pending === entry) this.pending = null; });
+    } else this.pending.users.add(user);
+    const entry = this.pending;
+    const release = () => {
+      entry.users.delete(user);
+      if (entry.users.size === 0 && !entry.done) { entry.control.abort(); if (this.pending === entry) this.pending = null; }
+    };
+    let abandon!: () => void;
+    const cancelled = new Promise<null>(resolve => { abandon = () => { release(); resolve(null); }; signal.addEventListener("abort", abandon, { once: true }); });
+    if (signal.aborted) abandon();
+    try {
+      const rows = await Promise.race([entry.work, cancelled]);
+      const result = rows?.get(rootId);
+      if (this.stopped || signal.aborted) return unavailable("unavailable", true);
+      return result?.capacity && result.capacity.measuredAt <= after ? unavailable() : structuredClone(result ?? unavailable());
+    } finally { signal.removeEventListener("abort", abandon); release(); }
   }
   async stop(): Promise<void> {
     this.stopped = true;
