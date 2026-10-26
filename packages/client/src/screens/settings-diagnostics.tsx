@@ -7,8 +7,6 @@ import {
   findingRef,
   primaryFindings,
   remedyAbsenceStatement,
-  recoveryIncidentSummary,
-  type RecoveryHistorySnapshot,
   type DiagnosticsSnapshot,
   type Finding,
   type FindingSeverity,
@@ -16,6 +14,7 @@ import {
 import { cx } from "../components/ui.js";
 import { refreshDiagnostics, useDiagnostics, useClientState } from "../lib/store.js";
 import { RecoveryControls } from "../components/recovery-controls.js";
+import { RecoveryHistoryBrowser } from "../components/recovery-history.js";
 
 /**
  * Settings · Diagnostics (SPEC-032 §1.10, design turn 111): the one surface that shows the
@@ -168,27 +167,6 @@ function StaleRemeasure({ remedy }: { remedy: NonNullable<Finding["remedy"]> }) 
   );
 }
 
-function RecoveryHistoryRows({ history }: { history: RecoveryHistorySnapshot | null | undefined }) {
-  if (!history) return null;
-  const phase = { observing: "Observing", "action-available": "Action available", recovering: "Recovering", verifying: "Verifying", recovered: "Recovered", "needs-user": "Needs you", unresolved: "Unresolved" };
-  return <section aria-label="Recovery history">
-    <div className="fy-diag__band"><span className="fy-rt__eyebrow">RECOVERY HISTORY</span></div>
-    <div className="fy-set__row fy-set__row--stack">
-      <div className="fy-diag__title">{history.activeCount} active · {history.resolvedCount} resolved</div>
-      <div className="fy-diag__meta">{history.audit === "unavailable" ? "History could not be saved or read. Current evidence remains available." : history.audit === "starting" ? "Reading local history…" : "Saved locally. Clearing history does not change restart limits or approvals."}</div>
-      {(history.limited || history.overflow.lostDetail) && <div className="fy-diag__meta">Showing a bounded summary. Some detail is unavailable.</div>}
-    </div>
-    {history.incidents.map(incident => {
-      const text = recoveryIncidentSummary(incident);
-      return <div key={incident.id} className="fy-set__row fy-set__row--stack" data-incident-id={incident.id}>
-        <div className="fy-diag__title">{text.title} · {phase[incident.phase]}</div>
-        <div className="fy-diag__meta">{text.detail}</div>
-        <div className="fy-diag__meta">Observed {new Date(incident.lastObservedAt).toLocaleString()}</div>
-      </div>;
-    })}
-  </section>;
-}
-
 export function SettingsDiagnosticsScreen() {
   const snapshot = useDiagnostics();
   const history = useClientState()?.app.recoveryHistory;
@@ -208,7 +186,7 @@ export function SettingsDiagnosticsScreen() {
           <span className="fy-diag__meta">not derived yet</span>
         </div>
         <RecoveryControls />
-        <RecoveryHistoryRows history={history} />
+        <RecoveryHistoryBrowser history={history} />
       </div>
     );
   }
@@ -257,7 +235,7 @@ export function SettingsDiagnosticsScreen() {
           ))
       )}
       <RecoveryControls />
-      <RecoveryHistoryRows history={history} />
+      <RecoveryHistoryBrowser history={history} />
     </div>
   );
 }

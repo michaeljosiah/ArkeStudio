@@ -46,7 +46,7 @@ it("renders bounded operational history using the existing Diagnostics rows with
   __setStateForTest(state(), { diagnostics: { derivedAt: new Date(now).toISOString(), findings: [], checked: [], sources: [] } });
   const html = renderToString(<MemoryRouter><SettingsDiagnosticsScreen /></MemoryRouter>);
   assert.match(html, /RECOVERY HISTORY/); assert.match(html, /Storage needs attention/); assert.match(html, /2\.0 GiB available/);
-  const section = html.slice(html.indexOf('aria-label="Recovery history"')); assert(!section.includes("<button")); assert(!section.includes("Restart"));
+  const section = html.slice(html.indexOf('aria-label="Recovery history"')); assert(section.includes("Recovery history filter")); assert(section.includes("Snooze 1 hour")); assert(!section.includes("Restart"));
 });
 
 it("Review Diagnostics only navigates and never resumes a job or approves a repair", async () => {

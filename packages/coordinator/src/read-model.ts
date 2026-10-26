@@ -403,6 +403,7 @@ export class ReadModel {
         return;
       }
       case "recovery.notice":
+      case "recovery.history-page":
       case "recovery.command-result": return;
       case "adapters.changed": {
         this.state = { ...this.state, app: { ...this.state.app, adapters: event.adapters } };

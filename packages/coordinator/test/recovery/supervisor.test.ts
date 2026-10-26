@@ -22,6 +22,28 @@ const policy = (service: RecoveryControlService, options: { acquire?: (signal: A
   new SupervisorRecovery({ control: service, identity, componentDigest: () => digest, current: options.current ?? (() => true), ownership: options.ownership ?? (() => "managed"),
     acquire: options.acquire ?? (async () => () => {}), now: options.now });
 
+it("ages managed attempts within one live supervisor and opens its circuit only for a full rolling window", { timeout: 40_000 }, async () => {
+  let now = 2_000_000; const h = control({ now: () => now }), port = policy(h.service, { now: () => now });
+  const accelerated: SupervisorRecoveryPort = { allowStart: signal => port.allowStart(signal), recover: work => port.recover({ ...work, sleep: async ms => { now += ms; } }),
+    mayStopForFailedHealth: () => port.mayStopForFailedHealth(), ownerStopped: () => port.ownerStopped() };
+  const supervisor = specimen({ maxRestarts: 1 }); supervisor.setRecoveryPort(accelerated);
+  try {
+    await supervisor.start();
+    for (let index = 0; index < 6; index++) {
+      if (index < 4) now += 15 * 60_000 + 1;
+      const pid = supervisor.pid!, epoch = supervisor.spawnEpoch; process.kill(pid, "SIGKILL");
+      await until(() => supervisor.status === "healthy" && supervisor.spawnEpoch === epoch + 1 && h.service.snapshot().control.targets[0]?.intent === null, "rolling-window managed replacement", 15_000);
+      assert.notEqual(supervisor.pid, pid); assert.equal(h.service.snapshot().control.targets[0]!.circuitOpen, false);
+      assert.equal(h.service.snapshot().control.targets[0]!.attempts.length, index < 4 ? 1 : index - 2);
+    }
+    const epoch = supervisor.spawnEpoch; process.kill(supervisor.pid!, "SIGKILL");
+    await until(() => supervisor.status === "failed" && h.service.snapshot().control.targets[0]?.circuitOpen === true, "rolling budget exhaustion", 15_000);
+    assert.equal(supervisor.spawnEpoch, epoch); assert.equal(supervisor.pid, null);
+    const restarted = new RecoveryControlService({ store: h.store, now: () => now + 15 * 60_000 + 1 }); await restarted.open();
+    assert.equal(restarted.snapshot().control.targets[0]!.circuitOpen, true, "only an actually exhausted circuit survives restart"); await restarted.stop();
+  } finally { await supervisor.stopAndConfirm(); await port.ownerStopped(); await h.service.stop(); }
+});
+
 it("a real child exit waits behind admitted GPU work, then restarts and verifies readiness once", { timeout: 40_000 }, async () => {
   const h = control(), gpu = new LocalGpu(async () => {}, ["Ollama", "Ming"]), abort = new AbortController();
   const creative = await gpu.acquire("Ming", abort.signal);
@@ -43,7 +65,7 @@ it("startup exits serialize through all allowed attempts rather than losing the 
   const h = control({ now: () => now });
   const port = policy(h.service, { now: () => now, acquire: async () => { acquisitions++; return () => { releases++; }; } });
   const accelerated: SupervisorRecoveryPort = { allowStart: signal => port.allowStart(signal), recover: work => port.recover({ ...work, sleep: async ms => { now += ms; } }),
-    mayStopForFailedHealth: () => port.mayStopForFailedHealth(), budgetExhausted: () => port.budgetExhausted(), ownerStopped: () => port.ownerStopped() };
+    mayStopForFailedHealth: () => port.mayStopForFailedHealth(), ownerStopped: () => port.ownerStopped() };
   const supervisor = specimen({ env: { MODE: "exit-immediately" } }); supervisor.setRecoveryPort(accelerated);
   try {
     await supervisor.start();

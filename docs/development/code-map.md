@@ -56,9 +56,17 @@ uses the existing notification drawing for admitted notices; desktop `background
 uses generic copy only after the separate opt-in. Both deduplicate live notices in bounded sets;
 opening an alert only navigates. The phone's existing notification opt-in does not subscribe to
 these host recovery events.
+`recovery-history-read` serves at most 100 retained summaries per revision-bound page; source,
+filter or page-size changes return stale rather than mixing revisions. The client retains four
+response pages and `components/recovery-history.tsx` supplies filtering, pagination and host-only
+acknowledge/advisory snooze controls. Snapshot history stays capped at 100. The existing opt-in
+`generate-diagnostics` bundle enumerates all retained summaries and safe policy holds through its
+normal secret/path boundary, excluding intent capabilities, mappings and session tokens.
+Shutdown starts bounded presentation draining before tracked message handlers. Managed supervisors
+use the durable rolling budget; only supervisors without a recovery port use the legacy lifetime count.
 Tests: contracts `test/recovery-incidents.test.ts`, coordinator `test/recovery/history*.test.ts`,
 client `test/recovery-{history,controls}.test.tsx`, desktop `test/background-notifications.test.ts`.
-Full lifecycle/event adapters, complete history pagination/export and approved Studio assistant visual acceptance
+Full lifecycle/action adapters, action-outcome export and approved Studio assistant visual acceptance
 remain outstanding (SPEC-061 R-1–R-5/R-15–R-18/R-24–R-28; SPEC-014/032 amendments).
 
 Managed local engines: coordinator `local-ai/ollama.ts` owns portable Ollama and explicit URL

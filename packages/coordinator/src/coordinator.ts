@@ -6016,7 +6016,10 @@ export class Coordinator {
     // State is captured AFTER the awaits: an event landing mid-wait would otherwise put the
     // old app section beside findings derived from the new one — the disagreement-in-one-
     // artifact R-13 exists to forbid.
-    return buildDiagnosticsBundle(this.getState(), this.appLog, this.secrets, findings);
+    const history = this.opts.recoveryHistory;
+    return buildDiagnosticsBundle(this.getState(), this.appLog, this.secrets, findings, {
+      history: history?.historyForExport() ?? null, audit: history?.snapshot() ?? null, policy: this.opts.recoveryControl?.policySnapshot() ?? null,
+    });
   }
 
   /** A credential failed mid-session: a provider fault naming the provider, never a work failure (R-4). */
@@ -14451,6 +14454,12 @@ export class Coordinator {
         // (R-34), and reaches the asker as the ordinary broadcast.
         this.diagnosticsSnapshot?.refresh();
         if (this.opts.storageHealth) this.trackBackground(this.opts.storageHealth.refresh());
+        return;
+      }
+      case "recovery-history-read": {
+        const page = this.opts.recoveryHistory?.page(msg.query) ?? { status: "unavailable" as const, filter: msg.query.filter, pageSize: msg.query.pageSize, offset: 0,
+          at: Date.now(), audit: "unavailable" as const, incidents: [], totalCount: 0, revision: null, nextCursor: null, previousCursor: null };
+        this.emit({ type: "recovery.history-page", at: this.nowIso(), requestId: msg.requestId, page });
         return;
       }
       case "recovery-set-mode":
@@ -23188,6 +23197,9 @@ export class Coordinator {
     this.opts.storageHealth?.closeAdmission();
     this.opts.recoveryControl?.closeAdmission();
     this.opts.recoveryHistory?.closeAdmission();
+    // Presentation handlers are part of activeMessages. Start their bounded drain now, before
+    // waiting for those handlers, so stalled nonessential I/O cannot prevent native cleanup.
+    const historyStopped = this.opts.recoveryHistory?.stop();
     this.sampleInstallAbort?.abort();
     const audioStudioStopped = this.audioStudioPreviews.stop();
     this.cataloguePreviews?.close();
@@ -23267,7 +23279,7 @@ export class Coordinator {
       await this.opts.adapter?.dispose?.().catch(() => {});
       await this.releaseOllama();
       const runtimeStops = await Promise.allSettled([this.opts.ming?.dispose(), this.opts.ollama?.service.dispose()]);
-      await this.opts.recoveryHistory?.stop();
+      await historyStopped;
       await this.worldQuery.stop();
       // Provider close is the critical gate: it saves pending state and releases the world lock.
       this.engineClosed = true;

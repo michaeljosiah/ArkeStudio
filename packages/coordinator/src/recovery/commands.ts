@@ -6,7 +6,8 @@ type Command = Extract<ClientMessage, { kind: RecoveryCommandResult["operation"]
 /** Host transport authentication/remote refusal precedes dispatch. These operations never
  * invoke a lifecycle owner, grant a repair, clear a circuit or replay submitted work. */
 export async function recoveryCommand(message: Command, deps: { control?: RecoveryControlService | null; history?: RecoveryHistoryService | null }): Promise<RecoveryCommandResult> {
-  const result = { requestId: message.requestId, operation: message.kind };
+  const result = { requestId: message.requestId, operation: message.kind,
+    ...(message.kind === "recovery-history-control" ? { historyAction: message.command.action } : {}) };
   try {
     let saved = false, available = false;
     if (message.kind === "recovery-set-mode") {

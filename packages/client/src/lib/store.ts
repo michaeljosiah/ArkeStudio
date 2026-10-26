@@ -235,6 +235,7 @@ interface StoreState {
    */
   diagnostics: import("@arke-studio/contracts").DiagnosticsSnapshot | null;
   recoveryCommandResults: Record<string, import("@arke-studio/contracts").RecoveryCommandResult>;
+  recoveryHistoryPages: Record<string, import("@arke-studio/contracts").RecoveryHistoryPage>;
   /** Build reviews by conversation and request, so a late response cannot erase a newer answer. */
   buildPlans: Record<
     string,
@@ -642,6 +643,7 @@ let current: StoreState = {
   setupStatus: null,
   diagnostics: null,
   recoveryCommandResults: {},
+  recoveryHistoryPages: {},
   reading: {},
   deriving: {},
   casting: {},
@@ -1586,6 +1588,7 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, recoveryHistory: event.history } };
     case "recovery.policy": return { ...state, app: { ...state.app, recoveryPolicy: event.policy } };
     case "recovery.notice":
+    case "recovery.history-page":
     case "recovery.command-result": return state;
     case "adapters.changed":
       return { ...state, app: { ...state.app, adapters: event.adapters } };
@@ -2911,6 +2914,9 @@ function handleFrame(json: string): void {
     const recoveryCommandResults = event.type === "recovery.command-result"
       ? Object.fromEntries([...Object.entries(current.recoveryCommandResults).filter(([id]) => id !== event.result.requestId), [event.result.requestId, event.result] as const].slice(-32))
       : current.recoveryCommandResults;
+    const recoveryHistoryPages = event.type === "recovery.history-page"
+      ? Object.fromEntries([...Object.entries(current.recoveryHistoryPages).filter(([id]) => id !== event.requestId), [event.requestId, event.page] as const].slice(-4))
+      : current.recoveryHistoryPages;
     let providerCallsByJob = current.providerCallsByJob;
     if (event.type === "diagnostics.snapshot") {
       diagnostics = event.snapshot;
@@ -3064,6 +3070,7 @@ function handleFrame(json: string): void {
       diagnosticsBundle,
       diagnostics,
       recoveryCommandResults,
+      recoveryHistoryPages,
       providerCallsByJob,
       frameRunQuotes,
       frameRunStartResults,
@@ -6837,6 +6844,9 @@ export function setRecoveryPreferences(preferences: { transientMuted?: boolean; 
 export function controlRecoveryHistory(command: Extract<ClientMessage, { kind: "recovery-history-control" }>["command"]): string | null {
   const requestId = ulid(); return send({ kind: "recovery-history-control", requestId, command }) ? requestId : null;
 }
+export function readRecoveryHistory(query: import("@arke-studio/contracts").RecoveryHistoryQuery): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-history-read", requestId, query }) ? requestId : null;
+}
 
 export function listProviderCalls(jobId: string | null): void {
   send({ kind: "list-provider-calls", jobId });
@@ -6945,6 +6955,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     setupStatus: null,
     diagnostics: null,
     recoveryCommandResults: {},
+    recoveryHistoryPages: {},
     reading: {},
   deriving: {},
     casting: {},

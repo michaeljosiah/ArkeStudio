@@ -107,7 +107,6 @@ export class SupervisorRecovery implements SupervisorRecoveryPort {
   // A health failure needs a reviewed stop/restart plan before it may kill a still-running
   // process. Unexpected-exit recovery above starts only after its owner confirmed cleanup.
   mayStopForFailedHealth(): boolean { return false; }
-  async budgetExhausted(): Promise<void> { await this.deps.control.markCircuitOpen(this.deps.identity); }
   async ownerStopped(): Promise<void> {
     const held = this.retained; this.retained = null;
     if (held) {

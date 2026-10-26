@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { emptyRecoveryHistory, RecoveryHistorySchema, RecoveryObservationSchema, observeRecoveryIncidents, pruneRecoveryHistory, recoveryFindingFacts, findingRef, primaryFindings,
   recoveryNoticeDecision, recordRecoveryNotice, FINDING_SEVERITY_RANK,
-  STORAGE_POLICY, storageWarningFloor,
+  STORAGE_POLICY, storageWarningFloor, RecoveryHistoryQuerySchema, type RecoveryHistoryQuery, type RecoveryHistoryPage,
   type ClientState, type DiagnosticsSnapshot, type RecoveryHistory, type RecoveryHistorySnapshot, type RecoveryObservation, type RecoveryNotice, type RecoveryIncident } from "@arke-studio/contracts";
 import type { RecoveryHistoryStore } from "./history-file.js";
 
@@ -17,6 +17,8 @@ export class RecoveryHistoryService {
   private closing = false;
   private stopped = false;
   private stopping: Promise<void> | null = null;
+  private releasePresentations!: () => void;
+  private readonly presentationsStopped = new Promise<void>(resolve => { this.releasePresentations = resolve; });
   private timer: ReturnType<typeof setTimeout> | null = null;
   private dirty = false;
   private work: Promise<void> | null = null;
@@ -38,6 +40,23 @@ export class RecoveryHistoryService {
   }
   /** Opt-in callers still own export/redaction and access checks. No native target mapping. */
   historyForExport(): RecoveryHistory { return structuredClone(this.history); }
+  /** Read-only bounded pages over one revision. A changed source cannot silently shift the
+   * rows under a cursor; even an in-memory audit failure remains explicitly labelled. */
+  page(input: RecoveryHistoryQuery): RecoveryHistoryPage {
+    const query = RecoveryHistoryQuerySchema.parse(input), snapshot = this.snapshot();
+    const base = { filter: query.filter, pageSize: query.pageSize, offset: 0, at: snapshot.at, audit: snapshot.audit,
+      ...(snapshot.reason ? { reason: snapshot.reason } : {}), incidents: [], totalCount: 0, revision: null, nextCursor: null, previousCursor: null };
+    if (this.closing || this.audit === "starting") return { ...base, status: "unavailable" };
+    const revision = createHash("sha256").update(JSON.stringify([query.filter, query.pageSize, this.audit, this.reason, this.history])).digest("hex");
+    const incidents = this.history.incidents.filter(value => query.filter === "all" || (value.phase === "recovered") === (query.filter === "resolved"))
+      .sort((a, b) => Number(a.phase === "recovered") - Number(b.phase === "recovered") || (a.phase === "recovered" ? 0 : FINDING_SEVERITY_RANK[a.severity] - FINDING_SEVERITY_RANK[b.severity]) || b.lastObservedAt - a.lastObservedAt || a.id.localeCompare(b.id));
+    const offset = query.cursor?.offset ?? 0;
+    if (query.cursor && (query.cursor.revision !== revision || offset > 0 && offset >= incidents.length || offset % query.pageSize !== 0)) return { ...base, status: "stale", revision, totalCount: incidents.length };
+    const cursor = (offset: number) => ({ revision, offset });
+    return { ...base, status: "ready", revision, offset, totalCount: incidents.length, incidents: structuredClone(incidents.slice(offset, offset + query.pageSize)),
+      nextCursor: offset + query.pageSize < incidents.length ? cursor(offset + query.pageSize) : null,
+      previousCursor: offset > 0 ? cursor(Math.max(0, offset - query.pageSize)) : null };
+  }
   subscribe(listener: (snapshot: RecoveryHistorySnapshot) => void): () => void { if (this.closing) return () => {}; this.subscribers.add(listener); return () => this.subscribers.delete(listener); }
   subscribeNotices(listener: (notice: RecoveryNotice) => void): () => void { if (this.closing) return () => {}; this.noticeSubscribers.add(listener); return () => this.noticeSubscribers.delete(listener); }
   private changed(): void {
@@ -167,10 +186,11 @@ export class RecoveryHistoryService {
   }
   /** Presentation-only preferences. Host routing must still enforce who may change them. */
   private async present(change: (history: RecoveryHistory, now: number) => boolean): Promise<boolean> {
-    await this.open(); if (this.closing || this.audit !== "available") return false;
+    await Promise.race([this.open(), this.presentationsStopped]); if (this.closing || this.audit !== "available") return false;
     const now = this.now(); if (!Number.isSafeInteger(now) || now < this.history.lastObservedAt) return false;
     const next = structuredClone(this.history); if (!change(next, now)) return false;
-    this.history = next; this.dirty = true; this.changed(); await this.flush(); return this.audit === "available";
+    this.history = next; this.dirty = true; this.changed();
+    return Promise.race([this.flush().then(() => !this.stopped && this.audit === "available"), this.presentationsStopped.then(() => false)]);
   }
   setPreferences(patch: Partial<RecoveryHistory["preferences"]>): Promise<boolean> {
     const parsed = z.object({ transientMuted: z.boolean().optional(), desktopOptIn: z.boolean().optional() }).strict().parse(patch);
@@ -234,6 +254,7 @@ export class RecoveryHistoryService {
       if (timer) clearTimeout(timer);
       if (!complete) { this.audit = "unavailable"; this.reason = this.work ? "write-failed" : "read-failed"; }
       this.stopped = true; this.dirty = false; this.pendingNotices.clear(); this.inFlightNotices.clear(); this.subscribers.clear(); this.noticeSubscribers.clear();
+      this.releasePresentations();
     })();
   }
 }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { join } from "node:path";
 import { writeFile, readFile } from "node:fs/promises";
-import { emptyRecoveryHistory, RecoveryHistorySchema, type RecoveryHistory, type RecoveryObservation, type RecoveryNotice, type DiagnosticsSnapshot } from "@arke-studio/contracts";
+import { emptyRecoveryHistory, RecoveryHistorySchema, RecoveryHistoryPageSchema, type RecoveryHistoryQuery, type RecoveryHistory, type RecoveryObservation, type RecoveryNotice, type DiagnosticsSnapshot } from "@arke-studio/contracts";
 import { RecoveryHistoryService } from "../../src/recovery/history.js";
 import { FileRecoveryHistoryStore } from "../../src/recovery/history-file.js";
 import { FileRecoveryControlStore } from "../../src/recovery/control-file.js";
@@ -110,6 +110,36 @@ it("caps the snapshot independently of retained history, marks overflow, and rej
   await h.service.flush(); assert.equal(RecoveryHistorySchema.parse(h.disk()).incidents.length, 1000); await h.service.stop();
 });
 
+it("reads every retained incident through bounded revision-bound pages and rejects changed sources or query scopes", async () => {
+  const h = harness(); await h.service.open();
+  const observations = Array.from({ length: 1000 }, (_, index) => observation({ key: (index + 1).toString(16).padStart(64, "0") }));
+  h.service.observe(observations); h.service.observe(observations.slice(0, 100).map(value => ({ ...value, phase: "recovered", resolution: "verified-capacity" })));
+  const seen: string[] = []; let cursor: RecoveryHistoryQuery["cursor"];
+  do {
+    const page = RecoveryHistoryPageSchema.parse(h.service.page({ filter: "all", pageSize: 37, ...(cursor ? { cursor } : {}) }));
+    assert.equal(page.status, "ready"); assert.equal(page.totalCount, 1000); assert(page.incidents.length <= 37);
+    assert.equal(page.offset, seen.length); seen.push(...page.incidents.map(value => value.id)); cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  assert.equal(seen.length, 1000); assert.equal(new Set(seen).size, 1000);
+  const first = h.service.page({ filter: "all", pageSize: 50 }), next = first.nextCursor!;
+  assert.equal(h.service.page({ filter: "active", pageSize: 100 }).totalCount, 900);
+  assert.equal(h.service.page({ filter: "resolved", pageSize: 100 }).totalCount, 100);
+  assert.equal(h.service.page({ filter: "active", pageSize: 50, cursor: next }).status, "stale");
+  assert.equal(h.service.page({ filter: "all", pageSize: 51, cursor: next }).status, "stale");
+  const second = h.service.page({ filter: "all", pageSize: 50, cursor: next }); assert.equal(second.previousCursor?.offset, 0);
+  const cloned = h.service.page({ filter: "all", pageSize: 50 }); cloned.incidents[0]!.facts = []; assert(h.service.page({ filter: "all", pageSize: 50 }).incidents[0]!.facts.length > 0);
+  h.advance(1); h.service.observe([observation({ ...observations[999], observedAt: now + 1, evidenceRevision: "d".repeat(64) })]);
+  const stale = h.service.page({ filter: "all", pageSize: 50, cursor: next }); assert.equal(stale.status, "stale"); assert.equal(stale.incidents.length, 0); assert.equal(stale.nextCursor, null);
+  await h.service.stop(); assert.equal(h.service.page({ filter: "all", pageSize: 50 }).status, "unavailable");
+});
+
+it("labels bounded memory pages after unavailable persistence without claiming saved evidence", async () => {
+  const h = harness({ save: async () => { throw Object.assign(new Error("disk full"), { code: "ENOSPC" }); } }); await h.service.open();
+  h.service.observe([observation()]); await h.service.flush();
+  const page = RecoveryHistoryPageSchema.parse(h.service.page({ filter: "all", pageSize: 50 }));
+  assert.equal(page.status, "ready"); assert.equal(page.audit, "unavailable"); assert.equal(page.reason, "disk-full"); assert.equal(page.incidents.length, 1); await h.service.stop();
+});
+
 it("requires separated fresh capacity readings, resets changed mappings, and never treats lost scope as recovery", async () => {
   const h = harness(), key = createHash("sha256").update("storage-pressure:volume-a").digest("hex"); await h.service.open();
   h.service.observe([observation({ key })]); await h.service.flush();
@@ -179,6 +209,14 @@ it("bounds shutdown waiting on nonessential history I/O and suppresses late cont
     finish.resolve(); await opening; await saving; service.observe([observation()]); await service.flush();
     assert.equal(writes, blocked === "write" ? 1 : 0); assert.equal(delivered, 0); assert.equal(published, before);
   }
+});
+
+it("releases presentation-command waits with an unconfirmed outcome when bounded shutdown expires", async () => {
+  const entered = deferred(), finish = deferred(); let delivered = 0;
+  const service = new RecoveryHistoryService({ stopTimeoutMs: 5, store: { load: async () => emptyRecoveryHistory(), save: async () => { entered.resolve(); await finish.promise; } }, onNotice: () => { delivered++; } });
+  await service.open(); const presenting = service.setPreferences({ desktopOptIn: true });
+  await entered.promise; await service.stop(); assert.equal(await presenting, false); assert.equal(service.snapshot().audit, "unavailable");
+  finish.resolve(); await service.flush(); assert.equal(delivered, 0);
 });
 
 it("carries a pending warning across same-severity evidence updates and delivers only after the latest save", async () => {

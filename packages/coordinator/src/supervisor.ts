@@ -57,7 +57,6 @@ export interface SupervisorRecoveryPort {
   }): Promise<void>;
   /** A health probe alone cannot authorize killing a busy or personal process. */
   mayStopForFailedHealth(): boolean;
-  budgetExhausted(): Promise<void>;
   ownerStopped(): Promise<void>;
 }
 
@@ -842,12 +841,6 @@ export class ChildSupervisor extends EventEmitter {
       return;
     }
     const why = signal ? `signal ${signal}` : `exit code ${code}`;
-    if (this.restarts >= this.spec.maxRestarts) {
-      await this.recovery?.budgetExhausted();
-      if (this.stopping || epoch !== this.launchEpoch) return;
-      this.setStatus("failed", `${this.id} exited (${why}) and exceeded its restart budget`);
-      return;
-    }
     if (this.recovery) {
       const signal = this.recoveryAbort.signal;
       await this.recovery.recover({ generation: epoch, signal,
@@ -857,7 +850,6 @@ export class ChildSupervisor extends EventEmitter {
         held: reason => { if (!this.stopping && epoch === this.launchEpoch) this.setStatus("failed", reason); },
         restart: async canSpawn => {
           if (this.stopping || epoch !== this.launchEpoch || this.child !== null) return "unknown";
-          this.restarts++;
           await this.spawnOnce(canSpawn);
           if (this.stopping || this.launchEpoch !== epoch + 1) return "unknown";
           if (this.child !== null && this.status === "healthy") return "ready";
@@ -865,6 +857,12 @@ export class ChildSupervisor extends EventEmitter {
           return this.child === null && this.descendants.length === 0 ? "failed" : "unknown";
         },
       });
+      return;
+    }
+    // The legacy lifetime counter applies only without a recovery port. Managed policy
+    // evaluates its persisted rolling attempts itself, including durable circuit admission.
+    if (this.restarts >= this.spec.maxRestarts) {
+      this.setStatus("failed", `${this.id} exited (${why}) and exceeded its restart budget`);
       return;
     }
     this.restarts += 1;

@@ -25,6 +25,14 @@ over the authenticated host socket and verifies disk state and journal exclusion
 checks receipt correlation and the summary-clear confirmation, while `recovery-history.test.tsx`
 checks notice mute/replay and read-only Activity navigation. Desktop `background-notifications.test.ts`
 checks the separate opt-in, generic copy, focus, shutdown and Activity-only click.
+`recovery/history.test.ts` traverses all 1,000 retained incidents with non-dividing page sizes,
+checks stale filter/source/page-size cursors and labels failed persistence in memory. Client
+`recovery-history-browser.test.tsx` checks pagination, stale reads, correlated snooze and remote
+read-only controls. `recovery/export.test.ts` exports all retained summaries and poisons future
+fields to verify enumeration plus the existing secret/path boundary. The authenticated host
+fixture stalls a preference save while an actual owned child is running, then verifies bounded
+shutdown confirms native exit without acknowledging an unconfirmed save. The supervisor fixture
+ages attempts across a long live session, then exhausts the actual rolling window.
 `test/recovery/supervisor.test.ts` additionally uses real native children to check
 GPU waiting, verified replacement, queued startup exits, cancellation, policy/ownership refusal
 and retained unhealthy processes. `test/recovery/application.test.ts` starts the actual host and

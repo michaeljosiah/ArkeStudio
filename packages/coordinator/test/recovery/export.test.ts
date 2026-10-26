@@ -1,0 +1,33 @@
+import assert from "node:assert/strict";
+import { it } from "node:test";
+import { emptyRecoveryHistory, observeRecoveryIncidents, IDLE_UPDATE_STATE, type ClientState, type RecoveryHistory, type RecoveryPolicySnapshot } from "@arke-studio/contracts";
+import { buildDiagnosticsBundle } from "../../src/diagnostics.js";
+import { SecretRegistry } from "../../src/redact.js";
+
+const now = 2_000_000;
+const state = { app: { version: "test", health: { coordinator: { status: "healthy" }, harness: { status: "healthy" }, voice: { status: "healthy" } }, providers: [], routing: { defaults: {}, faults: [] }, spend: null,
+  runtime: null, voiceRuntime: null, drift: [], manifest: null, jobs: [], ledger: [], ledgerUnavailable: false, update: IDLE_UPDATE_STATE }, worlds: [], world: null } as unknown as ClientState;
+
+it("exports the entire bounded incident history and enumerated policy through the existing diagnostics boundary", async () => {
+  const history = observeRecoveryIncidents(emptyRecoveryHistory(), Array.from({ length: 1000 }, (_, index) => ({ id: (index + 1).toString(16).padStart(64, "0"), observation: {
+    key: (index + 1).toString(16).padStart(64, "0"), kind: "storage-pressure" as const, evidenceRevision: "b".repeat(64), observedAt: now, phase: "needs-user" as const,
+    evidence: "fresh" as const, severity: "advisory" as const, facts: [{ name: "available-bytes" as const, value: 42, measuredAt: now }],
+  } })), now);
+  history.incidents[0]!.delivery.snoozedSession = "c".repeat(64);
+  const sentinel = "NEVER_EXPORT_RECOVERY_PROSE", secret = "sk-recovery-export-secret", absolute = "/Users/recovery-export-private/model.bin";
+  Object.assign(history, { futureText: sentinel, nativeTargets: [absolute] });
+  Object.assign(history.incidents[0]!, { worldTitle: sentinel, rawLog: secret, localPath: absolute });
+  Object.assign(history.incidents[0]!.facts[0]!, { path: absolute, explanation: sentinel });
+  const policy: RecoveryPolicySnapshot = { audit: "available", accepting: true, mode: "suggest-only", targets: [{ key: "d".repeat(64), service: "comfyui", stoppedByUser: true, circuitOpen: true, pendingOutcome: true }] };
+  Object.assign(policy.targets[0]!, { intentId: "e".repeat(64), componentDigest: "f".repeat(64), rawLog: sentinel, localPath: absolute });
+  const registry = new SecretRegistry(); registry.register(secret);
+  const bundle = await buildDiagnosticsBundle(state, null, registry, null, { history, audit: { audit: "unavailable", reason: "disk-full" }, policy });
+  const recovery = bundle.recovery as { history: { audit: string; reason: string; incidents: Array<{ resourceId: string; notification: Record<string, unknown> }> }; policy: { targets: Record<string, unknown>[] } };
+  assert.equal(recovery.history.incidents.length, 1000); assert.equal(recovery.history.audit, "unavailable"); assert.equal(recovery.history.reason, "disk-full");
+  assert.equal(recovery.history.incidents[0]!.resourceId, history.incidents[0]!.key); assert(!("snoozedSession" in recovery.history.incidents[0]!.notification));
+  assert.deepEqual(recovery.policy.targets, [{ resourceId: "d".repeat(64), service: "comfyui", stoppedByUser: true, circuitOpen: true, pendingOutcome: true }]);
+  const text = JSON.stringify(bundle); for (const excluded of [sentinel, secret, absolute, "c".repeat(64), "e".repeat(64), "f".repeat(64)]) assert(!text.includes(excluded));
+  const poisoned = structuredClone(history) as RecoveryHistory; poisoned.incidents[0]!.evidenceRevision = `${secret} ${absolute}`;
+  const scrubbed = JSON.stringify(await buildDiagnosticsBundle(state, null, registry, null, { history: poisoned, audit: { audit: "available" }, policy: null }));
+  assert(!scrubbed.includes(secret)); assert(!scrubbed.includes("recovery-export-private")); assert(scrubbed.includes("[redacted]"));
+});
