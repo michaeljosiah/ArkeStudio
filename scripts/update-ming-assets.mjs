@@ -33,4 +33,3 @@ const sdk=await asset(previous.sdk.url,previous.sdk.file);
 const lock={schemaVersion:1,sourceRevision:revision,source,sdk,variants};
 await writeFile(lockPath,JSON.stringify(lock,null,2)+'\n');
 console.log(JSON.stringify(Object.fromEntries(Object.entries(variants).map(([k,v])=>[k,{wheels:v.wheels.length,models:v.models.length,modelBytes:v.models.reduce((n,x)=>n+x.bytes,0)}]))));
-
