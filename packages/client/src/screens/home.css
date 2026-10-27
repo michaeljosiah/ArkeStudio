@@ -61,6 +61,7 @@
 
 /* A finger needs 44, and a glyph it can see at arm's length: on touch the bar's controls are the
    phone's at every width, while the lockup keeps its place (design turn 159). */
+.fy-titlebar [data-contextual-chat-trigger] { flex: none; }
 @media (pointer: coarse) {
   .fy-titlebar { height: 52px; }
   .fy-titlebar .fy-iconbtn--wide, .fy-titlebar button.fy-titlebar__context { min-height: 44px; }

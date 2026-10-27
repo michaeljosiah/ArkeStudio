@@ -14,12 +14,16 @@ export function withLocalGpu(
   const prepared = new Map<string, SessionConfigInput>();
   const models = new Map<string, string | undefined>();
   const priorities = new Map<string, "normal" | "background">();
+  const privateSessions = new Set<string>();
   const turns = new Map<string, { abort: AbortController; started: boolean }>();
   const closed = new AbortController();
   const events = new EventEmitter();
   events.setMaxListeners(0);
   let pumping = false;
-  const publish = (event: HarnessEvent) => events.emit("event", event);
+  const publish = (event: HarnessEvent) => {
+    if ("sessionId" in event && event.sessionId && privateSessions.has(event.sessionId)) return;
+    events.emit("event", event);
+  };
   const pump = () => {
     if (pumping) return;
     pumping = true;
@@ -71,6 +75,7 @@ export function withLocalGpu(
       const session = await adapter.createSession(input);
       models.set(session.sessionId, config?.model ?? (input.agent ? config?.agents?.[input.agent]?.model : undefined));
       priorities.set(session.sessionId, config?.inferencePriority ?? "normal");
+      if (input.visibility === "private") privateSessions.add(session.sessionId);
       if (input.preparationId) prepared.delete(input.preparationId);
       return session;
     },
@@ -105,7 +110,7 @@ export function withLocalGpu(
     async dispose() {
       closed.abort();
       await adapter.dispose?.();
-      prepared.clear(); models.clear(); priorities.clear();
+      prepared.clear(); models.clear(); priorities.clear(); privateSessions.clear();
     },
   };
   // Preserve optional adapter capabilities and bind their private state to the real adapter.

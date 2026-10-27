@@ -21,10 +21,10 @@ async function fixture() {
   const prepared: SessionConfigInput[] = [], created: CreateSessionInput[] = [], sent: SendMessageInput[] = [];
   let revision = 1, identity = "c".repeat(64), local = true, answer = '{"kind":"reply","text":"A reply."}',
     catalogGate: Promise<void> | undefined, creationGate: Promise<void> | undefined, sendGate: Promise<void> | undefined, failure = false, retained = false;
-  const raw: HarnessAdapter = { id: "test", capabilities: () => new Set(["events", "models"]), readiness: () => ({ ready: true }), lifecycleRevision: () => revision,
+  const raw: HarnessAdapter = { id: "test", privateSessions: true, capabilities: () => new Set(["events", "models"]), readiness: () => ({ ready: true }), lifecycleRevision: () => revision,
     async listModels() { await catalogGate; return [{ id: "test", provider: "ollama" }]; },
     prepareSession(input) { prepared.push(input); }, sessionFiles: () => [{ name: "opencode.json", contents: "{}" }],
-    async createSession(input) { created.push(input); await creationGate; if (retained) await writeFile(join(input.cwd!, "unrecognized.txt"), "KEEP_UNKNOWN_BYTES"); return { sessionId: `studio-${created.length}` }; },
+    async createSession(input) { created.push(input); await creationGate; if (retained) await writeFile(join(input.cwd!, "unrecognized.txt"), "KEEP_UNKNOWN_BYTES"); return { sessionId: `studio-${created.length}`, privateEvents: (signal: AbortSignal) => raw.streamEvents(signal) }; },
     async sendMessage(input) { sent.push(input); await sendGate;
       if (failure) { events.emit("event", { type: "session.error", sessionId: input.sessionId, message: "private backend failure" } satisfies HarnessEvent); throw new Error("unknown outcome"); }
       events.emit("event", { type: "message.completed", sessionId: input.sessionId, text: answer } satisfies HarnessEvent); return { sessionId: input.sessionId, correlationId: input.correlationId! }; },
@@ -37,10 +37,22 @@ async function fixture() {
     agents: { "world-builder": { brief: "PRIVATE_WORLD_OVERRIDE" } } }), destination: () => ({ identity, local }), timeoutMs: 5000 };
   const runner = new HarnessStudioModelRunner(deps);
   return { raw, deps, runner, scratch, prepared, created, sent, revision: () => { revision++; }, destination: () => { identity = "d".repeat(64); }, cloud: () => { local = false; },
+    emit: (event: HarnessEvent) => { events.emit("event", event); },
     answer: (text: string) => { answer = text; }, catalog: (gate: Promise<void>) => { catalogGate = gate; }, create: (gate: Promise<void>) => { creationGate = gate; },
     send: (gate: Promise<void>) => { sendGate = gate; }, fail: () => { failure = true; }, keep: () => { retained = true; } };
 }
 const input = { role: "studio-assistant" as const, model: "ollama/test", prompt: "A bounded Studio question." }, allow = async () => ({ cloudApproved: false });
+it("refuses a harness without private session isolation before preparing or sending content", async () => {
+  const h = await fixture(); delete (h.raw as { privateSessions?: true }).privateSessions;
+  try { await assert.rejects(h.runner.run(input, new AbortController().signal, allow), /private operational sessions/); assert.equal(h.created.length, 0); assert.equal(h.prepared.length, 0); assert.equal(h.sent.length, 0); }
+  finally { await h.runner.stop(); await h.runner.ownerStopped(); }
+});
+it("refuses a claimed private session whose native owner returns no private observer", async () => {
+  const h = await fixture(); const create = h.raw.createSession.bind(h.raw);
+  h.raw.createSession = async value => { const session = await create(value); delete session.privateEvents; return session; };
+  try { await assert.rejects(h.runner.run(input, new AbortController().signal, allow), /private session observer/); assert.equal(h.created[0]?.visibility, "private"); assert.equal(h.sent.length, 0); }
+  finally { await h.runner.stop(); await h.runner.ownerStopped(); }
+});
 it("refuses a missing lifecycle fence instead of treating an absent generation as unchanged", async () => {
   const h = await fixture(); delete h.raw.lifecycleRevision;
   try { await assert.rejects(h.runner.run(input, new AbortController().signal, allow), /no verified generation/); assert.equal(h.created.length, 0); assert.equal(h.sent.length, 0); }
@@ -138,10 +150,16 @@ it("runs the real conversation/session/GPU composition behind admitted creative 
   const h = await fixture(), gpu = new LocalGpu(async () => {}), owner = await gpu.acquire("ComfyUI", new AbortController().signal);
   const adapter = withLocalGpu(h.raw, gpu), runner = new HarnessStudioModelRunner({ ...h.deps, adapter: () => adapter });
   const service = new StudioAssistantService({ store: new FileStudioConversationStore(join(h.scratch, "studio.json")), model: runner, evidence: topic => studioDiagnosticEvidence(topic, {}, Date.now()) });
+  const shared: HarnessEvent[] = [], sharedStop = new AbortController();
+  const sharedDone = (async () => { for await (const event of adapter.streamEvents(sharedStop.signal)) shared.push(event); })();
   try {
     const threadId = (await service.createThread())!; await service.send({ threadId, text: "Help with Arke.", model: input.model });
     await until(() => gpu.isBusy("Ollama"), "Studio explanation waiting behind creative work"); assert.equal(h.sent.length, 0); owner();
     await until(() => !service.snapshot().busy, "one durable Studio answer"); assert.equal(h.sent.length, 1); assert.equal(service.snapshot().threads[0]!.messages.at(-1)!.text, "A reply.");
     assert.equal(h.prepared[0]!.inferencePriority, "background"); assert(!JSON.stringify(h.prepared).includes("PRIVATE_"));
-  } finally { owner(); await service.stop(); await adapter.dispose?.(); await runner.ownerStopped(); gpu.stop(); }
+    h.emit({ type: "tool.activity", sessionId: "ordinary-world-session", tool: "world-query", summary: "Ordinary activity" });
+    await until(() => shared.some(event => "sessionId" in event && event.sessionId === "ordinary-world-session"), "ordinary event proves the shared pump drained");
+    assert(shared.every(event => !("sessionId" in event) || event.sessionId !== h.sent[0]!.sessionId), "no private native reply or synthetic GPU wait reaches the shared stream");
+    assert(!JSON.stringify(shared).includes("A reply."));
+  } finally { sharedStop.abort(); owner(); await service.stop(); await adapter.dispose?.(); await sharedDone; await runner.ownerStopped(); gpu.stop(); }
 });

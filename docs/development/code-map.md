@@ -1159,6 +1159,16 @@ owner on the first authenticated Studio command, using `R/studio-assistant/conve
 Production model-route/spend authorization, remaining UI controls, reviewed actions and matched
 visual acceptance remain required before claiming the Studio assistant is delivered.
 
+Private native sessions: `contracts/adapter.ts` defines a host-only private visibility request
+and a one-use `SessionRef.privateEvents` capability bound to that session. The Studio runner
+requires the adapter's explicit isolation guarantee and returned observer; it never falls back
+to the shared stream. OpenCode v2 accepts only prepared operational roles, excludes their
+events and session trace facts (including backend errors that echo content), and rejects any
+unexpected private tool permission internally. Grants cannot override that rejection. The GPU
+wrapper also excludes private session activity from its common stream. Ordinary authoring
+events/traces keep their existing path. Other adapters have not yet qualified private sessions;
+native route/spend, unknown-inference/GPU cleanup and complete payload bounds remain gates.
+
 Guarded Studio sends use `HarnessAdapter.sendMessageWithFence`: the GPU and runtime-change
 wrappers propagate a synchronous final owner/route check through admission waits. A cancelled
 GPU waiter that never reaches that check is known not-dispatched and can retire; a submitted
@@ -1187,8 +1197,12 @@ successful execution.
 Studio dialog: client `components/studio-assistant.tsx` mounts inside `GlobalChatProvider`
 with its own `studio-assistant-context.tsx` owner. `lib/studio-assistant.ts` retains private
 per-thread drafts/model choices, correlates results and restores only a watch on reconnect;
-unconfirmed mutations are never replayed. The titlebar Chat button opens Studio. Existing
-World/Builder page entries keep their contextual controller and layout. The new dialog uses
+unconfirmed mutations are never replayed. The top-right titlebar Chat button opens Studio.
+A separate page-scoped Arke control uses the current native Sparkle icon to reopen the registered
+World/Builder/shot conversation, preserving its captured scope and draft. Its legacy
+`data-global-chat-trigger` selector continues to mean the contextual entry; Studio has its own
+selector. Native touch sizing prevents the contextual control shrinking beside a long title.
+Existing World/Builder page entries keep their contextual controller and layout. The new dialog uses
 the native PageSheet, composer, ModelChip, reply renderer and icons; its CSS affects only Studio,
 including compact modal focus and keyboard inset. History is private, cloud consent is scoped
 to one disclosure, and `GlobalChatController.stageDraft` carries only the editable request to

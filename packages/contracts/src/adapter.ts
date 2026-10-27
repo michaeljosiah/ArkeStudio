@@ -21,6 +21,9 @@ export type HarnessCapability = z.infer<typeof HarnessCapability>;
 
 export interface SessionRef {
   sessionId: string;
+  /** Host-only, one-use observer for this exact private operational session. Its events
+   * SHALL be excluded from streamEvents and ordinary traces; never serialize this capability. */
+  privateEvents?(signal: AbortSignal): AsyncIterable<HarnessEvent>;
 }
 
 /** What a session is for — selects the agent configuration and the confinement posture (§17.1). */
@@ -29,6 +32,9 @@ export type SessionPurpose = z.infer<typeof SessionPurpose>;
 
 export interface CreateSessionInput {
   purpose: SessionPurpose;
+  /** Host-only isolation request, accepted only for a prepared operational role. No fallback
+   * to the shared event stream. A supporting adapter returns the private observer on SessionRef. */
+  visibility?: "private";
   /** The one-use preparation returned by the coordinator's session-file step. */
   preparationId?: string;
   /** Bounds session creation; adapters SHALL pass it to every request on the creation path. */
@@ -293,6 +299,9 @@ export type VendorOAuthAttemptState =
  * adapter reports.
  */
 export interface HarnessAdapter {
+  /** True only after private operational sessions, event exclusion and trace privacy are
+   * implemented by this adapter. A private caller refuses an absent guarantee. */
+  readonly privateSessions?: true;
   /** Transport support alone is insufficient: the pinned session must also accept images. */
   readonly imageInput?: boolean;
   imageInputForSession?(sessionId: string): boolean;

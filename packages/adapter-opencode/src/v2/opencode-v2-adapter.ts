@@ -1,5 +1,6 @@
 import {
   HarnessEventSchema,
+  ROSTER,
   type HarnessCapability,
   type CreateSessionInput,
   type HarnessAdapter,
@@ -64,6 +65,7 @@ export interface OpenCodeV2AdapterOptions {
 }
 
 interface TrackedSession {
+  private: boolean;
   purpose: CreateSessionInput["purpose"];
   cwd?: string;
   agent?: string;
@@ -101,6 +103,7 @@ function freshWireId(): string {
 
 export class OpenCodeV2Adapter implements HarnessAdapter {
   readonly id = "opencode2";
+  readonly privateSessions = true as const;
   readonly imageInput = true;
   imageInputForSession(id: string): boolean { return this.sessions.get(id)?.image.supported === true; }
   imageDestinationForSession(id: string) {
@@ -144,7 +147,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
 
   // Fan-out: each streamEvents() consumer gets its own queue — the authoring service and the
   // permission pump both listen, and one must never starve the other.
-  private readonly subscribers = new Set<{ queue: HarnessEvent[]; wake: (() => void) | null }>();
+  private readonly subscribers = new Set<{ queue: HarnessEvent[]; wake: (() => void) | null; sessionId?: string }>();
   private pumping = false;
 
   constructor(private readonly opts: OpenCodeV2AdapterOptions) {
@@ -152,6 +155,9 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   }
 
   private trace(what: string, detail: Record<string, unknown> = {}): void {
+    // HTTP errors can echo prompt or response bytes. Private session facts have no path to
+    // the common harness trace, even when the backend supplies a verbose failure body.
+    if (typeof detail.sessionId === "string" && this.sessions.get(detail.sessionId)?.private) return;
     try {
       // The password never appears here — the trace vocabulary has no field to put it in.
       this.opts.onTrace?.({ at: new Date().toISOString(), what, ...detail });
@@ -273,6 +279,10 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     if (input.preparationId !== undefined && permissionPolicy === null) {
       throw new Error("session preparation is missing or was already consumed");
     }
+    const privateSession = input.visibility === "private";
+    if (privateSession && (!permissionPolicy || !ROSTER.some(member => member.name === input.agent && member.operationalOnly))) {
+      throw new Error("Private events require a prepared operational role.");
+    }
     const location = input.cwd;
     // The model is session state, pinned at creation (issue 1247). Measured against the pinned
     // build: an agent's `model` in opencode.json shows on GET /api/agent and is never consulted
@@ -291,6 +301,9 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     );
     const sessionId = session?.id ?? "";
     if (!sessionId) throw new Error("OpenCode v2 did not return a session id");
+    // Never reclassify an existing World/private session or delete somebody else's session
+    // as failed-creation cleanup when a malformed backend reuses its identity.
+    if (this.sessions.has(sessionId)) throw new Error("OpenCode v2 returned an already owned session identity");
     let window = model !== null ? this.modelWindows.get(`${model.providerID}/${model.id}`) ?? null : undefined;
     let image = sessionImageInput(null, model?.providerID ?? this.id);
     try {
@@ -337,6 +350,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     }
     if (window !== undefined) this.sessionWindows.set(sessionId, window);
     this.sessions.set(sessionId, {
+      private: privateSession,
       purpose: input.purpose,
       ...(location ? { cwd: location } : {}),
       ...(input.agent ? { agent: input.agent } : {}),
@@ -345,7 +359,12 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     });
     this.trace("session.created", { sessionId, agent: input.agent ?? null, baseUrl: this.opts.baseUrl() });
     this.push({ type: "session.created", sessionId });
-    return { sessionId };
+    let observed = false;
+    return { sessionId, ...(privateSession ? { privateEvents: (signal: AbortSignal) => {
+      if (observed) throw new Error("The private session observer was already used.");
+      observed = true;
+      return this.events(signal, sessionId);
+    } } : {}) };
   }
 
   /**
@@ -528,6 +547,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   async respondToPermission(decision: PermissionDecision): Promise<PermissionAck> {
     const sessionId = this.permissionSessions.get(decision.permissionId);
     if (!sessionId) return { permissionId: decision.permissionId, status: "stale" };
+    if (this.sessions.get(sessionId)?.private && decision.decision !== "reject") return { permissionId: decision.permissionId, status: "failed" };
     const confirmation = new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => {
         this.turnListeners.delete(listener);
@@ -705,11 +725,16 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       this.permissionSessions.set(parsed.permissionId, parsed.sessionId);
     }
     for (const listener of Array.from(this.turnListeners)) listener(parsed);
+    const privateSession = "sessionId" in parsed && parsed.sessionId ? this.sessions.get(parsed.sessionId)?.private === true : false;
     for (const sub of this.subscribers) {
+      if (privateSession ? sub.sessionId !== ("sessionId" in parsed ? parsed.sessionId : undefined) : sub.sessionId !== undefined) continue;
       sub.queue.push(parsed);
       sub.wake?.();
       sub.wake = null;
     }
+    // Operational roles have no native tools. An unexpected permission request is refused
+    // within its native owner; it must not reach the common world's permission UI/pump.
+    if (privateSession && parsed.type === "permission.requested") void this.respondToPermission({ permissionId: parsed.permissionId, decision: "reject" }).catch(() => {});
   }
 
   private readonly pumpAbort = new AbortController();
@@ -764,14 +789,12 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
             }
             if (outcome.kind === "events") {
               for (const event of outcome.events) {
-                if (event.type === "session.error") {
-                  this.trace("stream.session.error", "sessionId" in event ? { sessionId: event.sessionId } : {});
-                }
                 // Only surface events for sessions this adapter created — even a private v2
                 // server multiplexes locations, so this filter earns its keep.
                 if ("sessionId" in event && event.sessionId && !this.sessions.has(event.sessionId)) {
                   continue;
                 }
+                if (event.type === "session.error") this.trace("stream.session.error", { sessionId: event.sessionId });
                 this.push(event);
               }
             } else if (outcome.kind === "dead-letter") {
@@ -799,10 +822,14 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   }
 
   streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent> {
+    return this.events(signal);
+  }
+
+  private events(signal?: AbortSignal, sessionId?: string): AsyncIterable<HarnessEvent> {
     void this.pump();
     // Register eagerly, at call time — an event arriving between dispatch and the first pull
     // must not be lost.
-    const sub: { queue: HarnessEvent[]; wake: (() => void) | null } = { queue: [], wake: null };
+    const sub: { queue: HarnessEvent[]; wake: (() => void) | null; sessionId?: string } = { queue: [], wake: null, ...(sessionId ? { sessionId } : {}) };
     this.subscribers.add(sub);
     const { subscribers } = this;
     const live = () => !this.disposed;

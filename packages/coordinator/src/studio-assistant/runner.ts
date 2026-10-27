@@ -51,6 +51,7 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     if (!adapter?.readiness().ready || !adapter.capabilities().has("events")) throw new Error("The Studio model is unavailable.");
     const revision = adapter.lifecycleRevision?.();
     if (!Number.isSafeInteger(revision) || revision === undefined || revision < 0) throw new Error("The Studio model owner has no verified generation fence.");
+    if (adapter.privateSessions !== true) throw new Error("The Studio model owner does not support private operational sessions.");
     const sameOwner = () => this.deps.adapter() === adapter && adapter.lifecycleRevision?.() === revision && adapter.readiness().ready;
     signal.throwIfAborted();
     const catalog = await adapter.listModels?.(); signal.throwIfAborted();
@@ -73,14 +74,15 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     if (!sameOwner() || !sameDestination()) throw new Error("The selected Studio model owner changed before dispatch.");
     await mkdir(toExtendedLength(this.deps.scratch), { recursive: true });
     entry.dir = await mkdtemp(join(this.deps.scratch, "turn-"));
-    const session = await createPreparedSession(adapter, entry.dir, config, { purpose: "ask", agent: input.role }, undefined, signal);
+    const session = await createPreparedSession(adapter, entry.dir, config, { purpose: "ask", agent: input.role, visibility: "private" }, undefined, signal);
     entry.sessionId = session.sessionId;
+    if (!session.privateEvents) throw new Error("The Studio model owner did not return a private session observer.");
     signal.throwIfAborted(); if (!sameOwner() || !sameDestination()) throw new Error("The selected Studio model owner changed before dispatch.");
     const listen = new AbortController(); let completed = false;
     const interrupt = () => { void adapter.interrupt?.(session.sessionId).catch(() => {}); };
     signal.addEventListener("abort", interrupt, { once: true }); if (signal.aborted) interrupt();
     const answer = (async () => {
-      for await (const event of adapter.streamEvents(listen.signal)) {
+      for await (const event of session.privateEvents!(listen.signal)) {
         if (!("sessionId" in event) || event.sessionId !== session.sessionId) continue;
         if (event.type === "message.completed") {
           completed = true;

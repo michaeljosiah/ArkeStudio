@@ -9,7 +9,7 @@ import { StudioConversationClient } from "../src/lib/studio-assistant.js";
 import { StudioAssistantProvider, StudioAssistantView } from "../src/components/studio-assistant.js";
 import { StudioAssistantContext } from "../src/components/studio-assistant-context.js";
 import { GlobalChatContext } from "../src/components/global-chat-context.js";
-import { GlobalChatController } from "../src/lib/global-chat.js";
+import { chatSurfaceForPage, GlobalChatController } from "../src/lib/global-chat.js";
 import { AppChrome } from "../src/components/chrome.js";
 import { closeSystemPanel } from "../src/lib/system-panel.js";
 import { __handleFrameForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -57,6 +57,8 @@ it("the production provider opens lazily, watches the private reply path and ret
 it("quick prompts and private history only change the Studio draft; titlebar opens Studio and closes contextual chat", async () => {
   __setStateForTest(FIXTURE_STATE, { connection: "open" });
   const h = fixture(), world = new GlobalChatController(), container = document.createElement("div"); document.body.append(container);
+  const surface = chatSurfaceForPage(FIXTURE_STATE, `/w/${FIXTURE_STATE.world!.meta.worldId}`)!;
+  world.setCurrent(surface); world.setValue(surface.key, "draft", "Keep the World draft");
   const root = createRoot(container);
   try {
     await act(async () => root.render(<MemoryRouter><GlobalChatContext.Provider value={world}><StudioAssistantContext.Provider value={h.client}><AppChrome /><View client={h.client} /></StudioAssistantContext.Provider></GlobalChatContext.Provider></MemoryRouter>));
@@ -67,6 +69,11 @@ it("quick prompts and private history only change the Studio draft; titlebar ope
     assert.equal(h.client.getSnapshot().draft, "Review storage");
     await act(async () => container.querySelector<HTMLButtonElement>('[data-studio-chat-trigger]')!.click());
     assert.equal(h.client.getSnapshot().open, false); assert.equal(h.client.getSnapshot().draft, "Review storage");
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-studio-chat-trigger]')!.click());
+    assert.equal(h.client.getSnapshot().open, true); assert.equal(world.getSnapshot().open, false);
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-contextual-chat-trigger]')!.click());
+    assert.equal(world.getSnapshot().open, true); assert.equal(world.getSnapshot().selected?.key, surface.key); assert.equal(h.client.getSnapshot().open, false);
+    assert.equal(world.value(surface.key, "draft", ""), "Keep the World draft"); assert.equal(h.client.getSnapshot().draft, "Review storage");
     await act(async () => container.querySelector<HTMLButtonElement>('[data-studio-chat-trigger]')!.click());
     assert.equal(h.client.getSnapshot().open, true); assert.equal(world.getSnapshot().open, false);
     await act(async () => container.querySelector<HTMLButtonElement>('[data-system-trigger]')!.click());

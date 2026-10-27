@@ -1,6 +1,6 @@
 import { useMediaQuery } from "../lib/media-query.js";
 import { useNavigate } from "react-router";
-import { Bell, ChevronLeft, Cog, Cpu, Message } from "./icons.js";
+import { Bell, ChevronLeft, Cog, Cpu, Message, Sparkle } from "./icons.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useGlobalChat } from "./global-chat-context.js";
 import { useStudioAssistant } from "./studio-assistant-context.js";
@@ -93,6 +93,8 @@ export function AppChrome({
   const phone = useMediaQuery("(max-width: 599px)");
   const { state, connection } = useStore();
   const chat = useGlobalChat();
+  const contextualView = useSyncExternalStore(chat?.subscribe ?? (() => () => {}), chat?.getSnapshot ?? (() => null), () => null);
+  const contextual = chat?.forPage();
   const studio = useStudioAssistant();
   const studioView = useSyncExternalStore(studio?.subscribe ?? (() => () => {}), studio?.getSnapshot ?? (() => null), () => null);
   const chatRunning = !!studioView?.state?.busy;
@@ -133,6 +135,10 @@ export function AppChrome({
             <span className="fy-titlebar__context">{context.label}</span>
           ))}
         {menu}
+        {controls && contextual && <button type="button" className="fy-iconbtn" title={contextual.title} aria-label={`Open ${contextual.title}`}
+          aria-expanded={contextualView?.open === true && contextualView.selected?.key === contextual.key}
+          data-contextual-chat-trigger="" data-global-chat-trigger=""
+          onClick={() => { closeSystemPanel(); studio?.close(); chat?.open(contextual); }}><Sparkle size={13} /></button>}
       </div>
       <button type="button" className="fy-titlebar__brand" onClick={() => navigate("/worlds")} title="Arke Studio">
         <span className="fy-brand__arke">Arke</span>

@@ -1585,6 +1585,16 @@ cloud consent. `test/global-chat.test.ts` checks named draft staging, exact repl
 and capture/creation holds. Run from `packages/client`, then run the client typecheck after the
 last test edit. These DOM/protocol checks do not establish native model operation or rendered
 turn-239 parity. Do not replace required visual evidence with source/CSS assertions.
+Adapter `test/v2-private-sessions.test.ts` uses a native loopback protocol server to check
+prepared-role admission, one-use exact-session observation, exclusion from shared events/trace,
+private backend error echoes and native rejection of unexpected permissions (including attempted
+grants). The Studio runner suite refuses missing isolation/observer capabilities; its actual GPU
+wrapper composition excludes both private native responses and synthesized waiting activity.
+Run alongside the existing v2, Studio, GPU, model-routing and runtime-change suites with native
+loopback/filesystem access. These fixtures make no live-model or paid request and do not prove
+complete route/spend or unknown-inference cleanup qualification. Client Bench/chapter/Generate/
+scene regression suites check contextual access independently from Studio. The real-browser
+`audiobook-show-layout.test.tsx` checks titlebar separation and 44px touch targets with long titles.
 After building, `node --import tsx apps/desktop/scripts/smoke-transport-flow.mjs` checks a real
 hidden sandboxed Electron file page and built preload, including a correlated private reply,
 history negotiation/reset, hidden capability and authenticated media range. No model, paid

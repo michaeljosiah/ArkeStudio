@@ -40,6 +40,9 @@ export class StubOpenCodeV2 {
   version = "2.0.26";
   /** Answer the next GET .../message with a 503 — the completion-fetch blip switch. */
   failNextMessageFetch = false;
+  /** Error bodies can echo private request text; privacy tests must exercise this path. */
+  failNextPrompt: string | null = null;
+  nextSessionId: string | null = null;
   private healthAnswered = false;
   /** The location echoed on session create; null echoes the requested one honestly. */
   echoLocation: string | null = null;
@@ -117,7 +120,7 @@ export class StubOpenCodeV2 {
 
         if (url.pathname === "/api/session" && req.method === "POST") {
           const requested = (parsed as { location?: { directory?: string } } | undefined)?.location?.directory;
-          const id = `ses_stub_${++this.sessionCounter}`;
+          const id = this.nextSessionId ?? `ses_stub_${++this.sessionCounter}`; this.nextSessionId = null;
           const directory = this.echoLocation ?? requested;
           res.writeHead(200, { "Content-Type": "application/json" }).end(
             envelope({
@@ -157,6 +160,10 @@ export class StubOpenCodeV2 {
 
         m = /^\/api\/session\/([^/]+)\/prompt$/.exec(url.pathname);
         if (m && req.method === "POST") {
+          if (this.failNextPrompt !== null) {
+            const message = this.failNextPrompt; this.failNextPrompt = null;
+            res.writeHead(503, { "Content-Type": "application/json" }).end(JSON.stringify({ message })); return;
+          }
           const sessionId = m[1]!;
           const prompt = parsed as { id?: string; text?: string } | undefined;
           const id = prompt?.id;
