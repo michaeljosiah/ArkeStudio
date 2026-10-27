@@ -3204,7 +3204,7 @@ export class Coordinator {
       if (!targets.has(target.key) && targets.size >= RECOVERY_POLICY.maxTargets) continue;
       targets.set(target.key, { stoppedByUser: false, circuitOpen: false, pendingOutcome: false, ...targets.get(target.key), ...target });
     }
-    return { ...policy, targets: [...targets.values()] };
+    return { ...policy, targets: [...targets.values()], cleanup: this.recoveryActions.cleanupAvailability() };
   }
   private publishRecoveryPolicy(): void {
     const policy = this.recoveryPolicy(); if (this.started && !this.stopping && policy) this.emit({ type: "recovery.policy", at: this.nowIso(), policy });
@@ -4051,9 +4051,12 @@ export class Coordinator {
       : null;
     if (opts.appRoot && opts.voice) this.cataloguePreviews = new CataloguePreviewService({
       root: join(opts.appRoot, "voice-previews"), sidecar: opts.voice.sidecar, get manifest() { return opts.manifest; },
-      storage: opts.storageHealth ?? undefined,
+      storage: opts.storageHealth ?? undefined, now: () => Date.parse(this.nowIso()), cleanupChanged: () => this.publishRecoveryPolicy(),
       ...(this.jobQueue ? { enqueue: input => this.jobQueue!.enqueue(input), cancel: id => this.jobQueue!.cancel(id) } : {}),
       emit: event => this.emit(event),
+    });
+    if (this.cataloguePreviews) this.recoveryActions.registerCleanup({
+      available: () => this.cataloguePreviews!.cleanupAvailability(), prepare: signal => this.cataloguePreviews!.prepareCleanup(signal),
     });
     this.serverApplication = {
       attachTransport: sink => {
@@ -4978,6 +4981,7 @@ export class Coordinator {
       const control = this.opts.recoveryControl;
       this.lifecycleDisposers.add(control.subscribe(() => { this.recoveryActions.invalidateReviews(); this.publishRecoveryPolicy(); }));
       await control.open();
+      await this.cataloguePreviews?.initializeCleanup();
       this.publishRecoveryPolicy();
     }
     if (this.opts.recoveryHistory) {

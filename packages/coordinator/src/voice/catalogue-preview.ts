@@ -10,6 +10,8 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { LocalPreviewCache } from "../storage/local-preview-cache.js";
 import type { ResolvedMediaFile } from "../transport.js";
 import type { AppStorageService } from "../storage/service.js";
+import { CacheCleanupControl } from "../storage/cache-cleanup-control.js";
+import { KOKORO_PRESETS, localCandidates } from "@arke-studio/voice";
 
 const MAX_SAMPLE_BYTES = 12 * 1024 * 1024;
 
@@ -29,6 +31,7 @@ export class CataloguePreviewService {
   private results = new Map<string, Extract<DomainEvent, { type: "voice.catalogue-preview" }>>();
   private closed = false;
   private readonly localCache: LocalPreviewCache;
+  private readonly cleanupControl: CacheCleanupControl;
   constructor(private readonly deps: {
     root: string;
     sidecar: SidecarLike | null;
@@ -38,7 +41,26 @@ export class CataloguePreviewService {
     emit: (event: DomainEvent) => void;
     fetch?: typeof fetch;
     storage?: AppStorageService;
-  }) { this.localCache = new LocalPreviewCache(deps.root, deps.storage); }
+    now?: () => number;
+    cleanupChanged?: () => void;
+  }) {
+    const now = deps.now ?? Date.now;
+    this.cleanupControl = new CacheCleanupControl(join(deps.root, "cleanup-control.json"), { now, onChange: deps.cleanupChanged });
+    this.localCache = new LocalPreviewCache(deps.root, deps.storage, { control: this.cleanupControl, now });
+  }
+  initializeCleanup(): Promise<void> { return this.cleanupControl.open(); }
+  cleanupAvailability(): NonNullable<import("@arke-studio/contracts").RecoveryPolicySnapshot["cleanup"]> {
+    const state = this.cleanupControl.snapshot();
+    return { available: !this.closed && process.platform === "win32" && state.available, pending: state.pending, audit: state.audit,
+      ...(state.reason ? { reason: state.reason } : process.platform !== "win32" ? { reason: "unsupported" as const } : {}) };
+  }
+  async prepareCleanup(signal: AbortSignal): ReturnType<LocalPreviewCache["prepareCleanup"]> {
+    await this.initializeCleanup();
+    const eligible = [...localCandidates(KOKORO_PRESETS), ...this.voices.values()].filter(voice => voice.provider === "kokoro" &&
+      !voice.unavailableReason && voice.readsClone === undefined && voice.narratorCopy !== true && supportsVoiceUse(voice, "narration"));
+    const keys = new Set(eligible.slice(0, 256).map(voice => createHash("sha256").update(JSON.stringify([voiceTargetKey(voice), NARRATOR_PREVIEW_TEXT, "wav", 1])).digest("hex")));
+    return this.localCache.prepareCleanup(keys, signal);
+  }
 
   catalogue(voices: VoiceCandidate[]): VoiceCandidate[] {
     const annotated = voices.map(voice => {
@@ -95,6 +117,7 @@ export class CataloguePreviewService {
       const format = sample ? "mp3" : voice.provider === "kokoro" ? "wav" : model ? voiceFormatForModel(model) : "mp3";
       const hash = createHash("sha256").update(JSON.stringify([voiceTargetKey(voice), sample ? voice.previewUrl : NARRATOR_PREVIEW_TEXT, format, 1])).digest("hex");
       if (!sample && voice.provider === "kokoro") {
+        await this.initializeCleanup();
         const file = `local-${hash}.wav`;
         const cached = await this.localCache.read(hash);
         if (work.abort.signal.aborted) return;
@@ -186,6 +209,7 @@ export class CataloguePreviewService {
   close(): void {
     this.closed = true;
     this.localCache.close();
+    this.cleanupControl.closeAdmission();
     for (const request of this.requests.values()) request.abort.abort();
   }
 

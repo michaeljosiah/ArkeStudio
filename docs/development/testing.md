@@ -118,6 +118,19 @@ outside Windows; input refusal still runs. These fixtures do not grant cleanup p
 other filesystems/platforms, establish actual reclaimed capacity or replace action-level approval,
 intent persistence, lease/lifecycle, crash-reconciliation and UI acceptance.
 
+Reviewed fixed-preview cleanup adds `test/storage/cache-cleanup-control.test.ts`,
+`cache-cleanup.test.ts` and `cache-cleanup-host.test.ts`. Run these with native filesystem,
+Windows helper and loopback access. Generated fixtures cover flushed intent before mutation,
+unknown restart/save holds, bounded shutdown, the seven-day/eight-file scope, changed proofs,
+active readers, partial cancellation, fresh post-action capacity and early headroom stop.
+The host test uses the actual authenticated coordinator and native removal port: preview leaves
+bytes intact, approval removes only the eligible audition, duplicate approval refuses and no
+inference is replayed. Contracts `test/recovery-actions.test.ts` checks closed/enumerated plans;
+client `test/recovery-cache-cleanup.test.tsx` covers separate approval, cancellation, disconnect
+without replay and remote refusal. Run client tests from `packages/client`. These establish
+reviewed cleanup for this fixed Windows class, not unknown-outcome reconciliation, standing
+automatic maintenance, complete inventory, arbitrary cache deletion or creative-media removal.
+
 Recovery control tests (#2194) use contracts `test/recovery-policy.test.ts` and coordinator
 `test/recovery/control.test.ts`. They inject crash/unknown writes, competing attempts, rolling
 budgets, clock reversal, deliberate Stop/Suggest only, target changes during flush and shutdown.

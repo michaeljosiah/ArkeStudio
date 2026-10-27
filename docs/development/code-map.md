@@ -30,13 +30,13 @@ collector's coalescing floor for a post-report reading; it stays bounded and can
 authority also bounds stalled reads/saves during shutdown, retaining uncertain intents and refusing
 late write permission. Unsupported host ports retain their existing unknown-capacity policy and
 do not claim shared admission. Runtime-owned pulls, other write owners,
-restart reconciliation, other native ports and reviewed cleanup remain outstanding.
+restart reconciliation, other native ports and broader cleanup remain outstanding.
 Media-reader protection: `transport.ts` accepts an optional host-only `ResolvedMediaFile.release`
 lease from a resolver. It opens one descriptor for size/range and streaming, retains ownership
 through pending resolution/open/close, and releases only after confirmed descriptor closure.
 Playback disconnect and transport shutdown destroy admitted streams and their unfinished HTTP
 responses. Failed descriptor cleanup retains the lease as unknown. Local fixed-preset previews
-now supply these read leases through `storage/local-preview-cache.ts`; deletion plans remain pending. Tests:
+now supply these read leases through `storage/local-preview-cache.ts`. Tests:
 `test/media-read-leases.test.ts`, `test/transport.test.ts`, `test/voice/catalogue-preview.test.ts`.
 The local cache records producer identity/hash/size receipts only for new, fixed-line free Kokoro
 previews in a separate app directory. Legacy/public/paid/ledgered previews are never adopted.
@@ -46,18 +46,27 @@ storage settlement retains the exact owner capabilities. Qualified storage ports
 12 MiB audio plus 256 KiB new metadata before inference, then replan from fresh capacity and the
 actual audio size before opening output. The closed `preview` reservation owner reduces confirmed
 writes and settles only after file/receipt handles close. Unsupported ports make no fit claim.
-Tests: `test/storage/local-preview-cache.test.ts`; native identity-based deletion, reviewed cleanup,
-automatic maintenance, broader inventory and remaining write owners remain unfinished.
+Tests: `test/storage/local-preview-cache.test.ts`; automatic maintenance, broader inventory and
+remaining write owners remain unfinished.
 `storage/windows-cache-file.ts` supplies the host-only native identity/removal primitive.
 Its fixed, bounded, kernel-leashed program takes data through stdin, binds native and producer
 receipt identities, observes logical/allocation bytes separately, rejects links/reparse points
 and conflicting I/O handles, and sets deletion disposition on the exact verified exclusive handle. It
 never performs a second pathname-based unlink. Native failure/cancellation can be unknown after
 mutation; metadata-only handles that leave deletion pending also produce unknown. No automatic
-retry or reclaimed-capacity claim follows. This primitive is not yet
-registered as a user/model action: producer/lease fences, durable intents, reviewed plans and
-post-action capacity verification still belong in the cleanup integration. Native tests:
+retry or reclaimed-capacity claim follows. Native tests:
 `test/storage/windows-cache-file.test.ts`; other platform removal ports remain pending.
+The same `recovery/actions.ts` review executor now offers host-only cleanup of at most eight
+receipt-backed, fixed local Kokoro auditions aged at least seven days. Preview inspects every
+selected target without deletion; separate one-use approval revalidates ownership, exclusive
+leases and native proof. `storage/cache-cleanup-control.ts` flushes one exact private intent
+before each native removal and retains unknown outcomes across restart. The catalogue service
+owns the fixed-recipe allowlist and lifecycle; `recovery-cache-cleanup.tsx` presents review,
+approval, cancellation and measured outcomes in Settings. `storage/service.ts` supplies a
+post-fence capacity reading through the existing collector; observed improvement is never
+attributed wholly to cleanup. Unknown reconciliation, standing automatic maintenance and
+affected-volume incident actions remain unfinished. Tests: `test/storage/cache-cleanup*.test.ts`,
+contracts `test/recovery-actions.test.ts`, client `test/recovery-cache-cleanup.test.tsx`.
 Capacity invalidation/root changes revoke captured admission evidence across a reservation flush;
 an already-saved intent remains uncertain until its owner settles it. Completed-only destinations
 are excluded from direct-file admission, so a full old model volume does not block a different

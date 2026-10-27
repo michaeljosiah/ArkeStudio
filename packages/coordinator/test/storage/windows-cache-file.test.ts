@@ -125,7 +125,7 @@ it("refuses a replaced root, root junction and leaf directory reparse point", na
   const h = await fixture(); const retained = h.root + "-retained";
   // Both targets are disposable fixture directories under the known temporary parent.
   const parent = await realpath(join(h.root, ".."));
-  assert.equal(join(retained, "..").toLowerCase(), parent.toLowerCase());
+  assert.equal((await realpath(join(retained, ".."))).toLowerCase(), parent.toLowerCase());
   await rename(h.root, retained); await mkdir(h.root); await writeFile(h.path, h.bytes);
   let row = (await windowsCacheFiles({ root: h.root, mode: "remove", items: [{ key, expected: h.proof }] }, signal()))[0]!;
   assert.equal(row.state, "refused"); assert.deepEqual(await readFile(h.path), h.bytes);

@@ -76,6 +76,10 @@ export class AppStorageService {
     } };
   }
   snapshot(): StorageHealthSnapshot { return this.decorate(this.monitor.snapshot()); }
+  /** Registered host handle only; waits through collector coalescing for a post-fence sample. */
+  measure(rootId: string, signal: AbortSignal, after: number): Promise<import("@arke-studio/contracts").StorageCapacity | null> {
+    return this.closing || !this.roots.has(rootId) ? Promise.resolve(null) : this.monitor.capacity(rootId, signal, after);
+  }
   private publish(snapshot: StorageHealthSnapshot): void {
     if (this.closing) return;
     const value = this.decorate(snapshot);

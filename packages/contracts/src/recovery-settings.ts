@@ -4,6 +4,8 @@ import { RecoveryHistorySnapshotSchema, RecoveryIncidentSchema, RECOVERY_HISTORY
 
 /** SPEC-061 R-7/R-18/R-25. Presentation of policy carries no intent/capability or repair grant. */
 export const RecoveryPolicySnapshotSchema = z.object({
+  cleanup: z.object({ available: z.boolean(), pending: z.boolean(), audit: z.enum(["starting", "available", "unavailable"]).optional(),
+    reason: z.enum(["invalid", "permission", "disk-full", "read-failed", "write-failed", "unsupported"]).optional() }).strict().optional(),
   audit: z.enum(["starting", "available", "unavailable"]), accepting: z.boolean(), mode: RecoveryModeSchema,
   reason: z.enum(["invalid", "permission", "disk-full", "read-failed", "write-failed"]).optional(),
   targets: z.array(z.object({ key: z.string().regex(/^[a-f0-9]{64}$/), service: z.enum(["comfyui", "ollama", "ming", "voice", "harness"]),
