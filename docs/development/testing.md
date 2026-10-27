@@ -1680,6 +1680,19 @@ during metadata I/O, and direct private sends without active control. Coordinato
 file preservation, successor generations, unsent failure, traversal refusal, directory links and
 uncertain unlink/reconciliation. No generic scratch/history deletion is exercised or authorized.
 
+The pinned Studio runner now compares the complete provider JSON to its reviewed system/prompt,
+4,096-token cap and closed stream/storage fields, and checks native directory/session identifiers
+are absent. A changed config manifest fails its digest before approval or provider traffic.
+An injected HTTP-hook refusal produces zero requests and no successful assistant row while the
+input/unknown owner remain retained. `runner.test.ts` additionally reproduces caller mutation
+across authorization and verifies immutable capture; native destination support without the
+explicit payload capability refuses before creation. Control tests cover prompt-as-data/code
+separation and manifest bounds. Contracts and client approval tests verify bounded system/cap
+disclosure inside the existing private review. Full client tests still use the client cwd.
+These checks qualify the pinned body enforcement, not arbitrary SDKs or native metadata:
+the native transport adds `b3`/`traceparent` after the HTTP hook. Managed-origin, remaining
+network metadata, spend, raw persistence and physical/durable cleanup stay separate gates.
+
 The Effects browser fixture logs its actual browser version, a bounded stderr tail on failure
 and Linux cgroup memory counters every five seconds and before each decoder stage. Two Linux
 runs stopped after the same decoder stage despite ample host `freemem`; the cgroup samples

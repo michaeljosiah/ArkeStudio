@@ -9,6 +9,7 @@ import {
   type SessionConfigInput,
 } from "@arke-studio/contracts";
 import { assessMappedPermission, type SessionPermissionPolicy } from "../permission-policy.js";
+import type { privateWireBody } from "./private-control.js";
 
 /**
  * Session configuration in OpenCode v2 shapes. Contracts owns confinement policy;
@@ -105,7 +106,7 @@ export interface SessionConfigV2Input extends SessionConfigInput {
 }
 
 /** The opencode.json object written into a v2 session's working directory. */
-export function buildSessionConfigV2(input: SessionConfigV2Input, privateControl?: string): Record<string, unknown> {
+export function buildSessionConfigV2(input: SessionConfigV2Input, privateControl?: string, privateBody?: ReturnType<typeof privateWireBody>): Record<string, unknown> {
   if (privateControl && (privateControl.length > 4096 || privateControl.includes("\0") || [...privateControl].some(character => "\\*?[]{}!".includes(character)))) throw new Error("The private native control path cannot be pinned to a literal policy.");
   const operational = ROSTER.find(member => member.name === (input.agent ?? input.defaultAgent) && member.operationalOnly);
   const reference = input.model ?? (operational ? input.agents?.[operational.name]?.model : undefined);
@@ -142,7 +143,7 @@ export function buildSessionConfigV2(input: SessionConfigV2Input, privateControl
     ...(operational ? { default_agent: operational.name } : input.defaultAgent ? { default_agent: input.defaultAgent } : {}),
     agents,
     ...(operational ? {
-      ...(privateControl ? { plugins: [privateControl] } : {}),
+      ...(privateControl ? { plugins: [privateBody ? { package: privateControl, options: { body: privateBody } } : privateControl] } : {}),
       compaction: { auto: false }, warming: false, websearch: false,
       experimental: { policies: [
         { action: "tool.use", resource: "*", effect: "deny" },

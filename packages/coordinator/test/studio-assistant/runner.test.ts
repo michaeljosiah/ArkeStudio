@@ -46,6 +46,27 @@ async function fixture() {
     send: (gate: Promise<void>) => { sendGate = gate; }, fail: () => { failure = true; }, keep: () => { retained = true; } };
 }
 const input = { role: "studio-assistant" as const, model: "ollama/test", prompt: "A bounded Studio question." }, allow = async () => ({ cloudApproved: false });
+it("the reviewed request cannot be rebound by a caller mutation during authorization", async () => {
+  const h = await fixture(), request = { ...input }; h.cloud();
+  try {
+    await h.runner.run(request, new AbortController().signal, async disclosure => {
+      assert.equal(disclosure.prompt, input.prompt); assert(disclosure.system); assert.equal(disclosure.outputTokenLimit, 4096);
+      request.prompt = "MUST_NOT_REBIND_THE_APPROVED_PAYLOAD";
+      return { cloudApproved: true };
+    });
+    assert.equal(h.created[0]!.privateRequest!.prompt, input.prompt);
+    assert.equal(h.sent[0]!.parts[0]!.type === "text" && h.sent[0]!.parts[0]!.text, input.prompt);
+  } finally { await h.runner.stop(); await h.runner.ownerStopped(); }
+});
+it("a qualified native destination cannot borrow payload authority without its explicit capability", async () => {
+  const h = await fixture();
+  Object.defineProperty(h.raw, "privateDestinations", { value: true });
+  h.raw.sendMessageWithFence = async () => { throw new Error("MUST_NOT_DISPATCH"); };
+  try {
+    await assert.rejects(h.runner.run(input, new AbortController().signal, allow), /cannot seal the reviewed provider payload/);
+    assert.equal(h.created.length, 0); assert.equal(h.sent.length, 0);
+  } finally { await h.runner.stop(); await h.runner.ownerStopped(); }
+});
 it("prepared-session composition preserves opaque prototype capabilities and their original native receiver", async () => {
   const h = await fixture(), create = h.raw.createSession.bind(h.raw); h.fail(); let cleaned = false;
   h.raw.createSession = async input => {

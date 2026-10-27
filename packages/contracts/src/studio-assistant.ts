@@ -79,6 +79,7 @@ export const StudioCloudShareSchema = z.object({ id: UlidSchema, runId: UlidSche
   role: z.enum(["studio-assistant", "diagnostic-specialist"]), phase: z.enum(["main", "diagnostic", "answer"]),
   model: z.string().min(1).max(512), provider: z.string().min(1).max(128), destination: digest,
   prompt: z.string().max(192 * 1024), customBrief: z.string().max(16_000).optional(), variant: z.string().max(512).optional(),
+  system: z.string().max(32 * 1024).optional(), outputTokenLimit: z.number().int().min(1).max(4096).optional(),
 }).strict();
 export type StudioCloudShare = z.infer<typeof StudioCloudShareSchema>;
 /** Private host response only. Never add Studio transcript/share payloads to the common

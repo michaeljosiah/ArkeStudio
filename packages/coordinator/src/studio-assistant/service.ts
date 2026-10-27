@@ -128,6 +128,7 @@ export class StudioAssistantService {
     if (!disclosure.local) {
       const value = StudioCloudShareSchema.parse({ id: ulid(), runId: turn.id, threadId: turn.threadId, digest, phase,
         role: disclosure.role, model: disclosure.model, provider: disclosure.provider, destination: disclosure.destination, prompt: disclosure.prompt,
+        ...(disclosure.system !== undefined ? { system: disclosure.system } : {}), ...(disclosure.outputTokenLimit !== undefined ? { outputTokenLimit: disclosure.outputTokenLimit } : {}),
         ...(disclosure.customBrief !== undefined ? { customBrief: disclosure.customBrief } : {}), ...(disclosure.variant !== undefined ? { variant: disclosure.variant } : {}) });
       cloudApproved = await new Promise<boolean>(resolve => {
         const finish = (approved: boolean) => { signal.removeEventListener("abort", cancel); resolve(approved); };

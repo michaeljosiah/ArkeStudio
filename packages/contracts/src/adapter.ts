@@ -58,11 +58,16 @@ export interface SessionRef {
 export const SessionPurpose = z.enum(["authoring", "drafting", "extraction", "ask", "art-prompt", "world-chat"]);
 export type SessionPurpose = z.infer<typeof SessionPurpose>;
 
+/** Host-reviewed single private inference input. Never a renderer/tool authority or a
+ * credential container; concrete adapters render their measured provider grammar. */
+export interface PrivateSessionRequest { model: string; system: string; prompt: string; outputTokenLimit: number }
+
 export interface CreateSessionInput {
   purpose: SessionPurpose;
   /** Host-only isolation request, accepted only for a prepared operational role. No fallback
    * to the shared event stream. A supporting adapter returns the private observer on SessionRef. */
   visibility?: "private";
+  privateRequest?: PrivateSessionRequest;
   /** The one-use preparation returned by the coordinator's session-file step. */
   preparationId?: string;
   /** Bounds session creation; adapters SHALL pass it to every request on the creation path. */
@@ -334,6 +339,9 @@ export interface HarnessAdapter {
    * dispatch fence. A supporting adapter must return SessionRef.privateDestination and
    * implement sendMessageWithFence; this is separate from event/trace isolation. */
   readonly privateDestinations?: true;
+  /** Seals a supplied PrivateSessionRequest into native destination proof and provider
+   * dispatch. Native defaults/ambient context cannot expand the reviewed request body. */
+  readonly privatePayloads?: true;
   /** Transport support alone is insufficient: the pinned session must also accept images. */
   readonly imageInput?: boolean;
   imageInputForSession?(sessionId: string): boolean;
@@ -370,7 +378,7 @@ export interface HarnessAdapter {
    */
   /** The host supplies the resolved directory when a native control needs a literal path.
    * File contents remain adapter output; filesystem writes remain with the host. */
-  sessionFiles?(input: SessionConfigInput, directory?: string): ReadonlyArray<SessionFile>;
+  sessionFiles?(input: SessionConfigInput, directory?: string, request?: PrivateSessionRequest): ReadonlyArray<SessionFile>;
   /**
    * The same settings, for a harness that takes them as call options rather than as a file.
    *

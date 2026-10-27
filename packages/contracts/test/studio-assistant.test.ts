@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { ClientMessageSchema, FrameSchema, isRemoteHostCommand, RemoteCommandRefusalSchema, StudioAssistantCommandSchema, StudioAssistantSnapshotSchema } from "../src/index.js";
+import { ClientMessageSchema, FrameSchema, isRemoteHostCommand, RemoteCommandRefusalSchema, StudioAssistantCommandSchema, StudioAssistantSnapshotSchema, StudioCloudShareSchema } from "../src/index.js";
 const request = { kind: "studio-assistant", requestId: "12345678-1234-4234-8234-123456789abc", command: { action: "watch" } };
 it("keeps every Studio operation on the owner transport and rejects arbitrary operation fields", () => {
   assert.equal(isRemoteHostCommand(ClientMessageSchema.parse(request)), true);
@@ -19,4 +19,13 @@ it("bounds the aggregate private snapshot rather than multiplying individual mes
   const snapshot = { audit: "available", accepting: true, busy: false, threads: [thread], share: null, ephemeralReply: null };
   assert(StudioAssistantSnapshotSchema.safeParse(snapshot).success);
   assert.equal(StudioAssistantSnapshotSchema.safeParse({ ...snapshot, threads: [thread, { ...thread, id: "01J8F3K2QW9VZX4N7M0RTYB6HE" }] }).success, false);
+});
+
+it("bounds the reviewed system and output limit without admitting arbitrary provider options", () => {
+  const id = "01J8F3K2QW9VZX4N7M0RTYB6HC";
+  const share = { id, runId: id, threadId: id, digest: "a".repeat(64), role: "studio-assistant", phase: "main", model: "ollama/model", provider: "ollama", destination: "b".repeat(64), prompt: "Reviewed prompt", system: "Reviewed system", outputTokenLimit: 4096 };
+  assert(StudioCloudShareSchema.safeParse(share).success);
+  assert(!StudioCloudShareSchema.safeParse({ ...share, outputTokenLimit: 4097 }).success);
+  assert(!StudioCloudShareSchema.safeParse({ ...share, system: "x".repeat(32 * 1024 + 1) }).success);
+  assert(!StudioCloudShareSchema.safeParse({ ...share, headers: { authorization: "PRIVATE_KEY" } }).success);
 });

@@ -84,11 +84,12 @@ it("shows the complete app disclosure and never carries cloud consent into a rep
   const h = fixture(), container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
   const snapshot = initial(); snapshot.busy = true;
   snapshot.threads = [{ id: threadId, createdAt: 1, updatedAt: 1, archived: false, messages: [], pending: { id: runId, phase: "main", state: "preparing", startedAt: 1, model: "provider/model", destination: null, disclosure: null } }];
-  snapshot.share = { id: threadId, runId, threadId, digest: "a".repeat(64), role: "studio-assistant", phase: "main", model: "provider/model", provider: "Example provider", destination: "b".repeat(64), prompt: "Actual disclosed prompt", customBrief: "Private custom instructions", variant: "high" };
+  snapshot.share = { id: threadId, runId, threadId, digest: "a".repeat(64), role: "studio-assistant", phase: "main", model: "provider/model", provider: "Example provider", destination: "b".repeat(64), prompt: "Actual disclosed prompt", customBrief: "Private custom instructions", variant: "high", system: "Complete reviewed system instructions", outputTokenLimit: 4096 };
   h.deliver(snapshot);
   try {
     await act(async () => root.render(<MemoryRouter><View client={h.client} /></MemoryRouter>));
     assert(container.textContent?.includes("Actual disclosed prompt")); assert(container.textContent?.includes("Private custom instructions")); assert(container.textContent?.includes("Effort: high"));
+    assert(container.textContent?.includes("Complete reviewed system instructions")); assert(container.textContent?.includes("Answer limit: 4,096 tokens"));
     let approve = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === "Approve this request")!;
     assert(approve.disabled); const check = container.querySelector<HTMLInputElement>('.fy-studio-consent input')!;
     await act(async () => { check.checked = true; check.dispatchEvent(new dom.Event("click", { bubbles: true })); });

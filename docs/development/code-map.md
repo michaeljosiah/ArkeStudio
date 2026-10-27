@@ -1219,6 +1219,21 @@ filesystem writes remain host-owned. `harness/private-files.ts` retires only cap
 bytes after native retirement, protects successor generations/links/changed or unrelated files,
 and keeps failed known-file cleanup reachable for reconciliation without inference replay.
 
+Qualified Studio invocation also requires `HarnessAdapter.privatePayloads`. The runner captures
+immutable request values, constructs the exact roster system instructions and a 4,096-token
+answer cap, and supplies `CreateSessionInput.privateRequest` through the host file writer.
+V2 binds that manifest's digest to native control activation and verifies its options at setup.
+Its HTTP hook consumes/bounds the original native request before replacing it with the reviewed
+system/user messages and closed generation fields. Ambient native environment/instructions,
+tools and internal session headers cannot expand that provider body. A changed prompt, manifest,
+model or unexpected second transmission refuses. The private cloud approval includes the full
+system instructions and answer cap in its existing contents review. Nondefault native effort
+payloads remain unqualified and refuse rather than silently changing their semantics.
+Pinned fixtures compare the complete received body to approval and reject changed manifests
+before approval/network; an injected HTTP-hook refusal proves zero provider calls while keeping
+the native owner unknown. Native transport still adds tracing headers after this hook; complete
+metadata/persistence/spend and managed-origin qualification remain production activation gates.
+
 `SessionRef.privateRetire` retires only its exact ephemeral native session, never canonical
 Studio/World history. V2 captures the original server/authentication before creation and refuses
 unknown submitted work, changed generations and mismatched role/model/variant/directory.

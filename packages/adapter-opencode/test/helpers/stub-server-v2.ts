@@ -1,6 +1,7 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { once } from "node:events";
 import { resolve } from "node:path";
+import { readFile } from "node:fs/promises";
 import type { WireModel } from "../../src/model-metadata.js";
 
 /**
@@ -85,7 +86,7 @@ export class StubOpenCodeV2 {
 
       let body = "";
       req.on("data", (c: Buffer) => (body += c.toString("utf8")));
-      req.on("end", () => {
+      req.on("end", async () => {
         const parsed = body ? (JSON.parse(body) as unknown) : undefined;
         this.requests.push({ method: req.method ?? "", path: url.pathname, query, body: parsed, authorized });
 
@@ -258,7 +259,10 @@ export class StubOpenCodeV2 {
 
         if (url.pathname === "/api/plugin" && req.method === "GET") {
           const reply = this.pluginResponse?.(locationDir);
-          const plugins = reply?.plugins ?? [{ id: "arke.studio.private-control.v1", source: { type: "local", path: resolve(locationDir ?? ".", ".arke-private-control/index.js") },
+          const path = resolve(locationDir ?? ".", ".arke-private-control/index.js");
+          let id = "arke.studio.private-control.v1";
+          try { id = /id: "([^"]+)"/.exec(await readFile(path, "utf8"))?.[1] ?? id; } catch { /* Logical-location fixtures use the fixed legacy control. */ }
+          const plugins = reply?.plugins ?? [{ id, source: { type: "local", path },
             features: { server: true }, state: { status: "active" } }];
           res.writeHead(200, { "Content-Type": "application/json" }).end(envelope(plugins, reply?.directory === null ? undefined : reply?.directory ?? locationDir));
           return;

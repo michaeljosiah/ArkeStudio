@@ -1,12 +1,12 @@
 import { mkdir, mkdtemp, rmdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { findHarnessModel, harnessModelReference, STUDIO_ASSISTANT_LIMITS, type HarnessAdapter } from "@arke-studio/contracts";
+import { agentPromptFor, ROSTER, findHarnessModel, harnessModelReference, STUDIO_ASSISTANT_LIMITS, type HarnessAdapter } from "@arke-studio/contracts";
 import { createPreparedSession, scopeSessionInput, sessionTurnTimeoutMs, type SessionInput } from "../harness/session-files.js";
 import { toExtendedLength } from "../world/paths.js";
 
 export type StudioRole = "studio-assistant" | "diagnostic-specialist";
-export interface StudioModelDisclosure { role: StudioRole; model: string; provider: string; local: boolean; destination: string; prompt: string; customBrief?: string; variant?: string }
+export interface StudioModelDisclosure { role: StudioRole; model: string; provider: string; local: boolean; destination: string; prompt: string; system?: string; outputTokenLimit?: number; customBrief?: string; variant?: string }
 export interface StudioModelPort {
   busy(): boolean;
   subscribe?(listener: () => void): () => void;
@@ -33,6 +33,7 @@ export class HarnessStudioModelRunner implements StudioModelPort {
 
   async run(input: { role: StudioRole; model: string; prompt: string }, signal: AbortSignal,
     authorize: (disclosure: StudioModelDisclosure, signal: AbortSignal) => Promise<{ cloudApproved: boolean }>): Promise<string> {
+    input = Object.freeze({ role: input.role, model: input.model, prompt: input.prompt });
     if (this.lifetime.signal.aborted || signal.aborted || this.busy()) throw new Error("Studio inference is stopped or still awaiting its previous owner.");
     if (!["studio-assistant", "diagnostic-specialist"].includes(input.role) || !input.model || input.model.length > 512 || Buffer.byteLength(input.prompt) > 192 * 1024) throw new Error("The Studio request exceeds its model input bound.");
     const entry: Active = { control: new AbortController(), confirmed: false, started: false, workFinished: false }; this.active.add(entry); this.changed();
@@ -59,6 +60,7 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     if (!Number.isSafeInteger(revision) || revision === undefined || revision < 0) throw new Error("The Studio model owner has no verified generation fence.");
     if (adapter.privateSessions !== true) throw new Error("The Studio model owner does not support private operational sessions.");
     if (adapter.privateDestinations === true && !adapter.sendMessageWithFence) throw new Error("The Studio model owner has no native destination dispatch fence.");
+    if (adapter.privateDestinations === true && adapter.privatePayloads !== true) throw new Error("The Studio native owner cannot seal the reviewed provider payload.");
     const sameOwner = () => this.deps.adapter() === adapter && adapter.lifecycleRevision?.() === revision && adapter.readiness().ready;
     signal.throwIfAborted();
     const catalog = await adapter.listModels?.(); signal.throwIfAborted();
@@ -74,8 +76,14 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     const customBrief = config.agents?.[input.role]?.brief;
     if (customBrief && customBrief.length > 16_000) throw new Error("The Studio role instructions exceed their bound.");
     if (config.modelVariant && config.modelVariant.length > 512) throw new Error("The Studio model variant exceeds its bound.");
+    if (config.modelVariant && config.modelVariant !== "default") throw new Error("The Studio provider payload for this effort has not been qualified.");
+    const member = ROSTER.find(value => value.name === input.role)!;
+    const system = agentPromptFor({ ...member, researchWeb: false, ...(customBrief !== undefined ? { brief: customBrief } : {}) });
+    if (Buffer.byteLength(system) > 32 * 1024) throw new Error("The Studio system instructions exceed their bound.");
+    const privateRequest = { model: reference, system, prompt: input.prompt, outputTokenLimit: 4096 };
     const approve = async (route: { local: boolean; identity: string }) => {
       const approval = await authorize({ role: input.role, model: reference, provider: model.provider, local: route.local, destination: route.identity, prompt: input.prompt,
+        system, outputTokenLimit: privateRequest.outputTokenLimit,
         ...(customBrief !== undefined ? { customBrief } : {}), ...(config.modelVariant ? { variant: config.modelVariant } : {}) }, signal);
       signal.throwIfAborted();
       if (!route.local && !approval.cloudApproved) throw new Error("Cloud explanation requires explicit approval of this payload.");
@@ -86,7 +94,7 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     if (!sameOwner() || !sameDestination()) throw new Error("The selected Studio model owner changed before dispatch.");
     await mkdir(toExtendedLength(this.deps.scratch), { recursive: true });
     entry.dir = await mkdtemp(join(this.deps.scratch, "turn-"));
-    const session = await createPreparedSession(adapter, entry.dir, config, { purpose: "ask", agent: input.role, visibility: "private" }, undefined, signal,
+    const session = await createPreparedSession(adapter, entry.dir, config, { purpose: "ask", agent: input.role, visibility: "private", privateRequest }, undefined, signal,
       retire => { entry.retireFiles = retire; });
     entry.sessionId = session.sessionId;
     entry.retire = session.privateRetire?.bind(session);

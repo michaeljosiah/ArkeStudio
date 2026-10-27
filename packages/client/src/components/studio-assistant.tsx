@@ -156,6 +156,8 @@ function CloudApproval({ share, approve }: { share: StudioCloudShare; approve():
     <p>This request will go to {share.provider} using {share.model}.</p>
     <p className="fy-studio-note">{share.role === "diagnostic-specialist" ? "Diagnostic evidence" : "Studio request"} · {share.phase}</p>
     <details><summary>Review request contents</summary><pre>{share.prompt}</pre>
+      {share.system !== undefined && <><b>System instructions</b><pre>{share.system}</pre></>}
+      {share.outputTokenLimit !== undefined && <p>Answer limit: {share.outputTokenLimit.toLocaleString()} tokens</p>}
       {share.customBrief !== undefined && <><b>Custom instructions</b><pre>{share.customBrief}</pre></>}
       {share.variant !== undefined && <p>Effort: {share.variant}</p>}
       <p className="fy-studio-note">Destination reference: {share.destination}</p></details>
