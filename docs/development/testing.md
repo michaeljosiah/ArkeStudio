@@ -1530,6 +1530,10 @@ provider expiry, rejected accepted-facts appends, ownership loss before publicat
 prefix reuse, repeated legacy receipt recovery, partial publication and all-published adoption
 without another payload grant, cancellation, accounting reconciliation and unchanged charge identities. Run all
 affected types after final test edits. Full CI remains necessary for Windows/Linux differences.
+The result-storage tests also hold checkpoint/world writes after completed inline/remote output,
+then admit another engine through the real shared GPU scheduler. Retrieval must finish first;
+handover must settle before the next inference, and later job settlement cannot release that
+other owner's reservation. No submit, poll, fetch or charge is repeated during local storage retries.
 
 Regeneration also covers a larger ordinary destination being replaced by a smaller valid result
 after normal capacity admission. Different-sized staging/destination files are cache misses;
@@ -1547,8 +1551,18 @@ research enabled and rewritten briefs. Configuration tests inspect what reaches 
 and pin the same operational role at creation, excluding world/author notes, query URLs, skills
 and other-role overrides. GPU tests verify background sessions wait behind normal creative work,
 preserve FIFO within each priority and cancel without releasing the admitted owner's lane.
-These tests make no model call and do not qualify the still-unimplemented Studio conversation,
-delegation dispatcher, repair registry, cloud/spend approval or matched turn-239 visual gate.
+These tests make no model call and do not qualify the production Studio integration, repair
+registry, cloud/spend authorization or matched turn-239 visual gate.
+
+Run coordinator `test/studio-assistant/*.test.ts` for the unwired conversation core. Its native
+file-backed/protocol fixtures verify bounded private history, interrupted phase reconciliation,
+closed evidence and delegation, one-use nonlocal payload approval, route/generation fences,
+late shutdown suppression, retained unknown model ownership and explicit draft-only handoff.
+The composition case joins the actual conversation store, service, session runner and shared
+GPU wrapper behind admitted creative work. It uses a synthetic protocol adapter, not a live
+model. Native filesystem access is required for flushed atomic replacement. These tests establish
+the core boundaries; they do not prove production host/transport/UI wiring, provider spend
+approval, live explanation quality, reviewed repair execution or visual parity.
 
 ## System status (turn 240)
 

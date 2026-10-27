@@ -1115,6 +1115,9 @@ Contracts `job.ts` carries the optional pre-submission `resultReceiptId`. Queue
 `artifact-files.ts` owns bounded, hash-verified private completed-response receipts, cancellation
 and enumerated post-filing retirement. `dispatcher.ts` preserves accepted bytes across local
 storage holds and restores the exact result/usage/cost before considering provider recovery.
+Confirmed inline completion or terminal success plus complete retrieval releases the inference
+reservation before storage-only retries. The next GPU owner still performs normal engine
+handover; result buffers, file reservations and job/ledger settlement remain independently owned.
 Verified legacy inline receipts retain their old identity across repeated held restarts.
 Partial publication verifies/reuses matching destination files as well as staging prefixes;
 already-published bytes need no second payload reservation or copy.
@@ -1138,8 +1141,22 @@ query URLs, skills and other-role overrides before adapter preparation/file writ
 `local-ai/gpu.ts`: normal creative/recovery waiters precede background explanations, without
 preempting any admitted owner. Tests cover actual OpenCode v2/Claude/Codex gates, role pinning,
 configuration isolation, normal FIFO/background ordering and cancellation. These are session
-prerequisites; the Studio conversation, diagnostic tool/delegation dispatcher, reviewed repair
-registry and turn-239 dialog/visual acceptance remain unfinished.
+prerequisites; the production Studio transport, reviewed repair registry and turn-239
+dialog/visual acceptance remain unfinished.
+
+The unwired Studio core lives in coordinator `studio-assistant/`: `service.ts` owns one
+on-demand conversation turn, flushed phase intents, a closed diagnostic delegation and editable
+handoff data. `evidence.ts` selects bounded enumerated operational facts without world content,
+free-text causes, provider IDs, paths or raw logs. `store.ts` keeps a separate bounded private
+conversation file, preserving corrupt/full history and interrupted outcomes without replay.
+`runner.ts` pins an explicit live model and operational role, requires a host-proved destination,
+and retains unknown native work until actual owner settlement. Nonlocal calls need one-use
+approval of each application-controlled payload and destination. `contracts/studio-assistant.ts`
+defines the closed schemas and limits. Private transcripts/sharing payloads must never enter the
+common app snapshot, broadcast events, world journal or support export. These modules are tested
+together with the actual session/GPU wrappers, but are not yet instantiated by the shipped host.
+Production route/spend authorization, targeted private transport, UI, reviewed actions and matched
+visual acceptance remain required before claiming the Studio assistant is delivered.
 
 ## System status overview
 
