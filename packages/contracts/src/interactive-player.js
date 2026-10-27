@@ -202,10 +202,10 @@ export function mountInteractivePlayer(root, options) {
 .aip[data-mode="playing"]:not([data-paused]):not(.aip-wake) .aip-chrome{opacity:0}
 .aip[data-mode="choice"] .aip-bar,.aip[data-mode="ending"] .aip-bar,.aip[data-mode="poster"] .aip-bar,.aip[data-mode="ending"] .aip-top,.aip[data-mode="poster"] .aip-top{display:none}
 .aip-choices{position:absolute;left:0;right:0;bottom:96px;display:flex;justify-content:center;flex-wrap:wrap;gap:16px;padding:14px 32px 8px;max-height:calc(100% - 176px);overflow-y:auto;overscroll-behavior:contain}
-.aip-choice{position:relative;width:344px;max-width:100%;height:72px;display:flex!important;align-items:center;gap:14px;padding:0 20px!important;border-radius:16px;background:color-mix(in srgb,var(--aip-bg) 46%,transparent)!important;backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);border:1px solid color-mix(in srgb,var(--aip-fg) 22%,transparent)!important;box-shadow:0 10px 30px color-mix(in srgb,var(--aip-bg) 40%,transparent);font-size:18px!important;font-weight:600!important;letter-spacing:-.01em;text-align:left;animation:aip-rise .4s ease both}
+.aip-choice{position:relative;width:344px;max-width:100%;min-height:72px;flex:none;display:flex!important;align-items:center;gap:14px;padding:12px 20px!important;border-radius:16px;background:color-mix(in srgb,var(--aip-bg) 46%,transparent)!important;backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);border:1px solid color-mix(in srgb,var(--aip-fg) 22%,transparent)!important;box-shadow:0 10px 30px color-mix(in srgb,var(--aip-bg) 40%,transparent);font-size:18px!important;font-weight:600!important;letter-spacing:-.01em;text-align:left;animation:aip-rise .4s ease both}
 .aip-choice:focus-visible,.aip-choice:hover{background:var(--aip-fg)!important;color:var(--aip-bg)!important;border-color:transparent!important;outline:2px solid color-mix(in srgb,var(--aip-fg) 55%,transparent);outline-offset:4px}
 .aip-choice>.k{width:26px;height:26px;flex:none;border-radius:7px;border:1px solid currentColor;opacity:.6;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:500}
-.aip-choice>.l{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aip-choice>.l{flex:1;min-width:0;white-space:normal;overflow-wrap:anywhere}
 .aip-chip{position:absolute;top:-11px;right:16px;height:22px;padding:0 9px;border-radius:99px;display:inline-flex;align-items:center;font-size:11px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;background:var(--aip-bg);color:var(--aip-fg);border:1px solid color-mix(in srgb,var(--aip-fg) 30%,transparent)}
 @keyframes aip-rise{from{opacity:0;transform:translateY(14px)}}
 .aip-under{position:absolute;left:0;right:0;bottom:36px;display:flex;justify-content:center}
@@ -291,7 +291,7 @@ export function mountInteractivePlayer(root, options) {
 .aip-top{left:20px;right:14px;top:20px}
 .aip-bar{left:16px;right:16px}
 .aip-choices{flex-direction:column;flex-wrap:nowrap;align-items:stretch;bottom:74px;padding:14px 16px 8px;gap:10px;max-height:calc(100% - 136px)}
-.aip-choice{width:100%;height:58px;border-radius:14px}
+.aip-choice{width:100%;min-height:58px;border-radius:14px}
 .aip-hero{left:24px;right:24px;bottom:48px;max-height:calc(100% - 88px)}
 .aip-hero-title{font-size:32px}
 .aip-strip .aip-muted,.aip-strip .t,.aip-strip .aip-kbd{display:none}
