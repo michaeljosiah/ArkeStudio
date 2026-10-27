@@ -10,6 +10,41 @@ const result = (now: number, availableBytes = 20 * GiB): StorageProbeResult => (
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 
 describe("bounded scoped storage monitor (SPEC-062 R-1–R-5)", () => {
+  it("keeps admission pending when an early cooldown wake shares the same clock tick", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] }); let now = 600_000, probes = 0;
+    const monitor = new StorageMonitor({ now: () => now, probe: async () => { probes++; return result(now); }, onSnapshot: () => {} });
+    try {
+      monitor.setRoots([root]); await monitor.start(); now += 999;
+      let ended = false;
+      const pending = monitor.capacity(root.rootId, new AbortController().signal, now).then(value => { ended = true; return value; });
+      await new Promise(resolve => setImmediate(resolve));
+      t.mock.timers.tick(1); await new Promise(resolve => setImmediate(resolve));
+      assert.equal(ended, false, "an early timer wake is not evidence of a failed measurement");
+      assert.equal(probes, 1, "the one-second probe floor still applies");
+      now++; t.mock.timers.tick(1);
+      assert.equal((await pending)?.measuredAt, now); assert.equal(probes, 2);
+    } finally { await monitor.stop(); }
+  });
+  it("bounds admission waits with a frozen clock and refuses a reversed clock", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    for (const reversed of [false, true]) {
+      let now = 600_000, probes = 0;
+      const monitor = new StorageMonitor({ now: () => now, probe: async () => { probes++; return result(now); }, onSnapshot: () => {} });
+      try {
+        monitor.setRoots([root]); await monitor.start(); now += 999;
+        let ended = false;
+        const pending = monitor.capacity(root.rootId, new AbortController().signal, now).then(value => { ended = true; return value; });
+        await new Promise(resolve => setImmediate(resolve));
+        if (reversed) now--;
+        const limit = reversed ? 1 : 8;
+        for (let wake = 1; wake <= limit; wake++) {
+          t.mock.timers.tick(2); await new Promise(resolve => setImmediate(resolve));
+          assert.equal(ended, wake === limit, "a non-advancing clock has a finite wake budget");
+        }
+        assert.equal(await pending, null); assert.equal(probes, 1, "no stale reading may qualify admission");
+      } finally { await monitor.stop(); }
+    }
+  });
   it("does not mistake same-tick failure invalidation and cooldown for a performed failed admission probe", async t => {
     t.mock.timers.enable({ apis: ["setTimeout"] }); let now = 600_000, probes = 0;
     const monitor = new StorageMonitor({ now: () => now, probe: async () => { probes++; return result(now); }, onSnapshot: () => {} });

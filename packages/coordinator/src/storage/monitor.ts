@@ -166,6 +166,7 @@ export class StorageMonitor {
       bounded.addEventListener("abort", done, { once: true });
       void work.then(done, done); if (bounded.aborted) done();
     });
+    let nonAdvancingWakes = 0;
     while (!bounded.aborted && this.readings.get(rootId) === reading) {
       let sample = reading.result.capacity;
       if (sample && sample.measuredAt > reading.minimumAfter && sample.measuredAt <= this.now() && this.now() - sample.measuredAt <= STORAGE_POLICY.admissionMaxAgeMs) return structuredClone(sample);
@@ -183,7 +184,11 @@ export class StorageMonitor {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try { await wait(new Promise<void>(resolve => { timer = setTimeout(resolve, Math.min(delay, 1_000)); })); }
       finally { if (timer) clearTimeout(timer); }
-      if (this.now() <= waitingAt) return null; // A frozen/reversed clock cannot qualify freshness.
+      const wokeAt = this.now();
+      // A short timer may wake before Date.now advances. Retry within a finite budget;
+      // neither an early wake nor a frozen clock may qualify a stale capacity sample.
+      if (wokeAt < waitingAt || wokeAt === waitingAt && ++nonAdvancingWakes >= 8) return null;
+      if (wokeAt > waitingAt) nonAdvancingWakes = 0;
     }
     return null;
   }

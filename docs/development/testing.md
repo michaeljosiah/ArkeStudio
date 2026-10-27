@@ -55,7 +55,8 @@ Install/Retry commands against a competing owner's intent. It checks known-lengt
 body reads, transport cancellation, bounded unknown-length responses, valid-prefix retention and
 explicit ranged Resume with only the remaining byte reserved. Unavailable qualified native capacity
 cannot start a transfer. `monitor.test.ts` covers post-report admission through the one-second
-coalescing floor and cancellation on stop. `reservations.test.ts` bounds stalled read/save shutdown
+coalescing floor, early timer wakes within one clock tick, bounded frozen/reversed-clock refusal
+and cancellation on stop. `reservations.test.ts` bounds stalled read/save shutdown
 and refuses late grants while retaining uncertain intent on reopen. Runtime-owned pull phases, other
 landing/scratch/export/import owners and restart reconciliation still need their own acceptance.
 The production-host file fixture additionally stalls progress-accounting persistence while a real
