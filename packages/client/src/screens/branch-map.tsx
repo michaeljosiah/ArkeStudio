@@ -303,6 +303,9 @@ export function BranchMapScreen() {
     setPreview(null);
     setSelection(null);
     setConnector(null);
+    setConnectorSave(null);
+    setSceneRules(null);
+    setEndingRules(null);
     setMapPick(false);
     setFactsOpen(false);
     setHighlight(new Set());
@@ -1493,4 +1496,3 @@ function ExcludeField({ onCancel, onExclude }: { onCancel: () => void; onExclude
     </div>
   );
 }
-

@@ -63,6 +63,8 @@ export interface InteractivePlayerAuthor {
 
 export interface InteractivePlayerOptions {
   story?: StoryProgram;
+  /** Resume a named stateful playthrough; Start again creates a separate run. */
+  playthroughId?: string;
   prefix?: string[];
   /** The production's title: the poster's heading and the eyebrow over each scene. */
   title: string;

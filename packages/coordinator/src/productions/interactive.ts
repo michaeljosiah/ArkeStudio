@@ -528,7 +528,7 @@ ${player}
 // interactive movie made a visual novel on the same routing would open on beat 12 for 12s in.
 const manifest = ${json(manifest)};
 const titles = ${json(presentation.titles)};
-const KEY = "arke-iv-" + ${json(presentation.worldId)} + "-" + manifest.provenance.productionId + "-v" + manifest.provenance.routingVersion + (manifest.beats ? "-beats" : "");
+const KEY = "arke-iv-" + ${json(presentation.worldId)} + "-" + manifest.provenance.productionId + "-v" + manifest.provenance.routingVersion + (manifest.beats ? "-beats" : "") + (manifest.routing.schemaVersion === 2 ? "-" + manifest.provenance.exportId : "");
 mountInteractivePlayer(document.getElementById("app"), {
   title: ${json(presentation.title)},
   eyebrow: ${json(presentation.eyebrow)},
@@ -776,7 +776,7 @@ export async function exportInteractive(
   if (routing === null) return { ok: false, blockers: ["this production has no routing yet"] };
   const findings = await interactiveFindings(store, production);
   const blockers = publicationBlockers(findings).map((finding) => finding.detail);
-  if (routing.schemaVersion === 2 && routing.presentation?.length && !productionShape(production.meta).playsAsBeats) return { ok: false, blockers: ["Conditional dialogue and shots require beat playback; composite movies cannot hide inactive content."] };
+  if (routing.schemaVersion === 2 && routing.presentation?.some(rule => rule.blocks.length || rule.shots.length) && !productionShape(production.meta).playsAsBeats) return { ok: false, blockers: ["Conditional dialogue and shots require beat playback; composite movies cannot hide inactive content."] };
   if (productionShape(production.meta).playsAsBeats) return exportBeats(store, production, routing, blockers, clock, options);
 
   // Every routed, unexcluded scene ships ONE file that covers the whole scene: a pass take, or

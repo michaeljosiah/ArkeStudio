@@ -831,6 +831,20 @@ describe("remembered facts in the shared player (turn 240)", () => {
     p.click(p.all(".aip-choice").find(el => el.textContent?.includes("Rescue Elsie")));
     assert.match(p.root.textContent ?? "", /Elsie speaks/);
   });
+  it("keeps separate saved playthroughs when the reader starts again", () => {
+    const options = { ...storyOptions(), storageKey: "separate-runs" };
+    const first = mount(options);
+    first.click(first.all(".aip-choice").find(el => el.textContent?.includes("Seal the bore")));
+    const prior = JSON.parse(store.get("separate-runs")!);
+    first.key("r"); first.click(first.button("Start over"));
+    const next = JSON.parse(store.get("separate-runs")!);
+    assert.notEqual(next.playthroughId, prior.playthroughId);
+    assert.deepEqual(JSON.parse(store.get("separate-runs-" + prior.playthroughId)!).route, ["ch_seal"]);
+    first.handle.destroy();
+    const resumed = mount({ ...options, playthroughId: prior.playthroughId });
+    assert.equal(resumed.all(".aip-choice").length, 1);
+    assert.doesNotMatch(resumed.root.textContent ?? "", /Elsie speaks/);
+  });
   it("replays a saved prefix once and refuses a changed story with a restart notice", () => {
     const options = { ...storyOptions(), storageKey: "stateful-save" };
     const p = mount(options);

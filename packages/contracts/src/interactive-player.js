@@ -26,6 +26,7 @@ export function mountInteractivePlayer(root, options) {
   const doc = root.ownerDocument;
   const win = doc.defaultView || globalThis;
   const KEY = options.storageKey || null;
+  const newPlaythrough = () => globalThis.crypto?.randomUUID?.() || "play-" + Math.random().toString(36).slice(2);
   const author = options.author || null;
   const scenes = options.scenes;
   const choices = options.choices;
@@ -81,11 +82,11 @@ export function mountInteractivePlayer(root, options) {
   // "Play from here" names a place in the scene it starts from: a beat's index, or seconds.
   const at = (initial ? initial.sceneId : origin) === options.from && typeof options.at === "number" && options.at > 0 ? options.at : 0;
   let state = { sceneId: origin, positionSec: at, route: [], updatedAt: new Date().toISOString() };
-  if (story) state = { ...state, sceneId: initial.sceneId, route: initialPrefix.slice(), formatVersion: 2, identity };
+  if (story) state = { ...state, sceneId: initial.sceneId, route: initialPrefix.slice(), formatVersion: 2, identity, playthroughId: options.playthroughId || newPlaythrough() };
   let saved = null;
   if (KEY) {
     try {
-      saved = JSON.parse(win.localStorage.getItem(KEY) || "null");
+      saved = JSON.parse(win.localStorage.getItem(story && options.playthroughId ? KEY + "-" + options.playthroughId : KEY) || "null");
     } catch {
       if (story) resumeProblem = "This saved route is damaged or unavailable. Start again.";
       saved = null;
@@ -93,7 +94,7 @@ export function mountInteractivePlayer(root, options) {
     // A saved scene this package does not contain is ignored rather than played blind.
     if (story && saved) {
       try {
-        if (saved.formatVersion !== 2 || saved.identity !== identity || !Number.isFinite(saved.positionSec) || saved.positionSec < -1) throw new Error("This saved route belongs to a changed story or is damaged. Start again to use this version.");
+        if (saved.formatVersion !== 2 || typeof saved.playthroughId !== "string" || (options.playthroughId && saved.playthroughId !== options.playthroughId) || saved.identity !== identity || !Number.isFinite(saved.positionSec) || saved.positionSec < -1) throw new Error("This saved route belongs to a changed story or is damaged. Start again to use this version.");
         const replay = storyReplay(story, saved.route);
         if (replay.sceneId !== saved.sceneId || !media[replay.sceneId]) throw new Error("This saved route cannot be replayed. Start again.");
         facts = replay.state;
@@ -360,6 +361,7 @@ export function mountInteractivePlayer(root, options) {
     if (!KEY) return;
     try {
       win.localStorage.setItem(KEY, JSON.stringify(state));
+      if (story) win.localStorage.setItem(KEY + "-" + state.playthroughId, JSON.stringify(state));
     } catch {
       // A viewer who blocks storage still watches; they just start again next time.
     }
@@ -720,7 +722,7 @@ export function mountInteractivePlayer(root, options) {
 
   function startAgain() {
     state.route = [];
-    if (story) facts = storyReplay(story).state;
+    if (story) { facts = storyReplay(story).state; state.playthroughId = newPlaythrough(); }
     resumeProblem = "";
     routeOpen = false;
     play(origin, 0);

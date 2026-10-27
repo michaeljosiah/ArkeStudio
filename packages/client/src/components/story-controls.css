@@ -14,3 +14,5 @@
 @media(max-width:599px) { .story-dialog.fy-page-sheet { border-radius:18px; height:auto; max-height:calc(100dvh - 24px); margin:auto; inset:0; } .story-dialog .fy-page-sheet__body { padding:16px; } }
 
 .bm[data-picking="true"] .bm-node { outline:2px dashed var(--ring); outline-offset:5px; cursor:crosshair; }
+
+.story-dialog.fy-page-sheet::backdrop { background:color-mix(in srgb,var(--neutral-950) 40%,transparent); }

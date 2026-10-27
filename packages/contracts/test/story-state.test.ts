@@ -41,6 +41,11 @@ describe("remembered story rules (SPEC-063)", () => {
     const beats = [{ blockId: "blk_elsie", text: "I can help", audio: "elsie.mp3" }, { blockId: "blk_imani", text: "Move" }];
     assert.deepEqual(storyVisibleBeats(r, "sc_collar", beats, { elsie: "Lost" }), [beats[1]]);
     assert.equal(storyVisibleBeats(r, "sc_collar", beats, { elsie: "Alive" }).length, 2);
+    r.presentation![0]!.shots = [{ shotId: "sh_portrait", when: { op: "eq", fact: "elsie", value: "Alive" } }];
+    const kept = storyVisibleBeats(r, "sc_collar", [{ shotId: "sh_next", pictureShotId: "sh_portrait", picture: "elsie.png", keep: true, text: "Imani speaks", audio: "imani.mp3" }], { elsie: "Lost" });
+    assert.equal(kept[0]!.picture, undefined);
+    assert.equal(kept[0]!.keep, undefined);
+    assert.equal(kept[0]!.audio, "imani.mp3", "the active line keeps its own voice");
     assert.equal(storyEnding(r, "sc_escape", { elsie: "Lost" })?.title, "An empty seat");
   });
   it("refuses unknown facts, invalid enum values, duplicate writes and unversioned rules", () => {
