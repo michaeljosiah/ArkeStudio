@@ -1170,6 +1170,14 @@ events/traces keep their existing path. Other adapters have not yet qualified pr
 native route/spend, actual backing-inference cleanup qualification and complete payload bounds
 remain gates.
 
+OpenCode `src/v2/config.ts` gives operational sessions a closed native policy: wildcard tool
+permission denial, no tool/integration catalogue, a literal selected-provider policy and disabled
+title/summary/compaction/warming helpers. Ordinary authoring configuration keeps its existing
+path. Adapter `test/v2-operational-config.test.ts` checks policy construction; opt-in
+`test/v2-operational-protocol.test.ts` runs the pinned executable with a credential-free profile
+and scripted local provider, proving native unknown/read denials, zero advertised tool schemas
+and exactly one request per operational turn. This is not destination/locality or spend proof.
+
 Private inference ownership uses `SessionRef.privateTurnSettled`: native v2 completion or the
 exact host-only `privateOwnerStopped` cleanup capability can settle one turn. A send error,
 Stop acknowledgement, writing-child exit or adapter disposal cannot. Private sessions admit

@@ -1605,6 +1605,15 @@ receivers, stale-generation interrupts, missing proof, single-prompt private ses
 private late-settlement notification without transcript replay. Combine with model-routing,
 recovery/harness and v2-launch tests for the native gate. These use scripted local providers,
 not physical model-memory measurements; the optional pinned-native launch case is separate.
+Set `ARKE_TEST_OPENCODE2` to the staged or installed **2.0.26** executable and run adapter
+`test/v2-operational-protocol.test.ts` alongside `test/v2-operational-config.test.ts` for the
+actual native operational policy. It launches a fresh credential-free temporary profile and a
+scripted loopback provider, counts every model request (including automatic helpers), checks
+zero tool schemas and probes direct native read/unknown-tool denials without the adapter's
+permission backstop. It makes no paid or real inference request. Run the existing
+`test/v2-input-protocol.test.ts` with the same executable to retain ordinary writing/tool-loop
+qualification. The pinned 2.0.26 installed executable passes both; production Studio destination,
+full payload/persistence and spend qualification remain separate gates.
 After building, `node --import tsx apps/desktop/scripts/smoke-transport-flow.mjs` checks a real
 hidden sandboxed Electron file page and built preload, including a correlated private reply,
 history negotiation/reset, hidden capability and authenticated media range. No model, paid

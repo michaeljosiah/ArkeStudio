@@ -80,6 +80,7 @@ export function assessV2Permission(
  * allows. Reordering this is a behaviour change, not a tidy-up.
  */
 function renderV2(confinement: AgentConfinement): PermissionRule[] {
+  if (confinement.denyUnknown) return [{ action: "*", resource: "*", effect: "deny" }];
   const allows: PermissionRule[] = [];
   const denies: PermissionRule[] = [];
   for (const intent of ToolIntent.options) {
@@ -105,8 +106,15 @@ export interface SessionConfigV2Input extends SessionConfigInput {
 
 /** The opencode.json object written into a v2 session's working directory. */
 export function buildSessionConfigV2(input: SessionConfigV2Input): Record<string, unknown> {
+  const operational = ROSTER.find(member => member.name === (input.agent ?? input.defaultAgent) && member.operationalOnly);
+  const reference = input.model ?? (operational ? input.agents?.[operational.name]?.model : undefined);
+  const provider = reference?.slice(0, reference.indexOf("/"));
+  if (operational && reference && (!reference.includes("/") || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(provider ?? ""))) {
+    throw new Error("The Studio provider identifier cannot be pinned to a literal native policy.");
+  }
   const agents: Record<string, unknown> = {};
   for (const member of ROSTER) {
+    if (operational && member.name !== operational.name) continue;
     const override = input.agents?.[member.name];
     // The skill comes from the shipped registry, never from the Settings override (R-14, D12).
     const skill = sessionSkillForAgent(member.name, input);
@@ -123,11 +131,25 @@ export function buildSessionConfigV2(input: SessionConfigV2Input): Record<string
       ...(input.model ?? override?.model ? { model: input.model ?? override?.model } : {}),
     };
   }
+  if (operational) {
+    // These are the bundled 2.0.26 helpers, not application delegation. In particular title
+    // generation must not make an extra model request outside the reviewed Studio payload.
+    for (const name of ["title", "compaction", "summary", "build", "plan", "explore", "general"]) agents[name] = { disabled: true };
+  }
   return {
     $schema: "https://opencode.ai/config.json",
-    ...(input.defaultAgent ? { default_agent: input.defaultAgent } : {}),
+    ...(operational ? { default_agent: operational.name } : input.defaultAgent ? { default_agent: input.defaultAgent } : {}),
     agents,
-    ...(input.worldQueryUrl
+    ...(operational ? {
+      compaction: { auto: false }, warming: false, websearch: false,
+      experimental: { policies: [
+        { action: "tool.use", resource: "*", effect: "deny" },
+        { action: "integration.use", resource: "*", effect: "deny" },
+        { action: "provider.use", resource: "*", effect: "deny" },
+        ...(provider ? [{ action: "provider.use", resource: provider, effect: "allow" }] : []),
+      ] },
+    } : {}),
+    ...(!operational && input.worldQueryUrl
       ? {
           mcp: {
             servers: {
@@ -145,7 +167,7 @@ export function buildSessionConfigV2(input: SessionConfigV2Input): Record<string
       : {}),
     // Session-wide floor: autonomy inside the proposal is the point; anything an agent rule
     // does not decide stays on ask â€” the backstop, expected to be rare (R-16, D9).
-    permissions: [
+    permissions: operational ? [{ action: "*", resource: "*", effect: "deny" }] : [
       { action: "edit", resource: "*", effect: "allow" },
       { action: "shell", resource: "*", effect: "ask" },
       { action: "webfetch", resource: "*", effect: "ask" },

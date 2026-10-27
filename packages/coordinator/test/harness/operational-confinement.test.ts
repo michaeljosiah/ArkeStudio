@@ -20,10 +20,8 @@ it("enforces the operational roles in OpenCode v2, Claude and Codex tool boundar
     assert.equal(assessV2Permission(policy, "future_native_writer").status, "denied");
     assert.equal(assessV2Permission(policy, "todo").status, "denied");
     assert.equal(assessV2Permission(sessionPermissionPolicy("world-builder", {}), "future_native_writer").status, "ask", "Ordinary role permission policy remains unchanged");
-    const rules = (config.agents as Record<string, { permissions: Array<{ action: string; effect: string }> }>)[name]!.permissions;
-    for (const action of ["read", "edit", "glob", "grep", "arke-world_*", "subagent", "webfetch", "websearch", "shell"]) {
-      assert.equal(rules.find(value => value.action === action)?.effect, "deny", `${name}/${action}`);
-    }
+    const rules = (config.agents as Record<string, { permissions: Array<{ action: string; resource: string; effect: string }> }>)[name]!.permissions;
+    assert.deepEqual(rules, [{ action: "*", resource: "*", effect: "deny" }], `${name} denies known and future native tools without later re-allows`);
     assert.equal(sessionSurface(confinement, false).world, false);
     for (const tool of ["Read", "Edit", "Bash", "WebFetch", "Task", "mcp__arke-world__get_entry"]) {
       assert.equal((await decideTool(confinement, tool, { root, input: {} })).allow, false, `${name}/${tool}`);
