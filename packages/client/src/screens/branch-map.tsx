@@ -255,6 +255,8 @@ export function BranchMapScreen() {
   const [connectorSave, setConnectorSave] = useState<{ choice: Choice; version: number; ids: string[] } | null>(null);
   const [addedChoice, setAddedChoice] = useState<string | null>(null);
   const [choiceSavedLabel,setChoiceSavedLabel] = useState("Added");
+  const [ruleActionHost,setRuleActionHost] = useState<HTMLDivElement | null>(null);
+  useEffect(() => { if (addedChoice && (selection?.kind !== "choice" || selection.id !== addedChoice)) setAddedChoice(null); },[selection,addedChoice]);
   useEffect(() => {
     if (!connectorSave || !routing || routing.version <= connectorSave.version) return;
     const draft = connectorSave.choice;
@@ -452,7 +454,7 @@ export function BranchMapScreen() {
   const header = (
     <header className="bm-head" inert={mapPick || undefined}>
       <div className="bm-head__title">
-        <h1 className="bm-h1">Branch map</h1>
+        <h1 className="bm-h1">{sceneRules ? "Branch map / Dialogue" : "Branch map"}</h1>
         <div className="bm-head__meta">
           {scenes.length} scene{scenes.length === 1 ? "" : "s"}
           {routing
@@ -1090,10 +1092,12 @@ export function BranchMapScreen() {
     if (selection.kind === "choice") {
       if (!selectedChoice) return null;
       const walked = !unwalked.has(selectedChoice.id);
-      if (addedChoice === selectedChoice.id) return <Inspector title="Choice" onClose={() => setSelection(null)}><span className="bm-eyebrow">{choiceSavedLabel} · {walked ? "walked" : "not walked"}</span><h2 className="story-choice-title">{selectedChoice.label}</h2><p className="bm-muted">{titleOf(selectedChoice.from)} → {titleOf(selectedChoice.to)}</p><StoryRuleSummary routing={routing} when={selectedChoice.when} effects={selectedChoice.effects ?? []}/><p className="story-consequence">The connection is saved with its text, conditions and values in one change. {walked ? "Walked in preview." : "Preview is still needed."}</p><Button className="story-review-action" onClick={() => { setConnectorEditing(true); setConnector(selectedChoice); setMapDestination(null); }}>Edit choice</Button></Inspector>;
+      if (addedChoice === selectedChoice.id && !selection.removing) return <Inspector title="Choice" onClose={() => setSelection(null)}><span className="bm-eyebrow">{choiceSavedLabel} · {walked ? "walked" : "not walked"}</span><h2 className="story-choice-title">{selectedChoice.label}</h2><p className="bm-muted">{titleOf(selectedChoice.from)} → {titleOf(selectedChoice.to)}</p><StoryRuleSummary routing={routing} when={selectedChoice.when} effects={selectedChoice.effects ?? []}/><p className="story-consequence">The connection is saved with its text, conditions and values in one change. {walked ? "Walked in preview." : "Preview is still needed."}</p><Button className="story-review-action" onClick={() => { setConnectorEditing(true); setConnector(selectedChoice); setMapDestination(null); }}>Edit choice</Button><Button onClick={()=>setAddedChoice(null)}>More choice settings</Button></Inspector>;
       return (
-        <Inspector title="Choice" sub={selectedChoice.id} onClose={() => setSelection(null)}>
-          <Button onClick={() => { setConnectorEditing(true); setConnector(selectedChoice); setMapDestination(null); }}>Edit connector</Button>
+        <Inspector title="Choice" sub={routing.schemaVersion === 2 ? undefined : selectedChoice.id} onClose={() => setSelection(null)} footer={routing.schemaVersion === 2 ? <div ref={setRuleActionHost}/> : undefined}>
+          {routing.schemaVersion === 2 && <><span className="bm-eyebrow">{titleOf(selectedChoice.from)}</span><h2 className="story-choice-title">{selectedChoice.label}</h2><p className="bm-muted">{titleOf(selectedChoice.from)} → {titleOf(selectedChoice.to)}</p></>}
+          <details className={cx("story-choice-settings",routing.schemaVersion !== 2 && "story-choice-settings--legacy")} {...(routing.schemaVersion === 2 ? {} : {open:true})}><summary>Choice settings</summary>
+          {routing.schemaVersion !== 2 && <Button onClick={() => { setConnectorEditing(true); setConnector(selectedChoice); setMapDestination(null); }}>Edit connector</Button>}
           <CommitField
             key={`${selectedChoice.id}-${selectedChoice.label}`}
             label="Label"
@@ -1120,7 +1124,9 @@ export function BranchMapScreen() {
               {sceneOptions}
             </Select>
           </div>
-          <StoryChoiceRules key={selectedChoice.id} routing={routing} choice={selectedChoice} onSave={(when, effects, unavailable, baseVersion) => command({ operation:"edit-choice", choiceId:selectedChoice.id, baseVersion, changes:{ when:when ?? null, effects, ...(unavailable || selectedChoice.unavailable ? { unavailable:unavailable ?? null } : {}) } })} />
+          </details>
+          <StoryChoiceRules key={selectedChoice.id} routing={routing} choice={selectedChoice} actionHost={routing.schemaVersion === 2 ? ruleActionHost : undefined} onSave={(when, effects, unavailable, baseVersion) => command({ operation:"edit-choice", choiceId:selectedChoice.id, baseVersion, changes:{ when:when ?? null, effects, ...(unavailable || selectedChoice.unavailable ? { unavailable:unavailable ?? null } : {}) } })} />
+          {routing.schemaVersion === 2 && <Button onClick={() => { setConnectorEditing(true); setConnector(selectedChoice); setMapDestination(null); }}>Edit connector</Button>}
           <div className="bm-kv">
             <span className="bm-kv__k">Preview</span>
             <span className="bm-kv__v">
@@ -1396,7 +1402,7 @@ export function BranchMapScreen() {
       <div className="bm-main">
         {header}
         {exportNote !== null && <div className="bm-note">{exportNote}</div>}
-        {sceneRules && scenes.find(scene => scene.id === sceneRules) ? <div className="story-script-preview"><div className="bm-actions"><Button onClick={() => setSceneRules(null)}>← Branch map</Button><Link className="ui-btn" to={`/w/${worldId}/p/${prodId}/scenes/${sceneRules}`}>Open scene editor</Link></div><h2>{titleOf(sceneRules)}</h2>{scenes.find(scene => scene.id === sceneRules)?.script?.blocks.map(block => <button type="button" className={cx("story-script-line",ruleBlock === block.id && "story-script-line--selected")} key={block.id} onClick={() => setRuleBlock(block.id)}><small>{block.kind === "dialogue" ? "Dialogue" : "Narration"}</small><span>{block.text}</span>{routing?.presentation?.find(p => p.sceneId === sceneRules)?.blocks.some(rule => rule.blockId === block.id) && <span className="story-map-badge">Show when · conditional</span>}</button>)}</div> : mapPick && narrow ? <div className="story-destination-list"><h2>Choose a destination</h2><p>Your connector draft is kept.</p><Button onClick={() => setMapPick(false)}>Back to connector</Button>{scenes.filter(scene => scene.id !== connector?.from && !routing.excluded.some(entry => entry.sceneId === scene.id)).map(scene => <Button key={scene.id} onClick={() => pickScene(scene.id)}>{scene.title}</Button>)}</div> : narrow ? list : canvas}
+        {sceneRules && scenes.find(scene => scene.id === sceneRules) ? <div className="story-script-preview"><div className="bm-actions"><Button onClick={() => setSceneRules(null)}>← Branch map</Button><Button onClick={() => setRuleBlock(undefined)}>All scene rules</Button><Link className="ui-btn" to={`/w/${worldId}/p/${prodId}/scenes/${sceneRules}`}>Open scene editor</Link></div><h2>{titleOf(sceneRules)}</h2>{scenes.find(scene => scene.id === sceneRules)?.script?.blocks.map(block => <button type="button" className={cx("story-script-line",ruleBlock === block.id && "story-script-line--selected")} key={block.id} onClick={() => setRuleBlock(block.id)}><small>{block.kind === "dialogue" ? "Dialogue" : "Narration"}</small><span>{block.text}</span>{routing?.presentation?.find(p => p.sceneId === sceneRules)?.blocks.some(rule => rule.blockId === block.id) && <span className="story-map-badge">Show when · conditional</span>}</button>)}</div> : mapPick && narrow ? <div className="story-destination-list"><h2>Choose a destination</h2><p>Your connector draft is kept.</p><Button onClick={() => setMapPick(false)}>Back to connector</Button>{scenes.filter(scene => scene.id !== connector?.from && !routing.excluded.some(entry => entry.sceneId === scene.id)).map(scene => <Button key={scene.id} onClick={() => pickScene(scene.id)}>{scene.title}</Button>)}</div> : narrow ? list : canvas}
         {mapPick && !narrow && <div className="story-map-pick" role="status">Choose a destination. The dialog reopens with your draft. <Button onClick={() => setMapPick(false)}>Back to connector</Button></div>}
         {routing?.schemaVersion === 2 && preview && preview.from !== routing.start && !preview.prefix && <StoryPreviewStart routing={routing} sceneId={preview.from} onClose={() => setPreview(null)} onStart={prefix => setPreview({ ...preview, prefix })} />}
         {previewOptions !== null && preview !== null && (routing?.schemaVersion !== 2 || preview.from === routing.start || preview.prefix !== undefined) && (!playsAsBeats || previewVoices.ready) && (
@@ -1418,14 +1424,14 @@ export function BranchMapScreen() {
         setConnectorSave({ choice: { ...choice, id }, version: routing.version, ids: routing.choices.map(c => c.id) });
       }} />}
       <aside className="bm-side" inert={mapPick || undefined}>
-        <ResponsiveSheet sheet={compact || narrow} open={factsOpen || !!sceneRules || selection !== null && selection.kind !== "new"} onClose={() => { setSelection(null); setFactsOpen(false); setSceneRules(null); }} title={sceneRules ? "Dialogue" : factsOpen ? "Story facts" : selection?.kind === "new" && selection.from ? `New choice from ${titleOf(selection.from)}` : selection?.kind === "findings" ? "Findings" : selection?.kind === "choice" ? "Choice" : "Scene settings"} className="bm-inspector-sheet">{routing && sceneRules && scenes.find(scene => scene.id === sceneRules) ? <StorySceneDialog inline key={sceneRules} routing={routing} scene={scenes.find(scene => scene.id === sceneRules)!} blockId={ruleBlock} onClose={() => setSceneRules(null)} onSave={(presentation,baseVersion) => command({ operation:"set-presentation",presentation,baseVersion })}/> : routing && factsOpen ? <StoryFactsInspector routing={routing} onClose={() => setFactsOpen(false)} onSave={(facts,baseVersion) => command({ operation:"set-facts", facts,baseVersion })}/> : inspector}</ResponsiveSheet>
+        <ResponsiveSheet sheet={compact || narrow} open={factsOpen || !!sceneRules || selection !== null && selection.kind !== "new"} onClose={() => { setSelection(null); setFactsOpen(false); setSceneRules(null); }} title={sceneRules ? "Dialogue" : factsOpen ? "Story facts" : selection?.kind === "new" && selection.from ? `New choice from ${titleOf(selection.from)}` : selection?.kind === "findings" ? "Findings" : selection?.kind === "choice" ? "Choice" : "Scene settings"} className={`bm-inspector-sheet${routing?.schemaVersion === 2 ? " bm-story-inspector" : ""}`}>{routing && sceneRules && scenes.find(scene => scene.id === sceneRules) ? <StorySceneDialog inline key={sceneRules} routing={routing} scene={scenes.find(scene => scene.id === sceneRules)!} blockId={ruleBlock} onClose={() => setSceneRules(null)} onSave={(presentation,baseVersion) => command({ operation:"set-presentation",presentation,baseVersion })}/> : routing && factsOpen ? <StoryFactsInspector routing={routing} onClose={() => setFactsOpen(false)} onSave={(facts,baseVersion) => command({ operation:"set-facts", facts,baseVersion })}/> : inspector}</ResponsiveSheet>
         <ArkeEdge>{putAway => arke(putAway)}</ArkeEdge>
       </aside>
     </div>
   );
 }
 
-function Inspector({ title, sub, onClose, children }: { title: string; sub?: string; onClose: () => void; children: React.ReactNode }) {
+function Inspector({ title, sub, onClose, children, footer }: { title: string; sub?: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode }) {
   return (
     <section className="bm-insp" aria-label={title}>
       <div className="bm-insp__head">
@@ -1438,6 +1444,7 @@ function Inspector({ title, sub, onClose, children }: { title: string; sub?: str
         </button>
       </div>
       <div className="bm-insp__body">{children}</div>
+      {footer && <footer className="story-inspector-footer">{footer}</footer>}
     </section>
   );
 }

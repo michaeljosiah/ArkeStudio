@@ -428,6 +428,12 @@ describe("the branch map canvas (design turn 157)", () => {
     await click(button(item,"Edit choice"));
     await click(button(item,"Cancel"));
     assert.ok(button(item,"Edit choice"),"canceling an edit returns to the selected connector");
+    await key(all(item,`[data-walk="c:${add.choice.id}"]`)[0],"Delete");
+    assert.ok(all(item,'[role="alertdialog"]')[0],"Delete reaches confirmation from the saved summary");
+    await click(button(item,"Cancel"));
+    await click(button(item,"More choice settings"));
+    assert.ok(button(item,"Remove choice"));
+    assert.ok(all(item,'select[aria-label="From scene"]')[0],"source editing remains reachable in Choice settings");
   });
 
   it("forwards a stateful walk witness through the React player wrapper", async () => {
@@ -546,6 +552,35 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.match(text(all(item,".aip-fact-row")[0]!),/Dev Malik.*Follow the lantern.*false/);
     await click(button(item,"Test another route"));
     assert.ok(button(item,"Preview this route"),"another actual prefix is picked explicitly");
+  });
+
+  it("preserves spaces while an author types a multiword enum value", async () => {
+    const routing: Routing={...ROUTING,schemaVersion:2,facts:[{id:"dev",label:"Dev Malik",type:"enum",values:["Alive","Lost"],default:"Alive"}]};
+    const item=await mount(routing);
+    await click(button(item,"Story facts · 1"));
+    await click(button(item,"Edit Dev Malik"));
+    const input=all(item,'input[aria-label="Values for dev"]')[0] as HTMLInputElement;
+    for(const value of ["Alive, Lost ","Alive, Lost at ","Alive, Lost at release"]){await change(input,value);assert.equal(input.value,value);}
+    await blur(input);
+    await click(button(item,"Keep fact"));
+    assert.deepEqual(commands(item),[{operation:"set-facts",baseVersion:routing.version,facts:[{id:"dev",label:"Dev Malik",type:"enum",values:["Alive","Lost at release"],default:"Alive"}]}]);
+  });
+
+  it("keeps shot-condition controls reachable in a scripted scene", async () => {
+    const routing: Routing={...ROUTING,schemaVersion:2,facts:[{id:"dev",label:"Dev",type:"boolean",default:true}],presentation:[{sceneId:"sc_quarter",blocks:[],shots:[{shotId:"sh_rule",when:{op:"eq",fact:"dev",value:true}}]}]};
+    const item=await mount(routing);
+    const snapshot=state(routing);
+    const production=snapshot.world!.productions.find(p=>p.meta.id==="low-water")!;
+    production.scenes=production.scenes.map(scene=>scene.id==="sc_quarter"?{...scene,script:{version:1,blocks:[{id:"blk_line",kind:"action",text:"The room goes silent."}]},shots:[{id:"sh_rule",number:1,title:"The first shot",description:"A silent room"}]} as Scene:scene);
+    await act(async()=>__setStateForTest(snapshot));
+    await click(card(item,"sc_quarter"));
+    await click(button(item,"Show when"));
+    assert.equal(button(item,"Remove condition"),undefined,"the selected line has no guard");
+    await click(button(item,"All scene rules"));
+    await click(button(item,"Remove condition"));
+    await click(button(item,"Review change"));
+    await click(button(item,"Keep change"));
+    assert.deepEqual(commands(item),[{operation:"set-presentation",baseVersion:routing.version,presentation:{sceneId:"sc_quarter",blocks:[],shots:[]}}]);
   });
 
   it("keeps a stale unsaved condition repairable when its fact is removed elsewhere", async () => {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { storyFactReferences, RoutingSchema, type Routing, type Choice, type StoryPredicate, type StoryEffect, type StoryFact } from "@arke-studio/contracts";
 import { choiceIdFor } from "../lib/branch-map.js";
 import { subscribeCommandFailures } from "../lib/store.js";
@@ -29,6 +30,7 @@ export function FactValue({ fact, value, onChange, label }: { fact: StoryFact; v
   const values = fact.type === "boolean" ? [true, false] : fact.values;
   return <Select label={label} value={String(value)} onChange={e => onChange(fact.type === "boolean" ? e.target.value === "true" : e.target.value)}>{values.map(v => <option key={String(v)} value={String(v)}>{String(v)}</option>)}</Select>;
 }
+const enumValuesFromText = (raw:string) => raw.split(",").map(value=>value.trim());
 
 /** Closed, typed predicates: nesting represents Any/All without accepting executable text. */
 function StoryConditionTree({ facts, value, onChange, depth = 1 }: { facts: StoryFact[]; value?: StoryPredicate; onChange: (next?: StoryPredicate) => void; depth?: number }) {
@@ -59,7 +61,7 @@ export function StoryCondition({ facts, value, onChange, title }: { facts: Story
   const add = () => { const first = facts[0]; if (first) change([...rows, { op: "eq", fact: first.id, value: first.default }]); };
   return <div className="story-conditions">
     <div className="story-section-head">{title && <h3>{title}</h3>}<Button variant="ghost" aria-label="Add condition" disabled={!facts.length || rows.length >= 128 || !simple} onClick={add}>+ Condition</Button></div>
-    {rows.length === 0 ? <p>Always available. Add a condition to limit this choice.</p> : !simple ? <StoryConditionTree facts={facts} value={value} onChange={onChange} /> : <>
+    {rows.length === 0 ? <p>{title === "Show when" ? "Always shown. Add a condition to limit when it appears." : "Always available. Add a condition to limit this choice."}</p> : !simple ? <StoryConditionTree facts={facts} value={value} onChange={onChange} /> : <>
       <Select label="Match conditions" value={match} onChange={e => onChange({ op: e.target.value as "all" | "any", args: rows })}><option value="all">All conditions</option><option value="any">Any condition</option></Select>
       {rows.map((row, index) => {
         const eq = equalityOf(row)!;
@@ -115,7 +117,7 @@ export function ConnectorDialog({ routing, initial, editing, scenes, picking, de
 }
 
 /** The selected edge explains and edits the same rules as the connector helper. */
-export function StoryChoiceRules({ routing, choice, onSave }: { routing: Routing; choice: Choice; onSave: (when: StoryPredicate | undefined, effects: StoryEffect[], unavailable:Choice["unavailable"], baseVersion: number) => void }) {
+export function StoryChoiceRules({ routing, choice, onSave, actionHost }: { routing: Routing; choice: Choice; onSave: (when: StoryPredicate | undefined, effects: StoryEffect[], unavailable:Choice["unavailable"], baseVersion: number) => void; actionHost?: HTMLElement | null }) {
   const [when, setWhen] = useState(choice.when);
   const [effects, setEffects] = useState(choice.effects ?? []);
   const [unavailable,setUnavailable] = useState(choice.unavailable);
@@ -124,13 +126,14 @@ export function StoryChoiceRules({ routing, choice, onSave }: { routing: Routing
   const save = useStorySave(routing, JSON.stringify(current?.when) === JSON.stringify(when) && JSON.stringify(current?.effects ?? []) === JSON.stringify(effects) && JSON.stringify(current?.unavailable) === JSON.stringify(unavailable), () => setReview(false), () => { setWhen(current?.when); setEffects(current?.effects ?? []); setUnavailable(current?.unavailable); });
   const checked = RoutingSchema.safeParse({ ...routing, schemaVersion: 2, choices: routing.choices.map(c => c.id === choice.id ? { ...c, when, effects, unavailable } : c) });
   const changed = JSON.stringify(when) !== JSON.stringify(current?.when) || JSON.stringify(effects) !== JSON.stringify(current?.effects ?? []) || JSON.stringify(unavailable) !== JSON.stringify(current?.unavailable);
+  const action=<Button className="story-review-action" variant="primary" disabled={!changed || !checked.success || save.busy || save.stale || !current} onClick={() => setReview(true)}>Review change</Button>;
   return <div className="story-choice-rules">
     <section className="story-form-section"><StoryCondition title="Available when" facts={routing.facts ?? []} value={when} onChange={setWhen} /></section>
     <section className="story-form-section"><h3>If unavailable</h3><label className="story-field">In the player<Select label="If unavailable" value={unavailable ? "disabled" : "hidden"} onChange={e => setUnavailable(e.target.value === "disabled" ? {reason:""} : undefined)}><option value="hidden">Hide this choice</option><option value="disabled">Show disabled with a reason</option></Select></label>{unavailable && <label className="story-field">Reason<Textarea aria-label="Unavailable reason" maxLength={600} rows={2} value={unavailable.reason} onChange={e => setUnavailable({...unavailable,reason:e.target.value})}/></label>}</section>
     <section className="story-form-section"><StoryEffects facts={routing.facts ?? []} effects={effects} onChange={setEffects} /></section>
     <StorySaveStatus save={save} />
     {!checked.success && <p role="alert">{checked.error.issues[0]?.message}</p>}
-    <Button className="story-review-action" variant="primary" disabled={!changed || !checked.success || save.busy || save.stale || !current} onClick={() => setReview(true)}>Review change</Button>
+    {actionHost ? createPortal(action,actionHost) : action}
     {review && <PageSheet open title="Keep this story rule?" subtitle={choice.label} className="story-dialog" onClose={() => setReview(false)} dismissOnBackdrop={false} footer={<><Button onClick={() => setReview(false)}>Back</Button><Button variant="primary" disabled={!current || !checked.success || save.stale || save.busy} onClick={() => save.submit(version => onSave(when, effects, unavailable, version))}>Keep change</Button></>}><StoryRuleSummary routing={routing} when={when} effects={effects} /><h3>If unavailable</h3><p>{unavailable ? `Shown disabled: ${unavailable.reason}` : "Hidden in the player."}</p><p>Future routes use this rule. Existing saved routes are checked against the changed story before resuming.</p><StorySaveStatus save={save}/></PageSheet>}
   </div>;
 }
@@ -149,13 +152,15 @@ export function StoryFactsInspector({ routing, onClose, onSave }: { routing: Rou
 export function StoryFactsDialog({ routing, onClose, onSave, initialFactId }: { routing: Routing; onClose: () => void; onSave: (facts: StoryFact[], baseVersion: number) => void; initialFactId?: string }) {
   const [facts, setFacts] = useState(routing.facts ?? []);
   const [initialIds] = useState(() => new Set((routing.facts ?? []).map(fact => fact.id)));
+  const [enumDrafts,setEnumDrafts] = useState<Record<string,string>>({});
   const [label, setLabel] = useState("");
   const [type, setType] = useState<"boolean" | "enum">("enum");
   const update = (index: number, fact: StoryFact) => setFacts(facts.map((f, i) => i === index ? fact : f));
-  const save = useStorySave(routing, routing.schemaVersion === 2 && JSON.stringify(routing.facts ?? []) === JSON.stringify(facts), onClose, () => setFacts(routing.facts ?? []));
-  const validation = RoutingSchema.safeParse({ ...routing, schemaVersion: 2, facts });
-  return <PageSheet open title={initialFactId === undefined ? "Story facts" : initialFactId === "" ? "Add fact" : facts.find(fact => fact.id === initialFactId)?.label ?? "Story fact"} subtitle="Story facts · starting values for this production" onClose={onClose} dismissOnBackdrop={false} className={`story-dialog${initialFactId === undefined ? "" : " story-single-fact"}`} footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={!validation.success || save.busy || save.stale || initialFactId === "" && facts.every(fact => initialIds.has(fact.id))} onClick={() => save.submit(version => onSave(facts, version))}>{initialFactId === undefined ? "Save facts" : "Keep fact"}</Button></>}>
-    {facts.map((fact, index) => initialFactId === "" && initialIds.has(fact.id) || initialFactId !== undefined && initialFactId !== "" && fact.id !== initialFactId ? null : <fieldset className="story-fact" key={fact.id}><legend>{fact.label}</legend><label className="story-field">Name<Input aria-label={`Name for ${fact.id}`} value={fact.label} onChange={e => update(index, { ...fact, label: e.target.value })} /></label><label className="story-field">Type<Input readOnly value={fact.type === "enum" ? "Choose from a list" : "Yes or no"}/></label><details><summary>Used by {storyFactReferences(routing, fact.id).length}</summary><ul>{storyFactReferences(routing, fact.id).map((use, i) => <li key={i}>{use.label} · {use.kind}</li>)}</ul></details>{fact.type === "enum" && <div className="story-field"><span>Values</span><div className="story-value-chips">{fact.values.map((value,index)=><span key={index}>{value || "Empty value"}</span>)}</div><details><summary>Edit values</summary><Input aria-label={`Values for ${fact.id}`} value={fact.values.join(", ")} onChange={e => update(index, { ...fact, values: e.target.value.split(",").map(v => v.trim()) })} /></details></div>}<label className="story-field">Starting value<FactValue fact={fact} value={fact.default} label={`Starting value for ${fact.id}`} onChange={value => update(index, { ...fact, default: value } as StoryFact)} /></label><Button variant="ghost" disabled={storyFactReferences(routing, fact.id).length > 0} onClick={() => setFacts(facts.filter((_, i) => i !== index))}>Remove fact</Button></fieldset>)}
+  const normalizedFacts:StoryFact[] = facts.map(fact=>fact.type === "enum" && enumDrafts[fact.id] !== undefined ? {...fact,values:enumValuesFromText(enumDrafts[fact.id]!)} : fact);
+  const save = useStorySave(routing, routing.schemaVersion === 2 && JSON.stringify(routing.facts ?? []) === JSON.stringify(normalizedFacts), onClose, () => { setFacts(routing.facts ?? []); setEnumDrafts({}); });
+  const validation = RoutingSchema.safeParse({ ...routing, schemaVersion: 2, facts:normalizedFacts });
+  return <PageSheet open title={initialFactId === undefined ? "Story facts" : initialFactId === "" ? "Add fact" : facts.find(fact => fact.id === initialFactId)?.label ?? "Story fact"} subtitle="Story facts · starting values for this production" onClose={onClose} dismissOnBackdrop={false} className={`story-dialog${initialFactId === undefined ? "" : " story-single-fact"}`} footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={!validation.success || save.busy || save.stale || initialFactId === "" && facts.every(fact => initialIds.has(fact.id))} onClick={() => save.submit(version => onSave(normalizedFacts, version))}>{initialFactId === undefined ? "Save facts" : "Keep fact"}</Button></>}>
+    {facts.map((fact, index) => initialFactId === "" && initialIds.has(fact.id) || initialFactId !== undefined && initialFactId !== "" && fact.id !== initialFactId ? null : <fieldset className="story-fact" key={fact.id}><legend>{fact.label}</legend><label className="story-field">Name<Input aria-label={`Name for ${fact.id}`} value={fact.label} onChange={e => update(index, { ...fact, label: e.target.value })} /></label><label className="story-field">Type<Input readOnly value={fact.type === "enum" ? "Choose from a list" : "Yes or no"}/></label><details><summary>Used by {storyFactReferences(routing, fact.id).length}</summary><ul>{storyFactReferences(routing, fact.id).map((use, i) => <li key={i}>{use.label} · {use.kind}</li>)}</ul></details>{fact.type === "enum" && <div className="story-field"><span>Values</span><div className="story-value-chips">{fact.values.map((value,index)=><span key={index}>{value || "Empty value"}</span>)}</div><details><summary>Edit values</summary><Input aria-label={`Values for ${fact.id}`} value={enumDrafts[fact.id] ?? fact.values.join(", ")} onChange={e => setEnumDrafts(current=>({...current,[fact.id]:e.target.value}))} onBlur={()=>{ const raw=enumDrafts[fact.id]; if(raw !== undefined) { update(index,{...fact,values:enumValuesFromText(raw)}); setEnumDrafts(current=>{ const {[fact.id]:_raw,...rest}=current;return rest; }); } }} /></details></div>}<label className="story-field">Starting value<FactValue fact={fact} value={fact.default} label={`Starting value for ${fact.id}`} onChange={value => update(index, { ...fact, default: value } as StoryFact)} /></label><Button variant="ghost" disabled={storyFactReferences(routing, fact.id).length > 0} onClick={() => setFacts(facts.filter((_, i) => i !== index))}>Remove fact</Button></fieldset>)}
     {(initialFactId === undefined || initialFactId === "") && <fieldset className="story-fact"><legend>Add a fact</legend><Input aria-label="New fact name" value={label} placeholder="Dev Malik" onChange={e => setLabel(e.target.value)} /><Select label="Fact type" value={type} onChange={e => setType(e.target.value as "boolean" | "enum")}><option value="enum">List of values</option><option value="boolean">True or false</option></Select><Button disabled={!label.trim() || facts.length >= 32} onClick={() => {
       const base = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 55) || "fact";
       const rootId = /^[a-z]/.test(base) ? base : "fact-" + base;
