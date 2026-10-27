@@ -1320,6 +1320,12 @@ from common world commands, and stops its admission before draining ordinary han
 controller bounds pending asynchronous work (eight total, two per socket) and observation waits;
 uncertain operations retain admission until actual settlement. Cancel/sharing/unwatch controls
 remain available. A 64-ID volatile duplicate window is not a durable execution ledger.
+The private `dictate` action uses the existing `VoiceService.transcribe`/Voxa lifecycle seam,
+with one in-flight request, a 6 MB input cap, 45-second observation bound and 8,000-character
+result cap. It returns only to the captured requester, without shared `dictation.result` events
+or history writes. Stop/disconnect/shutdown revoke delivery; uncertain transcription remains
+single-flight until its promise settles. No model, cloud fallback or voice service is installed
+by this action. The local service retains its existing inference/recovery fences.
 Default model invocation refuses absent host-proved routes; native route/spend composition,
 reviewed repairs and full turn-239 interaction/visual acceptance remain unfinished.
 Private snapshots have a 2.5 MiB aggregate UTF-8 bound (the 2 MiB conversation plus one
@@ -1341,7 +1347,11 @@ including compact modal focus and keyboard inset. History is private, cloud cons
 to one disclosure, and `GlobalChatController.stageDraft` carries only the editable request to
 a named World/Builder destination. Replacement consent matches the exact existing draft;
 later typing requires fresh review. Staging creates/sends no coordinator conversation command.
-The default native inference route still refuses absent host proof. Media controls, effort
+`components/studio-dictation.tsx` reuses `ComposerMicControl` with separately owned capture:
+explicit start/stop, one-minute/6 MB limits, cancelled pending microphone permission and
+discard-on-close/disconnect. `StudioConversationClient.dictationTarget` captures the original
+thread/new-draft key; newer typing is preserved and no transcript is automatically submitted.
+The default native inference route still refuses absent host proof. Attachment/read-reply controls, effort
 selection, reviewed repair/cleanup cards and actual matched turn-239 rendering remain pending.
 History replacement reads wait for an already admitted same-path write that outlived bounded
 shutdown in this process. This prevents a late old rename from overwriting a successor's history;

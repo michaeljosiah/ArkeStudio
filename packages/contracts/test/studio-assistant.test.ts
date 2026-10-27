@@ -2,6 +2,17 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { ClientMessageSchema, FrameSchema, isRemoteHostCommand, RemoteCommandRefusalSchema, StudioAssistantCommandSchema, StudioAssistantSnapshotSchema, StudioCloudShareSchema } from "../src/index.js";
 const request = { kind: "studio-assistant", requestId: "12345678-1234-4234-8234-123456789abc", command: { action: "watch" } };
+it("keeps bounded Studio audio/transcript on the host-only private protocol", () => {
+  const dictate = { ...request, command: { action: "dictate", audioBase64: "AQID", contentType: "audio/webm;codecs=opus" } };
+  assert(isRemoteHostCommand(ClientMessageSchema.parse(dictate)));
+  for (const command of [ { ...dictate.command, audioBase64: "###=" }, { ...dictate.command, audioBase64: "A".repeat(8_000_004) },
+    { ...dictate.command, contentType: "application/javascript" }, { ...dictate.command, path: "PRIVATE_PATH" } ]) {
+    assert(!StudioAssistantCommandSchema.safeParse({ ...request, command }).success);
+  }
+  const frame = { kind: "studio-assistant", seq: 1, requestId: request.requestId, response: { type: "dictation", text: "PRIVATE_DICTATION" } };
+  assert(FrameSchema.safeParse(frame).success);
+  assert(!FrameSchema.safeParse({ ...frame, response: { ...frame.response, text: "x".repeat(8001) } }).success);
+});
 it("keeps every Studio operation on the owner transport and rejects arbitrary operation fields", () => {
   assert.equal(isRemoteHostCommand(ClientMessageSchema.parse(request)), true);
   assert(RemoteCommandRefusalSchema.safeParse({ kind: "command-refused", refused: "host-only", command: "studio-assistant" }).success);

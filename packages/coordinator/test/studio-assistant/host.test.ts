@@ -21,7 +21,15 @@ it("the production owner keeps Studio history across world opens/restarts and re
     await authorize({ role: input.role, model: input.model, provider: "synthetic", local: !nonlocal, destination: "c".repeat(64), prompt: input.prompt }, signal);
     sends++; return JSON.stringify({ kind: "reply", text: "PRIVATE_STUDIO_REPLY" });
   } };
-  const options = { appRoot: root, provider, adapter: null, storageHealth: null, systemResources: null, recoveryControl: null, recoveryHistory: null,
+  let dictations = 0;
+  const voice = { localPresets: [], cloudSources: [], sidecar: {
+    health: async () => ({ engineStatus: { kokoro: { ready: true } } }), listVoices: async () => [],
+    synthesize: async () => { throw Error("Unexpected speech generation"); },
+    transcribe: async (audio: Uint8Array, contentType: string) => {
+      dictations++; assert.deepEqual([...audio], [1, 2, 3]); assert.equal(contentType, "audio/webm"); return "PRIVATE_DICTATED_WORDS";
+    },
+  } };
+  const options = { appRoot: root, provider, voice, adapter: null, storageHealth: null, systemResources: null, recoveryControl: null, recoveryHistory: null,
     changeLogPath: join(root, "logs", "coordinator.jsonl"), appVersion: "studio-test", studioAssistant: { model } };
   let coordinator = createStudioCoordinator(options); const sockets: WebSocket[] = [];
   async function connect(session: { port: number; token: string }) {
@@ -37,6 +45,8 @@ it("the production owner keeps Studio history across world opens/restarts and re
   }
   try {
     const session = await coordinator.start(0), first = await connect(session), other = await connect(session);
+    const dictated = (await first.command({ action: "dictate", audioBase64: "AQID", contentType: "audio/webm" })).response;
+    assert.deepEqual(dictated, { type: "dictation", text: "PRIVATE_DICTATED_WORDS" }); assert.equal(dictations, 1); assert.equal(sends, 0);
     const created = (await first.command({ action: "create" })).response; assert(created.type === "result" && created.threadId); const threadId = created.threadId;
     await first.command({ action: "watch" });
     const sent = (await first.command({ action: "send", threadId, text: "PRIVATE_STUDIO_QUESTION", model: "synthetic/model" })).response;
@@ -57,7 +67,10 @@ it("the production owner keeps Studio history across world opens/restarts and re
     const state = (await first.command({ action: "watch" })).response; assert(state.type === "state");
     assert.equal(state.state.threads[0]?.id, threadId); assert.equal(state.state.threads[0]?.messages[0]?.text, "PRIVATE_STUDIO_QUESTION");
     assert(!JSON.stringify(other.frames).includes("PRIVATE_STUDIO")); assert(!JSON.stringify(coordinator.getState()).includes("PRIVATE_STUDIO"));
+    assert(!JSON.stringify(other.frames).includes("PRIVATE_DICTATED")); assert(!JSON.stringify(coordinator.getState()).includes("PRIVATE_DICTATED"));
+    assert(!JSON.stringify(first.frames.filter(frame => frame.kind !== "studio-assistant")).includes("PRIVATE_DICTATED"));
     const history = await readFile(join(root, "studio-assistant", "conversations.json"), "utf8"); assert(history.includes("PRIVATE_STUDIO_REPLY"));
+    assert(!history.includes("PRIVATE_DICTATED"), "a transcript is unsent workspace, not canonical conversation history");
     first.socket.close(); other.socket.close(); await coordinator.stop();
     coordinator = createStudioCoordinator({ ...options, provider: new FsWorldProvider(root) });
     const resumed = await connect(await coordinator.start(0)), restored = (await resumed.command({ action: "watch" })).response;
@@ -85,4 +98,67 @@ it("bounds an unconfirmed load, keeps pending admission owned and prevents late 
     await host.stop(); finish(); await new Promise(resolve => setImmediate(resolve));
     assert.equal(saves, 0); assert.equal(sends, 0); assert.equal(service.snapshot().accepting, false);
   } finally { finish(); control.abort(); await host.stop(); }
+});
+
+it("private dictation does not load history, persist audio/text, echo native errors or dispatch a model", async () => {
+  let loads = 0, saves = 0, sends = 0, transcribes = 0;
+  const service = new StudioAssistantService({ store: { load: async () => { loads++; throw Error("Disk unavailable"); }, save: async () => { saves++; } },
+    model: { busy: () => false, run: async () => { sends++; return ""; }, stop: async () => {} }, evidence: topic => studioDiagnosticEvidence(topic, {}, Date.now()) });
+  const replies: StudioAssistantResponse[] = [], control = new AbortController();
+  const requester = { signal: control.signal, reply(_id: string, value: StudioAssistantResponse) { replies.push(value); return true; } };
+  const host = new StudioAssistantHost(service, 10, async (audio, contentType) => {
+    transcribes++; assert.deepEqual([...audio], [1, 2, 3]); assert.equal(contentType, "audio/webm");
+    if (transcribes === 2) throw Error("PRIVATE_PROVIDER_ERROR_AND_AUDIO");
+    return transcribes === 3 ? "x".repeat(8001) : "PRIVATE_DICTATION_TEXT";
+  });
+  const dictate = () => host.handle({ kind: "studio-assistant", requestId: randomUUID(), command: { action: "dictate", audioBase64: "AQID", contentType: "audio/webm" } }, requester);
+  try {
+    await dictate(); assert.deepEqual(replies.at(-1), { type: "dictation", text: "PRIVATE_DICTATION_TEXT" });
+    await dictate(); assert(!JSON.stringify(replies).includes("PRIVATE_PROVIDER_ERROR"));
+    assert.deepEqual(replies.at(-1), { type: "result", status: "refused", reason: "unavailable", threadId: null, runId: null });
+    await dictate(); assert.deepEqual(replies.at(-1), { type: "result", status: "refused", reason: "full", threadId: null, runId: null });
+    await host.handle({ kind: "studio-assistant", requestId: randomUUID(), command: { action: "dictate", audioBase64: "AR==", contentType: "audio/webm" } }, requester);
+    assert.equal(transcribes, 3, "noncanonical base64 cannot reach the sidecar");
+    assert.equal(loads, 0); assert.equal(saves, 0); assert.equal(sends, 0);
+  } finally { control.abort(); await host.stop(); }
+});
+
+it("dictation remains single-flight through requester loss and cannot publish late or start after stop", async () => {
+  let finish!: (text: string) => void, calls = 0, observed: AbortSignal | undefined;
+  const transcription = new Promise<string>(resolve => { finish = resolve; });
+  const service = new StudioAssistantService({ store: { load: async () => ({ version: 1, threads: [] }), save: async () => {} },
+    model: { busy: () => false, run: async () => "", stop: async () => {} }, evidence: topic => studioDiagnosticEvidence(topic, {}, Date.now()) });
+  const host = new StudioAssistantHost(service, 10, async (_audio, _type, signal) => { calls++; observed = signal; return transcription; });
+  const first = new AbortController(), second = new AbortController(), firstReplies: StudioAssistantResponse[] = [], secondReplies: StudioAssistantResponse[] = [];
+  const requester = (control: AbortController, replies: StudioAssistantResponse[]) => ({ signal: control.signal, reply(_id: string, response: StudioAssistantResponse) { replies.push(response); return true; } });
+  const dictate = (control: AbortController, replies: StudioAssistantResponse[]) => host.handle({ kind: "studio-assistant", requestId: randomUUID(), command: { action: "dictate", audioBase64: "AQID", contentType: "audio/webm" } }, requester(control, replies));
+  try {
+    const work = dictate(first, firstReplies); await until(() => calls === 1, "admitted dictation");
+    first.abort(); await work; assert(observed?.aborted);
+    await dictate(second, secondReplies); assert.equal(calls, 1); assert.deepEqual(secondReplies.at(-1), { type: "result", status: "refused", reason: "busy", threadId: null, runId: null });
+    await host.stop(); finish("PRIVATE_LATE_TRANSCRIPT"); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(firstReplies.length, 0); assert(!JSON.stringify(secondReplies).includes("PRIVATE_LATE"));
+    await dictate(second, secondReplies); assert.equal(calls, 1);
+  } finally { finish(""); first.abort(); second.abort(); await host.stop(); }
+});
+
+it("dictation times out after 45 seconds without retrying or publishing a late result", async context => {
+  let finish!: (text: string) => void, calls = 0, observed: AbortSignal | undefined;
+  const held = new Promise<string>(resolve => { finish = resolve; });
+  const service = new StudioAssistantService({ store: { load: async () => ({ version: 1, threads: [] }), save: async () => {} },
+    model: { busy: () => false, run: async () => "", stop: async () => {} }, evidence: topic => studioDiagnosticEvidence(topic, {}, Date.now()) });
+  const host = new StudioAssistantHost(service, 10, async (_audio, _type, signal) => { calls++; observed = signal; return held; });
+  const replies: StudioAssistantResponse[] = [], control = new AbortController();
+  const requester = { signal: control.signal, reply(_id: string, response: StudioAssistantResponse) { replies.push(response); return true; } };
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const work = host.handle({ kind: "studio-assistant", requestId: randomUUID(), command: { action: "dictate", audioBase64: "AQID", contentType: "audio/webm" } }, requester);
+    assert.equal(calls, 1); context.mock.timers.tick(44_999); assert.equal(replies.length, 0);
+    context.mock.timers.tick(1); await work; assert(observed?.aborted);
+    assert.deepEqual(replies, [{ type: "result", status: "unconfirmed", reason: "timeout", threadId: null, runId: null }]);
+    await host.handle({ kind: "studio-assistant", requestId: randomUUID(), command: { action: "dictate", audioBase64: "AQID", contentType: "audio/webm" } }, requester);
+    assert.equal(calls, 1); const last = replies.at(-1); assert(last?.type === "result" && last.reason === "busy");
+    finish("PRIVATE_LATE_TRANSCRIPT"); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(replies.length, 2); assert(!JSON.stringify(replies).includes("PRIVATE_LATE"));
+  } finally { finish(""); control.abort(); await host.stop(); context.mock.timers.reset(); }
 });

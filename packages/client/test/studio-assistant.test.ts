@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
+import { randomUUID } from "node:crypto";
 import type { StudioAssistantCommand, StudioAssistantSnapshot } from "@arke-studio/contracts";
 import { StudioConversationClient } from "../src/lib/studio-assistant.js";
 
@@ -7,14 +8,53 @@ const id = "01J8F3K2QW9VZX4N7M0RTYB6HC", other = "01J8F3K2QW9VZX4N7M0RTYB6HD";
 const state = (ids: string[] = []): StudioAssistantSnapshot => ({ audit: "available", accepting: true, busy: false, share: null, ephemeralReply: null,
   threads: ids.map(id => ({ id, createdAt: 1, updatedAt: 1, archived: false, messages: [], pending: null })) });
 function fixture() {
-  const sent: StudioAssistantCommand[] = []; let count = 0;
-  const client = new StudioConversationClient({ id: () => String(++count), send(message) { sent.push(message); return true; } }, 20);
+  const sent: StudioAssistantCommand[] = [];
+  const client = new StudioConversationClient({ id: randomUUID, send(message) { sent.push(message); return true; } }, 20);
   client.setConnected(true); client.open();
   const deliver = (value: StudioAssistantSnapshot) => client.receive({ requestId: sent.findLast(message => message.command.action === "watch")!.requestId, response: { type: "state", state: value } });
   const reply = (request: StudioAssistantCommand, status: "ok" | "accepted", threadId: string | null = null) => client.receive({ requestId: request.requestId,
     response: { type: "result", status, reason: null, threadId, runId: status === "accepted" ? other : null } });
   return { client, sent, deliver, reply };
 }
+it("private dictation appends to its captured draft, preserves newer typing and never sends a model request", async () => {
+  const h = fixture(); h.deliver(state([id, other])); h.client.select(id); h.client.draft("Typed first");
+  const destination = h.client.dictationTarget(), control = new AbortController();
+  const dictating = destination("AQID", "audio/webm", control.signal), request = h.sent.at(-1)!;
+  assert.equal(request.command.action, "dictate");
+  assert.equal(await h.client.send("provider/model"), false, "a request cannot send during pending dictation");
+  h.client.draft("New typing"); h.client.select(other); h.client.draft("Other conversation");
+  h.client.receive({ requestId: request.requestId, response: { type: "dictation", text: "Spoken words" } });
+  assert(await dictating); assert.equal(h.client.getSnapshot().draft, "Other conversation");
+  h.client.select(id); assert.equal(h.client.getSnapshot().draft, "New typing Spoken words");
+  assert.deepEqual(h.sent.map(message => message.command.action), ["watch", "dictate"]); h.client.dispose();
+});
+it("cancelled, disconnected and closed Studio dictation cannot rebind or replay a late transcript", async () => {
+  for (const end of ["abort", "disconnect", "close"] as const) {
+    const h = fixture(); h.deliver(state([id])); h.client.draft("Keep typed words"); const control = new AbortController();
+    const dictating = h.client.dictationTarget()("AQID", "audio/webm", control.signal), request = h.sent.at(-1)!;
+    if (end === "abort") control.abort(); else if (end === "disconnect") h.client.setConnected(false); else { h.client.close(); h.client.open(); h.deliver(state([id])); }
+    h.client.receive({ requestId: request.requestId, response: { type: "dictation", text: "DO_NOT_INSERT" } });
+    assert.equal(await dictating, false); assert.equal(h.client.getSnapshot().draft, "Keep typed words");
+    const before = h.sent.length; if (end === "disconnect") h.client.setConnected(true); else h.client.open();
+    assert(h.sent.slice(before).every(message => message.command.action === "watch")); h.client.dispose();
+  }
+});
+it("dictation preserves a new-conversation destination and refuses overflow, unsupported recordings and archived targets", async () => {
+  const h = fixture(); h.deliver(state([id])); h.client.select(null); h.client.draft("A new request");
+  const control = new AbortController(), destination = h.client.dictationTarget();
+  h.deliver(state([id, other])); assert.equal(h.client.getSnapshot().selected, null);
+  let dictating = destination("AQID", "audio/webm", control.signal);
+  h.client.receive({ requestId: h.sent.at(-1)!.requestId, response: { type: "dictation", text: "dictated" } });
+  assert(await dictating); assert.equal(h.client.getSnapshot().draft, "A new request dictated");
+  h.client.draft("x".repeat(8000)); dictating = h.client.dictationTarget()("AQID", "audio/webm", control.signal);
+  h.client.receive({ requestId: h.sent.at(-1)!.requestId, response: { type: "dictation", text: "Too much" } });
+  assert.equal(await dictating, false); assert.equal(h.client.getSnapshot().draft.length, 8000);
+  const count = h.sent.length; assert.equal(await destination("AQID", "application/javascript", control.signal), false); assert.equal(h.sent.length, count);
+  h.client.select(id); dictating = h.client.dictationTarget()("AQID", "audio/webm", control.signal);
+  const snapshot = state([id]); snapshot.threads[0]!.archived = true; h.deliver(snapshot);
+  h.client.receive({ requestId: h.sent.at(-1)!.requestId, response: { type: "dictation", text: "Archived words" } });
+  assert.equal(await dictating, false); h.client.dispose();
+});
 it("keeps drafts on close/world-independent history changes and restores only observation on reconnect", async () => {
   const h = fixture(); h.deliver(state([id])); h.client.draft("Keep this Studio draft");
   h.client.close(); assert.equal(h.client.getSnapshot().draft, "Keep this Studio draft"); h.client.open(); h.deliver(state([id, other]));

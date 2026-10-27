@@ -3195,6 +3195,10 @@ export class Coordinator {
     if (this.stopping || !this.opts.appRoot || this.opts.studioAssistant === null) return null;
     return this.studioAssistantHost ??= createStudioAssistantHost({ root: this.opts.appRoot,
       adapter: () => this.opts.adapter ?? null, sessionInput: this.sessionInput, options: this.opts.studioAssistant,
+      transcribe: (audio, contentType, signal) => {
+        if (!this.voiceService) return Promise.reject(new Error("Local dictation is unavailable."));
+        return this.voiceService.transcribe(audio, contentType, signal);
+      },
       now: () => Date.parse(this.nowIso()), evidence: () => ({ history: this.opts.recoveryHistory?.snapshot(),
         policy: this.opts.recoveryControl?.policySnapshot(), storage: this.opts.storageHealth?.snapshot(), jobs: this.jobQueue?.listJobs() }) });
   }

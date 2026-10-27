@@ -12,6 +12,8 @@ import { StudioAssistantContext } from "./studio-assistant-context.js";
 import { useGlobalChat } from "./global-chat-context.js";
 import { PageSheet } from "./page-sheet.js";
 import { Composer } from "./composer.js";
+import { StudioDictation } from "./studio-dictation.js";
+import type { DictationPhase } from "./dictation.js";
 import { ModelChip } from "./model-chip.js";
 import { ConversationReply } from "./conversation-reply.js";
 import { Cpu, Folder, Help, ListBullet, X } from "./icons.js";
@@ -52,6 +54,7 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
   model?: string; modelSet?: boolean; pickModel(value: string | undefined): void;
 }) {
   const [history, setHistory] = useState(false), [focus, requestFocus] = useState(0);
+  const [dictationPhase, setDictationPhase] = useState<DictationPhase>("idle");
   const thread = view.state?.threads.find(thread => thread.id === view.selected), pending = thread?.pending;
   const share = view.state?.share && view.state.share.threadId === thread?.id ? view.state.share : null;
   const working = pending && pending.state !== "interrupted";
@@ -99,8 +102,10 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
         <button type="button" className="fy-studio-button" disabled={!view.fresh} onClick={() => void client.request({ action: "cancel", threadId: thread!.id, runId: pending.id })}>Stop request</button></div>}
     </div>}
     {view.trouble && <p className="fy-studio-trouble" role="status">{view.trouble}</p>}
-    <footer className="fy-studio-compose"><Composer value={view.draft} onChange={client.draft} onSubmit={() => { if (model) void client.send(model); }}
-      placeholder="Ask Arke…" agentLabel="Arke" focusRequest={focus} busy={view.submitting || !!working || !!view.state?.busy} disabledReason={unavailable}
+    <footer className="fy-studio-compose"><Composer value={view.draft} onChange={client.draft} onSubmit={() => { if (model && dictationPhase === "idle") void client.send(model); }}
+      placeholder="Ask Arke…" agentLabel="Arke" focusRequest={focus} busy={view.submitting || !!working || !!view.state?.busy || dictationPhase !== "idle"} disabledReason={unavailable}
+      busyLabel={dictationPhase === "requesting" ? "Microphone permission…" : dictationPhase === "listening" ? "Dictating…" : dictationPhase === "transcribing" ? "Transcribing…" : "Working…"}
+      dictationControl={<StudioDictation client={client} onPhase={setDictationPhase} enabled={view.open && view.connected && view.fresh && !view.submitting && !working && !view.state?.busy && !thread?.archived && pending?.state !== "interrupted"} />}
       modelControl={<ModelChip state={appState} value={model} set={modelSet} onPick={pickModel} unsetLabel="Use Studio’s configured model" disabled={view.submitting || !!view.state?.busy} />} />
       {view.draft.length > STUDIO_ASSISTANT_LIMITS.requestChars && <p className="fy-studio-note" role="status">Studio accepts up to {STUDIO_ASSISTANT_LIMITS.requestChars.toLocaleString()} characters per request.</p>}
     </footer>

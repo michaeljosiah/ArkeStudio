@@ -1,5 +1,5 @@
 import type { StudioAssistantCommand, StudioAssistantResponse, StudioAssistantSnapshot } from "@arke-studio/contracts";
-import { STUDIO_ASSISTANT_LIMITS } from "@arke-studio/contracts";
+import { STUDIO_ASSISTANT_LIMITS, StudioAssistantCommandSchema } from "@arke-studio/contracts";
 
 type Command = StudioAssistantCommand["command"];
 type Reply = Extract<StudioAssistantResponse, { type: "result" }>;
@@ -18,6 +18,8 @@ export class StudioConversationClient {
   private readonly models = new Map<string, string>();
   private watchId: string | null = null;
   private selectingNew = false;
+  private connectionEpoch = 0;
+  private dictation: { id: string; resolve(text: string | null): void; timer: ReturnType<typeof setTimeout> } | null = null;
   private readonly pending = new Map<string, { resolve(reply: Reply): void; timer: ReturnType<typeof setTimeout> }>();
   constructor(private readonly wire: { send(message: StudioAssistantCommand): boolean; id(): string }, private readonly timeoutMs = 7000) {}
   getSnapshot = (): StudioConversationView => this.view;
@@ -25,12 +27,16 @@ export class StudioConversationClient {
   private change(patch: Partial<StudioConversationView>): void { this.view = { ...this.view, ...patch }; for (const listener of this.listeners) listener(); }
   setConnected(connected: boolean): void {
     if (this.view.connected === connected) return;
+    this.connectionEpoch++;
+    if (this.dictation) { clearTimeout(this.dictation.timer); this.dictation.resolve(null); this.dictation = null; }
     this.watchId = null;
     if (!connected) { for (const request of this.pending.values()) { clearTimeout(request.timer); request.resolve(uncertain()); } this.pending.clear(); }
     this.change({ connected, fresh: false }); if (connected && this.view.open) this.watch();
   }
   open = (): void => { this.change({ open: true }); if (this.view.connected) this.watch(); };
   close = (): void => {
+    this.connectionEpoch++;
+    if (this.dictation) { clearTimeout(this.dictation.timer); this.dictation.resolve(null); this.dictation = null; }
     if (this.watchId && this.view.connected) this.wire.send({ kind: "studio-assistant", requestId: this.wire.id(), command: { action: "unwatch" } });
     this.watchId = null; this.change({ open: false, fresh: false });
   };
@@ -39,6 +45,10 @@ export class StudioConversationClient {
     if (!this.wire.send({ kind: "studio-assistant", requestId, command: { action: "watch" } })) { this.watchId = null; this.change({ fresh: false, trouble: "Studio is disconnected. Your draft is retained." }); }
   }
   receive(frame: { requestId: string; response: StudioAssistantResponse }): void {
+    if (frame.requestId === this.dictation?.id) {
+      const pending = this.dictation; this.dictation = null; clearTimeout(pending.timer);
+      pending.resolve(frame.response.type === "dictation" ? frame.response.text : null); return;
+    }
     if (frame.requestId === this.watchId) {
       if (frame.response.type === "state") {
         const state = frame.response.state;
@@ -62,6 +72,38 @@ export class StudioConversationClient {
     this.drafts.set(this.view.selected ?? "new", this.view.draft);
     this.change({ selected: id, model: this.models.get(id ?? "new"), draft: this.drafts.get(id ?? "new") ?? "", trouble: null });
   };
+  /** Capture the draft destination when the microphone opens. A later thread selection cannot
+   * redirect its words, and close/reconnect/cancel never submits or replays the recording. */
+  dictationTarget(): (audioBase64: string, contentType: string, signal: AbortSignal) => Promise<boolean> {
+    const target = this.view.selected, epoch = this.connectionEpoch;
+    if (!target) this.selectingNew = true;
+    return async (audioBase64, contentType, signal) => {
+      if (signal.aborted || !this.view.connected || !this.view.fresh || !this.view.open || this.connectionEpoch !== epoch || this.dictation) return false;
+      const command = { action: "dictate", audioBase64, contentType };
+      const parsed = StudioAssistantCommandSchema.safeParse({ kind: "studio-assistant", requestId: this.wire.id(), command });
+      if (!parsed.success) return false;
+      const text = await new Promise<string | null>(resolve => {
+        const id = parsed.data.requestId;
+        const cancel = () => {
+          if (this.dictation?.id !== id) return;
+          clearTimeout(this.dictation.timer); this.dictation = null; finish(null);
+        };
+        const finish = (text: string | null) => { signal.removeEventListener("abort", cancel); resolve(text); };
+        const timer = setTimeout(cancel, 50_000);
+        this.dictation = { id, resolve: finish, timer }; signal.addEventListener("abort", cancel, { once: true });
+        if (!this.wire.send(parsed.data)) cancel();
+      });
+      if (signal.aborted || !text?.trim() || !this.view.open || !this.view.connected || this.connectionEpoch !== epoch) return false;
+      const thread = target && this.view.state?.threads.find(row => row.id === target);
+      if (target && (!thread || thread.archived)) return false;
+      const key = target ?? "new", current = this.drafts.get(key) ?? "";
+      const next = current ? current + " " + text : text;
+      if (next.length > STUDIO_ASSISTANT_LIMITS.requestChars) return false;
+      this.drafts.set(key, next);
+      if (this.view.selected === target) this.change({ draft: next });
+      return true;
+    };
+  }
   async request(command: Command): Promise<Reply> {
     if (!this.view.connected || !this.view.fresh) return { type: "result", status: "refused", reason: "unavailable", threadId: null, runId: null };
     if (this.pending.size >= 4) return { type: "result", status: "refused", reason: "busy", threadId: null, runId: null };
@@ -76,7 +118,7 @@ export class StudioConversationClient {
     return response;
   }
   async send(model: string): Promise<boolean> {
-    const text = this.view.draft, before = this.view.selected; if (!text.trim() || text.length > STUDIO_ASSISTANT_LIMITS.requestChars || !model || this.view.submitting) return false;
+    const text = this.view.draft, before = this.view.selected; if (!text.trim() || text.length > STUDIO_ASSISTANT_LIMITS.requestChars || !model || this.view.submitting || this.dictation) return false;
     this.change({ submitting: true });
     try {
     let threadId = before;

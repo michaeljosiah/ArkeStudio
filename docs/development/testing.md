@@ -1588,6 +1588,14 @@ cloud consent. `test/global-chat.test.ts` checks named draft staging, exact repl
 and capture/creation holds. Run from `packages/client`, then run the client typecheck after the
 last test edit. These DOM/protocol checks do not establish native model operation or rendered
 turn-239 parity. Do not replace required visual evidence with source/CSS assertions.
+Private dictation adds contracts bounds to `test/studio-assistant.test.ts`, real two-socket
+coordinator/sidecar composition and single-flight/disconnect checks to coordinator
+`test/studio-assistant/host.test.ts`, and captured-draft/late-transcript checks to the client
+`test/studio-assistant.test.ts`. Client `test/studio-dictation.test.tsx` exercises the actual
+capture component with a synthetic MediaRecorder, including permission after close, stopped
+tracks, oversized recordings and its measured one-minute timer. It makes no microphone/model
+request. The ordinary Chrome `test/composer-row-layout.test.tsx` checks the shared microphone
+presentation at narrow widths; it neither reads the approved master nor establishes parity.
 Adapter `test/v2-private-sessions.test.ts` uses a native loopback protocol server to check
 prepared-role admission, one-use exact-session observation, exclusion from shared events/trace,
 private backend error echoes and native rejection of unexpected permissions (including attempted

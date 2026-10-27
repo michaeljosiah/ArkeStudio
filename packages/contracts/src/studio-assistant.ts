@@ -7,7 +7,9 @@ import { RecoveryEvidenceStateSchema, RecoveryFactSchema, RecoveryIncidentPhaseS
 import { StorageLimitationSchema, StorageProbeSourceSchema, StorageRootRoleSchema } from "./storage-health.js";
 
 export const STUDIO_ASSISTANT_LIMITS = Object.freeze({ storeBytes: 2 * 1024 ** 2, evidenceBytes: 32 * 1024,
-  threads: 20, messages: 100, requestChars: 8000, replyChars: 16000, responseBytes: 192 * 1024, modelCalls: 3 });
+  threads: 20, messages: 100, requestChars: 8000, replyChars: 16000, responseBytes: 192 * 1024, modelCalls: 3,
+  dictationBytes: 6_000_000, dictationMs: 60_000 });
+export const StudioDictationContentTypeSchema = z.enum(["audio/webm", "audio/webm;codecs=opus", "audio/ogg", "audio/ogg;codecs=opus", "audio/mp4", "audio/wav"]);
 const instant = z.number().int().nonnegative().safe().max(8_640_000_000_000_000), digest = z.string().regex(/^[a-f0-9]{64}$/);
 const bytes = z.number().int().nonnegative().safe(), audit = z.enum(["starting", "available", "unavailable"]);
 export const StudioDiagnosticTopicSchema = z.enum(["storage", "local-ai", "setup", "jobs"]);
@@ -99,6 +101,8 @@ export const StudioAssistantCommandSchema = z.object({ kind: z.literal("studio-a
   command: z.discriminatedUnion("action", [
     z.object({ action: z.literal("watch") }).strict(), z.object({ action: z.literal("unwatch") }).strict(),
     z.object({ action: z.literal("create") }).strict(),
+    z.object({ action: z.literal("dictate"), audioBase64: z.string().min(4).max(8_000_000)
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/).refine(value => value.length % 4 === 0), contentType: StudioDictationContentTypeSchema }).strict(),
     z.object({ action: z.literal("archive"), threadId: UlidSchema, archived: z.boolean() }).strict(),
     z.object({ action: z.literal("send"), threadId: UlidSchema, text: z.string().trim().min(1).max(STUDIO_ASSISTANT_LIMITS.requestChars),
       model: z.string().min(1).max(512), diagnosticModel: z.string().min(1).max(512).optional() }).strict(),
@@ -110,6 +114,7 @@ export const StudioAssistantCommandSchema = z.object({ kind: z.literal("studio-a
 export type StudioAssistantCommand = z.infer<typeof StudioAssistantCommandSchema>;
 export const StudioAssistantResponseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("state"), state: StudioAssistantSnapshotSchema }).strict(),
+  z.object({ type: z.literal("dictation"), text: z.string().max(STUDIO_ASSISTANT_LIMITS.requestChars) }).strict(),
   z.object({ type: z.literal("result"), status: z.enum(["ok", "accepted", "refused", "unconfirmed"]),
     reason: z.enum(["invalid", "missing-thread", "busy", "interrupted", "unavailable", "full", "stopped", "timeout"]).nullable(),
     threadId: UlidSchema.nullable(), runId: UlidSchema.nullable() }).strict(),

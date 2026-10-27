@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { HarnessAdapter, StudioAssistantCommand, StudioAssistantResponse } from "@arke-studio/contracts";
+import { STUDIO_ASSISTANT_LIMITS, type HarnessAdapter, type StudioAssistantCommand, type StudioAssistantResponse } from "@arke-studio/contracts";
 import type { SessionInput } from "../harness/session-files.js";
 import type { TransportRequester } from "../transport.js";
 import { studioDiagnosticEvidence, type StudioEvidenceSources } from "./evidence.js";
@@ -24,7 +24,9 @@ export class StudioAssistantHost {
   private readonly clients = new Map<TransportRequester, Client>();
   private readonly work = new Set<Promise<void>>();
   private pending = 0;
-  constructor(readonly service: StudioAssistantService, private readonly responseMs = 5000) {}
+  private dictating = false;
+  constructor(readonly service: StudioAssistantService, private readonly responseMs = 5000,
+    private readonly transcribe?: (audio: Uint8Array, contentType: string, signal: AbortSignal) => Promise<string>) {}
   private client(requester: TransportRequester): Client {
     const existing = this.clients.get(requester); if (existing) return existing;
     const abort = () => { state.unwatch?.(); requester.signal.removeEventListener("abort", abort); this.clients.delete(requester); };
@@ -53,7 +55,7 @@ export class StudioAssistantHost {
       timer = setTimeout(() => {
         if (!signal.aborted) requester.reply(id, result("unconfirmed", "timeout"));
         observation.abort();
-      }, this.responseMs);
+      }, command.action === "dictate" ? 45_000 : this.responseMs);
     });
     const work = this.execute(message, requester, client, signal).then(response => {
       if (response && !signal.aborted) requester.reply(id, response);
@@ -65,6 +67,22 @@ export class StudioAssistantHost {
     finally { clearTimeout(timer); signal.removeEventListener("abort", abandon); }
   }
   private async execute(message: StudioAssistantCommand, requester: TransportRequester, client: Client, signal: AbortSignal): Promise<StudioAssistantResponse | null> {
+    // Dictation is a transient local read. It neither depends on writable chat history nor
+    // emits the ordinary dictation.result event, which is shared with contextual chats.
+    if (message.command.action === "dictate") {
+      if (!this.transcribe) return result("refused", "unavailable");
+      if (this.dictating) return result("refused", "busy");
+      const audio = Buffer.from(message.command.audioBase64, "base64");
+      if (!audio.length || audio.length > STUDIO_ASSISTANT_LIMITS.dictationBytes || audio.toString("base64") !== message.command.audioBase64) return result("refused", "invalid");
+      signal.throwIfAborted(); this.dictating = true;
+      try {
+        const text = await this.transcribe(audio, message.command.contentType, signal);
+        if (signal.aborted) return null;
+        if (typeof text !== "string" || text.length > STUDIO_ASSISTANT_LIMITS.requestChars) return result("refused", "full");
+        return { type: "dictation", text };
+      } catch { return signal.aborted ? null : result("refused", "unavailable"); }
+      finally { this.dictating = false; }
+    }
     await this.service.open(); if (signal.aborted) return null;
     const command = message.command;
     switch (command.action) {
@@ -88,10 +106,11 @@ export class StudioAssistantHost {
   }
 }
 export function createStudioAssistantHost(deps: { root: string; adapter(): HarnessAdapter | null; sessionInput: SessionInput;
-  evidence(): StudioEvidenceSources; now(): number; options?: StudioAssistantHostOptions }): StudioAssistantHost {
+  evidence(): StudioEvidenceSources; now(): number; options?: StudioAssistantHostOptions;
+  transcribe?(audio: Uint8Array, contentType: string, signal: AbortSignal): Promise<string> }): StudioAssistantHost {
   const model = deps.options?.model ?? new HarnessStudioModelRunner({ adapter: deps.adapter, sessionInput: deps.sessionInput,
     scratch: join(deps.root, "studio-assistant", "turns"), destination: (model, provider) => deps.options?.destination?.(model, provider) ?? null });
   const service = new StudioAssistantService({ store: new FileStudioConversationStore(join(deps.root, "studio-assistant", "conversations.json")),
     model, now: deps.now, evidence: topic => studioDiagnosticEvidence(topic, deps.evidence(), deps.now()) });
-  return new StudioAssistantHost(service, deps.options?.responseMs);
+  return new StudioAssistantHost(service, deps.options?.responseMs, deps.transcribe);
 }
