@@ -1,4 +1,4 @@
-import { TraversalEvidenceSchema } from "./routing.js";
+import { TraversalEvidenceSchema, UnavailableChoiceSchema } from "./routing.js";
 import { StoryFactSchema, StoryPredicateSchema, StoryEffectSchema, StoryPresentationSchema, StoryEndingSchema } from "./story-state-schema.js";
 import { z } from "zod";
 import { AudioStudioProposalInputSchema } from "./audio-arrangement-schema.js";
@@ -1189,7 +1189,7 @@ export const RoutingCommandSchema = z.discriminatedUnion("operation", [
   z
     .object({
       operation: z.literal("add-choice"),
-      choice: z.object({ id: RoutingChoiceIdSchema, from: SceneIdSchema, label: z.string().trim().min(1), to: SceneIdSchema, when: StoryPredicateSchema.optional(), effects: z.array(StoryEffectSchema).max(32).optional() }).strict(),
+      choice: z.object({ id: RoutingChoiceIdSchema, from: SceneIdSchema, label: z.string().trim().min(1), to: SceneIdSchema, when: StoryPredicateSchema.optional(), effects: z.array(StoryEffectSchema).max(32).optional(), unavailable:UnavailableChoiceSchema.optional() }).strict(),
     })
     .strict(),
   z
@@ -1198,7 +1198,7 @@ export const RoutingCommandSchema = z.discriminatedUnion("operation", [
       baseVersion: z.number().int().min(1).optional(),
       choiceId: RoutingChoiceIdSchema,
       changes: NonEmptyRoutingChangesSchema(
-        { from: SceneIdSchema.optional(), label: z.string().trim().min(1).optional(), to: SceneIdSchema.optional(), when: StoryPredicateSchema.nullable().optional(), effects: z.array(StoryEffectSchema).max(32).optional() },
+        { from: SceneIdSchema.optional(), label: z.string().trim().min(1).optional(), to: SceneIdSchema.optional(), when: StoryPredicateSchema.nullable().optional(), effects: z.array(StoryEffectSchema).max(32).optional(), unavailable:UnavailableChoiceSchema.nullable().optional() },
         "a choice edit must change at least one field",
       ),
     })

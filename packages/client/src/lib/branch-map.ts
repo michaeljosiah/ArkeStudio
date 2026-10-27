@@ -209,6 +209,7 @@ export interface FindingRow {
   evidence: string[];
   sceneIds: string[];
   choiceIds: string[];
+  witnessPrefix?: string[];
 }
 
 /**
@@ -223,11 +224,11 @@ export function findingRows(
   const rows: FindingRow[] = [];
   const unwalked = findings.filter((finding) => finding.kind === "untraversed-edge");
   for (const [index, finding] of findings.entries()) {
-    const base = { key: `${finding.kind}-${index}`, severity: finding.severity, kind: finding.kind, sceneIds: finding.sceneIds, choiceIds: finding.choiceIds };
+    const base = { key: `${finding.kind}-${index}`, severity: finding.severity, kind: finding.kind, sceneIds: finding.sceneIds, choiceIds: finding.choiceIds, ...(finding.witnessPrefix === undefined ? {} : { witnessPrefix: finding.witnessPrefix }) };
     switch (finding.kind) {
       case "state-route":
       case "state-incomplete":
-        rows.push({ ...base, title: "Story state", note: finding.detail, evidence: finding.choiceIds.map(labelOf) });
+        rows.push({ ...base, title: finding.witnessPrefix === undefined ? "Story state" : titleOf(finding.sceneIds[0]!), note: finding.witnessPrefix === undefined ? finding.detail : finding.detail.split(" at ")[0]!, evidence: finding.witnessPrefix === undefined ? finding.choiceIds.map(labelOf) : [] });
         break;
       case "unreachable":
         rows.push({ ...base, title: titleOf(finding.sceneIds[0]!), note: "no way in", evidence: [] });
@@ -248,7 +249,7 @@ export function findingRows(
         rows.push({ ...base, title: titleOf(finding.sceneIds[0]!), note: `${finding.choiceIds.length} ways in`, evidence: finding.choiceIds.map(labelOf) });
         break;
       case "untraversed-edge":
-        if (finding.detail.includes("Facts:")) rows.push({ ...base, title: labelOf(finding.choiceIds[0]!), note: finding.detail, evidence: [] });
+        if (finding.detail.includes("Facts:")) rows.push({ ...base, title: labelOf(finding.choiceIds[0]!), note: finding.witnessPrefix === undefined ? finding.detail : "Not walked with this state", evidence: [] });
         break;
       case "unvisited-route":
         break;

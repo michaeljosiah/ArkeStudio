@@ -229,6 +229,12 @@ export function mountInteractivePlayer(root, options) {
 .aip-panel{position:absolute;top:16px;right:16px;bottom:16px;width:420px;max-width:calc(100% - 32px);border-radius:20px;padding:18px 14px 16px;display:flex;flex-direction:column;background:color-mix(in srgb,var(--aip-bg) 70%,transparent);backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%);border:1px solid color-mix(in srgb,var(--aip-fg) 16%,transparent);box-shadow:0 20px 50px color-mix(in srgb,var(--aip-bg) 50%,transparent)}
 .aip-panel-head{display:flex;align-items:center;padding:0 6px 14px 12px;font-size:18px;font-weight:600}
 .aip-panel-list{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+.aip-fact-row{display:grid;grid-template-columns:28px minmax(0,1fr) auto;align-items:center;gap:9px;padding:12px 0;border-bottom:1px solid color-mix(in srgb,var(--aip-fg) 16%,transparent);font-size:12px}
+.aip-fact-row .initials{height:27px;width:27px;display:grid;place-items:center;border-radius:50%;background:color-mix(in srgb,var(--aip-fg) 8%,transparent)}
+.aip-fact-row b{display:block;font-weight:500}.aip-fact-row small{display:block;opacity:.65;margin-top:5px}.aip-fact-row .value{padding:4px 7px;border:1px solid color-mix(in srgb,var(--aip-fg) 16%,transparent);border-radius:5px;max-width:145px}
+.aip-fact-row .aip-btn{grid-column:2 / 4;justify-self:start;font-size:11px;padding:4px 0;min-height:28px;background:none;text-decoration:underline}
+.aip-facts-note{font-size:12px;line-height:1.7;opacity:.65}.aip-route-history{font-size:12px;padding-top:16px}.aip-route-history summary{cursor:pointer;margin-bottom:12px}
+.aip-choice:disabled{opacity:.6;cursor:default}.aip-choice-reason{display:block;font-size:12px;font-weight:400;line-height:1.6;margin-top:5px}
 .aip-stop{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:12px}
 .aip-stop.now{background:color-mix(in srgb,var(--aip-fg) 9%,transparent)}
 .aip-stop>.n{width:22px;flex:none;font-size:12px;font-weight:500;color:color-mix(in srgb,var(--aip-fg) 60%,transparent)}
@@ -684,7 +690,7 @@ export function mountInteractivePlayer(root, options) {
     state.positionSec = -1;
     save();
     render();
-    if (mode === "choice") choicesEl.querySelector("button")?.focus();
+    if (mode === "choice") choicesEl.querySelector("button:not([disabled])")?.focus();
     else root.focus();
   }
 
@@ -731,11 +737,14 @@ export function mountInteractivePlayer(root, options) {
   }
 
   function renderChoices() {
-    const options = mode === "choice" ? outOf(state.sceneId) : [];
+    const available = outOf(state.sceneId);
+    const options = mode === "choice" ? choices.filter(c => c.from === state.sceneId && (available.some(a => a.id === c.id) || story && c.unavailable)) : [];
     choicesEl.innerHTML = options
-      .map((c, i) =>
-        '<button type="button" class="aip-choice" data-choice="' + esc(c.id) + '"><span class="k">' + (i + 1) + '</span><span class="l">' + esc(c.label) + "</span>" +
-        (author && unwalked.has(c.id) ? '<span class="aip-chip">not walked</span>' : "") + "</button>")
+      .map(c => {
+        const index = available.findIndex(a => a.id === c.id), disabled = index < 0;
+        return '<button type="button" class="aip-choice" data-choice="' + esc(c.id) + '"' + (disabled ? ' disabled aria-describedby="aip-reason-' + esc(c.id) + '"' : '') + '><span class="k">' + (disabled ? '—' : index + 1) + '</span><span class="l">' + esc(disabled ? c.unavailable.label || c.label : c.label) + (disabled ? '<small class="aip-choice-reason" id="aip-reason-' + esc(c.id) + '">' + esc(c.unavailable.reason) + '</small>' : '') + "</span>" +
+        (!disabled && author && unwalked.has(c.id) ? '<span class="aip-chip">not walked</span>' : "") + "</button>";
+      })
       .join("");
     el.under.innerHTML = mode === "choice" && ((media[state.sceneId] || []).length > 0 || isBeats(state.sceneId))
       ? '<button type="button" class="aip-ghost" data-act="replay">' + icon(I.back, 15) + "Replay scene</button>"
@@ -811,18 +820,18 @@ export function mountInteractivePlayer(root, options) {
       }
     });
     el.panel.innerHTML =
-      '<div class="aip-panel-head"><span style="flex:1">Route</span><button type="button" class="aip-ib" data-act="route" aria-label="Close">' + icon(I.x) + "</button></div>" +
-      '<div class="aip-panel-list">' + list + (story && author ? '<section aria-label="Preview facts"><h3>Preview facts</h3>' + (story.facts || []).map(fact => {
+      '<div class="aip-panel-head"><span style="flex:1">' + (story && author ? "Preview facts" : "Route") + '</span><button type="button" class="aip-ib" data-act="route" aria-label="Close">' + icon(I.x) + "</button></div>" +
+      '<div class="aip-panel-list">' + (story && author ? '<section aria-label="Preview facts"><p class="aip-facts-note">This route · values as this scene begins</p>' + (story.facts || []).map(fact => {
         const origin = storyReplay(story, state.route).origins[fact.id];
-        return '<p><b>' + esc(fact.label) + '</b>: ' + esc(facts[fact.id]) + '<br><small>' + esc(origin ? (choiceById(origin)?.label || origin) : "Starting value") + '</small></p>';
-      }).join("") + '</section>' : "") + "</div>" +
-      '<div class="aip-panel-foot"><button type="button" class="aip-btn small" data-act="restart">' + icon(I.back, 15) + "Start over</button></div>";
+        return '<div class="aip-fact-row"><span class="initials" aria-hidden="true">' + esc(fact.label.split(/\s+/).map(word => word[0]).slice(0,2).join("")) + '</span><div><b>' + esc(fact.label) + '</b><small>' + esc(origin ? (choiceById(origin)?.label || origin) : "Starting value") + '</small></div><span class="value">' + esc(facts[fact.id]) + '</span>' + (origin ? '<button type="button" class="aip-btn small" data-again="' + state.route.lastIndexOf(origin) + '">Choose again at ' + esc(titleOf(choiceById(origin)?.from)) + '</button>' : "") + '</div>';
+      }).join("") + '<p class="aip-facts-note">Preview facts follow this route, not the authored defaults.</p></section><details class="aip-route-history"><summary>Route history</summary>' + list + '</details>' : list) + "</div>" +
+      '<div class="aip-panel-foot"><button type="button" class="aip-btn small" data-act="restart">' + icon(I.back, 15) + "Start over</button>" + (story && author?.onTestRoute && state.sceneId !== options.start ? '<button type="button" class="aip-btn small" data-act="test-route">Test another route</button>' : '') + '</div>';
   }
 
   function renderStrip() {
     if (!el.strip) return;
     el.strip.innerHTML =
-      "<b>Preview</b><span class=\"aip-muted\">from " + esc(titleOf(origin)) + '</span><span class="aip-spacer"></span>' +
+      "<b>Preview</b><span class=\"aip-muted\">from " + esc(titleOf(initial ? initial.sceneId : origin)) + '</span><span class="aip-spacer"></span>' +
       (unwalked.size > 0 ? "<span>" + unwalked.size + " choice" + (unwalked.size === 1 ? "" : "s") + " not walked</span>" : '<span class="aip-muted">every choice walked</span>') +
       (story ? '<button type="button" class="aip-btn small" data-act="route">Preview facts</button>' : "") +
       (author.onBranchMap ? '<button type="button" class="aip-btn small" data-act="map" aria-label="Branch map">' + icon(I.map, 15) + '<span class="t">Branch map</span></button>' : "") +
@@ -1060,6 +1069,7 @@ export function mountInteractivePlayer(root, options) {
       case "restart": saved = null; startAgain(); break;
       case "last": chooseAgain(state.route.length - 1); break;
       case "map": author && author.onBranchMap && author.onBranchMap(); break;
+      case "test-route": if (author?.onTestRoute) author.onTestRoute(state.sceneId); break;
       case "close": author && author.onClose && author.onClose(); break;
     }
   };

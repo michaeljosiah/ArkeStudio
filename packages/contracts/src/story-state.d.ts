@@ -3,7 +3,7 @@ export type StoryState = Record<string, boolean | string>;
 export interface StoryProgram {
   start: string;
   facts?: StoryFact[];
-  choices: ReadonlyArray<{ id: string; from: string; to: string; when?: StoryPredicate; effects?: StoryEffect[] }>;
+  choices: ReadonlyArray<{ id: string; from: string; to: string; when?: StoryPredicate; effects?: StoryEffect[]; unavailable?: { label?:string; reason:string } }>;
   presentation?: StoryPresentation[];
   endings: ReadonlyArray<{ sceneId: string; title: string; variants?: StoryEnding[] }>;
 }

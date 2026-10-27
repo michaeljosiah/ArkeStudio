@@ -24,7 +24,8 @@ export const ChoiceSchema = z
     to: SceneIdSchema,
   })
   .strict();
-export const StatefulChoiceSchema = ChoiceSchema.extend({ when: StoryPredicateSchema.optional(), effects: z.array(StoryEffectSchema).max(32).optional() });
+export const UnavailableChoiceSchema = z.object({ label:z.string().trim().min(1).max(256).optional(), reason:z.string().trim().min(1).max(600) }).strict();
+export const StatefulChoiceSchema = ChoiceSchema.extend({ when: StoryPredicateSchema.optional(), effects: z.array(StoryEffectSchema).max(32).optional(), unavailable:UnavailableChoiceSchema.optional() });
 export type Choice = z.infer<typeof StatefulChoiceSchema>;
 
 export const RoutingSchema = z
@@ -57,7 +58,7 @@ export const RoutingSchema = z
   // traversal vouch for an edge nobody previewed, and one "remove" delete both. Refused at
   // parse, so the shape cannot exist on disk.
   .superRefine((routing, ctx) => {
-    if (routing.schemaVersion !== 2 && (routing.facts !== undefined || routing.presentation !== undefined || routing.choices.some(c => c.when !== undefined || c.effects !== undefined) || routing.endings.some(e => e.variants !== undefined))) {
+    if (routing.schemaVersion !== 2 && (routing.facts !== undefined || routing.presentation !== undefined || routing.choices.some(c => c.when !== undefined || c.effects !== undefined || c.unavailable !== undefined) || routing.endings.some(e => e.variants !== undefined))) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Story rules require routing schemaVersion 2" });
     }
     try { validateStoryProgram(routing); } catch (error) {
@@ -114,6 +115,8 @@ export interface RoutingFinding {
   detail: string;
   sceneIds: string[];
   choiceIds: string[];
+  /** Replayable route into the reported state (turn 240i). Absent for structural findings. */
+  witnessPrefix?: string[];
 }
 
 function reachableFrom(start: string, edges: ReadonlyMap<string, string[]>): Set<string> {
@@ -391,7 +394,7 @@ function stateRoutingFindings(routing: Routing, scenes: readonly {id: string; ti
   const graph = exploreStory(routing);
   const identity = storyIdentity(routing);
   const known = new Set(scenes.map(s => s.id));
-  const add = (detail: string, sceneIds: string[], choiceIds: string[] = [], kind: RoutingFinding["kind"] = "state-route") => result.push({ kind, severity: "blocks", detail, sceneIds, choiceIds });
+  const add = (detail: string, sceneIds: string[], choiceIds: string[] = [], kind: RoutingFinding["kind"] = "state-route", witnessPrefix?: string[]) => result.push({ kind, severity: "blocks", detail, sceneIds, choiceIds, ...(witnessPrefix === undefined ? {} : { witnessPrefix }) });
   if (!graph.complete) add(`State exploration reached its ${graph.limit ?? "state/transition"} limit; qualified export is unavailable`, [], [], "state-incomplete");
   for (const choice of routing.choices) for (const id of [choice.from, choice.to]) if (!known.has(id)) add(`Choice ${choice.label} names missing scene ${id}`, [id], [choice.id], "invalid-destination");
   for (const rule of routing.presentation ?? []) {
@@ -407,7 +410,7 @@ function stateRoutingFindings(routing: Routing, scenes: readonly {id: string; ti
   }
   for (const point of graph.points) if (!known.has(point.sceneId)) add(`Missing scene ${point.sceneId}`, [point.sceneId]);
   for (const scene of scenes) if (!routing.excluded.some(e => e.sceneId === scene.id) && !graph.points.some(p => p.sceneId === scene.id)) add(`No reachable story state enters ${scene.title ?? scene.id}`, [scene.id], [], "unreachable");
-  for (const problem of graph.problems) add(`${problem.detail} at ${problem.sceneId}. Route: ${problem.prefix.join(" → ") || "start"}. Facts: ${JSON.stringify(problem.state)}`, [problem.sceneId], problem.prefix);
+  for (const problem of graph.problems) add(`${problem.detail} at ${problem.sceneId}. Route: ${problem.prefix.join(" → ") || "start"}. Facts: ${JSON.stringify(problem.state)}`, [problem.sceneId], problem.prefix, "state-route", problem.prefix);
   const covered = new Set<string>();
   for (const entry of evidence) {
     if (!entry.story || entry.story.identity !== identity) continue;
@@ -420,7 +423,7 @@ function stateRoutingFindings(routing: Routing, scenes: readonly {id: string; ti
   }
   for (const edge of graph.transitions) {
     const point = graph.points[edge.from]!;
-    if (!covered.has(storyIdentity([point.sceneId, point.state, edge.choiceId]))) add(`Choice ${edge.choiceId} has not been walked in this state. Route: ${point.prefix.join(" → ") || "start"}. Facts: ${JSON.stringify(point.state)}`, [point.sceneId], [edge.choiceId], "untraversed-edge");
+    if (!covered.has(storyIdentity([point.sceneId, point.state, edge.choiceId]))) add(`Choice ${edge.choiceId} has not been walked in this state. Route: ${point.prefix.join(" → ") || "start"}. Facts: ${JSON.stringify(point.state)}`, [point.sceneId], [edge.choiceId], "untraversed-edge", point.prefix);
   }
   return result;
 }

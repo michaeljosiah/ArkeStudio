@@ -393,7 +393,7 @@ describe("the branch map canvas (design turn 157)", () => {
     const item = await mount();
     await click(card(item, "sc_vigil"));
     await click(button(item, "Draw a choice from here"));
-    await change(all(item, 'input[aria-label="Choice text"]')[0], "Take the bell stair");
+    await change(all(item, 'textarea[aria-label="Choice text"]')[0], "Take the bell stair");
     await change(all(item, 'select[aria-label="Destination scene"]')[0], "sc_towers");
     await click(button(item, "Add choice"));
     assert.deepEqual(commands(item), [
@@ -407,14 +407,14 @@ describe("the branch map canvas (design turn 157)", () => {
     await click(all(item, '[data-scene="sc_quarter"] .bm-port')[0]);
     assert.ok(all(item, 'dialog.story-dialog')[0]);
     assert.equal(button(item, "Add choice")!.hasAttribute("disabled"), true);
-    await change(all(item, 'input[aria-label="Choice text"]')[0], "Ask Dev to hold the release");
+    await change(all(item, 'textarea[aria-label="Choice text"]')[0], "Ask Dev to hold the release");
     await click(button(item, "Add condition"));
     await click(button(item, "Remember a value"));
     await change(all(item, 'select[aria-label="Remember value"]')[0], "Lost at release");
     await click(button(item, "Choose on map"));
     assert.equal(all(item, 'dialog.story-dialog').length, 0);
     await click(card(item, "sc_towers"));
-    assert.equal((all(item, 'input[aria-label="Choice text"]')[0] as HTMLInputElement).value, "Ask Dev to hold the release");
+    assert.equal((all(item, 'textarea[aria-label="Choice text"]')[0] as HTMLInputElement).value, "Ask Dev to hold the release");
     assert.equal(button(item, "Add choice")!.hasAttribute("disabled"), false);
     await click(button(item, "Add choice"));
     assert.deepEqual(commands(item), [{ operation: "add-choice", choice: { id: "ch_ask-dev-to-hold-the-release", from: "sc_quarter", to: "sc_towers", label: "Ask Dev to hold the release", when: { op: "eq", fact: "dev", value: "Alive" }, effects: [{ fact: "dev", value: "Lost at release" }] } }]);
@@ -436,7 +436,7 @@ describe("the branch map canvas (design turn 157)", () => {
     await click(all(item, ".bm-count")[0]);
     await click(button(item, "Draw a choice to it"));
     await change(all(item, 'select[aria-label="From scene"]')[0], "sc_quarter");
-    await change(all(item, 'input[aria-label="Choice text"]')[0], "Reach the undertow");
+    await change(all(item, 'textarea[aria-label="Choice text"]')[0], "Reach the undertow");
     await click(button(item, "Add choice"));
     assert.deepEqual(commands(item), [{ operation: "add-choice", choice: { id: "ch_reach-the-undertow", from: "sc_quarter", to: "sc_undertow", label: "Reach the undertow" } }]);
   });
@@ -445,7 +445,7 @@ describe("the branch map canvas (design turn 157)", () => {
     const item = await mount();
     await click(card(item, "sc_quarter"));
     await click(all(item, '[data-scene="sc_quarter"] .bm-port')[0]);
-    await change(all(item, 'input[aria-label="Choice text"]')[0], "Keyboard route");
+    await change(all(item, 'textarea[aria-label="Choice text"]')[0], "Keyboard route");
     await click(button(item, "Choose on map"));
     await key(card(item, "sc_towers"), "Enter");
     assert.ok(all(item, 'dialog.story-dialog')[0]);
@@ -457,7 +457,7 @@ describe("the branch map canvas (design turn 157)", () => {
     const item = await mount({ ...ROUTING, choices: [...ROUTING.choices, { id: "ch_connector-draft", from: "sc_quarter", to: "sc_causeway", label: "Connector draft" }] });
     await click(card(item, "sc_quarter"));
     await click(all(item, '[data-scene="sc_quarter"] .bm-port')[0]);
-    await change(all(item, 'input[aria-label="Choice text"]')[0], "New route");
+    await change(all(item, 'textarea[aria-label="Choice text"]')[0], "New route");
     await change(all(item, 'select[aria-label="Destination scene"]')[0], "sc_towers");
     await click(button(item, "Add choice"));
     assert.equal(commands(item)[0]!.operation, "add-choice");
@@ -478,16 +478,65 @@ describe("the branch map canvas (design turn 157)", () => {
     const routing: Routing = { ...ROUTING, schemaVersion: 2, facts: [{ id: "dev", label: "Dev Malik", type: "boolean", default: true }] };
     const item = await mount(routing);
     await click(button(item, "Story facts · 1"));
+    await click(button(item, "Edit Dev Malik"));
     await change(all(item, 'input[aria-label="Name for dev"]')[0], "Local draft name");
     const latest: Routing = { ...routing, version: routing.version + 1, facts: [...routing.facts!, { id: "wei", label: "Lin Wei", type: "boolean", default: true }] };
     await act(async () => __setStateForTest(state(latest)));
     assert.equal((all(item, 'input[aria-label="Name for dev"]')[0] as HTMLInputElement).value, "Local draft name");
-    assert.equal(button(item, "Save facts")!.hasAttribute("disabled"), true);
+    assert.equal(button(item, "Keep fact")!.hasAttribute("disabled"), true);
     await click(button(item, "Load current rules"));
-    assert.ok(all(item, 'input[aria-label="Name for wei"]')[0]);
+    assert.ok(button(item, "Edit Lin Wei"), "the Inspector includes the intervening fact");
     assert.equal((all(item, 'input[aria-label="Name for dev"]')[0] as HTMLInputElement).value, "Dev Malik");
-    await click(button(item, "Save facts"));
+    await click(button(item, "Keep fact"));
     assert.deepEqual(commands(item), [{ operation: "set-facts", baseVersion: latest.version, facts: latest.facts }]);
+  });
+
+  it("reviews compact is-not rules and remembered values before one atomic Inspector save", async () => {
+    const routing: Routing = { ...ROUTING, schemaVersion: 2, facts:[{ id:"dev",label:"Dev Malik",type:"enum",values:["Alive","Lost"],default:"Alive" }] };
+    const item = await mount(routing);
+    await click(all(item,'[data-walk="c:ch_follow"]')[0]);
+    await click(button(item,"Add condition"));
+    await change(all(item,'select[aria-label="Condition comparison"]')[0],"not");
+    await click(button(item,"Remember a value"));
+    await change(all(item,'select[aria-label="Remember value"]')[0],"Lost");
+    await change(all(item,'select[aria-label="If unavailable"]')[0],"disabled");
+    assert.ok(button(item,"Review change")!.hasAttribute("disabled"),"an authored reason is required");
+    await change(all(item,'textarea[aria-label="Unavailable reason"]')[0],"Dev cannot reach the release.");
+    await click(button(item,"Review change"));
+    assert.deepEqual(commands(item),[],"review does not write");
+    assert.match(text(item.container.ownerDocument.body),/Dev Malik is not Alive/);
+    await click(button(item,"Keep change"));
+    assert.deepEqual(commands(item),[{operation:"edit-choice",choiceId:"ch_follow",baseVersion:routing.version,changes:{when:{op:"not",arg:{op:"eq",fact:"dev",value:"Alive"}},effects:[{fact:"dev",value:"Lost"}],unavailable:{reason:"Dev cannot reach the release."}}}]);
+    await act(async()=>__setStateForTest(state({...routing,version:routing.version+1,choices:routing.choices.map(choice=>choice.id==="ch_follow"?{...choice,when:{op:"not",arg:{op:"eq",fact:"dev",value:"Alive"}},effects:[{fact:"dev",value:"Lost"}],unavailable:{reason:"Dev cannot reach the release."}}:choice)})));
+    assert.equal(button(item,"Keep change"),undefined,"acknowledgement closes review");
+    assert.equal(button(item,"Load current rules"),undefined,"an acknowledged save is not a conflict");
+  });
+
+  it("draws an unsaved connector and excludes its source from destination choices", async () => {
+    const item = await mount({...ROUTING,schemaVersion:2});
+    await click(all(item,'[data-scene="sc_quarter"] .bm-port')[0]);
+    assert.equal(all(item,'select[aria-label="Destination scene"] option').some(option=>option.getAttribute("value")==="sc_quarter"),false);
+    await change(all(item,'select[aria-label="Destination scene"]')[0],"sc_towers");
+    await change(all(item,'textarea[aria-label="Choice text"]')[0],"An unsaved route");
+    assert.match(text(all(item,'.story-draft-label')[0]!),/An unsaved route.*Draft/);
+    assert.ok(all(item,'.bm-edge--new')[0]);
+    assert.deepEqual(commands(item),[]);
+  });
+
+  it("opens the exact witness prefix from a state-dependent finding", async () => {
+    const routing: Routing = {...ROUTING,schemaVersion:2,facts:[{id:"dev",label:"Dev Malik",type:"boolean",default:true}],choices:ROUTING.choices.map(choice=>choice.id==="ch_follow"?{...choice,effects:[{fact:"dev",value:false}]}:choice)};
+    const item = await mount(routing);
+    await click(all(item,'.bm-count')[0]);
+    const finding=all(item,'.bm-find').find(el=>text(el).includes("Cross before the tide") && text(el).includes("Witness route"));
+    assert.ok(finding);
+    assert.match(text(finding),/Follow the lantern.*Dev Malik: false/);
+    await click([...finding.querySelectorAll('button')].find(el=>text(el)==="Preview this route") as HTMLElement);
+    assert.match(text(all(item,'.aip-strip')[0]!),/from The causeway/);
+    assert.equal(all(item,".story-dialog").length,0,"the route starts without a different-prefix picker");
+    await click(button(item,"Preview facts"));
+    assert.match(text(all(item,".aip-fact-row")[0]!),/Dev Malik.*Follow the lantern.*false/);
+    await click(button(item,"Test another route"));
+    assert.ok(button(item,"Preview this route"),"another actual prefix is picked explicitly");
   });
 
   it("keeps a stale unsaved condition repairable when its fact is removed elsewhere", async () => {
@@ -497,7 +546,7 @@ describe("the branch map canvas (design turn 157)", () => {
     await click(button(item, "Add condition"));
     await act(async () => __setStateForTest(state({ ...routing, version: routing.version + 1, facts: [] })));
     assert.match(text(item.container.ownerDocument.body), /Missing fact/);
-    assert.ok(all(item, 'select[aria-label="Condition type"]')[0]!.hasAttribute("disabled"));
+    assert.ok(all(item, 'select[aria-label="Condition comparison"]')[0]!.hasAttribute("disabled"));
     await click(button(item, "Remove condition"));
     assert.doesNotMatch(text(item.container.ownerDocument.body), /Missing fact/);
     assert.deepEqual(commands(item), []);
@@ -526,7 +575,8 @@ describe("the branch map canvas (design turn 157)", () => {
     await click(button(item, "Show when"));
     await click(button(item, "Remove rule for blk_gone"));
     await click(button(item, "Remove rule for sh_gone"));
-    await click(button(item, "Save rules"));
+    await click(button(item, "Review change"));
+    await click(button(item, "Keep change"));
     assert.deepEqual(commands(item), [{ operation: "set-presentation", baseVersion: routing.version, presentation: { sceneId: "sc_quarter", blocks: [], shots: [] } }]);
   });
 

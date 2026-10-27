@@ -1,5 +1,5 @@
 import { StorySceneDialog, StoryEndingDialog, StoryPreviewStart } from "../components/story-scene-controls.js";
-import { ConnectorDialog, StoryFactsDialog } from "../components/story-controls.js";
+import { ConnectorDialog, StoryChoiceRules, StoryFactsInspector } from "../components/story-controls.js";
 import type { Choice } from "@arke-studio/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Link, useParams } from "react-router";
@@ -161,6 +161,7 @@ export function beatPreviewOptions({
   onChoice,
   onBranchMap,
   onClose,
+  onTestRoute,
 }: {
   world: { meta: { name: string; slug: string }; artifacts: readonly ArtifactSidecar[]; sheets: readonly Pick<Sheet, "id" | "name">[] };
   production: ProductionBundle;
@@ -173,6 +174,7 @@ export function beatPreviewOptions({
   onChoice: NonNullable<NonNullable<InteractivePlayerOptions["author"]>["onChoice"]>;
   onBranchMap?: () => void;
   onClose: () => void;
+  onTestRoute?: (sceneId:string) => void;
 }): InteractivePlayerOptions {
   const routing = production.routing;
   const scenes = Object.fromEntries(production.scenes.map(scene => [scene.id, { title: scene.title, beats: scenePlayerBeats(production, world.artifacts, world.sheets, world.meta.slug, scene, voices) }]));
@@ -196,7 +198,7 @@ export function beatPreviewOptions({
     choices: routing?.choices ?? [],
     endings: routing?.endings ?? [],
     storageKey: null,
-    author: { unwalked: [...unwalked], onChoice, ...(onBranchMap ? { onBranchMap } : {}), onClose },
+    author: { unwalked: [...unwalked], onChoice, ...(onBranchMap ? { onBranchMap } : {}), onClose, ...(onTestRoute ? { onTestRoute } : {}) },
   };
 }
 
@@ -254,13 +256,15 @@ export function BranchMapScreen() {
   useEffect(() => {
     if (!connectorSave || !routing || routing.version <= connectorSave.version) return;
     const draft = connectorSave.choice;
-    const saved = routing.choices.find(c => (c.id === draft.id || (!connectorSave.ids.includes(c.id) && c.id.startsWith(draft.id + "-"))) && c.from === draft.from && c.to === draft.to && c.label === draft.label && JSON.stringify(c.when) === JSON.stringify(draft.when) && JSON.stringify(c.effects ?? []) === JSON.stringify(draft.effects ?? []));
+    const saved = routing.choices.find(c => (c.id === draft.id || (!connectorSave.ids.includes(c.id) && c.id.startsWith(draft.id + "-"))) && c.from === draft.from && c.to === draft.to && c.label === draft.label && JSON.stringify(c.when) === JSON.stringify(draft.when) && JSON.stringify(c.effects ?? []) === JSON.stringify(draft.effects ?? []) && JSON.stringify(c.unavailable) === JSON.stringify(draft.unavailable));
     if (saved) { setConnectorSave(null); setConnector(null); setMapPick(false); setSelection({ kind: "choice", id: saved.id }); }
   }, [routing, connectorSave]);
   const [mapPick, setMapPick] = useState(false);
   const [mapDestination, setMapDestination] = useState<string | null>(null);
   const [factsOpen, setFactsOpen] = useState(false);
+  useEffect(() => { if (selection) setFactsOpen(false); }, [selection]);
   const [sceneRules, setSceneRules] = useState<string | null>(null);
+  const [ruleBlock, setRuleBlock] = useState<string | undefined>(undefined);
   const [endingRules, setEndingRules] = useState<string | null>(null);
   useEffect(() => {
     if (selection?.kind === "new" && !connector) {
@@ -476,7 +480,7 @@ export function BranchMapScreen() {
           )}
         </button>
       )}
-      <Button disabled={!routing} onClick={() => setFactsOpen(true)}>Story facts{routing?.facts?.length ? ` · ${routing.facts.length}` : ""}</Button>
+      <Button disabled={!routing} onClick={() => { setSelection(null); setSceneRules(null); setFactsOpen(true); }}>Story facts{routing?.facts?.length ? ` · ${routing.facts.length}` : ""}</Button>
       <Button className="bm-preview" variant={compact ? "primary" : "secondary"} disabled={!routing} onClick={() => routing && setPreview({ from: routing.start, at: Date.now() })}>
         <Play size={12} />
         Preview
@@ -689,7 +693,7 @@ export function BranchMapScreen() {
   };
   const pickScene = (id: string) => {
     if (mapPick && connector) {
-      if (routing.excluded.some(e => e.sceneId === id)) return;
+      if (id === connector.from || routing.excluded.some(e => e.sceneId === id)) return;
       setMapDestination(id); setMapPick(false); return;
     }
     setSelection(compact ? {kind:"new",from:id,to:null} : {kind:"scene",id});
@@ -784,6 +788,7 @@ export function BranchMapScreen() {
         role="option"
         aria-label={spoken}
         aria-selected={isSelected}
+        aria-disabled={mapPick && (connector?.from === node.id || reason !== undefined) || undefined}
         data-scene={node.id}
         /*
          * One stop for the whole map, and the arrows move within it (IV-M2). Every option carrying
@@ -838,10 +843,11 @@ export function BranchMapScreen() {
             )}
           </span>
         </span>
-        {compact && <button type="button" className="bm-node-settings" aria-label={`Settings for ${title}`} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setSelection({ kind: "scene", id: node.id }); }}><More size={14}/></button>}
+        {compact && <button type="button" className="bm-node-settings" disabled={mapPick} aria-label={`Settings for ${title}`} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setSelection({ kind: "scene", id: node.id }); }}><More size={14}/></button>}
         {!inTray && (
-          <span
+          <button type="button"
             className={cx("bm-port", showPort && "bm-port--on")}
+            disabled={mapPick}
             role="button" aria-label={`Draw a choice from ${title}`} tabIndex={showPort ? 0 : -1}
             onKeyDown={event => { if(event.key === "Enter" || event.key === " ") {event.preventDefault();event.stopPropagation();setSelection({kind:"new",from:node.id,to:null});} }}
             title="Define connector"
@@ -852,15 +858,15 @@ export function BranchMapScreen() {
             // The click that follows a drag from the port would reach the card and select the
             // scene, closing the New choice panel the drop had just opened.
             onClick={(event) => { event.stopPropagation(); if (!suppressClick.current) setSelection(current => current?.kind === "new" ? current : { kind: "new", from: node.id, to: null }); }}
-          />
+          ><Plus size={16} /></button>
         )}
       </div>
     );
   };
 
   const pending =
-    selection?.kind === "new" && selection.from !== null && selection.to !== null && at.has(selection.from) && at.has(selection.to)
-      ? { from: at.get(selection.from)!, to: at.get(selection.to)! }
+    connector && !connectorEditing && at.has(connector.from) && at.has(connector.to)
+      ? { from: at.get(connector.from)!, to: at.get(connector.to)! }
       : null;
 
   /*
@@ -1006,9 +1012,10 @@ export function BranchMapScreen() {
               setHighlight(new Set());
             }}
           >
-            {edge.label}
+            {edge.label}{routing.choices.find(choice => choice.id === edge.id)?.when && <span className="story-map-badge" title="Conditional choice">Conditional</span>}{!!routing.choices.find(choice => choice.id === edge.id)?.effects?.length && <span className="story-map-badge" title="Remembers values">Remembers</span>}
           </button>
         ))}
+        {pending && <div className="bm-label story-draft-label" style={{ left:(outPort(pending.from).x + inPort(pending.to).x)/2, top:(outPort(pending.from).y + inPort(pending.to).y)/2 + 30 }}><span>{connector?.label || "New choice"}</span><small>Draft</small></div>}
         {selectedChoice && !(selection?.kind === "choice" && selection.removing) && at.has(selectedChoice.to) && (
           <span
             className="bm-handle"
@@ -1067,6 +1074,7 @@ export function BranchMapScreen() {
                     lit={row.sceneIds.length > 0 && row.sceneIds.every((id) => highlight.has(id))}
                     onPick={() => setHighlight(new Set(row.sceneIds))}
                     actions={findingActions(row)}
+                    witness={row.witnessPrefix !== undefined && routing.schemaVersion === 2 ? (() => { try { const point = storyReplay(routing,row.witnessPrefix); return <div className="story-witness"><b>Witness route</b><p>{row.witnessPrefix.map(id => routing.choices.find(choice => choice.id === id)?.label ?? id).join(" → ") || "Start"}</p>{routing.facts?.map(fact => <p key={fact.id}>{fact.label}: <strong>{String(point.state[fact.id])}</strong></p>)}</div>; } catch { return <p>Story rules changed. Refresh this finding.</p>; } })() : undefined}
                   />
                 ))}
               </div>
@@ -1082,8 +1090,6 @@ export function BranchMapScreen() {
       return (
         <Inspector title="Choice" sub={selectedChoice.id} onClose={() => setSelection(null)}>
           <Button onClick={() => { setConnectorEditing(true); setConnector(selectedChoice); setMapDestination(null); }}>Edit connector</Button>
-          {selectedChoice.when && <p>Available when · conditional</p>}
-          {!!selectedChoice.effects?.length && <p>Remember · {selectedChoice.effects.length} value(s)</p>}
           <CommitField
             key={`${selectedChoice.id}-${selectedChoice.label}`}
             label="Label"
@@ -1110,6 +1116,7 @@ export function BranchMapScreen() {
               {sceneOptions}
             </Select>
           </div>
+          <StoryChoiceRules key={selectedChoice.id} routing={routing} choice={selectedChoice} onSave={(when, effects, unavailable, baseVersion) => command({ operation:"edit-choice", choiceId:selectedChoice.id, baseVersion, changes:{ when:when ?? null, effects, ...(unavailable || selectedChoice.unavailable ? { unavailable:unavailable ?? null } : {}) } })} />
           <div className="bm-kv">
             <span className="bm-kv__k">Preview</span>
             <span className="bm-kv__v">
@@ -1183,7 +1190,7 @@ export function BranchMapScreen() {
     const onRoute = geometry.nodes.some((node) => node.id === scene.id);
     return (
       <Inspector title="Scene" sub={scene.id} onClose={() => setSelection(null)}>
-        <div className="bm-actions"><Button onClick={() => setSceneRules(scene.id)}>Show when</Button>{ending !== undefined && <Button onClick={() => setEndingRules(scene.id)}>Ending variants</Button>}</div>
+        <div className="bm-actions"><Button onClick={() => { setSceneRules(scene.id); setRuleBlock(scene.script?.blocks[0]?.id); }}>Show when</Button>{ending !== undefined && <Button onClick={() => setEndingRules(scene.id)}>Ending variants</Button>}</div>
         <div className="bm-scenehead">
           <span className="bm-thumb bm-thumb--small">{frame ? <img src={frame} alt="" /> : <span className="bm-thumb__none">{scene.number}</span>}</span>
           <span>
@@ -1285,6 +1292,12 @@ export function BranchMapScreen() {
     );
 
     function findingActions(row: FindingRow) {
+      if (row.witnessPrefix !== undefined) {
+        try {
+          const point = storyReplay(routing!,row.witnessPrefix);
+          if (scenes.some(scene => scene.id === point.sceneId)) return <Button size="sm" onClick={() => setPreview({ from:point.sceneId, prefix:row.witnessPrefix, at:Date.now() })}><Play size={10}/>Preview this route</Button>;
+        } catch { /* A stale witness cannot start a different route. */ }
+      }
       // A choice naming a scene that is gone is drawn nowhere — not on the canvas, not in the
       // list — so the finding is the only place it can be reached, and removal is its repair.
       if (row.kind === "invalid-destination") {
@@ -1348,6 +1361,7 @@ export function BranchMapScreen() {
             },
             onBranchMap: () => setPreview(null),
             onClose: () => setPreview(null),
+            onTestRoute: sceneId => setPreview({from:sceneId,at:Date.now()}),
           })
         : {
           title: production.meta.title,
@@ -1369,16 +1383,17 @@ export function BranchMapScreen() {
             },
             onBranchMap: () => setPreview(null),
             onClose: () => setPreview(null),
+            onTestRoute: sceneId => setPreview({from:sceneId,at:Date.now()}),
           },
         };
 
   return (
-    <div className="fy-arkewrap bm" data-screen="branch-map" data-picking={mapPick ? "true" : undefined} data-narrow={narrow ? "true" : undefined}>
+    <div className="fy-arkewrap bm" data-screen="branch-map" data-stateful={routing?.schemaVersion === 2 ? "true" : undefined} data-picking={mapPick ? "true" : undefined} data-narrow={narrow ? "true" : undefined}>
       <div className="bm-main">
         {header}
         {exportNote !== null && <div className="bm-note">{exportNote}</div>}
-        {narrow ? list : canvas}
-        {mapPick && <div className="story-map-pick" role="status">Choose a destination scene. <Button onClick={() => setMapPick(false)}>Back to connector</Button></div>}
+        {sceneRules && scenes.find(scene => scene.id === sceneRules) ? <div className="story-script-preview"><div className="bm-actions"><Button onClick={() => setSceneRules(null)}>← Branch map</Button><Link className="ui-btn" to={`/w/${worldId}/p/${prodId}/scenes/${sceneRules}`}>Open scene editor</Link></div><h2>{titleOf(sceneRules)}</h2>{scenes.find(scene => scene.id === sceneRules)?.script?.blocks.map(block => <button type="button" className={cx("story-script-line",ruleBlock === block.id && "story-script-line--selected")} key={block.id} onClick={() => setRuleBlock(block.id)}><small>{block.kind === "dialogue" ? "Dialogue" : "Narration"}</small><span>{block.text}</span>{routing?.presentation?.find(p => p.sceneId === sceneRules)?.blocks.some(rule => rule.blockId === block.id) && <span className="story-map-badge">Show when · conditional</span>}</button>)}</div> : mapPick && narrow ? <div className="story-destination-list"><h2>Choose a destination</h2><p>Your connector draft is kept.</p><Button onClick={() => setMapPick(false)}>Back to connector</Button>{scenes.filter(scene => scene.id !== connector?.from && !routing.excluded.some(entry => entry.sceneId === scene.id)).map(scene => <Button key={scene.id} onClick={() => pickScene(scene.id)}>{scene.title}</Button>)}</div> : narrow ? list : canvas}
+        {mapPick && !narrow && <div className="story-map-pick" role="status">Choose a destination. The dialog reopens with your draft. <Button onClick={() => setMapPick(false)}>Back to connector</Button></div>}
         {routing?.schemaVersion === 2 && preview && preview.from !== routing.start && !preview.prefix && <StoryPreviewStart routing={routing} sceneId={preview.from} onClose={() => setPreview(null)} onStart={prefix => setPreview({ ...preview, prefix })} />}
         {previewOptions !== null && preview !== null && (routing?.schemaVersion !== 2 || preview.from === routing.start || preview.prefix !== undefined) && (!playsAsBeats || previewVoices.ready) && (
           <InteractivePlayerView
@@ -1390,18 +1405,16 @@ export function BranchMapScreen() {
           />
         )}
       </div>
-      {routing && sceneRules && scenes.find(s => s.id === sceneRules) && <StorySceneDialog routing={routing} scene={scenes.find(s => s.id === sceneRules)!} onClose={() => setSceneRules(null)} onSave={(presentation, baseVersion) => command({ operation: "set-presentation", presentation, baseVersion })} />}
       {routing && endingRules && <StoryEndingDialog routing={routing} sceneId={endingRules} onClose={() => setEndingRules(null)} onSave={(variants, baseVersion) => command({ operation: "set-ending-variants", sceneId: endingRules, title: routing.endings.find(e => e.sceneId === endingRules)!.title, variants, baseVersion })} />}
-      {routing && factsOpen && <StoryFactsDialog routing={routing} onClose={() => setFactsOpen(false)} onSave={(facts, baseVersion) => command({ operation: "set-facts", facts, baseVersion })} />}
-      {routing && connector && <ConnectorDialog key={connector.id} editing={connectorEditing} routing={routing} initial={connector} scenes={scenes} picking={mapPick} destination={mapDestination} onPick={from => { setConnector(current => current ? { ...current, from } : null); setMapPick(true); }} onClose={() => { setConnector(null); setConnectorSave(null); setMapPick(false); setFocused(`s:${connector.from}`); setSelection(null); }} onSave={(choice, baseVersion) => {
+      {routing && connector && <ConnectorDialog key={connector.id} editing={connectorEditing} routing={routing} initial={connector} onDraft={setConnector} scenes={scenes} picking={mapPick} destination={mapDestination} onPick={from => { setConnector(current => current ? { ...current, from } : null); setMapPick(true); }} onClose={() => { setConnector(null); setConnectorSave(null); setMapPick(false); setFocused(`s:${connector.from}`); setSelection(null); }} onSave={(choice, baseVersion) => {
         const editing = connectorEditing;
         const id = editing ? choice.id : choiceIdFor(choice.label, routing);
-        if (editing) command({ operation: "edit-choice", choiceId: id, baseVersion, changes: { label: choice.label, to: choice.to, when: choice.when ?? null, effects: choice.effects ?? [] } });
+        if (editing) command({ operation: "edit-choice", choiceId: id, baseVersion, changes: { label: choice.label, to: choice.to, when: choice.when ?? null, effects: choice.effects ?? [], unavailable:choice.unavailable ?? null } });
         else command({ operation: "add-choice", choice: { ...choice, id } });
         setConnectorSave({ choice: { ...choice, id }, version: routing.version, ids: routing.choices.map(c => c.id) });
       }} />}
       <aside className="bm-side" inert={mapPick || undefined}>
-        <ResponsiveSheet sheet={compact || narrow} open={selection !== null && selection.kind !== "new"} onClose={() => setSelection(null)} title={selection?.kind === "new" && selection.from ? `New choice from ${titleOf(selection.from)}` : selection?.kind === "findings" ? "Findings" : selection?.kind === "choice" ? "Choice" : "Scene settings"} className="bm-inspector-sheet">{inspector}</ResponsiveSheet>
+        <ResponsiveSheet sheet={compact || narrow} open={factsOpen || !!sceneRules || selection !== null && selection.kind !== "new"} onClose={() => { setSelection(null); setFactsOpen(false); setSceneRules(null); }} title={sceneRules ? "Dialogue" : factsOpen ? "Story facts" : selection?.kind === "new" && selection.from ? `New choice from ${titleOf(selection.from)}` : selection?.kind === "findings" ? "Findings" : selection?.kind === "choice" ? "Choice" : "Scene settings"} className="bm-inspector-sheet">{routing && sceneRules && scenes.find(scene => scene.id === sceneRules) ? <StorySceneDialog inline key={sceneRules} routing={routing} scene={scenes.find(scene => scene.id === sceneRules)!} blockId={ruleBlock} onClose={() => setSceneRules(null)} onSave={(presentation,baseVersion) => command({ operation:"set-presentation",presentation,baseVersion })}/> : routing && factsOpen ? <StoryFactsInspector routing={routing} onClose={() => setFactsOpen(false)} onSave={(facts,baseVersion) => command({ operation:"set-facts", facts,baseVersion })}/> : inspector}</ResponsiveSheet>
         <ArkeEdge>{putAway => arke(putAway)}</ArkeEdge>
       </aside>
     </div>
@@ -1415,6 +1428,7 @@ function Inspector({ title, sub, onClose, children }: { title: string; sub?: str
         <b>{title}</b>
         {sub && <span className="bm-muted">{sub}</span>}
         <span className="bm-spacer" />
+        <Button variant="ghost" onClick={onClose}>Arke</Button>
         <button type="button" className="bm-insp__close" aria-label="Close" onClick={onClose}>
           <X size={14} />
         </button>
@@ -1424,7 +1438,7 @@ function Inspector({ title, sub, onClose, children }: { title: string; sub?: str
   );
 }
 
-function FindingCard({ row, lit, onPick, actions }: { row: FindingRow; lit: boolean; onPick: () => void; actions: React.ReactNode }) {
+function FindingCard({ row, lit, onPick, actions, witness }: { row: FindingRow; lit: boolean; onPick: () => void; actions: React.ReactNode; witness?: React.ReactNode }) {
   return (
     <div className={cx("bm-find", lit && "bm-find--on")} onClick={onPick}>
       <div className="bm-find__title">
@@ -1433,6 +1447,7 @@ function FindingCard({ row, lit, onPick, actions }: { row: FindingRow; lit: bool
         {row.note && <span className="bm-muted">{row.note}</span>}
       </div>
       {row.evidence.length > 0 && <div className="bm-find__evidence">{row.evidence.join(" · ")}</div>}
+      {witness}
       {actions && (
         <div className="bm-actions" onClick={(event) => event.stopPropagation()}>
           {actions}

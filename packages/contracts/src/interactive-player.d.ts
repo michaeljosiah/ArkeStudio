@@ -44,6 +44,7 @@ export interface InteractivePlayerClip {
 }
 
 export interface InteractivePlayerChoice {
+  unavailable?: { label?: string; reason:string };
   when?: StoryPredicate;
   effects?: StoryEffect[];
   id: string;
@@ -59,6 +60,8 @@ export interface InteractivePlayerAuthor {
   onChoice?: (choice: InteractivePlayerChoice, walked: string[], story?: { identity: string; prefix: string[]; before: string; after: string; provenance: "human" | "automated" }) => void;
   onBranchMap?: () => void;
   onClose?: () => void;
+  /** Pick another reachable prefix into the current scene; never an authored state override. */
+  onTestRoute?: (sceneId:string) => void;
 }
 
 export interface InteractivePlayerOptions {

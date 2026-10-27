@@ -20,6 +20,14 @@ const routing = () => RoutingSchema.parse({
 });
 
 describe("remembered story rules (SPEC-063)", () => {
+  it("permits authored unavailable reasons only in stateful routing and rejects empty reasons", () => {
+    const r=routing();
+    r.choices[2]!.unavailable={reason:"Elsie’s measurements are needed."};
+    assert.ok(RoutingSchema.safeParse(r).success);
+    assert.equal(RoutingSchema.safeParse({...r,schemaVersion:undefined}).success,false);
+    r.choices[2]!.unavailable={reason:"   "};
+    assert.equal(RoutingSchema.safeParse(r).success,false);
+  });
   it("fingerprints canonical UTF-8 content with the same SHA-256 as Node", () => {
     for (const value of [null, "", "林 · Ana Lucía", "a".repeat(1000), { a: [true, "Alive"], z: "Lost" }]) {
       const expected = "sha256:" + createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -90,6 +98,10 @@ describe("remembered story rules (SPEC-063)", () => {
     const evidence = { ts: "2026-10-27T12:00:00.000Z", routingVersion: 1, choiceId: "ch_manual", from: "sc_collar", to: "sc_escape", route: ["sc_bore", "sc_collar"], story: { identity: storyIdentity(r), prefix, before: storyIdentity(before.state), after: storyIdentity(after.state), provenance: "human" as const } };
     const findings = routingFindings(r, ["sc_bore", "sc_collar", "sc_escape"].map(id => ({ id })), [evidence]);
     assert.equal(findings.filter(f => f.kind === "untraversed-edge" && f.choiceIds.includes("ch_manual")).length, 1);
+    const uncovered = findings.find(f => f.kind === "untraversed-edge" && f.choiceIds.includes("ch_manual"))!;
+    assert.ok(uncovered.witnessPrefix);
+    assert.equal(storyReplay(r,uncovered.witnessPrefix).sceneId,"sc_collar");
+    assert.notDeepEqual(storyReplay(r,uncovered.witnessPrefix).state,before.state,"the witness represents the other pre-state");
     const stale = { ...r, version: 2 };
     assert.equal(routingFindings(stale, [], [evidence]).filter(f => f.kind === "untraversed-edge" && f.choiceIds.includes("ch_manual")).length, 2);
   });

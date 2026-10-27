@@ -164,7 +164,7 @@ export function applyRoutingCommand(current: Routing | null, command: RoutingCom
       if (index < 0) throw new Error(`Choice ${command.choiceId} does not exist.`);
       next = {
         ...current,
-        choices: current.choices.map((choice, at) => at === index ? { ...choice, ...command.changes, when: command.changes.when === null ? undefined : command.changes.when ?? choice.when } : choice),
+        choices: current.choices.map((choice, at) => at === index ? { ...choice, ...command.changes, when: command.changes.when === null ? undefined : command.changes.when ?? choice.when, unavailable:command.changes.unavailable === null ? undefined : command.changes.unavailable ?? choice.unavailable } : choice),
       };
       break;
     }
@@ -236,8 +236,8 @@ export function applyRoutingCommand(current: Routing | null, command: RoutingCom
   ) {
     refuseExcludedOnRoute(next);
   }
-  if (next.choices.some(c => c.when !== undefined || c.effects?.length)) next = { ...next, schemaVersion: 2 };
-  if (next.schemaVersion !== 2) next = { ...next, choices: next.choices.map(({ when: _when, effects: _effects, ...choice }) => choice) };
+  if (next.choices.some(c => c.when !== undefined || c.effects?.length || c.unavailable !== undefined)) next = { ...next, schemaVersion: 2 };
+  if (next.schemaVersion !== 2) next = { ...next, choices: next.choices.map(({ when: _when, effects: _effects, unavailable:_unavailable, ...choice }) => choice) };
   return RoutingSchema.parse({ ...next, version: current.version + 1 });
 }
 

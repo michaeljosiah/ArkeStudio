@@ -65,6 +65,7 @@ export function InteractivePlayerView({
               onChoice: (choice, walked, story) => latest.current.author?.onChoice?.(choice, walked, story),
               onBranchMap: () => latest.current.author?.onBranchMap?.(),
               onClose: () => latest.current.author?.onClose?.(),
+              ...(author.onTestRoute ? { onTestRoute:(sceneId:string) => latest.current.author?.onTestRoute?.(sceneId) } : {}),
             },
           }
         : {}),

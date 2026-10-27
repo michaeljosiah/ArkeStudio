@@ -979,3 +979,11 @@ Client `components/story-controls.tsx` owns the connector helper and facts form,
 The generic commit boundary raises the world minimum reader to 113 when any routing write introduces schema version 2, including proposals and whole-file imports. The original production is never automatically migrated. `scripts/interactive-player-source.mjs` composes the evaluator and player into the exact exporter source; regenerate it after changing either JavaScript module. Conditional composite films are refused because they cannot remove an inactive line or person; beat packages carry block, shot and picture-source identities.
 
 Focused coverage: contracts `test/story-state.test.ts`; client `test/branch-map-canvas.test.tsx`, `test/interactive-player.test.ts`, `test/season-layout.test.tsx`; coordinator `test/productions/story-state.test.ts`, `test/productions/interactive.test.ts` and `test/world/schema-version.test.ts`.
+
+Turn 240's visual alignment adds the Story facts Inspector and individual fact dialog, compact
+is/is-not condition rows, an unsaved draft path and atomic Review/Keep in the choice and dialogue
+Inspectors. Optional `choice.unavailable` carries an authored disabled label/reason; omitted
+means hidden. Stateful findings carry `witnessPrefix`, so the map can display named facts and
+preview that exact state without parsing diagnostic text. Preview facts link values back to
+their originating choice; Test another route opens the reachable-prefix picker through
+`InteractivePlayerAuthor.onTestRoute`, rather than inventing audience state.

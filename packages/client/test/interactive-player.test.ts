@@ -831,6 +831,32 @@ describe("remembered facts in the shared player (turn 240)", () => {
     p.click(p.all(".aip-choice").find(el => el.textContent?.includes("Rescue Elsie")));
     assert.match(p.root.textContent ?? "", /Elsie speaks/);
   });
+  it("shows an authored disabled reason without making the unavailable choice selectable", () => {
+    const options=storyOptions();
+    options.story!.choices[2]!.unavailable={reason:'Elsie’s measurements are needed. <safe>'};
+    const p=mount(options);
+    p.click(p.all(".aip-choice").find(el=>el.textContent?.includes("Seal the bore")));
+    const disabled=p.all(".aip-choice").find(el=>el.textContent?.includes("Ask Elsie"))!;
+    assert.ok(disabled.hasAttribute("disabled"));
+    assert.match(disabled.textContent??"",/Elsie’s measurements are needed. <safe>/);
+    assert.equal(disabled.querySelector("safe"),null,"the reason is literal text");
+    p.click(disabled);
+    assert.equal(p.all(".aip-choice").length,2,"the refused choice did not advance");
+    p.key("1");
+    assert.equal(p.root.getAttribute("data-mode"),"ending","shortcut one selects the first legal choice");
+  });
+  it("shows fact origins with a choose-again action at the exact originating choice", () => {
+    const p=mount({...storyOptions(),author:{unwalked:[],onClose(){}}});
+    p.click(p.all(".aip-choice").find(el=>el.textContent?.includes("Seal the bore")));
+    p.key("r");
+    const row=p.all(".aip-fact-row")[0]!;
+    assert.match(row.textContent??"",/Elsie Ward.*Seal the bore.*false.*Choose again at The bore/);
+    p.click(row.querySelector<HTMLButtonElement>("[data-again]"));
+    assert.ok(p.all('[data-ref="panel"]')[0]!.hasAttribute("hidden"),"rewind closes the facts panel");
+    assert.equal(p.all(".aip-choice").length,2,"the pre-loss choices are restored");
+    p.key("r");
+    assert.match(p.all(".aip-fact-row")[0]!.textContent??"",/Starting value.*true/);
+  });
   it("keeps stateful coverage pending until the journal owner confirms it", () => {
     const p = mount({ ...storyOptions(), author: { unwalked: ["ch_seal"], onChoice() {} } });
     p.click(p.all(".aip-choice").find(el => el.textContent?.includes("Seal the bore")));

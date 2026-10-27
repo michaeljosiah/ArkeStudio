@@ -18,7 +18,7 @@ it("native story commands persist, fence older readers, replay evidence and surv
     const run = (command: Parameters<typeof applyRoutingCommandOnDisk>[2]) => applyRoutingCommandOnDisk(store, production.meta.id, command);
     await run({ operation: "set-start", sceneId: from.id });
     await run({ operation: "set-facts", facts: [{ id: "elsie", label: "Elsie Ward", type: "enum", values: ["Alive", "Lost"], default: "Alive" }] });
-    await run({ operation: "add-choice", choice: { id: "ch_seal", from: from.id, to: to.id, label: "Seal the bore", effects: [{ fact: "elsie", value: "Lost" }] } });
+    await run({ operation: "add-choice", choice: { id: "ch_seal", from: from.id, to: to.id, label: "Seal the bore", effects: [{ fact: "elsie", value: "Lost" }], unavailable:{reason:"The bore is already sealed."} } });
     await run({ operation: "set-ending-variants", sceneId: to.id, title: "Above the Quiet", variants: [{ id: "loss", title: "An empty seat", text: "Elsie was lost at the bore.", fallback: true }] });
     const routing = await run({ operation: "set-ending", sceneId: to.id, title: "A renamed map ending" });
     assert.deepEqual(routing.endings[0]!.variants, [{ id: "loss", title: "An empty seat", text: "Elsie was lost at the bore.", fallback: true }]);
@@ -38,8 +38,11 @@ it("native story commands persist, fence older readers, replay evidence and surv
     store = await WorldStore.open(dir);
     const reopened = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!.routing!;
     assert.deepEqual(storyReplay(reopened, ["ch_seal"]).state, { elsie: "Lost" });
+    assert.deepEqual(reopened.choices[0]!.unavailable,{reason:"The bore is already sealed."});
     assert.equal(await readFile(join(dir, "productions/saltlight/routing.json"), "utf8"), bytes);
     // Whole-file imports pass the same schema fence and semantic validation.
     await assert.rejects(saveRouting(store, production.meta.id, { ...reopened, facts: [] }), /Unknown story fact/);
+    const cleared=await run({operation:"edit-choice",choiceId:"ch_seal",changes:{unavailable:null}});
+    assert.equal(cleared.choices[0]!.unavailable,undefined);
   } finally { await store.close(); }
 });
