@@ -13,6 +13,15 @@ const request = { ...identity, context, automatic: true };
 const fresh = (): RecoveryControl => ({ version: 1, policyRevision: 1, mode: "automatic", targets: [] });
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 
+it("revalidates a reviewed offer after earlier control writes and before recording new authority", async () => {
+  const entered = deferred(), finish = deferred(); let valid = true, disk = fresh();
+  const service = new RecoveryControlService({ store: { load: async () => disk, save: async value => { entered.resolve(); await finish.promise; disk = structuredClone(value); } } });
+  await service.open(); const mode = service.setMode("suggest-only"); await entered.promise;
+  const requested = service.authorize({ ...request, automatic: false, revalidate: () => valid });
+  valid = false; finish.resolve(); await mode;
+  assert.deepEqual(await requested, { status: "held", reason: "target-changed" }); assert.equal(disk.targets.length, 0); await service.stop();
+});
+
 it("atomically retains exact owner outcome receipts across restart without refunding attempts or exposing authority", async () => {
   const h = harness(); await h.service.open();
   try {

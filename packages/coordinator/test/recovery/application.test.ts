@@ -4,7 +4,9 @@ import { createHash } from "node:crypto";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { RecoveryControlSchema } from "@arke-studio/contracts";
+import { RecoveryControlSchema, FrameSchema, ulid, type Frame } from "@arke-studio/contracts";
+import { once } from "node:events";
+import WebSocket from "ws";
 import { createStudioCoordinator } from "../../src/application/studio-host.js";
 import { OllamaEngineService } from "../../src/local-ai/ollama.js";
 import { FileRecoveryControlStore } from "../../src/recovery/control-file.js";
@@ -52,13 +54,36 @@ it("a persisted Suggest only policy survives host startup and Refresh cannot res
   const service = new OllamaEngineService({ appRoot: root, port: await allocateLoopbackPort(), exists: () => true, registerBackstop: () => () => {},
     supervise: spec => { const worker = new ChildSupervisor({ ...spec, command: process.execPath, args: [CHILD], env: { SERVICE_VERSION: OLLAMA_VERSION } }, { listDescendants: async () => [] }); workers.push(worker); return worker; } });
   const coordinator = createStudioCoordinator({ provider, adapter: null, appRoot: root, storageHealth: null, changeLogPath: join(root, "log.jsonl"), appVersion: "recovery-test", ollama: { service } });
+  let client: WebSocket | undefined, creative: (() => void) | undefined;
   try {
-    await coordinator.start(0); assert.equal(service.status().state, "ready", "ordinary selected-service startup is retained");
+    const session = await coordinator.start(0); assert.equal(service.status().state, "ready", "ordinary selected-service startup is retained");
     process.kill(workers[0]!.pid!, "SIGKILL");
     await until(() => service.status().detail?.includes("Suggest only") === true, "persisted policy refusal", 30_000);
     await service.refresh(); assert.equal(workers.length, 1); assert.equal(workers[0]!.pid, null);
     assert.equal(service.status().state, "failed");
-  } finally { await coordinator.stop(); await provider.close(); }
+    await until(() => coordinator.getState().app.recoveryPolicy?.targets.some(target => target.retryAvailable) === true, "reviewed retry availability", 10000);
+    const target = coordinator.getState().app.recoveryPolicy!.targets.find(target => target.retryAvailable)!;
+    const frames: Frame[] = []; client = new WebSocket(`ws://127.0.0.1:${session.port}`);
+    client.on("message", data => frames.push(FrameSchema.parse(JSON.parse(String(data))))); await once(client, "open");
+    client.send(JSON.stringify({ kind: "hello", token: session.token })); await until(() => frames.some(frame => frame.kind === "snapshot"), "authenticated repair owner");
+    const previewId = ulid(); client.send(JSON.stringify({ kind: "recovery-action", requestId: previewId, command: { action: "preview-retry", resourceKey: target.key } }));
+    const result = (id: string) => frames.findLast(frame => frame.kind === "event" && frame.event.type === "recovery.action-result" && frame.event.result.requestId === id);
+    await until(() => result(previewId) !== undefined, "exact retry review");
+    const preview = result(previewId)!; assert(preview.kind === "event" && preview.event.type === "recovery.action-result" && preview.event.result.plan);
+    const plan = preview.event.result.plan; assert.equal(preview.event.result.status, "preview"); assert.equal(workers[0]!.pid, null, "preview starts no process");
+    assert(!JSON.stringify(plan).includes("componentDigest"));
+    const gpu = (coordinator as unknown as { localGpu: LocalGpu }).localGpu; creative = await gpu.acquire("Ming", new AbortController().signal);
+    const approvalId = ulid(); client.send(JSON.stringify({ kind: "recovery-action", requestId: approvalId, command: { action: "approve-retry", planId: plan.id } }));
+    await until(() => gpu.isBusy("Ollama"), "reviewed recovery behind admitted work", 10000); assert.equal(workers[0]!.pid, null);
+    creative(); creative = undefined;
+    await until(() => { const frame = result(approvalId); return frame?.kind === "event" && frame.event.type === "recovery.action-result" && frame.event.result.status === "verified"; }, "owner-verified retry result", 15000);
+    assert.equal(workers.length, 1); assert.equal(service.status().state, "ready");
+    const disk = RecoveryControlSchema.parse(JSON.parse(await readFile(join(root, "operations", "recovery-control.json"), "utf8")));
+    assert.equal(disk.mode, "suggest-only"); assert.equal(disk.targets[0]!.lastOutcome?.automatic, false); assert.equal(disk.targets[0]!.attempts.length, 0);
+    const repeated = ulid(); client.send(JSON.stringify({ kind: "recovery-action", requestId: repeated, command: { action: "approve-retry", planId: plan.id } }));
+    await until(() => result(repeated) !== undefined, "duplicate approval refusal");
+    const refused = result(repeated); assert(refused?.kind === "event" && refused.event.type === "recovery.action-result" && refused.event.result.status === "refused");
+  } finally { creative?.(); client?.close(); await coordinator.stop(); await provider.close(); }
 });
 
 it("the runtime-update command lets setup own the GPU lease, stop and verified activation", { timeout: 50_000 }, async () => {

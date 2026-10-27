@@ -9,6 +9,7 @@ export const RecoveryPolicySnapshotSchema = z.object({
   targets: z.array(z.object({ key: z.string().regex(/^[a-f0-9]{64}$/), service: z.enum(["comfyui", "ollama", "ming", "voice", "harness"]),
     stoppedByUser: z.boolean(), circuitOpen: z.boolean(), pendingOutcome: z.boolean(),
     lastOutcome: RecoveryOutcomeSummarySchema.optional(),
+    retryAvailable: z.boolean().optional(),
   }).strict()).max(RECOVERY_POLICY.maxTargets),
 }).strict();
 export type RecoveryPolicySnapshot = z.infer<typeof RecoveryPolicySnapshotSchema>;

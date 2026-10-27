@@ -71,6 +71,19 @@ excluding intent IDs, component digests and process generations. Client `recover
 shows these as past attempts, not current service health or completed creative work. Removable
 incident history cannot erase them or refund rolling attempts; the 128-target/256 KiB control
 cap remains unchanged. This is latest-outcome evidence, not complete action history or a repair grant.
+Reviewed retry: contracts `recovery-actions.ts` defines a closed preview/approve/cancel protocol.
+Coordinator `recovery/actions.ts` keeps at most 64 five-minute one-use reviews over registered
+native owners. `ChildSupervisor.prepareRecoveryRetry` offers only a failed, confirmed-stopped
+idle owner; `SupervisorRecovery` binds its epoch/configuration/policy evidence and rechecks after
+GPU/runtime waiting, under serialized durable admission and at final spawn. Ollama, ComfyUI
+primary/profiles, bundled harness and managed voice register their existing supervisors.
+Personal owners, live unhealthy workers and unresolved cleanup cannot offer this retry.
+`recoveryPolicy.retryAvailable` is advisory; control changes invalidate unapproved reviews.
+Host-only `recovery-action` receipts stay transient and never enter world journals; shared
+client `store.ts` retains 32 correlated results. `components/recovery-retry.tsx` separates
+Review from Approve and never resubmits on reconnect/timeout. Cancellation revokes waiting
+admission; an already started service still needs owner verification. Manual Stop/interruption,
+repair/re-download/model/cache plans, Ming actions and complete action history remain pending.
 `recovery/supervisor.ts` admits the existing owner's restart through the shared GPU lane. The host
 factory enables control; Coordinator connects managed Ollama and ComfyUI before their first child starts.
 ComfyUI's primary and isolated recipe processes each retain a stable recovery target;

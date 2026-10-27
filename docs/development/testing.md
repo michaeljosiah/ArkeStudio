@@ -139,6 +139,17 @@ uncertain writes, retained attempts, legacy files and maximum receipts within th
 the original failed generation. `test/recovery/export.test.ts` rejects injected/free-form
 receipt fields and excludes execution identity; client `test/recovery-controls.test.tsx`
 checks unconfirmed outcome wording without treating a past receipt as present health.
+Reviewed retries add contracts `test/recovery-actions.test.ts`, coordinator
+`test/recovery/actions.test.ts` and client `test/recovery-retry.test.tsx`. They cover separate
+preview/approval, one-use IDs, bounded expiry, policy/target invalidation, cancellation and no
+replay. Coordinator `test/recovery/supervisor.test.ts` uses the actual native supervisor in
+Suggest only, checks GPU waiting and retained unknown cleanup, and `test/recovery/control.test.ts`
+checks authority revalidation after queued writes. The production-host application fixture
+retries a stopped managed Ollama over an authenticated socket, verifies readiness and rejects
+duplicate approval; gateway fixtures include `recovery-action` in every host-only refusal.
+Run the existing ComfyUI/harness/Voxa recovery suites alongside these because the executor is
+shared. These are service-restoration checks, not model-quality, full storage admission or
+turn-239 visual acceptance evidence.
 
 Incident checks (#2194) use contracts `test/recovery-incidents.test.ts`, coordinator
 `test/recovery/history.test.ts` / `history-application.test.ts`, and client

@@ -3,8 +3,9 @@ import type { RecoveryMode } from "@arke-studio/contracts";
 import { Button, Select } from "./ui.js";
 import { controlRecoveryHistory, setRecoveryMode, setRecoveryPreferences, useStore } from "../lib/store.js";
 import { isRemoteSession } from "../lib/remote-session.js";
+import { RecoveryRetryControls } from "./recovery-retry.js";
 
-/** Application policy stays on the host. These controls never approve a repair. */
+/** Policy controls stay on the host; repairs have their own explicit review and approval. */
 export function RecoveryControls() {
   const { state, connection, recoveryCommandResults } = useStore(), policy = state?.app.recoveryPolicy, history = state?.app.recoveryHistory;
   const [pending, setPending] = useState<string | null>(null), [message, setMessage] = useState(""), [clearing, setClearing] = useState(false);
@@ -52,6 +53,7 @@ export function RecoveryControls() {
       </div>}
     </>}
     {policy && policy.targets.some(target => target.circuitOpen || target.stoppedByUser || target.pendingOutcome) && <p className="fy-diag__meta">Some services remain held by a stop, exhausted retry budget or unconfirmed outcome. Changing mode does not release those holds.</p>}
+    <RecoveryRetryControls />
     {policy?.targets.some(target => target.lastOutcome) && <section aria-label="Latest recovery outcomes">
       <div className="fy-set__eyebrow">LATEST RECOVERY OUTCOMES</div>
       <p className="fy-diag__meta">One latest attempt per service target. These receipts describe that attempt, not current health or completed creative work.</p>

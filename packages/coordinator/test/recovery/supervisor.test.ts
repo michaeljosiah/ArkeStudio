@@ -22,6 +22,51 @@ const policy = (service: RecoveryControlService, options: { acquire?: (signal: A
   new SupervisorRecovery({ control: service, identity, componentDigest: () => digest, current: options.current ?? (() => true), ownership: options.ownership ?? (() => "managed"),
     acquire: options.acquire ?? (async () => () => {}), now: options.now });
 
+it("an explicit reviewed retry uses the same native supervisor and GPU fence in Suggest only", { timeout: 40000 }, async () => {
+  const h = control({ mode: "suggest-only" }), gpu = new LocalGpu(async () => {}, ["Ollama", "Ming"]), abort = new AbortController();
+  const port = policy(h.service, { acquire: signal => gpu.acquire("Ollama", signal) }), supervisor = specimen(); supervisor.setRecoveryPort(port);
+  let creative: (() => void) | undefined;
+  try {
+    await supervisor.start(); const epoch = supervisor.spawnEpoch; await h.service.markCircuitOpen(identity); process.kill(supervisor.pid!, "SIGKILL");
+    await until(() => supervisor.prepareRecoveryRetry() !== null, "reviewable stopped managed owner", 15000);
+    const prepared = supervisor.prepareRecoveryRetry()!; assert.equal(prepared.offer.generation, epoch); assert.equal(supervisor.pid, null);
+    creative = await gpu.acquire("Ming", abort.signal); const retry = prepared.run(abort.signal);
+    await until(() => gpu.isBusy("Ollama"), "reviewed retry behind creative work", 10000); assert.equal(supervisor.pid, null);
+    creative(); creative = undefined; assert.equal(await retry, "ready");
+    assert.equal(supervisor.status, "healthy"); const target = h.service.snapshot().control.targets[0]!;
+    assert.equal(target.lastOutcome?.automatic, false); assert.equal(target.lastOutcome?.generation, epoch); assert.equal(target.lastOutcome?.outcome, "verified");
+    assert.equal(target.attempts.length, 0); assert.equal(target.circuitOpen, false); assert.equal(h.service.policySnapshot().mode, "suggest-only");
+    assert.equal(await prepared.run(abort.signal), "refused");
+    process.kill(supervisor.pid!, "SIGKILL");
+    await until(() => supervisor.prepareRecoveryRetry() !== null, "second reviewable stopped owner", 15000);
+    const expiring = supervisor.prepareRecoveryRetry()!; let valid = true;
+    const expireAtSpawn = () => { if (supervisor.status === "starting") valid = false; };
+    supervisor.on("status", expireAtSpawn);
+    try { assert.equal(await expiring.run(abort.signal, () => valid), "failed"); assert.equal(supervisor.pid, null, "revoked validity cannot pass the final spawn guard"); }
+    finally { supervisor.off("status", expireAtSpawn); }
+  } finally { creative?.(); await supervisor.stopAndConfirm(); await h.service.stop(); gpu.stop(); }
+});
+
+it("a changed review during GPU waiting refuses without creating a durable restart intent", async () => {
+  const h = control({ mode: "suggest-only" }); await h.service.open(); let release!: () => void, entered!: () => void, calls = 0;
+  const waiting = new Promise<void>(resolve => { entered = resolve; }), held = new Promise<void>(resolve => { release = resolve; });
+  const port = policy(h.service, { acquire: async () => { entered(); await held; return () => {}; } }), offer = port.retryOffer(2)!;
+  const retry = port.retry({ generation: 2, signal: new AbortController().signal, current: () => true, exitConfirmed: () => true,
+    sleep: async () => {}, held: () => {}, restart: async () => { calls++; return "ready"; } }, offer);
+  await waiting; await h.service.setStoppedByUser(identity, true); release(); assert.equal(await retry, "refused");
+  assert.equal(calls, 0); assert.equal(h.service.snapshot().control.targets[0]!.intent, null); await h.service.stop();
+});
+
+it("an unknown reviewed retry retains the exact GPU lease and cannot offer another review until confirmed cleanup", async () => {
+  const h = control({ mode: "suggest-only" }); await h.service.open(); let releases = 0, calls = 0;
+  const port = policy(h.service, { acquire: async () => () => { releases++; } }), offer = port.retryOffer(2)!;
+  const result = await port.retry({ generation: 2, signal: new AbortController().signal, current: () => true, exitConfirmed: () => true,
+    sleep: async () => {}, held: () => {}, restart: async () => { calls++; return "unknown"; } }, offer);
+  assert.equal(result, "unknown"); assert.equal(releases, 0); assert.equal(port.retryOffer(2), null);
+  assert.equal(h.service.snapshot().control.targets[0]!.intent?.phase, "unknown");
+  await port.ownerStopped(); assert.equal(releases, 1); assert.equal(calls, 1); assert.equal(h.service.snapshot().control.targets[0]!.intent, null); await h.service.stop();
+});
+
 it("an early timer wake waits out the same durable intent without consuming another restart attempt", async () => {
   let now = 2_000_000, starts = 0; const waits: number[] = [], h = control({ now: () => now }), port = policy(h.service, { now: () => now });
   try {

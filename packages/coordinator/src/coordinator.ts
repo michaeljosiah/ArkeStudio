@@ -1,5 +1,7 @@
 import { savedPicture, openSavedPicture, type SavedPicture } from "./productions/audiobook-picture-reuse.js";
 import { createStudioAssistantHost, type StudioAssistantHost, type StudioAssistantHostOptions } from "./studio-assistant/host.js";
+import { RecoveryActionRegistry } from "./recovery/actions.js";
+import { RECOVERY_POLICY, type RecoveryPolicySnapshot, type RecoveryRetryPlan } from "@arke-studio/contracts";
 import { chapterReviewSummary } from "@arke-studio/contracts";
 import { rebuildBenchPrefill } from "@arke-studio/contracts";
 import { MUSIC_IMPORT_EXTENSIONS } from "@arke-studio/contracts";
@@ -3191,6 +3193,28 @@ export class Coordinator {
 
   private readonly sessionInput: SessionInput;
   private studioAssistantHost: StudioAssistantHost | null = null;
+  private readonly recoveryTargetObservers = new Map<string, () => void>();
+  private readonly recoveryActions = new RecoveryActionRegistry({ now: () => Date.parse(this.nowIso()), publish: result => {
+    if (!this.stopping) { this.emit({ type: "recovery.action-result", at: this.nowIso(), result }); this.publishRecoveryPolicy(); }
+  } });
+  private recoveryPolicy(): RecoveryPolicySnapshot | null {
+    const policy = this.opts.recoveryControl?.policySnapshot(); if (!policy) return null;
+    const targets = new Map(policy.targets.map(target => [target.key, target]));
+    for (const target of this.recoveryActions.availability()) {
+      if (!targets.has(target.key) && targets.size >= RECOVERY_POLICY.maxTargets) continue;
+      targets.set(target.key, { stoppedByUser: false, circuitOpen: false, pendingOutcome: false, ...targets.get(target.key), ...target });
+    }
+    return { ...policy, targets: [...targets.values()] };
+  }
+  private publishRecoveryPolicy(): void {
+    const policy = this.recoveryPolicy(); if (this.started && !this.stopping && policy) this.emit({ type: "recovery.policy", at: this.nowIso(), policy });
+  }
+  private registerRecoveryTarget(key: string, service: RecoveryRetryPlan["service"], supervisor: ChildSupervisor, current: () => boolean): void {
+    this.recoveryActions.register(key, { service, prepare: () => current() ? supervisor.prepareRecoveryRetry() : null });
+    this.recoveryTargetObservers.get(key)?.();
+    const changed = () => this.publishRecoveryPolicy(); supervisor.on("status", changed); supervisor.on("recovery-settled", changed);
+    this.recoveryTargetObservers.set(key, () => { supervisor.off("status", changed); supervisor.off("recovery-settled", changed); });
+  }
   private studioConversation(): StudioAssistantHost | null {
     if (this.stopping || !this.opts.appRoot || this.opts.studioAssistant === null) return null;
     return this.studioAssistantHost ??= createStudioAssistantHost({ root: this.opts.appRoot,
@@ -3611,16 +3635,20 @@ export class Coordinator {
       // The control file already belongs to this app root. Path spelling or a replacement
       // supervisor must not mint a fresh budget for its one managed Ollama role.
       const key = createHash("sha256").update("managed-ollama").digest("hex");
-      service.configureRecovery(supervisor => new SupervisorRecovery({ control, identity: { key, service: "ollama" },
+      service.configureRecovery(supervisor => {
+        this.registerRecoveryTarget(key, "ollama", supervisor, () => !this.stopping && service.ownsSupervisor(supervisor));
+        return new SupervisorRecovery({ control, identity: { key, service: "ollama" },
         current: () => !this.stopping && service.ownsSupervisor(supervisor), ownership: () => service.externallySelected() ? "external" : "managed",
         componentDigest: () => createHash("sha256").update(JSON.stringify([SETUP_CATALOGUE.find(entry => entry.id === "ollama-runtime"), service.modelsDir()])).digest("hex"),
         acquire: signal => this.localGpu.acquire("Ollama", signal),
-      }));
+        });
+      });
     }
     if (opts.recoveryControl && opts.comfyui && opts.appRoot) {
       const control = opts.recoveryControl;
       opts.comfyui.service.configureRecovery((owner, supervisor) => {
         const key = createHash("sha256").update(`managed-comfyui:${owner.recoveryTarget().role}`).digest("hex");
+        this.registerRecoveryTarget(key, "comfyui", supervisor, () => !this.stopping && owner.ownsSupervisor(supervisor));
         return new SupervisorRecovery({ control, identity: { key, service: "comfyui" },
           current: () => !this.stopping && owner.ownsSupervisor(supervisor), ownership: () => owner.recoveryTarget().ownership,
           componentDigest: () => createHash("sha256").update(JSON.stringify([SETUP_CATALOGUE.find(entry => entry.id === "comfyui-runtime"), owner.recoveryTarget().configurationDigest])).digest("hex"),
@@ -4861,6 +4889,8 @@ export class Coordinator {
         current: () => !this.stopping && this.supervisors.get(component) === supervisor,
         ownership: () => owner.ownership(), componentDigest: () => owner.componentDigest(), acquire: signal => owner.reserve(signal) });
       supervisor.setRecoveryPort(recovery);
+      const key = createHash("sha256").update(component === "harness" ? "managed-harness-v2" : "managed-voxa").digest("hex");
+      this.registerRecoveryTarget(key, component, supervisor, () => !this.stopping && this.supervisors.get(component) === supervisor);
     }
     this.supervisors.set(component, supervisor);
     supervisor.on("status", ({ status, reason }: { status: SupervisorStatus; reason?: string }) => {
@@ -4945,11 +4975,9 @@ export class Coordinator {
     await this.adapterLibrary?.refresh();
     if (this.opts.recoveryControl) {
       const control = this.opts.recoveryControl;
-      this.lifecycleDisposers.add(control.subscribe(policy => {
-        if (!this.stopping) this.emit({ type: "recovery.policy", at: this.nowIso(), policy });
-      }));
+      this.lifecycleDisposers.add(control.subscribe(() => { this.recoveryActions.invalidateReviews(); this.publishRecoveryPolicy(); }));
       await control.open();
-      this.emit({ type: "recovery.policy", at: this.nowIso(), policy: control.policySnapshot() });
+      this.publishRecoveryPolicy();
     }
     if (this.opts.recoveryHistory) {
       const history = this.opts.recoveryHistory;
@@ -14533,6 +14561,9 @@ export class Coordinator {
         if (!this.stopping) this.emit({ type: "recovery.command-result", at: this.nowIso(), result });
         return;
       }
+      case "recovery-action": {
+        await this.recoveryActions.handle(msg); this.publishRecoveryPolicy(); return;
+      }
       case "probe-grouped-read": {
         // Design turn 185's probe: a few consecutive blocks of a chapter, prepared exactly as a
         // run prepares them, read three ways in the book's narrator — three requests through the
@@ -23258,6 +23289,8 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    this.recoveryActions.closeAdmission();
+    for (const detach of this.recoveryTargetObservers.values()) detach(); this.recoveryTargetObservers.clear();
     const systemResourcesStopped = this.opts.systemResources?.stop();
     this.opts.storageHealth?.closeAdmission();
     this.opts.recoveryControl?.closeAdmission();

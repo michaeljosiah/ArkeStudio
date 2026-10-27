@@ -58,7 +58,13 @@ export interface SupervisorRecoveryPort {
   /** A health probe alone cannot authorize killing a busy or personal process. */
   mayStopForFailedHealth(): boolean;
   ownerStopped(): Promise<void>;
+  retryOffer?(generation: number): SupervisorRetryOffer | null;
+  retry?(work: Parameters<SupervisorRecoveryPort["recover"]>[0], offer: SupervisorRetryOffer): Promise<SupervisorRetryOutcome>;
 }
+export type SupervisorRetryOutcome = "ready" | "failed" | "unknown" | "refused";
+/** Host-only evidence and closures. No command/path or renderer-supplied launch settings. */
+export interface SupervisorRetryOffer { key: string; service: string; generation: number; componentDigest: string; policyRevision: number; evidence: string }
+export interface PreparedSupervisorRetry { offer: SupervisorRetryOffer; current(): boolean; run(signal: AbortSignal, valid?: () => boolean): Promise<SupervisorRetryOutcome> }
 
 export interface SupervisedSpec {
   id: string;
@@ -313,6 +319,29 @@ export class ChildSupervisor extends EventEmitter {
   /** Monotonic process-attempt identity for lifecycle consumers such as local job recovery. */
   get spawnEpoch(): number {
     return this.launchEpoch;
+  }
+
+  prepareRecoveryRetry(): PreparedSupervisorRetry | null {
+    const generation = this.launchEpoch, port = this.recovery;
+    const available = () => !this.stopping && this.launchEpoch === generation && this.child === null && this.descendants.length === 0 &&
+      this.status === "failed" && this.recoveryTask === null && this.spec.command !== null;
+    if (!available() || !port?.retry || !port.retryOffer) return null;
+    const readOffer = port.retryOffer.bind(port), retry = port.retry.bind(port);
+    const candidate = readOffer(generation); if (!candidate) return null;
+    const offer = Object.freeze({ ...candidate });
+    const current = () => {
+      if (!available() || this.recovery !== port) return false;
+      const next = readOffer(generation);
+      return next !== null && next.key === offer.key && next.service === offer.service && next.generation === offer.generation &&
+        next.componentDigest === offer.componentDigest && next.policyRevision === offer.policyRevision && next.evidence === offer.evidence;
+    };
+    return { offer, current, run: async (signal, valid = () => true) => {
+      if (!current() || signal.aborted || !valid()) return "refused";
+      const combined = AbortSignal.any([signal, this.recoveryAbort.signal]);
+      const operation = retry(this.recoveryWork(generation, combined, valid), offer);
+      this.recoveryTask = operation.then(() => {}, () => {}).finally(() => this.finishRecoveryTask());
+      return operation;
+    } };
   }
 
   /** Tracked descendant pids of the current child — for the exit backstop's sweep. */
@@ -821,11 +850,31 @@ export class ChildSupervisor extends EventEmitter {
     const epoch = this.launchEpoch;
     this.recoveryTask = this.handleUnexpectedExit(code, signal).catch(() => {
       if (!this.stopping && epoch === this.launchEpoch) this.setStatus("failed", `${this.id} recovery could not be verified. Review its status before retrying.`);
-    }).finally(() => {
-      this.recoveryTask = null;
-      const next = this.queuedExit; this.queuedExit = null;
-      if (next && !this.stopping && next.epoch === this.launchEpoch && this.child === null) this.queueUnexpectedExit(next.code, next.signal);
-    });
+    }).finally(() => this.finishRecoveryTask());
+  }
+
+  private finishRecoveryTask(): void {
+    this.recoveryTask = null;
+    const next = this.queuedExit; this.queuedExit = null;
+    if (next && !this.stopping && next.epoch === this.launchEpoch && this.child === null) this.queueUnexpectedExit(next.code, next.signal);
+    this.emit("recovery-settled");
+  }
+  private recoveryWork(epoch: number, signal: AbortSignal, valid: () => boolean = () => true): Parameters<SupervisorRecoveryPort["recover"]>[0] {
+    return { generation: epoch, signal,
+      current: () => valid() && !this.stopping && epoch === this.launchEpoch && this.child === null,
+      exitConfirmed: () => this.child === null && this.descendants.length === 0,
+      sleep: ms => this.sleep(ms),
+      held: reason => { if (!this.stopping && epoch === this.launchEpoch) this.setStatus("failed", reason); },
+      restart: async canSpawn => {
+        if (this.stopping || epoch !== this.launchEpoch || this.child !== null) return "unknown";
+        if (!valid()) return "failed";
+        await this.spawnOnce(() => valid() && canSpawn());
+        if (this.stopping || this.launchEpoch !== epoch + 1) return "unknown";
+        if (this.child !== null && this.status === "healthy") return "ready";
+        await this.reapSurvivors();
+        return this.child === null && this.descendants.length === 0 ? "failed" : "unknown";
+      },
+    };
   }
 
   private async handleUnexpectedExit(code: number | null, signal: NodeJS.Signals | null): Promise<void> {
@@ -847,20 +896,7 @@ export class ChildSupervisor extends EventEmitter {
     const why = signal ? `signal ${signal}` : `exit code ${code}`;
     if (this.recovery) {
       const signal = this.recoveryAbort.signal;
-      await this.recovery.recover({ generation: epoch, signal,
-        current: () => !this.stopping && epoch === this.launchEpoch && this.child === null,
-        exitConfirmed: () => this.child === null && this.descendants.length === 0,
-        sleep: ms => this.sleep(ms),
-        held: reason => { if (!this.stopping && epoch === this.launchEpoch) this.setStatus("failed", reason); },
-        restart: async canSpawn => {
-          if (this.stopping || epoch !== this.launchEpoch || this.child !== null) return "unknown";
-          await this.spawnOnce(canSpawn);
-          if (this.stopping || this.launchEpoch !== epoch + 1) return "unknown";
-          if (this.child !== null && this.status === "healthy") return "ready";
-          await this.reapSurvivors();
-          return this.child === null && this.descendants.length === 0 ? "failed" : "unknown";
-        },
-      });
+      await this.recovery.recover(this.recoveryWork(epoch, signal));
       return;
     }
     // The legacy lifetime counter applies only without a recovery port. Managed policy

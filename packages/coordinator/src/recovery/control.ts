@@ -116,10 +116,11 @@ export class RecoveryControlService {
 
   /** Persists a single-use intent and spends an automatic attempt before a child can start.
    * The caller must later call begin under the same lifecycle owner, then report its outcome. */
-  authorize(input: { key: string; service: RecoveryTarget["service"]; context: RecoveryRestartContext; automatic: boolean }): Promise<RecoveryAuthorization> {
+  authorize(input: { key: string; service: RecoveryTarget["service"]; context: RecoveryRestartContext; automatic: boolean; revalidate?: () => boolean }): Promise<RecoveryAuthorization> {
     const context = RecoveryRestartContextSchema.parse(input.context);
     return this.duringShutdown<RecoveryAuthorization>(this.serial(async () => {
       const held = this.ready(); if (held) return held;
+      if (input.revalidate && !input.revalidate()) return { status: "held", reason: "target-changed" };
       const now = this.now(), next = structuredClone(this.control);
       let target = next.targets.find(value => value.key === input.key);
       if (target && target.service !== input.service) return { status: "held", reason: "target-changed" };

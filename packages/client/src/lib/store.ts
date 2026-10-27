@@ -235,6 +235,7 @@ interface StoreState {
    */
   diagnostics: import("@arke-studio/contracts").DiagnosticsSnapshot | null;
   recoveryCommandResults: Record<string, import("@arke-studio/contracts").RecoveryCommandResult>;
+  recoveryActionResults: Record<string, import("@arke-studio/contracts").RecoveryActionResult>;
   recoveryHistoryPages: Record<string, import("@arke-studio/contracts").RecoveryHistoryPage>;
   /** Build reviews by conversation and request, so a late response cannot erase a newer answer. */
   buildPlans: Record<
@@ -643,6 +644,7 @@ let current: StoreState = {
   setupStatus: null,
   diagnostics: null,
   recoveryCommandResults: {},
+  recoveryActionResults: {},
   recoveryHistoryPages: {},
   reading: {},
   deriving: {},
@@ -1592,6 +1594,7 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
     case "recovery.notice":
     case "recovery.history-page":
     case "recovery.command-result": return state;
+    case "recovery.action-result": return state;
     case "adapters.changed":
       return { ...state, app: { ...state.app, adapters: event.adapters } };
     case "harness.status":
@@ -2922,6 +2925,9 @@ function handleFrame(json: string): void {
     const recoveryCommandResults = event.type === "recovery.command-result"
       ? Object.fromEntries([...Object.entries(current.recoveryCommandResults).filter(([id]) => id !== event.result.requestId), [event.result.requestId, event.result] as const].slice(-32))
       : current.recoveryCommandResults;
+    const recoveryActionResults = event.type === "recovery.action-result"
+      ? Object.fromEntries([...Object.entries(current.recoveryActionResults).filter(([id]) => id !== event.result.requestId), [event.result.requestId, event.result] as const].slice(-32))
+      : current.recoveryActionResults;
     const recoveryHistoryPages = event.type === "recovery.history-page"
       ? Object.fromEntries([...Object.entries(current.recoveryHistoryPages).filter(([id]) => id !== event.requestId), [event.requestId, event.page] as const].slice(-4))
       : current.recoveryHistoryPages;
@@ -3078,6 +3084,7 @@ function handleFrame(json: string): void {
       diagnosticsBundle,
       diagnostics,
       recoveryCommandResults,
+      recoveryActionResults,
       recoveryHistoryPages,
       providerCallsByJob,
       frameRunQuotes,
@@ -6849,6 +6856,9 @@ export function generateDiagnostics(): void {
 export function setRecoveryMode(mode: import("@arke-studio/contracts").RecoveryMode): string | null {
   const requestId = ulid(); return send({ kind: "recovery-set-mode", requestId, mode }) ? requestId : null;
 }
+export function reviewRecoveryAction(command: import("@arke-studio/contracts").RecoveryActionCommand["command"]): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-action", requestId, command }) ? requestId : null;
+}
 export function setRecoveryPreferences(preferences: { transientMuted?: boolean; desktopOptIn?: boolean }): string | null {
   const requestId = ulid(); return send({ kind: "recovery-set-preferences", requestId, preferences }) ? requestId : null;
 }
@@ -6966,6 +6976,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     setupStatus: null,
     diagnostics: null,
     recoveryCommandResults: {},
+    recoveryActionResults: {},
     recoveryHistoryPages: {},
     reading: {},
   deriving: {},

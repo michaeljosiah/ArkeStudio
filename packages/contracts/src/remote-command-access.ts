@@ -34,6 +34,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "download-update": "host", "install-update-and-restart": "host", "install-update-on-close": "host",
   "generate-diagnostics": "host", "probe-grouped-read": "host", "open-data-folder": "host", "bench-upload-references": "host",
   "recovery-set-mode": "host", "recovery-set-preferences": "host", "recovery-history-control": "host",
+  "recovery-action": "host",
   "recovery-history-read": "studio",
   "attach-files-correlated": "host", "install-sample-world": "host",
   "cancel-sample-world-download": "host", "discard-sample-world-download": "host", "refresh-sample-world-download": "host",

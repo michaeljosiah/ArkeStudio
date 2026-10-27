@@ -39,6 +39,7 @@ import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
 import { RecoveryModeSchema } from "./recovery-policy.js";
 import { RecoveryHistoryCommandSchema, RecoveryHistoryQuerySchema } from "./recovery-settings.js";
+import { RecoveryActionCommandSchema } from "./recovery-actions.js";
 import { CharacterAliasesInputSchema } from "./world.js";
 import { RoutingCommandSchema } from "./world-chat-actions.js";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
@@ -4188,6 +4189,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     preferences: z.object({ transientMuted: z.boolean().optional(), desktopOptIn: z.boolean().optional() }).strict() }).strict(),
   z.object({ kind: z.literal("recovery-history-control"), requestId: UlidSchema, command: RecoveryHistoryCommandSchema }).strict(),
   z.object({ kind: z.literal("recovery-history-read"), requestId: UlidSchema, query: RecoveryHistoryQuerySchema }).strict(),
+  RecoveryActionCommandSchema,
   /**
    * The grouped-read probe (design turn 185): the same few consecutive blocks of a chapter read
    * as one request three ways — every turn its whole style, the notes once with each later turn
