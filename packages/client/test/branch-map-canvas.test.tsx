@@ -578,7 +578,9 @@ describe("the branch map canvas (design turn 157)", () => {
     const options=(shotId:string)=>beatPreviewOptions({world:snapshot.world!,production,voices:new Map(),from:routing.start,shotId,unwalked:[],onChoice:()=>{},onClose:()=>{}});
     for(const [shotId,index] of [["sh_2",0],["sh_3",1]] as const){
       const preview=options(shotId);
-      const active=storyVisibleBeats(routing,routing.start,preview.scenes[routing.start]!.beats,storyReplay(routing,[]).state);
+      const beats=preview.scenes[routing.start]!.beats;
+      assert.ok(beats,"the authored scene has preview beats");
+      const active=storyVisibleBeats(routing,routing.start,beats,storyReplay(routing,[]).state);
       assert.equal(preview.at??0,index);
       assert.equal(active[preview.at??0]!.shotId,shotId,"the preview opens on the requested visible shot");
     }
