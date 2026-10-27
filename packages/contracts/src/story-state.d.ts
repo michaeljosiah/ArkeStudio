@@ -15,8 +15,8 @@ export function storyReplay(program: StoryProgram, prefix?: readonly string[]): 
 export function storyIdentity(value: unknown): string;
 export function storyEnding(program: StoryProgram, sceneId: string, state: StoryState): { title: string; text?: string } | undefined;
 export function storyVisibleBeats<T extends { shotId?: string; pictureShotId?: string; blockId?: string }>(program: StoryProgram, sceneId: string, beats: T[], state: StoryState): T[];
-export function exploreStory(program: StoryProgram, limits?: { states?: number; transitions?: number }): {
-  complete: boolean; points: StoryPoint[]; transitions: Array<{from: number; to: number; choiceId: string}>; problems: Array<StoryPoint & {detail: string}>;
+export function exploreStory(program: StoryProgram, limits?: { states?: number; transitions?: number; witnessEntries?: number }): {
+  complete: boolean; limit?: "witness"; points: StoryPoint[]; transitions: Array<{from: number; to: number; choiceId: string}>; problems: Array<StoryPoint & {detail: string}>;
 };
 
 export function storyFactReferences(program: StoryProgram, id: string): Array<{kind: string; id: string; label: string}>;

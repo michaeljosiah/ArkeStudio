@@ -19,7 +19,9 @@ it("native story commands persist, fence older readers, replay evidence and surv
     await run({ operation: "set-start", sceneId: from.id });
     await run({ operation: "set-facts", facts: [{ id: "elsie", label: "Elsie Ward", type: "enum", values: ["Alive", "Lost"], default: "Alive" }] });
     await run({ operation: "add-choice", choice: { id: "ch_seal", from: from.id, to: to.id, label: "Seal the bore", effects: [{ fact: "elsie", value: "Lost" }] } });
-    const routing = await run({ operation: "set-ending", sceneId: to.id, title: "Above the Quiet" });
+    await run({ operation: "set-ending-variants", sceneId: to.id, title: "Above the Quiet", variants: [{ id: "loss", title: "An empty seat", text: "Elsie was lost at the bore.", fallback: true }] });
+    const routing = await run({ operation: "set-ending", sceneId: to.id, title: "A renamed map ending" });
+    assert.deepEqual(routing.endings[0]!.variants, [{ id: "loss", title: "An empty seat", text: "Elsie was lost at the bore.", fallback: true }]);
     assert.equal((await readWorldMeta(dir)).schemaVersion, 113);
     await assert.rejects(run({ operation: "set-facts", baseVersion: 1, facts: [] }), /changed while/);
     const bytes = await readFile(join(dir, "productions/saltlight/routing.json"), "utf8");

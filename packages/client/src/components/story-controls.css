@@ -16,3 +16,8 @@
 .bm[data-picking="true"] .bm-node { outline:2px dashed var(--ring); outline-offset:5px; cursor:crosshair; }
 
 .story-dialog.fy-page-sheet::backdrop { background:color-mix(in srgb,var(--neutral-950) 40%,transparent); }
+
+.bm-row-head { display:flex; align-items:stretch; gap:4px; }
+.bm-row-head .bm-row { flex:1; }
+.bm-row-settings { flex:none; min-width:44px; min-height:44px; border:1px solid var(--border); border-radius:10px; background:var(--background); color:var(--foreground); }
+.bm-node-settings { position:absolute; right:4px; top:4px; width:44px; height:44px; border:1px solid var(--border); border-radius:8px; background:var(--background); color:var(--foreground); display:grid; place-items:center; cursor:pointer; }

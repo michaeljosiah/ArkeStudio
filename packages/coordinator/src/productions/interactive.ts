@@ -179,7 +179,7 @@ export function applyRoutingCommand(current: Routing | null, command: RoutingCom
         ...current,
         endings: [
           ...current.endings.filter((ending) => ending.sceneId !== command.sceneId),
-          { sceneId: command.sceneId, title: command.title },
+          { ...current.endings.find(ending => ending.sceneId === command.sceneId), sceneId: command.sceneId, title: command.title },
         ],
       };
       break;

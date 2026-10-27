@@ -70,6 +70,21 @@ describe("remembered story rules (SPEC-063)", () => {
     const overlap = { ...r, endings: [{ ...r.endings[0]!, variants: [r.endings[0]!.variants![0]!, { ...r.endings[0]!.variants![0]!, id: "duplicate" }] }] };
     assert.ok(exploreStory(overlap).problems.some(p => p.detail.includes("Overlapping")));
   });
+  it("bounds retained witness memory before a long state-changing loop can exhaust the heap", () => {
+    const facts = Array.from({ length: 17 }, (_, i) => ({ id: `bit-${i}`, label: `Bit ${i}`, type: "boolean", default: false }));
+    const program = RoutingSchema.parse({ schemaVersion: 2, version: 1, start: "sc_loop", facts,
+      choices: [...facts.map((fact, i) => ({ id: `ch_inc-${i}`, from: "sc_loop", to: "sc_loop", label: `Increment ${i}`,
+        when: { op: "all", args: [{ op: "eq", fact: fact.id, value: false }, ...facts.slice(0, i).map(f => ({ op: "eq", fact: f.id, value: true }))] },
+        effects: [{ fact: fact.id, value: true }, ...facts.slice(0, i).map(f => ({ fact: f.id, value: false }))] })),
+        { id: "ch_exit", from: "sc_loop", to: "sc_end", label: "Exit" }],
+      endings: [{ sceneId: "sc_end", title: "Exit" }], excluded: [], groups: [],
+    });
+    const graph = exploreStory(program, { witnessEntries: 2000 });
+    assert.equal(graph.complete, false);
+    assert.equal(graph.limit, "witness");
+    assert.ok(graph.points.reduce((total, point) => total + point.prefix.length, 0) <= 2000);
+    assert.ok(graph.points.length < 200);
+  });
   it("one traversal cannot cover the same edge from a different pre-state", () => {
     const r = routing(), prefix = ["ch_save"], before = storyReplay(r, prefix), after = storyReplay(r, [...prefix, "ch_manual"]);
     const evidence = { ts: "2026-10-27T12:00:00.000Z", routingVersion: 1, choiceId: "ch_manual", from: "sc_collar", to: "sc_escape", route: ["sc_bore", "sc_collar"], story: { identity: storyIdentity(r), prefix, before: storyIdentity(before.state), after: storyIdentity(after.state), provenance: "human" as const } };

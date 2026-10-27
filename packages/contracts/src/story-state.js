@@ -149,6 +149,8 @@ export function storyVisibleBeats(program, sceneId, beats, state) {
 export function exploreStory(program, limits = {}) {
   validateStoryProgram(program);
   const maxStates = limits.states ?? 100000, maxTransitions = limits.transitions ?? 1000000;
+  const maxWitnessEntries = Math.min(limits.witnessEntries ?? 1000000, 1000000);
+  let witnessEntries = 0;
   const initial = storyReplay(program);
   const queue = [{ ...initial, prefix: [] }], seen = new Map();
   const transitions = [], problems = [];
@@ -163,12 +165,15 @@ export function exploreStory(program, limits = {}) {
     } catch (error) { problems.push({ ...point, detail: error.message }); }
     for (const choice of outgoing) {
       if (transitions.length >= maxTransitions) return { complete: false, points: queue, transitions, problems };
-      const prefix = [...point.prefix, choice.id];
       const next = storyAdvance(program, point, choice.id);
       const key = storyIdentity([next.sceneId, next.state]);
       let to = seen.get(key);
       if (to === undefined) {
         if (queue.length >= maxStates) return { complete: false, points: queue, transitions, problems };
+        const depth = point.prefix.length + 1;
+        if (depth > 2048 || witnessEntries + depth > maxWitnessEntries) return { complete: false, limit: "witness", points: queue, transitions, problems };
+        witnessEntries += depth;
+        const prefix = [...point.prefix, choice.id];
         to = queue.length;
         seen.set(key, to);
         queue.push({ ...next, prefix });

@@ -249,6 +249,7 @@ export function BranchMapScreen() {
   const [preview, setPreview] = useState<{ from: string; at: number; prefix?: string[] } | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   const [connector, setConnector] = useState<Choice | null>(null);
+  const [connectorEditing, setConnectorEditing] = useState(false);
   const [connectorSave, setConnectorSave] = useState<{ choice: Choice; version: number; ids: string[] } | null>(null);
   useEffect(() => {
     if (!connectorSave || !routing || routing.version <= connectorSave.version) return;
@@ -262,11 +263,12 @@ export function BranchMapScreen() {
   const [sceneRules, setSceneRules] = useState<string | null>(null);
   const [endingRules, setEndingRules] = useState<string | null>(null);
   useEffect(() => {
-    if (selection?.kind === "new" && selection.from && !connector) {
-      setConnector({ id: "ch_connector-draft", from: selection.from, to: selection.to ?? "", label: "" });
+    if (selection?.kind === "new" && !connector) {
+      setConnectorEditing(false);
+      setConnector({ id: choiceIdFor("connector draft", routing), from: selection.from ?? "", to: selection.to ?? "", label: "" });
       setMapDestination(null);
     }
-  }, [selection, connector]);
+  }, [selection, connector, routing]);
   useEffect(() => {
     if (!mapPick) return;
     const back = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); setMapPick(false); } };
@@ -708,7 +710,8 @@ export function BranchMapScreen() {
     else if (event.key === "End") next = walk[walk.length - 1];
     else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      setSelection(isChoice ? { kind: "choice", id } : { kind: "scene", id });
+      if (mapPick) { if (!isChoice) pickScene(id); }
+      else setSelection(isChoice ? { kind: "choice", id } : { kind: "scene", id });
       return;
     } else if ((event.key === "Delete" || event.key === "Backspace") && isChoice) {
       // Delete on a focused choice asks first, naming what breaks (157e).
@@ -835,6 +838,7 @@ export function BranchMapScreen() {
             )}
           </span>
         </span>
+        {compact && <button type="button" className="bm-node-settings" aria-label={`Settings for ${title}`} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setSelection({ kind: "scene", id: node.id }); }}><More size={14}/></button>}
         {!inTray && (
           <span
             className={cx("bm-port", showPort && "bm-port--on")}
@@ -873,6 +877,7 @@ export function BranchMapScreen() {
             <span className="bm-eyebrow">{index === layout.layers.length ? `Not on a route · ${ids.length}` : `Layer ${index + 1}`}</span>
             {ids.map((id) => (
               <div key={id} className="bm-list__scene">
+                <div className="bm-row-head">
                 <button
                   type="button"
                   className={cx("bm-row", selection?.kind === "scene" && selection.id === id && "bm-row--selected")}
@@ -884,8 +889,9 @@ export function BranchMapScreen() {
                   {endings.has(id) && <span className="bm-tag">ending</span>}
                   {excluded.has(id) && <span className="bm-tag">excluded</span>}
                   {unreachable.has(id) && !excluded.has(id) && <span className="bm-tag bm-tag--bad">unreachable</span>}
-                  {narrow && <span className="bm-row__menu" aria-hidden><More size={18}/></span>}
                 </button>
+                <button type="button" className="bm-row-settings" aria-label={`Settings for ${titleOf(id)}`} onClick={() => setSelection({ kind: "scene", id })}><More size={18}/></button>
+                </div>
                 {routing.choices
                   .filter((choice) => choice.from === id)
                   .map((choice) => (
@@ -1074,7 +1080,7 @@ export function BranchMapScreen() {
       const walked = !unwalked.has(selectedChoice.id);
       return (
         <Inspector title="Choice" sub={selectedChoice.id} onClose={() => setSelection(null)}>
-          <Button onClick={() => { setConnector(selectedChoice); setMapDestination(null); }}>Edit connector</Button>
+          <Button onClick={() => { setConnectorEditing(true); setConnector(selectedChoice); setMapDestination(null); }}>Edit connector</Button>
           {selectedChoice.when && <p>Available when · conditional</p>}
           {!!selectedChoice.effects?.length && <p>Remember · {selectedChoice.effects.length} value(s)</p>}
           <CommitField
@@ -1176,6 +1182,7 @@ export function BranchMapScreen() {
     const onRoute = geometry.nodes.some((node) => node.id === scene.id);
     return (
       <Inspector title="Scene" sub={scene.id} onClose={() => setSelection(null)}>
+        <div className="bm-actions"><Button onClick={() => setSceneRules(scene.id)}>Show when</Button>{ending !== undefined && <Button onClick={() => setEndingRules(scene.id)}>Ending variants</Button>}</div>
         <div className="bm-scenehead">
           <span className="bm-thumb bm-thumb--small">{frame ? <img src={frame} alt="" /> : <span className="bm-thumb__none">{scene.number}</span>}</span>
           <span>
@@ -1382,19 +1389,18 @@ export function BranchMapScreen() {
           />
         )}
       </div>
-      {routing && selection?.kind === "scene" && <div className="story-map-pick"><Button onClick={() => setSceneRules(selection.id)}>Show when</Button>{routing.endings.some(e => e.sceneId === selection.id) && <Button onClick={() => setEndingRules(selection.id)}>Ending variants</Button>}</div>}
       {routing && sceneRules && scenes.find(s => s.id === sceneRules) && <StorySceneDialog routing={routing} scene={scenes.find(s => s.id === sceneRules)!} onClose={() => setSceneRules(null)} onSave={(presentation, baseVersion) => command({ operation: "set-presentation", presentation, baseVersion })} />}
       {routing && endingRules && <StoryEndingDialog routing={routing} sceneId={endingRules} onClose={() => setEndingRules(null)} onSave={(variants, baseVersion) => command({ operation: "set-ending-variants", sceneId: endingRules, title: routing.endings.find(e => e.sceneId === endingRules)!.title, variants, baseVersion })} />}
       {routing && factsOpen && <StoryFactsDialog routing={routing} onClose={() => setFactsOpen(false)} onSave={(facts, baseVersion) => command({ operation: "set-facts", facts, baseVersion })} />}
-      {routing && connector && <ConnectorDialog key={connector.id} routing={routing} initial={connector} scenes={scenes} picking={mapPick} destination={mapDestination} onPick={() => setMapPick(true)} onClose={() => { setConnector(null); setConnectorSave(null); setMapPick(false); setFocused(`s:${connector.from}`); setSelection(null); }} onSave={(choice, baseVersion) => {
-        const editing = routing.choices.some(c => c.id === choice.id);
+      {routing && connector && <ConnectorDialog key={connector.id} editing={connectorEditing} routing={routing} initial={connector} scenes={scenes} picking={mapPick} destination={mapDestination} onPick={from => { setConnector(current => current ? { ...current, from } : null); setMapPick(true); }} onClose={() => { setConnector(null); setConnectorSave(null); setMapPick(false); setFocused(`s:${connector.from}`); setSelection(null); }} onSave={(choice, baseVersion) => {
+        const editing = connectorEditing;
         const id = editing ? choice.id : choiceIdFor(choice.label, routing);
         if (editing) command({ operation: "edit-choice", choiceId: id, baseVersion, changes: { label: choice.label, to: choice.to, when: choice.when ?? null, effects: choice.effects ?? [] } });
         else command({ operation: "add-choice", choice: { ...choice, id } });
         setConnectorSave({ choice: { ...choice, id }, version: routing.version, ids: routing.choices.map(c => c.id) });
       }} />}
       <aside className="bm-side" inert={mapPick || undefined}>
-        <ResponsiveSheet sheet={narrow} open={selection !== null && selection.kind !== "new"} onClose={() => setSelection(null)} title={selection?.kind === "new" && selection.from ? `New choice from ${titleOf(selection.from)}` : selection?.kind === "findings" ? "Findings" : selection?.kind === "choice" ? "Choice" : "Scene settings"} className="bm-inspector-sheet">{inspector}</ResponsiveSheet>
+        <ResponsiveSheet sheet={compact || narrow} open={selection !== null && selection.kind !== "new"} onClose={() => setSelection(null)} title={selection?.kind === "new" && selection.from ? `New choice from ${titleOf(selection.from)}` : selection?.kind === "findings" ? "Findings" : selection?.kind === "choice" ? "Choice" : "Scene settings"} className="bm-inspector-sheet">{inspector}</ResponsiveSheet>
         <ArkeEdge>{putAway => arke(putAway)}</ArkeEdge>
       </aside>
     </div>

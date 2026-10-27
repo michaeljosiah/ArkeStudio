@@ -86,7 +86,8 @@ export function mountInteractivePlayer(root, options) {
   let saved = null;
   if (KEY) {
     try {
-      saved = JSON.parse(win.localStorage.getItem(story && options.playthroughId ? KEY + "-" + options.playthroughId : KEY) || "null");
+      const raw = story && options.playthroughId ? win.localStorage.getItem(KEY + "-" + options.playthroughId) : win.localStorage.getItem(KEY);
+      saved = JSON.parse(raw || "null");
     } catch {
       if (story) resumeProblem = "This saved route is damaged or unavailable. Start again.";
       saved = null;

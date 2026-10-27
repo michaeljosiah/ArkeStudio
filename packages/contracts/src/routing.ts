@@ -392,7 +392,7 @@ function stateRoutingFindings(routing: Routing, scenes: readonly {id: string; ti
   const identity = storyIdentity(routing);
   const known = new Set(scenes.map(s => s.id));
   const add = (detail: string, sceneIds: string[], choiceIds: string[] = [], kind: RoutingFinding["kind"] = "state-route") => result.push({ kind, severity: "blocks", detail, sceneIds, choiceIds });
-  if (!graph.complete) add("State exploration reached its limit; qualified export is unavailable", [], [], "state-incomplete");
+  if (!graph.complete) add(`State exploration reached its ${graph.limit ?? "state/transition"} limit; qualified export is unavailable`, [], [], "state-incomplete");
   for (const choice of routing.choices) for (const id of [choice.from, choice.to]) if (!known.has(id)) add(`Choice ${choice.label} names missing scene ${id}`, [id], [choice.id], "invalid-destination");
   for (const rule of routing.presentation ?? []) {
     const scene = scenes.find(s => s.id === rule.sceneId);

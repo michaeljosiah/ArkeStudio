@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { storyFactReferences, RoutingSchema, type Routing, type Choice, type StoryPredicate, type StoryEffect, type StoryFact } from "@arke-studio/contracts";
+import { choiceIdFor } from "../lib/branch-map.js";
 import { subscribeCommandFailures } from "../lib/store.js";
 import { PageSheet } from "./page-sheet.js";
 import { Button, Input, Select } from "./ui.js";
 
 /** Replacement forms keep their draft until acknowledgement, and fence a stale authoring snapshot. */
-export function useStorySave(routing: Routing, saved: boolean, onClose: () => void) {
+export function useStorySave(routing: Routing, saved: boolean, onClose: () => void, reload: () => void) {
   const [baseVersion, setBaseVersion] = useState(routing.version);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -17,10 +18,10 @@ export function useStorySave(routing: Routing, saved: boolean, onClose: () => vo
   }, [busy, saved, routing.version, baseVersion, onClose]);
   return { baseVersion, busy, error, stale: routing.version !== baseVersion,
     submit: (send: (version: number) => void) => { setBusy(true); setError(""); send(baseVersion); },
-    review: () => { setBaseVersion(routing.version); setError(""); setBusy(false); } };
+    review: () => { reload(); setBaseVersion(routing.version); setError(""); setBusy(false); } };
 }
 export function StorySaveStatus({ save }: { save: ReturnType<typeof useStorySave> }) {
-  return <>{save.error && <p role="alert">{save.error}</p>}{save.stale && <p role="status">Story rules changed while this dialog was open. <Button onClick={save.review}>Review current rules</Button></p>}</>;
+  return <>{save.error && <p role="alert">{save.error}</p>}{save.stale && <p role="status">Story rules changed. Your draft is retained; loading current rules replaces this draft. <Button onClick={save.review}>Load current rules</Button></p>}</>;
 }
 
 export function FactValue({ fact, value, onChange, label }: { fact: StoryFact; value: boolean | string; onChange: (value: boolean | string) => void; label: string }) {
@@ -53,21 +54,21 @@ export function StoryEffects({ facts, effects, onChange }: { facts: StoryFact[];
   })}<Button disabled={!available.length} onClick={() => onChange([...effects, { fact: available[0]!.id, value: available[0]!.default }])}>Remember a value</Button></>;
 }
 
-export function ConnectorDialog({ routing, initial, scenes, picking, destination, onPick, onClose, onSave }: {
-  routing: Routing; initial: Choice; scenes: readonly { id: string; title: string }[]; picking: boolean; destination: string | null;
-  onPick: () => void; onClose: () => void; onSave: (choice: Choice, baseVersion: number) => void;
+export function ConnectorDialog({ routing, initial, editing, scenes, picking, destination, onPick, onClose, onSave }: {
+  routing: Routing; initial: Choice; editing: boolean; scenes: readonly { id: string; title: string }[]; picking: boolean; destination: string | null;
+  onPick: (source: string) => void; onClose: () => void; onSave: (choice: Choice, baseVersion: number) => void;
 }) {
   const [draft, setDraft] = useState(initial);
   useEffect(() => { if (destination !== null) setDraft(current => ({ ...current, to: destination })); }, [destination]);
-  const editing = routing.choices.some(c => c.id === initial.id);
-  const choice = { ...draft, to: draft.to, label: draft.label.trim() };
+  const [chooseSource] = useState(!initial.from);
+  const choice = { ...draft, id: editing ? draft.id : choiceIdFor(draft.label, routing), to: draft.to, label: draft.label.trim() };
   const facts = routing.facts ?? [];
-  const save = useStorySave(routing, false, () => {});
+  const save = useStorySave(routing, false, () => {}, () => setDraft(editing ? routing.choices.find(c => c.id === initial.id) ?? initial : { ...initial, label: "", effects: undefined, when: undefined }));
   const checked = RoutingSchema.safeParse({ ...routing, ...(choice.when || choice.effects?.length ? { schemaVersion: 2 } : {}), choices: editing ? routing.choices.map(c => c.id === choice.id ? choice : c) : [...routing.choices, choice] });
-  const ready = checked.success && scenes.some(s => s.id === choice.from) && scenes.some(s => s.id === choice.to) && !routing.excluded.some(e => e.sceneId === choice.to);
+  const ready = checked.success && (!editing || routing.choices.some(c => c.id === initial.id)) && scenes.some(s => s.id === choice.from) && scenes.some(s => s.id === choice.to) && !routing.excluded.some(e => e.sceneId === choice.to);
   return <PageSheet returnFocus={() => document.querySelector<HTMLElement>(`[data-scene="${initial.from}"] .bm-port`) ?? document.querySelector<HTMLElement>(`[data-walk="s:${initial.from}"]`)} open={!picking} title={editing ? "Edit connector" : "Define connector"} subtitle="A choice connects two scenes. Its rules travel with it." onClose={onClose} dismissOnBackdrop={false} className="story-dialog" footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={!ready || save.busy || save.stale} onClick={() => save.submit(version => onSave(choice, version))}>{editing ? "Save choice" : "Add choice"}</Button></>}>
-    <label className="story-field">From scene<Input aria-label="From scene" value={scenes.find(s => s.id === draft.from)?.title ?? draft.from} readOnly /></label>
-    <div className="story-rule-row"><label className="story-field">Destination scene<Select label="Destination scene" value={choice.to} onChange={e => setDraft({ ...draft, to: e.target.value })}><option value="">Choose a scene…</option>{scenes.filter(s => !routing.excluded.some(e => e.sceneId === s.id)).map(s => <option key={s.id} value={s.id}>{s.title}</option>)}</Select></label><Button onClick={onPick}>Choose on map</Button></div>
+    <label className="story-field">From scene{chooseSource ? <Select label="From scene" value={draft.from} onChange={event => setDraft({ ...draft, from: event.target.value })}><option value="">Choose a source scene…</option>{scenes.filter(s => !routing.excluded.some(e => e.sceneId === s.id)).map(s => <option key={s.id} value={s.id}>{s.title}</option>)}</Select> : <Input aria-label="From scene" value={scenes.find(s => s.id === draft.from)?.title ?? draft.from} readOnly />}</label>
+    <div className="story-rule-row"><label className="story-field">Destination scene<Select label="Destination scene" value={choice.to} onChange={e => setDraft({ ...draft, to: e.target.value })}><option value="">Choose a scene…</option>{scenes.filter(s => !routing.excluded.some(e => e.sceneId === s.id)).map(s => <option key={s.id} value={s.id}>{s.title}</option>)}</Select></label><Button disabled={!draft.from} onClick={() => onPick(draft.from)}>Choose on map</Button></div>
     <label className="story-field">Choice text<Input aria-label="Choice text" value={draft.label} placeholder="Ask Dev to hold the release" onChange={e => setDraft({ ...draft, label: e.target.value })} /></label>
     <section><h3>Available when</h3><p>Checked before this choice is made. No conditions means always available.</p><StoryCondition facts={facts} value={draft.when} onChange={when => setDraft({ ...draft, when })} /></section>
     <section><h3>Remember</h3><p>Set these values together after the player chooses this path.</p><StoryEffects facts={facts} effects={draft.effects ?? []} onChange={effects => setDraft({ ...draft, effects })} /></section>
@@ -82,7 +83,7 @@ export function StoryFactsDialog({ routing, onClose, onSave }: { routing: Routin
   const [label, setLabel] = useState("");
   const [type, setType] = useState<"boolean" | "enum">("enum");
   const update = (index: number, fact: StoryFact) => setFacts(facts.map((f, i) => i === index ? fact : f));
-  const save = useStorySave(routing, routing.schemaVersion === 2 && JSON.stringify(routing.facts ?? []) === JSON.stringify(facts), onClose);
+  const save = useStorySave(routing, routing.schemaVersion === 2 && JSON.stringify(routing.facts ?? []) === JSON.stringify(facts), onClose, () => setFacts(routing.facts ?? []));
   const validation = RoutingSchema.safeParse({ ...routing, schemaVersion: 2, facts });
   return <PageSheet open title="Story facts" subtitle="Starting values belong to this production. Player choices remember changes." onClose={onClose} dismissOnBackdrop={false} className="story-dialog" footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={!validation.success || save.busy || save.stale} onClick={() => save.submit(version => onSave(facts, version))}>Save facts</Button></>}>
     {facts.map((fact, index) => <fieldset className="story-fact" key={fact.id}><legend>{fact.label}</legend><label className="story-field">Name<Input aria-label={`Name for ${fact.id}`} value={fact.label} onChange={e => update(index, { ...fact, label: e.target.value })} /></label><small>{fact.id} · {fact.type}</small><details><summary>Used by {storyFactReferences(routing, fact.id).length}</summary><ul>{storyFactReferences(routing, fact.id).map((use, i) => <li key={i}>{use.label} · {use.kind}</li>)}</ul></details>{fact.type === "enum" && <label className="story-field">Values, separated by commas<Input aria-label={`Values for ${fact.id}`} value={fact.values.join(", ")} onChange={e => update(index, { ...fact, values: e.target.value.split(",").map(v => v.trim()) })} /></label>}<label className="story-field">Starting value<FactValue fact={fact} value={fact.default} label={`Starting value for ${fact.id}`} onChange={value => update(index, { ...fact, default: value } as StoryFact)} /></label><Button variant="ghost" disabled={storyFactReferences(routing, fact.id).length > 0} onClick={() => setFacts(facts.filter((_, i) => i !== index))}>Remove fact</Button></fieldset>)}

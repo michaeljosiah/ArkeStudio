@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import type { ClientMessage, ClientState, RoutingCommand, Routing, Scene } from "@arke-studio/contracts";
+import { storyIdentity, storyReplay, type ClientMessage, type ClientState, type RoutingCommand, type Routing, type Scene } from "@arke-studio/contracts";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { BranchMapScreen, sceneClips } from "../src/screens/branch-map.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -419,6 +419,86 @@ describe("the branch map canvas (design turn 157)", () => {
     await click(button(item, "Add choice"));
     assert.deepEqual(commands(item), [{ operation: "add-choice", choice: { id: "ch_ask-dev-to-hold-the-release", from: "sc_quarter", to: "sc_towers", label: "Ask Dev to hold the release", when: { op: "eq", fact: "dev", value: "Alive" }, effects: [{ fact: "dev", value: "Lost at release" }] } }]);
     assert.ok(all(item, 'dialog.story-dialog')[0], "the draft stays until its saved snapshot arrives");
+  });
+
+  it("forwards a stateful walk witness through the React player wrapper", async () => {
+    const routing: Routing = { ...ROUTING, schemaVersion: 2, facts: [{ id: "dev", label: "Dev", type: "boolean", default: true }], choices: ROUTING.choices.map(choice => choice.id === "ch_stay" ? { ...choice, effects: [{ fact: "dev", value: false }] } : choice) };
+    const item = await mount(routing);
+    await click(button(item, "Preview"));
+    await click(all(item, ".aip-choice").find(el => /Stay with the boat/.test(text(el))));
+    const walk = item.sent.find(message => message.kind === "record-traversal");
+    assert.ok(walk?.kind === "record-traversal");
+    assert.deepEqual(walk.story, { identity: storyIdentity(routing), prefix: [], before: storyIdentity(storyReplay(routing).state), after: storyIdentity(storyReplay(routing, ["ch_stay"]).state), provenance: "human" });
+  });
+
+  it("creates an incoming connector when the finding supplies only its destination", async () => {
+    const item = await mount();
+    await click(all(item, ".bm-count")[0]);
+    await click(button(item, "Draw a choice to it"));
+    await change(all(item, 'select[aria-label="From scene"]')[0], "sc_quarter");
+    await change(all(item, 'input[aria-label="Choice text"]')[0], "Reach the undertow");
+    await click(button(item, "Add choice"));
+    assert.deepEqual(commands(item), [{ operation: "add-choice", choice: { id: "ch_reach-the-undertow", from: "sc_quarter", to: "sc_undertow", label: "Reach the undertow" } }]);
+  });
+
+  it("keyboard activation selects a map destination and retains the draft", async () => {
+    const item = await mount();
+    await click(card(item, "sc_quarter"));
+    await click(all(item, '[data-scene="sc_quarter"] .bm-port')[0]);
+    await change(all(item, 'input[aria-label="Choice text"]')[0], "Keyboard route");
+    await click(button(item, "Choose on map"));
+    await key(card(item, "sc_towers"), "Enter");
+    assert.ok(all(item, 'dialog.story-dialog')[0]);
+    await click(button(item, "Add choice"));
+    assert.ok(commands(item).some(command => command.operation === "add-choice" && command.choice.to === "sc_towers" && command.choice.label === "Keyboard route"));
+  });
+
+  it("a persisted Connector draft choice cannot turn creation into editing", async () => {
+    const item = await mount({ ...ROUTING, choices: [...ROUTING.choices, { id: "ch_connector-draft", from: "sc_quarter", to: "sc_causeway", label: "Connector draft" }] });
+    await click(card(item, "sc_quarter"));
+    await click(all(item, '[data-scene="sc_quarter"] .bm-port')[0]);
+    await change(all(item, 'input[aria-label="Choice text"]')[0], "New route");
+    await change(all(item, 'select[aria-label="Destination scene"]')[0], "sc_towers");
+    await click(button(item, "Add choice"));
+    assert.equal(commands(item)[0]!.operation, "add-choice");
+  });
+
+  it("the phone list exposes scene settings separately from connector creation", async () => {
+    narrowWindow = true;
+    try {
+      const item = await mount();
+      await click(button(item, "Settings for The drowned quarter"));
+      assert.ok(all(item, '.bm-insp button[role="switch"][aria-label="Ending"]')[0]);
+      assert.ok(button(item, "Show when"));
+      assert.ok(button(item, "Draw a choice from here"));
+    } finally { narrowWindow = false; }
+  });
+
+  it("loading current rules shows the intervening facts before a stale replacement can save", async () => {
+    const routing: Routing = { ...ROUTING, schemaVersion: 2, facts: [{ id: "dev", label: "Dev Malik", type: "boolean", default: true }] };
+    const item = await mount(routing);
+    await click(button(item, "Story facts · 1"));
+    await change(all(item, 'input[aria-label="Name for dev"]')[0], "Local draft name");
+    const latest: Routing = { ...routing, version: routing.version + 1, facts: [...routing.facts!, { id: "wei", label: "Lin Wei", type: "boolean", default: true }] };
+    await act(async () => __setStateForTest(state(latest)));
+    assert.equal((all(item, 'input[aria-label="Name for dev"]')[0] as HTMLInputElement).value, "Local draft name");
+    assert.equal(button(item, "Save facts")!.hasAttribute("disabled"), true);
+    await click(button(item, "Load current rules"));
+    assert.ok(all(item, 'input[aria-label="Name for wei"]')[0]);
+    assert.equal((all(item, 'input[aria-label="Name for dev"]')[0] as HTMLInputElement).value, "Dev Malik");
+    await click(button(item, "Save facts"));
+    assert.deepEqual(commands(item), [{ operation: "set-facts", baseVersion: latest.version, facts: latest.facts }]);
+  });
+
+  it("obsolete Show when rules can be removed after their targets are deleted", async () => {
+    const routing: Routing = { ...ROUTING, schemaVersion: 2, facts: [{ id: "dev", label: "Dev", type: "boolean", default: true }], presentation: [{ sceneId: "sc_quarter", blocks: [{ blockId: "blk_gone", when: { op: "eq", fact: "dev", value: true } }], shots: [{ shotId: "sh_gone", when: { op: "eq", fact: "dev", value: true } }] }] };
+    const item = await mount(routing);
+    await click(card(item, "sc_quarter"));
+    await click(button(item, "Show when"));
+    await click(button(item, "Remove rule for blk_gone"));
+    await click(button(item, "Remove rule for sh_gone"));
+    await click(button(item, "Save rules"));
+    assert.deepEqual(commands(item), [{ operation: "set-presentation", baseVersion: routing.version, presentation: { sceneId: "sc_quarter", blocks: [], shots: [] } }]);
   });
 
   it("previews in the shared player over the window, and a choice pressed there is walk evidence", async () => {
