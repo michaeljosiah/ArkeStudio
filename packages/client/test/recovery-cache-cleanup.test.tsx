@@ -22,8 +22,9 @@ it("reviews before approving cleanup, bounds duplicate clicks and never replays 
     await act(async () => root.render(<RecoveryCacheCleanupControls />)); assert.equal(sent.length, 0);
     await act(async () => { button("Review previews…").click(); button("Review previews…").click(); }); assert.equal(sent.length, 1);
     const review = sent[0]!; assert(review.kind === "recovery-action"); assert.equal(review.command.action, "preview-cleanup");
+    const preparedAt = Date.now();
     const plan = { id: "b".repeat(64), action: "cleanup-local-preset-previews" as const, evidence: "a".repeat(64), policyRevision: 1 as const,
-      preparedAt: Date.now(), expiresAt: Date.now() + 300000, category: "fixed-local-preset-previews" as const,
+      preparedAt, expiresAt: preparedAt + 300000, category: "fixed-local-preset-previews" as const,
       files: 1, logicalBytes: 256, allocatedBytes: 4096, minAgeMs: CACHE_CLEANUP_POLICY.minAgeMs, stopAtAvailableBytes: null,
       targets: [{ resourceKey: "c".repeat(64), createdAt: 0, logicalBytes: 256, allocatedBytes: 4096 }],
       replaysJobs: false as const, interruptsWork: false as const, undoable: false as const };
@@ -76,8 +77,9 @@ it("opens a warning's exact scope without sending work, discards late reviews an
   const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
   const button = (text: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === text);
   const respond = (result: RecoveryActionResult) => act(async () => __applyEventForTest({ type: "recovery.action-result", at: new Date().toISOString(), result }));
+  const preparedAt = Date.now();
   const plan = { id: "b".repeat(64), action: "cleanup-local-preset-previews" as const, evidence: "a".repeat(64), policyRevision: 1 as const,
-    scope: first, preparedAt: Date.now(), expiresAt: Date.now() + 300000, category: "fixed-local-preset-previews" as const,
+    scope: first, preparedAt, expiresAt: preparedAt + 300000, category: "fixed-local-preset-previews" as const,
     files: 1, logicalBytes: 60, allocatedBytes: 4096, minAgeMs: CACHE_CLEANUP_POLICY.minAgeMs, stopAtAvailableBytes: null,
     targets: [{ resourceKey: "c".repeat(64), createdAt: 0, logicalBytes: 60, allocatedBytes: 4096 }],
     replaysJobs: false as const, interruptsWork: false as const, undoable: false as const };

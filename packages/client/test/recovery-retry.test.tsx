@@ -21,8 +21,9 @@ it("only previews on Review, requires exact approval, and never replays after re
     await act(async () => root.render(<RecoveryRetryControls />)); assert.equal(sent.length, 0);
     await act(async () => { button("Review retry…").click(); button("Review retry…").click(); }); assert.equal(sent.length, 1);
     const preview = sent[0]!; assert(preview.kind === "recovery-action" && preview.command.action === "preview-retry");
+    const preparedAt = Date.now();
     const plan = { id: "b".repeat(64), resourceKey: key, action: "retry-managed-runtime" as const, service: "ollama" as const, evidence: "c".repeat(64), policyRevision: 1 as const,
-      preparedAt: Date.now(), expiresAt: Date.now() + 300000, downloadBytes: 0 as const, diskBytes: null, interruptsWork: false as const, replaysJobs: false as const };
+      preparedAt, expiresAt: preparedAt + 300000, downloadBytes: 0 as const, diskBytes: null, interruptsWork: false as const, replaysJobs: false as const };
     await respond({ requestId: preview.requestId, status: "preview", plan });
     assert(container.textContent?.includes("extra space is unknown")); assert.equal(sent.length, 1);
     await act(async () => { button("Approve this retry").click(); button("Approve this retry")?.click(); }); assert.equal(sent.length, 2);
