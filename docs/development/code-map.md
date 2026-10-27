@@ -35,8 +35,15 @@ Known import payloads use `storage/import-files.ts`. Its closed Node-copy owner 
 durable per-volume registry as setup/results, reports written bytes and settles after original
 file/metadata work. `artifacts/filing.ts` admits each new decoded copy after content deduplication,
 then rechecks world ownership before its atomic write. Small authored sidecars/journals keep the
-world's existing commit path; full batch/metadata peak planning is not claimed. Duplicate creative
-bytes are reused, not deleted. `artifacts/browser-media-import.ts` separately admits the bounded
+world's existing commit path; complete metadata peak planning is not claimed. Duplicate creative
+bytes are reused, not deleted. `artifacts/browser-import-batch.ts` plans the bounded browser
+batch's remaining unique world copies before the first copy; producer receipts and verified
+retained media permit deduplication without a second payload reservation. Each child revalidates
+fresh capacity while spending the parent's budget, and original children/admission flushes retain
+ownership through cancellation. Audio Studio and Music exclude files their routes reject before
+filing. A changed zero-copy plan cannot grant an unreserved replacement. After admission, filing
+rechecks mutation preconditions and destination absence before copying.
+`artifacts/browser-media-import.ts` separately admits the bounded
 whole spool before payload writes and holds it through filing/cleanup, so shared/separate spool
 and world volumes cannot be confused. Coordinator UI, editor/audio/music, folder import and scoped
 World Chat controls pass only host-owned capabilities. Failed accounting retains valid media.
@@ -45,7 +52,7 @@ protects pending writes across service instances, and unrelated imports remain u
 `storage/service.ts` can retain an explicitly stable destination while its world stays active,
 keeping a mounted artifact-volume warning after an operation fails. Temporary/per-job roots keep
 their lease lifetime. No directory scan, native worker, generic cleanup or new write authority is
-added. Provider pre-dispatch/scratch, full batch planning, other import/export owners and remaining
+added. Provider pre-dispatch/scratch, other batch/import/export owners and remaining
 storage/platform acceptance are still open.
 Media-reader protection: `transport.ts` accepts an optional host-only `ResolvedMediaFile.release`
 lease from a resolver. It opens one descriptor for size/range and streaming, retains ownership

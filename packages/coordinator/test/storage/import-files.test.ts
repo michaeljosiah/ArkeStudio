@@ -84,6 +84,30 @@ it("world close during admission refuses late payload writes and drains the orig
     assert.equal(settled, 1); assert(!existsSync(join(h.world, "artifacts", "late.txt"))); assert.equal(await readFile(source, "utf8"), "MUST_NOT_COPY");
   } finally { release(); await h.store.close(); await h.storage.stop(); }
 });
+it("a destination created during admission is preserved instead of overwritten by the delayed import", async () => {
+  const h = await open(), source = join(h.root, "changed.txt"), destination = join(h.world, "artifacts", "changed.txt");
+  await writeFile(source, "SELECTED_SOURCE"); let settled = 0;
+  const space: ImportFileSpace = { async reserve() {
+    await writeFile(destination, "OTHER_CREATIVE_BYTES");
+    return { async consumed() { assert.fail("No overwrite"); }, writeFailed() {}, async settle() { settled++; } };
+  } };
+  try {
+    await assert.rejects(fileArtifact(h.store, { sourcePath: source, importSpace: space }), /destination changed/);
+    assert.equal(await readFile(destination, "utf8"), "OTHER_CREATIVE_BYTES"); assert.equal(await readFile(source, "utf8"), "SELECTED_SOURCE");
+    assert.equal(settled, 1); assert(!existsSync(`${destination}.json`)); assert.equal(h.store.getBundle().artifacts.length, h.initialArtifacts);
+  } finally { await h.store.close(); await h.storage.stop(); }
+});
+it("a mutation precondition changed during admission refuses the delayed copy and settles its lease", async () => {
+  const h = await open(), source = join(h.root, "stale.txt"); await writeFile(source, "SELECTED_SOURCE"); let stale = false, settled = 0;
+  const space: ImportFileSpace = { async reserve() { stale = true;
+    return { async consumed() { assert.fail("No stale copy"); }, writeFailed() {}, async settle() { settled++; } };
+  } };
+  try {
+    await assert.rejects(fileArtifact(h.store, { sourcePath: source, importSpace: space, mutation: { source: "test", precondition: () => stale ? "Selection changed" : null } }), /Selection changed/);
+    assert.equal(settled, 1); assert(!existsSync(join(h.world, "artifacts", "stale.txt"))); assert.equal(await readFile(source, "utf8"), "SELECTED_SOURCE");
+    assert.equal(h.store.getBundle().artifacts.length, h.initialArtifacts);
+  } finally { await h.store.close(); await h.storage.stop(); }
+});
 it("browser spool admission retains its original owner through cancellation without late payload or consume", async () => {
   let release!: () => void, directory = "", settled = 0;
   const gate = new Promise<void>(resolve => { release = resolve; }), abort = new AbortController();

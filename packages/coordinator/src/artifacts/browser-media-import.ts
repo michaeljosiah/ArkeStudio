@@ -3,19 +3,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BrowserMediaFilesSchema, browserMediaDecodedSize, type BrowserMediaFile } from "@arke-studio/contracts";
 import type { ImportFileLease, ImportFileSpace } from "../storage/import-files.js";
+import { createHash } from "node:crypto";
+
+export interface BrowserImportPayload { readonly digest: string; readonly bytes: number }
 
 /** One bounded batch per host. Authored filing still belongs to the existing world service. */
 export class BrowserMediaImports {
   private busy = false;
   constructor(private readonly space?: ImportFileSpace) {}
 
-  async run<T>(files: readonly BrowserMediaFile[], abandoned: () => boolean, consume: (paths: string[]) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  async run<T>(files: readonly BrowserMediaFile[], abandoned: () => boolean, consume: (paths: string[], payloads: readonly BrowserImportPayload[]) => Promise<T>, signal?: AbortSignal): Promise<T> {
     if (this.busy) throw new Error("Another browser import is running. Wait for it to finish.");
     this.busy = true;
     let directory: string | undefined;
     let identity: Awaited<ReturnType<typeof lstat>> | undefined;
     let lease: ImportFileLease | undefined;
     const paths: string[] = [], children: string[] = [];
+    const payloads: BrowserImportPayload[] = [];
     try {
       const checked = BrowserMediaFilesSchema.parse(files);
       signal?.throwIfAborted();
@@ -35,9 +39,10 @@ export class BrowserMediaImports {
         if (bytes.toString("base64") !== file.data) throw new Error(`${file.name}: invalid file bytes.`);
         signal?.throwIfAborted(); if (abandoned()) throw new Error("The world closed during import.");
         paths.push(path); await writeFile(path, bytes, { flag: "wx", mode: 0o600 }); await lease?.consumed(bytes.length);
+        payloads.push(Object.freeze({ digest: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length }));
       }
       signal?.throwIfAborted(); if (abandoned()) throw new Error("The world closed during import.");
-      return await consume(paths);
+      return await consume(paths, Object.freeze(payloads));
     } catch (error) { lease?.writeFailed(); throw error; }
     finally {
       try {

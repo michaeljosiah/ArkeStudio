@@ -77,7 +77,13 @@ scope after refusal. Other cases cover competing result reservations, dedup/reti
 unknown capacity, failed post-write accounting and cancellation without late payload. A disposable
 Node host exits with flushed import intents; reconciliation settles only this finite port and
 leaves valid files/unrelated intents intact. Another service instance cannot release a live owner.
-These checks qualify per-file copies and the bounded browser spool, not full batch/metadata peaks,
+`storage/import-batch.test.ts` and `artifacts/browser-import-batch.test.ts` additionally cover
+whole known browser world-copy admission before the first copy, exact-fit shared budgeting,
+duplicate/retired reuse, mixed Audio Studio filtering and changed zero-copy plans. Batch close
+retains unfinished child writes and admission flushes; cancellation cannot grant a late child.
+Delayed filing tests preserve a destination created during admission and refuse changed mutation
+preconditions. These checks qualify per-file copies, bounded browser spool and known browser
+world-copy batches, not complete metadata peaks or other batch/import owners,
 provider pre-dispatch/scratch, remaining import/export owners or all native platforms. Run the
 coordinator typecheck after the final test edit; optional FFmpeg cases report explicit skips.
 

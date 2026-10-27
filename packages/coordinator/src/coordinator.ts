@@ -275,7 +275,8 @@ import type { AppStorageService } from "./storage/service.js";
 import { SetupFileStorage } from "./storage/setup-files.js";
 import { SetupArchiveStorage } from "./storage/setup-archive.js";
 import { JobArtifactStorage } from "./storage/job-artifacts.js";
-import { ImportFileStorage } from "./storage/import-files.js";
+import { ImportFileStorage, type ImportFileSpace } from "./storage/import-files.js";
+import { withBrowserImportBatch } from "./artifacts/browser-import-batch.js";
 import type { RecoveryControlService } from "./recovery/control.js";
 import type { RecoveryHistoryService } from "./recovery/history.js";
 import { recoveryCommand } from "./recovery/commands.js";
@@ -364,6 +365,7 @@ import {
   fileArtifact,
   fileGeneratedArtifact,
   importFolder,
+  kindForFile,
   retireArtifact,
   restoreArtifact,
 } from "./artifacts/filing.js";
@@ -7331,6 +7333,7 @@ export class Coordinator {
     genesisDecisionHeld = false,
     browserImportStore?: WorldStore,
     audiobookStore?: WorldStore,
+    browserImportSpace?: ImportFileSpace,
   ): Promise<void> {
     // A request owns its world independently of the renderer route. Use the same authenticated
     // commands and store, never a second coordinator or an unowned filesystem writer.
@@ -7340,7 +7343,7 @@ export class Coordinator {
       this.opts.provider.withBackgroundWorldStore) {
       if (this.stopping) return;
       return this.opts.provider.withBackgroundWorldStore(msg.worldId, store =>
-        this.handleClientMessage(msg, benchTakeActionHeld, benchDispatchHeld, genesisDecisionHeld, browserImportStore, store));
+        this.handleClientMessage(msg, benchTakeActionHeld, benchDispatchHeld, genesisDecisionHeld, browserImportStore, store, browserImportSpace));
     }
     if (!genesisDecisionHeld && (msg.kind === "genesis-propose-world" || msg.kind === "genesis-import-resolve" || msg.kind === "genesis-voice-generate" || msg.kind === "genesis-voice-decide" || msg.kind === "genesis-image-generate" || msg.kind === "genesis-image-decide" || msg.kind === "generate-look-preview" || msg.kind === "genesis-discard" || msg.kind === "genesis-chat" || msg.kind === "genesis-decide" || msg.kind === "genesis-review" || msg.kind === "genesis-readiness" || msg.kind === "genesis-readiness-leave" || msg.kind === "genesis-voices" || msg.kind === "genesis-images" || msg.kind === "genesis-imports" || msg.kind === "begin-founding-build" || msg.kind === "genesis-attach" || msg.kind === "genesis-attach-files" || msg.kind === "create-world") && msg.genesisId) {
       return serializeFileMutation(`founding-decisions:${msg.genesisId}`, () => this.handleClientMessage(msg, false, false, true));
@@ -18817,7 +18820,10 @@ export class Coordinator {
           if (browserFiles.length === 0) { this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true); return; }
           try {
             await this.browserMediaImports.run(browserFiles, () => !this.stillOpen(store) || this.stopping,
-              sourcePaths => this.handleClientMessage({ ...request, sourcePaths }, false, false, false, store), store.closingSignal);
+              (sourcePaths, payloads) => withBrowserImportBatch(store, payloads.filter((_payload, index) => msg.audioStudio
+                ? kindForFile(sourcePaths[index]!) === "audio"
+                : msg.music === undefined || (MUSIC_IMPORT_EXTENSIONS as readonly string[]).includes(extname(sourcePaths[index]!).slice(1).toLowerCase())), this.importFileSpace,
+                space => this.handleClientMessage({ ...request, sourcePaths }, false, false, false, store, undefined, space)), store.closingSignal);
           } catch (error) { this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error)); }
           return;
         }
@@ -18835,10 +18841,11 @@ export class Coordinator {
           this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
           return;
         }
+        const importSpace = browserImportSpace ?? this.importFileSpace;
         if (msg.audioStudio) {
           try {
             const failures = await importAudioStudioMedia(store, chosen, msg.audioStudio, {
-              ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
+              ...(importSpace ? { importSpace } : {}),
               ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
               ...(this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
               ...(this.opts.confirmLargeMediaImport ? { confirmLarge: this.opts.confirmLargeMediaImport } : {}),
@@ -18863,7 +18870,7 @@ export class Coordinator {
             if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
             const name = basename(sourcePath);
             if (!(MUSIC_IMPORT_EXTENSIONS as readonly string[]).includes(extname(name).slice(1).toLowerCase())) { failures.push({ index, reason: `${name}: a track is WAV, MP3, M4A or FLAC` }); continue; }
-            const outcome = await fileArtifact(store, { ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
+            const outcome = await fileArtifact(store, { ...(importSpace ? { importSpace } : {}),
               sourcePath,
               ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
               abandoned: () => !this.stillOpen(store) || this.stopping,
@@ -18881,7 +18888,7 @@ export class Coordinator {
         if (msg.editor) {
           try {
             const failures = await importEditorMedia(store, chosen, msg.editor, {
-              ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
+              ...(importSpace ? { importSpace } : {}),
               ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
               ...(this.opts.takePosterMaker ? { poster: this.opts.takePosterMaker } : {}),
               onPosterUnavailable: (artifactId, reason) => {
@@ -18904,7 +18911,7 @@ export class Coordinator {
         for (const [index, sourcePath] of chosen.entries()) {
           if (!this.stillOpen(store)) return;
           if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
-          const outcome = await fileArtifact(store, { ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
+          const outcome = await fileArtifact(store, { ...(importSpace ? { importSpace } : {}),
             sourcePath,
             // Measured as it is filed (#283): an artifact is immutable, so its length and whether
             // it carries audio are true once and true forever.

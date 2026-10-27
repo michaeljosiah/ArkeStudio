@@ -3,6 +3,8 @@ import { lstat, readdir, readFile, realpath, stat, statfs } from "node:fs/promis
 import { basename, extname, join, sep } from "node:path";
 import {
   ArtifactSidecarSchema,
+  BROWSER_MEDIA_IMPORT_MAX_BYTES,
+  BROWSER_MEDIA_IMPORT_MAX_FILES,
   audioSourceOf,
   pickableArtifacts,
   ulid,
@@ -22,6 +24,7 @@ import { hashMedia } from "../world/scan.js";
 import { sha256 } from "../world/text-files.js";
 import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 import { ImportStorageHeld, type ImportFileLease, type ImportFileSpace } from "../storage/import-files.js";
+import type { BrowserImportPayload } from "./browser-media-import.js";
 
 /**
  * Artifact filing (SPEC-015 §2.3): copy in, never reference (D8); dedupe by content hash (D9);
@@ -217,6 +220,30 @@ async function artifactMediaMatches(
   const hash = await hashMedia(path);
   return hash !== null && hash.slice(0, "sha256:".length + 16) === expectedHash;
 }
+async function reusableArtifact(store: WorldStore, existing: ArtifactSidecar, hash: string) {
+  const current = await currentSidecar(store, existing);
+  return current && current.raw !== null && current.sidecar.id === existing.id && current.sidecar.file === existing.file &&
+    current.sidecar.hash === hash && await artifactMediaMatches(store, current.sidecar, hash) ? current : null;
+}
+/** Producer receipts only; the world verifies reuse under its existing mutation gate. */
+export async function planBrowserArtifactCopies(store: WorldStore, payloads: readonly BrowserImportPayload[]): Promise<{ bytes: number; copies: number }> {
+  if (payloads.length > BROWSER_MEDIA_IMPORT_MAX_FILES || payloads.some(value => !/^[a-f0-9]{64}$/.test(value.digest) || !Number.isSafeInteger(value.bytes) || value.bytes < 0) ||
+    payloads.reduce((sum, value) => sum + value.bytes, 0) > BROWSER_MEDIA_IMPORT_MAX_BYTES) throw new Error("Invalid browser import payload plan.");
+  return store.gateOp(async () => {
+    const seen = new Map<string, number>(); let bytes = 0, copies = 0;
+    for (const value of payloads) {
+      store.closingSignal.throwIfAborted();
+      if (seen.has(value.digest)) { if (seen.get(value.digest) !== value.bytes) throw new Error("The browser import payload changed."); continue; }
+      seen.set(value.digest, value.bytes);
+      const hash = `sha256:${value.digest.slice(0, 16)}`; let held = false;
+      for (const existing of store.getBundle().artifacts.filter(artifact => artifact.hash === hash)) {
+        if (await reusableArtifact(store, existing, hash)) { held = true; break; }
+      }
+      if (!held) { bytes += value.bytes; copies++; }
+    }
+    return { bytes, copies };
+  });
+}
 
 /** Merge links into an existing artifact — dedupe keeps one copy, many uses (R-4, D9). */
 export async function prepareArtifactLinks(store: WorldStore, artifact: ArtifactSidecar, links: string[]): Promise<import("../world/commit.js").CommitFileInput> {
@@ -389,15 +416,8 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
       : artifact.file === original || artifact.file === `${stem}${ext}` ? 2 : 1;
     candidates.sort((a, b) => restorationRank(b) - restorationRank(a));
     for (const existing of candidates) {
-      const current = await currentSidecar(store, existing);
-      if (
-        current !== null &&
-        current.raw !== null &&
-        current.sidecar.id === existing.id &&
-        current.sidecar.file === existing.file &&
-        current.sidecar.hash === hash &&
-        (await artifactMediaMatches(store, current.sidecar, hash))
-      ) {
+      const current = await reusableArtifact(store, existing, hash);
+      if (current) {
         const links = [...new Set([...current.sidecar.links, ...(input.links ?? [])])];
         const next = { ...current.sidecar, links };
         let changed = links.length !== current.sidecar.links.length;
@@ -460,8 +480,11 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
       store.closingSignal.throwIfAborted();
       if (input.abandoned?.()) throw new Error("The world closed during import.");
       await store.assertOwnership();
+      const changed = input.mutation?.precondition?.(); if (changed) throw new WorldStateStaleError(changed);
+      const destination = join(store.dir, "artifacts", file);
+      if (await lstat(toExtendedLength(destination)).catch(() => null) || await lstat(toExtendedLength(`${destination}.json`)).catch(() => null)) throw new Error("The artifact destination changed before copying. Import it again.");
       // Stage the bytes that were hashed, not a second read of a changed source.
-      await atomicWriteFile(join(store.dir, "artifacts", file), bytes);
+      await atomicWriteFile(destination, bytes);
       await lease?.consumed(bytes.length);
       await writeSidecar(store, sidecar, null, input.mutation);
       return { outcome: "filed", artifact: sidecar };
