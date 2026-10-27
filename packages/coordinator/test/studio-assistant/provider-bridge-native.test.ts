@@ -89,8 +89,8 @@ for (const { overflow, managedWriter, managedProvider, interrupted } of scenario
   const gpu = new LocalGpu(async () => {}), adapter = withModelValidation(withLocalGpu(wiring.adapter, gpu), async () => ({}));
   const runner = new HarnessStudioModelRunner({ adapter: () => adapter, scratch: join(root, "studio", "turns"), sessionInput: async value => value,
     destination: () => ({ local: true, identity: wiring.recovery!.componentDigest() }), timeoutMs: managedWriter ? 90_000 : 30_000,
-    privateTransport: async request => { assert.deepEqual(privateWireBody(request), expected);
-      const writer = managedWriter ? wiring.createPrivateWriter?.(request) : undefined;
+    privateTransport: async (request, signal) => { assert.deepEqual(privateWireBody(request), expected);
+      const writer = managedWriter ? await wiring.createPrivateWriter?.(request, signal) : undefined;
       if (managedWriter) assert(writer, "the actual bundled supervisor must supply its original writer connection");
       if (writer && managedProvider) {
         const original = writer.fetch.bind(writer);

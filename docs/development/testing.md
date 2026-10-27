@@ -2017,6 +2017,16 @@ host and active world with two native stand-ins, verifies retirement reconciliat
 native stops, and checks durable world closure before reporting a retirement error. Run these
 with native process/socket access, then coordinator typecheck after the last test edit. Synthetic
 stand-ins do not establish binary provenance, live model/GPU or remaining activation gates.
+`test/harness/executable-content.test.ts` and `private-writer-pin.test.ts` add bounded byte,
+size, metadata/identity, owner, cancellation and path-alias checks, including a healthy bundled
+protocol stand-in refused by the private writer factory. Desktop `runtime-sources.test.mjs`
+checks the private executable pin against the bundled version/archive; `runtime-support.test.mjs`
+retains the packaging regression checks. With `ARKE_TEST_OPENCODE2`, the five real bundled bridge
+scenarios now await executable byte qualification before creating a private writer. No build
+manifest, generic protocol reply or test stand-in can replace the committed expected digest.
+This qualifies the pinned writer content within Arke's existing owned local desktop trust model.
+Managed provider dependencies and remaining activation/native acceptance are separate requirements;
+no protection against compromise of the local user/OS is claimed.
 
 ## System status (master turn 241; System 240 review)
 

@@ -1522,7 +1522,14 @@ owns the exact paused socket, proof, bounded request/response and actual close; 
 redirects, reconnects or retries. Other platforms refuse native proof pending qualification.
 `harness/managed-writer-transport.ts` adds a closed original-auth API policy for one private
 directory/role/session/request and one generation. `harness/v2-launch.ts` supplies it only for
-the current bundled Windows writer. Failed creation retains original files until HTTP drains.
+the current bundled Windows writer. Its asynchronous factory also checks executable content
+against `harness/private-writer-pin.json` before granting the capability. The pin is embedded
+with Arke, not read from a self-reported runtime manifest. `harness/executable-content.ts`
+streams one bounded descriptor, checks file identity/metadata and canonical path around the
+read, and refuses changed bytes, owner, cancellation or aliases. Original pending I/O drains
+before the task returns. This is byte qualification, not an atomic loader-image/hostile-filesystem
+fence. Packaging checks the same executable/archive/version pin before probing/staging it.
+Failed native creation retains original files until HTTP drains.
 
 The pinned native metadata deadline is one second. Managed startup verifies two unwritten
 one-use sockets before exposing the URL; initial metadata can consume each once, with final

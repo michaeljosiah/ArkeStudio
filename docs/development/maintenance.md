@@ -14,6 +14,13 @@ licence source in `apps/desktop/runtime-sources.json`, and rerun the real-binary
 `@opencode/cli-windows-x64` and extracts `package/bin/opencode.exe`; staging renames it to
 `opencode2.exe` to preserve Studio's installed paths. PATH discovery checks both command names
 and accepts only the pinned v2 release. OpenCode v1 has no adapter, fallback or launch override.
+Private Studio writer qualification also embeds the verified executable size/hash in coordinator
+`harness/private-writer-pin.json`, tied to that source archive and architecture. After verifying
+the new archive against `runtime-sources.json`, stream/hash its exact executable member and
+update this pin with the version change. `prepare-opencode2.mjs` refuses incoherent pins or
+mismatched extracted bytes before its version probe/stage. A staged runtime's own manifest does
+not supply this expected digest. Repeat content-reader and actual bundled private-writer checks;
+the content check alone does not qualify the full managed stack or activate Studio model calls.
 OpenCode remains the bundled default while the
 Arke replacement in [issue #1698](https://github.com/michaeljosiah/ArkeStudio/issues/1698) is deferred.
 

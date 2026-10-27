@@ -29,6 +29,8 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { ownedChildHooks } from "./owned-child.js";
 import { HarnessRuntimeChanges, type HarnessRecoveryOwner } from "./runtime-change.js";
 import { ManagedStudioWriterTransport } from "./managed-writer-transport.js";
+import { executableContentMatches } from "./executable-content.js";
+import privateWriterPin from "./private-writer-pin.json" with { type: "json" };
 
 // This package owns shared desktop/dev composition, so every adapter is a runtime dependency.
 // Keep concrete adapter imports here; Coordinator itself consumes the HarnessAdapter contract.
@@ -214,7 +216,7 @@ export interface AssembleHarnessOptions {
 
 export interface AssembledHarness {
   /** Host-only original bundled writer. No existing-install ownership or model approval. */
-  createPrivateWriter?(request: PrivateSessionRequest): (PrivateSessionWriter & { ownerStopped(): boolean }) | null;
+  createPrivateWriter?(request: PrivateSessionRequest, signal?: AbortSignal): Promise<(PrivateSessionWriter & { ownerStopped(): boolean }) | null>;
   recovery?: HarnessRecoveryOwner;
   reconfigureOllama?: (apply?: () => Promise<void>) => Promise<void>;
   harness: DiscoveredHarness | null;
@@ -377,12 +379,16 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     isV2,
     supervisor,
     adapter,
-    createPrivateWriter: request => {
+    createPrivateWriter: async (request, signal = AbortSignal.timeout(10_000)) => {
       if (process.platform !== "win32" || !harness || harness.discovery.source !== "bundled") return null;
+      const captured = Object.freeze({ model: request.model, system: request.system, prompt: request.prompt, outputTokenLimit: request.outputTokenLimit });
       const origin = supervisor.captureProcessOrigin(), secret = password.current();
       if (!origin || !secret || origin.executable !== harness.discovery.command || baseUrl() !== `http://127.0.0.1:${origin.port}`) return null;
-      return new ManagedStudioWriterTransport({ origin, current: () => password.current() === secret && baseUrl() === `http://127.0.0.1:${origin.port}`,
-        authorization: v2BasicAuth(secret), request });
+      const current = () => origin.current() && password.current() === secret && baseUrl() === `http://127.0.0.1:${origin.port}`;
+      if (privateWriterPin.version !== OPENCODE2_PINNED_VERSION || privateWriterPin.arch !== "x64" ||
+        !await executableContentMatches(origin.executable, privateWriterPin, signal, current).catch(() => false) || signal.aborted || !current()) return null;
+      return new ManagedStudioWriterTransport({ origin, current,
+        authorization: v2BasicAuth(secret), request: captured });
     },
     ...(harness ? { recovery: { ownership: harness.discovery.source === "bundled" ? "managed" as const : "external" as const,
       componentDigest: () => createHash("sha256").update(JSON.stringify([harness.generation, harness.discovery.command, harness.discovery.version, opts.ollamaEndpoint?.()])).digest("hex"),
