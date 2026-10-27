@@ -3,11 +3,14 @@ import { it } from "node:test";
 import { FindingSchema } from "../src/diagnostics.js";
 import { deriveStorageFindings } from "../src/storage-diagnostics.js";
 import type { StorageHealthSnapshot, StorageRootHealth } from "../src/storage-health.js";
+import type { RecoveryCacheScope } from "../src/recovery-actions.js";
 
 const now = "2026-10-26T14:00:00.000Z", epoch = Date.parse(now), GiB = 1024 ** 3;
 const root = (rootId = "media", availableBytes = 20 * GiB): StorageRootHealth => ({ rootId, role: "generated-media", state: "measured", source: "host-provided", limitations: [], pressure: null, forecast: null,
   capacity: { volumeId: "volume-a", mappingRevision: "mount-a", measuredAt: epoch, availableBytes, totalBytes: 500 * GiB } });
 const health = (...roots: StorageRootHealth[]): StorageHealthSnapshot => ({ at: epoch, writing: false, roots });
+const scope: RecoveryCacheScope = { revision: "a".repeat(64), volumeId: "volume-a", mappingRevision: "mount-a", measuredAt: epoch,
+  inventoryAt: epoch, candidateFiles: 1, recordedBytes: 60 };
 
 it("states no storage fault for absent hosts or fresh sufficient capacity", () => {
   assert.deepEqual(deriveStorageFindings(undefined, now), []);
@@ -70,4 +73,34 @@ it("carries a typed control-store failure without exposing filesystem error text
     assert.equal(finding.kind, "storage-control-unavailable"); assert.match(finding.cause.statement, clause);
     assert.equal(finding.remedy, null); FindingSchema.parse({ ...finding, firstSeen: now });
   }
+});
+
+it("offers a scoped review only for fresh receipt candidates on the warning's measured volume", () => {
+  const finding = deriveStorageFindings(health(root("media", 4 * GiB)), now, { available: true, pending: false, scope })[0]!;
+  assert.deepEqual(finding.remedy, { control: "local-preview-cleanup-review", target: scope.revision });
+  assert.deepEqual(finding.facts.find(f => f.name === "reviewable-previews"), { name: "reviewable-previews", value: 1,
+    source: "app.recoveryPolicy.cleanup.scope", measuredAt: now });
+  assert.match(finding.note!, /Needs your approval/); assert.match(finding.note!, /recoverable space is unknown/);
+  FindingSchema.parse({ ...finding, firstSeen: now });
+  const other = root("exports", 4 * GiB); other.capacity!.volumeId = "volume-b";
+  const mixed = deriveStorageFindings(health(root("media", 4 * GiB), other), now, { available: true, pending: false, scope });
+  assert.equal(mixed.find(f => f.occurrence === "volume-a")?.remedy?.target, scope.revision);
+  assert.equal(mixed.find(f => f.occurrence === "volume-b")?.remedy, null);
+});
+
+it("withholds cleanup review for stale, future, changed or unavailable cache scope and restored headroom", () => {
+  const input = health(root("media", 4 * GiB));
+  for (const patch of [{ volumeId: "volume-b" }, { mappingRevision: "mount-b" }, { candidateFiles: 0 },
+    { measuredAt: epoch - 60_001 }, { measuredAt: epoch + 1 }, { inventoryAt: epoch - 60_001 }, { inventoryAt: epoch + 1 }]) {
+    const finding = deriveStorageFindings(input, now, { available: true, pending: false, scope: { ...scope, ...patch } })[0]!;
+    assert.equal(finding.remedy, null); assert(!finding.facts.some(f => f.name === "reviewable-previews"));
+    assert.match(finding.note!, /You need to free space/);
+  }
+  for (const patch of [{ available: false }, { pending: true }]) {
+    assert.equal(deriveStorageFindings(input, now, { available: true, pending: false, scope, ...patch })[0]!.remedy, null);
+  }
+  const recovered = root("media", 20 * GiB);
+  recovered.pressure = { volumeId: "volume-a", mappingRevision: "mount-a", warning: true, critical: false,
+    warningClearSince: epoch, criticalClearSince: null, lastMeasuredAt: epoch };
+  assert.equal(deriveStorageFindings(health(recovered), now, { available: true, pending: false, scope })[0]!.remedy, null);
 });

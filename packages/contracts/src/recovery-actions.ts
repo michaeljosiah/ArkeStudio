@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { UlidSchema } from "./ids.js";
+import { StorageCapacitySchema } from "./storage-health.js";
 const digest = z.string().regex(/^[a-f0-9]{64}$/), instant = z.number().int().nonnegative().safe();
 export const RECOVERY_ACTION_LIMITS = Object.freeze({ previews: 64, previewMs: 5 * 60_000 });
 export const RecoveryRetryPlanSchema = z.object({
@@ -17,6 +18,7 @@ export const RecoveryCachePlanSchema = z.object({
   targets: z.array(z.object({ resourceKey: digest, createdAt: instant, logicalBytes: instant.min(1), allocatedBytes: instant.nullable() }).strict()).min(1).max(CACHE_CLEANUP_POLICY.maxFiles),
   allocatedBytes: instant.nullable(), minAgeMs: z.literal(CACHE_CLEANUP_POLICY.minAgeMs),
   stopAtAvailableBytes: instant.nullable(),
+  scope: digest.optional(),
   replaysJobs: z.literal(false), interruptsWork: z.literal(false), undoable: z.literal(false),
 }).strict().refine(value => value.expiresAt > value.preparedAt && value.expiresAt - value.preparedAt <= RECOVERY_ACTION_LIMITS.previewMs &&
   value.files === value.targets.length && new Set(value.targets.map(row => row.resourceKey)).size === value.targets.length &&
@@ -24,6 +26,11 @@ export const RecoveryCachePlanSchema = z.object({
   value.logicalBytes === value.targets.reduce((sum, row) => sum + row.logicalBytes, 0) &&
   (value.targets.some(row => row.allocatedBytes === null) ? value.allocatedBytes === null : value.allocatedBytes === value.targets.reduce((sum, row) => sum + row.allocatedBytes!, 0)));
 export type RecoveryCachePlan = z.infer<typeof RecoveryCachePlanSchema>;
+export const RecoveryCacheScopeSchema = StorageCapacitySchema.pick({ volumeId: true, mappingRevision: true, measuredAt: true }).extend({
+  revision: digest, inventoryAt: instant, candidateFiles: z.number().int().nonnegative().max(CACHE_CLEANUP_POLICY.maxFiles),
+  recordedBytes: instant.max(CACHE_CLEANUP_POLICY.maxBytes),
+}).strict();
+export type RecoveryCacheScope = z.infer<typeof RecoveryCacheScopeSchema>;
 export const RecoveryCacheOutcomeSchema = z.object({
   removedFiles: z.number().int().min(0).max(CACHE_CLEANUP_POLICY.maxFiles), logicalBytes: instant,
   availableBefore: instant.nullable(), availableAfter: instant.nullable(), reclaimedBytes: z.null(),
@@ -44,7 +51,7 @@ export const RecoveryActionCommandSchema = z.object({ kind: z.literal("recovery-
   command: z.discriminatedUnion("action", [
     z.object({ action: z.literal("preview-retry"), resourceKey: digest }).strict(),
     z.object({ action: z.literal("approve-retry"), planId: digest }).strict(),
-    z.object({ action: z.literal("preview-cleanup") }).strict(),
+    z.object({ action: z.literal("preview-cleanup"), scope: digest.optional() }).strict(),
     z.object({ action: z.literal("approve-cleanup"), planId: digest }).strict(),
     z.object({ action: z.literal("reconcile-cleanup") }).strict(),
     z.object({ action: z.literal("set-cleanup-maintenance"), enabled: z.boolean() }).strict(),

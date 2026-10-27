@@ -74,6 +74,22 @@ it("cleanup expiry, invalidation and cancellation consume reviews before any del
   }
 });
 
+it("forwards the exact warning scope to its owner and keeps review separate from approval", async () => {
+  const h = fixture(), scope = "d".repeat(64); let calls = 0;
+  h.advance(CACHE_CLEANUP_POLICY.minAgeMs);
+  h.registry.registerCleanup({ available: () => ({ available: true, pending: false }), prepare: async (_signal, expected) => {
+    assert.equal(expected, scope);
+    return { evidence: key, files: 1, logicalBytes: 1, allocatedBytes: 4096, stopAtAvailableBytes: null,
+      targets: [{ resourceKey: key, createdAt: 0, logicalBytes: 1, allocatedBytes: 4096 }], run: async () => {
+        calls++; return { status: "verified", cleanup: { removedFiles: 1, logicalBytes: 1, availableBefore: null, availableAfter: null, reclaimedBytes: null } };
+      } };
+  } });
+  await h.handle({ action: "preview-cleanup", scope }); const plan = h.results.at(-1)?.cleanupPlan;
+  assert(plan); assert.equal(plan.scope, scope); assert.equal(calls, 0);
+  await h.handle({ action: "approve-cleanup", planId: plan.id }); assert.equal(calls, 1);
+  h.registry.closeAdmission();
+});
+
 it("read-only cleanup reconciliation shares the executor and never prepares another deletion", async () => {
   const h = fixture(); let calls = 0, prepares = 0, finish!: () => void;
   const waiting = new Promise<void>(resolve => { finish = resolve; });

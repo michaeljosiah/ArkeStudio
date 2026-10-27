@@ -153,7 +153,17 @@ between files and retain the later audition. Broker tests preserve the single ex
 allow withdrawal even with an invalid clock. Client `test/recovery-cache-maintenance.test.tsx`
 requires review before opt-in, lets withdrawal overtake enable, refuses duplicate clicks and
 never resubmits after reconnect. This qualifies only the fixed preset class; broader classes,
-inventory, process/driver/platform acceptance and incident action binding remain separate.
+inventory and process/driver/platform acceptance remain separate.
+
+The fixed-preview incident remedy additionally uses contracts storage/diagnostics/recovery tests
+for exact volume/mapping, capacity/inventory freshness, restored headroom, pending control,
+closed source projection and generic approval-required notices. The authenticated cleanup host
+injects capacity while using the real native file owner: a wrong scope is refused, a mapping
+change after review preserves the audition, a same-path root replacement preserves both original
+and successor bytes, and a new scoped review still requires separate one-use approval.
+This is measured capacity injection, not a real disk-full experiment or proof
+of reclaimable allocation. Client cleanup tests open without sending work, withdraw an unadmitted
+review when its warning changes, ignore its late response and preserve an approval already sent.
 
 Recovery control tests (#2194) use contracts `test/recovery-policy.test.ts` and coordinator
 `test/recovery/control.test.ts`. They inject crash/unknown writes, competing attempts, rolling

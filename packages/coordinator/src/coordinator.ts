@@ -4059,7 +4059,7 @@ export class Coordinator {
       emit: event => this.emit(event),
     });
     if (this.cataloguePreviews) this.recoveryActions.registerCleanup({
-      available: () => this.cataloguePreviews!.cleanupAvailability(), prepare: signal => this.cataloguePreviews!.prepareCleanup(signal),
+      available: () => this.cataloguePreviews!.cleanupAvailability(), prepare: (signal, scope) => this.cataloguePreviews!.prepareCleanup(signal, scope),
       reconcile: signal => this.cataloguePreviews!.reconcileCleanup(signal),
       setMaintenance: enabled => this.cataloguePreviews!.setMaintenance(enabled), revokeMaintenance: () => this.cataloguePreviews!.revokeMaintenance(),
       maintenanceReady: () => this.cataloguePreviews!.maintenanceReady(), runMaintenance: (id, signal, valid) => this.cataloguePreviews!.runMaintenance(id, signal, valid),
@@ -4711,7 +4711,7 @@ export class Coordinator {
     // A tail read that failed transiently (an AV pass holding app.jsonl) would otherwise stick
     // as `unavailable` until the next append; retrying on the next event is still event-driven.
     if (this.diagnosticsLogTail === "unavailable") this.refreshDiagnosticsLogTail();
-    if (!parsed.type.startsWith("recovery.")) this.diagnosticsSnapshot?.schedule();
+    if (!parsed.type.startsWith("recovery.") || parsed.type === "recovery.policy") this.diagnosticsSnapshot?.schedule();
     try {
       this.opts.observeEvent?.(parsed);
     } catch {
@@ -5013,7 +5013,11 @@ export class Coordinator {
     }
     if (this.opts.storageHealth) {
       this.lifecycleDisposers.add(this.opts.storageHealth.subscribe(health => {
-        if (!this.stopping) { this.emit({ type: "storage.health", at: new Date().toISOString(), health }); this.trackBackground(this.recoveryActions.maintainCleanup()); }
+        if (!this.stopping) {
+          this.emit({ type: "storage.health", at: new Date().toISOString(), health });
+          if (this.cataloguePreviews) this.trackBackground(this.cataloguePreviews.refreshCleanupScope());
+          this.trackBackground(this.recoveryActions.maintainCleanup());
+        }
       }));
       this.syncStorageObservation();
       this.trackBackground(this.opts.storageHealth.start());
@@ -14557,6 +14561,7 @@ export class Coordinator {
         // (R-34), and reaches the asker as the ordinary broadcast.
         this.diagnosticsSnapshot?.refresh();
         if (this.opts.storageHealth) this.trackBackground(this.opts.storageHealth.refresh());
+        if (this.cataloguePreviews) this.trackBackground(this.cataloguePreviews.refreshCleanupScope());
         return;
       }
       case "refresh-system-resources": {

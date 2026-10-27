@@ -35,3 +35,27 @@ it("requests storage measurement from the finding and stale Refresh without remo
     await act(async () => root.unmount()); container.remove(); __setBridgeForTest(null);
   }
 });
+
+it("follows a measured storage remedy to its scoped review without approving or previewing cleanup", async () => {
+  const now = new Date().toISOString(), scope = "d".repeat(64), sent: ClientMessage[] = [], state = structuredClone(FIXTURE_STATE);
+  state.app.storageHealth = { at: Date.parse(now), writing: false, roots: [{ rootId: "cache", role: "working-files", state: "measured", source: "host-provided",
+    limitations: [], capacity: { volumeId: "volume-a", mappingRevision: "mount-a", measuredAt: Date.parse(now), availableBytes: 4 * 1024 ** 3, totalBytes: 100 * 1024 ** 3 }, pressure: null, forecast: null }] };
+  state.app.recoveryPolicy = { audit: "available", accepting: true, mode: "suggest-only", targets: [], cleanup: { available: true, pending: false,
+    scope: { revision: scope, volumeId: "volume-a", mappingRevision: "mount-a", measuredAt: Date.parse(now), inventoryAt: Date.parse(now), candidateFiles: 1, recordedBytes: 60 } } };
+  const snapshot = deriveDiagnostics({ sources: diagnosticsSources(state.app), tails: { appLog: [] }, previous: null, now });
+  __setStateForTest(state, { connection: "open", diagnostics: snapshot });
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json) { sent.push(JSON.parse(json)); } });
+  const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  try {
+    await act(async () => root.render(<MemoryRouter initialEntries={["/settings/diagnostics"]}><SettingsDiagnosticsScreen /></MemoryRouter>));
+    const row = container.querySelector('[data-kind="storage-pressure"]')!;
+    const remedy = row.querySelector<HTMLButtonElement>(".fy-diag__go")!; assert.equal(remedy.textContent, "Review preview cleanup");
+    await act(async () => remedy.click());
+    assert(!sent.some(message => message.kind === "recovery-action"));
+    assert(container.textContent?.includes("volume named by the storage warning"));
+    const review = [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Review previews…")!;
+    assert(!review.disabled); await act(async () => review.click());
+    const actions = sent.filter(message => message.kind === "recovery-action"); assert.equal(actions.length, 1);
+    assert.deepEqual(actions[0]!.command, { action: "preview-cleanup", scope });
+  } finally { await act(async () => root.unmount()); container.remove(); __setBridgeForTest(null); }
+});

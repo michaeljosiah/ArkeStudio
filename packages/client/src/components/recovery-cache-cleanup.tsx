@@ -6,13 +6,30 @@ import { Button } from "./ui.js";
 
 const bytes = (value: number | null) => value === null ? "unknown" : `${value.toLocaleString()} bytes`;
 
-export function RecoveryCacheCleanupControls() {
+export function RecoveryCacheCleanupControls({ scope }: { scope?: string } = {}) {
   const { state, connection, recoveryActionResults } = useStore(), policy = state?.app.recoveryPolicy;
   const [request, setRequest] = useState<string | null>(null), [plan, setPlan] = useState<RecoveryCachePlan | null>(null);
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(""), [cancelled, setCancelled] = useState(false);
   const [checking, setChecking] = useState(false);
   const submitting = useRef(false), result = request ? recoveryActionResults[request] : undefined;
+  const focused = useRef<string | null>(null);
+  const previousScope = useRef(scope);
   const available = !isRemoteSession() && connection === "open" && policy?.accepting;
+  const scopeCurrent = scope === undefined || /^[a-f0-9]{64}$/.test(scope) && policy?.cleanup?.scope?.revision === scope;
+  useEffect(() => {
+    if (previousScope.current === scope) return;
+    previousScope.current = scope;
+    // An approval already sent retains its original target. A pending review grants no
+    // authority and its late reply must not populate a different warning's dialog.
+    if (busy && (plan || checking)) return;
+    if (plan && available) reviewRecoveryAction({ action: "cancel", planId: plan.id });
+    setPlan(null); setRequest(null); setBusy(false); submitting.current = false; setMessage("");
+  }, [scope]);
+  useEffect(() => {
+    if (!scope || focused.current === scope) return;
+    const section = document.getElementById("recovery-cache-cleanup");
+    if (section) { section.scrollIntoView?.({ block: "center" }); section.focus?.({ preventScroll: true }); focused.current = scope; }
+  }, [scope, Boolean(policy?.cleanup)]);
   useEffect(() => {
     if (!request) return;
     if (connection !== "open") {
@@ -51,18 +68,20 @@ export function RecoveryCacheCleanupControls() {
     if (!id) setMessage("The request could not be sent. Reconnect and check Diagnostics.");
   };
   if (!policy?.cleanup && !plan && !message) return null;
-  return <section aria-label="Review local preview cleanup">
+  return <section aria-label="Review local preview cleanup" id="recovery-cache-cleanup" tabIndex={-1}>
     <div className="fy-set__row">
       <div className="fy-set__name fy-set__name--wide"><div className="fy-set__title">Expired local preset previews</div>
         <div className="fy-set__caps">Needs your approval · Receipt-backed fixed auditions. New or active previews stay protected.</div></div>
-      <Button disabled={!available || busy || !policy?.cleanup?.available} onClick={() => send({ action: "preview-cleanup" })}>Review previews…</Button>
+      <Button disabled={!available || busy || !policy?.cleanup?.available || !scopeCurrent} onClick={() => send({ action: "preview-cleanup", ...(scope !== undefined ? { scope } : {}) })}>Review previews…</Button>
     </div>
+    {scope !== undefined && !plan && !busy && <p className="fy-diag__meta">{scopeCurrent ? "Reviewing previews on the volume named by the storage warning. Opening this review approves no deletion." : "This storage review target is no longer current. Refresh Diagnostics before reviewing cleanup."}</p>}
     {policy?.cleanup?.pending && <p className="fy-diag__meta" role="status">An earlier cleanup has an unconfirmed outcome. Its intent is retained and further cleanup is held.</p>}
     {policy?.cleanup?.pending && <Button disabled={!available || busy} onClick={() => send({ action: "reconcile-cleanup" })}>Check cleanup outcome</Button>}
     {policy?.cleanup?.audit === "unavailable" && <p className="fy-diag__meta" role="status">Cleanup control is unavailable. {policy.cleanup.reason === "disk-full" ? "Disk space is needed to record cleanup safely." : policy.cleanup.reason === "permission" ? "The host cannot access its cleanup record." : "Its saved record needs attention."} Cleanup stays held.</p>}
     {policy?.cleanup?.reason === "unsupported" && <p className="fy-diag__meta">Native preview cleanup is unavailable on this host.</p>}
     {plan && <div className="fy-set__row fy-set__row--stack">
       <div className="fy-set__title">Delete {plan.files} expired local preset {plan.files === 1 ? "preview" : "previews"}?</div>
+      {plan.scope && <p className="fy-diag__meta">This plan is bound to the storage warning’s cache root and volume.</p>}
       <p className="fy-diag__meta">Recorded size: {bytes(plan.logicalBytes)}. Observed allocation: {bytes(plan.allocatedBytes)}. Recovered space may differ. These fixed auditions are at least seven days old and can be generated again. Deletion cannot be undone.</p>
       <ul className="fy-diag__meta">{plan.targets.map((target, index) => <li key={target.resourceKey}>Local audition {index + 1} · {new Date(target.createdAt).toLocaleDateString()} · {bytes(target.logicalBytes)}</li>)}</ul>
       {plan.stopAtAvailableBytes !== null && <p className="fy-diag__meta">Stops early if measured available space reaches {bytes(plan.stopAtAvailableBytes)}. Waiting work still needs its own fresh admission.</p>}

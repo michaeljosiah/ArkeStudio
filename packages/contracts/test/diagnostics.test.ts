@@ -783,6 +783,19 @@ describe("derivation discipline (R-11, R-14, R-35)", () => {
     assert.ok("ledgerUnavailable" in projected);
     assert.equal(Object.keys(projected).length, 23);
   });
+
+  it("projects only the closed cleanup review observation, without the recovery policy or private target data", () => {
+    const scope = { revision: "a".repeat(64), volumeId: "volume-a", mappingRevision: "mount-a", measuredAt: Date.parse(NOW),
+      inventoryAt: Date.parse(NOW), candidateFiles: 1, recordedBytes: 60 };
+    const app = { ...sources(), recoveryPolicy: { audit: "available", accepting: true, mode: "automatic", targets: [{ token: "PRIVATE_POLICY" }],
+      cleanup: { available: true, pending: false, maintenance: { token: "PRIVATE_MAINTENANCE" }, scope: { ...scope, path: "PRIVATE_PATH" } } } } as never;
+    const projected = diagnosticsSources(app);
+    assert.deepEqual(projected.cleanup, { available: true, pending: false, scope });
+    assert(!("recoveryPolicy" in projected)); assert(!JSON.stringify(projected).includes("PRIVATE_"));
+    assert.equal(Object.keys(projected).length, 24);
+    assert.equal(CONTROL_REGISTRY["local-preview-cleanup-review"].route, "/settings/diagnostics");
+    assert.equal(CONTROL_REGISTRY["local-preview-cleanup-review"].targetParam, "cleanupScope");
+  });
 });
 
 describe("the declared registry and kinds (R-8, R-24, R-27)", () => {

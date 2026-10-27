@@ -7,7 +7,7 @@ import type { PreparedPreviewCleanup } from "../storage/local-preview-cache.js";
 interface Target { service: RecoveryRetryPlan["service"]; prepare(): PreparedSupervisorRetry | null }
 interface Preview { plan: RecoveryRetryPlan; target: Target; prepared: PreparedSupervisorRetry }
 type CleanupAvailability = NonNullable<import("@arke-studio/contracts").RecoveryPolicySnapshot["cleanup"]>;
-interface CleanupTarget { available(): CleanupAvailability; prepare(signal: AbortSignal): Promise<PreparedPreviewCleanup | null>;
+interface CleanupTarget { available(): CleanupAvailability; prepare(signal: AbortSignal, scope?: string): Promise<PreparedPreviewCleanup | null>;
   reconcile?(signal: AbortSignal): Promise<import("@arke-studio/contracts").RecoveryCacheReconciliation>;
   setMaintenance?(enabled: boolean): Promise<boolean>; revokeMaintenance?(): void; maintenanceReady?(): boolean;
   runMaintenance?(planId: string, signal: AbortSignal, allowed: () => boolean): Promise<void> }
@@ -100,12 +100,12 @@ export class RecoveryActionRegistry {
       if (!target?.available().available || this.previews.size + this.cleanupPreviews.size >= RECOVERY_ACTION_LIMITS.previews) { reply({ status: "refused", reason: "unavailable" }); return; }
       this.preparing = true;
       try {
-        const prepared = await target.prepare(this.closed.signal), at = this.deps.now();
+        const prepared = await target.prepare(this.closed.signal, command.scope), at = this.deps.now();
         if (!prepared || this.revision !== revision || this.cleanupTarget !== target || !target.available().available || at < now || at >= now + RECOVERY_ACTION_LIMITS.previewMs) { reply({ status: "refused", reason: "unavailable" }); return; }
         const plan = Object.freeze(RecoveryCachePlanSchema.parse({ id: randomBytes(32).toString("hex"), action: "cleanup-local-preset-previews", evidence: prepared.evidence,
           policyRevision: 1, preparedAt: now, expiresAt: now + RECOVERY_ACTION_LIMITS.previewMs, category: "fixed-local-preset-previews",
           files: prepared.files, targets: prepared.targets, logicalBytes: prepared.logicalBytes, allocatedBytes: prepared.allocatedBytes, minAgeMs: CACHE_CLEANUP_POLICY.minAgeMs,
-          stopAtAvailableBytes: prepared.stopAtAvailableBytes, replaysJobs: false, interruptsWork: false, undoable: false }));
+          stopAtAvailableBytes: prepared.stopAtAvailableBytes, ...(command.scope ? { scope: command.scope } : {}), replaysJobs: false, interruptsWork: false, undoable: false }));
         this.cleanupPreviews.set(plan.id, { plan, prepared, target }); reply({ status: "preview", cleanupPlan: plan });
       } catch { reply({ status: "refused", reason: "unavailable" }); }
       finally { this.preparing = false; }

@@ -69,7 +69,13 @@ it("the authenticated host requires opt-in and Automatic mode before maintaining
     assert.deepEqual(await readFile(path), bytes, "pressure on another registered volume cannot authorize this cache's cleanup");
     assert.equal(JSON.parse(await readFile(controlPath, "utf8")).maintenance.lastAttemptId, undefined);
     cacheLow = true; await storage.wake();
-    await until(() => coordinator.getState().app.recoveryPolicy?.cleanup?.maintenance?.lastRun?.status === "verified", "verified native maintenance outcome", 45_000);
+    try {
+      await until(() => coordinator.getState().app.recoveryPolicy?.cleanup?.maintenance?.lastRun?.status === "verified", "verified native maintenance outcome", 45_000);
+    } catch (error) {
+      assert.fail(JSON.stringify({ error: (error as Error).message, cleanup: coordinator.getState().app.recoveryPolicy?.cleanup,
+        roots: coordinator.getState().app.storageHealth?.roots.map(root => ({ state: root.state, volume: root.capacity?.volumeId,
+          available: root.capacity?.availableBytes, warning: root.pressure?.warning, measuredAt: root.capacity?.measuredAt })) }));
+    }
     const run = coordinator.getState().app.recoveryPolicy!.cleanup!.maintenance!.lastRun!;
     assert.equal(run.cleanup.removedFiles, 1); assert.equal(run.cleanup.availableAfter, 6 * 1024 ** 3); assert.equal(run.cleanup.reclaimedBytes, null);
     await assert.rejects(readFile(path), { code: "ENOENT" }); assert.equal(await readFile(protectedPath, "utf8"), "protected fixture"); assert.equal(syntheses, 1);

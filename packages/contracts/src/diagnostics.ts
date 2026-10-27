@@ -6,6 +6,7 @@ import { formatMicroUsd } from "./money.js";
 import { formatGb } from "./runtime-gate.js";
 import type { ClientState } from "./client-state.js";
 import { deriveStorageFindings } from "./storage-diagnostics.js";
+import type { RecoveryPolicySnapshot } from "./recovery-settings.js";
 
 /**
  * The diagnostics snapshot (SPEC-032): the set of findings true right now, derived from state
@@ -62,6 +63,7 @@ export const FINDING_SEVERITY_RANK: Record<FindingSeverity, number> = {
  */
 export const CONTROL_REGISTRY = {
   "storage-refresh": { label: "Refresh", place: "Settings · Diagnostics", route: "/settings/diagnostics" },
+  "local-preview-cleanup-review": { label: "Review preview cleanup", place: "Settings · Diagnostics", route: "/settings/diagnostics", targetParam: "cleanupScope" },
   /** Stops the supervised child and resolves the selection again (Settings · Providers). */
   "comfyui-restart": {
     label: "Restart",
@@ -421,7 +423,7 @@ export type DiagnosticsSources = Pick<
   | "drift"
   | "builds"
   | "update"
->;
+> & { cleanup?: Pick<NonNullable<RecoveryPolicySnapshot["cleanup"]>, "available" | "pending" | "scope"> };
 
 export function diagnosticsSources(app: ClientState["app"]): DiagnosticsSources {
   return {
@@ -430,6 +432,11 @@ export function diagnosticsSources(app: ClientState["app"]): DiagnosticsSources 
     env: app.env,
     runtime: app.runtime,
     storageHealth: app.storageHealth,
+    ...(app.recoveryPolicy?.cleanup ? { cleanup: { available: app.recoveryPolicy.cleanup.available, pending: app.recoveryPolicy.cleanup.pending,
+      ...(app.recoveryPolicy.cleanup.scope ? { scope: { revision: app.recoveryPolicy.cleanup.scope.revision, volumeId: app.recoveryPolicy.cleanup.scope.volumeId,
+        mappingRevision: app.recoveryPolicy.cleanup.scope.mappingRevision, measuredAt: app.recoveryPolicy.cleanup.scope.measuredAt,
+        inventoryAt: app.recoveryPolicy.cleanup.scope.inventoryAt, candidateFiles: app.recoveryPolicy.cleanup.scope.candidateFiles,
+        recordedBytes: app.recoveryPolicy.cleanup.scope.recordedBytes } } : {}) } } : {}),
     harness: app.harness,
     harnessInfo: app.harnessInfo,
     setup: app.setup,
@@ -1292,7 +1299,7 @@ const STATE_RULES: readonly Rule[] = [
   waitingOnComponent,
   hardwareFacts,
   windowsCommitFacts,
-  { kind: "storage-pressure", run: ctx => deriveStorageFindings(ctx.sources.storageHealth, ctx.now) },
+  { kind: "storage-pressure", run: ctx => deriveStorageFindings(ctx.sources.storageHealth, ctx.now, ctx.sources.cleanup) },
   providerRepeatedFaults,
   spendAbovePrevious,
 ];

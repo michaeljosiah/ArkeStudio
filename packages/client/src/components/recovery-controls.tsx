@@ -8,7 +8,7 @@ import { RecoveryCacheCleanupControls } from "./recovery-cache-cleanup.js";
 import { RecoveryCacheMaintenanceControls } from "./recovery-cache-maintenance.js";
 
 /** Policy controls stay on the host; repairs have their own explicit review and approval. */
-export function RecoveryControls() {
+export function RecoveryControls({ cleanupScope }: { cleanupScope?: string } = {}) {
   const { state, connection, recoveryCommandResults } = useStore(), policy = state?.app.recoveryPolicy, history = state?.app.recoveryHistory;
   const [pending, setPending] = useState<string | null>(null), [message, setMessage] = useState(""), [clearing, setClearing] = useState(false);
   const result = pending ? recoveryCommandResults[pending] : undefined;
@@ -56,7 +56,7 @@ export function RecoveryControls() {
     </>}
     {policy && policy.targets.some(target => target.circuitOpen || target.stoppedByUser || target.pendingOutcome) && <p className="fy-diag__meta">Some services remain held by a stop, exhausted retry budget or unconfirmed outcome. Changing mode does not release those holds.</p>}
     <RecoveryRetryControls />
-    <RecoveryCacheCleanupControls />
+    <RecoveryCacheCleanupControls scope={cleanupScope} />
     <RecoveryCacheMaintenanceControls />
     {policy?.targets.some(target => target.lastOutcome) && <section aria-label="Latest recovery outcomes">
       <div className="fy-set__eyebrow">LATEST RECOVERY OUTCOMES</div>

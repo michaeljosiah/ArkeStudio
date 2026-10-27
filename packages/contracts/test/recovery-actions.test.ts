@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { CACHE_CLEANUP_POLICY, ClientMessageSchema, RecoveryActionCommandSchema, RecoveryRetryPlanSchema, RecoveryCachePlanSchema, isRemoteHostCommand } from "../src/index.js";
+import { CACHE_CLEANUP_POLICY, ClientMessageSchema, RecoveryActionCommandSchema, RecoveryRetryPlanSchema, RecoveryCachePlanSchema, RecoveryCacheScopeSchema, isRemoteHostCommand } from "../src/index.js";
 const requestId = "01ARZ3NDEKTSV4RRFFQ69G5FAV", key = "a".repeat(64);
 it("requires separate host-only preview, approval and cancellation with no launch arguments", () => {
   for (const command of [{ action: "preview-retry", resourceKey: key }, { action: "approve-retry", planId: key }, { action: "cancel", planId: key }, { action: "preview-cleanup" }, { action: "approve-cleanup", planId: key }, { action: "reconcile-cleanup" }, { action: "set-cleanup-maintenance", enabled: true }, { action: "set-cleanup-maintenance", enabled: false }]) {
@@ -26,4 +26,17 @@ it("bounds the exact retry review without pretending startup uses zero disk spac
     preparedAt: 1000, expiresAt: 301000, downloadBytes: 0, diskBytes: null, interruptsWork: false, replaysJobs: false };
   assert(RecoveryRetryPlanSchema.safeParse(plan).success);
   for (const patch of [{ expiresAt: 301001 }, { diskBytes: 0 }, { replaysJobs: true }, { command: "PRIVATE_SHELL" }]) assert(!RecoveryRetryPlanSchema.safeParse({ ...plan, ...patch }).success);
+});
+
+it("accepts only an opaque scoped review and bounds receipt candidate observations without file paths", () => {
+  const command = { kind: "recovery-action", requestId, command: { action: "preview-cleanup", scope: key } };
+  assert(isRemoteHostCommand(ClientMessageSchema.parse(command)));
+  for (const scope of ["", "C:/PRIVATE_PATH", "a".repeat(63), "A".repeat(64)]) {
+    assert(!RecoveryActionCommandSchema.safeParse({ ...command, command: { ...command.command, scope } }).success);
+  }
+  const observation = { revision: key, volumeId: "volume-a", mappingRevision: "mount-a", measuredAt: 1000,
+    inventoryAt: 1000, candidateFiles: 1, recordedBytes: 60 };
+  assert(RecoveryCacheScopeSchema.safeParse(observation).success);
+  for (const patch of [{ candidateFiles: 9 }, { recordedBytes: CACHE_CLEANUP_POLICY.maxBytes + 1 }, { inventoryAt: -1 },
+    { path: "PRIVATE_PATH" }, { rootIdentity: key }]) assert(!RecoveryCacheScopeSchema.safeParse({ ...observation, ...patch }).success);
 });

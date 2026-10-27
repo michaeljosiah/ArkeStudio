@@ -9,7 +9,7 @@ export const RecoveryEvidenceStateSchema = z.enum(["fresh", "stale", "unavailabl
 /** Closed operational facts only. Free-form causes, paths, titles and worker output are never
  * copied from a diagnostic finding into saved history or an assistant's evidence payload. */
 export const RECOVERY_FACT_NAMES = ["held-jobs", "disabled-recipes", "download-mb", "needs-mb", "volume-free-mb", "fault-count", "waiting",
-  "destinations", "available-bytes", "reserve-bytes", "warning-floor-bytes", "estimated-time-to-reserve-ms", "forecast-window-ms", "uncertain-reservations"] as const;
+  "destinations", "available-bytes", "reserve-bytes", "warning-floor-bytes", "estimated-time-to-reserve-ms", "forecast-window-ms", "uncertain-reservations", "reviewable-previews"] as const;
 export const RecoveryFactSchema = z.object({ name: z.enum(RECOVERY_FACT_NAMES), value: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(), measuredAt: instant }).strict();
 export type RecoveryFact = z.infer<typeof RecoveryFactSchema>;
 export const RecoveryObservationSchema = z.object({
@@ -154,7 +154,8 @@ export function recoveryIncidentSummary(incident: RecoveryIncident): { title: st
     : { title: "Capability is available again", detail: "Service readiness does not establish a completed creative result. Check held work." };
   if (incident.kind === "storage-pressure") {
     const available = incident.facts.find(fact => fact.name === "available-bytes"), estimate = incident.facts.find(fact => fact.name === "estimated-time-to-reserve-ms");
-    return { title, detail: `${available?.value !== null && available?.value !== undefined ? `${(available.value / 1024 ** 3).toFixed(1)} GiB available. ` : ""}${estimate?.value !== null && estimate?.value !== undefined ? `The reserve may be reached in ${Math.max(1, Math.round(estimate.value / 60000))} min at the recent rate. ` : ""}Free space on the affected drive, then refresh. Creative media is kept.` };
+    const review = incident.phase === "action-available" && incident.facts.some(fact => fact.name === "reviewable-previews" && fact.value !== null && fact.value > 0);
+    return { title, detail: `${available?.value !== null && available?.value !== undefined ? `${(available.value / 1024 ** 3).toFixed(1)} GiB available. ` : ""}${estimate?.value !== null && estimate?.value !== undefined ? `The reserve may be reached in ${Math.max(1, Math.round(estimate.value / 60000))} min at the recent rate. ` : ""}${review ? "A preview cleanup review is available in Diagnostics. Cleanup needs your approval." : "You need to free space on the affected drive, then refresh."} Creative media is kept.` };
   }
   if (incident.phase === "recovering") return { title: "Local AI recovery is running", detail: "Arke is restoring the service. Submitted work still needs its own reconciliation." };
   if (incident.phase === "verifying") return { title: "Local AI recovery is being checked", detail: "Readiness has not yet been verified." };

@@ -46,7 +46,7 @@ storage settlement retains the exact owner capabilities. Qualified storage ports
 12 MiB audio plus 256 KiB new metadata before inference, then replan from fresh capacity and the
 actual audio size before opening output. The closed `preview` reservation owner reduces confirmed
 writes and settles only after file/receipt handles close. Unsupported ports make no fit claim.
-Tests: `test/storage/local-preview-cache.test.ts`; automatic maintenance, broader inventory and
+Tests: `test/storage/local-preview-cache.test.ts`; broader inventory and
 remaining write owners remain unfinished.
 `storage/windows-cache-file.ts` supplies the host-only native identity/removal primitive.
 Its fixed, bounded, kernel-leashed program takes data through stdin, binds native and producer
@@ -69,13 +69,12 @@ intent. Startup and the host-only Check cleanup outcome control reconcile withou
 the original owner/control chain must be finished, or both recorded processes positively absent;
 then current native root/file proof distinguishes intact, absent and changed targets. Unknown
 handles retain their exact capabilities until confirmed close. Audit restoration refuses a
-different intent. Legacy/unprovable unknown resolution and
-affected-volume incident actions remain unfinished. Tests: `test/storage/cache-cleanup*.test.ts`,
+different intent. Legacy/unprovable unknown resolution remains unfinished. Tests: `test/storage/cache-cleanup*.test.ts`,
 contracts `test/recovery-actions.test.ts`, client `test/recovery-cache-cleanup.test.tsx`.
 Standing maintenance is off by default. The host-only setting binds one fixed cache root and
 the existing seven-day/eight-file/2 GiB limits. `recovery-cache-maintenance.tsx` separates scope
 review from enabling and keeps withdrawal available during active maintenance. The catalogue
-owner retains that root's storage observation only while opted in; pressure on another volume
+owner retains that root's storage observation while producer receipts exist or maintenance is opted in; pressure on another volume
 cannot trigger its cleanup. `recovery/actions.ts` uses the same active executor and current
 Automatic recovery mode gate for background maintenance. Before preparation the private
 control flushes a five-minute cooldown/attempt, retained across restart. Every file/input fence
@@ -85,6 +84,15 @@ control-file owner remains retained through pending writes and the whole automat
 replacement cannot overwrite it. Tests: `test/storage/cache-maintenance-host.test.ts`, extended
 control/cleanup/action tests and client `test/recovery-cache-maintenance.test.tsx`. Broader cache
 classes, cross-process qualification and the rest of the epic remain unfinished.
+Storage warnings can link to this same fixed-preview review when fresh bounded receipt candidates
+and the cache's measured volume/mapping match the warning. `diagnosticsSources` admits only
+cleanup availability, pending state and seven closed observation fields; history retains only
+the numeric reviewable count. The opaque `cleanupScope` Settings target binds producer root and
+volume mapping, grants no deletion and is revalidated before preview, approval and file input.
+`recovery-cache-cleanup.tsx` separates explicit review from approval and discards a late review
+when its warning changes. Other volume remedies remain manual unless an existing owner supplies
+a qualified action. Tests: contracts storage/diagnostics/recovery suites and the authenticated
+native cleanup host, including changed-mapping refusal with original bytes retained.
 Capacity invalidation/root changes revoke captured admission evidence across a reservation flush;
 an already-saved intent remains uncertain until its owner settles it. Completed-only destinations
 are excluded from direct-file admission, so a full old model volume does not block a different

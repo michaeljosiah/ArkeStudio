@@ -23,6 +23,7 @@ const indexSchema = z.object({ version: z.literal(1), rootIdentity: hashSchema,
   entries: z.array(receiptSchema).max(MAX_ENTRIES) }).strict().refine(index => new Set(index.entries.map(row => row.key)).size === index.entries.length);
 type Index = z.infer<typeof indexSchema>;
 export interface PreparedPreviewCleanup {
+  rootIdentity?: string;
   evidence: string; files: number; logicalBytes: number; allocatedBytes: number; stopAtAvailableBytes: number | null;
   targets: RecoveryCachePlan["targets"];
   run(planId: string, signal: AbortSignal, valid: () => boolean, automatic?: boolean): Promise<{ status: "verified" | "refused" | "unknown" | "cancelled"; cleanup: RecoveryCacheOutcome }>;
@@ -315,7 +316,7 @@ export class LocalPreviewCache {
         } finally { hold.release(); }
       }
       const evidence = digest(JSON.stringify(entries.map(entry => [entry.receipt, this.stableProof(entry.proof)])));
-      return { evidence, files: entries.length, logicalBytes: entries.reduce((sum, row) => sum + row.receipt.bytes, 0),
+      return { evidence, rootIdentity: root, files: entries.length, logicalBytes: entries.reduce((sum, row) => sum + row.receipt.bytes, 0),
         targets: entries.map(row => ({ resourceKey: digest(JSON.stringify(row.receipt)), createdAt: row.receipt.createdAt,
           logicalBytes: row.receipt.bytes, allocatedBytes: row.proof.allocatedBytes })),
         allocatedBytes: entries.reduce((sum, row) => sum + row.proof.allocatedBytes, 0), stopAtAvailableBytes,

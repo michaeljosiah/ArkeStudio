@@ -169,6 +169,7 @@ function StaleRemeasure({ remedy }: { remedy: NonNullable<Finding["remedy"]> }) 
 
 export function SettingsDiagnosticsScreen() {
   const snapshot = useDiagnostics();
+  const cleanupScope = new URLSearchParams(useLocation().search).get("cleanupScope") ?? undefined;
   const target = new URLSearchParams(useLocation().search).get("finding"), focused = useRef<string | null>(null);
   useEffect(() => {
     if (!target || focused.current === target) return;
@@ -191,7 +192,7 @@ export function SettingsDiagnosticsScreen() {
           <span style={{ flex: 1 }} />
           <span className="fy-diag__meta">not derived yet</span>
         </div>
-        <RecoveryControls />
+        <RecoveryControls cleanupScope={cleanupScope} />
         <RecoveryHistoryBrowser history={history} />
       </div>
     );
@@ -240,7 +241,7 @@ export function SettingsDiagnosticsScreen() {
             </div>
           ))
       )}
-      <RecoveryControls />
+      <RecoveryControls cleanupScope={cleanupScope} />
       <RecoveryHistoryBrowser history={history} />
     </div>
   );

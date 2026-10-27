@@ -3,7 +3,7 @@ import { readFile, realpath } from "node:fs/promises";
 import { join, relative, isAbsolute } from "node:path";
 import { estimateSpeechMicroUsd, NARRATOR_PREVIEW_TEXT, VOICE_PREVIEW_SCOPE, supportsVoiceUse,
   voiceFormatForModel, voiceTargetKey, CACHE_CLEANUP_POLICY, RECOVERY_ACTION_LIMITS, STORAGE_POLICY, storageWarningFloor,
-  type RecoveryCacheMaintenanceRun, type VoiceCandidate, type ModelManifest, type DomainEvent, type Job } from "@arke-studio/contracts";
+  type RecoveryCacheMaintenanceRun, type RecoveryCacheScope, type VoiceCandidate, type ModelManifest, type DomainEvent, type Job } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import type { SidecarLike } from "./service.js";
 import { cachedVoiceAudioLooksRight } from "./service.js";
@@ -37,6 +37,8 @@ export class CataloguePreviewService {
   private maintenanceRootHold: ReturnType<AppStorageService["acquireRoot"]> | null = null;
   private maintenanceRootIdentity: string | null = null;
   private maintenanceSyncRevision = 0;
+  private scopeRefresh: Promise<void> | null = null;
+  private candidates: { root: string; at: number; files: number; bytes: number } | null = null;
   constructor(private readonly deps: {
     root: string;
     sidecar: SidecarLike | null;
@@ -53,17 +55,48 @@ export class CataloguePreviewService {
     this.cleanupControl = new CacheCleanupControl(join(deps.root, "cleanup-control.json"), { now, onChange: deps.cleanupChanged });
     this.localCache = new LocalPreviewCache(deps.root, deps.storage, { control: this.cleanupControl, now });
   }
-  async initializeCleanup(): Promise<void> { await this.cleanupControl.open(); await this.syncMaintenanceRoot(); }
+  async initializeCleanup(): Promise<void> { await this.cleanupControl.open(); await this.refreshCleanupScope(); }
+  refreshCleanupScope(): Promise<void> {
+    if (this.closed) return Promise.resolve();
+    this.scopeRefresh ??= this.syncMaintenanceRoot().finally(() => {
+      this.scopeRefresh = null;
+      if (!this.closed) try { this.deps.cleanupChanged?.(); } catch { /* Presentation grants no cleanup authority. */ }
+    });
+    return this.scopeRefresh;
+  }
   private async syncMaintenanceRoot(): Promise<void> {
-    const revision = ++this.maintenanceSyncRevision, policy = this.cleanupControl.maintenancePolicy();
-    if (this.closed || !policy?.enabled || !this.deps.storage) {
+    const revision = ++this.maintenanceSyncRevision, root = await this.localCache.maintenanceRoot();
+    const inventory = root ? await this.localCache.inventory() : null, policy = this.cleanupControl.maintenancePolicy(), at = (this.deps.now ?? Date.now)();
+    if (this.closed || revision !== this.maintenanceSyncRevision) return;
+    // Keep the last fresh observation during the read. A transient empty publication would
+    // revoke a scoped approval when its own capacity refresh schedules this metadata read.
+    if (!root || !this.deps.storage || inventory?.state !== "recorded" || !Number.isSafeInteger(at) ||
+      await this.localCache.maintenanceRoot() !== root || (!inventory.entries.length && (!policy?.enabled || policy.rootIdentity !== root))) {
+      this.candidates = null;
       this.maintenanceRootHold?.release(); this.maintenanceRootHold = null; this.maintenanceRootIdentity = null; return;
     }
-    if (this.maintenanceRootHold && this.maintenanceRootIdentity === policy.rootIdentity) return;
-    const root = await this.localCache.maintenanceRoot();
-    if (this.closed || revision !== this.maintenanceSyncRevision || !this.cleanupControl.maintenancePolicy()?.enabled || root !== policy.rootIdentity) return;
+    if (this.closed || revision !== this.maintenanceSyncRevision) return;
+    const keys = this.cleanupKeys(), rows = inventory.entries.filter(row => keys.has(row.resourceKey) && !row.leased &&
+      row.createdAt <= at - CACHE_CLEANUP_POLICY.minAgeMs).sort((a, b) => a.createdAt - b.createdAt).slice(0, CACHE_CLEANUP_POLICY.maxFiles);
+    this.candidates = { root, at, files: rows.length, bytes: rows.reduce((sum, row) => sum + row.recordedBytes, 0) };
+    if (this.maintenanceRootHold && this.maintenanceRootIdentity === root) return;
     this.maintenanceRootHold?.release(); this.maintenanceRootHold = this.deps.storage.acquireRoot(join(this.deps.root, "local-presets-v1"), "working-files");
     this.maintenanceRootIdentity = root;
+  }
+  private cleanupScope(): RecoveryCacheScope | null {
+    const inventory = this.candidates, now = (this.deps.now ?? Date.now)();
+    if (this.closed || !this.maintenanceRootHold || !inventory || inventory.root !== this.maintenanceRootIdentity ||
+      inventory.at > now || now - inventory.at > STORAGE_POLICY.forecastMaxAgeMs) return null;
+    const root = this.deps.storage?.snapshot().roots.find(root => root.rootId === this.maintenanceRootHold!.rootId), fact = root?.capacity;
+    if (root?.state !== "measured" || !fact || fact.availableBytes === null || fact.measuredAt > now || now - fact.measuredAt > STORAGE_POLICY.forecastMaxAgeMs) return null;
+    return { volumeId: fact.volumeId, mappingRevision: fact.mappingRevision, measuredAt: fact.measuredAt, inventoryAt: inventory.at,
+      candidateFiles: inventory.files, recordedBytes: inventory.bytes,
+      revision: createHash("sha256").update(JSON.stringify(["fixed-local-preset-previews", inventory.root, fact.volumeId, fact.mappingRevision])).digest("hex") };
+  }
+  private cleanupKeys(): Set<string> {
+    const eligible = [...localCandidates(KOKORO_PRESETS), ...this.voices.values()].filter(voice => voice.provider === "kokoro" &&
+      !voice.unavailableReason && voice.readsClone === undefined && voice.narratorCopy !== true && supportsVoiceUse(voice, "narration"));
+    return new Set(eligible.slice(0, 256).map(voice => createHash("sha256").update(JSON.stringify([voiceTargetKey(voice), NARRATOR_PREVIEW_TEXT, "wav", 1])).digest("hex")));
   }
   revokeMaintenance(): void { this.cleanupControl.revokeMaintenance(); }
   async setMaintenance(enabled: boolean): Promise<boolean> {
@@ -73,7 +106,7 @@ export class CataloguePreviewService {
     const root = enabled ? await this.localCache.maintenanceRoot(true) : null;
     if (enabled && !root) return false;
     const saved = await this.cleanupControl.setMaintenance(enabled, root, () => !this.closed && !this.cleanupLifetime.signal.aborted);
-    await this.syncMaintenanceRoot(); return saved;
+    await this.refreshCleanupScope(); return saved;
   }
   maintenanceReady(): boolean {
     const policy = this.cleanupControl.maintenancePolicy(), now = (this.deps.now ?? Date.now)();
@@ -108,19 +141,30 @@ export class CataloguePreviewService {
     return this.localCache.reconcileCleanup(AbortSignal.any([signal, this.cleanupLifetime.signal]));
   }
   cleanupAvailability(): NonNullable<import("@arke-studio/contracts").RecoveryPolicySnapshot["cleanup"]> {
-    const state = this.cleanupControl.snapshot(), policy = this.cleanupControl.maintenancePolicy();
+    const state = this.cleanupControl.snapshot(), policy = this.cleanupControl.maintenancePolicy(), scope = this.cleanupScope();
     return { available: !this.closed && process.platform === "win32" && state.available, pending: state.pending, audit: state.audit,
       maintenance: { enabled: policy?.enabled === true, rootScope: "fixed-local-preset-previews", minAgeMs: CACHE_CLEANUP_POLICY.minAgeMs,
         maxFiles: CACHE_CLEANUP_POLICY.maxFiles, maxBytes: CACHE_CLEANUP_POLICY.maxBytes, nextAttemptAt: policy?.nextAttemptAt ?? 0,
         ...(policy?.lastRun ? { lastRun: policy.lastRun } : {}) },
+      ...(scope ? { scope } : {}),
       ...(state.reason ? { reason: state.reason } : process.platform !== "win32" ? { reason: "unsupported" as const } : {}) };
   }
-  async prepareCleanup(signal: AbortSignal): ReturnType<LocalPreviewCache["prepareCleanup"]> {
+  async prepareCleanup(signal: AbortSignal, expectedScope?: string): ReturnType<LocalPreviewCache["prepareCleanup"]> {
     await this.initializeCleanup();
-    const eligible = [...localCandidates(KOKORO_PRESETS), ...this.voices.values()].filter(voice => voice.provider === "kokoro" &&
-      !voice.unavailableReason && voice.readsClone === undefined && voice.narratorCopy !== true && supportsVoiceUse(voice, "narration"));
-    const keys = new Set(eligible.slice(0, 256).map(voice => createHash("sha256").update(JSON.stringify([voiceTargetKey(voice), NARRATOR_PREVIEW_TEXT, "wav", 1])).digest("hex")));
-    return this.localCache.prepareCleanup(keys, signal);
+    if (expectedScope && this.cleanupScope()?.revision !== expectedScope) return null;
+    const prepared = await this.localCache.prepareCleanup(this.cleanupKeys(), signal); await this.refreshCleanupScope();
+    if (!prepared || expectedScope && (this.cleanupScope()?.revision !== expectedScope || prepared.rootIdentity !== this.maintenanceRootIdentity)) return null;
+    return { ...prepared, run: async (planId, signal, valid, automatic) => {
+      try {
+        if (expectedScope) {
+          await this.initializeCleanup();
+          if (this.maintenanceRootHold) await this.deps.storage?.measure(this.maintenanceRootHold.rootId, signal, (this.deps.now ?? Date.now)());
+          if (this.cleanupScope()?.revision !== expectedScope) return { status: "refused", cleanup: {
+            removedFiles: 0, logicalBytes: 0, availableBefore: null, availableAfter: null, reclaimedBytes: null } };
+        }
+        return await prepared.run(planId, signal, () => valid() && (!expectedScope || this.cleanupScope()?.revision === expectedScope), automatic);
+      } finally { await this.refreshCleanupScope(); }
+    } };
   }
 
   catalogue(voices: VoiceCandidate[]): VoiceCandidate[] {
@@ -190,7 +234,7 @@ export class CataloguePreviewService {
             return bytes;
           }, work.abort.signal);
         } else if (!cachedVoiceAudioLooksRight(cached, "wav")) throw new Error("The cached voice preview needs attention.");
-        if (!work.abort.signal.aborted) this.result(input.requestId, { status: "ready", file });
+        if (!work.abort.signal.aborted) { await this.refreshCleanupScope(); this.result(input.requestId, { status: "ready", file }); }
         return;
       }
       const file = `${hash}.${format}`;

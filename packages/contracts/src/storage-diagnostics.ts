@@ -1,5 +1,6 @@
 import type { Finding } from "./diagnostics.js";
 import { STORAGE_POLICY, storageWarningFloor, type StorageHealthSnapshot, type StorageRootHealth } from "./storage-health.js";
+import type { RecoveryPolicySnapshot } from "./recovery-settings.js";
 
 type Draft = Omit<Finding, "firstSeen">;
 const refresh = { control: "storage-refresh" as const };
@@ -10,7 +11,8 @@ const auditReasons = {
 
 /** SPEC-062 measurements enter SPEC-032's single finding model. No I/O, world data or guessed job
  * correlation: an observed volume risk is not proof that a particular provider result failed. */
-export function deriveStorageFindings(health: StorageHealthSnapshot | null | undefined, now: string): Draft[] {
+export function deriveStorageFindings(health: StorageHealthSnapshot | null | undefined, now: string,
+  cleanup?: Pick<NonNullable<RecoveryPolicySnapshot["cleanup"]>, "available" | "pending" | "scope">): Draft[] {
   if (!health) return [];
   const findings: Draft[] = [], at = Date.parse(now);
   const unknown = (occurrence: string, roots: readonly StorageRootHealth[], statement: string, remeasure = true): Draft => ({
@@ -48,6 +50,11 @@ export function deriveStorageFindings(health: StorageHealthSnapshot | null | und
     const forecast = fresh.map(root => root.forecast).find(value => value?.warning && value.to <= at && at - value.to <= STORAGE_POLICY.forecastMaxAgeMs);
     if (!critical && capacity.availableBytes! >= floor && !latched.some(root => root.pressure!.warning) && !forecast) continue;
     const measuredAt = new Date(capacity.measuredAt).toISOString();
+    const scope = cleanup?.scope;
+    const review = cleanup?.available && !cleanup.pending && scope && scope.candidateFiles > 0 && scope.volumeId === volumeId &&
+      scope.measuredAt <= at && at - scope.measuredAt <= STORAGE_POLICY.forecastMaxAgeMs && scope.inventoryAt <= at && at - scope.inventoryAt <= STORAGE_POLICY.forecastMaxAgeMs &&
+      fresh.some(root => root.capacity!.mappingRevision === scope.mappingRevision) && capacity.availableBytes! < floor + STORAGE_POLICY.clearMarginBytes
+      ? scope : null;
     findings.push({ kind: "storage-pressure", occurrence: volumeId,
       // Specific work holds require the owning operation's causal evidence; this measured risk
       // alone does not invent an affected job count or claim a paid result failed.
@@ -57,13 +64,16 @@ export function deriveStorageFindings(health: StorageHealthSnapshot | null | und
         { name: "reserve-bytes", value: STORAGE_POLICY.reserveBytes, source: "storage-policy", measuredAt: now },
         { name: "warning-floor-bytes", value: floor, source: "storage-policy", measuredAt: now },
         { name: "destinations", value: fresh.length, source: "app.storageHealth.roots", measuredAt: now },
+        ...(review ? [{ name: "reviewable-previews", value: review.candidateFiles, source: "app.recoveryPolicy.cleanup.scope", measuredAt: new Date(review.inventoryAt).toISOString() }] : []),
         ...(forecast ? [
           { name: "forecast-window-ms", value: forecast.to - forecast.from, source: "app.storageHealth.roots.forecast", measuredAt: new Date(forecast.to).toISOString() },
           { name: "estimated-time-to-reserve-ms", value: forecast.timeToReserveMs, source: "app.storageHealth.roots.forecast", measuredAt: new Date(forecast.to).toISOString() },
         ] : []),
       ],
       cause: { statement: critical ? "available space has reached the operational reserve or is awaiting confirmed recovery" : capacity.availableBytes! < floor ? "available space is below the warning threshold" : forecast ? "recent volume-wide usage estimates reaching the reserve within thirty minutes" : "free space has improved but recovery still needs two separated fresh readings" },
-      remedy: null, consequences: [], note: "Free space on the affected drive, then refresh. Creative media is retained.",
+      remedy: review ? { control: "local-preview-cleanup-review", target: review.revision } : null, consequences: [],
+      note: review ? "Needs your approval · Review older local preset previews on this volume. File eligibility is verified before approval; recoverable space is unknown. Creative media is retained."
+        : "You need to free space on the affected drive, then refresh. Creative media is retained.",
     });
   }
   return findings;
