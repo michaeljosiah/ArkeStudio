@@ -5,6 +5,7 @@ import { controlRecoveryHistory, setRecoveryMode, setRecoveryPreferences, useSto
 import { isRemoteSession } from "../lib/remote-session.js";
 import { RecoveryRetryControls } from "./recovery-retry.js";
 import { RecoveryCacheCleanupControls } from "./recovery-cache-cleanup.js";
+import { RecoveryCacheMaintenanceControls } from "./recovery-cache-maintenance.js";
 
 /** Policy controls stay on the host; repairs have their own explicit review and approval. */
 export function RecoveryControls() {
@@ -56,6 +57,7 @@ export function RecoveryControls() {
     {policy && policy.targets.some(target => target.circuitOpen || target.stoppedByUser || target.pendingOutcome) && <p className="fy-diag__meta">Some services remain held by a stop, exhausted retry budget or unconfirmed outcome. Changing mode does not release those holds.</p>}
     <RecoveryRetryControls />
     <RecoveryCacheCleanupControls />
+    <RecoveryCacheMaintenanceControls />
     {policy?.targets.some(target => target.lastOutcome) && <section aria-label="Latest recovery outcomes">
       <div className="fy-set__eyebrow">LATEST RECOVERY OUTCOMES</div>
       <p className="fy-diag__meta">One latest attempt per service target. These receipts describe that attempt, not current health or completed creative work.</p>

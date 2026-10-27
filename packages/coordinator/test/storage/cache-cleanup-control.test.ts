@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { CacheCleanupControl, type CacheCleanupStore } from "../../src/storage/cache-cleanup-control.js";
 import { tempDir } from "../tmp.js";
 import { until } from "../wait.js";
+import { CACHE_MAINTENANCE_POLICY } from "@arke-studio/contracts";
 
 const key = "a".repeat(64), planId = "b".repeat(64);
 const entry = { key, evidence: key, rootIdentity: key, fileIdentity: key };
@@ -104,4 +105,59 @@ it("can settle a positively verified intent after startup audit failure, but nev
   const legacyId = await restarted.begin(planId, entry, () => true); assert(legacyId);
   assert.equal(await restarted.resolve(legacyId, "retained", () => true), false); assert.equal(restarted.snapshot().pending, true);
   restarted.closeAdmission();
+});
+
+it("requires saved opt-in, binds the exact root and attempt, and retains cooldown and withdrawal across restart", async () => {
+  const root = await tempDir("arke-maintenance-policy-"), path = join(root, "control.json"); let now = 1000;
+  const first = new CacheCleanupControl(path, { now: () => now }); await first.open();
+  assert.equal(await first.reserveMaintenance(planId, key, () => true), null);
+  assert(await first.setMaintenance(true, key, () => true));
+  assert.equal(await first.reserveMaintenance(planId, "c".repeat(64), () => true), null);
+  const token = await first.reserveMaintenance(planId, key, () => true); assert(token);
+  assert(first.maintenanceCurrent(planId, token, key)); assert.equal(first.quiescent(), false);
+  const run = { status: "verified" as const, cleanup: { removedFiles: 0, logicalBytes: 0, availableBefore: 1, availableAfter: 2, reclaimedBytes: null } };
+  await first.finishMaintenance("c".repeat(64), run); assert(first.maintenanceCurrent(planId, token, key));
+  await first.finishMaintenance(planId, run); assert.equal(first.maintenanceCurrent(planId, token, key), false); first.closeAdmission();
+  const next = new CacheCleanupControl(path, { now: () => now }); await next.open();
+  assert.equal(next.maintenancePolicy()?.enabled, true); assert.equal(next.maintenancePolicy()?.lastRun?.cleanup.reclaimedBytes, null);
+  assert.equal(await next.reserveMaintenance(planId, key, () => true), null);
+  now += CACHE_MAINTENANCE_POLICY.intervalMs;
+  const renewed = await next.reserveMaintenance(planId, key, () => true); assert(renewed);
+  next.revokeMaintenance(); assert.equal(next.maintenanceCurrent(planId, renewed, key), false);
+  assert(await next.setMaintenance(false, null, () => true)); await next.finishMaintenance(planId, { ...run, status: "cancelled" }); next.closeAdmission();
+  const stopped = new CacheCleanupControl(path, { now: () => now }); await stopped.open();
+  assert.equal(stopped.maintenancePolicy()?.enabled, false); assert.equal(await stopped.reserveMaintenance(planId, key, () => true), null); stopped.closeAdmission();
+});
+
+it("withdrawal during a worker-record flush revokes its late native input grant", async () => {
+  let disk: unknown = { version: 1, pending: null, outcomes: [] }, hold = false, finish!: () => void, entered!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const store: CacheCleanupStore = { load: async () => structuredClone(disk), save: async state => {
+    if (hold) { entered(); await new Promise<void>(resolve => { finish = resolve; }); hold = false; } disk = structuredClone(state);
+  } };
+  const control = new CacheCleanupControl("unused-maintenance-gate", { store }); await control.open(); assert(await control.setMaintenance(true, key, () => true));
+  const token = await control.reserveMaintenance(planId, key, () => true); assert(token);
+  const valid = () => control.maintenanceCurrent(planId, token, key);
+  const id = await control.begin(planId, { ...proven, automatic: true }, valid); assert(id);
+  hold = true; const admitted = control.admitWorker(id, 42, valid); await started;
+  control.revokeMaintenance(); finish(); assert.equal(await admitted, false);
+  assert(await control.settle(id, "not-started"));
+  await control.finishMaintenance(planId, { status: "cancelled", cleanup: { removedFiles: 0, logicalBytes: 0, availableBefore: null, availableAfter: null, reclaimedBytes: null } });
+  assert.equal(control.snapshot().outcomes.at(-1)?.automatic, true); control.closeAdmission();
+});
+
+it("retains the original file-control owner through an abandoned shutdown write", async () => {
+  const root = await tempDir("arke-maintenance-owner-"), path = join(root, "control.json");
+  let disk: unknown = { version: 1, pending: null, outcomes: [] }, finish!: () => void, entered!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; }); let hold = true;
+  const store: CacheCleanupStore = { load: async () => structuredClone(disk), save: async state => {
+    if (hold) { entered(); await new Promise<void>(resolve => { finish = resolve; }); hold = false; } disk = structuredClone(state);
+  } };
+  const first = new CacheCleanupControl(path, { store, stopMs: 10 }); await first.open();
+  const saving = first.setMaintenance(true, key, () => true); await started; first.closeAdmission(); assert.equal(await saving, false);
+  const blocked = new CacheCleanupControl(path, { store }); await blocked.open(); assert.equal(blocked.snapshot().audit, "unavailable");
+  assert.equal(await blocked.setMaintenance(true, key, () => true), false); blocked.closeAdmission();
+  finish(); await until(() => first.quiescent(), "original policy writer to settle", 1000);
+  const next = new CacheCleanupControl(path, { store }); await next.open();
+  assert(await next.setMaintenance(false, null, () => true)); assert.equal(next.maintenancePolicy()?.enabled, false); next.closeAdmission();
 });

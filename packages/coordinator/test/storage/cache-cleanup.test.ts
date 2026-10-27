@@ -106,6 +106,20 @@ it("reconciles a retained original through its completed owner without repeating
   h.cache.close(); h.control.closeAdmission();
 });
 
+it("standing-policy withdrawal between file steps preserves later auditions and reports partial completion", async () => {
+  const h = await fixture(), second = "c".repeat(64); await h.cache.generate(second, async () => bytes, signal()); h.age();
+  const root = await h.cache.maintenanceRoot(); assert(root); assert(await h.control.setMaintenance(true, root, () => true));
+  const token = await h.control.reserveMaintenance(planId, root, () => true); assert(token);
+  const valid = () => h.control.maintenanceCurrent(planId, token, root);
+  const prepared = await h.cache.prepareCleanup(new Set([key, second]), signal()); assert(prepared);
+  h.afterDelete(async () => { assert(await h.control.setMaintenance(false, null, () => true)); });
+  const result = await prepared.run(planId, signal(), valid, true);
+  assert.equal(result.status, "cancelled"); assert.equal(result.cleanup.removedFiles, 1); assert.equal(h.deletes(), 1);
+  assert.deepEqual(await readFile(join(h.root, "local-presets-v1", `${second}.wav`)), bytes);
+  await h.control.finishMaintenance(planId, result); assert.equal(h.control.maintenancePolicy()?.lastRun?.cleanup.removedFiles, 1);
+  assert.equal(h.control.maintenancePolicy()?.enabled, false); h.cache.close(); h.control.closeAdmission();
+});
+
 it("does not reconcile a live original operation, then retires only its removed receipt after completion", async () => {
   const h = await fixture(); h.age(); h.unknownRemoved();
   let finish!: () => void, entered!: () => void;

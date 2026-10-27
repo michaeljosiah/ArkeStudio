@@ -29,6 +29,13 @@ export const RecoveryCacheOutcomeSchema = z.object({
   availableBefore: instant.nullable(), availableAfter: instant.nullable(), reclaimedBytes: z.null(),
 }).strict();
 export type RecoveryCacheOutcome = z.infer<typeof RecoveryCacheOutcomeSchema>;
+export const CACHE_MAINTENANCE_POLICY = Object.freeze({ revision: 1, intervalMs: 5 * 60_000 });
+export const RecoveryCacheMaintenanceRunSchema = z.object({ at: instant,
+  status: z.enum(["verified", "refused", "unknown", "cancelled"]), cleanup: RecoveryCacheOutcomeSchema }).strict();
+export type RecoveryCacheMaintenanceRun = z.infer<typeof RecoveryCacheMaintenanceRunSchema>;
+export const RecoveryCacheMaintenanceSchema = z.object({ enabled: z.boolean(), rootScope: z.literal("fixed-local-preset-previews"),
+  minAgeMs: z.literal(CACHE_CLEANUP_POLICY.minAgeMs), maxFiles: z.literal(CACHE_CLEANUP_POLICY.maxFiles), maxBytes: z.literal(CACHE_CLEANUP_POLICY.maxBytes),
+  nextAttemptAt: instant, lastRun: RecoveryCacheMaintenanceRunSchema.optional() }).strict();
 export const RecoveryCacheReconciliationSchema = z.object({ outcome: z.enum(["removed", "retained", "unconfirmed"]),
   availableBytes: instant.nullable() }).strict();
 export type RecoveryCacheReconciliation = z.infer<typeof RecoveryCacheReconciliationSchema>;
@@ -40,6 +47,7 @@ export const RecoveryActionCommandSchema = z.object({ kind: z.literal("recovery-
     z.object({ action: z.literal("preview-cleanup") }).strict(),
     z.object({ action: z.literal("approve-cleanup"), planId: digest }).strict(),
     z.object({ action: z.literal("reconcile-cleanup") }).strict(),
+    z.object({ action: z.literal("set-cleanup-maintenance"), enabled: z.boolean() }).strict(),
     z.object({ action: z.literal("cancel"), planId: digest }).strict(),
   ]),
 }).strict();
@@ -49,7 +57,9 @@ export const RecoveryActionResultSchema = z.object({ requestId: UlidSchema,
   plan: RecoveryRetryPlanSchema.optional(),
   cleanupPlan: RecoveryCachePlanSchema.optional(), cleanup: RecoveryCacheOutcomeSchema.optional(),
   reconciliation: RecoveryCacheReconciliationSchema.optional(),
+  maintenanceSaved: z.boolean().optional(),
   reason: z.enum(["unavailable", "stale", "busy", "cancelled"]).optional(),
 }).strict().refine(value => !(value.plan && value.cleanupPlan) && (!value.cleanup || value.cleanupPlan !== undefined) &&
-  (!value.reconciliation || !value.plan && !value.cleanupPlan && !value.cleanup));
+  (!value.reconciliation || !value.plan && !value.cleanupPlan && !value.cleanup) &&
+  (value.maintenanceSaved === undefined || value.status === "verified" && !value.plan && !value.cleanupPlan && !value.cleanup && !value.reconciliation));
 export type RecoveryActionResult = z.infer<typeof RecoveryActionResultSchema>;

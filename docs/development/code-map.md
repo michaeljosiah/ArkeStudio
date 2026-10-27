@@ -69,9 +69,22 @@ intent. Startup and the host-only Check cleanup outcome control reconcile withou
 the original owner/control chain must be finished, or both recorded processes positively absent;
 then current native root/file proof distinguishes intact, absent and changed targets. Unknown
 handles retain their exact capabilities until confirmed close. Audit restoration refuses a
-different intent. Legacy/unprovable unknown resolution, standing automatic maintenance and
+different intent. Legacy/unprovable unknown resolution and
 affected-volume incident actions remain unfinished. Tests: `test/storage/cache-cleanup*.test.ts`,
 contracts `test/recovery-actions.test.ts`, client `test/recovery-cache-cleanup.test.tsx`.
+Standing maintenance is off by default. The host-only setting binds one fixed cache root and
+the existing seven-day/eight-file/2 GiB limits. `recovery-cache-maintenance.tsx` separates scope
+review from enabling and keeps withdrawal available during active maintenance. The catalogue
+owner retains that root's storage observation only while opted in; pressure on another volume
+cannot trigger its cleanup. `recovery/actions.ts` uses the same active executor and current
+Automatic recovery mode gate for background maintenance. Before preparation the private
+control flushes a five-minute cooldown/attempt, retained across restart. Every file/input fence
+rechecks the standing grant; withdrawal revokes it synchronously before a setting flush.
+The same cleanup owner stops at measured headroom and records partial/unknown outcomes. A
+control-file owner remains retained through pending writes and the whole automatic run, so a
+replacement cannot overwrite it. Tests: `test/storage/cache-maintenance-host.test.ts`, extended
+control/cleanup/action tests and client `test/recovery-cache-maintenance.test.tsx`. Broader cache
+classes, cross-process qualification and the rest of the epic remain unfinished.
 Capacity invalidation/root changes revoke captured admission evidence across a reservation flush;
 an already-saved intent remains uncertain until its owner settles it. Completed-only destinations
 are excluded from direct-file admission, so a full old model volume does not block a different

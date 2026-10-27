@@ -25,7 +25,7 @@ type Index = z.infer<typeof indexSchema>;
 export interface PreparedPreviewCleanup {
   evidence: string; files: number; logicalBytes: number; allocatedBytes: number; stopAtAvailableBytes: number | null;
   targets: RecoveryCachePlan["targets"];
-  run(planId: string, signal: AbortSignal, valid: () => boolean): Promise<{ status: "verified" | "refused" | "unknown" | "cancelled"; cleanup: RecoveryCacheOutcome }>;
+  run(planId: string, signal: AbortSignal, valid: () => boolean, automatic?: boolean): Promise<{ status: "verified" | "refused" | "unknown" | "cancelled"; cleanup: RecoveryCacheOutcome }>;
 }
 const digest = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
 const unavailable = () => new Error("The local preview cache needs attention. No existing files were removed.");
@@ -86,6 +86,10 @@ export class LocalPreviewCache {
     this.indexPath = join(this.root, "receipts.json");
   }
   close(): void { this.closed = true; }
+  async maintenanceRoot(create = false): Promise<string | null> {
+    if (this.closed || (this.cleanupDeps.platform ?? process.platform) !== "win32") return null;
+    try { return await this.rootIdentity(create); } catch { return null; }
+  }
   private now(): number { return (this.cleanupDeps.now ?? Date.now)(); }
   private blocked(key: string): boolean { const state = this.cleanupDeps.control?.snapshot(); return state?.protected === true || state?.key === key; }
   private path(key: string): string { hashSchema.parse(key); return join(this.root, `${key}.wav`); }
@@ -315,7 +319,7 @@ export class LocalPreviewCache {
         targets: entries.map(row => ({ resourceKey: digest(JSON.stringify(row.receipt)), createdAt: row.receipt.createdAt,
           logicalBytes: row.receipt.bytes, allocatedBytes: row.proof.allocatedBytes })),
         allocatedBytes: entries.reduce((sum, row) => sum + row.proof.allocatedBytes, 0), stopAtAvailableBytes,
-        run: (planId, signal, valid) => this.executeCleanup(planId, entries, root, stopAtAvailableBytes, signal, valid) };
+        run: (planId, signal, valid, automatic) => this.executeCleanup(planId, entries, root, stopAtAvailableBytes, signal, valid, automatic) };
     } catch (error) {
       if (error instanceof UnknownClose) {
         unknown = true; retainedOwners.add({ path: this.indexPath, file: error.file, release: () => { for (const release of held.values()) release(); } });
@@ -324,7 +328,7 @@ export class LocalPreviewCache {
     } finally { if (!unknown) for (const release of held.values()) release(); }
   }
   private async executeCleanup(planId: string, entries: Array<{ receipt: Receipt; proof: WindowsCacheProof }>, root: string,
-    stopAt: number | null, signal: AbortSignal, valid: () => boolean): Promise<{ status: "verified" | "refused" | "unknown" | "cancelled"; cleanup: RecoveryCacheOutcome }> {
+    stopAt: number | null, signal: AbortSignal, valid: () => boolean, automatic = false): Promise<{ status: "verified" | "refused" | "unknown" | "cancelled"; cleanup: RecoveryCacheOutcome }> {
     const control = this.cleanupDeps.control!;
     const cleanup: RecoveryCacheOutcome = { removedFiles: 0, logicalBytes: 0, availableBefore: null, availableAfter: null, reclaimedBytes: null };
     const held = new Map<string, () => void>(), retained = new Set<string>();
@@ -367,7 +371,7 @@ export class LocalPreviewCache {
         if (!active()) return { status: "cancelled", cleanup };
         currentKey = entry.receipt.key;
         intentId = await control.begin(planId, { key: currentKey, evidence: digest(JSON.stringify(entry.receipt)),
-          rootIdentity: entry.proof.rootIdentity, fileIdentity: entry.proof.fileIdentity, proof: entry.proof }, active);
+          rootIdentity: entry.proof.rootIdentity, fileIdentity: entry.proof.fileIdentity, proof: entry.proof, ...(automatic ? { automatic: true } : {}) }, active);
         if (!intentId) {
           if (control.snapshot().pending) { keep(currentKey); return { status: "unknown", cleanup }; }
           return { status: "refused", cleanup };

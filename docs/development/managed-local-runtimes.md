@@ -36,6 +36,25 @@ so explicit Resume can reuse it without HTTP. Publication/carry use rename rathe
 payload copy. Native cleanup uncertainty retains the disk/install reservation. Shared runtime-pull
 space planning, other write owners and previous-host reconciliation remain unfinished.
 
+Settings → Diagnostics exposes Automatic recovery and Suggest only. Automatic recovery can
+restore a failed idle Arke-managed supervisor within its shared durable budget; personal engine
+installs retain their own lifecycle. Review and separate approval can retry an eligible confirmed-
+stopped managed service. Restored readiness does not replay a submitted job or prove its output.
+
+Automatic preset preview cleanup is a separate host-only opt-in, off by default. Its scope review
+names Arke's fixed local preset preview cache, a seven-day minimum age and at most eight files/
+2 GiB per run; each audition is already bounded to 12 MiB. It runs at most once every five minutes
+in Automatic recovery mode when fresh measurements show low space on that cache's volume.
+Another volume's pressure grants nothing, and Suggest only holds it. The same verified cleanup
+owner checks producer receipts, native identity and active readers, flushes intent before removal,
+and stops when measured warning headroom is restored. Models, cloned/paid/legacy previews and
+creative artifacts stay protected. Disabling fences further file admissions immediately; an
+admitted step may finish and completed deletions cannot be undone. Unconfirmed saves remain
+unconfirmed, and uncertain cleanup holds remain until their original owner can be verified.
+The latest automatic-run receipt reports confirmed counts and measured/unknown capacity without
+attributing all free-space improvement to Arke. This qualifies the fixed preview class on the
+measured Windows port; it does not implement every planned storage remedy or filesystem port.
+
 Ollama is a pinned, SHA-256-verified portable tree, not a system installer or PATH command.
 Arke owns its process, a private loopback port, `<appRoot>/models/ollama`, and
 `<appRoot>/runtime-home/ollama`. Logs are `<appRoot>/logs/engines/ollama.log`.

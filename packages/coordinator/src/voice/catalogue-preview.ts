@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { join, relative, isAbsolute } from "node:path";
 import { estimateSpeechMicroUsd, NARRATOR_PREVIEW_TEXT, VOICE_PREVIEW_SCOPE, supportsVoiceUse,
-  voiceFormatForModel, voiceTargetKey, type VoiceCandidate, type ModelManifest, type DomainEvent, type Job } from "@arke-studio/contracts";
+  voiceFormatForModel, voiceTargetKey, CACHE_CLEANUP_POLICY, RECOVERY_ACTION_LIMITS, STORAGE_POLICY, storageWarningFloor,
+  type RecoveryCacheMaintenanceRun, type VoiceCandidate, type ModelManifest, type DomainEvent, type Job } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import type { SidecarLike } from "./service.js";
 import { cachedVoiceAudioLooksRight } from "./service.js";
@@ -33,6 +34,9 @@ export class CataloguePreviewService {
   private readonly localCache: LocalPreviewCache;
   private readonly cleanupControl: CacheCleanupControl;
   private readonly cleanupLifetime = new AbortController();
+  private maintenanceRootHold: ReturnType<AppStorageService["acquireRoot"]> | null = null;
+  private maintenanceRootIdentity: string | null = null;
+  private maintenanceSyncRevision = 0;
   constructor(private readonly deps: {
     root: string;
     sidecar: SidecarLike | null;
@@ -49,14 +53,66 @@ export class CataloguePreviewService {
     this.cleanupControl = new CacheCleanupControl(join(deps.root, "cleanup-control.json"), { now, onChange: deps.cleanupChanged });
     this.localCache = new LocalPreviewCache(deps.root, deps.storage, { control: this.cleanupControl, now });
   }
-  initializeCleanup(): Promise<void> { return this.cleanupControl.open(); }
+  async initializeCleanup(): Promise<void> { await this.cleanupControl.open(); await this.syncMaintenanceRoot(); }
+  private async syncMaintenanceRoot(): Promise<void> {
+    const revision = ++this.maintenanceSyncRevision, policy = this.cleanupControl.maintenancePolicy();
+    if (this.closed || !policy?.enabled || !this.deps.storage) {
+      this.maintenanceRootHold?.release(); this.maintenanceRootHold = null; this.maintenanceRootIdentity = null; return;
+    }
+    if (this.maintenanceRootHold && this.maintenanceRootIdentity === policy.rootIdentity) return;
+    const root = await this.localCache.maintenanceRoot();
+    if (this.closed || revision !== this.maintenanceSyncRevision || !this.cleanupControl.maintenancePolicy()?.enabled || root !== policy.rootIdentity) return;
+    this.maintenanceRootHold?.release(); this.maintenanceRootHold = this.deps.storage.acquireRoot(join(this.deps.root, "local-presets-v1"), "working-files");
+    this.maintenanceRootIdentity = root;
+  }
+  revokeMaintenance(): void { this.cleanupControl.revokeMaintenance(); }
+  async setMaintenance(enabled: boolean): Promise<boolean> {
+    if (!enabled) this.revokeMaintenance();
+    await this.initializeCleanup();
+    if (enabled && (!this.deps.storage?.supportsAdmission || process.platform !== "win32")) return false;
+    const root = enabled ? await this.localCache.maintenanceRoot(true) : null;
+    if (enabled && !root) return false;
+    const saved = await this.cleanupControl.setMaintenance(enabled, root, () => !this.closed && !this.cleanupLifetime.signal.aborted);
+    await this.syncMaintenanceRoot(); return saved;
+  }
+  maintenanceReady(): boolean {
+    const policy = this.cleanupControl.maintenancePolicy(), now = (this.deps.now ?? Date.now)();
+    if (this.closed || !policy?.enabled || !this.cleanupControl.snapshot().available || !this.maintenanceRootHold ||
+      !Number.isSafeInteger(now) || now < policy.changedAt || now < policy.nextAttemptAt) return false;
+    const root = this.deps.storage?.snapshot().roots.find(root => root.rootId === this.maintenanceRootHold!.rootId), fact = root?.capacity;
+    return root?.state === "measured" && !!root.pressure && (root.pressure.warning || root.pressure.critical) && !!fact && fact.availableBytes !== null &&
+      fact.measuredAt <= now && now - fact.measuredAt <= STORAGE_POLICY.forecastMaxAgeMs &&
+      root.pressure.volumeId === fact.volumeId && root.pressure.mappingRevision === fact.mappingRevision &&
+      fact.availableBytes < storageWarningFloor(fact.totalBytes) + STORAGE_POLICY.clearMarginBytes;
+  }
+  async runMaintenance(planId: string, signal: AbortSignal, allowed: () => boolean): Promise<void> {
+    await this.initializeCleanup();
+    if (!allowed() || !this.maintenanceReady()) return;
+    const root = await this.localCache.maintenanceRoot(), policy = this.cleanupControl.maintenancePolicy();
+    if (!root || !policy || root !== policy.rootIdentity || signal.aborted) return;
+    const token = await this.cleanupControl.reserveMaintenance(planId, root, () => !this.closed && !signal.aborted && allowed());
+    if (!token) return;
+    const started = (this.deps.now ?? Date.now)(), expires = started + RECOVERY_ACTION_LIMITS.previewMs;
+    const valid = () => { const at = (this.deps.now ?? Date.now)(); return !this.closed && !signal.aborted && allowed() &&
+      Number.isSafeInteger(at) && at >= started && at < expires && this.cleanupControl.maintenanceCurrent(planId, token, root); };
+    let run: Omit<RecoveryCacheMaintenanceRun, "at"> = { status: "refused", cleanup: { removedFiles: 0, logicalBytes: 0,
+      availableBefore: null, availableAfter: null, reclaimedBytes: null } };
+    try {
+      const prepared = await this.prepareCleanup(signal);
+      if (prepared && prepared.stopAtAvailableBytes !== null && valid()) run = await prepared.run(planId, signal, valid, true);
+    } catch { run = { ...run, status: "unknown" }; }
+    finally { await this.cleanupControl.finishMaintenance(planId, run); }
+  }
   async reconcileCleanup(signal: AbortSignal = this.cleanupLifetime.signal) {
     await this.initializeCleanup();
     return this.localCache.reconcileCleanup(AbortSignal.any([signal, this.cleanupLifetime.signal]));
   }
   cleanupAvailability(): NonNullable<import("@arke-studio/contracts").RecoveryPolicySnapshot["cleanup"]> {
-    const state = this.cleanupControl.snapshot();
+    const state = this.cleanupControl.snapshot(), policy = this.cleanupControl.maintenancePolicy();
     return { available: !this.closed && process.platform === "win32" && state.available, pending: state.pending, audit: state.audit,
+      maintenance: { enabled: policy?.enabled === true, rootScope: "fixed-local-preset-previews", minAgeMs: CACHE_CLEANUP_POLICY.minAgeMs,
+        maxFiles: CACHE_CLEANUP_POLICY.maxFiles, maxBytes: CACHE_CLEANUP_POLICY.maxBytes, nextAttemptAt: policy?.nextAttemptAt ?? 0,
+        ...(policy?.lastRun ? { lastRun: policy.lastRun } : {}) },
       ...(state.reason ? { reason: state.reason } : process.platform !== "win32" ? { reason: "unsupported" as const } : {}) };
   }
   async prepareCleanup(signal: AbortSignal): ReturnType<LocalPreviewCache["prepareCleanup"]> {
@@ -213,6 +269,7 @@ export class CataloguePreviewService {
 
   close(): void {
     this.closed = true;
+    this.maintenanceSyncRevision++; this.maintenanceRootHold?.release(); this.maintenanceRootHold = null;
     this.cleanupLifetime.abort();
     this.localCache.close();
     this.cleanupControl.closeAdmission();

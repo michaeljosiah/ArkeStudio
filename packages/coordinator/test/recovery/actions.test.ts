@@ -85,3 +85,24 @@ it("read-only cleanup reconciliation shares the executor and never prepares anot
   assert.equal(h.results.at(-1)?.reconciliation?.outcome, "retained"); assert.equal(h.results.at(-1)?.status, "verified");
   assert.equal(calls, 1); assert.equal(prepares, 0); assert.equal(h.calls(), 0); h.registry.closeAdmission();
 });
+
+it("automatic cleanup requires the host mode gate, shares the executor and admits withdrawal while work is active", async () => {
+  let allowed = false, calls = 0, revoked = false, now = 1000, finish!: () => void;
+  const results: RecoveryActionResult[] = [], waiting = new Promise<void>(resolve => { finish = resolve; });
+  const registry = new RecoveryActionRegistry({ now: () => now, publish: result => results.push(result), automaticAllowed: () => allowed });
+  registry.registerCleanup({ available: () => ({ available: true, pending: false }), prepare: async () => null, maintenanceReady: () => !revoked,
+    revokeMaintenance: () => { revoked = true; }, setMaintenance: async enabled => { assert.equal(enabled, false); return true; },
+    runMaintenance: async (_id, _signal, valid) => { calls++; assert(valid()); await waiting; assert.equal(valid(), false); },
+  });
+  await registry.maintainCleanup(); assert.equal(calls, 0);
+  allowed = true; const running = registry.maintainCleanup(); assert.equal(calls, 1);
+  await registry.maintainCleanup(); assert.equal(calls, 1);
+  await registry.handle({ kind: "recovery-action", requestId, command: { action: "preview-cleanup" } }); assert.equal(results.at(-1)?.reason, "busy");
+  now = NaN;
+  await registry.handle({ kind: "recovery-action", requestId, command: { action: "set-cleanup-maintenance", enabled: false } });
+  assert(revoked, "withdrawal still fences further input when the clock cannot authorize a save");
+  now = 1000;
+  await registry.handle({ kind: "recovery-action", requestId, command: { action: "set-cleanup-maintenance", enabled: false } });
+  assert(revoked); assert.equal(results.at(-1)?.maintenanceSaved, false);
+  allowed = false; finish(); await running; registry.closeAdmission();
+});

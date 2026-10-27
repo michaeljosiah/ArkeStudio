@@ -8,7 +8,9 @@ interface Target { service: RecoveryRetryPlan["service"]; prepare(): PreparedSup
 interface Preview { plan: RecoveryRetryPlan; target: Target; prepared: PreparedSupervisorRetry }
 type CleanupAvailability = NonNullable<import("@arke-studio/contracts").RecoveryPolicySnapshot["cleanup"]>;
 interface CleanupTarget { available(): CleanupAvailability; prepare(signal: AbortSignal): Promise<PreparedPreviewCleanup | null>;
-  reconcile?(signal: AbortSignal): Promise<import("@arke-studio/contracts").RecoveryCacheReconciliation> }
+  reconcile?(signal: AbortSignal): Promise<import("@arke-studio/contracts").RecoveryCacheReconciliation>;
+  setMaintenance?(enabled: boolean): Promise<boolean>; revokeMaintenance?(): void; maintenanceReady?(): boolean;
+  runMaintenance?(planId: string, signal: AbortSignal, allowed: () => boolean): Promise<void> }
 /** Typed review broker over the existing supervisor executor. Volatile plans are not durable
  * execution authority: the original owner still flushes its exact intent before a spawn. */
 export class RecoveryActionRegistry {
@@ -20,7 +22,7 @@ export class RecoveryActionRegistry {
   private readonly cleanupPreviews = new Map<string, { plan: import("@arke-studio/contracts").RecoveryCachePlan; prepared: PreparedPreviewCleanup; target: CleanupTarget }>();
   private preparing = false;
   private revision = 0;
-  constructor(private readonly deps: { now(): number; publish(result: RecoveryActionResult): void }) {}
+  constructor(private readonly deps: { now(): number; publish(result: RecoveryActionResult): void; automaticAllowed?: () => boolean; maintenanceSettled?: () => void }) {}
   register(key: string, target: Target): void {
     if (this.closed.signal.aborted) return;
     if (!/^[a-f0-9]{64}$/.test(key) || !this.targets.has(key) && this.targets.size >= RECOVERY_POLICY.maxTargets) throw new Error("Recovery target unavailable.");
@@ -41,19 +43,44 @@ export class RecoveryActionRegistry {
   private publish(result: RecoveryActionResult): void { if (!this.closed.signal.aborted) { try { this.deps.publish(result); } catch { /* Presentation cannot grant or reverse authority. */ } } }
   private current(prepared: PreparedSupervisorRetry): boolean { try { return prepared.current(); } catch { return false; } }
   invalidateReviews(): void { this.revision++; this.previews.clear(); this.cleanupPreviews.clear(); }
+  private automaticAllowed(): boolean { try { return !this.closed.signal.aborted && this.deps.automaticAllowed?.() === true; } catch { return false; } }
+  async maintainCleanup(): Promise<void> {
+    const target = this.cleanupTarget, at = this.deps.now();
+    if (!Number.isSafeInteger(at) || at < 0 || this.active || this.preparing || !this.automaticAllowed() || !target?.runMaintenance || !target.maintenanceReady?.()) return;
+    const plan = { id: randomBytes(32).toString("hex") }, control = new AbortController(); this.active = { plan, control };
+    const signal = AbortSignal.any([control.signal, this.closed.signal]), timer = setTimeout(() => control.abort(), RECOVERY_ACTION_LIMITS.previewMs);
+    try { await target.runMaintenance(plan.id, signal, () => !signal.aborted && this.cleanupTarget === target && this.automaticAllowed()); }
+    catch { /* The existing cache owner retains uncertain native/audit authority; never replay it. */ }
+    finally {
+      clearTimeout(timer); if (this.active?.plan === plan) this.active = null;
+      if (!this.closed.signal.aborted) try { this.deps.maintenanceSettled?.(); } catch { /* Presentation does not grant cleanup authority. */ }
+    }
+  }
   async handle(message: RecoveryActionCommand): Promise<void> {
     const reply = (value: Omit<RecoveryActionResult, "requestId">) => this.publish({ requestId: message.requestId, ...value });
     if (this.closed.signal.aborted) return;
+    const command = message.command;
+    if (command.action === "set-cleanup-maintenance" && !command.enabled) this.cleanupTarget?.revokeMaintenance?.();
     const now = this.deps.now();
     if (!Number.isSafeInteger(now) || now < 0) { reply({ status: "refused", reason: "unavailable" }); return; }
     for (const [id, preview] of this.previews) if (now >= preview.plan.expiresAt || now < preview.plan.preparedAt) this.previews.delete(id);
     for (const [id, preview] of this.cleanupPreviews) if (now >= preview.plan.expiresAt || now < preview.plan.preparedAt) this.cleanupPreviews.delete(id);
-    const command = message.command;
     if (command.action === "cancel") {
       this.previews.delete(command.planId);
       this.cleanupPreviews.delete(command.planId);
       if (this.active?.plan.id === command.planId) this.active.control.abort();
       reply({ status: "cancelled" }); return;
+    }
+    if (command.action === "set-cleanup-maintenance") {
+      const target = this.cleanupTarget;
+      if (!target?.setMaintenance || command.enabled && (this.active || this.preparing)) { reply({ status: "refused", reason: "busy" }); return; }
+      if (command.enabled) this.preparing = true;
+      try {
+        const saved = await target.setMaintenance(command.enabled); this.invalidateReviews();
+        reply(saved ? { status: "verified", maintenanceSaved: command.enabled } : { status: "refused", reason: "unavailable" });
+      } catch { reply({ status: "unknown" }); }
+      finally { if (command.enabled) this.preparing = false; }
+      return;
     }
     if (this.active || this.preparing) { reply({ status: "refused", reason: "busy" }); return; }
     if (command.action === "reconcile-cleanup") {

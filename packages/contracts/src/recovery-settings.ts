@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { RecoveryModeSchema, RecoveryOutcomeSummarySchema, RECOVERY_POLICY } from "./recovery-policy.js";
 import { RecoveryHistorySnapshotSchema, RecoveryIncidentSchema, RECOVERY_HISTORY_LIMITS } from "./recovery-incidents.js";
+import { RecoveryCacheMaintenanceSchema } from "./recovery-actions.js";
 
 /** SPEC-061 R-7/R-18/R-25. Presentation of policy carries no intent/capability or repair grant. */
 export const RecoveryPolicySnapshotSchema = z.object({
   cleanup: z.object({ available: z.boolean(), pending: z.boolean(), audit: z.enum(["starting", "available", "unavailable"]).optional(),
+    maintenance: RecoveryCacheMaintenanceSchema.optional(),
     reason: z.enum(["invalid", "permission", "disk-full", "read-failed", "write-failed", "unsupported"]).optional() }).strict().optional(),
   audit: z.enum(["starting", "available", "unavailable"]), accepting: z.boolean(), mode: RecoveryModeSchema,
   reason: z.enum(["invalid", "permission", "disk-full", "read-failed", "write-failed"]).optional(),

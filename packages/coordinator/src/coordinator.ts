@@ -3196,6 +3196,9 @@ export class Coordinator {
   private readonly recoveryTargetObservers = new Map<string, () => void>();
   private readonly recoveryActions = new RecoveryActionRegistry({ now: () => Date.parse(this.nowIso()), publish: result => {
     if (!this.stopping) { this.emit({ type: "recovery.action-result", at: this.nowIso(), result }); this.publishRecoveryPolicy(); }
+  }, maintenanceSettled: () => this.publishRecoveryPolicy(), automaticAllowed: () => {
+    const policy = this.opts.recoveryControl?.policySnapshot();
+    return this.started && !this.stopping && policy?.accepting === true && policy.audit === "available" && policy.mode === "automatic";
   } });
   private recoveryPolicy(): RecoveryPolicySnapshot | null {
     const policy = this.opts.recoveryControl?.policySnapshot(); if (!policy) return null;
@@ -4058,6 +4061,8 @@ export class Coordinator {
     if (this.cataloguePreviews) this.recoveryActions.registerCleanup({
       available: () => this.cataloguePreviews!.cleanupAvailability(), prepare: signal => this.cataloguePreviews!.prepareCleanup(signal),
       reconcile: signal => this.cataloguePreviews!.reconcileCleanup(signal),
+      setMaintenance: enabled => this.cataloguePreviews!.setMaintenance(enabled), revokeMaintenance: () => this.cataloguePreviews!.revokeMaintenance(),
+      maintenanceReady: () => this.cataloguePreviews!.maintenanceReady(), runMaintenance: (id, signal, valid) => this.cataloguePreviews!.runMaintenance(id, signal, valid),
     });
     this.serverApplication = {
       attachTransport: sink => {
@@ -4980,7 +4985,10 @@ export class Coordinator {
     await this.adapterLibrary?.refresh();
     if (this.opts.recoveryControl) {
       const control = this.opts.recoveryControl;
-      this.lifecycleDisposers.add(control.subscribe(() => { this.recoveryActions.invalidateReviews(); this.publishRecoveryPolicy(); }));
+      this.lifecycleDisposers.add(control.subscribe(() => {
+        this.recoveryActions.invalidateReviews(); this.publishRecoveryPolicy();
+        if (!this.stopping) this.trackBackground(this.recoveryActions.maintainCleanup());
+      }));
       await control.open();
       await this.cataloguePreviews?.initializeCleanup();
       await this.cataloguePreviews?.reconcileCleanup();
@@ -5005,7 +5013,7 @@ export class Coordinator {
     }
     if (this.opts.storageHealth) {
       this.lifecycleDisposers.add(this.opts.storageHealth.subscribe(health => {
-        if (!this.stopping) this.emit({ type: "storage.health", at: new Date().toISOString(), health });
+        if (!this.stopping) { this.emit({ type: "storage.health", at: new Date().toISOString(), health }); this.trackBackground(this.recoveryActions.maintainCleanup()); }
       }));
       this.syncStorageObservation();
       this.trackBackground(this.opts.storageHealth.start());
@@ -14569,7 +14577,9 @@ export class Coordinator {
         return;
       }
       case "recovery-action": {
-        await this.recoveryActions.handle(msg); this.publishRecoveryPolicy(); return;
+        await this.recoveryActions.handle(msg); this.publishRecoveryPolicy();
+        if (!this.stopping) this.trackBackground(this.recoveryActions.maintainCleanup());
+        return;
       }
       case "probe-grouped-read": {
         // Design turn 185's probe: a few consecutive blocks of a chapter, prepared exactly as a

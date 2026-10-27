@@ -128,8 +128,8 @@ bytes intact, approval removes only the eligible audition, duplicate approval re
 inference is replayed. Contracts `test/recovery-actions.test.ts` checks closed/enumerated plans;
 client `test/recovery-cache-cleanup.test.tsx` covers separate approval, cancellation, disconnect
 without replay and remote refusal. Run client tests from `packages/client`. These establish
-reviewed cleanup for this fixed Windows class, not standing automatic maintenance, complete
-inventory, arbitrary cache deletion or creative-media removal.
+reviewed cleanup for this fixed Windows class, not complete inventory, arbitrary cache deletion
+or creative-media removal. Standing maintenance has additional checks below.
 Reconciliation additionally checks retained/absent/changed targets, protected successors,
 live/reused/missing original process identities, probe refusal, rejected audit writes and an
 unfinished original control chain. The actual Windows helper receives no input until its PID
@@ -140,6 +140,20 @@ metadata handle closes. The authenticated cleanup fixture bounds its read-only r
 on loaded Windows runners; approval/removal is never automatically retried. Client checks
 correlated manual reconciliation, held wording and paired-browser refusal. Legacy unknowns
 without the admission witness remain held and do not qualify an arbitrary override.
+
+Standing cache maintenance uses `test/storage/cache-maintenance-host.test.ts` with actual
+authenticated commands/native removal and injected capacity, never a full system volume. Low
+space alone grants nothing; explicit opt-in in Suggest only still performs no removal. A
+healthy cache volume is protected when another registered volume is low. Automatic mode plus
+fresh pressure on the opted-in cache volume admits the existing cleanup owner, measures its
+headroom and reports only confirmed counts with unknown causal reclaimed space. Control tests
+check root/attempt binding, persisted cooldown and disable across restart, blocked input-flush
+withdrawal and retained file-control ownership through abandoned writes. Cleanup tests withdraw
+between files and retain the later audition. Broker tests preserve the single executor and
+allow withdrawal even with an invalid clock. Client `test/recovery-cache-maintenance.test.tsx`
+requires review before opt-in, lets withdrawal overtake enable, refuses duplicate clicks and
+never resubmits after reconnect. This qualifies only the fixed preset class; broader classes,
+inventory, process/driver/platform acceptance and incident action binding remain separate.
 
 Recovery control tests (#2194) use contracts `test/recovery-policy.test.ts` and coordinator
 `test/recovery/control.test.ts`. They inject crash/unknown writes, competing attempts, rolling
