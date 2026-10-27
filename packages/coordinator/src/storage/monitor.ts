@@ -17,6 +17,7 @@ interface Reading {
   pressure: StoragePressure | null;
   attemptedAt: number;
   minimumAfter: number;
+  fenceTick: number | null;
 }
 const missing = (): StorageProbeResult => ({ state: "unavailable", source: "host-provided", limitations: ["probe-failed"], capacity: null });
 
@@ -61,7 +62,7 @@ export class StorageMonitor {
     for (const root of next) {
       const old = before.get(root.rootId), value = this.readings.get(root.rootId);
       retained.set(root.rootId, old?.revision === root.revision && value ? value : {
-        result: missing(), samples: [], pressure: value?.pressure ?? this.deps.initialPressure?.[root.rootId] ?? null, attemptedAt: -Infinity, minimumAfter: old ? this.now() : -Infinity,
+        result: missing(), samples: [], pressure: value?.pressure ?? this.deps.initialPressure?.[root.rootId] ?? null, attemptedAt: -Infinity, minimumAfter: old ? this.now() : -Infinity, fenceTick: null,
       });
     }
     this.readings = retained;
@@ -127,6 +128,9 @@ export class StorageMonitor {
           if (this.readings.get(root.rootId) === reading) this.pending.add(root.rootId);
           continue;
         }
+        // A successful same-tick probe cannot qualify freshness, but is not a failed probe.
+        // Retain only its fence identity so admission may wait for the next eligible reading.
+        reading.fenceTick = result.capacity?.measuredAt === reading.minimumAfter ? reading.minimumAfter : null;
         if (result.capacity && result.capacity.measuredAt <= reading.minimumAfter) result = missing();
         const previous = reading.result.capacity;
         if (previous && result.capacity && result.capacity.measuredAt < previous.measuredAt && previous.measuredAt <= this.now()) {
@@ -177,7 +181,7 @@ export class StorageMonitor {
       if (sample && sample.measuredAt > reading.minimumAfter && sample.measuredAt <= this.now() && this.now() - sample.measuredAt <= STORAGE_POLICY.admissionMaxAgeMs) return structuredClone(sample);
       // A performed, current failed measurement is unavailable. A coalescing cooldown is
       // merely pending: wait for its eligible refresh instead of invalidating a live lease.
-      if (sample === null && reading.attemptedAt !== attemptedBefore && reading.attemptedAt >= reading.minimumAfter) return null;
+      if (sample === null && reading.attemptedAt !== attemptedBefore && reading.attemptedAt >= reading.minimumAfter && reading.fenceTick !== reading.minimumAfter) return null;
       if (reading.attemptedAt !== attemptedBefore && reading.attemptedAt >= reading.minimumAfter && sample && sample.measuredAt <= reading.minimumAfter) return null;
       const delay = Math.max(1, 1_000 - (this.now() - reading.attemptedAt));
       const waitingAt = this.now();

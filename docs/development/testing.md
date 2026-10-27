@@ -49,6 +49,10 @@ journal exclusion. Client `test/storage-health.test.ts` checks the matching fold
 `test/storage-diagnostics.test.ts` covers pure findings, stale/unknown facts and typed failures.
 These checks establish observation and Diagnostics composition; write-path protection, recovery
 and visual parity with approved turn 239 require separate end-to-end acceptance.
+`monitor.test.ts` separately reproduces a performed probe completing at exactly its admission
+fence timestamp. It must remain pending until a later eligible reading, without publishing
+same-tick fit or treating it as failed native I/O. The matching frozen-clock case retains the
+eight-wake bound; existing failed/stale probe, one-second floor and cancellation checks still apply.
 `test/storage/setup-files.test.ts` now runs two real streamed file installers against one shared
 volume, verifies the second makes no request while held, and sends authenticated production-host
 Install/Retry commands against a competing owner's intent. It checks known-length growth before

@@ -10,6 +10,32 @@ const result = (now: number, availableBytes = 20 * GiB): StorageProbeResult => (
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 
 describe("bounded scoped storage monitor (SPEC-062 R-1–R-5)", () => {
+  it("waits for a later tick when a performed probe shares the admission fence timestamp", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] }); let now = 600_000, probes = 0;
+    const monitor = new StorageMonitor({ now: () => now, probe: async () => { probes++; return result(now, 0); }, onSnapshot: () => {} });
+    try {
+      monitor.setRoots([root]); await monitor.start(); now += 1000; monitor.invalidate(root.rootId);
+      let ended = false;
+      const pending = monitor.capacity(root.rootId, new AbortController().signal, now).then(value => { ended = true; return value; });
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(probes, 2); assert.equal(ended, false, "equal timestamps are not a post-report reading or a failed native probe");
+      assert.equal(monitor.snapshot().roots[0]!.capacity, null, "the same-tick observation cannot qualify fit");
+      now += 1001; t.mock.timers.tick(1001);
+      const measured = await pending; assert.equal(measured?.measuredAt, now); assert.equal(measured?.availableBytes, 0); assert.equal(probes, 3);
+    } finally { await monitor.stop(); }
+  });
+  it("retains a finite wake budget after a performed same-tick probe on a frozen clock", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] }); let now = 600_000, probes = 0;
+    const monitor = new StorageMonitor({ now: () => now, probe: async () => { probes++; return result(now); }, onSnapshot: () => {} });
+    try {
+      monitor.setRoots([root]); await monitor.start(); now += 1000; monitor.invalidate(root.rootId);
+      let ended = false;
+      const pending = monitor.capacity(root.rootId, new AbortController().signal, now).then(value => { ended = true; return value; });
+      await new Promise(resolve => setImmediate(resolve)); assert.equal(ended, false);
+      for (let wake = 1; wake <= 8; wake++) { t.mock.timers.tick(1000); await new Promise(resolve => setImmediate(resolve)); assert.equal(ended, wake === 8); }
+      assert.equal(await pending, null); assert.equal(probes, 2); assert.equal(monitor.snapshot().roots[0]!.capacity, null);
+    } finally { await monitor.stop(); }
+  });
   it("keeps admission pending when an early cooldown wake shares the same clock tick", async t => {
     t.mock.timers.enable({ apis: ["setTimeout"] }); let now = 600_000, probes = 0;
     const monitor = new StorageMonitor({ now: () => now, probe: async () => { probes++; return result(now); }, onSnapshot: () => {} });

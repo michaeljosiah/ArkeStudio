@@ -26,7 +26,10 @@ declared file bound with a valid resumable checkpoint where supported. Progress 
 bytes; verified publication/pause/failure settles only after handles/checkpoints close, before
 component activation. Space/audit holds use existing Downloads/Diagnostics state and report the
 measured available/committed/remaining/reserve figures. Capacity admission waits through the
-collector's coalescing floor for a post-report reading; it stays bounded and cancellable. Storage
+collector's coalescing floor for a post-report reading; it stays bounded and cancellable.
+Admission also withholds a performed probe sharing the freshness fence's clock tick and waits
+for a later eligible reading, rather than misclassifying that valid observation as probe failure.
+It retains only the fence identity; no same-tick capacity may qualify a write. Storage
 authority also bounds stalled reads/saves during shutdown, retaining uncertain intents and refusing
 late write permission. Unsupported host ports retain their existing unknown-capacity policy and
 do not claim shared admission. Runtime-owned pulls, other write owners,
