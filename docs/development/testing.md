@@ -1643,6 +1643,14 @@ are retired. Other SDK transports, production spend/payload and physical cleanup
 Set `ARKE_TEST_OPENCODE2` for that test; it makes no real inference or paid request. Production
 host attestation still defaults to refusal. These checks do not prove complete cloud payload,
 spend, native transcript retention or physical backing-inference cleanup requirements.
+The separate opt-in `test/v2-launch.test.ts` native case poisons inherited OpenCode authentication,
+DB/config and XDG cache/state controls using a second disposable synthetic profile. It requires
+healthy launch, the DB under Arke's profile, unchanged synthetic personal bytes and no cache/state
+or DB sidecars in that second profile. A server-only fix is insufficient: the real `--version`
+discovery probe also initializes native paths. Adapter discovery tests cover environment delivery
+through configured, PATH and bundled candidates. Pure launcher tests cover mixed-case native/
+telemetry controls, pin-owned update/SDK-telemetry flags and preserving the parent environment.
+These checks do not establish all native log/telemetry behavior or private transport trace isolation.
 Adapter `test/v2-private-retirement.test.ts` verifies completed/unsent exact-session retirement,
 refusal of unknown inference/Stop acknowledgements, original server/authentication binding,
 changed owner fields/generation, both native absence checks, idempotent retry, finite private

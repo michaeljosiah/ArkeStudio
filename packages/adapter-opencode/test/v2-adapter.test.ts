@@ -687,6 +687,26 @@ describe("v2 session config (issue 327 §7)", () => {
 });
 
 describe("v2 discovery and the release pin (issue 327 §3)", () => {
+  it("passes a host-owned environment through configured, PATH and bundled discovery probes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "arke-oc2-env-")), configured = join(dir, "configured.exe"), bundled = join(dir, "bundled.exe");
+    writeFileSync(configured, "stub"); writeFileSync(bundled, "stub");
+    try {
+      for (const source of ["configured", "path", "bundled"] as const) {
+        const env = { HOME: "synthetic-owned-profile", PATH: "synthetic-bin", OPENCODE_DISABLE_AUTOUPDATE: "1" };
+        let probes = 0;
+        const result = await discoverPreferredHarness({ v2: { configuredPath: configured, bundledPath: bundled, env,
+          runCommand: async (command, args, _timeoutMs, actualEnv) => {
+            probes++; assert.equal(actualEnv, env);
+            if (command === "where" || command === "which") return source === "path" && args[0] === "opencode2"
+              ? { status: 0, stdout: "synthetic-path.exe" } : { status: 1, stdout: "" };
+            return { status: 0, stdout: command === configured && source !== "configured" ? "1.0.0" : "2.0.26" };
+          },
+        } });
+        assert.equal(result.found?.discovery.source, source); assert(probes > 0);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it("keeps the adapter's release gate in lockstep with the packaged runtime", () => {
     const metadata = JSON.parse(readFileSync(new URL("../../../apps/desktop/runtime-sources.json", import.meta.url), "utf8"));
     assert.equal(OPENCODE2_PINNED_VERSION, metadata.opencode2.version);

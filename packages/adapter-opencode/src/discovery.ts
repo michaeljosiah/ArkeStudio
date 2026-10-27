@@ -21,15 +21,15 @@ interface CommandResult {
   stdout: string;
 }
 
-type CommandRunner = (command: string, args: string[], timeoutMs: number) => Promise<CommandResult>;
+type CommandRunner = (command: string, args: string[], timeoutMs: number, env?: NodeJS.ProcessEnv) => Promise<CommandResult>;
 
-const runCommand: CommandRunner = (command, args, timeoutMs) =>
+const runCommand: CommandRunner = (command, args, timeoutMs, env) =>
   new Promise((resolve) => {
     const shim = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
-    const executable = shim ? (process.env["ComSpec"] ?? "cmd.exe") : command;
+    const executable = shim ? ((env ?? process.env)["ComSpec"] ?? "cmd.exe") : command;
     const executableArgs = shim ? ["/d", "/c", "call", command, ...args] : args;
     let settled = false;
-    const child = execFile(executable, executableArgs, { encoding: "utf8", windowsHide: true }, (error, stdout) => {
+    const child = execFile(executable, executableArgs, { encoding: "utf8", windowsHide: true, ...(env ? { env } : {}) }, (error, stdout) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
@@ -102,6 +102,8 @@ export interface DiscoveryOptions {
   bundledPath?: string;
   /** Process seam for deterministic timeout/non-blocking tests. */
   runCommand?: CommandRunner;
+  /** Complete probe environment. Managed hosts use the same isolated profile as the server. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /** Only the release qualified with Studio's adapter and bundle is supported. */
@@ -127,7 +129,7 @@ async function discoverGated(
   opts: DiscoveryOptions,
   accept: (version: string | null) => boolean,
 ): Promise<GatedDiscovery> {
-  const run = opts.runCommand ?? runCommand;
+  const run: CommandRunner = (command, args, timeoutMs) => (opts.runCommand ?? runCommand)(command, args, timeoutMs, opts.env);
   let rejected: DiscoveredOpenCode | null = null;
   const consider = (candidate: DiscoveredOpenCode): DiscoveredOpenCode | null => {
     if (accept(candidate.version)) return candidate;
