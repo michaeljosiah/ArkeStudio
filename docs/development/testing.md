@@ -1629,6 +1629,12 @@ while queued refuses before dispatch without retaining unsent GPU/runtime admiss
 native proof/fence cannot fall back to the host claim. Opt-in `pinned-native.test.ts` runs the
 same runner through the shared actual 2.0.26 launcher, a credential-free profile and scripted
 provider, checking one approved zero-tool completion, settlement and private trace exclusion.
+Its failure cases return two HTTP 503/429 responses before success and measure three identical
+provider requests despite only one application approval/dispatch. Terminal HTTP 400 produces
+a failed native assistant with `time.completed`, `finish: "error"` and structured error metadata;
+the runner refuses its response and retains unknown GPU/runtime ownership through Stop without
+application replay. This characterization exposes native retries; it does not disable or approve
+them. Production retry/spend and payload gates remain closed.
 Set `ARKE_TEST_OPENCODE2` for that test; it makes no real inference or paid request. Production
 host attestation still defaults to refusal. These checks do not prove complete cloud payload,
 spend, native transcript retention or physical backing-inference cleanup requirements.
@@ -1656,6 +1662,10 @@ request and do not establish complete native payload disclosure, spend or subpro
 The same suite checks cached rows after an observed private error cannot become completion
 proof during reconnect, and private unknown event names cannot reach common dead-letter
 diagnostics. Neither a refused response nor a Stop acknowledgement releases unknown inference.
+Missed-failure reconnect cases require the newest assistant's error-free `finish: "stop"` before
+publishing private text, even when a failed row has a completed timestamp and plausible JSON.
+Truncation, native tool requests, inconsistent error metadata and missing finish refuse; a newer
+unfinished assistant cannot reveal an older complete row. Ordinary authoring keeps its prior path.
 
 The Effects browser fixture logs its actual browser version, a bounded stderr tail on failure
 and Linux cgroup memory counters every five seconds and before each decoder stage. Two Linux

@@ -573,14 +573,17 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
           id?: string;
           type?: string;
           time?: { completed?: number };
+          finish?: string;
+          error?: unknown;
           content?: Array<{ type?: string; text?: string }>;
         }>
       >("GET", `/api/session/${sessionId}/message`, undefined, { signal: AbortSignal.any([runtime.signal, AbortSignal.timeout(10_000)]),
         ...(tracked?.private ? { responseBytes: 4 * 1024 ** 2 } : {}) });
       if (runtime.signal.aborted || this.disposed || !stillAdmitted() || tracked?.privateResponseRejected) return;
-      const done = Array.isArray(messages)
-        ? messages.find((m) => m.type === "assistant" && (tracked?.private ? Number.isSafeInteger(m.time?.completed) && m.time!.completed! >= 0 : typeof m.time?.completed === "number"))
-        : undefined;
+      const newest = tracked?.private && Array.isArray(messages) ? messages.find(m => m.type === "assistant") : undefined;
+      const done = tracked?.private
+        ? newest && Number.isSafeInteger(newest.time?.completed) && newest.time!.completed! >= 0 ? newest : undefined
+        : Array.isArray(messages) ? messages.find(m => m.type === "assistant" && typeof m.time?.completed === "number") : undefined;
       const id = done?.id;
       if (id === undefined || this.reportedMessage.get(sessionId) === id) {
         this.trace("turn.nothing-new", { sessionId });
@@ -589,7 +592,10 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
         }
         return;
       }
-      if (tracked?.private && (typeof id !== "string" || id.length > 256 || !Array.isArray(done?.content) || done.content.some(part => part?.type === "text" && typeof part.text !== "string"))) { this.rejectPrivateResponse(sessionId); return; }
+      // Actual 2.0.26 failed rows also have time.completed, including after a missed SSE
+      // failure. Only the newest, error-free normal stop is a complete private response;
+      // truncation, tool requests and unknown finish shapes remain a refusal, never a reply.
+      if (tracked?.private && (done?.finish !== "stop" || done.error !== undefined || typeof id !== "string" || id.length > 256 || !Array.isArray(done.content) || done.content.some(part => part?.type === "text" && typeof part.text !== "string"))) { this.rejectPrivateResponse(sessionId); return; }
       const text = (done?.content ?? [])
         .filter((part) => part.type === "text")
         .map((part) => part.text ?? "")

@@ -1176,7 +1176,8 @@ title/summary/compaction/warming helpers. Ordinary authoring configuration keeps
 path. Adapter `test/v2-operational-config.test.ts` checks policy construction; opt-in
 `test/v2-operational-protocol.test.ts` runs the pinned executable with a credential-free profile
 and scripted local provider, proving native unknown/read denials, zero advertised tool schemas
-and exactly one request per operational turn. This is not destination/locality or spend proof.
+and exactly one request per successful scripted operational turn. This is not a failure-retry,
+destination/locality or spend guarantee.
 
 `SessionRef.privateDestination` is a host-only scoped route capability preserved through
 prepared-session composition. V2 `private-destination.ts` verifies the native session's pinned
@@ -1193,8 +1194,16 @@ fence rather than fabricating it through their ordinary fallback. The Studio run
 the native proof with a trusted host attestation before approval. Either nonlocal verdict
 requires cloud consent, and the disclosure digest binds both identities. Coordinator
 `test/studio-assistant/native-route.test.ts` covers the production wrapper composition;
-opt-in `pinned-native.test.ts` drives the actual launcher/runner through one zero-tool native
-completion. The production host attestation port still defaults to refusal. Full payload,
+opt-in `pinned-native.test.ts` drives the actual launcher/runner through a zero-tool native
+completion and scripted provider failures. Actual 2.0.26 retries two HTTP 503/429 responses:
+one Arke dispatch/approval produces three identical provider requests before success. A terminal
+HTTP 400 remains unknown to inference ownership and is never replayed by the application;
+its failed native assistant row still has `time.completed`. The private completion reader
+therefore requires the newest assistant's error-free `finish: "stop"`; missing/unknown finish,
+truncation, tool requests and cached error rows cannot publish a reply. It cannot search behind
+a newer unfinished assistant to reveal an older reply after reconnect. These checks preserve
+ordinary authoring's existing completion path. The production host attestation port still
+defaults to refusal. Native retry control, full payload,
 spend, native retention/cleanup and production authorization remain unfinished gates.
 
 `SessionRef.privateRetire` retires only its exact ephemeral native session, never canonical

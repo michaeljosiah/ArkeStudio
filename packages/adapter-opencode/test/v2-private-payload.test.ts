@@ -43,7 +43,7 @@ it("accounts for UTF-8 surrogate pairs split across deltas and coalesces private
     for (const delta of deltas) h.stub.emit({ type: "session.text.delta", data: { sessionID: h.ref.sessionId, assistantMessageID: "private", delta } });
     const text = prefix + "🙂";
     h.stub.emit({ type: "session.text.ended", data: { sessionID: h.ref.sessionId, assistantMessageID: "private", text } });
-    h.stub.messagesBySession.set(h.ref.sessionId, [{ id: "private", type: "assistant", time: { completed: 1 }, content: [{ type: "text", text }] }]);
+    h.stub.messagesBySession.set(h.ref.sessionId, [{ id: "private", type: "assistant", finish: "stop", time: { completed: 1 }, content: [{ type: "text", text }] }]);
     h.stub.emit({ type: "session.execution.succeeded", data: { sessionID: h.ref.sessionId } });
     await sent; await h.observe();
     assert.equal(h.events.filter(event => event.type === "message.delta").length, 1);
@@ -68,7 +68,7 @@ it("never falls back to partial private text after an oversized native retrieval
   try {
     const observing = h.observe(), sent = h.send(); await h.submitted();
     h.stub.emit({ type: "session.text.delta", data: { sessionID: h.ref.sessionId, assistantMessageID: "private", delta: "partial private output" } });
-    h.stub.messagesBySession.set(h.ref.sessionId, [{ id: "large", type: "assistant", time: { completed: 1 }, content: [{ type: "text", text: "x".repeat(4 * 1024 ** 2) }] }]);
+    h.stub.messagesBySession.set(h.ref.sessionId, [{ id: "large", type: "assistant", finish: "stop", time: { completed: 1 }, content: [{ type: "text", text: "x".repeat(4 * 1024 ** 2) }] }]);
     h.stub.emit({ type: "session.execution.succeeded", data: { sessionID: h.ref.sessionId } }); await observing; await sent;
     assert(h.events.some(event => event.type === "session.error")); assert(!h.events.some(event => event.type === "message.completed"));
     await h.ref.privateTurnSettled; assert.equal(await h.ref.privateRetire!(new AbortController().signal), true);
@@ -171,5 +171,49 @@ it("a cached assistant row after an unknown native error cannot become completio
     assert.equal(confirmed, false); assert.equal(await h.ref.privateRetire!(new AbortController().signal), false);
     h.stub.emit({ type: "session.execution.succeeded", data: { sessionID: h.ref.sessionId } }); await h.ref.privateTurnSettled;
     assert.equal(await h.ref.privateRetire!(new AbortController().signal), true);
+  } finally { await h.close(); }
+});
+
+for (const metadata of [
+  { finish: "error", error: { type: "provider.invalid-request", message: "PRIVATE_CACHED_PROVIDER_ERROR", status: 400 } },
+  { finish: "stop", error: { message: "PRIVATE_INCONSISTENT_ERROR" } },
+  { finish: "length" }, { finish: "tool_calls" }, {},
+]) it(`refuses a cached private assistant without positive completion metadata (${JSON.stringify(Object.keys(metadata).length ? metadata.finish : "missing")})`, async () => {
+  const h = await fixture();
+  try {
+    const observing = h.observe(), sent = h.send(); await h.submitted();
+    let confirmed = false; void h.ref.privateTurnSettled!.then(() => { confirmed = true; });
+    // The native failure event was lost while disconnected. Actual 2.0.26 failed assistant
+    // rows still carry time.completed; that timestamp alone must never publish a reply.
+    h.stub.messagesBySession.set(h.ref.sessionId, [{ id: "cached-terminal-row", type: "assistant", time: { completed: 1 }, ...metadata,
+      content: [{ type: "text", text: '{"kind":"reply","text":"PRIVATE_VALID_LOOKING_FAILED_REPLY"}' }] }]);
+    const mark = h.stub.requests.filter(request => request.path === "/api/event").length; h.stub.disconnectEvents();
+    await until(() => h.stub.requests.filter(request => request.path === "/api/event").length > mark && h.stub.streamCount > 0, "cached native failure reconciliation");
+    await observing; await sent;
+    assert(!h.events.some(event => event.type === "message.completed")); assert(h.events.some(event => event.type === "session.error"));
+    assert.equal(confirmed, false); assert.equal(await h.ref.privateRetire!(new AbortController().signal), false);
+    assert(!JSON.stringify([...h.events, ...h.shared, ...h.traces]).includes("PRIVATE_"));
+    assert.equal(h.stub.requests.filter(request => request.method === "POST" && request.path.endsWith("/prompt")).length, 1);
+    h.stub.emit({ type: "session.execution.succeeded", data: { sessionID: h.ref.sessionId } }); await h.ref.privateTurnSettled;
+  } finally { await h.close(); }
+});
+
+it("a newer unfinished private assistant cannot reveal an older completed reply on reconnect", async () => {
+  const h = await fixture();
+  try {
+    const observing = h.observe(), sent = h.send(); await h.submitted();
+    h.stub.messagesBySession.set(h.ref.sessionId, [
+      { id: "newest-unfinished", type: "assistant", time: { created: 2 }, content: [] },
+      { id: "older-complete", type: "assistant", finish: "stop", time: { completed: 1 }, content: [{ type: "text", text: "PRIVATE_STALE_REPLY" }] },
+    ]);
+    const mark = h.stub.requests.filter(request => request.path === "/api/event").length; h.stub.disconnectEvents();
+    await until(() => h.stub.requests.filter(request => request.path === "/api/event").length > mark && h.stub.streamCount > 0, "newest unfinished assistant reconciliation");
+    const ordinary = await h.adapter.createSession({ purpose: "ask" }); h.stub.emitTurn(ordinary.sessionId, "marker");
+    await until(() => h.shared.some(event => event.type === "message.completed" && event.sessionId === ordinary.sessionId), "ordinary marker after unfinished private reconciliation");
+    assert(!h.events.some(event => event.type === "message.completed"));
+    h.stub.emitTurn(h.ref.sessionId, "PRIVATE_FRESH_REPLY"); await observing; await sent; await h.ref.privateTurnSettled;
+    assert(h.events.some(event => event.type === "message.completed" && event.text === "PRIVATE_FRESH_REPLY"));
+    assert(!JSON.stringify(h.events).includes("PRIVATE_STALE_REPLY"));
+    assert.equal(h.stub.requests.filter(request => request.method === "POST" && request.path.endsWith("/prompt")).length, 1);
   } finally { await h.close(); }
 });

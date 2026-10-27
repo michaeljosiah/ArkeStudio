@@ -375,6 +375,7 @@ export class StubOpenCodeV2 {
       {
         id: messageId,
         type: "assistant",
+        finish: "stop",
         time: { created: 1, completed: 2 },
         content: [{ type: "text", text }],
       },
