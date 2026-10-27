@@ -490,6 +490,22 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.deepEqual(commands(item), [{ operation: "set-facts", baseVersion: latest.version, facts: latest.facts }]);
   });
 
+  it("retains an ending draft when another author removes its ending", async () => {
+    const routing: Routing = { ...ROUTING, schemaVersion: 2 };
+    const item = await mount(routing);
+    await click(card(item, "sc_pier"));
+    await click(button(item, "Ending variants"));
+    await change(all(item, 'input[aria-label="Ending title 1"]')[0], "A retained ending");
+    await act(async () => __setStateForTest(state({ ...routing, version: routing.version + 1, endings: [] })));
+    assert.match(text(item.container.ownerDocument.body), /no longer an ending.*draft is retained/);
+    assert.equal((all(item, 'input[aria-label="Ending title 1"]')[0] as HTMLInputElement).value, "A retained ending");
+    assert.ok(button(item, "Save endings")!.hasAttribute("disabled"));
+    assert.equal(button(item, "Load current rules"), undefined, "a removed ending cannot replace the retained draft");
+    assert.deepEqual(commands(item), []);
+    await click(button(item, "Cancel"));
+    assert.equal(button(item, "Save endings"), undefined, "cancellation safely returns to the map");
+  });
+
   it("obsolete Show when rules can be removed after their targets are deleted", async () => {
     const routing: Routing = { ...ROUTING, schemaVersion: 2, facts: [{ id: "dev", label: "Dev", type: "boolean", default: true }], presentation: [{ sceneId: "sc_quarter", blocks: [{ blockId: "blk_gone", when: { op: "eq", fact: "dev", value: true } }], shots: [{ shotId: "sh_gone", when: { op: "eq", fact: "dev", value: true } }] }] };
     const item = await mount(routing);

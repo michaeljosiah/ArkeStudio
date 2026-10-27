@@ -20,16 +20,18 @@ export function StorySceneDialog({ routing, scene, blockId, onClose, onSave }: {
 }
 
 export function StoryEndingDialog({ routing, sceneId, onClose, onSave }: { routing: Routing; sceneId: string; onClose: () => void; onSave: (variants: StoryEnding[], baseVersion: number) => void }) {
-  const ending = routing.endings.find(e => e.sceneId === sceneId)!;
-  const [variants, setVariants] = useState<StoryEnding[]>(ending.variants ?? [{ id: "fallback", title: ending.title, text: "", fallback: true }]);
+  const ending = routing.endings.find(e => e.sceneId === sceneId);
+  const [initial] = useState(ending);
+  const [variants, setVariants] = useState<StoryEnding[]>(() => initial?.variants ?? [{ id: "fallback", title: initial?.title ?? "Ending", text: "", fallback: true }]);
   const update = (at: number, variant: StoryEnding) => setVariants(variants.map((v, i) => i === at ? variant : v));
-  const save = useStorySave(routing, JSON.stringify(ending.variants) === JSON.stringify(variants), onClose, () => setVariants(ending.variants ?? [{ id: "fallback", title: ending.title, text: "", fallback: true }]));
+  const save = useStorySave(routing, !!ending && JSON.stringify(ending.variants) === JSON.stringify(variants), onClose, () => { if (ending) setVariants(ending.variants ?? [{ id: "fallback", title: ending.title, text: "", fallback: true }]); });
   const checked = RoutingSchema.safeParse({ ...routing, schemaVersion: 2, endings: routing.endings.map(e => e.sceneId === sceneId ? { ...e, variants } : e) });
-  return <PageSheet open title="Ending variants" subtitle="Each reachable state must select one ending, or one fallback." onClose={onClose} dismissOnBackdrop={false} className="story-dialog" footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={!checked.success || save.busy || save.stale} onClick={() => save.submit(version => onSave(variants, version))}>Save endings</Button></>}>
+  return <PageSheet open title="Ending variants" subtitle="Each reachable state must select one ending, or one fallback." onClose={onClose} dismissOnBackdrop={false} className="story-dialog" footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={!ending || !checked.success || save.busy || save.stale} onClick={() => save.submit(version => onSave(variants, version))}>Save endings</Button></>}>
+    {!ending && <p role="alert">This scene is no longer an ending. Your draft is retained, but cannot be saved while the ending is removed.</p>}
     {variants.map((variant, index) => <fieldset className="story-fact" key={variant.id}><legend>{"fallback" in variant ? "Fallback" : "Conditional ending"}</legend><label className="story-field">Title<Input aria-label={`Ending title ${index + 1}`} value={variant.title} onChange={e => update(index, { ...variant, title: e.target.value })} /></label><label className="story-field">Ending text<Textarea aria-label={`Ending text ${index + 1}`} value={variant.text} onChange={e => update(index, { ...variant, text: e.target.value })} /></label>{"when" in variant && <StoryCondition facts={routing.facts ?? []} value={variant.when} onChange={when => { if (when) update(index, { ...variant, when }); }} />}<Button onClick={() => setVariants(variants.filter((_, i) => i !== index))}>Remove variant</Button></fieldset>)}
     <Button disabled={!routing.facts?.length} onClick={() => { const fact = routing.facts![0]!; let id = "ending-" + (variants.length + 1); for (let n = variants.length + 2; variants.some(v => v.id === id); n++) id = "ending-" + n; setVariants([...variants, { id, title: "New ending", text: "", when: { op: "eq", fact: fact.id, value: fact.default } }]); }}>Add conditional ending</Button>
-    <Button disabled={variants.some(v => "fallback" in v)} onClick={() => setVariants([...variants, { id: "fallback", title: ending.title, text: "", fallback: true }])}>Add fallback</Button>
-    <StorySaveStatus save={save} />
+    <Button disabled={variants.some(v => "fallback" in v)} onClick={() => setVariants([...variants, { id: "fallback", title: ending?.title ?? initial?.title ?? "Ending", text: "", fallback: true }])}>Add fallback</Button>
+    {ending && <StorySaveStatus save={save} />}
     {!checked.success && <p role="alert">{checked.error.issues[0]?.message}</p>}
   </PageSheet>;
 }
