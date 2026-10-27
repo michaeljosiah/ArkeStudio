@@ -50,6 +50,7 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     const adapter = this.deps.adapter();
     if (!adapter?.readiness().ready || !adapter.capabilities().has("events")) throw new Error("The Studio model is unavailable.");
     const revision = adapter.lifecycleRevision?.();
+    if (!Number.isSafeInteger(revision) || revision === undefined || revision < 0) throw new Error("The Studio model owner has no verified generation fence.");
     const sameOwner = () => this.deps.adapter() === adapter && adapter.lifecycleRevision?.() === revision && adapter.readiness().ready;
     signal.throwIfAborted();
     const catalog = await adapter.listModels?.(); signal.throwIfAborted();
@@ -92,10 +93,13 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     })();
     void answer.catch(() => {});
     try {
-      signal.throwIfAborted(); if (!sameOwner() || !sameDestination()) throw new Error("The Studio model owner changed.");
-      entry.started = true;
+      const dispatch = () => {
+        signal.throwIfAborted(); if (!sameOwner() || !sameDestination()) throw new Error("The Studio model owner changed.");
+        entry.started = true;
+      };
       // sendMessage's completion and a final response are both required. No resend or retry.
-      const sent = adapter.sendMessage({ sessionId: session.sessionId, correlationId: session.sessionId, parts: [{ type: "text", text: input.prompt }] });
+      const message = { sessionId: session.sessionId, correlationId: session.sessionId, parts: [{ type: "text" as const, text: input.prompt }] };
+      const sent = adapter.sendMessageWithFence ? adapter.sendMessageWithFence(message, dispatch) : (dispatch(), adapter.sendMessage(message));
       try {
         const text = await Promise.race([answer, sent.then(() => answer)]);
         await sent; entry.confirmed = true;

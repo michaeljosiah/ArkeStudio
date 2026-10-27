@@ -367,6 +367,10 @@ export interface HarnessAdapter {
   promptReserveTokens?(agent: string, window: number): number | undefined;
   /** Synchronous send: resolves when the turn completes. */
   sendMessage(input: SendMessageInput): Promise<SendReceipt>;
+  /** Host-only send with a synchronous last-admission fence. Wrappers that queue work
+   * propagate it through every wait; a throwing fence prevents native dispatch. Calling it
+   * confirms dispatch admission, so cancellation before it is a known not-dispatched result. */
+  sendMessageWithFence?(input: SendMessageInput, beforeDispatch: () => void): Promise<SendReceipt>;
   /** Fire-and-watch: must not block while the turn runs. */
   dispatchAsync(input: SendMessageInput): Promise<SendReceipt>;
   usageTokens?(sessionId: string): number;

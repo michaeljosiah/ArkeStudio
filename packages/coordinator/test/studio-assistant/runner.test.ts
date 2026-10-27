@@ -9,6 +9,8 @@ import { StudioAssistantService } from "../../src/studio-assistant/service.js";
 import { FileStudioConversationStore } from "../../src/studio-assistant/store.js";
 import { studioDiagnosticEvidence } from "../../src/studio-assistant/evidence.js";
 import { withLocalGpu } from "../../src/harness/local-gpu.js";
+import { withModelValidation } from "../../src/harness/model-validation.js";
+import { HarnessRuntimeChanges } from "../../src/harness/runtime-change.js";
 import { LocalGpu } from "../../src/local-ai/gpu.js";
 import { tempDir } from "../tmp.js";
 import { until, untilAsync } from "../wait.js";
@@ -39,6 +41,40 @@ async function fixture() {
     send: (gate: Promise<void>) => { sendGate = gate; }, fail: () => { failure = true; }, keep: () => { retained = true; } };
 }
 const input = { role: "studio-assistant" as const, model: "ollama/test", prompt: "A bounded Studio question." }, allow = async () => ({ cloudApproved: false });
+it("refuses a missing lifecycle fence instead of treating an absent generation as unchanged", async () => {
+  const h = await fixture(); delete h.raw.lifecycleRevision;
+  try { await assert.rejects(h.runner.run(input, new AbortController().signal, allow), /no verified generation/); assert.equal(h.created.length, 0); assert.equal(h.sent.length, 0); }
+  finally { await h.runner.stop(); await h.runner.ownerStopped(); }
+});
+for (const change of ["route", "generation"] as const) {
+  it(`rechecks ${change} after GPU admission through the production wrapper order`, async () => {
+    const h = await fixture(), gpu = new LocalGpu(async () => {}), owner = await gpu.acquire("ComfyUI", new AbortController().signal);
+    const adapter = withModelValidation(withLocalGpu(new HarnessRuntimeChanges().wrap(h.raw), gpu), async () => ({}));
+    const runner = new HarnessStudioModelRunner({ ...h.deps, adapter: () => adapter });
+    try {
+      const refused = assert.rejects(runner.run(input, new AbortController().signal, allow), /could not be completed/);
+      await until(() => gpu.isBusy("Ollama"), "Studio queued on the GPU after its route was approved");
+      if (change === "route") { h.cloud(); h.destination(); } else h.revision();
+      owner(); await refused;
+      await until(() => !runner.busy(), "changed route was refused before native dispatch");
+      assert.equal(h.sent.length, 0); assert.equal(gpu.isBusy("Ollama"), false);
+    } finally { owner(); await runner.stop(); await adapter.dispose?.(); await runner.ownerStopped(); gpu.stop(); }
+  });
+}
+it("retires cancellation while queued for the GPU and admits a fresh explicitly requested turn", async () => {
+  const h = await fixture(), gpu = new LocalGpu(async () => {}), owner = await gpu.acquire("ComfyUI", new AbortController().signal);
+  const adapter = withModelValidation(withLocalGpu(new HarnessRuntimeChanges().wrap(h.raw), gpu), async () => ({}));
+  const runner = new HarnessStudioModelRunner({ ...h.deps, adapter: () => adapter }), stop = new AbortController();
+  try {
+    const cancelled = assert.rejects(runner.run(input, stop.signal, allow), /stopped/);
+    await until(() => gpu.isBusy("Ollama"), "first Studio turn queued"); stop.abort(); await cancelled;
+    await until(() => !runner.busy(), "confirmed not-dispatched Studio turn retired");
+    assert.equal(h.sent.length, 0); assert.equal(gpu.isBusy("ComfyUI"), true);
+    const next = runner.run(input, new AbortController().signal, allow);
+    await until(() => gpu.isBusy("Ollama"), "new independent turn queued"); owner();
+    assert.match(await next, /A reply/); assert.equal(h.sent.length, 1);
+  } finally { owner(); await runner.stop(); await adapter.dispose?.(); await runner.ownerStopped(); gpu.stop(); }
+});
 it("uses the pinned operational role, strips world configuration and removes only known settled config", async () => {
   const h = await fixture();
   try {

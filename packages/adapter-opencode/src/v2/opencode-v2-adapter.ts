@@ -123,11 +123,15 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   private readonly preparedPolicies = new PreparedSessionPolicies();
   private disposed = false;
   private runtimeRequests = new AbortController();
+  private runtimeRevision = 0;
   private readonly pendingTurns = new Set<string>();
+
+  lifecycleRevision(): number { return this.runtimeRevision; }
 
   /** Host-confirmed process exit is stronger evidence than an SSE disconnect. End local
    * waits with an unknown outcome; never replay a prompt or claim that inference stopped. */
   runtimeExited(): void {
+    this.runtimeRevision++;
     this.runtimeRequests.abort();
     this.runtimeRequests = new AbortController();
     // push() deletes settled entries and synchronously notifies listeners; preserve the

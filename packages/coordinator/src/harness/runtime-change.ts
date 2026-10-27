@@ -19,10 +19,14 @@ export class HarnessRuntimeChanges {
 
   wrap<T extends HarnessAdapter>(adapter: T): T {
     return new Proxy(adapter, { get: (target, property) => {
-      if (property === "sendMessage") return async (...args: Parameters<HarnessAdapter["sendMessage"]>) => {
+      if (property === "sendMessage" || property === "sendMessageWithFence") return async (input: Parameters<HarnessAdapter["sendMessage"]>[0], beforeDispatch?: () => void) => {
         if (this.changing || this.recoveryWaiting || this.recoveryHeld) throw new Error("Writing runtime settings are changing or recovering. Try again shortly.");
         this.active++;
-        try { return await target.sendMessage(...args); }
+        try {
+          if (beforeDispatch && target.sendMessageWithFence) return await target.sendMessageWithFence(input, beforeDispatch);
+          beforeDispatch?.();
+          return await target.sendMessage(input);
+        }
         finally { this.active--; this.changed(); }
       };
       const value = Reflect.get(target, property);

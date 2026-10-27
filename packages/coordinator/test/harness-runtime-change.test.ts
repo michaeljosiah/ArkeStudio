@@ -3,6 +3,21 @@ import { it } from "node:test";
 import type { HarnessAdapter } from "@arke-studio/contracts";
 import { HarnessRuntimeChanges } from "../src/harness/runtime-change.js";
 
+it("keeps guarded dispatch inside runtime admission and lets a rejected final fence prevent the send", async () => {
+  const gate = new HarnessRuntimeChanges(); let sent = 0, checked = 0, finish!: () => void;
+  const raw = { sendMessage: async () => { sent++; return { sessionId: "studio", correlationId: "studio" }; } } as unknown as HarnessAdapter;
+  const adapter = gate.wrap(raw), input = { sessionId: "studio", parts: [] };
+  const change = gate.run(async () => { await new Promise<void>(resolve => { finish = resolve; }); });
+  await assert.rejects(adapter.sendMessageWithFence!(input, () => { checked++; }), /settings are changing/);
+  assert.equal(checked, 0); assert.equal(sent, 0); finish(); await change;
+  await assert.rejects(adapter.sendMessageWithFence!(input, () => { checked++; throw new Error("approved route changed"); }), /route changed/);
+  assert.equal(checked, 1); assert.equal(sent, 0);
+  const release = await gate.reserveRecovery(new AbortController().signal);
+  await assert.rejects(adapter.sendMessageWithFence!(input, () => { checked++; }), /recovering/);
+  assert.equal(checked, 1); release();
+  await adapter.sendMessageWithFence!(input, () => { checked++; }); assert.equal(sent, 1); assert.equal(checked, 2);
+});
+
 it("refuses reconfiguration during cloud turns and prevents new turns during a reserved change", async () => {
   const gate = new HarnessRuntimeChanges();
   let endTurn!: () => void, endChange!: () => void;

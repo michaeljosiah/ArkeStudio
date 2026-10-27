@@ -157,6 +157,13 @@ describe("v2 normalisation (issue 327 §6)", () => {
 });
 
 describe("v2 adapter against the scripted server (issue 327 §11)", () => {
+  it("changes its lifecycle revision on confirmed runtime exit even while the adapter object survives", async () => {
+    const adapter = new OpenCodeV2Adapter({ baseUrl: () => "http://127.0.0.1:1", password: () => STUB_V2_PASSWORD });
+    const before = adapter.lifecycleRevision();
+    adapter.runtimeExited(); assert(adapter.lifecycleRevision() > before);
+    const replacement = adapter.lifecycleRevision();
+    await adapter.dispose(); assert(adapter.lifecycleRevision() > replacement);
+  });
   const stub = new StubOpenCodeV2();
   before(async () => stub.start());
   after(async () => stub.stop());

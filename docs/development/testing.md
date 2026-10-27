@@ -1563,6 +1563,13 @@ GPU wrapper behind admitted creative work. It uses a synthetic protocol adapter,
 model. Native filesystem access is required for flushed atomic replacement. These tests establish
 the core boundaries; they do not prove production host/transport/UI wiring, provider spend
 approval, live explanation quality, reviewed repair execution or visual parity.
+Review regressions run through model validation, shared GPU and runtime-change wrappers in
+production order: changing the route/locality or process generation during the GPU wait must
+prevent the native send, and cancelling a queued turn must permit a new independent request
+without releasing admitted creative work. Missing lifecycle revisions are refused. OpenCode
+`test/v2-adapter.test.ts` verifies the concrete revision changes on confirmed exit/disposal;
+`test/harness-runtime-change.test.ts` checks guarded sends cannot bypass runtime replacement/
+recovery admission and that a rejecting final fence makes no native call.
 
 ## System status (turn 240)
 

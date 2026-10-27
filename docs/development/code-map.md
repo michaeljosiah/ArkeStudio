@@ -1158,6 +1158,13 @@ together with the actual session/GPU wrappers, but are not yet instantiated by t
 Production route/spend authorization, targeted private transport, UI, reviewed actions and matched
 visual acceptance remain required before claiming the Studio assistant is delivered.
 
+Guarded Studio sends use `HarnessAdapter.sendMessageWithFence`: the GPU and runtime-change
+wrappers propagate a synchronous final owner/route check through admission waits. A cancelled
+GPU waiter that never reaches that check is known not-dispatched and can retire; a submitted
+unknown outcome remains held. OpenCode v2 increments `lifecycleRevision` on host-confirmed runtime
+exit/disposal; Studio refuses adapters without a verified revision instead of equating missing
+tokens. These host-only callbacks carry no renderer/model repair authority.
+
 ## System status overview
 
 Approved turn 240: contracts `src/system-resources.ts` owns readings, freshness and conservative

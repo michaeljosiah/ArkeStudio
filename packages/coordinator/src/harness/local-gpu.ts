@@ -28,7 +28,7 @@ export function withLocalGpu(
       finally { pumping = false; }
     })().catch(() => {});
   };
-  const send = async (input: SendMessageInput) => {
+  const send = async (input: SendMessageInput, beforeDispatch?: () => void) => {
     if (closed.signal.aborted) throw new Error("The writing harness is stopping.");
     if (turns.has(input.sessionId)) throw new Error("This writing session already has a turn in progress.");
     const turn = { abort: new AbortController(), started: false };
@@ -54,7 +54,9 @@ export function withLocalGpu(
       }), priorities.get(input.sessionId));
       signal.throwIfAborted();
       if (local && model !== undefined) onLocalModel(model.replace(/^ollama\//, ""));
-      turn.started = true;
+      const dispatch = () => { signal.throwIfAborted(); beforeDispatch?.(); turn.started = true; };
+      if (adapter.sendMessageWithFence) return await adapter.sendMessageWithFence(input, dispatch);
+      dispatch();
       return await adapter.sendMessage(input);
     } finally { release?.(); turns.delete(input.sessionId); settled(); }
   };
@@ -73,6 +75,7 @@ export function withLocalGpu(
       return session;
     },
     sendMessage: send,
+    sendMessageWithFence: send,
     async dispatchAsync(input) {
       pump();
       const receipt = { sessionId: input.sessionId, correlationId: input.correlationId ?? randomUUID() };
