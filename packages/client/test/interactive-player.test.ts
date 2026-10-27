@@ -831,6 +831,13 @@ describe("remembered facts in the shared player (turn 240)", () => {
     p.click(p.all(".aip-choice").find(el => el.textContent?.includes("Rescue Elsie")));
     assert.match(p.root.textContent ?? "", /Elsie speaks/);
   });
+  it("keeps stateful coverage pending until the journal owner confirms it", () => {
+    const p = mount({ ...storyOptions(), author: { unwalked: ["ch_seal"], onChoice() {} } });
+    p.click(p.all(".aip-choice").find(el => el.textContent?.includes("Seal the bore")));
+    assert.match(p.text(".aip-strip"), /1 choice not walked/);
+    p.handle.setUnwalked([]);
+    assert.match(p.text(".aip-strip"), /every choice walked/);
+  });
   it("keeps separate saved playthroughs when the reader starts again", () => {
     const options = { ...storyOptions(), storageKey: "separate-runs" };
     const first = mount(options);

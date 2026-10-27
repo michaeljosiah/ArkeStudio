@@ -698,7 +698,8 @@ export function mountInteractivePlayer(root, options) {
     }
     if (author && author.onChoice) author.onChoice(choice, walked(), evidence);
     state.route = state.route.concat([choice.id]);
-    unwalked.delete(choice.id);
+    // Stateful coverage is confirmed by the coordinator after the witness is flushed.
+    if (!story) unwalked.delete(choice.id);
     play(choice.to, 0);
   }
 

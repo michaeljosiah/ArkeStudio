@@ -880,6 +880,7 @@ export function BranchMapScreen() {
                 <div className="bm-row-head">
                 <button
                   type="button"
+                  data-walk={`s:${id}`}
                   className={cx("bm-row", selection?.kind === "scene" && selection.id === id && "bm-row--selected")}
                   onClick={() => pickScene(id)}
                 >
