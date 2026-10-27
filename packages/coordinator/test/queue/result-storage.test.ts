@@ -3,7 +3,8 @@ import { it } from "node:test";
 import { join } from "node:path";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import type { Job, LedgerEntry } from "@arke-studio/contracts";
-import { JobQueue, type EnqueueInput } from "../../src/queue/dispatcher.js";
+import { JobQueue, type EnqueueInput, type JobQueueOptions } from "../../src/queue/dispatcher.js";
+import { LocalGpu } from "../../src/local-ai/gpu.js";
 import { JobJournal, type JobStateStore } from "../../src/queue/journal.js";
 import { ArtifactResultFiles } from "../../src/queue/artifact-files.js";
 import { AppStorageService } from "../../src/storage/service.js";
@@ -15,7 +16,7 @@ import { until, untilAsync } from "../wait.js";
 const GiB = 1024 ** 3;
 const input: EnqueueInput = { worldId: '01J8F3K2QW9VZX4N7M0RTYB6HC', provider: 'fake', model: 'synthetic-image', capability: 'image',
   target: { kind: 'shot', id: 'shot_one' }, params: {}, estimatedMicroUsd: 100, landing: { dir: 'incoming', name: 'result.png' } };
-async function fixture(inline = false, custom?: ArtifactWriteSpace) {
+async function fixture(inline = false, custom?: ArtifactWriteSpace, acquireLocalGpu?: JobQueueOptions['acquireLocalGpu']) {
   const root = await tempDir('arke-result-queue-'), world = join(root, 'world'), journalPath = join(root, 'queue', 'jobs.jsonl');
   let clock = Date.now(), free = 0, roots: readonly { rootId: string; path: string }[] = [], fetches = 0;
   const storage = new AppStorageService({ appRoot: root, now: () => clock, native: {
@@ -31,11 +32,62 @@ async function fixture(inline = false, custom?: ArtifactWriteSpace) {
   fake.onFetch = () => { fetches++; };
   const ledger: LedgerEntry[] = [], events: Job[] = [], space = custom ?? new JobArtifactStorage(storage);
   const create = (journal?: JobStateStore, verify?: () => Promise<void>) => new JobQueue({ journalPath, ...(journal ? { journal } : {}), clients: { fake }, getKey: async () => 'synthetic',
-    emit(event) { if (event.type === 'job.updated') events.push(event.job); }, artifactSpace: space, artifactRetryMs: 15,
+    emit(event) { if (event.type === 'job.updated') events.push(event.job); }, artifactSpace: space, artifactRetryMs: 15, acquireLocalGpu,
     landInWorld: async (_worldId, work) => { await work(world, verify); return true; }, baseIntervalMs: 1, pollIntervalMs: 5,
     ledger: { async readJobIds() { return new Set(ledger.map(value => value.jobId)); }, async has(id) { return ledger.some(value => value.jobId === id); }, async append(value) { ledger.push(value); } } });
   const freeWorld = () => { free = 10 * GiB; clock += 5001; for (const value of roots) if (value.path.startsWith(world)) storage.writeFailed(value.rootId); };
   return { root, world, journalPath, storage, fake, artifacts, ledger, events, create, freeWorld, fetches: () => fetches };
+}
+
+for (const mode of ['remote-checkpoint', 'inline-checkpoint', 'remote-world'] as const) {
+  it(`completed ${mode} storage retries release inference ownership without replay or bypassing handover`, { timeout: 15_000 }, async () => {
+    let held = true, reserves = 0, handover = false, finishHandover: (() => void) | undefined;
+    const gpu = new LocalGpu(async engine => {
+      if (handover && engine === 'ComfyUI') await new Promise<void>(resolve => { finishHandover = resolve; });
+    });
+    const h = await fixture(mode === 'inline-checkpoint', mode === 'remote-world' ? undefined : {
+      async reserve() { reserves++; if (held) throw new ArtifactStorageHeld(); return { async consumed() {}, writeFailed() {}, async settle() {} }; },
+    }, (_job, signal, waiting) => gpu.acquire('ComfyUI', signal, waiting));
+    if (mode === 'inline-checkpoint') {
+      const submit = h.fake.submit.bind(h.fake); h.fake.submit = async (...args) => ({ ...await submit(...args), costMicroUsd: 37 });
+    }
+    let finishFetch: (() => void) | undefined;
+    if (mode !== 'inline-checkpoint') {
+      const fetch = h.fake.fetchArtifacts.bind(h.fake);
+      h.fake.fetchArtifacts = async () => {
+        await new Promise<void>(resolve => { finishFetch = resolve; }); return fetch();
+      };
+    }
+    const queue = h.create(); let releaseWriting: (() => void) | undefined;
+    try {
+      await queue.start(); const job = await queue.enqueue(input);
+      if (mode !== 'inline-checkpoint') {
+        await until(() => finishFetch !== undefined, 'confirmed remote completion, retrieval still in flight');
+        assert.equal(gpu.isBusy('ComfyUI'), true, 'Do not release while provider bytes are still needed');
+        finishFetch!();
+      }
+      await until(() => queue.listJobs()[0]?.error?.includes('storage') === true, 'completed bytes held by local storage');
+      const polls = h.fake.pollCount;
+      handover = true; let writing = false;
+      const acquiring = gpu.acquire('Ollama', new AbortController().signal).then(release => { writing = true; return release; });
+      void acquiring.catch(() => {});
+      await until(() => finishHandover !== undefined, 'completed inference released before storage recovers');
+      assert.equal(writing, false, 'The next inference still waits for actual engine handover');
+      assert.equal(queue.listJobs()[0]?.status, 'running', 'Local filing is still held');
+      finishHandover!(); releaseWriting = await acquiring;
+      assert.equal(writing, true); assert.equal(h.fake.submitCount, 1);
+      assert.equal(h.fetches(), mode === 'inline-checkpoint' ? 0 : 1);
+      assert.equal(h.fake.pollCount, polls);
+      if (mode !== 'remote-world') { await until(() => reserves >= 2, 'the exact result is retried locally'); held = false; }
+      h.freeWorld(); await until(() => queue.listJobs()[0]?.status === 'succeeded', 'same completed result filed');
+      assert.equal(gpu.isBusy('Ollama'), true, 'Job settlement cannot release another inference owner');
+      assert.equal(h.fake.submitCount, 1); assert.equal(h.fake.pollCount, polls);
+      assert.equal(h.fetches(), mode === 'inline-checkpoint' ? 0 : 1);
+      assert.equal(h.ledger.length, 1); assert.equal(h.ledger[0]?.actualMicroUsd, 37);
+      assert.deepEqual(await readFile(join(h.world, 'incoming', 'result.png')), Buffer.from(pngBytes()));
+      assert.equal(queue.listJobs()[0]?.id, job.id);
+    } finally { finishFetch?.(); finishHandover?.(); releaseWriting?.(); gpu.stop(); await queue.dispose(); await queue.waitForIdle(); await h.storage.stop(); }
+  });
 }
 
 it("a full world holds a completed remote result despite a roomy app drive, then files the same bytes without another fetch or submit", { timeout: 30_000 }, async () => {

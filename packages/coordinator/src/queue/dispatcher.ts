@@ -1670,6 +1670,11 @@ export class JobQueue {
    * A rejected disk append is not evidence that the result or a charge did not exist. */
   private async retainCompletedResult(job: Job, artifacts: DispatchArtifact[]): Promise<boolean> {
     const signal = this.artifactSignal(job);
+    // Callers have witnessed a complete inline response or terminal success plus retrieval
+    // of every result byte. Only local storage remains: holding inference here would block
+    // unrelated engines indefinitely on a full disk. The next GPU owner still performs its
+    // normal unload/handover; result bytes, storage leases and accounting stay with this job.
+    if (!signal.aborted && this.stillActiveRun(job)) this.releaseGpu(job);
     // An empty response has no result bytes. Its durable job/usage facts cannot stand in for
     // a missing media result on restart (notably inline-only speech and voice creation).
     if (artifacts.length === 0) return !signal.aborted && this.stillActiveRun(job);
