@@ -25,9 +25,14 @@ state.app.jobs = [{ id: "jb_01J8F3K2QW9VZX4N7M0RTYB6HC", idempotencyKey: "01J8F3
 state.app.ledger = [{ ts: at, worldId: state.app.jobs[0].worldId, jobId: state.app.jobs[0].id,
   provider: "fixture", model: "fixture", outcome: "succeeded", estimatedMicroUsd: 123, actualMicroUsd: 123 }];
 const token = randomBytes(32).toString("hex");
+let studioDocumentReceived = false;
 const transport = new Transport({ auth: { token, allowedOrigins: ["file://", "null"] }, getSnapshot: () => state,
   onMessage: (message, requester) => {
     if (message.kind === "refresh-diagnostics") transport.broadcastSnapshot();
+    if (message.kind === "studio-assistant" && message.command.action === "send") {
+      assert.deepEqual(message.command.attachments, [{ id: "12345678-1234-4234-8234-123456789abc", name: "notes.txt", text: "PRIVATE_STUDIO_DOCUMENT" }]);
+      studioDocumentReceived = true;
+    }
     if (message.kind === "studio-assistant") requester?.reply(message.requestId,
       { type: "result", status: "refused", reason: "unavailable", threadId: null, runId: null });
   },
@@ -69,11 +74,16 @@ app.whenReady().then(async () => {
   const privateReply = await read({ kind: "studio-assistant", requestId, command: { action: "watch" } }, 4);
   assert.equal(privateReply.kind, "studio-assistant"); assert.equal(privateReply.requestId, requestId); assert.equal(privateReply.seq, 4);
   assert.deepEqual(privateReply.response, { type: "result", status: "refused", reason: "unavailable", threadId: null, runId: null });
+  const documentReply = await read({ kind: "studio-assistant", requestId: "12345678-1234-4234-8234-123456789abd", command: {
+    action: "send", threadId: "01J8F3K2QW9VZX4N7M0RTYB6HC", text: "Review the attached text", model: "fixture/model",
+    attachments: [{ id: requestId, name: "notes.txt", text: "PRIVATE_STUDIO_DOCUMENT" }] } }, 5);
+  assert.equal(documentReply.kind, "studio-assistant"); assert.equal(documentReply.seq, 5);
+  assert(!JSON.stringify(first).includes("PRIVATE_STUDIO_DOCUMENT"));
   const media = await window.webContents.executeJavaScript('fetch(window.arke.coordinatorHttpBase()+"/media/test/range.txt",{headers:{Range:"bytes=2-5"}}).then(async r=>({status:r.status,body:await r.text()}))');
   assert.deepEqual(media, { status: 206, body: "2345" });
   assert.ok(!JSON.stringify(first).includes(session.token));
   assert.equal(await window.webContents.executeJavaScript('typeof process'), "undefined");
-  console.log("[smoke] sandboxed file-page hello, compact/retained history, reset, private Studio reply and authenticated media range passed");
+  console.log("[smoke] sandboxed file-page hello, compact/retained history, reset, private Studio document/reply and authenticated media range passed");
   window.destroy(); clearTimeout(timeout); app.exit(0);
 }).catch(error => { console.error(error); app.exit(1); });
 `);
@@ -82,6 +92,7 @@ app.whenReady().then(async () => {
   child.on("message", message => { if (message === "ready") child.send({ port, token }); });
   const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("exit", resolve); });
   assert.equal(code, 0, "transport file-page smoke failed");
+  assert(studioDocumentReceived, "the built preload must carry the explicit private document request");
 } finally {
   await transport.stop();
   await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });

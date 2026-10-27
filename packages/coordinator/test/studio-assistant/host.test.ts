@@ -17,9 +17,10 @@ import { until } from "../wait.js";
 
 it("the production owner keeps Studio history across world opens/restarts and replies only to its requesting socket", async () => {
   const { root } = await makeTempRoot(), provider = new FsWorldProvider(root); let sends = 0, nonlocal = false;
+  const attachments = [{ id: randomUUID(), name: "PRIVATE_STUDIO_DOCUMENT.txt", text: "PRIVATE_STUDIO_DOCUMENT_CONTENT" }];
   const model: StudioModelPort = { busy: () => false, stop: async () => {}, async run(input, signal, authorize) {
     await authorize({ role: input.role, model: input.model, provider: "synthetic", local: !nonlocal, destination: "c".repeat(64), prompt: input.prompt }, signal);
-    sends++; return JSON.stringify({ kind: "reply", text: "PRIVATE_STUDIO_REPLY" });
+    assert(input.prompt.includes(attachments[0]!.text)); sends++; return JSON.stringify({ kind: "reply", text: "PRIVATE_STUDIO_REPLY" });
   } };
   let dictations = 0;
   const voice = { localPresets: [], cloudSources: [], sidecar: {
@@ -49,7 +50,7 @@ it("the production owner keeps Studio history across world opens/restarts and re
     assert.deepEqual(dictated, { type: "dictation", text: "PRIVATE_DICTATED_WORDS" }); assert.equal(dictations, 1); assert.equal(sends, 0);
     const created = (await first.command({ action: "create" })).response; assert(created.type === "result" && created.threadId); const threadId = created.threadId;
     await first.command({ action: "watch" });
-    const sent = (await first.command({ action: "send", threadId, text: "PRIVATE_STUDIO_QUESTION", model: "synthetic/model" })).response;
+    const sent = (await first.command({ action: "send", threadId, text: "PRIVATE_STUDIO_QUESTION", model: "synthetic/model", attachments })).response;
     assert(sent.type === "result" && sent.status === "accepted");
     await until(() => first.frames.some(frame => frame.kind === "studio-assistant" && frame.response.type === "state" && frame.response.state.threads[0]?.messages.at(-1)?.text === "PRIVATE_STUDIO_REPLY"), "durable private response");
     nonlocal = true;
@@ -58,6 +59,7 @@ it("the production owner keeps Studio history across world opens/restarts and re
     const sharing = first.frames.findLast(frame => frame.kind === "studio-assistant" && frame.response.type === "state" && frame.response.state.share);
     assert(sharing?.kind === "studio-assistant" && sharing.response.type === "state" && sharing.response.state.share); const share = sharing.response.state.share;
     assert(share.prompt.includes("PRIVATE_CLOUD_QUESTION")); assert.equal(sends, 1);
+    assert(share.prompt.includes(attachments[0]!.text));
     const approval = { action: "approve-cloud", threadId, runId: share.runId, shareId: share.id, digest: share.digest };
     const wrong = (await first.command({ ...approval, digest: "d".repeat(64) })).response; assert(wrong.type === "result" && wrong.status === "refused"); assert.equal(sends, 1);
     const approved = (await first.command(approval)).response; assert(approved.type === "result" && approved.status === "ok");
@@ -66,15 +68,18 @@ it("the production owner keeps Studio history across world opens/restarts and re
     await coordinator.openWorld(WORLD_ID);
     const state = (await first.command({ action: "watch" })).response; assert(state.type === "state");
     assert.equal(state.state.threads[0]?.id, threadId); assert.equal(state.state.threads[0]?.messages[0]?.text, "PRIVATE_STUDIO_QUESTION");
+    assert.deepEqual(state.state.threads[0]?.messages[0]?.attachments, attachments);
     assert(!JSON.stringify(other.frames).includes("PRIVATE_STUDIO")); assert(!JSON.stringify(coordinator.getState()).includes("PRIVATE_STUDIO"));
     assert(!JSON.stringify(other.frames).includes("PRIVATE_DICTATED")); assert(!JSON.stringify(coordinator.getState()).includes("PRIVATE_DICTATED"));
     assert(!JSON.stringify(first.frames.filter(frame => frame.kind !== "studio-assistant")).includes("PRIVATE_DICTATED"));
     const history = await readFile(join(root, "studio-assistant", "conversations.json"), "utf8"); assert(history.includes("PRIVATE_STUDIO_REPLY"));
+    assert(history.includes(attachments[0]!.text));
+    assert(!(await readFile(join(root, "logs", "coordinator.jsonl"), "utf8")).includes(attachments[0]!.text));
     assert(!history.includes("PRIVATE_DICTATED"), "a transcript is unsent workspace, not canonical conversation history");
     first.socket.close(); other.socket.close(); await coordinator.stop();
     coordinator = createStudioCoordinator({ ...options, provider: new FsWorldProvider(root) });
     const resumed = await connect(await coordinator.start(0)), restored = (await resumed.command({ action: "watch" })).response;
-    assert(restored.type === "state"); assert.equal(restored.state.threads[0]?.id, threadId); assert.equal(sends, 2, "Restart never replays a model call");
+    assert(restored.type === "state"); assert.equal(restored.state.threads[0]?.id, threadId); assert.deepEqual(restored.state.threads[0]?.messages[0]?.attachments, attachments); assert.equal(sends, 2, "Restart never replays a model call");
   } finally { for (const socket of sockets) socket.close(); await coordinator.stop(); await provider.close(); }
 });
 

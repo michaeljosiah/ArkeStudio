@@ -1,7 +1,8 @@
-import { useEffect, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import type { ClientState, StudioAssistantThread, StudioCloudShare } from "@arke-studio/contracts";
 import { STUDIO_ASSISTANT_LIMITS } from "@arke-studio/contracts";
 import { StudioConversationClient, type StudioConversationView } from "../lib/studio-assistant.js";
+import { STUDIO_DOCUMENT_ACCEPT, studioDocumentsFit } from "../lib/studio-documents.js";
 import { onStudioAssistantReply, send, useStore } from "../lib/store.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { useKeyboardInset } from "../lib/keyboard-inset.js";
@@ -57,6 +58,10 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
 }) {
   const [history, setHistory] = useState(false), [focus, requestFocus] = useState(0);
   const [dictationPhase, setDictationPhase] = useState<DictationPhase>("idle");
+  const [attachmentTrouble, setAttachmentTrouble] = useState<string | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const pickerTarget = useRef<ReturnType<StudioConversationClient["documentPickerTarget"]> | null>(null);
+  useEffect(() => setAttachmentTrouble(null), [view.selected, view.open]);
   const thread = view.state?.threads.find(thread => thread.id === view.selected), pending = thread?.pending;
   const reading = useStudioReadReplies(client, view, !history && dictationPhase === "idle");
   const share = view.state?.share && view.state.share.threadId === thread?.id ? view.state.share : null;
@@ -67,6 +72,7 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
     : thread?.archived ? "This conversation is archived. Restore it to continue."
     : pending?.state === "interrupted" ? "Review the interrupted request before continuing."
     : view.draft.length > STUDIO_ASSISTANT_LIMITS.requestChars ? `Studio accepts up to ${STUDIO_ASSISTANT_LIMITS.requestChars.toLocaleString()} characters per request.`
+    : !studioDocumentsFit(view.draft, view.attachments) ? "The request and documents exceed their size limit. Shorten the request or remove a document."
     : !model ? "Choose a model for the Studio assistant." : undefined;
   const draft = (text: string) => { client.draft(text); requestFocus(value => value + 1); };
   return <>
@@ -108,11 +114,21 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
     </div>}
     {view.trouble && <p className="fy-studio-trouble" role="status">{view.trouble}</p>}
     <footer className="fy-studio-compose"><Composer value={view.draft} onChange={client.draft} onSubmit={() => { if (model && dictationPhase === "idle") void client.send(model); }}
-      placeholder="Ask Arke…" agentLabel="Arke" focusRequest={focus} busy={view.submitting || !!working || !!view.state?.busy || dictationPhase !== "idle"} disabledReason={unavailable}
-      busyLabel={dictationPhase === "requesting" ? "Microphone permission…" : dictationPhase === "listening" ? "Dictating…" : dictationPhase === "transcribing" ? "Transcribing…" : "Working…"}
-      dictationControl={<StudioDictation client={client} onPhase={setDictationPhase} enabled={view.open && view.connected && view.fresh && !view.submitting && !working && !view.state?.busy && !thread?.archived && pending?.state !== "interrupted"} />}
+      placeholder="Ask Arke…" agentLabel="Arke" focusRequest={focus} busy={view.attaching || view.submitting || !!working || !!view.state?.busy || dictationPhase !== "idle"} disabledReason={unavailable}
+      busyLabel={view.attaching ? "Reading documents…" : dictationPhase === "requesting" ? "Microphone permission…" : dictationPhase === "listening" ? "Dictating…" : dictationPhase === "transcribing" ? "Transcribing…" : "Working…"}
+      attachmentLabel="Attach text documents" removeAttachmentTitle="Remove this unsent document"
+      onAttach={() => { pickerTarget.current = client.documentPickerTarget(); picker.current?.click(); }} onAttachFiles={client.attachFiles} onAttachText={client.attachText}
+      attachments={view.attachments.map(row => ({ id: row.id, file: row.name, kind: "document" }))} onRemoveAttachment={client.removeDocument}
+      dictationControl={<StudioDictation client={client} onPhase={setDictationPhase} enabled={view.open && view.connected && view.fresh && !view.attaching && !view.submitting && !working && !view.state?.busy && !thread?.archived && pending?.state !== "interrupted"} />}
       readReplies={reading.composer}
       modelControl={<ModelChip state={appState} value={model} set={modelSet} onPick={pickModel} unsetLabel="Use Studio’s configured model" disabled={view.submitting || !!view.state?.busy} />} />
+      <input ref={picker} type="file" hidden multiple accept={STUDIO_DOCUMENT_ACCEPT} aria-label="Choose Studio text documents" onChange={event => {
+        const files = Array.from(event.target.files ?? []); event.target.value = "";
+        const take = pickerTarget.current; pickerTarget.current = null;
+        if (take) void take(files).then(trouble => { if (trouble.length) setAttachmentTrouble(trouble.map(row => `${row.name}: ${row.reason}`).join(" ")); else setAttachmentTrouble(null); });
+      }} />
+      {attachmentTrouble && <p className="fy-studio-note" role="status">{attachmentTrouble}<button type="button" className="fy-studio-button" onClick={() => setAttachmentTrouble(null)}>Dismiss</button></p>}
+      {view.attachments.length > 0 && <details className="fy-studio-fact-card"><summary>Review unsent documents</summary>{view.attachments.map(row => <div key={row.id}><b>{row.name}</b><pre>{row.text}</pre></div>)}</details>}
       {view.draft.length > STUDIO_ASSISTANT_LIMITS.requestChars && <p className="fy-studio-note" role="status">Studio accepts up to {STUDIO_ASSISTANT_LIMITS.requestChars.toLocaleString()} characters per request.</p>}
     </footer>
   </>;
@@ -122,6 +138,7 @@ function StudioMessage({ message, appState, close, actions }: { message: StudioA
   return <article className={message.role === "user" ? "fy-studio-user" : "fy-studio-answer"} aria-label={message.role === "user" ? "You" : "Arke"}>
     {message.role === "arke" && <div className="fy-studio-answer-label">Arke</div>}
     <ConversationReply text={message.text} />
+    {message.attachments?.map(row => <details className="fy-studio-fact-card" key={row.id}><summary>{row.name}</summary><pre>{row.text}</pre></details>)}
     {message.diagnostic && <div className="fy-studio-fact-card"><b>Operational findings</b><ConversationReply text={message.diagnostic.answer.explanation} />
       <p className="fy-studio-note">Observed {new Date(message.diagnostic.evidence.at).toLocaleString()}. Findings describe that observation.</p>
       {message.diagnostic.answer.hypotheses.length > 0 && <><b>Possible causes</b><ul>{message.diagnostic.answer.hypotheses.map((hypothesis, index) => <li key={index}>{hypothesis}</li>)}</ul></>}

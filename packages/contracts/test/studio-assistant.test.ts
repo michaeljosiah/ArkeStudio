@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { ClientMessageSchema, FrameSchema, isRemoteHostCommand, RemoteCommandRefusalSchema, StudioAssistantCommandSchema, StudioAssistantSnapshotSchema, StudioCloudShareSchema } from "../src/index.js";
+import { ClientMessageSchema, FrameSchema, isRemoteHostCommand, RemoteCommandRefusalSchema, StudioAssistantCommandSchema, StudioAssistantSnapshotSchema, StudioCloudShareSchema, StudioAssistantMessageSchema, StudioTextAttachmentsSchema } from "../src/index.js";
 const request = { kind: "studio-assistant", requestId: "12345678-1234-4234-8234-123456789abc", command: { action: "watch" } };
+it("bounds text documents by aggregate encoded bytes and keeps paths and model attachments out of the protocol", () => {
+  const attachment = { id: request.requestId, name: "notes.md", text: "Untrusted user document" };
+  const command = { action: "send", threadId: "01J8F3K2QW9VZX4N7M0RTYB6HC", model: "provider/model", text: "Explain these notes", attachments: [attachment] };
+  assert(ClientMessageSchema.safeParse({ ...request, command }).success);
+  for (const attachments of [[attachment, attachment], [{ ...attachment, text: "é".repeat(17000) }], [{ ...attachment, text: "\u0000binary" }],
+    [{ ...attachment, name: "../notes.txt" }], [{ ...attachment, path: "C:/private.txt" }], [{ ...attachment, name: "bad\nname" }]]) {
+    assert(!StudioTextAttachmentsSchema.safeParse(attachments).success);
+  }
+  assert(!ClientMessageSchema.safeParse({ ...request, command: { ...command, text: "\u0001".repeat(8000), attachments: [{ ...attachment, text: "x".repeat(16000) }] } }).success);
+  const message = { id: command.threadId, role: "user", text: command.text, at: 1 };
+  assert(StudioAssistantMessageSchema.safeParse(message).success, "legacy text-only history remains readable");
+  assert(StudioAssistantMessageSchema.safeParse({ ...message, attachments: [attachment] }).success);
+  assert(!StudioAssistantMessageSchema.safeParse({ ...message, role: "arke", attachments: [attachment] }).success);
+});
 it("keeps bounded Studio audio/transcript on the host-only private protocol", () => {
   const dictate = { ...request, command: { action: "dictate", audioBase64: "AQID", contentType: "audio/webm;codecs=opus" } };
   assert(isRemoteHostCommand(ClientMessageSchema.parse(dictate)));

@@ -122,6 +122,7 @@ export class StudioAssistantHost {
       case "acknowledge": return await this.service.acknowledgeInterruption(command.threadId, command.runId) ? result("ok") : result("refused", "invalid");
       case "send": {
         const sent = await this.service.send({ threadId: command.threadId, text: command.text, model: command.model,
+          ...(command.attachments?.length ? { attachments: command.attachments } : {}),
           ...(command.diagnosticModel ? { diagnosticModel: command.diagnosticModel } : {}) });
         return sent.status === "accepted" ? result("accepted", null, command.threadId, sent.runId) : result("refused", sent.reason);
       }

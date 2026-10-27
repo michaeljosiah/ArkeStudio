@@ -1,28 +1,32 @@
-import type { StudioAssistantCommand, StudioAssistantResponse, StudioAssistantSnapshot } from "@arke-studio/contracts";
+import type { StudioAssistantCommand, StudioAssistantResponse, StudioAssistantSnapshot, StudioTextAttachment } from "@arke-studio/contracts";
 import { STUDIO_ASSISTANT_LIMITS, StudioAssistantCommandSchema } from "@arke-studio/contracts";
+import { loadStudioDocuments, studioDocumentsFit, studioPastedDocument, type StudioDocumentTrouble } from "./studio-documents.js";
 
 type Command = Exclude<StudioAssistantCommand["command"], { action: "dictate" | "read-reply" }>;
 type Reply = Extract<StudioAssistantResponse, { type: "result" }>;
 export interface StudioConversationView {
   open: boolean; connected: boolean; fresh: boolean; submitting: boolean; state: StudioAssistantSnapshot | null;
   selected: string | null; draft: string; model: string | undefined; trouble: string | null;
+  attachments: readonly StudioTextAttachment[]; attaching: boolean;
 }
 const uncertain = (): Reply => ({ type: "result", status: "unconfirmed", reason: "unavailable", threadId: null, runId: null });
 
 /** Private app conversation client. Only observation is restored on reconnect; mutations
  * are never queued/replayed, and no Studio content enters shared app/world state. */
 export class StudioConversationClient {
-  private view: StudioConversationView = { open: false, connected: false, fresh: false, submitting: false, state: null, selected: null, draft: "", model: undefined, trouble: null };
+  private view: StudioConversationView = { open: false, connected: false, fresh: false, submitting: false, state: null, selected: null, draft: "", model: undefined, trouble: null, attachments: [], attaching: false };
   private readonly listeners = new Set<() => void>();
   private readonly drafts = new Map<string, string>();
   private readonly models = new Map<string, string>();
+  private readonly documents = new Map<string, readonly StudioTextAttachment[]>();
+  private loadingDocuments = false;
   private watchId: string | null = null;
   private selectingNew = false;
   private connectionEpoch = 0;
   private dictation: { id: string; resolve(text: string | null): void; timer: ReturnType<typeof setTimeout> } | null = null;
   private speech: { id: string; finish(value: Extract<StudioAssistantResponse, { type: "speech" }> | null): void; timer: ReturnType<typeof setTimeout> } | null = null;
   private readonly pending = new Map<string, { resolve(reply: Reply): void; timer: ReturnType<typeof setTimeout> }>();
-  constructor(private readonly wire: { send(message: StudioAssistantCommand): boolean; id(): string }, private readonly timeoutMs = 7000) {}
+  constructor(private readonly wire: { send(message: StudioAssistantCommand): boolean; id(): string }, private readonly timeoutMs = 7000, private readonly documentReadMs = 30_000) {}
   getSnapshot = (): StudioConversationView => this.view;
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   private change(patch: Partial<StudioConversationView>): void { this.view = { ...this.view, ...patch }; for (const listener of this.listeners) listener(); }
@@ -60,10 +64,10 @@ export class StudioConversationClient {
       if (frame.response.type === "state") {
         const state = frame.response.state;
         const selected = this.view.selected && state.threads.some(thread => thread.id === this.view.selected) ? this.view.selected
-          : this.selectingNew || this.view.draft.length > 0 ? null : state.threads.findLast(thread => !thread.archived)?.id ?? null;
+          : this.selectingNew || this.view.draft.length > 0 || this.view.attachments.length > 0 ? null : state.threads.findLast(thread => !thread.archived)?.id ?? null;
         // A close/navigation never retargets the draft. Restored history has no implicit send.
         if (selected !== this.view.selected) this.drafts.set(this.view.selected ?? "new", this.view.draft);
-        this.change({ state, fresh: true, selected, model: this.models.get(selected ?? "new"), draft: selected === this.view.selected ? this.view.draft : this.drafts.get(selected ?? "new") ?? "", trouble: null });
+        this.change({ state, fresh: true, selected, model: this.models.get(selected ?? "new"), draft: selected === this.view.selected ? this.view.draft : this.drafts.get(selected ?? "new") ?? "", attachments: this.documents.get(selected ?? "new") ?? [], trouble: null });
       } else this.change({ fresh: false, trouble: "Studio history is unavailable. Your draft is retained." });
       return;
     }
@@ -78,7 +82,52 @@ export class StudioConversationClient {
     this.stopSpeech();
     this.selectingNew = id === null;
     this.drafts.set(this.view.selected ?? "new", this.view.draft);
-    this.change({ selected: id, model: this.models.get(id ?? "new"), draft: this.drafts.get(id ?? "new") ?? "", trouble: null });
+    this.change({ selected: id, model: this.models.get(id ?? "new"), draft: this.drafts.get(id ?? "new") ?? "", attachments: this.documents.get(id ?? "new") ?? [], trouble: null });
+  };
+  removeDocument = (id: string): void => {
+    const key = this.view.selected ?? "new", next = this.view.attachments.filter(row => row.id !== id);
+    this.documents.set(key, next); this.change({ attachments: next });
+  };
+  attachText = async (text: string): Promise<readonly StudioDocumentTrouble[]> => {
+    if (!this.canAttach()) return [{ name: "Pasted text", reason: "Wait until Studio is ready to attach documents." }];
+    const document = studioPastedDocument(text, crypto.randomUUID());
+    if (!document || !this.appendDocuments(this.view.selected, [document])) return [{ name: "Pasted text", reason: "The pasted text exceeds the document or request limit." }];
+    return [];
+  };
+  private canAttach(): boolean { return this.view.open && this.view.connected && this.view.fresh && !this.view.submitting && !this.loadingDocuments && !this.view.state?.busy &&
+    this.view.state?.audit === "available" && (!this.view.selected || !!this.view.state.threads.find(row => row.id === this.view.selected && !row.archived && !row.pending)); }
+  private appendDocuments(target: string | null, documents: readonly StudioTextAttachment[]): boolean {
+    if (target && !this.view.state?.threads.some(row => row.id === target && !row.archived && !row.pending)) return false;
+    const key = target ?? "new", next = [...this.documents.get(key) ?? [], ...documents];
+    if (!studioDocumentsFit(this.drafts.get(key) ?? "", next)) return false;
+    if (!target) this.selectingNew = true;
+    this.documents.set(key, next); if (this.view.selected === target) this.change({ attachments: next }); return true;
+  }
+  documentPickerTarget(): (files: readonly File[]) => Promise<readonly StudioDocumentTrouble[]> {
+    const target = this.view.selected, epoch = this.connectionEpoch;
+    if (!target) this.selectingNew = true;
+    return files => this.connectionEpoch === epoch && this.view.selected === target ? this.attachFiles(files)
+      : Promise.resolve([{ name: "Documents", reason: "The conversation changed while choosing documents. Choose them again in the intended conversation." }]);
+  }
+  attachFiles = async (files: readonly File[]): Promise<readonly StudioDocumentTrouble[]> => {
+    if (!this.canAttach()) return [{ name: "Documents", reason: "Wait until Studio is ready to attach documents." }];
+    if (files.length > STUDIO_ASSISTANT_LIMITS.attachments) return [{ name: "Documents", reason: "Choose up to four text documents at a time." }];
+    const target = this.view.selected, epoch = this.connectionEpoch, existing = this.view.attachments;
+    if (!target) this.selectingNew = true;
+    this.loadingDocuments = true; this.change({ attaching: true });
+    let abandoned = false, timer: ReturnType<typeof setTimeout> | undefined;
+    const work = loadStudioDocuments([...files], existing, () => crypto.randomUUID(), () => !abandoned && epoch === this.connectionEpoch && this.view.open && this.view.connected).then(result => {
+      if (abandoned || epoch !== this.connectionEpoch || !this.view.open || !this.view.connected) return [];
+      if (result.documents.length && !this.appendDocuments(target, result.documents)) return [{ name: "Documents", reason: "The draft changed or its documents exceed the request limit. Attach them again after reviewing it." }];
+      return this.view.selected === target ? result.trouble : [];
+    }, () => [{ name: "Documents", reason: "The selected documents could not be read." }]).finally(() => {
+      clearTimeout(timer); this.loadingDocuments = false; this.change({ attaching: false });
+    });
+    // An abandoned File read remains owned until actual settlement; it cannot append late
+    // or admit overlapping reads. Closing/reconnecting invalidates its captured destination.
+    return Promise.race([work, new Promise<readonly StudioDocumentTrouble[]>(resolve => {
+      timer = setTimeout(() => { abandoned = true; resolve([{ name: "Documents", reason: "Reading the documents timed out. Studio is waiting for that read to finish." }]); }, this.documentReadMs);
+    })]);
   };
   private stopSpeech(send = this.view.connected): void {
     const pending = this.speech; if (!pending) return;
@@ -148,23 +197,29 @@ export class StudioConversationClient {
     return response;
   }
   async send(model: string): Promise<boolean> {
-    const text = this.view.draft, before = this.view.selected; if (!text.trim() || text.length > STUDIO_ASSISTANT_LIMITS.requestChars || !model || this.view.submitting || this.dictation) return false;
+    const text = this.view.draft, before = this.view.selected, epoch = this.connectionEpoch, attachments = this.view.attachments.map(row => ({ ...row })), signature = JSON.stringify(attachments);
+    if (!text.trim() || !studioDocumentsFit(text, attachments) || !model || this.view.submitting || this.dictation || this.loadingDocuments) return false;
     this.stopSpeech(); this.change({ submitting: true });
     try {
     let threadId = before;
     if (!threadId) {
       const created = await this.request({ action: "create" }); if (created.status !== "ok" || !created.threadId) return false;
       threadId = created.threadId;
-      if (this.view.selected !== before || this.view.draft !== text) return false;
+      if (this.connectionEpoch !== epoch || !this.view.open || this.view.selected !== before || this.view.draft !== text || JSON.stringify(this.view.attachments) !== signature) return false;
       this.selectingNew = false; this.drafts.set(threadId, text);
+      this.documents.set(threadId, attachments);
       if (this.view.model) this.models.set(threadId, this.view.model);
       this.change({ selected: threadId });
     }
-    const sent = await this.request({ action: "send", threadId, model, text });
+    const sent = await this.request({ action: "send", threadId, model, text, ...(attachments.length ? { attachments } : {}) });
     if (sent.status !== "accepted") return false;
     if (before === null && this.drafts.get("new") === text) this.drafts.set("new", "");
+    if (before === null && JSON.stringify(this.documents.get("new") ?? []) === signature) this.documents.delete("new");
+    if (JSON.stringify(this.documents.get(threadId) ?? []) === signature) {
+      this.documents.delete(threadId); if (this.view.selected === threadId) this.change({ attachments: [] });
+    }
     // Do not erase new typing or another selected thread while the receipt was in flight.
-    if (this.view.selected === threadId && this.view.draft === text) this.draft("");
+    if (this.drafts.get(threadId) === text) { this.drafts.set(threadId, ""); if (this.view.selected === threadId) this.change({ draft: "" }); }
     return true;
     } finally { this.change({ submitting: false }); }
   }

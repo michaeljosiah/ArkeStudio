@@ -35,6 +35,22 @@ function View({ client }: { client: StudioConversationClient }) {
   const view = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot);
   return <StudioAssistantView view={view} client={client} appState={FIXTURE_STATE} model="provider/model" pickModel={client.pickModel} />;
 }
+it("uses the shared attachment controls, previews escaped text and removes unsent documents without filing them", async () => {
+  const h = fixture(), container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  try {
+    await act(async () => root.render(<View client={h.client} />));
+    assert(container.querySelector('[aria-label="Attach text documents"]'));
+    assert(container.querySelector<HTMLInputElement>('[aria-label="Choose Studio text documents"]')!.getAttribute("accept")!.includes(".md"));
+    await act(async () => { await h.client.attachText("<script>PRIVATE_TEXT</script>"); });
+    const preview = container.querySelector("details pre")!;
+    assert.equal(preview.textContent, "<script>PRIVATE_TEXT</script>"); assert.equal(preview.querySelector("script"), null);
+    assert(!container.textContent?.includes("File in world"));
+    const remove = container.querySelector<HTMLButtonElement>('[aria-label="Stop referring to Pasted text.txt"]')!;
+    assert.equal(remove.title, "Remove this unsent document");
+    await act(async () => remove.click()); assert.equal(h.client.getSnapshot().attachments.length, 0);
+    assert(h.sent.every(row => row.command.action === "watch"));
+  } finally { await act(async () => root.unmount()); h.client.dispose(); container.remove(); }
+});
 it("the production provider opens lazily, watches the private reply path and returns focus without resending", async () => {
   const sent: StudioAssistantCommand[] = [], world = new GlobalChatController(), container = document.createElement("div"); document.body.append(container);
   __setStateForTest({ ...FIXTURE_STATE, world: null }, { connection: "open" });

@@ -9,7 +9,33 @@ import { DEFAULT_NARRATOR, KOKORO_VOICE_MODEL } from "./voice.js";
 
 export const STUDIO_ASSISTANT_LIMITS = Object.freeze({ storeBytes: 2 * 1024 ** 2, evidenceBytes: 32 * 1024,
   threads: 20, messages: 100, requestChars: 8000, replyChars: 16000, responseBytes: 192 * 1024, modelCalls: 3,
-  dictationBytes: 6_000_000, dictationMs: 60_000, speechBytes: 6_000_000, speechChunkChars: 450, speechParts: 128 });
+  dictationBytes: 6_000_000, dictationMs: 60_000, speechBytes: 6_000_000, speechChunkChars: 450, speechParts: 128,
+  attachments: 4, attachmentBytes: 32 * 1024, requestBytes: 48 * 1024 });
+/** Explicit user text, never a path, import, diagnostic fact or native tool grant. */
+function studioTextCharacters(value: string, whitespace: boolean, limit: number): boolean {
+  if (value.length > limit) return false;
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if (code === 127 || code < 32 && !(whitespace && (code === 9 || code === 10 || code === 13))) return false;
+  }
+  return true;
+}
+export const StudioTextAttachmentSchema = z.object({ id: z.string().uuid(),
+  name: z.string().min(1).max(128).refine(value => !/[\\/]/.test(value) && studioTextCharacters(value, false, 128)),
+  text: z.string().min(1).max(STUDIO_ASSISTANT_LIMITS.attachmentBytes).refine(value => studioTextCharacters(value, true, STUDIO_ASSISTANT_LIMITS.attachmentBytes)),
+}).strict();
+export type StudioTextAttachment = z.infer<typeof StudioTextAttachmentSchema>;
+export const StudioTextAttachmentsSchema = z.array(StudioTextAttachmentSchema).max(STUDIO_ASSISTANT_LIMITS.attachments)
+  .refine(value => value.length <= STUDIO_ASSISTANT_LIMITS.attachments && value.every(row => row.name.length <= 128 && row.text.length <= STUDIO_ASSISTANT_LIMITS.attachmentBytes) && new Set(value.map(row => row.id)).size === value.length &&
+    new TextEncoder().encode(JSON.stringify(value)).length <= STUDIO_ASSISTANT_LIMITS.attachmentBytes,
+  "Text documents exceed the request's count or byte limit.");
+export function studioRequestFits(value: { text: string; attachments?: readonly StudioTextAttachment[] }): boolean {
+  return value.text.length <= STUDIO_ASSISTANT_LIMITS.requestChars && (!value.attachments || value.attachments.length <= STUDIO_ASSISTANT_LIMITS.attachments && value.attachments.every(row => row.name.length <= 128 && row.text.length <= STUDIO_ASSISTANT_LIMITS.attachmentBytes)) &&
+    new TextEncoder().encode(JSON.stringify({ text: value.text, ...(value.attachments?.length ? { attachments: value.attachments } : {}) })).length <= STUDIO_ASSISTANT_LIMITS.requestBytes;
+}
+export const StudioAssistantSendSchema = z.object({ action: z.literal("send"), threadId: UlidSchema,
+  text: z.string().trim().min(1).max(STUDIO_ASSISTANT_LIMITS.requestChars), attachments: StudioTextAttachmentsSchema.optional(),
+  model: z.string().min(1).max(512), diagnosticModel: z.string().min(1).max(512).optional() }).strict();
 /** Studio has no world narrator or implicit cloud/fallback permission. */
 export function studioLocalNarrator(stored: { provider: string; model?: string; voiceId: string; worldId?: string } | null | undefined): string | null {
   if (!stored) return DEFAULT_NARRATOR.voiceId;
@@ -58,11 +84,12 @@ export type StudioDiagnosticAnswer = z.infer<typeof StudioDiagnosticAnswerSchema
 
 export const StudioAssistantMessageSchema = z.object({
   id: UlidSchema, role: z.enum(["user", "arke"]), text: z.string().max(STUDIO_ASSISTANT_LIMITS.replyChars), at: instant,
+  attachments: StudioTextAttachmentsSchema.optional(),
   diagnostic: z.object({ evidence: StudioDiagnosticEvidenceSchema, answer: StudioDiagnosticAnswerSchema }).strict().optional(),
   handoff: z.object({ destination: z.enum(["world", "builder"]), draft: z.string().max(STUDIO_ASSISTANT_LIMITS.requestChars) }).strict().optional(),
   interrupted: z.object({ runId: UlidSchema, phase: z.enum(["main", "diagnostic", "answer"]), at: instant,
     model: z.string().min(1).max(512), destination: digest.nullable(), disclosure: digest.nullable() }).strict().optional(),
-}).strict();
+}).strict().refine(value => value.attachments === undefined || value.role === "user" && studioRequestFits(value), "Only bounded user requests may contain text documents.");
 export const StudioAssistantThreadSchema = z.object({
   id: UlidSchema, createdAt: instant, updatedAt: instant, archived: z.boolean(),
   messages: z.array(StudioAssistantMessageSchema).max(STUDIO_ASSISTANT_LIMITS.messages),
@@ -113,12 +140,11 @@ export const StudioAssistantCommandSchema = z.object({ kind: z.literal("studio-a
     z.object({ action: z.literal("dictate"), audioBase64: z.string().min(4).max(8_000_000)
       .regex(/^[A-Za-z0-9+/]+={0,2}$/).refine(value => value.length % 4 === 0), contentType: StudioDictationContentTypeSchema }).strict(),
     z.object({ action: z.literal("archive"), threadId: UlidSchema, archived: z.boolean() }).strict(),
-    z.object({ action: z.literal("send"), threadId: UlidSchema, text: z.string().trim().min(1).max(STUDIO_ASSISTANT_LIMITS.requestChars),
-      model: z.string().min(1).max(512), diagnosticModel: z.string().min(1).max(512).optional() }).strict(),
+    StudioAssistantSendSchema,
     z.object({ action: z.literal("cancel"), threadId: UlidSchema, runId: UlidSchema }).strict(),
     z.object({ action: z.literal("acknowledge"), threadId: UlidSchema, runId: UlidSchema }).strict(),
     z.object({ action: z.literal("approve-cloud"), threadId: UlidSchema, runId: UlidSchema, shareId: UlidSchema, digest }).strict(),
-  ]),
+  ]).refine(value => value.action !== "send" || studioRequestFits(value), "The request and documents exceed their byte limit."),
 }).strict();
 export type StudioAssistantCommand = z.infer<typeof StudioAssistantCommandSchema>;
 export const StudioAssistantResponseSchema = z.discriminatedUnion("type", [

@@ -1470,8 +1470,17 @@ read without replay. Restored/offscreen history is never read automatically. Tes
 `test/studio-assistant/speech{,-host}.test.ts`, `test/voice/private-speech.test.ts`, voice/client
 private-speech and Studio read-reply suites. Actual model/physical cleanup qualification remains
 separate; selected cloud or world-bound voices are unavailable for this private local path.
-The default native inference route still refuses absent host proof. Attachment controls, effort
-selection, reviewed repair/cleanup cards and actual matched turn-239 rendering remain pending.
+Studio text documents use contracts `StudioTextAttachmentsSchema` and `studioRequestFits`,
+client `lib/studio-documents.ts` and the shared Composer's existing attach/drop/paste/removal
+controls. A bounded selected UTF-8 slice becomes unsent per-thread workspace; close/reconnect
+invalidates a pending read and no replacement starts until actual settlement. Explicit Send
+captures document bytes into the private Studio user message and the main assistant's prompt.
+Cloud review seals their full contents; the diagnostic specialist still receives only closed
+operational evidence. No path/import/world filing or new native tool authority is granted.
+Private history preserves sent documents across restart within the existing aggregate store cap.
+Images/audio and extracted PDF/Office attachments remain unimplemented and explicitly refused.
+The default native inference route still refuses absent host proof. Remaining media attachments,
+effort selection, reviewed repair/cleanup cards and actual matched turn-239 rendering remain pending.
 History replacement reads wait for an already admitted same-path write that outlived bounded
 shutdown in this process. This prevents a late old rename from overwriting a successor's history;
 it is not a cross-process/multiple-active-host lock. Private state is not replayed on reconnect

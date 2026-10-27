@@ -38,6 +38,8 @@ export interface ComposerProps {
   /** The model chip, in the tool row beside attach and voice (design turn 190e). */
   modelControl?: ReactNode;
   onAttach?: () => void;
+  attachmentLabel?: string;
+  removeAttachmentTitle?: string;
   /**
    * Present → the microphone appears, and what is heard lands here as text.
    *
@@ -136,6 +138,8 @@ export function Composer(props: ComposerProps) {
     focusRequest,
     modelControl,
     onAttach,
+    attachmentLabel = "Attach images, documents and audio",
+    removeAttachmentTitle = "Stop referring to this — it stays filed in the world",
     onDictate,
     dictationControl,
     onAttachFiles,
@@ -300,7 +304,7 @@ export function Composer(props: ComposerProps) {
                   type="button"
                   className="fy-cx__chipx"
                   aria-label={`Stop referring to ${a.file}`}
-                  title="Stop referring to this — it stays filed in the world"
+                  title={removeAttachmentTitle}
                   onClick={() => onRemoveAttachment(a.id)}
                 >
                   ×
@@ -363,8 +367,8 @@ export function Composer(props: ComposerProps) {
               type="button"
               className="fy-cx__attach"
               disabled={locked}
-              aria-label="Attach images, documents and audio"
-              title="Attach images, documents and audio"
+              aria-label={attachmentLabel}
+              title={attachmentLabel}
               onClick={() => { if (remote && onAttachFiles) picker.current?.click(); else onAttach?.(); }}
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">

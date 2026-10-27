@@ -1898,6 +1898,22 @@ they do not silently substitute another reader. Other private speech engines/non
 remaining dialog controls, native inference qualification and matched turn-239 visual acceptance
 remain separate work. Run typecheck after the final test edits.
 
+Studio text documents use contracts `test/studio-assistant.test.ts`, client
+`test/studio-documents.test.ts` and the extended Studio conversation/view suites. They cover
+UTF-8/binary refusal, bounded slices/aggregate encoded bytes, original draft ownership,
+close/reconnect/timeout suppressing late insertion and later file reads, explicit immutable Send,
+private preview/removal, and unconfirmed requests without replay. Run client tests from
+`packages/client`. Coordinator `test/studio-assistant/service.test.ts` and `host.test.ts` cover
+complete per-phase cloud disclosure, specialist exclusion, authenticated two-socket isolation,
+shared-state/journal exclusion and private history across actual host/world reopen/restart.
+The host uses a synthetic model port, so these tests do not qualify native model activation or
+multimodal/Office extraction. No arbitrary file is opened by the coordinator. Run full typecheck
+after final test edits; production build and sandboxed file-page transport smoke remain required.
+
+`test/story-pdf-runner.test.ts` uses an explicit worker/phase-callback handshake in the terminal
+drain fixtures. A worker error cannot race ahead of the write the test intends to hold open;
+the assertion still requires draining an admitted write and skipping later queued phases.
+
 ## System status (turn 240)
 
 Run contracts/coordinator/desktop `system-resources.test.ts`, coordinator
