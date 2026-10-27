@@ -83,8 +83,11 @@ export class OpenCodeV2Http {
     method: string,
     path: string,
     body?: unknown,
-    init?: { signal?: AbortSignal; location?: string },
+    init?: { signal?: AbortSignal; location?: string; responseBytes?: number },
   ): Promise<T> {
+    if (init?.responseBytes !== undefined && (!Number.isSafeInteger(init.responseBytes) || init.responseBytes <= 0 || init.responseBytes > 16 * 1024 ** 2)) {
+      throw new Error("Invalid native response bound");
+    }
     const res = await fetch(this.url(path, init?.location), {
       method,
       headers: {
@@ -93,12 +96,12 @@ export class OpenCodeV2Http {
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       ...(init?.signal ? { signal: init.signal } : {}),
+      ...(init?.responseBytes !== undefined ? { redirect: "error" as const } : {}),
     });
+    const text = init?.responseBytes === undefined ? await res.text().catch(error => { if (res.ok) throw error; return ""; }) : await boundedResponseText(res, init.responseBytes);
     if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new OpenCodeError(method, path, res.status, res.statusText, errorDetailFrom(errText));
+      throw new OpenCodeError(method, path, res.status, res.statusText, errorDetailFrom(text));
     }
-    const text = await res.text();
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
@@ -111,7 +114,7 @@ export class OpenCodeV2Http {
     method: string,
     path: string,
     body?: unknown,
-    init?: { signal?: AbortSignal; location?: string },
+    init?: { signal?: AbortSignal; location?: string; responseBytes?: number },
   ): Promise<T> {
     const envelope = await this.req<V2Envelope<T>>(method, path, body, init);
     if (init?.location !== undefined && envelope?.location?.directory !== undefined) {
@@ -145,4 +148,19 @@ export class OpenCodeV2Http {
     if (res?.ok && res.body) return { path: "/api/event", body: res.body };
     throw new OpenCodeError("GET", "/api/event", res?.status ?? 0, "event stream unreachable — retry, do not downgrade");
   }
+}
+
+/** Bound before decoding/JSON parsing; no redirect or oversized metadata may carry authority. */
+export async function boundedResponseText(response: Response, limit: number): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader(), chunks: Uint8Array[] = []; let bytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      bytes += value.byteLength;
+      if (bytes > limit) { await reader.cancel(); throw new Error("Native metadata exceeds its response bound"); }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  return Buffer.concat(chunks).toString("utf8");
 }

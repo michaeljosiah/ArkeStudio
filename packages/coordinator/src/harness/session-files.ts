@@ -115,6 +115,7 @@ export async function createPreparedSession(
           // and promise identity; spreading a SessionRef must not drop or retarget authority.
           ...(created.privateEvents ? { privateEvents: created.privateEvents.bind(created) } : {}),
           ...(created.privateTurnSettled ? { privateTurnSettled: created.privateTurnSettled } : {}),
+          ...(created.privateDestination ? { privateDestination: created.privateDestination.bind(created) } : {}),
           ...(created.privateOwnerStopped ? { privateOwnerStopped: created.privateOwnerStopped.bind(created) } : {}) };
       } finally {
         adapter.abandonSessionPreparation?.(preparationId);

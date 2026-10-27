@@ -19,6 +19,14 @@ export const HarnessCapability = z.enum([
 ]);
 export type HarnessCapability = z.infer<typeof HarnessCapability>;
 
+/** Host-only, opaque destination evidence. URLs, credentials and model metadata stay native. */
+export interface PrivateSessionDestination {
+  readonly model: string;
+  readonly provider: string;
+  readonly local: boolean;
+  readonly identity: string;
+}
+
 export interface SessionRef {
   sessionId: string;
   /** Host-only, one-use observer for this exact private operational session. Its events
@@ -34,6 +42,11 @@ export interface SessionRef {
    * A local writer exiting cannot confirm remote inference. Never expose this to a model,
    * renderer, log, persisted plan or wire command. It also retires the native session. */
   privateOwnerStopped?(): void;
+  /** Read-only scoped route verification. Reading it pins the first proved destination;
+   * the adapter SHALL reverify that same route before native dispatch and before calling
+   * the final dispatch fence. Null/changed/aborted evidence cannot dispatch. This capability
+   * grants no cloud/spend approval and must never be serialized or exposed as a model tool. */
+  privateDestination?(signal: AbortSignal): Promise<PrivateSessionDestination | null>;
 }
 
 /** What a session is for — selects the agent configuration and the confinement posture (§17.1). */

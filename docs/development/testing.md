@@ -1614,6 +1614,16 @@ permission backstop. It makes no paid or real inference request. Run the existin
 `test/v2-input-protocol.test.ts` with the same executable to retain ordinary writing/tool-loop
 qualification. The pinned 2.0.26 installed executable passes both; production Studio destination,
 full payload/persistence and spend qualification remain separate gates.
+Adapter `test/v2-private-destination.test.ts` uses native HTTP/SSE plus a scripted model-metadata
+server. It checks session/variant/role/location and scoped catalogue agreement, opaque frozen
+proofs, matching metadata authentication, cloud forwarding, final dispatch fencing, changes
+during metadata I/O, unknown transports/options, redirects, bounded responses, cancellation and
+generation loss. A failed proof must send no prompt and must not cross the admitted dispatch
+fence. The exact-binary operational test also verifies the pinned native session/default variant,
+actual Ollama settings shape and route proof before a single zero-tool request per role.
+Prepared-session tests preserve prototype capability receivers. These checks qualify the native
+capability; the Studio runner/host has not yet bound it into production authorization, and they
+do not prove complete cloud payload, spend or native transcript-retention requirements.
 After building, `node --import tsx apps/desktop/scripts/smoke-transport-flow.mjs` checks a real
 hidden sandboxed Electron file page and built preload, including a correlated private reply,
 history negotiation/reset, hidden capability and authenticated media range. No model, paid

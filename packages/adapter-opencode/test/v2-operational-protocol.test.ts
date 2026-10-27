@@ -19,6 +19,7 @@ it("qualifies native operational deny policy, zero tool schemas and exactly one 
 }, async () => {
   const profile = await mkdtemp(join(tmpdir(), "arke-operational-native-")), model = "arke-operational";
   const requests: Array<{ model: string; tools?: unknown[]; messages?: unknown[] }> = [];
+  const metadataAuthentication: Array<string | undefined> = [], completionAuthentication: Array<string | undefined> = [];
   const provider = createServer((req, res) => {
     let body = "";
     req.on("data", chunk => { body += String(chunk); if (body.length > 2 * 1024 ** 2) req.destroy(); });
@@ -26,9 +27,10 @@ it("qualifies native operational deny policy, zero tool schemas and exactly one 
       res.setHeader("content-type", "application/json");
       if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [{ name: model, model, modified_at: "2026-10-27T00:00:00Z", size: 1, digest: model,
         details: { format: "gguf", family: "gemma", parameter_size: "12B", quantization_level: "Q4_K_M" } }] })); return; }
-      if (req.url === "/api/show") { res.end(JSON.stringify({ capabilities: ["completion", "tools"], model_info: { "general.architecture": "gemma", "gemma.context_length": 262144 } })); return; }
+      if (req.url === "/api/show") { metadataAuthentication.push(req.headers.authorization); res.end(JSON.stringify({ capabilities: ["completion", "tools"], model_info: { "general.architecture": "gemma", "gemma.context_length": 262144 } })); return; }
       if (req.url !== "/v1/chat/completions") { res.writeHead(404).end(); return; }
       const input = JSON.parse(body); requests.push(input);
+      completionAuthentication.push(req.headers.authorization);
       const content = '{"kind":"reply","text":"Qualified local operational reply."}';
       if (!input.stream) { res.end(JSON.stringify({ id: "synthetic", object: "chat.completion", created: 1, model,
         choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 5 } })); return; }
@@ -41,7 +43,7 @@ it("qualifies native operational deny policy, zero tool schemas and exactly one 
   provider.listen(0, "127.0.0.1"); await once(provider, "listening");
   const providerAddress = provider.address(); assert(providerAddress && typeof providerAddress !== "string");
   const configDir = join(profile, ".config", "opencode"); await mkdir(configDir, { recursive: true });
-  await writeFile(join(configDir, "opencode.json"), JSON.stringify({ providers: { ollama: { settings: { baseURL: `http://127.0.0.1:${providerAddress.port}/v1` } } } }));
+  await writeFile(join(configDir, "opencode.json"), JSON.stringify({ providers: { ollama: { settings: { baseURL: `http://127.0.0.1:${providerAddress.port}/v1`, apiKey: "synthetic-route-key" } } } }));
   const socket = createSocket(); socket.listen(0, "127.0.0.1"); await once(socket, "listening");
   const address = socket.address(); assert(address && typeof address !== "string"); const port = address.port; await new Promise<void>(resolve => socket.close(() => resolve()));
   const env: Record<string, string> = {};
@@ -75,6 +77,10 @@ it("qualifies native operational deny policy, zero tool schemas and exactly one 
       const direct = await request("POST", "/api/session", { location: { directory: cwd.replaceAll("\\", "/") }, model: { providerID: "ollama", id: model } });
       assert.equal(direct.status, 200);
       await request("POST", `/api/session/${direct.body.data.id}/agent`, { agent: role });
+      const state = await request("GET", `/api/session/${direct.body.data.id}`);
+      assert.equal(state.status, 200);
+      assert.deepEqual(state.body.data.model, { providerID: "ollama", id: model, variant: "default" });
+      assert.equal(state.body.data.agent, role);
       for (const action of ["read", "arke-unlisted-native-tool"]) {
         const denied = await request("POST", `/api/session/${direct.body.data.id}/permission`, { action, resources: ["synthetic"], agent: role });
         assert.equal(denied.status, 200, `${role} permission probe must return a native decision`);
@@ -82,6 +88,14 @@ it("qualifies native operational deny policy, zero tool schemas and exactly one 
       }
       adapter.prepareSession(preparation);
       const ref = await adapter.createSession({ purpose: "ask", agent: role, visibility: "private", cwd, preparationId: role });
+      const destination = await ref.privateDestination!(new AbortController().signal);
+      assert(destination); assert.equal(destination.local, true); assert.equal(destination.provider, "ollama");
+      assert.equal(destination.model, `ollama/${model}`); assert.match(destination.identity, /^[a-f0-9]{64}$/);
+      const scoped = await request("GET", "/api/model?" + new URLSearchParams({ "location[directory]": cwd.replaceAll("\\", "/") }));
+      const selected = scoped.body.data.find((row: { providerID: string; id: string }) => row.providerID === "ollama" && row.id === model);
+      assert.deepEqual(Object.keys(selected.settings).sort(), ["apiKey", "baseURL", "provider"]);
+      assert.equal(selected.settings.provider, "ollama"); assert.equal(typeof selected.settings.apiKey, "string");
+      assert.equal(selected.settings.apiKey, "synthetic-route-key");
       const stop = new AbortController(), events: HarnessEvent[] = [];
       const reading = (async () => { for await (const event of ref.privateEvents!(stop.signal)) { events.push(event); if (event.type === "message.completed" || event.type === "session.error") break; } })();
       try {
@@ -96,6 +110,8 @@ it("qualifies native operational deny policy, zero tool schemas and exactly one 
       } finally { stop.abort(); await reading; }
     }
     assert.equal(requests.length, 2);
+    assert.deepEqual(completionAuthentication, ["Bearer synthetic-route-key", "Bearer synthetic-route-key"]);
+    assert(metadataAuthentication.filter(value => value === "Bearer synthetic-route-key").length >= 4, "initial and final route probes use the measured completion authentication");
   } finally {
     await adapter.dispose();
     if (child.exitCode === null) { const exited = once(child, "exit"); child.kill(); await exited; }

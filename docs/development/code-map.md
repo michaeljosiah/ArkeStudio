@@ -1178,6 +1178,19 @@ path. Adapter `test/v2-operational-config.test.ts` checks policy construction; o
 and scripted local provider, proving native unknown/read denials, zero advertised tool schemas
 and exactly one request per operational turn. This is not destination/locality or spend proof.
 
+`SessionRef.privateDestination` is a host-only scoped route capability preserved through
+prepared-session composition. V2 `private-destination.ts` verifies the native session's pinned
+model/variant/role/directory and its exact scoped catalogue row, then bounds/read-checks the
+measured native Ollama route's model metadata with matching authentication. Unknown transports,
+extra proxy/header options, redirects, missing/ambiguous scope and unproved metadata refuse.
+Cloud forwarding stays nonlocal; URLs/credentials remain behind an opaque route digest. Reading
+the capability pins its first proof. Native dispatch rechecks the route before its final fence,
+including changes during metadata I/O; failed or cancelled proof cannot authorize a prompt.
+Adapter `test/v2-private-destination.test.ts` and the exact-binary operational fixture qualify
+this boundary. The Studio runner/host does not consume this native capability yet: production
+destination binding, complete payload/spend/persistence qualification and default invocation
+remain unfinished and closed.
+
 Private inference ownership uses `SessionRef.privateTurnSettled`: native v2 completion or the
 exact host-only `privateOwnerStopped` cleanup capability can settle one turn. A send error,
 Stop acknowledgement, writing-child exit or adapter disposal cannot. Private sessions admit

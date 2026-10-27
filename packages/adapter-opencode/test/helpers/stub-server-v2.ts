@@ -43,6 +43,7 @@ export class StubOpenCodeV2 {
   /** Error bodies can echo private request text; privacy tests must exercise this path. */
   failNextPrompt: string | null = null;
   nextSessionId: string | null = null;
+  readonly sessionStates = new Map<string, { id: string; agent?: string; model?: { providerID: string; id: string; variant?: string }; location?: { directory?: string } }>();
   private healthAnswered = false;
   /** The location echoed on session create; null echoes the requested one honestly. */
   echoLocation: string | null = null;
@@ -122,6 +123,9 @@ export class StubOpenCodeV2 {
           const requested = (parsed as { location?: { directory?: string } } | undefined)?.location?.directory;
           const id = this.nextSessionId ?? `ses_stub_${++this.sessionCounter}`; this.nextSessionId = null;
           const directory = this.echoLocation ?? requested;
+          if (!this.sessionStates.has(id)) this.sessionStates.set(id, { id,
+            ...(directory ? { location: { directory } } : {}),
+            ...((parsed as { model?: object })?.model ? { model: { variant: "default", ...(parsed as { model: { providerID: string; id: string } }).model } } : {}) });
           res.writeHead(200, { "Content-Type": "application/json" }).end(
             envelope({
               id,
@@ -136,11 +140,17 @@ export class StubOpenCodeV2 {
         let m = /^\/api\/session\/([^/]+)\/agent$/.exec(url.pathname);
         if (m && req.method === "POST") {
           if (this.holdAgentPin) return;
+          const state = this.sessionStates.get(m[1]!); if (state) state.agent = (parsed as { agent: string }).agent;
           res.writeHead(204).end();
           return;
         }
         m = /^\/api\/session\/([^/]+)$/.exec(url.pathname);
+        if (m && req.method === "GET") {
+          const state = this.sessionStates.get(m[1]!);
+          res.writeHead(state ? 200 : 404, { "Content-Type": "application/json" }).end(envelope(state)); return;
+        }
         if (m && req.method === "DELETE") {
+          this.sessionStates.delete(m[1]!);
           res.writeHead(204).end();
           return;
         }

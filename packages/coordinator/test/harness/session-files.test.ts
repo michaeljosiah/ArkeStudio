@@ -24,6 +24,14 @@ function adapterWithFileFailure(): Pick<
 }
 
 describe("session preparation lifetime", () => {
+  it("preserves the private destination capability's native prototype receiver", async () => {
+    const proof = Object.freeze({ model: "ollama/model", provider: "ollama", local: true, identity: "a".repeat(64) });
+    const native = Object.create({ async privateDestination(signal: AbortSignal) { assert.equal(this, native); signal.throwIfAborted(); return proof; } });
+    Object.defineProperty(native, "sessionId", { value: "prototype-route", enumerable: true });
+    const adapter = { createSession: async () => native } as unknown as HarnessAdapter;
+    const session = await createPreparedSession(adapter, await tempDir("arke-session-route-"), {}, { purpose: "ask" });
+    assert.equal(await session.privateDestination!(new AbortController().signal), proof);
+  });
   it("isolates Studio roles after world/Settings enrichment and pins the same role at creation", async () => {
     for (const agent of ["studio-assistant", "diagnostic-specialist"]) {
       const input = { agent, model: "ollama/local", researchWeb: true, inferencePriority: "normal" as const,

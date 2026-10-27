@@ -16,6 +16,7 @@ import {
   type SessionRef,
   type SessionConfigInput,
   type SessionFile,
+  type PrivateSessionDestination,
   type VendorIntegration,
   type VendorOAuthAttempt,
   type VendorOAuthAttemptState,
@@ -30,6 +31,7 @@ import { OPENCODE2_PINNED_VERSION } from "../discovery.js";
 import { waitForSessionModel } from "./model-readiness.js";
 import { imagePrompt, sessionImageInput, qualifySessionImageInput, type SessionImageInput } from "./image-input.js";
 import { createNormalizeV2State, normalizeOpenCodeV2, type NormalizeV2State } from "./normalize.js";
+import { privateSessionDestination } from "./private-destination.js";
 import {
   normalizeAttempt,
   normalizeAttemptStatus,
@@ -67,6 +69,7 @@ export interface OpenCodeV2AdapterOptions {
 interface TrackedSession {
   private: boolean;
   privateTurn?: { dispatched: boolean; stopped: boolean; settled: Promise<void>; complete(): void };
+  privateRoute?: { requested(): boolean; verified(): boolean; verify(signal: AbortSignal): Promise<PrivateSessionDestination | null> };
   purpose: CreateSessionInput["purpose"];
   cwd?: string;
   agent?: string;
@@ -352,9 +355,24 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     if (window !== undefined) this.sessionWindows.set(sessionId, window);
     let complete!: () => void;
     const privateTurn = privateSession ? { dispatched: false, stopped: false, settled: new Promise<void>(resolve => { complete = resolve; }), complete: () => complete() } : undefined;
+    const revision = this.runtimeRevision, runtime = this.runtimeRequests;
+    let routeRequested = false, routeRefused = false, routePin: PrivateSessionDestination | undefined;
+    const verifyRoute = async (callerSignal: AbortSignal): Promise<PrivateSessionDestination | null> => {
+      routeRequested = true;
+      if (!privateTurn || privateTurn.stopped || privateTurn.dispatched || routeRefused || !model || !location || !input.agent || this.disposed || this.runtimeRevision !== revision) return null;
+      const signal = AbortSignal.any([callerSignal, runtime.signal, AbortSignal.timeout(5_000)]);
+      let destination: PrivateSessionDestination | null;
+      try {
+        destination = await privateSessionDestination(this.http, { sessionId, directory: location, agent: input.agent, model }, signal, !routePin);
+        signal.throwIfAborted();
+      } catch (error) { routeRefused = true; throw error; }
+      if (this.disposed || this.runtimeRevision !== revision || privateTurn.stopped || privateTurn.dispatched) return null;
+      if (!destination || routePin && (routePin.identity !== destination.identity || routePin.local !== destination.local)) { routeRefused = true; return null; }
+      routePin ??= destination; return routePin;
+    };
     this.sessions.set(sessionId, {
       private: privateSession,
-      ...(privateTurn ? { privateTurn } : {}),
+      ...(privateTurn ? { privateTurn, privateRoute: { requested: () => routeRequested, verified: () => !!routePin && !routeRefused, verify: verifyRoute } } : {}),
       purpose: input.purpose,
       ...(location ? { cwd: location } : {}),
       ...(input.agent ? { agent: input.agent } : {}),
@@ -365,6 +383,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     this.push({ type: "session.created", sessionId });
     let observed = false;
     return { sessionId, ...(privateTurn ? { privateTurnSettled: privateTurn.settled,
+      privateDestination: verifyRoute,
       privateOwnerStopped: () => { privateTurn.stopped = true; privateTurn.complete(); }, privateEvents: (signal: AbortSignal) => {
       if (observed) throw new Error("The private session observer was already used.");
       observed = true;
@@ -378,17 +397,20 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
    * msg_ namespace: replaying an existing id returns its original input, even when the text
    * changed. The caller's correlation id stays on this side of the wire.
    */
-  async dispatchAsync(input: SendMessageInput): Promise<SendReceipt> {
+  async dispatchAsync(input: SendMessageInput, beforeDispatch?: () => void): Promise<SendReceipt> {
     if (this.disposed) throw new Error("The writing adapter is closed.");
     if (input.parts.some(part => part.type === "image") && !this.imageInputForSession(input.sessionId)) {
       throw new Error("This OpenCode session cannot inspect images. Select a model with verified image input.");
     }
-    const privateTurn = this.sessions.get(input.sessionId)?.privateTurn;
+    const tracked = this.sessions.get(input.sessionId), privateTurn = tracked?.privateTurn;
     if (privateTurn) {
       if (privateTurn.stopped) throw new Error("The private operational owner has been retired.");
       if (privateTurn.dispatched) throw new Error("A private operational session permits one model turn only.");
+      if (tracked.privateRoute?.requested() && (!tracked.privateRoute.verified() || !await tracked.privateRoute.verify(this.runtimeRequests.signal))) throw new Error("The private model destination changed or could not be verified. No prompt was sent.");
+      if (privateTurn.stopped || privateTurn.dispatched || this.disposed) throw new Error("The private operational owner changed before dispatch.");
+      beforeDispatch?.();
       privateTurn.dispatched = true;
-    }
+    } else beforeDispatch?.();
     // The turn's completion arrives only on the stream — make sure someone is listening even
     // if the host never called streamEvents(), or sendMessage waits on silence forever.
     void this.pump();
@@ -417,7 +439,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   }
 
   /** Synchronous send: resolves when this session's turn completes (or errors). */
-  async sendMessage(input: SendMessageInput): Promise<SendReceipt> {
+  async sendMessage(input: SendMessageInput, beforeDispatch?: () => void): Promise<SendReceipt> {
     let listener!: (event: HarnessEvent) => void;
     const completed = new Promise<void>((resolve) => {
       const check = (event: HarnessEvent): boolean =>
@@ -433,10 +455,14 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       this.turnListeners.add(listener);
     });
     try {
-      const receipt = await this.dispatchAsync(input);
+      const receipt = await this.dispatchAsync(input, beforeDispatch);
       await completed;
       return receipt;
     } finally { this.turnListeners.delete(listener); }
+  }
+
+  sendMessageWithFence(input: SendMessageInput, beforeDispatch: () => void): Promise<SendReceipt> {
+    return this.sendMessage(input, beforeDispatch);
   }
 
   private readonly turnListeners = new Set<(event: HarnessEvent) => void>();
