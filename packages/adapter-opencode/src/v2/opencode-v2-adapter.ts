@@ -62,13 +62,16 @@ export interface OpenCodeV2AdapterOptions {
   warmupMs?: number;
   /** Local ceiling inside the caller's session-creation deadline, overridable in regressions. */
   modelReadyMs?: number;
+  /** Finite per-adapter private identity budget, including failed creation/retired tombstones. */
+  privateSessionLimit?: number;
   /** One line per adapter-lifecycle fact; the host appends them to logs/harness.jsonl. */
   onTrace?: (line: Record<string, unknown>) => void;
 }
 
 interface TrackedSession {
   private: boolean;
-  privateTurn?: { dispatched: boolean; stopped: boolean; settled: Promise<void>; complete(): void };
+  privateTurn?: { dispatched: boolean; stopped: boolean; confirmed: boolean; settled: Promise<void>; complete(): void };
+  ownerHttp?: OpenCodeV2Http;
   privateRoute?: { requested(): boolean; verified(): boolean; verify(signal: AbortSignal): Promise<PrivateSessionDestination | null> };
   purpose: CreateSessionInput["purpose"];
   cwd?: string;
@@ -120,6 +123,8 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   private ready: Readiness = { ready: false, reason: "not probed yet" };
   serverVersion: string | null = null;
   private readonly sessions = new Map<string, TrackedSession>();
+  private readonly retiredPrivateIds = new Set<string>();
+  private privateAdmissions = 0;
   private readonly normalizeState: NormalizeV2State = createNormalizeV2State();
   /** Bounded record of dropped frames — contained, never silently lost (R-14). */
   readonly deadLetters: Array<{ reason: string; at: number }> = [];
@@ -142,6 +147,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     this.runtimeRevision++;
     this.runtimeRequests.abort();
     this.runtimeRequests = new AbortController();
+    for (const session of this.sessions.values()) if (session.privateTurn) session.privateTurn.stopped = true;
     // push() deletes settled entries and synchronously notifies listeners; preserve the
     // interrupted set so a listener cannot add a new turn to this exit's iteration.
     for (const sessionId of Array.from(this.pendingTurns)) {
@@ -156,13 +162,14 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   private pumping = false;
 
   constructor(private readonly opts: OpenCodeV2AdapterOptions) {
+    if (opts.privateSessionLimit !== undefined && (!Number.isSafeInteger(opts.privateSessionLimit) || opts.privateSessionLimit < 1 || opts.privateSessionLimit > 8192)) throw new Error("Invalid private native session budget");
     this.http = new OpenCodeV2Http({ baseUrl: opts.baseUrl, password: opts.password });
   }
 
   private trace(what: string, detail: Record<string, unknown> = {}): void {
     // HTTP errors can echo prompt or response bytes. Private session facts have no path to
     // the common harness trace, even when the backend supplies a verbose failure body.
-    if (typeof detail.sessionId === "string" && this.sessions.get(detail.sessionId)?.private) return;
+    if (typeof detail.sessionId === "string" && (this.retiredPrivateIds.has(detail.sessionId) || this.sessions.get(detail.sessionId)?.private || !this.sessions.has(detail.sessionId) && !this.pendingTurns.has(detail.sessionId))) return;
     try {
       // The password never appears here — the trace vocabulary has no field to put it in.
       this.opts.onTrace?.({ at: new Date().toISOString(), what, ...detail });
@@ -288,6 +295,13 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     if (privateSession && (!permissionPolicy || !ROSTER.some(member => member.name === input.agent && member.operationalOnly))) {
       throw new Error("Private events require a prepared operational role.");
     }
+    if (privateSession) {
+      if (this.privateAdmissions >= (this.opts.privateSessionLimit ?? 8192)) throw new Error("The private native session budget requires host reconciliation.");
+      this.privateAdmissions++;
+    }
+    const revision = this.runtimeRevision, runtime = this.runtimeRequests;
+    const ownerBase = this.opts.baseUrl(), ownerPassword = this.opts.password();
+    const http = privateSession ? new OpenCodeV2Http({ baseUrl: () => ownerBase, password: () => ownerPassword }) : this.http;
     const location = input.cwd;
     // The model is session state, pinned at creation (issue 1247). Measured against the pinned
     // build: an agent's `model` in opencode.json shows on GET /api/agent and is never consulted
@@ -295,20 +309,21 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     // answers with the server default. So every choice Studio wrote into the config was being
     // read back as the default model, a cloud one, whatever the person had picked. Split at
     // the first slash, because a model id may carry its own (`openrouter/vendor/model`).
-    const session = await this.http.reqData<{ id?: string; location?: { directory?: string } }>(
+    const session = await http.reqData<{ id?: string; location?: { directory?: string } }>(
       "POST",
       "/api/session",
       {
         ...(location ? { location: { directory: wireDirectory(location) } } : {}),
         ...(model !== null ? { model } : {}),
       },
-      { signal: input.signal },
+      { signal: input.signal, ...(privateSession ? { responseBytes: 64 * 1024 } : {}) },
     );
     const sessionId = session?.id ?? "";
     if (!sessionId) throw new Error("OpenCode v2 did not return a session id");
+    if (privateSession && sessionId.length > 256) throw new Error("The private native session identity exceeds its bound.");
     // Never reclassify an existing World/private session or delete somebody else's session
     // as failed-creation cleanup when a malformed backend reuses its identity.
-    if (this.sessions.has(sessionId)) throw new Error("OpenCode v2 returned an already owned session identity");
+    if (this.sessions.has(sessionId) || this.retiredPrivateIds.has(sessionId)) throw new Error("OpenCode v2 returned an already owned session identity");
     let window = model !== null ? this.modelWindows.get(`${model.providerID}/${model.id}`) ?? null : undefined;
     let image = sessionImageInput(null, model?.providerID ?? this.id);
     try {
@@ -323,9 +338,9 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       // backing carried (the `build` fallback that silently ate turns). 204 on success;
       // confirmation arrives as session.agent.selected on the stream.
       if (input.agent) {
-        await this.http.req("POST", `/api/session/${sessionId}/agent`, { agent: input.agent }, { signal: input.signal });
+        await http.req("POST", `/api/session/${sessionId}/agent`, { agent: input.agent }, { signal: input.signal, ...(privateSession ? { responseBytes: 64 * 1024 } : {}) });
       }
-      const row = await waitForSessionModel(this.http, model, location ?? session.location?.directory, input.signal, this.opts.modelReadyMs);
+      const row = await waitForSessionModel(http, model, location ?? session.location?.directory, input.signal, this.opts.modelReadyMs);
       if (row !== null) window = modelMetadata(row).inputTokenLimit ?? null;
       // Only a pinned selection identifies where these bytes will go. A global default or a
       // model name is not evidence for this location; failed/unknown metadata stays unreadable.
@@ -333,8 +348,8 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
         try {
           const signal = AbortSignal.any([AbortSignal.timeout(5_000), ...(input.signal ? [input.signal] : [])]);
           const scopedLocation = location ?? session.location?.directory;
-          const envelope = await this.http.req<{ data: WireModel[]; location?: { directory?: string } }>("GET", "/api/model", undefined,
-            { location: scopedLocation, signal });
+          const envelope = await http.req<{ data: WireModel[]; location?: { directory?: string } }>("GET", "/api/model", undefined,
+            { location: scopedLocation, signal, ...(privateSession ? { responseBytes: 1024 ** 2 } : {}) });
           if (scopedLocation !== undefined && !sameDirectory(envelope?.location?.directory, scopedLocation)) {
             throw new Error("OpenCode image catalog did not confirm the session location");
           }
@@ -347,16 +362,16 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
         }
       }
       input.signal?.throwIfAborted();
+      if (privateSession && (this.runtimeRevision !== revision || this.disposed)) throw new Error("The private writing owner changed during creation.");
     } catch (error) {
       // Nobody upstream has this id yet. A failed pin, readiness check or stop must not leave
       // an orphan. Retirement is best-effort, bounded and independent of the caller's signal.
-      await this.http.req<void>("DELETE", `/api/session/${sessionId}`, undefined, { signal: AbortSignal.timeout(5_000) }).catch(() => {});
+      await http.req<void>("DELETE", `/api/session/${sessionId}`, undefined, { signal: AbortSignal.timeout(5_000) }).catch(() => {});
       throw error;
     }
     if (window !== undefined) this.sessionWindows.set(sessionId, window);
     let complete!: () => void;
-    const privateTurn = privateSession ? { dispatched: false, stopped: false, settled: new Promise<void>(resolve => { complete = resolve; }), complete: () => complete() } : undefined;
-    const revision = this.runtimeRevision, runtime = this.runtimeRequests;
+    const privateTurn: TrackedSession["privateTurn"] = privateSession ? { dispatched: false, stopped: false, confirmed: false, settled: new Promise<void>(resolve => { complete = resolve; }), complete: () => { privateTurn!.confirmed = true; complete(); } } : undefined;
     let routeRequested = false, routeRefused = false, routePin: PrivateSessionDestination | undefined;
     const verifyRoute = async (callerSignal: AbortSignal): Promise<PrivateSessionDestination | null> => {
       routeRequested = true;
@@ -364,28 +379,57 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       const signal = AbortSignal.any([callerSignal, runtime.signal, AbortSignal.timeout(5_000)]);
       let destination: PrivateSessionDestination | null;
       try {
-        destination = await privateSessionDestination(this.http, { sessionId, directory: location, agent: input.agent, model }, signal, !routePin);
+        destination = await privateSessionDestination(http, { sessionId, directory: location, agent: input.agent, model }, signal, !routePin);
         signal.throwIfAborted();
       } catch (error) { routeRefused = true; throw error; }
       if (this.disposed || this.runtimeRevision !== revision || privateTurn.stopped || privateTurn.dispatched) return null;
       if (!destination || routePin && (routePin.identity !== destination.identity || routePin.local !== destination.local)) { routeRefused = true; return null; }
       routePin ??= destination; return routePin;
     };
-    this.sessions.set(sessionId, {
+    const tracked: TrackedSession = {
       private: privateSession,
-      ...(privateTurn ? { privateTurn, privateRoute: { requested: () => routeRequested, verified: () => !!routePin && !routeRefused, verify: verifyRoute } } : {}),
+      ...(privateTurn ? { privateTurn, ownerHttp: http, privateRoute: { requested: () => routeRequested, verified: () => !!routePin && !routeRefused, verify: verifyRoute } } : {}),
       purpose: input.purpose,
       ...(location ? { cwd: location } : {}),
       ...(input.agent ? { agent: input.agent } : {}),
       permissionPolicy,
       image,
-    });
+    };
+    this.sessions.set(sessionId, tracked);
+    let retired = false, retiring: Promise<boolean> | undefined;
+    const retire = (callerSignal: AbortSignal): Promise<boolean> => {
+      if (retired) return Promise.resolve(true);
+      if (retiring) return retiring;
+      const work = async () => {
+        if (!privateTurn || privateTurn.dispatched && !privateTurn.confirmed || this.disposed || this.runtimeRevision !== revision || this.sessions.get(sessionId) !== tracked) return false;
+        privateTurn.stopped = true;
+        const signal = AbortSignal.any([callerSignal, runtime.signal, AbortSignal.timeout(5_000)]);
+        const absent = async (path: string) => { try { await http.reqData("GET", path, undefined, { signal, responseBytes: 64 * 1024 }); return false; } catch (error) { if (error instanceof OpenCodeError && error.status === 404) return true; throw error; } };
+        try {
+          const path = `/api/session/${encodeURIComponent(sessionId)}`;
+          if (!await absent(path)) {
+            const state = await http.reqData<{ id?: string; agent?: string; model?: { providerID?: string; id?: string; variant?: string }; location?: { directory?: string } }>("GET", path, undefined, { signal, responseBytes: 64 * 1024 });
+            if (state?.id !== sessionId || state.agent !== input.agent || location && !sameDirectory(state.location?.directory, location) || model && (state.model?.providerID !== model.providerID || state.model.id !== model.id || (state.model.variant ?? "default") !== (model.variant ?? "default"))) return false;
+            await http.req("DELETE", path, undefined, { signal, responseBytes: 64 * 1024 });
+          }
+          if (!await absent(path) || !await absent(`${path}/message`)) return false;
+          signal.throwIfAborted(); if (this.runtimeRevision !== revision || this.sessions.get(sessionId) !== tracked) return false;
+          this.retiredPrivateIds.add(sessionId); this.sessions.delete(sessionId); this.sessionWindows.delete(sessionId);
+          this.normalizeState.textBySession.delete(sessionId); this.normalizeState.tokensBySession.delete(sessionId); this.reportedMessage.delete(sessionId); this.pendingTurns.delete(sessionId);
+          for (const [permissionId, owner] of this.permissionSessions) if (owner === sessionId) this.permissionSessions.delete(permissionId);
+          privateTurn.complete(); retired = true; return true;
+        } catch { return false; }
+      };
+      retiring = work().finally(() => { retiring = undefined; }); return retiring;
+    };
     this.trace("session.created", { sessionId, agent: input.agent ?? null, baseUrl: this.opts.baseUrl() });
     this.push({ type: "session.created", sessionId });
     let observed = false;
     return { sessionId, ...(privateTurn ? { privateTurnSettled: privateTurn.settled,
       privateDestination: verifyRoute,
+      privateRetire: retire,
       privateOwnerStopped: () => { privateTurn.stopped = true; privateTurn.complete(); }, privateEvents: (signal: AbortSignal) => {
+      if (retired) throw new Error("The private operational session was retired.");
       if (observed) throw new Error("The private session observer was already used.");
       observed = true;
       return this.events(signal, sessionId);
@@ -400,6 +444,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
    */
   async dispatchAsync(input: SendMessageInput, beforeDispatch?: () => void): Promise<SendReceipt> {
     if (this.disposed) throw new Error("The writing adapter is closed.");
+    if (this.retiredPrivateIds.has(input.sessionId)) throw new Error("The private operational owner has been retired.");
     if (input.parts.some(part => part.type === "image") && !this.imageInputForSession(input.sessionId)) {
       throw new Error("This OpenCode session cannot inspect images. Select a model with verified image input.");
     }
@@ -421,13 +466,14 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     this.pendingTurns.add(input.sessionId);
     void (async () => {
       try {
-        await this.http.reqData<{ id?: string }>("POST", `/api/session/${input.sessionId}/prompt`, {
+        await (tracked?.ownerHttp ?? this.http).reqData<{ id?: string }>("POST", `/api/session/${input.sessionId}/prompt`, {
           id: freshWireId(),
           ...prompt,
         }, { signal: runtime.signal });
+        if (tracked?.private && this.sessions.get(input.sessionId) !== tracked) return;
         this.trace("dispatch.accepted", { sessionId: input.sessionId });
       } catch (err) {
-        if (runtime.signal.aborted || this.disposed) return;
+        if (runtime.signal.aborted || this.disposed || tracked?.private && this.sessions.get(input.sessionId) !== tracked) return;
         this.trace("dispatch.failed", { sessionId: input.sessionId, error: String(err) });
         this.push({
           type: "session.error",
@@ -501,6 +547,8 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
    * The fetch is bounded so a hung GET can never wedge the caller.
    */
   private async reportCompletedTurn(sessionId: string, mode: "turn-ended" | "resync"): Promise<void> {
+    const tracked = this.sessions.get(sessionId); if (!tracked && !this.pendingTurns.has(sessionId)) return;
+    const stillAdmitted = () => tracked ? this.sessions.get(sessionId) === tracked : this.pendingTurns.has(sessionId) && !this.retiredPrivateIds.has(sessionId);
     const runtime = this.runtimeRequests;
     const finishWithAccumulated = (why: string): void => {
       const last = this.normalizeState.textBySession.get(sessionId);
@@ -513,7 +561,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       });
     };
     try {
-      const messages = await this.http.reqData<
+      const messages = await (tracked?.ownerHttp ?? this.http).reqData<
         Array<{
           id?: string;
           type?: string;
@@ -521,7 +569,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
           content?: Array<{ type?: string; text?: string }>;
         }>
       >("GET", `/api/session/${sessionId}/message`, undefined, { signal: AbortSignal.any([runtime.signal, AbortSignal.timeout(10_000)]) });
-      if (runtime.signal.aborted || this.disposed) return;
+      if (runtime.signal.aborted || this.disposed || !stillAdmitted()) return;
       const done = Array.isArray(messages)
         ? messages.find((m) => m.type === "assistant" && typeof m.time?.completed === "number")
         : undefined;
@@ -545,7 +593,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       this.trace("turn.completed", { sessionId, messageId: id, chars: text.length });
       this.push({ type: "message.completed", sessionId, correlationId: id, text });
     } catch (err) {
-      if (runtime.signal.aborted || this.disposed) return;
+      if (runtime.signal.aborted || this.disposed || !stillAdmitted()) return;
       this.trace("turn.fetch-failed", { sessionId, mode, error: String(err) });
       if (mode === "turn-ended") finishWithAccumulated("completion fetch failed");
     }
@@ -756,6 +804,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
 
   private push(event: HarnessEvent): void {
     const parsed = HarnessEventSchema.parse(event);
+    if ("sessionId" in parsed && parsed.sessionId && (this.retiredPrivateIds.has(parsed.sessionId) || !this.sessions.has(parsed.sessionId) && !this.pendingTurns.has(parsed.sessionId))) return;
     if (parsed.type === "message.completed") {
       const turn = this.sessions.get(parsed.sessionId)?.privateTurn;
       if (turn?.dispatched) turn.complete();
@@ -819,12 +868,14 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
           await this.resyncPendingPermissions();
           for await (const raw of parseSse(stream.body, attempt.signal, heard)) {
             if (runtime.signal.aborted || this.disposed) break;
+            const rawSessionId = (raw as { data?: { sessionID?: unknown } })?.data?.sessionID;
+            if (typeof rawSessionId === "string" && (this.retiredPrivateIds.has(rawSessionId) || !this.sessions.has(rawSessionId) && !this.pendingTurns.has(rawSessionId))) continue;
             const outcome = normalizeOpenCodeV2(raw, this.normalizeState);
             if (outcome.kind === "turn-succeeded") {
               // Detached, deliberately: awaiting this fetch inside the read loop would let one
               // hung GET starve event delivery for every session and every subscriber. The
               // fetch is itself time-bounded, and dedup makes late arrival harmless.
-              if (this.sessions.has(outcome.sessionId)) {
+              if (this.sessions.has(outcome.sessionId) || this.pendingTurns.has(outcome.sessionId)) {
                 void this.reportCompletedTurn(outcome.sessionId, "turn-ended");
               }
               continue;
@@ -833,7 +884,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
               for (const event of outcome.events) {
                 // Only surface events for sessions this adapter created — even a private v2
                 // server multiplexes locations, so this filter earns its keep.
-                if ("sessionId" in event && event.sessionId && !this.sessions.has(event.sessionId)) {
+                if ("sessionId" in event && event.sessionId && !this.sessions.has(event.sessionId) && !this.pendingTurns.has(event.sessionId)) {
                   continue;
                 }
                 if (event.type === "session.error") this.trace("stream.session.error", { sessionId: event.sessionId });

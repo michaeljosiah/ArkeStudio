@@ -1632,6 +1632,23 @@ provider, checking one approved zero-tool completion, settlement and private tra
 Set `ARKE_TEST_OPENCODE2` for that test; it makes no real inference or paid request. Production
 host attestation still defaults to refusal. These checks do not prove complete cloud payload,
 spend, native transcript retention or physical backing-inference cleanup requirements.
+Adapter `test/v2-private-retirement.test.ts` verifies completed/unsent exact-session retirement,
+refusal of unknown inference/Stop acknowledgements, original server/authentication binding,
+changed owner fields/generation, both native absence checks, idempotent retry, finite private
+admission and late-event/cache/trace exclusion. The pinned operational fixture verifies actual
+2.0.26 session and message endpoints return 404 after the capability succeeds. The pinned runner
+fixture also runs bounded native retirement before settling private admission. Coordinator
+`native-route.test.ts` retains the durable Studio request/reply and unrelated creative bytes
+through failed native deletion, blocks further inference without holding GPU memory, then
+reconciles only that retired copy without another prompt. Prepared-session tests preserve the
+retirement capability's native receiver. These are logical API-retention checks, not secure
+database/WAL/log erasure, cross-restart cleanup or financial/payload qualification.
+
+The Effects browser fixture logs its actual browser version, a bounded stderr tail on failure
+and Linux cgroup memory counters every five seconds and before each decoder stage. Two Linux
+runs stopped after the same decoder stage despite ample host `freemem`; the cgroup samples
+distinguish host RAM from a possible container limit. These diagnostics retain all pixel,
+source-frame and timeout assertions. A green Windows reproduction does not qualify Linux.
 After building, `node --import tsx apps/desktop/scripts/smoke-transport-flow.mjs` checks a real
 hidden sandboxed Electron file page and built preload, including a correlated private reply,
 history negotiation/reset, hidden capability and authenticated media range. No model, paid

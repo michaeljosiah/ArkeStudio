@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { OpenCodeV2Adapter } from "@arke-studio/adapter-opencode";
 import { StubOpenCodeV2, STUB_V2_PASSWORD } from "../../../adapter-opencode/test/helpers/stub-server-v2.js";
 import { HarnessStudioModelRunner, type StudioModelDisclosure } from "../../src/studio-assistant/runner.js";
@@ -9,8 +11,11 @@ import { HarnessRuntimeChanges } from "../../src/harness/runtime-change.js";
 import { withLocalGpu } from "../../src/harness/local-gpu.js";
 import { withModelValidation } from "../../src/harness/model-validation.js";
 import { LocalGpu } from "../../src/local-ai/gpu.js";
+import { StudioAssistantService } from "../../src/studio-assistant/service.js";
+import { FileStudioConversationStore } from "../../src/studio-assistant/store.js";
+import { studioDiagnosticEvidence } from "../../src/studio-assistant/evidence.js";
 import { tempDir } from "../tmp.js";
-import { until } from "../wait.js";
+import { until, untilAsync } from "../wait.js";
 
 const input = { role: "studio-assistant" as const, model: "ollama/neutral", prompt: "Explain the measured operational state." };
 async function fixture() {
@@ -23,11 +28,12 @@ async function fixture() {
   const raw = new OpenCodeV2Adapter({ baseUrl: () => stub.baseUrl(), password: () => STUB_V2_PASSWORD, warmupMs: 3000 }); await raw.init(); assert(raw.readiness().ready);
   const gpu = new LocalGpu(async () => {}), changes = new HarnessRuntimeChanges();
   const adapter = withModelValidation(withLocalGpu(changes.wrap(raw), gpu), async () => ({}));
-  const runner = new HarnessStudioModelRunner({ adapter: () => adapter, scratch: await tempDir("arke-studio-native-route-"), sessionInput: async value => value,
+  const scratch = await tempDir("arke-studio-native-route-");
+  const runner = new HarnessStudioModelRunner({ adapter: () => adapter, scratch, sessionInput: async value => value,
     destination: () => ({ identity, local }), timeoutMs: 10_000 });
   const prompts = () => stub.requests.filter(request => request.method === "POST" && request.path.endsWith("/prompt"));
   const complete = async () => { await until(() => prompts().length === 1 && stub.streamCount > 0, "the sole qualified private prompt"); stub.emitTurn(prompts()[0]!.path.split("/")[3]!, '{"kind":"reply","text":"A qualified reply."}'); };
-  return { runner, raw, adapter, gpu, changes, stub, prompts, complete,
+  return { runner, raw, adapter, gpu, changes, stub, prompts, complete, scratch,
     metadata: (value: unknown) => { metadata = value; }, host: (value: boolean) => { local = value; }, changeHost: () => { identity = "d".repeat(64); },
     close: async () => { await runner.stop(); await adapter.dispose?.(); await runner.ownerStopped(); gpu.stop(); await stub.stop(); provider.closeAllConnections(); await new Promise<void>(resolve => provider.close(() => resolve())); } };
 }
@@ -44,6 +50,28 @@ it("discloses the combined native/host destination only after exact native sessi
     assert.match(disclosure.destination, /^[a-f0-9]{64}$/); assert.notEqual(disclosure.destination, "c".repeat(64));
     assert(!JSON.stringify(disclosure).includes("127.0.0.1")); assert.equal(h.prompts().length, 1);
   } finally { await h.close(); }
+});
+
+it("retains canonical Studio history and creative bytes while failed native retirement blocks new inference without holding GPU memory", async () => {
+  const h = await fixture(), path = join(h.scratch, "conversations.json"), creative = join(h.scratch, "world-story.md");
+  const service = new StudioAssistantService({ store: new FileStudioConversationStore(path), model: h.runner, evidence: topic => studioDiagnosticEvidence(topic, {}, Date.now()) });
+  try {
+    await writeFile(creative, "KEEP_CANONICAL_CREATIVE_BYTES"); const threadId = (await service.createThread())!;
+    const ordinary = await h.adapter.createSession({ purpose: "authoring", agent: "world-builder" });
+    h.stub.failSessionDelete = true;
+    assert.equal((await service.send({ threadId, text: "KEEP_PRIVATE_STUDIO_REQUEST", model: input.model })).status, "accepted");
+    await h.complete();
+    await untilAsync(async () => { const saved = JSON.parse(await readFile(path, "utf8")); return saved.threads[0]?.pending === null && saved.threads[0]?.messages.at(-1)?.text === "A qualified reply."; }, "the completed reply is durable despite native retirement failure");
+    const saved = await readFile(path, "utf8"); assert(saved.includes("KEEP_PRIVATE_STUDIO_REQUEST"));
+    assert(h.runner.busy()); assert(service.snapshot().busy); assert.equal(h.gpu.isBusy("Ollama"), false);
+    assert.deepEqual(await service.send({ threadId, text: "MUST_NOT_DISPATCH", model: input.model }), { status: "refused", reason: "busy" });
+    await h.changes.run(async () => {}); await h.runner.reconcileRetirement(); assert(h.runner.busy());
+    h.stub.failSessionDelete = false; await h.runner.reconcileRetirement();
+    assert.equal(h.runner.busy(), false); assert.equal(h.prompts().length, 1);
+    assert(h.stub.sessionStates.has(ordinary.sessionId));
+    assert.equal(await readFile(path, "utf8"), saved); assert.equal(await readFile(creative, "utf8"), "KEEP_CANONICAL_CREATIVE_BYTES");
+    assert.deepEqual(await new FileStudioConversationStore(path).load(), JSON.parse(saved));
+  } finally { h.stub.failSessionDelete = false; await service.stop(); await h.close(); }
 });
 
 for (const source of ["host", "native"]) it(`${source} nonlocal evidence cannot be overridden by the other source's local claim`, async () => {
@@ -76,7 +104,7 @@ it("a native cloud-route change while queued cannot cross the dispatch fence or 
   } finally { release(); await h.close(); }
 });
 
-for (const missing of ["proof", "fence", "model"]) it(`refuses a qualified native owner with missing or invalid ${missing} without falling back to the host claim`, async () => {
+for (const missing of ["proof", "fence", "model", "retirement"]) it(`refuses a qualified native owner with missing or invalid ${missing} without falling back to the host claim`, async () => {
   const h = await fixture(); let approvals = 0;
   try {
     if (missing === "fence") Object.defineProperty(h.raw, "sendMessageWithFence", { value: undefined, configurable: true });
@@ -85,11 +113,12 @@ for (const missing of ["proof", "fence", "model"]) it(`refuses a qualified nativ
       h.raw.createSession = async value => {
         const ref = await create(value);
         if (missing === "proof") delete ref.privateDestination;
+        else if (missing === "retirement") delete ref.privateRetire;
         else { const read = ref.privateDestination!.bind(ref); ref.privateDestination = async signal => { const proof = await read(signal); return proof ? { ...proof, model: "ollama/different" } : null; }; }
         return ref;
       };
     }
-    await assert.rejects(h.runner.run(input, new AbortController().signal, async () => { approvals++; return { cloudApproved: true }; }), /destination/);
+    await assert.rejects(h.runner.run(input, new AbortController().signal, async () => { approvals++; return { cloudApproved: true }; }), /destination|retirement/);
     assert.equal(approvals, 0); assert.equal(h.prompts().length, 0);
   } finally { await h.close(); }
 });

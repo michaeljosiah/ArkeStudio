@@ -14,7 +14,7 @@ export interface StudioModelPort {
     authorize: (disclosure: StudioModelDisclosure, signal: AbortSignal) => Promise<{ cloudApproved: boolean }>): Promise<string>;
   stop(): Promise<void>;
 }
-interface Active { control: AbortController; listen?: AbortController; ownerStopped?: () => void; dir?: string; sessionId?: string; work?: Promise<string>; confirmed: boolean; started: boolean; workFinished: boolean; failed?: boolean }
+interface Active { control: AbortController; listen?: AbortController; ownerStopped?: () => void; retire?: (signal: AbortSignal) => Promise<boolean>; finishing?: Promise<void>; dir?: string; sessionId?: string; work?: Promise<string>; confirmed: boolean; started: boolean; workFinished: boolean; failed?: boolean }
 
 /** One explicit model call at a time. Native tools are denied by the operational roster;
  * structured delegation is handled by the coordinator, never a native subagent command.
@@ -47,7 +47,7 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     // dispatch holds this runner until the actual owner confirms settlement or host shutdown.
     void entry.work.then(() => { entry.workFinished = true; return this.finish(entry); }, () => { entry.workFinished = true; if (!entry.started || entry.confirmed) void this.finish(entry); });
     timer = setTimeout(() => entry.control.abort(), this.deps.timeoutMs ?? sessionTurnTimeoutMs(input.model, 180_000));
-    try { return await Promise.race([entry.work, stopped]); }
+    try { const text = await Promise.race([entry.work, stopped]); await Promise.race([this.finish(entry), stopped]); return text; }
     finally { clearTimeout(timer); combined.removeEventListener("abort", stop); }
   }
 
@@ -88,6 +88,8 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     entry.dir = await mkdtemp(join(this.deps.scratch, "turn-"));
     const session = await createPreparedSession(adapter, entry.dir, config, { purpose: "ask", agent: input.role, visibility: "private" }, undefined, signal);
     entry.sessionId = session.sessionId;
+    entry.retire = session.privateRetire?.bind(session);
+    if (adapter.privateDestinations === true && !entry.retire) throw new Error("The Studio native owner has no verified session retirement capability.");
     if (!session.privateEvents) throw new Error("The Studio model owner did not return a private session observer.");
     if (!session.privateTurnSettled) throw new Error("The Studio model owner did not return a native completion proof.");
     entry.ownerStopped = session.privateOwnerStopped?.bind(session);
@@ -151,15 +153,26 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     }
   }
   private async finish(entry: Active): Promise<void> {
-    if (!this.active.delete(entry)) return;
-    entry.listen?.abort(); this.changed();
-    if (entry.dir) {
+    if (!this.active.has(entry)) return;
+    if (entry.finishing) return entry.finishing;
+    entry.listen?.abort();
+    const work = async () => {
+      if (entry.retire) {
+        try { if (!await entry.retire(AbortSignal.timeout(5_000))) return; }
+        catch { return; } // Unknown retirement retains one reachable owner/config, never a replay.
+      }
+      if (entry.dir) {
       // Only the known adapter config and then an empty UUID directory. Unknown contents
       // remain; there is no generic scratch/creative cleanup or recursive deletion.
       await unlink(toExtendedLength(join(entry.dir, "opencode.json"))).catch(() => {});
       await rmdir(toExtendedLength(entry.dir)).catch(() => {});
-    }
+      }
+      this.active.delete(entry); this.changed();
+    };
+    entry.finishing = work().finally(() => { entry.finishing = undefined; }); return entry.finishing;
   }
+  /** Trusted housekeeping only: retry known-complete/unsent native retirement, never inference. */
+  async reconcileRetirement(): Promise<void> { for (const entry of this.active) if (entry.workFinished && (!entry.started || entry.confirmed)) await this.finish(entry); }
   async stop(): Promise<void> { this.lifetime.abort(); for (const entry of this.active) entry.control.abort(); }
   /** Trusted confirmation that both the exact backing inference and its writing owner have
    * completed native cleanup/no further dispatch. A writer exit or Stop reply is insufficient.

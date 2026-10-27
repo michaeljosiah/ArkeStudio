@@ -43,6 +43,8 @@ export class StubOpenCodeV2 {
   /** Error bodies can echo private request text; privacy tests must exercise this path. */
   failNextPrompt: string | null = null;
   nextSessionId: string | null = null;
+  failSessionDelete = false;
+  retainDeletedMessages = false;
   readonly sessionStates = new Map<string, { id: string; agent?: string; model?: { providerID: string; id: string; variant?: string }; location?: { directory?: string } }>();
   private healthAnswered = false;
   /** The location echoed on session create; null echoes the requested one honestly. */
@@ -150,7 +152,9 @@ export class StubOpenCodeV2 {
           res.writeHead(state ? 200 : 404, { "Content-Type": "application/json" }).end(envelope(state)); return;
         }
         if (m && req.method === "DELETE") {
+          if (this.failSessionDelete) { res.writeHead(503).end(JSON.stringify({ message: "synthetic retirement failure" })); return; }
           this.sessionStates.delete(m[1]!);
+          if (!this.retainDeletedMessages) this.messagesBySession.delete(m[1]!);
           res.writeHead(204).end();
           return;
         }
@@ -207,6 +211,7 @@ export class StubOpenCodeV2 {
 
         m = /^\/api\/session\/([^/]+)\/message$/.exec(url.pathname);
         if (m && req.method === "GET") {
+          if (!this.sessionStates.has(m[1]!) && !this.retainDeletedMessages) { res.writeHead(404).end(JSON.stringify({ message: "session not found" })); return; }
           if (this.failNextMessageFetch) {
             this.failNextMessageFetch = false;
             res.writeHead(503).end();

@@ -108,6 +108,10 @@ it("qualifies native operational deny policy, zero tool schemas and exactly one 
         assert.equal(requests.length - before, 1, "private turn must not launch hidden title/summary/compaction requests");
         const actual = requests.at(-1)!; assert.equal(actual.model, model); assert.equal(actual.tools?.length ?? 0, 0, "no native tool schemas may reach the operational model");
       } finally { stop.abort(); await reading; }
+      assert.equal(await ref.privateRetire!(new AbortController().signal), true);
+      assert.equal(await ref.privateRetire!(new AbortController().signal), true);
+      assert.equal((await request("GET", `/api/session/${ref.sessionId}`)).status, 404);
+      assert.equal((await request("GET", `/api/session/${ref.sessionId}/message`)).status, 404);
     }
     assert.equal(requests.length, 2);
     assert.deepEqual(completionAuthentication, ["Bearer synthetic-route-key", "Bearer synthetic-route-key"]);

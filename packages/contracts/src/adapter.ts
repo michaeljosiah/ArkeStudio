@@ -47,6 +47,11 @@ export interface SessionRef {
    * the final dispatch fence. Null/changed/aborted evidence cannot dispatch. This capability
    * grants no cloud/spend approval and must never be serialized or exposed as a model tool. */
   privateDestination?(signal: AbortSignal): Promise<PrivateSessionDestination | null>;
+  /** Retire only this ephemeral native session after confirmed completion, or before any
+   * dispatch. True requires native session/message absence. It cannot settle unknown model
+   * work, delete canonical Studio/World history, or target a replacement writing generation.
+   * Host-only capability; never serialize it or expose a general session-delete command. */
+  privateRetire?(signal: AbortSignal): Promise<boolean>;
 }
 
 /** What a session is for — selects the agent configuration and the confinement posture (§17.1). */

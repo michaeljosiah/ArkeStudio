@@ -116,6 +116,7 @@ export async function createPreparedSession(
           ...(created.privateEvents ? { privateEvents: created.privateEvents.bind(created) } : {}),
           ...(created.privateTurnSettled ? { privateTurnSettled: created.privateTurnSettled } : {}),
           ...(created.privateDestination ? { privateDestination: created.privateDestination.bind(created) } : {}),
+          ...(created.privateRetire ? { privateRetire: created.privateRetire.bind(created) } : {}),
           ...(created.privateOwnerStopped ? { privateOwnerStopped: created.privateOwnerStopped.bind(created) } : {}) };
       } finally {
         adapter.abandonSessionPreparation?.(preparationId);

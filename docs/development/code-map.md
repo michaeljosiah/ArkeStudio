@@ -1197,6 +1197,21 @@ opt-in `pinned-native.test.ts` drives the actual launcher/runner through one zer
 completion. The production host attestation port still defaults to refusal. Full payload,
 spend, native retention/cleanup and production authorization remain unfinished gates.
 
+`SessionRef.privateRetire` retires only its exact ephemeral native session, never canonical
+Studio/World history. V2 captures the original server/authentication before creation and refuses
+unknown submitted work, changed generations and mismatched role/model/variant/directory.
+Success requires both session and message reads to return native absence; failed/unknown
+retirement stays reachable. Late fetch/dispatch callbacks and untracked SSE frames cannot
+repopulate private caches, publish private replies or expose retired facts through traces.
+Bounded tombstones prevent identity reuse: at most 8,192 private admissions per adapter,
+including failed creation, before host reconciliation is required. Ordinary creation keeps its
+existing path. The runner waits for bounded retirement on success; failure retains one private
+owner/config and blocks new Studio inference while the confirmed GPU/runtime lease is free.
+Host-only `reconcileRetirement` retries known-complete/unsent retirement without regenerating
+an answer. Native protocol/service fixtures verify canonical history/creative bytes survive.
+This qualifies logical native API retirement, not secure erasure of database/WAL/log bytes,
+restart reconciliation or full financial-record retention; production activation remains closed.
+
 Private inference ownership uses `SessionRef.privateTurnSettled`: native v2 completion or the
 exact host-only `privateOwnerStopped` cleanup capability can settle one turn. A send error,
 Stop acknowledgement, writing-child exit or adapter disposal cannot. Private sessions admit
