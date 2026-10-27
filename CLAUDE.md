@@ -301,9 +301,12 @@ keep their bundled pictures.
 
 ## Pull requests
 
-Branch, push, raise the PR, then comment `@codex review` on it. Fix every P1 and re-request until a
-round comes back clean. There are no required checks on this repo, so `--auto` merges immediately —
-poll CI yourself before merging rather than trusting auto-merge to gate.
+Branch, push, raise the PR, then comment `@codex review` on it. Automated code review is capped
+at three rounds per PR, including previously completed rounds; a new push does not reset the
+count. Stop sooner when a round returns no P1 findings. Address returned P1s, but do not request
+a fourth round; report any unresolved P1s rather than treating the limit as approval to merge.
+Tests and CI remain independent gates. There are no required checks on this repo, so `--auto`
+merges immediately — poll CI yourself before merging rather than trusting auto-merge to gate.
 
 `gh pr merge --delete-branch` switches your checkout to main, and commits made there afterwards
 skip PR review entirely. Prefer merging without it and cleaning up separately.
