@@ -48,6 +48,16 @@ actual audio size before opening output. The closed `preview` reservation owner 
 writes and settles only after file/receipt handles close. Unsupported ports make no fit claim.
 Tests: `test/storage/local-preview-cache.test.ts`; native identity-based deletion, reviewed cleanup,
 automatic maintenance, broader inventory and remaining write owners remain unfinished.
+`storage/windows-cache-file.ts` supplies the host-only native identity/removal primitive.
+Its fixed, bounded, kernel-leashed program takes data through stdin, binds native and producer
+receipt identities, observes logical/allocation bytes separately, rejects links/reparse points
+and conflicting I/O handles, and sets deletion disposition on the exact verified exclusive handle. It
+never performs a second pathname-based unlink. Native failure/cancellation can be unknown after
+mutation; metadata-only handles that leave deletion pending also produce unknown. No automatic
+retry or reclaimed-capacity claim follows. This primitive is not yet
+registered as a user/model action: producer/lease fences, durable intents, reviewed plans and
+post-action capacity verification still belong in the cleanup integration. Native tests:
+`test/storage/windows-cache-file.test.ts`; other platform removal ports remain pending.
 Capacity invalidation/root changes revoke captured admission evidence across a reservation flush;
 an already-saved intent remains uncertain until its owner settles it. Completed-only destinations
 are excluded from direct-file admission, so a full old model volume does not block a different
