@@ -7,3 +7,59 @@
 
 .bms240{color-scheme:light}.dark .bms240{color-scheme:dark}.bms240.mobile .map{width:100%}
 .bms240.mobile select,.bms240.mobile input,.bms240.mobile textarea{min-height:44px}
+.bms240.connector-flow .panel{width:400px}
+.bms240 .connector-banner{display:flex;align-items:center;gap:9px;padding:10px 20px;border-bottom:1px solid var(--border);font:var(--type-label);min-height:44px;background:var(--muted)}
+.bms240 .connector-banner span{flex:1}.bms240 .connector-banner button{padding:4px 8px;min-height:28px;font:var(--type-label)}
+.bms240 .connector-map{position:relative;width:860px;height:600px}
+.bms240 .connector-map .connections{width:860px;height:600px}
+.bms240 .connector-card{position:absolute;width:220px;background:var(--background);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-xs);display:flex;flex-direction:column;text-align:left;gap:10px;white-space:normal;align-items:stretch;padding:16px;min-height:130px}
+.bms240 .connector-card.source{padding:0;border-color:var(--foreground)}
+.bms240 .connector-card.selected{box-shadow:0 0 0 1px var(--foreground)}
+.bms240 .connector-card-body{display:flex;flex-direction:column;align-items:stretch;text-align:left;border:0;white-space:normal;gap:10px;min-height:142px;padding:16px;width:100%;background:transparent}
+.bms240 .connector-card .num{font:var(--type-meta);color:var(--muted-foreground);display:flex;align-items:center;gap:5px}
+.bms240 .connector-card .num svg{width:12px;height:12px}
+.bms240 .connector-card strong{font:var(--type-ui)}
+.bms240 .connector-card .node-foot{border-top:1px solid var(--border);padding-top:8px;font:var(--type-meta);color:var(--muted-foreground)}
+.bms240 .connector-card.can-pick{outline:1px dashed var(--ring);outline-offset:5px}
+.bms240 .connector-card.can-pick:hover{border-color:var(--foreground);outline-color:var(--foreground)}
+.bms240 .connector-card.destination-selected{border-color:var(--foreground);box-shadow:0 0 0 1px var(--foreground)}
+.bms240 .target-hint{font:var(--type-label);border-top:1px solid var(--border);padding-top:8px}
+.bms240 button.node-port{position:absolute;right:-23px;top:50%;transform:translateY(-50%);width:44px;height:44px;min-height:44px;padding:10px;border-radius:50%;background:var(--background);border:1px solid var(--foreground);z-index:2}
+.bms240 button.node-port:hover{background:var(--primary);color:var(--primary-foreground)}
+.bms240 button.node-port.port-focus{outline:3px solid var(--border);outline-offset:4px}
+.bms240 .port-label{position:absolute;right:-96px;top:28px;font:var(--type-label);padding:5px 8px;background:var(--primary);color:var(--primary-foreground);border-radius:5px}
+.bms240 .existing-connections{opacity:.45}
+.bms240 .connections .draft-connection{stroke:var(--foreground);stroke-dasharray:2 5;stroke-width:1.8}
+.bms240 .connections .unwalked{stroke:var(--foreground);stroke-dasharray:5 4;stroke-width:1.8}
+.bms240 .connector-edge{display:flex;flex-direction:column;align-items:flex-start;max-width:220px;white-space:normal;gap:3px;line-height:1.5}
+.bms240 .connector-edge small{opacity:.7}
+.bms240 .connector-existing-label{position:absolute;font:var(--type-meta);color:var(--muted-foreground);padding:4px 8px;border-radius:4px;background:var(--background)}
+.bms240 .connector-legend{position:absolute;left:28px;bottom:18px;font:var(--type-label);line-height:1.6;color:var(--muted-foreground);background:var(--background);padding:10px 12px;border:1px solid var(--border);border-radius:8px;max-width:660px}
+.bms240 .connector-form{display:flex;flex-direction:column;gap:16px}
+.bms240 .connector-form .field{gap:6px}
+.bms240 .connector-form textarea{min-height:58px;resize:vertical}
+.bms240 .connector-form-section{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--border);padding-top:12px}
+.bms240 .connector-section-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.bms240 .connector-section-head button{padding:4px 7px;min-height:28px;font:var(--type-label)}
+.bms240 .connector-rule-row{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,.8fr) minmax(0,1fr) 24px;gap:4px;align-items:center}
+.bms240 .connector-rule-row select{min-width:0;padding:7px 3px;font:var(--type-label);height:34px;min-height:34px}
+.bms240 .connector-rule-row .remove-rule{width:24px;height:30px;min-height:30px;padding:4px}
+.bms240 .connector-rule-row .remove-rule svg{width:12px;height:12px}
+.bms240 .connector-rule-row.effect-row{grid-template-columns:minmax(0,1fr) 12px minmax(0,1.2fr) 24px}
+.bms240 .connector-consequence{padding:10px 12px;background:var(--muted);border-radius:8px;font:var(--type-label);line-height:1.7}
+.bms240 .connector-form-actions{display:flex;justify-content:flex-end;gap:8px}
+.bms240 .connector-panel .panelscroll{padding:18px}
+.bms240.connector-flow.mobile .panel{width:auto}
+.bms240.connector-flow.mobile .connector-rule-row{grid-template-columns:minmax(0,1.5fr) minmax(0,.8fr) minmax(0,1fr) 32px}
+.bms240.connector-flow.mobile .connector-rule-row.effect-row{grid-template-columns:minmax(0,1fr) 12px minmax(0,1.2fr) 32px}
+.bms240.connector-flow.mobile .connector-rule-row select,.bms240.connector-flow.mobile .connector-rule-row .remove-rule{min-height:44px;height:44px}
+.bms240.connector-flow.mobile .connector-rule-row .remove-rule{width:32px}
+.bms240.connector-flow.mobile .connector-section-head button{min-height:44px}
+.bms240.connector-flow.mobile .connector-rule-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 44px;gap:6px;margin-bottom:6px}
+.bms240.connector-flow.mobile .connector-rule-row select:first-child{grid-column:1 / 3;grid-row:1}
+.bms240.connector-flow.mobile .connector-rule-row select:nth-child(2){grid-column:1;grid-row:2}
+.bms240.connector-flow.mobile .connector-rule-row select:nth-child(3){grid-column:2;grid-row:2}
+.bms240.connector-flow.mobile .connector-rule-row .remove-rule{grid-column:3;grid-row:1;width:44px}
+.bms240.connector-flow.mobile .connector-rule-row.effect-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 44px}
+.bms240.connector-flow.mobile .connector-rule-row.effect-row>span{display:none}
+.bms240.connector-flow.mobile .connector-rule-row.effect-row select:nth-child(3){grid-column:1 / 3;grid-row:2}

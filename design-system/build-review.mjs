@@ -39,6 +39,12 @@ const SCREENS = [
   { group: "Remembered choices · turn 240", screen: "The ending · the manifest follows the route", frame: "240h", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Proposed; not approved or built. SPEC-063, issue #2199."] },
   { group: "Remembered choices · turn 240", screen: "A finding carries the state that makes it fail", frame: "240i", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Proposed; not approved or built. SPEC-063, issue #2199."] },
   { group: "Remembered choices · turn 240", screen: "Phone · the same rule in a sheet", frame: "240j", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Proposed; not approved or built. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Start at the node’s +", frame: "240k", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Proposed; not approved or built. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Choose a destination node", frame: "240l", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Proposed; not approved or built. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Write the choice on the draft connection", frame: "240m", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Proposed; not approved or built. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Set conditions and remembered values before adding", frame: "240n", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Proposed; not approved or built. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Add choice · the new connector is selected", frame: "240o", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Proposed; not approved or built. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Phone · create the same choice in a sheet", frame: "240p", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Proposed; not approved or built. SPEC-063, issue #2199."] },
   // END BRANCH MAP STATE 240
 
   // BEGIN GLOBAL CHAT 239
@@ -922,7 +928,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
-  { file: "branch-map-state-240.review.html", what: "Turn 240: remembered values, conditional choices and dialogue in First Contact; local interactive prototype.", state: "proposed 27 October 2026; not built" },
+  { file: "branch-map-state-240.review.html", what: "Turn 240: remembered values, conditional choices and dialogue in First Contact, plus the click-connector creation flow; local interactive prototype.", state: "proposed 27 October 2026; not built" },
   { file: "global-chat-239.review.html", what: "Turn 239: the Studio assistant in a notification-style rounded dialog, diagnosis, reviewed repair, world handoff, phone, tablet and keyboard viewport.", state: "approved 26 October 2026; not built" },
   { file: "music-238.review.html", what: "Turn 238: Music as a production — Make music at the door, an album’s cover and tracks, Add track from Bench or a file, a track open with its lyrics and Heard in, a character’s theme in the Guide, a song teaser, Export → Arke Player for an album, a track’s composer and takes, the track editor, and the album’s sequence.", state: "approved 24 October 2026; not built" },
   { file: "picture-marks-237.review.html", what: "Turn 237: Picture marks — pictures set on the words inside a beat, + Picture at a sentence, a new mark’s panel, and Illustrate choosing pictures from the story under a cap.", state: "approved 24 October 2026; not built" },
