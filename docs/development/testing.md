@@ -1644,6 +1644,19 @@ reconciles only that retired copy without another prompt. Prepared-session tests
 retirement capability's native receiver. These are logical API-retention checks, not secure
 database/WAL/log erasure, cross-restart cleanup or financial/payload qualification.
 
+Adapter `test/sse.test.ts` checks per-frame UTF-8 limits across arbitrary chunk/delimiter
+boundaries, many valid frames in one chunk, malformed input, sanitized size errors and abort
+without waiting for an uncooperative cancellation callback. `test/v2-private-payload.test.ts`
+checks the 192 KiB decoded private response limit, split surrogate pairs, delta coalescing,
+64-event/control bounds, metadata limits, native error/end redaction, unscoped-error exclusion
+and refusal of missing/oversized final retrieval without accepting partial text. The native-route
+composition holds GPU/runtime ownership after a refused oversized stream until positive native
+completion, then retires the exact session without another prompt. These make no model/paid
+request and do not establish complete native payload disclosure, spend or subprocess persistence.
+The same suite checks cached rows after an observed private error cannot become completion
+proof during reconnect, and private unknown event names cannot reach common dead-letter
+diagnostics. Neither a refused response nor a Stop acknowledgement releases unknown inference.
+
 The Effects browser fixture logs its actual browser version, a bounded stderr tail on failure
 and Linux cgroup memory counters every five seconds and before each decoder stage. Two Linux
 runs stopped after the same decoder stage despite ample host `freemem`; the cgroup samples

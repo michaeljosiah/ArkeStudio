@@ -1212,6 +1212,22 @@ an answer. Native protocol/service fixtures verify canonical history/creative by
 This qualifies logical native API retirement, not secure erasure of database/WAL/log bytes,
 restart reconciliation or full financial-record retention; production activation remains closed.
 
+`adapter-opencode/src/sse.ts` bounds each native frame at 64 MiB, above the current 20 MB
+encoded image budget, and cancels its reader on refusal/abort without echoing frame data.
+V2 checks private decoded UTF-8 response bytes before normalization (including split surrogate
+pairs), coalesces pending deltas, caps private queues/control requests at 64, bounds metadata
+and opaque IDs, and redacts native error/end text. Private prompt receipts, completion JSON
+and permission reconciliation have finite body bounds. An absent/oversized/failed private
+retrieval cannot promote partial stream text into a reply. Positive native execution success
+settles inference independently of reply retrieval; a size/error refusal alone does not.
+Unscoped native session errors and raw stream exception text never enter shared observations.
+Private unsupported/malformed events also stay out of the common dead-letter buffer. After
+an observed private error or Stop, cached assistant rows on reconnect cannot settle its unknown
+inference; a late positive native execution event may still retire the exact original owner.
+Adapter `test/sse.test.ts`/`test/v2-private-payload.test.ts` plus the coordinator native-route
+composition cover these refusal/ownership boundaries. Complete native network-payload,
+subprocess persistence, spend and production activation qualification remain required.
+
 Private inference ownership uses `SessionRef.privateTurnSettled`: native v2 completion or the
 exact host-only `privateOwnerStopped` cleanup capability can settle one turn. A send error,
 Stop acknowledgement, writing-child exit or adapter disposal cannot. Private sessions admit

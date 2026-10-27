@@ -79,7 +79,9 @@ it("keeps backend errors that echo private content out of shared events and harn
     const ref = await h.create(); observation = observe(ref, event => event.type === "session.error");
     h.stub.failNextPrompt = "PRIVATE_ECHOED_PROMPT_AND_RESPONSE";
     await h.adapter.sendMessage({ sessionId: ref.sessionId, parts: [{ type: "text", text: "PRIVATE_REQUEST" }] }); await observation.done;
-    assert(observation.events.some(event => event.type === "session.error" && event.message.includes("PRIVATE_ECHOED_PROMPT_AND_RESPONSE")));
+    assert(observation.events.some(event => event.type === "session.error" && event.message.includes("private model request")));
+    assert(!JSON.stringify(observation.events).includes("PRIVATE_ECHOED_PROMPT_AND_RESPONSE"));
+    assert.equal(h.stub.failNextPrompt, null, "the native backend echo failure was consumed");
     assert(!JSON.stringify(h.traces).includes("PRIVATE_")); assert(!JSON.stringify(h.shared).includes("PRIVATE_"));
     assert(!h.shared.some(event => "sessionId" in event && event.sessionId === ref.sessionId));
     const ordinary = await h.adapter.createSession({ purpose: "authoring", agent: "world-builder" });

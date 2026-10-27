@@ -1,6 +1,7 @@
 import {
   HarnessEventSchema,
   ROSTER,
+  STUDIO_ASSISTANT_LIMITS,
   type HarnessCapability,
   type CreateSessionInput,
   type HarnessAdapter,
@@ -23,7 +24,7 @@ import {
 } from "@arke-studio/contracts";
 import { assessV2Permission, buildSessionConfigV2 } from "./config.js";
 import { PreparedSessionPolicies, type SessionPermissionPolicy } from "../permission-policy.js";
-import { parseSse } from "../sse.js";
+import { parseSse, SseFrameLimitError } from "../sse.js";
 import { modelEnabled, modelMetadata, providerNameOf, type WireModel } from "../model-metadata.js";
 import { OpenCodeV2Http, sameDirectory, wireDirectory } from "./http.js";
 import { OpenCodeError } from "../http.js";
@@ -70,6 +71,10 @@ export interface OpenCodeV2AdapterOptions {
 
 interface TrackedSession {
   private: boolean;
+  privateTextBytes?: number;
+  privateTextTail?: string;
+  privateResponseRejected?: boolean;
+  privatePermissionRequests?: number;
   privateTurn?: { dispatched: boolean; stopped: boolean; confirmed: boolean; settled: Promise<void>; complete(): void };
   ownerHttp?: OpenCodeV2Http;
   privateRoute?: { requested(): boolean; verified(): boolean; verify(signal: AbortSignal): Promise<PrivateSessionDestination | null> };
@@ -452,8 +457,9 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     if (privateTurn) {
       if (privateTurn.stopped) throw new Error("The private operational owner has been retired.");
       if (privateTurn.dispatched) throw new Error("A private operational session permits one model turn only.");
+      if (tracked.privateResponseRejected) throw new Error("The private response observation was refused before dispatch.");
       if (tracked.privateRoute?.requested() && (!tracked.privateRoute.verified() || !await tracked.privateRoute.verify(this.runtimeRequests.signal))) throw new Error("The private model destination changed or could not be verified. No prompt was sent.");
-      if (privateTurn.stopped || privateTurn.dispatched || this.disposed) throw new Error("The private operational owner changed before dispatch.");
+      if (privateTurn.stopped || privateTurn.dispatched || tracked.privateResponseRejected || this.disposed) throw new Error("The private operational owner changed before dispatch.");
       beforeDispatch?.();
       privateTurn.dispatched = true;
     } else beforeDispatch?.();
@@ -469,7 +475,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
         await (tracked?.ownerHttp ?? this.http).reqData<{ id?: string }>("POST", `/api/session/${input.sessionId}/prompt`, {
           id: freshWireId(),
           ...prompt,
-        }, { signal: runtime.signal });
+        }, { signal: runtime.signal, ...(tracked?.private ? { responseBytes: 2 * 1024 ** 2 } : {}) });
         if (tracked?.private && this.sessions.get(input.sessionId) !== tracked) return;
         this.trace("dispatch.accepted", { sessionId: input.sessionId });
       } catch (err) {
@@ -550,6 +556,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     const tracked = this.sessions.get(sessionId); if (!tracked && !this.pendingTurns.has(sessionId)) return;
     const stillAdmitted = () => tracked ? this.sessions.get(sessionId) === tracked : this.pendingTurns.has(sessionId) && !this.retiredPrivateIds.has(sessionId);
     const runtime = this.runtimeRequests;
+    if (tracked?.privateResponseRejected) return;
     const finishWithAccumulated = (why: string): void => {
       const last = this.normalizeState.textBySession.get(sessionId);
       this.normalizeState.textBySession.delete(sessionId);
@@ -568,21 +575,26 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
           time?: { completed?: number };
           content?: Array<{ type?: string; text?: string }>;
         }>
-      >("GET", `/api/session/${sessionId}/message`, undefined, { signal: AbortSignal.any([runtime.signal, AbortSignal.timeout(10_000)]) });
-      if (runtime.signal.aborted || this.disposed || !stillAdmitted()) return;
+      >("GET", `/api/session/${sessionId}/message`, undefined, { signal: AbortSignal.any([runtime.signal, AbortSignal.timeout(10_000)]),
+        ...(tracked?.private ? { responseBytes: 4 * 1024 ** 2 } : {}) });
+      if (runtime.signal.aborted || this.disposed || !stillAdmitted() || tracked?.privateResponseRejected) return;
       const done = Array.isArray(messages)
-        ? messages.find((m) => m.type === "assistant" && typeof m.time?.completed === "number")
+        ? messages.find((m) => m.type === "assistant" && (tracked?.private ? Number.isSafeInteger(m.time?.completed) && m.time!.completed! >= 0 : typeof m.time?.completed === "number"))
         : undefined;
       const id = done?.id;
       if (id === undefined || this.reportedMessage.get(sessionId) === id) {
         this.trace("turn.nothing-new", { sessionId });
-        if (mode === "turn-ended" && id === undefined) finishWithAccumulated("no completed assistant message");
+        if (mode === "turn-ended" && id === undefined) {
+          if (tracked?.private) this.rejectPrivateResponse(sessionId); else finishWithAccumulated("no completed assistant message");
+        }
         return;
       }
+      if (tracked?.private && (typeof id !== "string" || id.length > 256 || !Array.isArray(done?.content) || done.content.some(part => part?.type === "text" && typeof part.text !== "string"))) { this.rejectPrivateResponse(sessionId); return; }
       const text = (done?.content ?? [])
         .filter((part) => part.type === "text")
         .map((part) => part.text ?? "")
         .join("");
+      if (tracked?.private && Buffer.byteLength(text) > STUDIO_ASSISTANT_LIMITS.responseBytes) { this.rejectPrivateResponse(sessionId); return; }
       if (mode === "resync" && text.trim().length === 0) {
         // An all-tool message, or shape drift: not worth ending a possibly-live turn over.
         this.trace("turn.resync-empty", { sessionId, messageId: id });
@@ -595,6 +607,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     } catch (err) {
       if (runtime.signal.aborted || this.disposed || !stillAdmitted()) return;
       this.trace("turn.fetch-failed", { sessionId, mode, error: String(err) });
+      if (tracked?.private) { this.rejectPrivateResponse(sessionId); return; }
       if (mode === "turn-ended") finishWithAccumulated("completion fetch failed");
     }
   }
@@ -607,22 +620,27 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   private async resyncPendingPermissions(): Promise<void> {
     for (const sessionId of this.sessions.keys()) {
       try {
-        const pending = await this.http.reqData<
+        const owner = this.sessions.get(sessionId)!;
+        if (owner.privateResponseRejected) continue;
+        const pending = await (owner.ownerHttp ?? this.http).reqData<
           Array<{ id?: string; action?: string; resources?: unknown[] }>
-        >("GET", `/api/session/${sessionId}/permission`, undefined, { signal: AbortSignal.timeout(10_000) });
+        >("GET", `/api/session/${sessionId}/permission`, undefined, { signal: AbortSignal.timeout(10_000), ...(owner.private ? { responseBytes: 64 * 1024 } : {}) });
+        if (this.sessions.get(sessionId) !== owner) continue;
+        if (owner.private && (!Array.isArray(pending) || pending.length > 64)) { this.rejectPrivateResponse(sessionId); continue; }
         for (const request of pending ?? []) {
           if (!request.id || this.permissionSessions.has(request.id)) continue;
-          const resources = (request.resources ?? []).filter((r): r is string => typeof r === "string");
+          const resources = owner.private ? [] : (request.resources ?? []).filter((r): r is string => typeof r === "string");
           this.trace("resync.permission", { sessionId, permissionId: request.id });
           this.push({
             type: "permission.requested",
             sessionId,
             permissionId: request.id,
-            actionClass: request.action ?? "an action",
+            actionClass: owner.private ? "native-operational-action" : request.action ?? "an action",
             ...(resources.length > 0 ? { detail: resources.join(", ").slice(0, 300) } : {}),
           });
         }
       } catch {
+        if (this.sessions.get(sessionId)?.private) this.rejectPrivateResponse(sessionId);
         /* a session we cannot read is not a reason to abandon the reconnect */
       }
     }
@@ -803,8 +821,26 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   // ---- the event pump ------------------------------------------------------
 
   private push(event: HarnessEvent): void {
-    const parsed = HarnessEventSchema.parse(event);
+    let parsed = HarnessEventSchema.parse(event);
     if ("sessionId" in parsed && parsed.sessionId && (this.retiredPrivateIds.has(parsed.sessionId) || !this.sessions.has(parsed.sessionId) && !this.pendingTurns.has(parsed.sessionId))) return;
+    const privateOwner = "sessionId" in parsed && parsed.sessionId ? this.sessions.get(parsed.sessionId) : undefined;
+    if (privateOwner?.privateResponseRejected && parsed.type !== "session.error") return;
+    if (privateOwner?.private && parsed.type === "session.error") parsed = { type: "session.error", sessionId: parsed.sessionId!, message: "The private model request could not be completed. Submitted work was not replayed." };
+    if (privateOwner?.private && parsed.type === "session.ended") parsed = { type: "session.ended", sessionId: parsed.sessionId, reason: parsed.reason, detail: "The private turn ended without a confirmed response." };
+    if (privateOwner?.private && (parsed.type === "session.error" || parsed.type === "session.ended")) {
+      privateOwner.privateResponseRejected = true; privateOwner.privateTextBytes = 0; privateOwner.privateTextTail = undefined;
+      this.normalizeState.textBySession.delete(parsed.sessionId!);
+      if (privateOwner.privateTurn && !privateOwner.privateTurn.dispatched) privateOwner.privateTurn.stopped = true;
+    }
+    if (privateOwner?.private) {
+      const metadata = parsed.type === "message.delta" || parsed.type === "message.completed" ? { ...parsed, text: undefined } : parsed;
+      if (Buffer.byteLength(JSON.stringify(metadata)) > 4096 || "correlationId" in parsed && typeof parsed.correlationId === "string" && parsed.correlationId.length > 256 || "permissionId" in parsed && parsed.permissionId.length > 256) { this.rejectPrivateResponse(parsed.sessionId!); return; }
+      if (parsed.type === "permission.requested") {
+        if ((privateOwner.privatePermissionRequests ?? 0) >= 64) { this.rejectPrivateResponse(parsed.sessionId); return; }
+        privateOwner.privatePermissionRequests = (privateOwner.privatePermissionRequests ?? 0) + 1;
+        parsed = { type: "permission.requested", sessionId: parsed.sessionId, permissionId: parsed.permissionId, actionClass: "native-operational-action" };
+      }
+    }
     if (parsed.type === "message.completed") {
       const turn = this.sessions.get(parsed.sessionId)?.privateTurn;
       if (turn?.dispatched) turn.complete();
@@ -819,6 +855,16 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     const privateSession = "sessionId" in parsed && parsed.sessionId ? this.sessions.get(parsed.sessionId)?.private === true : false;
     for (const sub of this.subscribers) {
       if (privateSession ? sub.sessionId !== ("sessionId" in parsed ? parsed.sessionId : undefined) : sub.sessionId !== undefined) continue;
+      if (privateSession && parsed.type === "message.delta") {
+        const old = sub.queue.findIndex(value => value.type === "message.delta"); if (old >= 0) sub.queue.splice(old, 1);
+      }
+      if (privateSession && sub.queue.length >= 64) {
+        privateOwner!.privateResponseRejected = true; privateOwner!.privateTextBytes = 0; privateOwner!.privateTextTail = undefined;
+        this.normalizeState.textBySession.delete(sub.sessionId!);
+        sub.queue.length = 0;
+        this.push({ type: "session.error", sessionId: sub.sessionId!, message: "The private model observation exceeded its event bound. Submitted work was not replayed." });
+        continue;
+      }
       sub.queue.push(parsed);
       sub.wake?.();
       sub.wake = null;
@@ -826,6 +872,16 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     // Operational roles have no native tools. An unexpected permission request is refused
     // within its native owner; it must not reach the common world's permission UI/pump.
     if (privateSession && parsed.type === "permission.requested") void this.respondToPermission({ permissionId: parsed.permissionId, decision: "reject" }).catch(() => {});
+  }
+
+  private rejectPrivateResponse(sessionId: string): void {
+    const owner = this.sessions.get(sessionId);
+    if (!owner?.private || owner.privateResponseRejected) return;
+    owner.privateResponseRejected = true; owner.privateTextBytes = 0;
+    owner.privateTextTail = undefined;
+    if (owner.privateTurn && !owner.privateTurn.dispatched) owner.privateTurn.stopped = true;
+    this.normalizeState.textBySession.delete(sessionId);
+    this.push({ type: "session.error", sessionId, message: "The private response exceeded its observation bound." });
   }
 
   private readonly pumpAbort = new AbortController();
@@ -869,9 +925,35 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
           for await (const raw of parseSse(stream.body, attempt.signal, heard)) {
             if (runtime.signal.aborted || this.disposed) break;
             const rawSessionId = (raw as { data?: { sessionID?: unknown } })?.data?.sessionID;
+            const rawType = (raw as { type?: unknown })?.type;
+            if (typeof rawType === "string" && rawType.startsWith("session.") && typeof rawSessionId !== "string") continue;
             if (typeof rawSessionId === "string" && (this.retiredPrivateIds.has(rawSessionId) || !this.sessions.has(rawSessionId) && !this.pendingTurns.has(rawSessionId))) continue;
-            const outcome = normalizeOpenCodeV2(raw, this.normalizeState);
+            const owner = typeof rawSessionId === "string" ? this.sessions.get(rawSessionId) : undefined;
+            let normalizedRaw = raw;
+            if (owner?.private && typeof rawType === "string") {
+              if (owner.privateResponseRejected && rawType !== "session.execution.succeeded") continue;
+              const data = (raw as { data: Record<string, unknown> }).data;
+              if ([data.assistantMessageID, data.id, data.requestID].some(value => typeof value === "string" && value.length > 256)) { this.rejectPrivateResponse(rawSessionId as string); continue; }
+              if (rawType === "permission.asked") normalizedRaw = { type: rawType, data: { sessionID: rawSessionId, id: data.id, action: "native-operational-action", resources: [] } };
+              if (rawType.startsWith("session.tool.")) continue; // operational sessions have no native tools
+              if (rawType === "session.text.delta" || rawType === "session.text.ended") {
+                if (owner.privateResponseRejected) continue;
+                const data = (raw as { data: { delta?: unknown; text?: unknown } }).data;
+                const text = rawType === "session.text.delta" ? data.delta : data.text;
+                if (typeof text === "string" && (rawType === "session.text.delta" || text.length > 0)) {
+                  const append = rawType === "session.text.delta";
+                  const paired = append && owner.privateTextTail && /[\uD800-\uDBFF]/.test(owner.privateTextTail) && /^[\uDC00-\uDFFF]/.test(text);
+                  const bytes = Buffer.byteLength(text) + (append ? owner.privateTextBytes ?? 0 : 0) - (paired ? 2 : 0);
+                  if (bytes > STUDIO_ASSISTANT_LIMITS.responseBytes) { this.rejectPrivateResponse(rawSessionId as string); continue; }
+                  owner.privateTextBytes = bytes;
+                  owner.privateTextTail = text.length ? text.at(-1) : owner.privateTextTail;
+                }
+              }
+            }
+            const outcome = normalizeOpenCodeV2(normalizedRaw, this.normalizeState);
             if (outcome.kind === "turn-succeeded") {
+              const turn = this.sessions.get(outcome.sessionId)?.privateTurn;
+              if (turn?.dispatched) turn.complete(); // positive native completion is independent of response retrieval
               // Detached, deliberately: awaiting this fetch inside the read loop would let one
               // hung GET starve event delivery for every session and every subscriber. The
               // fetch is itself time-bounded, and dedup makes late arrival harmless.
@@ -890,13 +972,14 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
                 if (event.type === "session.error") this.trace("stream.session.error", { sessionId: event.sessionId });
                 this.push(event);
               }
-            } else if (outcome.kind === "dead-letter") {
+            } else if (outcome.kind === "dead-letter" && !owner?.private) {
               this.deadLetters.push({ reason: outcome.reason, at: Date.now() });
               if (this.deadLetters.length > 100) this.deadLetters.shift();
             }
           }
         } catch (err) {
-          this.trace("stream.dropped", { error: String(err) });
+          if (err instanceof SseFrameLimitError) for (const sessionId of this.pendingTurns) if (this.sessions.get(sessionId)?.private) this.rejectPrivateResponse(sessionId);
+          this.trace("stream.dropped", { reason: err instanceof SseFrameLimitError ? "frame-limit" : "connection-lost" });
         } finally {
           clearTimeout(watchdog);
           signal.removeEventListener("abort", giveUp);

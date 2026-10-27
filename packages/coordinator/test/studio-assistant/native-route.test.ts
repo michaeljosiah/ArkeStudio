@@ -5,6 +5,7 @@ import { once } from "node:events";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { OpenCodeV2Adapter } from "@arke-studio/adapter-opencode";
+import { STUDIO_ASSISTANT_LIMITS } from "@arke-studio/contracts";
 import { StubOpenCodeV2, STUB_V2_PASSWORD } from "../../../adapter-opencode/test/helpers/stub-server-v2.js";
 import { HarnessStudioModelRunner, type StudioModelDisclosure } from "../../src/studio-assistant/runner.js";
 import { HarnessRuntimeChanges } from "../../src/harness/runtime-change.js";
@@ -131,4 +132,19 @@ it("host ownership changes during native payload approval cannot dispatch or reu
     await until(() => entered, "native-bound disclosure approval"); h.changeHost(); resume(); await refused;
     assert.equal(h.prompts().length, 0); await until(() => !h.runner.busy(), "the unsent stale host attestation retires");
   } finally { resume(); await h.close(); }
+});
+
+it("an oversized private stream keeps unknown GPU/runtime ownership until positive native completion, without replay", async () => {
+  const h = await fixture();
+  try {
+    const refused = assert.rejects(h.runner.run(input, new AbortController().signal, async () => ({ cloudApproved: false })), /could not be completed/);
+    await until(() => h.prompts().length === 1, "the admitted private prompt");
+    const sessionId = h.prompts()[0]!.path.split("/")[3]!;
+    h.stub.emit({ type: "session.text.delta", data: { sessionID: sessionId, assistantMessageID: "private", delta: "x".repeat(STUDIO_ASSISTANT_LIMITS.responseBytes + 1) } });
+    await refused; assert(h.runner.busy()); assert(h.gpu.isBusy("Ollama"));
+    await assert.rejects(h.changes.run(async () => {}), /Finish or cancel writing/);
+    h.stub.emit({ type: "session.execution.succeeded", data: { sessionID: sessionId } });
+    await until(() => !h.runner.busy() && !h.gpu.isBusy("Ollama"), "positive native completion and exact retirement release the original owner");
+    await h.changes.run(async () => {}); assert.equal(h.prompts().length, 1);
+  } finally { await h.close(); }
 });

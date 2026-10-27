@@ -420,9 +420,13 @@ export class StubOpenCodeV2 {
     return [...this.requests].reverse().find((r) => pathPattern.test(r.path));
   }
 
-  async stop(): Promise<void> {
+  disconnectEvents(): void {
     for (const client of this.sseClients) client.end();
     this.sseClients.clear();
+  }
+
+  async stop(): Promise<void> {
+    this.disconnectEvents();
     const server = this.server;
     this.server = null;
     if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
