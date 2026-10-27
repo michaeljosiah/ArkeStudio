@@ -96,7 +96,9 @@
 .story-inspector-footer { flex:none; padding:16px 20px; border-top:1px solid var(--border); background:var(--background); }
 .story-inspector-footer .ui-btn { width:100%; }
 .story-inspector-footer .story-review-action { margin:0; }
-.bm[data-stateful="true"] .bm-side:has(.bm-insp) .fy-production-studio-owner,.bm[data-stateful="true"] .bm-side:has(.bm-insp) .fy-arke { display:none; }
+/* The global conversation leaves a full-height slot behind when its body moves. Put that
+   placeholder away with the older dock owners or it squeezes the fact list down to its padding. */
+.bm[data-stateful="true"] .bm-side:has(.bm-insp) :is(.fy-production-studio-owner,.fy-arke,.fy-global-chat-slot) { display:none; }
 .bm[data-stateful="true"] .bm-insp { flex:1; max-height:none; }
 .bm[data-stateful="true"] .bm-side:has(.bm-insp) { width:400px; }
 .bm[data-stateful="true"] .bm-side { width:400px; }

@@ -1375,3 +1375,14 @@ corners, 12px phone margins, scrolling body/fixed footer and 44px phone targets.
 facts Inspector, choice Review/Keep, selected-line Show when, draft/map-pick round trip and
 witness preview. Verify disabled choices show literal reasons, cannot advance on click or
 shortcut, and do not change the shortcut numbers of legal choices.
+
+Run `node scripts/smoke-story-layout.mjs` for the complete App/global-chat composition in a
+headless Chrome browser (`ARKE_CHROME` may name the browser executable). It captures light/dark
+facts and one/two/three/five-option beat previews at desktop, window, tablet and phone sizes.
+Assertions measure usable fact-list height, multiple visible alternatives, complete labels,
+scroll access to the last choice and selection of a distinct second route. DOM-only Inspector
+tests cannot detect a full-height global-chat placeholder squeezing out its sibling list, or
+the shared player's late stylesheet overriding the preview's position. `--output <folder>`
+retains captures and measurements; `--baseline <git-ref>` records the prior layout without
+treating its known geometry failures as a pass. Fixtures use the public design example and do
+not read or write an author's world.
