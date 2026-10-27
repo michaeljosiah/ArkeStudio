@@ -105,7 +105,8 @@ export interface SessionConfigV2Input extends SessionConfigInput {
 }
 
 /** The opencode.json object written into a v2 session's working directory. */
-export function buildSessionConfigV2(input: SessionConfigV2Input): Record<string, unknown> {
+export function buildSessionConfigV2(input: SessionConfigV2Input, privateControl?: string): Record<string, unknown> {
+  if (privateControl && (privateControl.length > 4096 || privateControl.includes("\0") || [...privateControl].some(character => "\\*?[]{}!".includes(character)))) throw new Error("The private native control path cannot be pinned to a literal policy.");
   const operational = ROSTER.find(member => member.name === (input.agent ?? input.defaultAgent) && member.operationalOnly);
   const reference = input.model ?? (operational ? input.agents?.[operational.name]?.model : undefined);
   const provider = reference?.slice(0, reference.indexOf("/"));
@@ -141,10 +142,12 @@ export function buildSessionConfigV2(input: SessionConfigV2Input): Record<string
     ...(operational ? { default_agent: operational.name } : input.defaultAgent ? { default_agent: input.defaultAgent } : {}),
     agents,
     ...(operational ? {
+      ...(privateControl ? { plugins: [privateControl] } : {}),
       compaction: { auto: false }, warming: false, websearch: false,
       experimental: { policies: [
         { action: "tool.use", resource: "*", effect: "deny" },
         { action: "integration.use", resource: "*", effect: "deny" },
+        ...(privateControl ? [{ action: "integration.use", resource: `plugin:${privateControl}`, effect: "allow" }] : []),
         { action: "provider.use", resource: "*", effect: "deny" },
         ...(provider ? [{ action: "provider.use", resource: provider, effect: "allow" }] : []),
       ] },

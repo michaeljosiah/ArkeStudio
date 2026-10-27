@@ -368,7 +368,9 @@ export interface HarnessAdapter {
    * paths and atomic replacement are solved once in the coordinator, and an adapter that had to
    * solve them again would solve them differently.
    */
-  sessionFiles?(input: SessionConfigInput): ReadonlyArray<SessionFile>;
+  /** The host supplies the resolved directory when a native control needs a literal path.
+   * File contents remain adapter output; filesystem writes remain with the host. */
+  sessionFiles?(input: SessionConfigInput, directory?: string): ReadonlyArray<SessionFile>;
   /**
    * The same settings, for a harness that takes them as call options rather than as a file.
    *

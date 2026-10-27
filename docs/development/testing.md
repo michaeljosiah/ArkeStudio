@@ -668,6 +668,9 @@ coordinator `test/harness/codex-image-runner.test.ts`, `test/spec008/codex-image
 picture/illustration suites. Client coverage includes `test/dispatch-bar.test.tsx`,
 `test/providers.test.tsx`, `test/queue-toaster.test.ts`, Bench, founding-build and audiobook
 picture tests. The ordinary suites use fixtures and consume no account allowance.
+The shared-connection cancellation fixture keeps its second image pending until the first thread
+is unsubscribed. This establishes a live peer at cancellation without relying on a 20 ms timer;
+it preserves both the second-image result and connection-readiness assertions under Windows load.
 Startup coverage holds the Codex probe pending while the transport opens, then verifies that
 the real founding-service wiring accepts validated external sign-in without a stored API key.
 For a live check, use an installed Codex with ChatGPT sign-in and a synthetic one-image reference;
@@ -1629,12 +1632,14 @@ while queued refuses before dispatch without retaining unsent GPU/runtime admiss
 native proof/fence cannot fall back to the host claim. Opt-in `pinned-native.test.ts` runs the
 same runner through the shared actual 2.0.26 launcher, a credential-free profile and scripted
 provider, checking one approved zero-tool completion, settlement and private trace exclusion.
-Its failure cases return two HTTP 503/429 responses before success and measure three identical
-provider requests despite only one application approval/dispatch. Terminal HTTP 400 produces
+An earlier unguarded 2.0.26 probe measured three provider requests after two HTTP 503/429 failures
+despite one application approval/dispatch. The fixed Arke control now refuses native retries:
+success, HTTP 503/429/400 and an uncertain dropped socket each produce exactly one request.
+The scoped plugin must be active at its expected source before dispatch. Terminal HTTP 400 produces
 a failed native assistant with `time.completed`, `finish: "error"` and structured error metadata;
 the runner refuses its response and retains unknown GPU/runtime ownership through Stop without
-application replay. This characterization exposes native retries; it does not disable or approve
-them. Production retry/spend and payload gates remain closed.
+application replay. Success also verifies the exact control/config files and empty turn directory
+are retired. Other SDK transports, production spend/payload and physical cleanup remain gates.
 Set `ARKE_TEST_OPENCODE2` for that test; it makes no real inference or paid request. Production
 host attestation still defaults to refusal. These checks do not prove complete cloud payload,
 spend, native transcript retention or physical backing-inference cleanup requirements.
@@ -1666,6 +1671,14 @@ Missed-failure reconnect cases require the newest assistant's error-free `finish
 publishing private text, even when a failed row has a completed timestamp and plausible JSON.
 Truncation, native tool requests, inconsistent error metadata and missing finish refuse; a newer
 unfinished assistant cannot reveal an older complete row. Ordinary authoring keeps its prior path.
+
+`test/v2-private-control.test.ts` checks the fixed control code, literal integration policy,
+ordinary-file compatibility and refusal of glob-bearing paths. Native-destination cases reject
+missing/failed/duplicate/extra/wrong-source/oversized or unscoped plugin metadata, control loss
+during metadata I/O, and direct private sends without active control. Coordinator
+`test/harness/private-files.test.ts` verifies exact captured-byte retirement, changed/creative
+file preservation, successor generations, unsent failure, traversal refusal, directory links and
+uncertain unlink/reconciliation. No generic scratch/history deletion is exercised or authorized.
 
 The Effects browser fixture logs its actual browser version, a bounded stderr tail on failure
 and Linux cgroup memory counters every five seconds and before each decoder stage. Two Linux

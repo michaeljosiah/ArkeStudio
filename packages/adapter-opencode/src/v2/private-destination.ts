@@ -4,6 +4,7 @@ import type { PrivateSessionDestination } from "@arke-studio/contracts";
 import { modelEnabled, type WireModel } from "../model-metadata.js";
 import { boundedResponseText, OpenCodeV2Http, sameDirectory, type V2Envelope } from "./http.js";
 import { localOllamaModelEndpoint } from "./image-input.js";
+import { privateControlProof } from "./private-control.js";
 
 interface Pin { sessionId: string; directory: string; agent: string; model: { providerID: string; id: string; variant?: string } }
 interface State { id?: string; agent?: string; model?: Pin["model"]; location?: { directory?: string } }
@@ -28,6 +29,13 @@ export async function privateSessionDestination(http: OpenCodeV2Http, pin: Pin, 
     signal.throwIfAborted();
     const state = await http.reqData<State>("GET", `/api/session/${encodeURIComponent(pin.sessionId)}`, undefined, { signal, responseBytes: 64 * 1024 });
     if (!matchesPin(state, pin)) return null;
+    let control: string | null | undefined;
+    for (;;) {
+      control = await privateControlProof(http, pin.directory, signal);
+      if (control !== undefined || !waitForCatalogue) break;
+      await delay(100, undefined, { signal });
+    }
+    if (!control) return null;
     let matches: WireModel[];
     for (;;) {
       const envelope = await http.req<V2Envelope<WireModel[]>>("GET", "/api/model", undefined, { location: pin.directory, signal, responseBytes: 1024 ** 2 });
@@ -60,8 +68,9 @@ export async function privateSessionDestination(http: OpenCodeV2Http, pin: Pin, 
     if (selected.length !== 1 || !modelEnabled(selected[0]!) || JSON.stringify(canonical({ package: selected[0]!.package, settings: selected[0]!.settings })) !== JSON.stringify(canonical({ package: row.package, settings: row.settings }))) return null;
     const confirmed = await http.reqData<State>("GET", `/api/session/${encodeURIComponent(pin.sessionId)}`, undefined, { signal, responseBytes: 64 * 1024 });
     if (!matchesPin(confirmed, pin)) return null;
+    if (await privateControlProof(http, pin.directory, signal) !== control) return null;
     const route = JSON.stringify(canonical({ directory: pin.directory, agent: pin.agent, model: state.model, package: row.package,
-      settings: row.settings, architecture: architecture ?? null, remoteHost: remoteHost ?? null, remoteModel: remoteModel ?? null }));
+      settings: row.settings, control, architecture: architecture ?? null, remoteHost: remoteHost ?? null, remoteModel: remoteModel ?? null }));
     if (Buffer.byteLength(route) > 256 * 1024) return null;
     signal.throwIfAborted();
     return Object.freeze({ provider: pin.model.providerID, model: `${pin.model.providerID}/${pin.model.id}`, local: !remote,

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rmdir, unlink } from "node:fs/promises";
+import { mkdir, mkdtemp, rmdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { findHarnessModel, harnessModelReference, STUDIO_ASSISTANT_LIMITS, type HarnessAdapter } from "@arke-studio/contracts";
@@ -14,7 +14,7 @@ export interface StudioModelPort {
     authorize: (disclosure: StudioModelDisclosure, signal: AbortSignal) => Promise<{ cloudApproved: boolean }>): Promise<string>;
   stop(): Promise<void>;
 }
-interface Active { control: AbortController; listen?: AbortController; ownerStopped?: () => void; retire?: (signal: AbortSignal) => Promise<boolean>; finishing?: Promise<void>; dir?: string; sessionId?: string; work?: Promise<string>; confirmed: boolean; started: boolean; workFinished: boolean; failed?: boolean }
+interface Active { control: AbortController; listen?: AbortController; ownerStopped?: () => void; retire?: (signal: AbortSignal) => Promise<boolean>; retireFiles?: () => Promise<boolean>; finishing?: Promise<void>; dir?: string; sessionId?: string; work?: Promise<string>; confirmed: boolean; started: boolean; workFinished: boolean; failed?: boolean }
 
 /** One explicit model call at a time. Native tools are denied by the operational roster;
  * structured delegation is handled by the coordinator, never a native subagent command.
@@ -86,9 +86,11 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     if (!sameOwner() || !sameDestination()) throw new Error("The selected Studio model owner changed before dispatch.");
     await mkdir(toExtendedLength(this.deps.scratch), { recursive: true });
     entry.dir = await mkdtemp(join(this.deps.scratch, "turn-"));
-    const session = await createPreparedSession(adapter, entry.dir, config, { purpose: "ask", agent: input.role, visibility: "private" }, undefined, signal);
+    const session = await createPreparedSession(adapter, entry.dir, config, { purpose: "ask", agent: input.role, visibility: "private" }, undefined, signal,
+      retire => { entry.retireFiles = retire; });
     entry.sessionId = session.sessionId;
     entry.retire = session.privateRetire?.bind(session);
+    entry.retireFiles = session.retirePrivateFiles;
     if (adapter.privateDestinations === true && !entry.retire) throw new Error("The Studio native owner has no verified session retirement capability.");
     if (!session.privateEvents) throw new Error("The Studio model owner did not return a private session observer.");
     if (!session.privateTurnSettled) throw new Error("The Studio model owner did not return a native completion proof.");
@@ -162,9 +164,9 @@ export class HarnessStudioModelRunner implements StudioModelPort {
         catch { return; } // Unknown retirement retains one reachable owner/config, never a replay.
       }
       if (entry.dir) {
-      // Only the known adapter config and then an empty UUID directory. Unknown contents
-      // remain; there is no generic scratch/creative cleanup or recursive deletion.
-      await unlink(toExtendedLength(join(entry.dir, "opencode.json"))).catch(() => {});
+      if (entry.retireFiles && !await entry.retireFiles()) return;
+      // Exact captured preparation bytes, then an empty UUID directory. Unknown/changed
+      // contents remain; there is no generic scratch/creative cleanup or recursive deletion.
       await rmdir(toExtendedLength(entry.dir)).catch(() => {});
       }
       this.active.delete(entry); this.changed();

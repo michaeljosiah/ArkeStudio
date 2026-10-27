@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
-import { ROSTER, type CreateSessionInput, type HarnessAdapter, type SessionConfigInput, type SessionRef } from "@arke-studio/contracts";
+import { ROSTER, type CreateSessionInput, type HarnessAdapter, type SessionConfigInput, type SessionRef, type SessionFile } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { loadSkillBodies } from "./skills.js";
+import { privateFileRetirement } from "./private-files.js";
 
 const setupByDir = new Map<string, Promise<void>>();
+const privatePreparations = new Map<string, string>();
+const directoryKey = (dir: string) => { const key = resolve(dir).replaceAll("\\", "/"); return process.platform === "win32" || process.platform === "darwin" ? key.toLowerCase() : key; };
 
 /** Scope after Settings/world enrichment, before any adapter sees or writes configuration.
  * Operational roles receive selected-role settings, never another world's notes or tools. */
@@ -52,6 +55,7 @@ export async function writeSessionFiles(
   dir: string,
   pending: SessionConfigInput | Promise<SessionConfigInput> = {},
   signal?: AbortSignal,
+  capture?: (files: readonly SessionFile[]) => void,
 ): Promise<string> {
   // A configuration still being decided (issue 1247) is bounded like the creation it feeds:
   // a caller that gave up must not find a session created for it once discovery settles.
@@ -69,7 +73,9 @@ export async function writeSessionFiles(
   // caller offering only one silently configures nothing for the harnesses using the other.
   try {
     adapter.prepareSession?.(prepared);
-    for (const file of adapter.sessionFiles?.(prepared) ?? []) {
+    const files = adapter.sessionFiles?.(prepared, dir) ?? [];
+    capture?.(files);
+    for (const file of files) {
       await atomicWriteFile(join(dir, file.name), file.contents);
     }
     return preparationId;
@@ -87,8 +93,14 @@ export async function createPreparedSession(
   session: CreateSessionInput,
   timeoutMs = 30_000,
   signal?: AbortSignal,
-): Promise<SessionRef & { model?: string }> {
+  capturePrivateRetirement?: (retire: () => Promise<boolean>) => void,
+): Promise<SessionRef & { model?: string; retirePrivateFiles?: () => Promise<boolean> }> {
   return serialized(dir, async () => {
+    const key = directoryKey(dir), token = randomUUID();
+    privatePreparations.delete(key);
+    if (session.visibility === "private") privatePreparations.set(key, token);
+    let retirePrivateFiles: (() => Promise<boolean>) | undefined;
+    let retireUnsentFiles: (() => Promise<boolean>) | undefined;
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(new Error("session creation timed out")), timeoutMs);
     // The caller's stop, combined with the bound: a run stopped while its configuration waits
@@ -104,13 +116,25 @@ export async function createPreparedSession(
         model = scoped.model ?? scoped.agents?.[agent ?? "sheet-editor"]?.model;
         return scoped;
       });
-      const preparationId = await writeSessionFiles(adapter, dir, config, abort.signal);
+      const preparationId = await writeSessionFiles(adapter, dir, config, abort.signal, session.visibility === "private" ? files => {
+        const retire = privateFileRetirement(dir, files, () => privatePreparations.get(key) === token);
+        let retired = false;
+        retireUnsentFiles = async () => {
+          if (retired) return true;
+          const confirmed = await retire();
+          if (confirmed) { retired = true; if (privatePreparations.get(key) === token) privatePreparations.delete(key); }
+          return confirmed;
+        };
+        retirePrivateFiles = () => serialized(dir, retireUnsentFiles!);
+        capturePrivateRetirement?.(retirePrivateFiles);
+      } : undefined);
       try {
         // A stop that landed while the files were written creates nothing: not every adapter
         // refuses an already-fired signal, and a session opened for a stopped run is an orphan.
         abort.signal.throwIfAborted();
         const created = await adapter.createSession({ ...session, ...(agent ? { agent } : {}), cwd: dir, preparationId, signal: abort.signal });
         return { ...created, ...(model !== undefined ? { model } : {}),
+          ...(retirePrivateFiles ? { retirePrivateFiles } : {}),
           // Native capabilities may be prototype methods/getters. Preserve their receiver
           // and promise identity; spreading a SessionRef must not drop or retarget authority.
           ...(created.privateEvents ? { privateEvents: created.privateEvents.bind(created) } : {}),
@@ -122,6 +146,10 @@ export async function createPreparedSession(
         adapter.abandonSessionPreparation?.(preparationId);
       }
     } catch (error) {
+      // No private prompt has been dispatched by preparation/creation. Release only our
+      // exact unsent control bytes, inside the directory critical section already held.
+      await retireUnsentFiles?.();
+      if (!retireUnsentFiles && session.visibility === "private" && privatePreparations.get(key) === token) privatePreparations.delete(key);
       if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error("session creation stopped", { cause: error });
       if (abort.signal.aborted) throw new Error("session creation timed out", { cause: error });
       throw error;

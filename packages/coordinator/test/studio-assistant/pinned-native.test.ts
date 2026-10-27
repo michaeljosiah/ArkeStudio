@@ -3,6 +3,7 @@ import { it } from "node:test";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { join } from "node:path";
+import { readdir } from "node:fs/promises";
 import { assembleHarness, harnessProfileDir, v2ProfileEnv } from "../../src/harness/v2-launch.js";
 import { ChildSupervisor } from "../../src/supervisor.js";
 import { HarnessStudioModelRunner } from "../../src/studio-assistant/runner.js";
@@ -12,9 +13,9 @@ import { LocalGpu } from "../../src/local-ai/gpu.js";
 import { tempDir } from "../tmp.js";
 import { until, untilAsync } from "../wait.js";
 
-// Failure cases characterize native HTTP retries; one Arke dispatch/approval is not proof
-// of one provider request. Production attestation stays closed until replay/spend is controlled.
-for (const failureStatus of [undefined, 503, 429, 400]) it(failureStatus === undefined
+// The owned native retry hook must stop the retry behavior measured on unguarded 2.0.26.
+// Production attestation stays closed until the remaining payload/spend gates qualify.
+for (const failureStatus of [undefined, 503, 429, 400, "socket-drop"] as const) it(failureStatus === undefined
   ? "qualifies the actual pinned launcher, private runner, native destination approval and single zero-tool completion"
   : `measures pinned native provider failure ${failureStatus} without application replay or false owner settlement`, {
   skip: !process.env.ARKE_TEST_OPENCODE2, timeout: 75_000,
@@ -30,6 +31,7 @@ for (const failureStatus of [undefined, 503, 429, 400]) it(failureStatus === und
       if (req.url === "/api/show") { res.end(JSON.stringify({ capabilities: ["completion", "tools"], model_info: { "general.architecture": "gemma", "gemma.context_length": 262144 } })); return; }
       if (req.url !== "/v1/chat/completions") { res.writeHead(404).end(); return; }
       const input = JSON.parse(body); requests.push(input);
+      if (failureStatus === "socket-drop") { req.socket.destroy(); return; }
       if (failureStatus && (failureStatus === 400 || requests.length <= 2)) {
         res.writeHead(failureStatus); res.end(JSON.stringify({ error: { message: "PRIVATE_SCRIPTED_FAILURE", type: "server_error", code: "server_error" } })); return;
       }
@@ -65,7 +67,7 @@ for (const failureStatus of [undefined, 503, 429, 400]) it(failureStatus === und
       approvals++; assert(disclosure.local); assert.equal(requests.length, 0); assert.notEqual(disclosure.destination, wiring.recovery!.componentDigest());
       assert.equal(disclosure.model, `ollama/${model}`); return { cloudApproved: false };
     });
-    if (failureStatus === 400) {
+    if (failureStatus !== undefined) {
       await assert.rejects(work, /could not be completed/); assert(runner.busy()); assert(gpu.isBusy("Ollama"));
       assert(nativePassword);
       const nativeGet = async (path: string) => {
@@ -77,16 +79,17 @@ for (const failureStatus of [undefined, 503, 429, 400]) it(failureStatus === und
       const sessions = await nativeGet("/api/session"); assert.equal(sessions.length, 1); assert(sessions[0]!.id);
       const messages = await nativeGet(`/api/session/${sessions[0]!.id}/message`), failed = messages.find(row => row.type === "assistant");
       assert(failed); assert(Number.isSafeInteger(failed.time?.completed)); assert.equal(failed.finish, "error");
-      assert.equal(failed.error?.type, "provider.invalid-request"); assert.equal(failed.error?.status, 400);
+      if (failureStatus === 400) assert.equal(failed.error?.type, "provider.invalid-request");
+      if (typeof failureStatus === "number") assert.equal(failed.error?.status, failureStatus);
       await runner.stop(); assert(runner.busy()); assert(gpu.isBusy("Ollama"));
     } else {
       const reply = await work; assert.match(reply, /PRIVATE_PINNED_REPLY/); await until(() => !runner.busy(), "actual private native settlement");
       assert.equal(gpu.isBusy("Ollama"), false);
+      assert.deepEqual(await readdir(join(root, "studio", "turns")), [], "native retirement also removes only its captured control/config files");
     }
     await new Promise(resolve => setTimeout(resolve, 500));
-    assert.equal(approvals, 1); assert.equal(requests.length, failureStatus === 503 || failureStatus === 429 ? 3 : 1);
+    assert.equal(approvals, 1); assert.equal(requests.length, 1);
     assert(requests.every(input => input.model === model && (input.tools?.length ?? 0) === 0));
-    if (requests.length > 1) assert(requests.every(input => JSON.stringify(input) === JSON.stringify(requests[0])), "native retries repeat the approved request without another Arke dispatch");
     assert(!JSON.stringify(traces).includes("PRIVATE_PINNED_"));
     assert(!JSON.stringify(traces).includes("PRIVATE_SCRIPTED_FAILURE"));
   } finally {

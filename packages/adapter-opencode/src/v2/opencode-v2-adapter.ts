@@ -33,6 +33,7 @@ import { waitForSessionModel } from "./model-readiness.js";
 import { imagePrompt, sessionImageInput, qualifySessionImageInput, type SessionImageInput } from "./image-input.js";
 import { createNormalizeV2State, normalizeOpenCodeV2, type NormalizeV2State } from "./normalize.js";
 import { privateSessionDestination } from "./private-destination.js";
+import { PRIVATE_CONTROL_FILES, privateControlDirectory, privateControlProof } from "./private-control.js";
 import {
   normalizeAttempt,
   normalizeAttemptStatus,
@@ -274,8 +275,10 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
    * OpenCode reads Studio's roster, tool limits and MCP registration from a config file beside
    * the work — so this is where the session's confinement actually reaches the harness (R-5).
    */
-  sessionFiles(input: SessionConfigInput): ReadonlyArray<SessionFile> {
-    return [{ name: "opencode.json", contents: `${JSON.stringify(buildSessionConfigV2(input), null, 2)}
+  sessionFiles(input: SessionConfigInput, directory?: string): ReadonlyArray<SessionFile> {
+    const operational = ROSTER.some(member => member.name === input.agent && member.operationalOnly);
+    if (operational && !directory) throw new Error("Private native control requires its session directory.");
+    return [...(operational ? PRIVATE_CONTROL_FILES : []), { name: "opencode.json", contents: `${JSON.stringify(buildSessionConfigV2(input, operational ? privateControlDirectory(directory!) : undefined), null, 2)}
 ` }];
   }
 
@@ -459,6 +462,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       if (privateTurn.dispatched) throw new Error("A private operational session permits one model turn only.");
       if (tracked.privateResponseRejected) throw new Error("The private response observation was refused before dispatch.");
       if (tracked.privateRoute?.requested() && (!tracked.privateRoute.verified() || !await tracked.privateRoute.verify(this.runtimeRequests.signal))) throw new Error("The private model destination changed or could not be verified. No prompt was sent.");
+      if (!tracked.privateRoute?.requested() && (!tracked.cwd || !await privateControlProof(tracked.ownerHttp!, tracked.cwd, this.runtimeRequests.signal))) throw new Error("The private native retry control could not be verified. No prompt was sent.");
       if (privateTurn.stopped || privateTurn.dispatched || tracked.privateResponseRejected || this.disposed) throw new Error("The private operational owner changed before dispatch.");
       beforeDispatch?.();
       privateTurn.dispatched = true;

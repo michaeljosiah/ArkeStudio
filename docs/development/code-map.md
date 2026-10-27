@@ -1195,16 +1195,29 @@ the native proof with a trusted host attestation before approval. Either nonloca
 requires cloud consent, and the disclosure digest binds both identities. Coordinator
 `test/studio-assistant/native-route.test.ts` covers the production wrapper composition;
 opt-in `pinned-native.test.ts` drives the actual launcher/runner through a zero-tool native
-completion and scripted provider failures. Actual 2.0.26 retries two HTTP 503/429 responses:
-one Arke dispatch/approval produces three identical provider requests before success. A terminal
+completion and scripted provider failures. Unguarded 2.0.26 retried two HTTP 503/429 responses:
+one Arke dispatch/approval produced three identical provider requests before success. A terminal
 HTTP 400 remains unknown to inference ownership and is never replayed by the application;
 its failed native assistant row still has `time.completed`. The private completion reader
 therefore requires the newest assistant's error-free `finish: "stop"`; missing/unknown finish,
 truncation, tool requests and cached error rows cannot publish a reply. It cannot search behind
 a newer unfinished assistant to reveal an older reply after reconnect. These checks preserve
 ordinary authoring's existing completion path. The production host attestation port still
-defaults to refusal. Native retry control, full payload,
-spend, native retention/cleanup and production authorization remain unfinished gates.
+defaults to refusal. Full payload, spend, native retention/cleanup and production authorization
+remain unfinished gates.
+
+V2 `private-control.ts` supplies fixed, dependency-free application code through the existing
+session-file writer, with a literal integration allow for only that session's control directory.
+Its native retry hook refuses internal retries. Scoped plugin activation/source is checked before
+private dispatch and on both sides of destination metadata I/O; missing/failed/wrong/extra controls
+refuse. Initial empty location activation is polled only within the existing bounded verification.
+The pinned fixture now verifies one model request for success, HTTP 503/429/400 and a dropped socket,
+with unknown work still retaining GPU/runtime ownership. This qualifies that pinned native Ollama
+path; it does not prove arbitrary SDKs, host-file tamper resistance or physical model cleanup.
+`sessionFiles` receives its resolved directory from coordinator `harness/session-files.ts` while
+filesystem writes remain host-owned. `harness/private-files.ts` retires only captured preparation
+bytes after native retirement, protects successor generations/links/changed or unrelated files,
+and keeps failed known-file cleanup reachable for reconciliation without inference replay.
 
 `SessionRef.privateRetire` retires only its exact ephemeral native session, never canonical
 Studio/World history. V2 captures the original server/authentication before creation and refuses

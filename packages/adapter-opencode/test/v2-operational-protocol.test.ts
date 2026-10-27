@@ -4,12 +4,11 @@ import { once } from "node:events";
 import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative, isAbsolute } from "node:path";
+import { dirname, join, relative, isAbsolute } from "node:path";
 import { createServer } from "node:http";
 import { createServer as createSocket } from "node:net";
 import type { HarnessEvent } from "@arke-studio/contracts";
 import { OpenCodeV2Adapter } from "../src/v2/opencode-v2-adapter.js";
-import { buildSessionConfigV2 } from "../src/v2/config.js";
 import { until } from "./wait.js";
 
 /** Actual pinned binary, credential-free profile and a scripted local provider. Every model
@@ -71,7 +70,9 @@ it("qualifies native operational deny policy, zero tool schemas and exactly one 
     for (const role of ["studio-assistant", "diagnostic-specialist"]) {
       const cwd = join(profile, role); await mkdir(cwd);
       const preparation = { agent: role, model: `ollama/${model}`, preparationId: role };
-      await writeFile(join(cwd, "opencode.json"), JSON.stringify(buildSessionConfigV2(preparation)));
+      for (const file of adapter.sessionFiles(preparation, cwd)) {
+        await mkdir(dirname(join(cwd, file.name)), { recursive: true }); await writeFile(join(cwd, file.name), file.contents);
+      }
       // Direct API probes are intentionally not registered with the adapter. A native deny
       // must succeed without relying on its unexpected-permission auto-rejection backstop.
       const direct = await request("POST", "/api/session", { location: { directory: cwd.replaceAll("\\", "/") }, model: { providerID: "ollama", id: model } });

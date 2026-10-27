@@ -16,7 +16,7 @@ async function fixture() {
   const create = async () => {
     const preparationId = crypto.randomUUID();
     adapter.prepareSession({ preparationId, agent: "studio-assistant" });
-    return adapter.createSession({ purpose: "ask", agent: "studio-assistant", visibility: "private", preparationId });
+    return adapter.createSession({ purpose: "ask", agent: "studio-assistant", visibility: "private", preparationId, cwd: "/private/studio-events" });
   };
   const close = async () => { stop.abort(); await adapter.dispose(); await sharedDone; await stub.stop(); };
   return { stub, adapter, traces, shared, create, close };

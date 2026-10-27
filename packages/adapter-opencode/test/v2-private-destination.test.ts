@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { createServer, type ServerResponse } from "node:http";
 import { once } from "node:events";
+import { resolve } from "node:path";
 import { OpenCodeV2Adapter } from "../src/v2/opencode-v2-adapter.js";
 import type { WireModel } from "../src/model-metadata.js";
 import { StubOpenCodeV2, STUB_V2_PASSWORD } from "./helpers/stub-server-v2.js";
@@ -52,6 +53,46 @@ it("binds a text-only native session route, rechecks before its final fence and 
     assert.equal(await h.read(), null, "a consumed private turn cannot supply fresh route authority");
     assert(!JSON.stringify(h.traces).includes("PRIVATE_ROUTE_"));
     assert(!JSON.stringify(proof).includes("127.0.0.1"));
+  } finally { await h.close(); }
+});
+
+for (const change of ["missing", "failed", "source", "extra", "duplicate", "scope", "oversized"]) it(`refuses ${change} native retry control before dispatch`, async () => {
+  const h = await fixture();
+  try {
+    assert(await h.read());
+    const control = { id: "arke.studio.private-control.v1", source: { type: "local", path: resolve("/private/route", ".arke-private-control/index.js") }, features: { server: true }, state: { status: "active" } };
+    h.stub.pluginResponse = () => {
+      if (change === "missing") return { plugins: [{ id: "native", source: { type: "builtin" } }] };
+      if (change === "failed") return { plugins: [{ ...control, state: { status: "failed" } }] };
+      if (change === "source") return { plugins: [{ ...control, source: { type: "local", path: "/different/index.js" } }] };
+      if (change === "extra") return { plugins: [control, { id: "unapproved", source: { type: "sdk" }, state: { status: "active" } }] };
+      if (change === "duplicate") return { plugins: [control, control] };
+      if (change === "scope") return { plugins: [control], directory: null };
+      return { plugins: [{ ...control, unbounded: "x".repeat(1024 ** 2) }] };
+    };
+    let fenced = false;
+    await assert.rejects(h.adapter.sendMessageWithFence({ sessionId: h.ref.sessionId, parts: [{ type: "text", text: "MUST_NOT_DISPATCH" }] }, () => { fenced = true; }), /destination|metadata exceeds/);
+    assert.equal(fenced, false); assert(!h.stub.requests.some(request => request.path.endsWith("/prompt")));
+  } finally { await h.close(); }
+});
+
+it("a control lost during metadata I/O cannot borrow its earlier activation", async () => {
+  const h = await fixture();
+  try {
+    assert(await h.read()); h.mode("hold"); let fenced = false;
+    const refused = assert.rejects(h.adapter.sendMessageWithFence({ sessionId: h.ref.sessionId, parts: [{ type: "text", text: "MUST_NOT_DISPATCH" }] }, () => { fenced = true; }), /destination/);
+    await until(() => h.shows() === 2, "the native metadata observation");
+    h.stub.pluginResponse = () => ({ plugins: [{ id: "native", source: { type: "builtin" } }] }); h.release(); await refused;
+    assert.equal(fenced, false); assert(!h.stub.requests.some(request => request.path.endsWith("/prompt")));
+  } finally { await h.close(); }
+});
+
+it("a direct private sender also requires active native retry control without borrowing route approval", async () => {
+  const h = await fixture();
+  try {
+    h.stub.pluginResponse = () => ({ plugins: [] });
+    await assert.rejects(h.adapter.sendMessage({ sessionId: h.ref.sessionId, parts: [{ type: "text", text: "MUST_NOT_DISPATCH" }] }), /retry control/);
+    assert(!h.stub.requests.some(request => request.path.endsWith("/prompt")));
   } finally { await h.close(); }
 });
 

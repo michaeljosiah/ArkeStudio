@@ -1,5 +1,6 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { once } from "node:events";
+import { resolve } from "node:path";
 import type { WireModel } from "../../src/model-metadata.js";
 
 /**
@@ -54,6 +55,7 @@ export class StubOpenCodeV2 {
   modelResponse?: (directory: string | undefined) => {
     models?: WireModel[]; status?: number; directory?: string | null; hold?: boolean;
   };
+  pluginResponse?: (directory: string | undefined) => { plugins?: unknown[]; directory?: string | null };
   defaultModel: (WireModel & { id: string; providerID: string }) | null = null;
   /** The integration catalog GET /api/integration serves — raw wire rows, scripted per test. */
   integrations: unknown[] = [];
@@ -254,6 +256,13 @@ export class StubOpenCodeV2 {
           return;
         }
 
+        if (url.pathname === "/api/plugin" && req.method === "GET") {
+          const reply = this.pluginResponse?.(locationDir);
+          const plugins = reply?.plugins ?? [{ id: "arke.studio.private-control.v1", source: { type: "local", path: resolve(locationDir ?? ".", ".arke-private-control/index.js") },
+            features: { server: true }, state: { status: "active" } }];
+          res.writeHead(200, { "Content-Type": "application/json" }).end(envelope(plugins, reply?.directory === null ? undefined : reply?.directory ?? locationDir));
+          return;
+        }
         if (url.pathname === "/api/model" && req.method === "GET") {
           const reply = this.modelResponse?.(locationDir);
           if (reply?.hold) return;
