@@ -48,8 +48,8 @@ export function RecoveryControls({ cleanupScope }: { cleanupScope?: string } = {
           <option value="off">Off</option><option value="enabled">Enabled</option>
         </Select>
       </div>
-      {history.resolvedCount > 0 && <div className="fy-set__row">
-        <div className="fy-set__name fy-set__name--wide"><div className="fy-set__title">Resolved history</div><div className="fy-set__caps">Remove resolved summaries from this PC. Retry budgets, active incidents and creative files are kept.</div></div>
+      {(history.resolvedCount > 0 || (history.settledActionCount ?? 0) > 0 || history.actions?.some(action => action.outcome !== "unknown")) && <div className="fy-set__row">
+        <div className="fy-set__name fy-set__name--wide"><div className="fy-set__title">Resolved history</div><div className="fy-set__caps">Remove resolved incidents and settled action summaries from this PC. Retry budgets, unconfirmed outcomes, active incidents and creative files are kept.</div></div>
         {!clearing ? <Button disabled={unavailable || history.audit !== "available"} onClick={() => setClearing(true)}>Clear resolved…</Button>
           : <><Button disabled={unavailable || history.audit !== "available"} onClick={() => { setClearing(false); request(controlRecoveryHistory({ action: "clear-resolved" })); }}>Confirm clear</Button><Button onClick={() => setClearing(false)}>Keep history</Button></>}
       </div>}

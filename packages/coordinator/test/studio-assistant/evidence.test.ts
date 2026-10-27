@@ -44,3 +44,13 @@ it("bounds the window and payload and keeps truncation explicit instead of asser
     assert.equal(StudioAssistantDecisionSchema.safeParse(value).success, false);
   }
 });
+
+it("keeps the local action timeline outside the specialist's existing evidence envelope", () => {
+  const h = history(), actionId = "d".repeat(64);
+  h.actions = [{ id: actionId, resourceId: "e".repeat(64), action: "cleanup-local-preset-previews", automatic: false,
+    authorizedAt: null, outcomeAt: now, outcome: "unknown", evidence: "owner-receipt" }];
+  h.actionCount = 1000; h.actionsLimited = true;
+  const evidence = studioDiagnosticEvidence("storage", { history: h }, now);
+  assert.equal(evidence.limited.incidents, false); assert(!JSON.stringify(evidence).includes(actionId));
+  assert(!("actions" in evidence));
+});

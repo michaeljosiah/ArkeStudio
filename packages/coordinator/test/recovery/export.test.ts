@@ -44,3 +44,19 @@ it("exports only closed latest outcome facts and never their control identity or
   const refused = JSON.stringify(await buildDiagnosticsBundle(state, null, new SecretRegistry(), null, { history: null, audit: null, policy }));
   assert(!refused.includes("PRIVATE_FORGED")); assert(refused.includes('"unavailable":true'));
 });
+
+it("exports bounded chronological action summaries without future fields or executable identifiers", async () => {
+  const history = emptyRecoveryHistory();
+  history.actions = Array.from({ length: 1000 }, (_, index) => ({ id: (index + 1).toString(16).padStart(64, "0"), resourceId: "a".repeat(64),
+    action: "cleanup-local-preset-previews", automatic: false, authorizedAt: null, outcomeAt: now, outcome: "cancelled", evidence: "owner-receipt",
+    cleanup: { removedFiles: 1, logicalBytes: 60, availableBefore: null, availableAfter: null, reclaimedBytes: null } }));
+  Object.assign(history.actions[0]!, { planId: "PRIVATE_PLAN", intentId: "PRIVATE_INTENT", path: "/private/cache.wav", prompt: "PRIVATE_PROSE" });
+  Object.assign(history.actions[0]!.cleanup!, { path: "/private/cleanup.wav" });
+  const bundle = await buildDiagnosticsBundle(state, null, new SecretRegistry(), null, { history, audit: { audit: "available" }, policy: null });
+  const exported = bundle.recovery as { history: { actionsAvailable: boolean; actions: unknown[] } };
+  assert.equal(exported.history.actionsAvailable, true); assert.equal(exported.history.actions.length, 1000);
+  const text = JSON.stringify(exported); assert(!text.includes("PRIVATE_")); assert(!text.includes("/private/"));
+  history.actions[0]!.id = "PRIVATE_FORGED_ID";
+  const invalid = JSON.stringify(await buildDiagnosticsBundle(state, null, new SecretRegistry(), null, { history, audit: { audit: "available" }, policy: null }));
+  assert(!invalid.includes("PRIVATE_FORGED")); assert(invalid.includes('"unavailable":true'));
+});

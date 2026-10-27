@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { recoveryIncidentSummary, type RecoveryHistoryPage, type RecoveryHistoryQuery, type RecoveryHistorySnapshot } from "@arke-studio/contracts";
+import { recoveryIncidentSummary, recoveryActionSummaryLabel, type RecoveryHistoryPage, type RecoveryHistoryQuery, type RecoveryHistorySnapshot } from "@arke-studio/contracts";
 import { controlRecoveryHistory, readRecoveryHistory, useStore } from "../lib/store.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { Button, Select } from "./ui.js";
@@ -10,12 +10,13 @@ const PHASE = { observing: "Observing", "action-available": "Action available", 
 export function RecoveryHistoryBrowser({ history }: { history: RecoveryHistorySnapshot | null | undefined }) {
   const { connection, recoveryHistoryPages, recoveryCommandResults } = useStore();
   const [filter, setFilter] = useState<RecoveryHistoryQuery["filter"]>("all"), [requestId, setRequestId] = useState<string | null>(null);
+  const [view, setView] = useState<"incidents" | "actions">("incidents");
   const [page, setPage] = useState<RecoveryHistoryPage | null>(null), [pending, setPending] = useState<string | null>(null), [message, setMessage] = useState("");
   const response = requestId ? recoveryHistoryPages[requestId] : undefined, receipt = pending ? recoveryCommandResults[pending] : undefined;
   const clearReceipt = Object.values(recoveryCommandResults).findLast(result => result.operation === "recovery-history-control" && result.historyAction === "clear-resolved" && result.status === "saved");
   const seenClear = useRef(clearReceipt?.requestId);
-  const load = (selected: RecoveryHistoryQuery["filter"], cursor?: RecoveryHistoryQuery["cursor"]) => {
-    const id = readRecoveryHistory({ filter: selected, pageSize: 50, ...(cursor ? { cursor } : {}) });
+  const load = (selected: RecoveryHistoryQuery["filter"], cursor?: RecoveryHistoryQuery["cursor"], selectedView = view) => {
+    const id = readRecoveryHistory({ filter: selected, pageSize: 50, ...(selectedView === "actions" ? { view: "actions" as const } : {}), ...(cursor ? { cursor } : {}) });
     setRequestId(id); setMessage(id ? "Reading retained history…" : "History could not be requested. Reconnect before trying again.");
   };
   useEffect(() => { if (history && connection === "open") load(filter); }, [Boolean(history), connection]);
@@ -48,8 +49,9 @@ export function RecoveryHistoryBrowser({ history }: { history: RecoveryHistorySn
     if (history && connection === "open") { setPage(null); load(filter); }
   }, [clearReceipt?.requestId]);
   if (!history) return null;
-  const loaded = page?.status === "ready" && page.filter === filter ? page : null;
-  const incidents = loaded?.incidents ?? (filter === "all" && page?.status !== "stale" ? history.incidents : []);
+  const loaded = page?.status === "ready" && page.filter === filter && (page.view ?? "incidents") === view ? page : null;
+  const incidents = view === "incidents" ? loaded?.incidents ?? (filter === "all" && page?.status !== "stale" ? history.incidents : []) : [];
+  const actions = view === "actions" ? loaded?.actions ?? (filter === "all" && page?.status !== "stale" ? history.actions ?? [] : []) : [];
   const remote = isRemoteSession(), busy = pending !== null || requestId !== null || connection !== "open";
   const act = (command: Parameters<typeof controlRecoveryHistory>[0]) => {
     const id = controlRecoveryHistory(command); setPending(id); setMessage(id ? "Saving…" : "The command could not be sent. Reconnect before trying again.");
@@ -57,18 +59,29 @@ export function RecoveryHistoryBrowser({ history }: { history: RecoveryHistorySn
   return <section aria-label="Recovery history">
     <div className="fy-diag__band"><span className="fy-rt__eyebrow">RECOVERY HISTORY</span></div>
     <div className="fy-set__row fy-set__row--stack">
-      <div className="fy-diag__title">{history.activeCount} active · {history.resolvedCount} resolved</div>
+      <div className="fy-diag__title">{view === "actions" ? `${history.unconfirmedActionCount ?? "Unknown"} unconfirmed · ${history.settledActionCount ?? "unknown"} settled` : `${history.activeCount} active · ${history.resolvedCount} resolved`}</div>
       <div className="fy-diag__meta">{history.audit === "unavailable" ? "History could not be saved or read. Current evidence remains available in memory." : history.audit === "starting" ? "Reading local history…" : "Saved locally. Clearing history does not change restart limits or approvals."}</div>
       {history.overflow.lostDetail && <div className="fy-diag__meta">Some older detail was coalesced or pruned within the retention limit.</div>}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <Select label="Recovery history view" value={view} disabled={busy} onChange={event => {
+          const selected = event.target.value as typeof view; setView(selected); setFilter("all"); setPage(null); load("all", undefined, selected);
+        }}><option value="incidents">Incidents</option><option value="actions">Actions</option></Select>
         <Select label="Recovery history filter" value={filter} disabled={busy} onChange={event => { const selected = event.target.value as typeof filter; setFilter(selected); setPage(null); load(selected); }}>
-          <option value="all">All incidents</option><option value="active">Active</option><option value="resolved">Resolved</option>
+          <option value="all">{view === "actions" ? "All actions" : "All incidents"}</option><option value="active">{view === "actions" ? "Unconfirmed" : "Active"}</option><option value="resolved">{view === "actions" ? "Settled" : "Resolved"}</option>
         </Select>
         <Button size="sm" disabled={busy} onClick={() => load(filter)}>Refresh history</Button>
-        {loaded && <span className="fy-diag__meta">{loaded.totalCount === 0 ? "0" : `${loaded.offset + 1}–${loaded.offset + loaded.incidents.length}`} of {loaded.totalCount} · as of {new Date(loaded.at).toLocaleTimeString()}</span>}
+        {loaded && <span className="fy-diag__meta">{loaded.totalCount === 0 ? "0" : `${loaded.offset + 1}–${loaded.offset + (view === "actions" ? loaded.actions?.length ?? 0 : loaded.incidents.length)}`} of {loaded.totalCount} · as of {new Date(loaded.at).toLocaleTimeString()}</span>}
       </div>
       {message && <div role="status" className="fy-diag__meta">{message}</div>}
     </div>
+    {view === "actions" && <div className="fy-set__row fy-set__row--stack"><div className="fy-diag__meta">Historical repair outcomes. Current service readiness and creative results need their own verification.</div>
+      {!loaded && history.actions === undefined && <div className="fy-diag__meta">Action history is unavailable from this host.</div>}
+    </div>}
+    {actions.map(action => <div key={action.id} className="fy-set__row fy-set__row--stack" data-recovery-action-id={action.id}>
+      <div className="fy-diag__title">{recoveryActionSummaryLabel(action)}</div>
+      <div className="fy-diag__meta">{action.automatic ? "Automatic recovery" : "Requested on this PC"} · Recorded {new Date(action.outcomeAt).toLocaleString()}</div>
+      {action.cleanup && <div className="fy-diag__meta">Confirmed removals: {action.cleanup.removedFiles}. Available before: {action.cleanup.availableBefore === null ? "unknown" : `${action.cleanup.availableBefore.toLocaleString()} bytes`}; after: {action.cleanup.availableAfter === null ? "unknown" : `${action.cleanup.availableAfter.toLocaleString()} bytes`}. Space attributable to cleanup is unknown.</div>}
+    </div>)}
     {incidents.map(incident => {
       const text = recoveryIncidentSummary(incident), canChange = !remote && !busy && history.audit === "available" && loaded !== null;
       return <div key={incident.id} className="fy-set__row fy-set__row--stack" data-incident-id={incident.id}>

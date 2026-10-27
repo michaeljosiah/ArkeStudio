@@ -5,6 +5,7 @@ import {
   RECOVERY_HISTORY_LIMITS,
   RECOVERY_POLICY,
   RecoveryOutcomeSummarySchema,
+  RecoveryActionSummarySchema, RECOVERY_ACTION_HISTORY_LIMITS, type RecoveryActionSummary,
   type ClientState,
   type DiagnosticsSnapshot,
   type Finding,
@@ -82,6 +83,8 @@ function exportedRecovery(input: NonNullable<Parameters<typeof buildDiagnosticsB
       version: history.version, lastObservedAt: history.lastObservedAt,
       preferences: { transientMuted: history.preferences.transientMuted, desktopOptIn: history.preferences.desktopOptIn },
       overflow: { coalescedObservations: history.overflow.coalescedObservations, prunedSummaries: history.overflow.prunedSummaries, lostDetail: history.overflow.lostDetail },
+      actionsAvailable: history.actions !== undefined,
+      actions: (history.actions ?? []).slice(0, RECOVERY_ACTION_HISTORY_LIMITS.maxActions).map(exportedAction),
       incidents: history.incidents.slice(0, RECOVERY_HISTORY_LIMITS.maxIncidents).map(incident => ({
         id: incident.id, resourceId: incident.key, kind: incident.kind, ...(incident.previousId ? { previousId: incident.previousId } : {}),
         firstObservedAt: incident.firstObservedAt, lastObservedAt: incident.lastObservedAt, evidenceRevision: incident.evidenceRevision,
@@ -100,6 +103,14 @@ function exportedRecovery(input: NonNullable<Parameters<typeof buildDiagnosticsB
 function exportedOutcome(value: NonNullable<RecoveryPolicySnapshot["targets"][number]["lastOutcome"]>) {
   const parsed = RecoveryOutcomeSummarySchema.safeParse({ action: value.action, automatic: value.automatic,
     authorizedAt: value.authorizedAt, settledAt: value.settledAt, outcome: value.outcome });
+  return parsed.success ? parsed.data : { unavailable: true };
+}
+function exportedAction(row: RecoveryActionSummary) {
+  const parsed = RecoveryActionSummarySchema.safeParse({ id: row.id, resourceId: row.resourceId, action: row.action,
+    ...(row.service ? { service: row.service } : {}), automatic: row.automatic, authorizedAt: row.authorizedAt,
+    outcomeAt: row.outcomeAt, outcome: row.outcome, evidence: row.evidence,
+    ...(row.cleanup ? { cleanup: { removedFiles: row.cleanup.removedFiles, logicalBytes: row.cleanup.logicalBytes,
+      availableBefore: row.cleanup.availableBefore, availableAfter: row.cleanup.availableAfter, reclaimedBytes: row.cleanup.reclaimedBytes } } : {}) });
   return parsed.success ? parsed.data : { unavailable: true };
 }
 

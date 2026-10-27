@@ -31,7 +31,7 @@ it("sends host policy commands, waits for its own flushed receipt and requires c
     await act(async () => __applyEventForTest({ type: "recovery.command-result", at: new Date().toISOString(), result: { requestId: command.requestId as string, operation: "recovery-set-mode", status: "saved" } }));
     assert.match(container.textContent!, /Saved on this PC/);
     const clear = [...container.querySelectorAll("button")].find(button => button.textContent === "Clear resolved…")!;
-    await act(async () => clear.click()); assert.equal(sent.length, 1); assert.match(container.textContent!, /Retry budgets, active incidents and creative files are kept/);
+    await act(async () => clear.click()); assert.equal(sent.length, 1); assert.match(container.textContent!, /Retry budgets, unconfirmed outcomes, active incidents and creative files are kept/);
     await act(async () => [...container.querySelectorAll("button")].find(button => button.textContent === "Confirm clear")!.click());
     assert.equal(sent[1]!.kind, "recovery-history-control"); assert.deepEqual("command" in sent[1]! && sent[1].command, { action: "clear-resolved" });
     const meta = document.createElement("meta"); meta.name = "arke-remote"; meta.content = "true"; document.head.append(meta);

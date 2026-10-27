@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
-import { CacheCleanupControl, type CacheCleanupStore } from "../../src/storage/cache-cleanup-control.js";
+import { CacheCleanupControl, CacheCleanupControlSchema, type CacheCleanupStore } from "../../src/storage/cache-cleanup-control.js";
 import { tempDir } from "../tmp.js";
 import { until } from "../wait.js";
 import { CACHE_MAINTENANCE_POLICY } from "@arke-studio/contracts";
@@ -11,6 +11,28 @@ const key = "a".repeat(64), planId = "b".repeat(64);
 const entry = { key, evidence: key, rootIdentity: key, fileIdentity: key };
 const proven = { ...entry, proof: { rootIdentity: key, fileIdentity: key, contentHash: key, nodeRootIdentity: key,
   nodeFileIdentity: key, modifiedNs: "1", bytes: 1, allocatedBytes: 1, writeTicks: "1", observedAt: 1 } };
+
+it("retains bounded whole-run receipts independently of file intent authority and refuses unknown audit writes", async () => {
+  const root = await tempDir("arke-cleanup-runs-"), path = join(root, "control.json");
+  const control = new CacheCleanupControl(path); await control.open();
+  const run = { status: "cancelled" as const, cleanup: { removedFiles: 1, logicalBytes: 60, availableBefore: 4000, availableAfter: 5000, reclaimedBytes: null } };
+  try {
+    for (let i = 1; i <= 34; i++) assert(await control.recordRun(i.toString(16).padStart(64, "0"), i % 2 === 0, run));
+    const rows = control.runReceipts(); assert.equal(rows.length, 32); assert.equal(rows.at(-1)!.status, "cancelled");
+    rows[0]!.cleanup.removedFiles = 0; assert.equal(control.runReceipts()[0]!.cleanup.removedFiles, 1);
+    const disk = CacheCleanupControlSchema.parse(JSON.parse(await readFile(path, "utf8")));
+    assert.equal(disk.pending, null); assert.deepEqual(disk.outcomes, []); assert.equal(disk.runs?.length, 32);
+    assert(Buffer.byteLength(JSON.stringify(disk)) < 64 * 1024);
+  } finally { control.closeAdmission(); }
+  const next = new CacheCleanupControl(path); await next.open(); assert.equal(next.runReceipts().length, 32); next.closeAdmission();
+  const failed = new CacheCleanupControl(join(root, "failed.json"), { store: { load: async () => ({ version: 1, pending: null, outcomes: [] }),
+    save: async () => { throw Object.assign(new Error("PRIVATE_PATH"), { code: "ENOSPC" }); } } });
+  await failed.open(); assert.equal(await failed.recordRun(planId, false, run), false); assert.equal(failed.snapshot().audit, "unavailable");
+  assert.equal(failed.snapshot().available, false); assert(!JSON.stringify(failed.snapshot()).includes("PRIVATE_PATH")); failed.closeAdmission();
+  const invalid = new CacheCleanupControl(join(root, "invalid-run.json")); await invalid.open();
+  assert.equal(await invalid.recordRun(planId, false, { ...run, cleanup: { ...run.cleanup, removedFiles: 9 } }), false);
+  assert.equal(invalid.snapshot().reason, "invalid"); assert.equal(invalid.snapshot().protected, true); invalid.closeAdmission();
+});
 it("flushes one exact intent before authority and retains bounded outcomes independently of incidents", async () => {
   const root = await tempDir("arke-cleanup-control-"), path = join(root, "control.json");
   const control = new CacheCleanupControl(path); await control.open();

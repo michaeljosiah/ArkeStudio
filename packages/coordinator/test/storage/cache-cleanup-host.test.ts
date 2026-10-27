@@ -15,6 +15,8 @@ import { tempDir } from "../tmp.js";
 import { until, untilAsync } from "../wait.js";
 import { probeProcesses } from "../../src/child-ledger.js";
 import { AppStorageService } from "../../src/storage/service.js";
+import { RecoveryHistoryService } from "../../src/recovery/history.js";
+import { FileRecoveryHistoryStore } from "../../src/recovery/history-file.js";
 
 it("the authenticated host previews without deletion, approves the exact native cleanup and refuses replay", { skip: process.platform !== "win32", timeout: 120_000 }, async () => {
   const root = await tempDir("arke-cleanup-host-"); const events: DomainEvent[] = [], wireEvents: DomainEvent[] = [];
@@ -31,6 +33,7 @@ it("the authenticated host previews without deletion, approves the exact native 
     } } });
   const coordinator = new Coordinator({ provider, adapter: null, appRoot: root, appVersion: "fixture", changeLogPath: join(root, "changes.jsonl"),
     storageHealth: storage,
+    recoveryHistory: new RecoveryHistoryService({ store: new FileRecoveryHistoryStore(join(root, "operations", "recovery-history.json")) }),
     recoveryControl: new RecoveryControlService({ store: new FileRecoveryControlStore(join(root, "operations", "recovery.json")) }),
     observeEvent: event => events.push(event), voice: { localPresets: [], cloudSources: [], sidecar: {
       health: async () => ({ engineStatus: { kokoro: { ready: true } } }), listVoices: async () => [{ id: "bm_george", label: "George", attributes: [] }],
@@ -97,7 +100,9 @@ it("the authenticated host previews without deletion, approves the exact native 
     await until(() => coordinator.getState().app.recoveryPolicy?.cleanup?.scope?.revision === currentScope, "restored original root observation", 5000);
     await untilAsync(async () => { review = await action({ action: "preview-cleanup", scope: currentScope }); return review.status === "preview"; }, "new review of original restored root", 35_000);
     assert(review?.cleanupPlan);
-    await assert.rejects(readFile(join(root, "voice-previews", "cleanup-control.json")), { code: "ENOENT" });
+    const before = JSON.parse(await readFile(join(root, "voice-previews", "cleanup-control.json"), "utf8"));
+    assert.equal(before.pending, null); assert.deepEqual(before.outcomes, []); assert.equal(before.runs.length, 2);
+    assert(before.runs.every((run: { status: string }) => run.status === "refused"));
     const completed = await action({ action: "approve-cleanup", planId: review.cleanupPlan.id });
     assert.equal(completed.status, "verified"); assert.equal(completed.cleanup?.removedFiles, 1); assert.equal(completed.cleanup?.reclaimedBytes, null);
     await assert.rejects(readFile(path), { code: "ENOENT" }); assert.equal(await readFile(protectedPath, "utf8"), "protected generated fixture");
@@ -106,6 +111,9 @@ it("the authenticated host previews without deletion, approves the exact native 
     assert.equal(syntheses, 1); assert.equal(provider.openStore(), null);
     const control = JSON.parse(await readFile(join(root, "voice-previews", "cleanup-control.json"), "utf8"));
     assert.equal(control.pending, null); assert.equal(control.outcomes.length, 1); assert.equal(control.outcomes[0].status, "removed");
+    await until(() => coordinator.getState().app.recoveryHistory?.actionCount === 3, "retained scoped action outcomes", 5000);
+    assert.equal(coordinator.getState().app.recoveryHistory!.actions!.filter(row => row.outcome === "verified").length, 1);
+    assert.equal(coordinator.getState().app.recoveryHistory!.actions!.filter(row => row.outcome === "refused").length, 2);
     assert(events.some(event => event.type === "recovery.policy" && event.policy.cleanup?.pending), "the flushed intent publishes its hold before final outcome");
   } finally { socket?.close(); await coordinator.stop(); await provider.close(); }
   assert(!(await readFile(join(root, "changes.jsonl"), "utf8")).includes("cleanup-local-preset-previews"), "cleanup authority never enters the diagnostic journal");

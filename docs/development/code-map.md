@@ -181,8 +181,9 @@ Operational incidents (#2194): contracts `recovery-incidents.ts` owns closed num
 incident phases, verified resolution and persisted notification-budget decisions. Coordinator
 `recovery/history.ts` correlates the existing primary Diagnostics findings, uses one coalesced
 writer, retains bounded in-memory state after persistence failure and emits notices only after
-their budget marker is flushed. `recovery/history-file.ts` stores at most 1,000 summaries/10 MiB
-outside world and financial journals; resolved summaries age out after 30 days. Restart authority
+their budget marker is flushed. `recovery/history-file.ts` stores at most 1,000 incident and 1,000
+action summaries within the shared 10 MiB file, outside world and financial journals; settled
+summaries age out after 30 days. Restart authority
 remains in its separate control file. Current ComfyUI readiness and two separated fresh high-space
 readings can resolve their matching incident; missing measurements or changed mounts cannot.
 The app-root factory enables history before a world opens. `recovery.history` reaches both state
@@ -198,6 +199,18 @@ uses the existing notification drawing for admitted notices; desktop `background
 uses generic copy only after the separate opt-in. Both deduplicate live notices in bounded sets;
 opening an alert only navigates. The phone's existing notification opt-in does not subscribe to
 these host recovery events.
+Chronological repair outcomes use contracts `recovery-action-history.ts` for the closed schema,
+retention, unconfirmed-row protection and presentation labels. Coordinator
+`recovery/action-history.ts` hashes separate presentation IDs and projects owner restart receipts,
+whole cleanup runs and read-only outcome checks. `CataloguePreviewService` records at most 32
+whole-run receipts in the existing bounded cleanup control; these do not replace file intents.
+History uses its existing writer, read-only paging and export boundary. Settings switches between
+Incidents and Actions; action rows cannot execute repairs. Clearing settled history saves a
+bounded watermark/tie marker, preserves unconfirmed outcomes and leaves minimum control intact.
+Startup reconstructs only retained owner receipts and marks missing historical coverage; legacy
+incident files remain readable. Tests: contracts `test/recovery-action-history.test.ts`, coordinator
+`test/recovery/action-history.test.ts` plus owner/host/export suites, client
+`test/recovery-action-history.test.tsx`.
 `recovery-history-read` serves at most 100 retained summaries per revision-bound page; source,
 filter or page-size changes return stale rather than mixing revisions. The client retains four
 response pages and `components/recovery-history.tsx` supplies filtering, pagination and host-only

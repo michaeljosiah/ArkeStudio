@@ -1,6 +1,7 @@
 import { savedPicture, openSavedPicture, type SavedPicture } from "./productions/audiobook-picture-reuse.js";
 import { createStudioAssistantHost, type StudioAssistantHost, type StudioAssistantHostOptions } from "./studio-assistant/host.js";
 import { RecoveryActionRegistry } from "./recovery/actions.js";
+import { restartActionHistory, reviewedActionHistory } from "./recovery/action-history.js";
 import { RECOVERY_POLICY, type RecoveryPolicySnapshot, type RecoveryRetryPlan } from "@arke-studio/contracts";
 import { chapterReviewSummary } from "@arke-studio/contracts";
 import { rebuildBenchPrefill } from "@arke-studio/contracts";
@@ -3195,7 +3196,10 @@ export class Coordinator {
   private studioAssistantHost: StudioAssistantHost | null = null;
   private readonly recoveryTargetObservers = new Map<string, () => void>();
   private readonly recoveryActions = new RecoveryActionRegistry({ now: () => Date.parse(this.nowIso()), publish: result => {
-    if (!this.stopping) { this.emit({ type: "recovery.action-result", at: this.nowIso(), result }); this.publishRecoveryPolicy(); }
+    if (!this.stopping) {
+      this.opts.recoveryHistory?.observeActions(reviewedActionHistory(result, Date.parse(this.nowIso())));
+      this.emit({ type: "recovery.action-result", at: this.nowIso(), result }); this.publishRecoveryPolicy();
+    }
   }, maintenanceSettled: () => this.publishRecoveryPolicy(), automaticAllowed: () => {
     const policy = this.opts.recoveryControl?.policySnapshot();
     return this.started && !this.stopping && policy?.accepting === true && policy.audit === "available" && policy.mode === "automatic";
@@ -3209,8 +3213,13 @@ export class Coordinator {
     }
     return { ...policy, targets: [...targets.values()], cleanup: this.recoveryActions.cleanupAvailability() };
   }
-  private publishRecoveryPolicy(): void {
-    const policy = this.recoveryPolicy(); if (this.started && !this.stopping && policy) this.emit({ type: "recovery.policy", at: this.nowIso(), policy });
+  private publishRecoveryPolicy(reconstructed = false): void {
+    if (!this.started || this.stopping) return;
+    this.opts.recoveryHistory?.observeActions([
+      ...(this.opts.recoveryControl ? restartActionHistory(this.opts.recoveryControl.snapshot().control) : []),
+      ...(this.cataloguePreviews?.cleanupHistory() ?? []),
+    ], reconstructed);
+    const policy = this.recoveryPolicy(); if (policy) this.emit({ type: "recovery.policy", at: this.nowIso(), policy });
   }
   private registerRecoveryTarget(key: string, service: RecoveryRetryPlan["service"], supervisor: ChildSupervisor, current: () => boolean): void {
     this.recoveryActions.register(key, { service, prepare: () => current() ? supervisor.prepareRecoveryRetry() : null });
@@ -5004,6 +5013,7 @@ export class Coordinator {
       }));
       await history.open();
       history.observeDiagnostics(this.diagnosticsSnapshot!.currentSnapshot());
+      this.publishRecoveryPolicy(true);
     }
     await this.seedAppConfig();
     if (this.opts.systemResources) {
@@ -14570,6 +14580,7 @@ export class Coordinator {
       }
       case "recovery-history-read": {
         const page = this.opts.recoveryHistory?.page(msg.query) ?? { status: "unavailable" as const, filter: msg.query.filter, pageSize: msg.query.pageSize, offset: 0,
+          ...(msg.query.view === "actions" ? { view: "actions" as const, actions: [] } : {}),
           at: Date.now(), audit: "unavailable" as const, incidents: [], totalCount: 0, revision: null, nextCursor: null, previousCursor: null };
         this.emit({ type: "recovery.history-page", at: this.nowIso(), requestId: msg.requestId, page });
         return;

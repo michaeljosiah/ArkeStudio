@@ -3,6 +3,7 @@ import { z } from "zod";
 import { emptyRecoveryHistory, RecoveryHistorySchema, RecoveryObservationSchema, observeRecoveryIncidents, pruneRecoveryHistory, recoveryFindingFacts, findingRef, primaryFindings,
   recoveryNoticeDecision, recordRecoveryNotice, FINDING_SEVERITY_RANK,
   STORAGE_POLICY, storageWarningFloor, RecoveryHistoryQuerySchema, type RecoveryHistoryQuery, type RecoveryHistoryPage,
+  retainRecoveryActions, type RecoveryActionSummary,
   type ClientState, type DiagnosticsSnapshot, type RecoveryHistory, type RecoveryHistorySnapshot, type RecoveryObservation, type RecoveryNotice, type RecoveryIncident } from "@arke-studio/contracts";
 import type { RecoveryHistoryStore } from "./history-file.js";
 
@@ -36,6 +37,10 @@ export class RecoveryHistoryService {
     const resolved = this.history.incidents.filter(value => value.phase === "recovered").sort((a, b) => b.lastObservedAt - a.lastObservedAt);
     return { at, audit: this.audit, ...(this.reason ? { reason: this.reason } : {}), incidents: structuredClone([...active, ...resolved].slice(0, 100)),
       activeCount: active.length, resolvedCount: resolved.length, limited: active.length + resolved.length > 100,
+      actions: structuredClone((this.history.actions ?? []).slice(0, 100)), actionCount: this.history.actions?.length ?? 0,
+      settledActionCount: this.history.actions?.filter(row => row.outcome !== "unknown").length ?? 0,
+      unconfirmedActionCount: this.history.actions?.filter(row => row.outcome === "unknown").length ?? 0,
+      actionsLimited: (this.history.actions?.length ?? 0) > 100,
       preferences: { ...this.history.preferences }, overflow: { ...this.history.overflow } };
   }
   /** Opt-in callers still own export/redaction and access checks. No native target mapping. */
@@ -44,17 +49,22 @@ export class RecoveryHistoryService {
    * rows under a cursor; even an in-memory audit failure remains explicitly labelled. */
   page(input: RecoveryHistoryQuery): RecoveryHistoryPage {
     const query = RecoveryHistoryQuerySchema.parse(input), snapshot = this.snapshot();
+    const actionView = query.view === "actions";
     const base = { filter: query.filter, pageSize: query.pageSize, offset: 0, at: snapshot.at, audit: snapshot.audit,
+      ...(actionView ? { view: "actions" as const, actions: [] } : {}),
       ...(snapshot.reason ? { reason: snapshot.reason } : {}), incidents: [], totalCount: 0, revision: null, nextCursor: null, previousCursor: null };
     if (this.closing || this.audit === "starting") return { ...base, status: "unavailable" };
-    const revision = createHash("sha256").update(JSON.stringify([query.filter, query.pageSize, this.audit, this.reason, this.history])).digest("hex");
+    const revision = createHash("sha256").update(JSON.stringify([query.view ?? "incidents", query.filter, query.pageSize, this.audit, this.reason, this.history])).digest("hex");
     const incidents = this.history.incidents.filter(value => query.filter === "all" || (value.phase === "recovered") === (query.filter === "resolved"))
       .sort((a, b) => Number(a.phase === "recovered") - Number(b.phase === "recovered") || (a.phase === "recovered" ? 0 : FINDING_SEVERITY_RANK[a.severity] - FINDING_SEVERITY_RANK[b.severity]) || b.lastObservedAt - a.lastObservedAt || a.id.localeCompare(b.id));
+    const actions = (this.history.actions ?? []).filter(row => query.filter === "all" || (row.outcome !== "unknown") === (query.filter === "resolved"));
+    const total = actionView ? actions.length : incidents.length;
     const offset = query.cursor?.offset ?? 0;
-    if (query.cursor && (query.cursor.revision !== revision || offset > 0 && offset >= incidents.length || offset % query.pageSize !== 0)) return { ...base, status: "stale", revision, totalCount: incidents.length };
+    if (query.cursor && (query.cursor.revision !== revision || offset > 0 && offset >= total || offset % query.pageSize !== 0)) return { ...base, status: "stale", revision, totalCount: total };
     const cursor = (offset: number) => ({ revision, offset });
-    return { ...base, status: "ready", revision, offset, totalCount: incidents.length, incidents: structuredClone(incidents.slice(offset, offset + query.pageSize)),
-      nextCursor: offset + query.pageSize < incidents.length ? cursor(offset + query.pageSize) : null,
+    return { ...base, status: "ready", revision, offset, totalCount: total, incidents: actionView ? [] : structuredClone(incidents.slice(offset, offset + query.pageSize)),
+      ...(actionView ? { actions: structuredClone(actions.slice(offset, offset + query.pageSize)) } : {}),
+      nextCursor: offset + query.pageSize < total ? cursor(offset + query.pageSize) : null,
       previousCursor: offset > 0 ? cursor(Math.max(0, offset - query.pageSize)) : null };
   }
   subscribe(listener: (snapshot: RecoveryHistorySnapshot) => void): () => void { if (this.closing) return () => {}; this.subscribers.add(listener); return () => this.subscribers.delete(listener); }
@@ -74,6 +84,7 @@ export class RecoveryHistoryService {
       try {
         const raw = await this.deps.store.load(); if (this.stopped) return;
         const loaded = RecoveryHistorySchema.parse(raw); this.history = pruneRecoveryHistory(loaded, this.now());
+        if (this.history.actions === undefined) { this.history.actions = []; this.history.overflow.lostDetail = true; }
         for (const incident of this.history.incidents) if (incident.phase !== "recovered") {
           incident.evidence = "unavailable";
           if (["recovering", "verifying"].includes(incident.phase)) incident.phase = "unresolved";
@@ -123,6 +134,22 @@ export class RecoveryHistoryService {
     }
     this.changed(); this.dirty = true;
     if (this.audit === "available" && !this.work && !this.timer) this.timer = setTimeout(() => { this.timer = null; void this.flush(); }, this.deps.saveDelayMs ?? 1000);
+  }
+  /** Closed owner/executor evidence only, never a grant or an automatic retry source. */
+  observeActions(observations: readonly RecoveryActionSummary[], reconstructed = false): void {
+    if (this.closing || this.audit === "starting") return;
+    const now = this.now(); if (!Number.isSafeInteger(now) || now < this.history.lastObservedAt) return;
+    try {
+      const next = retainRecoveryActions(this.history.actions ?? [], observations.slice(0, 1000), now, this.history.actionsClearedThrough, this.history.actionsClearedIds);
+      const imported = reconstructed && next.actions.some(row => !this.history.actions?.some(previous => previous.id === row.id));
+      if (JSON.stringify(next.actions) === JSON.stringify(this.history.actions ?? []) && !next.pruned && !next.coalesced && observations.length <= 1000) return;
+      this.history.actions = next.actions; this.history.lastObservedAt = now;
+      this.history.overflow.prunedSummaries = Math.min(Number.MAX_SAFE_INTEGER, this.history.overflow.prunedSummaries + next.pruned);
+      this.history.overflow.coalescedObservations = Math.min(Number.MAX_SAFE_INTEGER, this.history.overflow.coalescedObservations + next.coalesced + Math.max(0, observations.length - 1000));
+      this.history.overflow.lostDetail ||= imported || next.pruned > 0 || next.coalesced > 0 || observations.length > 1000;
+      this.changed(); this.dirty = true;
+      if (this.audit === "available" && !this.work && !this.timer) this.timer = setTimeout(() => { this.timer = null; void this.flush(); }, this.deps.saveDelayMs ?? 1000);
+    } catch (error) { this.failed(error, "write-failed"); }
   }
   /** Missing findings never clear a fault: current owners must explicitly verify resolution. */
   observeDiagnostics(snapshot: DiagnosticsSnapshot): void {
@@ -210,7 +237,14 @@ export class RecoveryHistoryService {
     });
   }
   clearResolved(): Promise<boolean> {
-    return this.present(history => { history.incidents = history.incidents.filter(value => value.phase !== "recovered"); return true; });
+    return this.present((history, now) => {
+      const clearedIds = [...new Set([...(history.actionsClearedThrough === now ? history.actionsClearedIds ?? [] : []),
+        ...(history.actions ?? []).filter(row => row.outcome !== "unknown" && row.outcomeAt === now).map(row => row.id)])];
+      if (clearedIds.length > 1000) return false;
+      history.incidents = history.incidents.filter(value => value.phase !== "recovered");
+      history.actions = (history.actions ?? []).filter(value => value.outcome === "unknown");
+      history.actionsClearedThrough = now; history.actionsClearedIds = clearedIds; history.lastObservedAt = now; return true;
+    });
   }
   async flush(): Promise<void> {
     if (this.stopped) return;

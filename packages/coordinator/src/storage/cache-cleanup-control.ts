@@ -16,7 +16,10 @@ const intent = z.object({ id: digest, planId: digest, key: digest, evidence: dig
   owner: z.object({ pid, token: digest, gate: z.literal("native-input-v1") }).strict().optional(), workerPid: pid.optional(),
 }).strict().refine(row => !row.proof || row.proof.rootIdentity === row.rootIdentity && row.proof.fileIdentity === row.fileIdentity);
 const outcome = z.object({ planId: digest, key: digest, at: instant, status: z.enum(["removed", "retained", "not-started", "unknown"]), automatic: z.boolean().optional() }).strict();
-export const CacheCleanupControlSchema = z.object({ version: z.literal(1), pending: intent.nullable(), outcomes: z.array(outcome).max(32), maintenance: maintenance.optional() }).strict();
+const runReceipt = RecoveryCacheMaintenanceRunSchema.extend({ planId: digest, automatic: z.boolean() }).strict();
+export const CacheCleanupControlSchema = z.object({ version: z.literal(1), pending: intent.nullable(), outcomes: z.array(outcome).max(32),
+  runs: z.array(runReceipt).max(32).optional(), maintenance: maintenance.optional() }).strict()
+  .refine(value => new Set(value.runs?.map(row => row.planId)).size === (value.runs?.length ?? 0), "Repeated cleanup run receipt");
 type State = z.infer<typeof CacheCleanupControlSchema>;
 type AuditFailure = "invalid" | "permission" | "disk-full" | "read-failed" | "write-failed";
 export interface CacheCleanupStore { load(): Promise<unknown>; save(state: State): Promise<void> }
@@ -91,6 +94,18 @@ export class CacheCleanupControl {
       pending: this.state.pending !== null, key: this.state.pending?.key ?? null, outcomes: structuredClone(this.state.outcomes) };
   }
   pendingForReconciliation(): State["pending"] { return this.loaded && !this.closing ? structuredClone(this.state.pending) : null; }
+  runReceipts(): NonNullable<State["runs"]> { return structuredClone(this.state.runs ?? []); }
+  async recordRun(planId: string, automatic: boolean, run: Omit<RecoveryCacheMaintenanceRun, "at">): Promise<boolean> {
+    let saved = false;
+    await this.bounded(this.enqueue(async () => {
+      const at = (this.deps.now ?? Date.now)();
+      if (!this.audit || !this.loaded || !Number.isSafeInteger(at) || at < 0) return;
+      const receipt = runReceipt.safeParse({ ...run, at, planId, automatic });
+      if (!receipt.success) { this.audit = false; this.failure = "invalid"; this.changed(); return; }
+      saved = await this.persist({ ...this.state, runs: [...(this.state.runs ?? []).filter(row => row.planId !== planId), receipt.data].slice(-32) });
+    }), undefined);
+    return saved;
+  }
   ownsPending(id: string): boolean { const row = this.state.pending; return row?.id === id && row.owner?.pid === process.pid && row.owner.token === ownerToken; }
   private classify(error: unknown, fallback: "read-failed" | "write-failed"): AuditFailure {
     if (error instanceof z.ZodError || error instanceof SyntaxError) return "invalid";

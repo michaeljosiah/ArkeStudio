@@ -185,6 +185,19 @@ fields to verify enumeration plus the existing secret/path boundary. The authent
 fixture stalls a preference save while an actual owned child is running, then verifies bounded
 shutdown confirms native exit without acknowledging an unconfirmed save. The supervisor fixture
 ages attempts across a long live session, then exhausts the actual rolling window.
+
+Chronological action history adds contracts `test/recovery-action-history.test.ts`, coordinator
+`test/recovery/action-history.test.ts` and client `test/recovery-action-history.test.tsx`. Check
+repeated outcomes for one service, same-action settlement, owner-receipt precedence, future/stale
+observations, the shared 10 MiB maximum with 1,000 incidents/actions, retained unconfirmed rows,
+revision/view/filter-bound pagination and clear/restart suppression without losing a new
+same-millisecond action. Whole cleanup-run receipts remain bounded within the existing 64 KiB
+control; failed saves retain unavailable audit and cannot grant replay. Existing actual restart
+and authenticated native-cleanup fixtures verify action rows in the production composition.
+Export enumerates all 1,000 action rows while excluding poisoned paths/intent/plan fields.
+The Actions view issues read-only queries, keeps failures distinct from unconfirmed outcomes,
+rejects stale pages and grants no repair permission. Review fixtures capture one timestamp for
+preparation and expiry; a second clock read can make a nominal five-minute plan invalid on CI.
 The host fixture repeats a blocked mode save: the authenticated command must end unconfirmed,
 native exit must complete while the file write stays blocked, and no late saved receipt may appear.
 Control faults cover a stalled read/authority write, bounded owner settlement behind that write,

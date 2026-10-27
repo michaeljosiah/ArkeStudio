@@ -44,6 +44,8 @@ it("the production host's managed Ollama crash uses its default durable recovery
     }, "production restart's flushed verified outcome", 35_000);
     assert.equal(workers.length, 1, "the existing owner executed the restart");
     assert.equal(coordinator.getState().app.ollama?.state, "ready");
+    await until(() => coordinator.getState().app.recoveryHistory?.actions?.some(row => row.action === "restart-managed-runtime" && row.service === "ollama" && row.automatic && row.outcome === "verified") === true,
+      "historical outcome of the owned restart", 5000);
   } finally { release?.(); await coordinator.stop(); await provider.close(); }
   assert.equal(workers[0]!.pid, null);
 });

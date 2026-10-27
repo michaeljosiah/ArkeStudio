@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { FINDING_KIND_IDS, FindingSeveritySchema, FINDING_SEVERITY_RANK, type Finding } from "./diagnostics.js";
+import { RECOVERY_ACTION_HISTORY_LIMITS, RecoveryActionSummarySchema, retainRecoveryActions } from "./recovery-action-history.js";
 
 export const RECOVERY_HISTORY_LIMITS = Object.freeze({ maxIncidents: 1000, maxBytes: 10 * 1024 ** 2, retentionMs: 30 * 86400_000, advisoryIntervalMs: 86400_000 });
 const instant = z.number().int().nonnegative().safe().max(8_640_000_000_000_000), digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -42,9 +43,14 @@ export const RecoveryHistorySchema = z.object({
   version: z.literal(1), lastObservedAt: instant,
   preferences: z.object({ transientMuted: z.boolean(), desktopOptIn: z.boolean() }).strict(),
   incidents: z.array(RecoveryIncidentSchema).max(RECOVERY_HISTORY_LIMITS.maxIncidents),
+  actions: z.array(RecoveryActionSummarySchema).max(RECOVERY_ACTION_HISTORY_LIMITS.maxActions).optional(),
+  actionsClearedThrough: instant.optional(),
+  actionsClearedIds: z.array(digest).max(RECOVERY_ACTION_HISTORY_LIMITS.maxActions).optional(),
   overflow: z.object({ coalescedObservations: count, prunedSummaries: count, lostDetail: z.boolean() }).strict(),
 }).strict().superRefine((value, ctx) => {
   if (new Set(value.incidents.map(incident => incident.id)).size !== value.incidents.length) ctx.addIssue({ code: "custom", message: "Repeated incident ID." });
+  if (new Set(value.actions?.map(action => action.id)).size !== (value.actions?.length ?? 0)) ctx.addIssue({ code: "custom", message: "Repeated action summary ID." });
+  if (new Set(value.actionsClearedIds).size !== (value.actionsClearedIds?.length ?? 0) || value.actionsClearedIds?.length && value.actionsClearedThrough === undefined) ctx.addIssue({ code: "custom", message: "Invalid action clear marker." });
   const active = value.incidents.filter(incident => incident.phase !== "recovered");
   if (new Set(active.map(incident => incident.key)).size !== active.length) ctx.addIssue({ code: "custom", message: "Repeated active resource." });
 });
@@ -53,6 +59,8 @@ export const RecoveryHistorySnapshotSchema = z.object({
   at: instant,
   audit: z.enum(["starting", "available", "unavailable"]), reason: z.enum(["invalid", "permission", "disk-full", "read-failed", "write-failed"]).optional(),
   incidents: z.array(RecoveryIncidentSchema).max(100), activeCount: count, resolvedCount: count, limited: z.boolean(),
+  actions: z.array(RecoveryActionSummarySchema).max(100).optional(), actionCount: count.optional(),
+  settledActionCount: count.optional(), unconfirmedActionCount: count.optional(), actionsLimited: z.boolean().optional(),
   preferences: z.object({ transientMuted: z.boolean(), desktopOptIn: z.boolean() }).strict(),
   overflow: z.object({ coalescedObservations: count, prunedSummaries: count, lostDetail: z.boolean() }).strict(),
 }).strict();
@@ -61,7 +69,7 @@ export const RecoveryNoticeReasonSchema = z.enum(["first-actionable", "severity-
 export const RecoveryNoticeSchema = z.object({ incidentId: digest, reason: RecoveryNoticeReasonSchema, at: instant }).strict();
 export type RecoveryNotice = z.infer<typeof RecoveryNoticeSchema>;
 export function emptyRecoveryHistory(): RecoveryHistory {
-  return { version: 1, lastObservedAt: 0, preferences: { transientMuted: false, desktopOptIn: false }, incidents: [], overflow: { coalescedObservations: 0, prunedSummaries: 0, lostDetail: false } };
+  return { version: 1, lastObservedAt: 0, preferences: { transientMuted: false, desktopOptIn: false }, incidents: [], actions: [], overflow: { coalescedObservations: 0, prunedSummaries: 0, lostDetail: false } };
 }
 const increment = (value: number) => Math.min(Number.MAX_SAFE_INTEGER, value + 1);
 export function recoveryFindingFacts(finding: Finding): RecoveryFact[] {
@@ -91,8 +99,14 @@ export function pruneRecoveryHistory(history: RecoveryHistory, now: number): Rec
   instant.parse(now); const next = structuredClone(history); if (now < history.lastObservedAt) return next;
   const retained = next.incidents.filter(incident => incident.phase !== "recovered" || now - incident.lastObservedAt <= RECOVERY_HISTORY_LIMITS.retentionMs);
   next.overflow.prunedSummaries = Math.min(Number.MAX_SAFE_INTEGER, next.overflow.prunedSummaries + next.incidents.length - retained.length);
-  next.incidents = retained; return next;
+  next.incidents = retained;
+  if (next.actions) {
+    const actions = retainRecoveryActions(next.actions, [], now, next.actionsClearedThrough, next.actionsClearedIds);
+    next.actions = actions.actions; next.overflow.prunedSummaries = incrementBy(next.overflow.prunedSummaries, actions.pruned);
+  }
+  return next;
 }
+const incrementBy = (value: number, by: number) => Math.min(Number.MAX_SAFE_INTEGER, value + by);
 function applyRecoveryIncident(history: RecoveryHistory, observation: RecoveryObservation, id: string, now: number): RecoveryHistory {
   const value = RecoveryObservationSchema.parse(observation); instant.parse(now); digest.parse(id);
   if (now < history.lastObservedAt || value.observedAt > now || value.facts.some(fact => fact.measuredAt > now)) return history;

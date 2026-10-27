@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { join, relative, isAbsolute } from "node:path";
 import { estimateSpeechMicroUsd, NARRATOR_PREVIEW_TEXT, VOICE_PREVIEW_SCOPE, supportsVoiceUse,
-  voiceFormatForModel, voiceTargetKey, CACHE_CLEANUP_POLICY, RECOVERY_ACTION_LIMITS, STORAGE_POLICY, storageWarningFloor,
+  voiceFormatForModel, voiceTargetKey, CACHE_CLEANUP_POLICY, CACHE_MAINTENANCE_POLICY, RECOVERY_ACTION_LIMITS, STORAGE_POLICY, storageWarningFloor,
   type RecoveryCacheMaintenanceRun, type RecoveryCacheScope, type VoiceCandidate, type ModelManifest, type DomainEvent, type Job } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import type { SidecarLike } from "./service.js";
@@ -13,6 +13,7 @@ import type { ResolvedMediaFile } from "../transport.js";
 import type { AppStorageService } from "../storage/service.js";
 import { CacheCleanupControl } from "../storage/cache-cleanup-control.js";
 import { KOKORO_PRESETS, localCandidates } from "@arke-studio/voice";
+import { cleanupActionHistory, partialCleanupHistory } from "../recovery/action-history.js";
 
 const MAX_SAMPLE_BYTES = 12 * 1024 * 1024;
 
@@ -134,7 +135,11 @@ export class CataloguePreviewService {
       const prepared = await this.prepareCleanup(signal);
       if (prepared && prepared.stopAtAvailableBytes !== null && valid()) run = await prepared.run(planId, signal, valid, true);
     } catch { run = { ...run, status: "unknown" }; }
-    finally { await this.cleanupControl.finishMaintenance(planId, run); }
+    finally {
+      try { if (!await this.cleanupControl.recordRun(planId, true, run)) run = { ...run, status: "unknown" }; }
+      catch { run = { ...run, status: "unknown" }; }
+      await this.cleanupControl.finishMaintenance(planId, run);
+    }
   }
   async reconcileCleanup(signal: AbortSignal = this.cleanupLifetime.signal) {
     await this.initializeCleanup();
@@ -149,6 +154,13 @@ export class CataloguePreviewService {
       ...(scope ? { scope } : {}),
       ...(state.reason ? { reason: state.reason } : process.platform !== "win32" ? { reason: "unsupported" as const } : {}) };
   }
+  cleanupHistory(): import("@arke-studio/contracts").RecoveryActionSummary[] {
+    const rows = partialCleanupHistory(this.cleanupControl.pendingForReconciliation(), this.cleanupControl.snapshot().outcomes);
+    const policy = this.cleanupControl.maintenancePolicy(), at = policy ? policy.nextAttemptAt - CACHE_MAINTENANCE_POLICY.intervalMs : -1;
+    if (policy?.lastAttemptId && at >= 0) rows.push({ ...cleanupActionHistory(policy.lastAttemptId, true, { at, status: "unknown", cleanup: {
+      removedFiles: 0, logicalBytes: 0, availableBefore: null, availableAfter: null, reclaimedBytes: null } }), evidence: "partial-owner" });
+    return [...rows, ...this.cleanupControl.runReceipts().map(row => cleanupActionHistory(row.planId, row.automatic, row))];
+  }
   async prepareCleanup(signal: AbortSignal, expectedScope?: string): ReturnType<LocalPreviewCache["prepareCleanup"]> {
     await this.initializeCleanup();
     if (expectedScope && this.cleanupScope()?.revision !== expectedScope) return null;
@@ -156,13 +168,17 @@ export class CataloguePreviewService {
     if (!prepared || expectedScope && (this.cleanupScope()?.revision !== expectedScope || prepared.rootIdentity !== this.maintenanceRootIdentity)) return null;
     return { ...prepared, run: async (planId, signal, valid, automatic) => {
       try {
+        let current = true;
         if (expectedScope) {
           await this.initializeCleanup();
           if (this.maintenanceRootHold) await this.deps.storage?.measure(this.maintenanceRootHold.rootId, signal, (this.deps.now ?? Date.now)());
-          if (this.cleanupScope()?.revision !== expectedScope) return { status: "refused", cleanup: {
-            removedFiles: 0, logicalBytes: 0, availableBefore: null, availableAfter: null, reclaimedBytes: null } };
+          current = this.cleanupScope()?.revision === expectedScope;
         }
-        return await prepared.run(planId, signal, () => valid() && (!expectedScope || this.cleanupScope()?.revision === expectedScope), automatic);
+        const run = current ? await prepared.run(planId, signal, () => valid() && (!expectedScope || this.cleanupScope()?.revision === expectedScope), automatic)
+          : { status: "refused" as const, cleanup: { removedFiles: 0, logicalBytes: 0, availableBefore: null, availableAfter: null, reclaimedBytes: null } };
+        if (automatic) return run;
+        const saved = await this.cleanupControl.recordRun(planId, false, run);
+        return saved ? run : { ...run, status: "unknown" };
       } finally { await this.refreshCleanupScope(); }
     } };
   }
