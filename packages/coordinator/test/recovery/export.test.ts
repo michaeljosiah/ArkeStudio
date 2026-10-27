@@ -31,3 +31,16 @@ it("exports the entire bounded incident history and enumerated policy through th
   const scrubbed = JSON.stringify(await buildDiagnosticsBundle(state, null, registry, null, { history: poisoned, audit: { audit: "available" }, policy: null }));
   assert(!scrubbed.includes(secret)); assert(!scrubbed.includes("recovery-export-private")); assert(scrubbed.includes("[redacted]"));
 });
+
+it("exports only closed latest outcome facts and never their control identity or injected fields", async () => {
+  const receipt = { action: "restart-managed-runtime" as const, automatic: true, authorizedAt: now, settledAt: now + 10, outcome: "unknown" as const };
+  Object.assign(receipt, { intentId: "PRIVATE_INTENT", componentDigest: "PRIVATE_DIGEST", rawLog: "PRIVATE_WORKER_OUTPUT", path: "/private/runtime" });
+  const policy: RecoveryPolicySnapshot = { audit: "available", accepting: true, mode: "automatic", targets: [{ key: "d".repeat(64), service: "ollama", stoppedByUser: false, circuitOpen: false, pendingOutcome: true, lastOutcome: receipt }] };
+  const bundle = await buildDiagnosticsBundle(state, null, new SecretRegistry(), null, { history: null, audit: null, policy });
+  const exported = bundle.recovery as { policy: { targets: { lastOutcome: unknown }[] } };
+  assert.deepEqual(exported.policy.targets[0]!.lastOutcome, { action: "restart-managed-runtime", automatic: true, authorizedAt: now, settledAt: now + 10, outcome: "unknown" });
+  assert(!JSON.stringify(bundle).includes("PRIVATE_")); assert(!JSON.stringify(bundle).includes("/private/runtime"));
+  Object.assign(receipt, { outcome: "PRIVATE_FORGED_OUTCOME" });
+  const refused = JSON.stringify(await buildDiagnosticsBundle(state, null, new SecretRegistry(), null, { history: null, audit: null, policy }));
+  assert(!refused.includes("PRIVATE_FORGED")); assert(refused.includes('"unavailable":true'));
+});

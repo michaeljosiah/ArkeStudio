@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { RecoveryControlSchema, RecoveryRestartContextSchema, decideRecoveryRestart, emptyRecoveryTarget, recentRecoveryAttempts } from "../src/recovery-policy.js";
+import { RecoveryControlSchema, RecoveryRestartContextSchema, RecoveryOutcomeReceiptSchema, decideRecoveryRestart, emptyRecoveryTarget, recentRecoveryAttempts } from "../src/recovery-policy.js";
 
 const now = 2_000_000, key = "a".repeat(64);
 const context = { ownership: "managed" as const, idle: true, exitConfirmed: true, generation: 2, componentDigest: "b".repeat(64) };
+it("bounds latest outcome receipts without granting commands or invalidating legacy control files", () => {
+  const receipt = { intentId: "c".repeat(64), action: "restart-managed-runtime", generation: 2, componentDigest: "b".repeat(64), automatic: true, authorizedAt: now, settledAt: now + 10, outcome: "verified" };
+  assert(RecoveryOutcomeReceiptSchema.safeParse(receipt).success);
+  for (const patch of [{ settledAt: now - 1 }, { outcome: "PRIVATE_ERROR" }, { command: "PRIVATE_SHELL" }, { componentDigest: "/private/path" }]) assert(!RecoveryOutcomeReceiptSchema.safeParse({ ...receipt, ...patch }).success);
+  const target = emptyRecoveryTarget(key, "ollama", now), legacy = { version: 1, policyRevision: 1, mode: "automatic", targets: [target] };
+  assert(RecoveryControlSchema.safeParse(legacy).success);
+  assert(RecoveryControlSchema.safeParse({ ...legacy, targets: [{ ...target, lastOutcome: receipt }] }).success);
+});
 it("refuses every automatic restart without declared ownership, idle work and confirmed cleanup", () => {
   const target = emptyRecoveryTarget(key, "comfyui", now);
   for (const [patch, reason] of [[{ ownership: "external" }, "external"], [{ idle: false }, "busy"], [{ exitConfirmed: false }, "cleanup-unconfirmed"]] as const) {

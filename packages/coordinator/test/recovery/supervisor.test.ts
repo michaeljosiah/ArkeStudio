@@ -73,13 +73,15 @@ it("a real child exit waits behind admitted GPU work, then restarts and verifies
   const creative = await gpu.acquire("Ming", abort.signal);
   const port = policy(h.service, { acquire: signal => gpu.acquire("Ollama", signal) }), supervisor = specimen(); supervisor.setRecoveryPort(port);
   try {
-    await supervisor.start(); assert.equal(supervisor.status, "healthy"); const previous = supervisor.pid!;
+    await supervisor.start(); assert.equal(supervisor.status, "healthy"); const previous = supervisor.pid!, previousEpoch = supervisor.spawnEpoch;
     process.kill(previous, "SIGKILL");
     await until(() => gpu.isBusy("Ollama"), "restart waiting behind creative work", 30_000);
     assert.equal(supervisor.pid, null); assert.equal(supervisor.status, "unhealthy"); assert.equal(h.service.snapshot().control.targets.length, 0);
     creative();
     await until(() => supervisor.pid !== null && supervisor.pid !== previous && supervisor.status === "healthy" && h.service.snapshot().control.targets[0]?.intent === null, "verified owned restart", 30_000);
     assert.equal(h.service.snapshot().control.targets[0]!.attempts.length, 1);
+    assert.equal(h.service.snapshot().control.targets[0]!.lastOutcome?.outcome, "verified");
+    assert.equal(h.service.snapshot().control.targets[0]!.lastOutcome?.generation, previousEpoch);
     assert.equal(gpu.isBusy("Ollama"), false, "verified startup released the inference lane");
   } finally { creative(); await supervisor.stopAndConfirm(); await port.ownerStopped(); await h.service.stop(); gpu.stop(); }
 });

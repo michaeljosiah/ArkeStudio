@@ -35,7 +35,7 @@ export class RecoveryControlService {
       const finish = () => {
         if (failure) {
           this.auditAvailable = false; this.auditFailure ??= failure;
-          for (const target of this.control.targets) if (target.intent) target.intent.phase = "unknown";
+          for (const target of this.control.targets) this.unknown(target);
         }
         resolve(fallback);
       };
@@ -63,7 +63,9 @@ export class RecoveryControlService {
     const state = this.snapshot();
     return { audit: state.audit, accepting: state.accepting, mode: state.control.mode, ...(state.reason ? { reason: state.reason } : {}),
       targets: state.control.targets.map(target => ({ key: target.key, service: target.service, stoppedByUser: target.stoppedByUser,
-        circuitOpen: target.circuitOpen, pendingOutcome: target.intent !== null })) };
+        circuitOpen: target.circuitOpen, pendingOutcome: target.intent !== null,
+        ...(target.lastOutcome ? { lastOutcome: { action: target.lastOutcome.action, automatic: target.lastOutcome.automatic,
+          authorizedAt: target.lastOutcome.authorizedAt, settledAt: target.lastOutcome.settledAt, outcome: target.lastOutcome.outcome } } : {}) })) };
   }
   snapshot(): { audit: "starting" | "available" | "unavailable"; accepting: boolean; reason?: AuditFailure; control: RecoveryControl } {
     return { audit: !this.auditAvailable ? "unavailable" : !this.opened ? "starting" : "available", accepting: this.opened && this.auditAvailable && !this.closing && !this.closed, reason: this.auditFailure, control: structuredClone(this.control) };
@@ -79,7 +81,7 @@ export class RecoveryControlService {
       try {
         this.control = RecoveryControlSchema.parse(await this.deps.store.load());
         for (const target of this.control.targets) {
-          if (target.intent) target.intent.phase = "unknown";
+          this.unknown(target);
           target.healthySince = null; // Downtime is not continuous measured health.
         }
       } catch (error) { this.auditAvailable = false; this.auditFailure = this.failure(error, "read-failed"); }
@@ -94,7 +96,7 @@ export class RecoveryControlService {
       await this.deps.store.save(RecoveryControlSchema.parse(next));
       this.control = next;
       if (this.closed || !this.auditAvailable) {
-        for (const target of this.control.targets) if (target.intent) target.intent.phase = "unknown";
+        for (const target of this.control.targets) this.unknown(target);
         return false;
       }
       this.changed(); return true;
@@ -104,9 +106,10 @@ export class RecoveryControlService {
       const retained = new Map(this.control.targets.map(target => [target.key, target]));
       for (const target of next.targets) {
         const previous = retained.get(target.key);
-        retained.set(target.key, { ...target, intent: target.intent ?? previous?.intent ?? null });
+        const intent = target.intent ?? previous?.intent ?? null;
+        retained.set(target.key, { ...target, intent });
       }
-      for (const target of retained.values()) if (target.intent) target.intent = { ...target.intent, phase: "unknown" };
+      for (const target of retained.values()) this.unknown(target);
       this.control = { ...next, targets: [...retained.values()] }; this.auditAvailable = false; this.auditFailure = this.failure(error, "write-failed"); this.changed(); return false;
     }
   }
@@ -182,8 +185,9 @@ export class RecoveryControlService {
       if (this.closed || !this.opened || !this.auditAvailable) return false;
       const next = structuredClone(this.control), target = next.targets.find(value => value.key === key);
       if (!target?.intent || target.intent.id !== intentId) return false;
-      const now = this.now(); if (now < target.lastObservedAt) return false;
+      const now = this.now(); if (!Number.isSafeInteger(now) || now < target.lastObservedAt) return false;
       target.lastObservedAt = now;
+      target.lastOutcome = this.receipt(target.intent, outcome, now);
       if (outcome === "unknown") target.intent.phase = "unknown";
       else {
         const automatic = target.intent.automatic;
@@ -193,6 +197,17 @@ export class RecoveryControlService {
       }
       return this.persist(next);
     }), false, this.deps.stopTimeoutMs ?? 2_000, "write-failed");
+  }
+
+  private receipt(intent: Intent, outcome: "verified" | "failed" | "not-started" | "unknown", settledAt: number): NonNullable<RecoveryTarget["lastOutcome"]> {
+    return { intentId: intent.id, action: intent.action, generation: intent.generation, componentDigest: intent.componentDigest,
+      automatic: intent.automatic, authorizedAt: intent.authorizedAt, settledAt, outcome };
+  }
+  private unknown(target: RecoveryTarget): void {
+    if (!target.intent) return;
+    target.intent = { ...target.intent, phase: "unknown" };
+    const now = this.now();
+    target.lastOutcome = this.receipt(target.intent, "unknown", Math.max(target.intent.authorizedAt, target.lastObservedAt, Number.isSafeInteger(now) && now >= 0 ? now : 0));
   }
 
   setMode(mode: RecoveryMode): Promise<boolean> {

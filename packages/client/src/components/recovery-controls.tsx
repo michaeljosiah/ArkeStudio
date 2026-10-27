@@ -52,6 +52,15 @@ export function RecoveryControls() {
       </div>}
     </>}
     {policy && policy.targets.some(target => target.circuitOpen || target.stoppedByUser || target.pendingOutcome) && <p className="fy-diag__meta">Some services remain held by a stop, exhausted retry budget or unconfirmed outcome. Changing mode does not release those holds.</p>}
+    {policy?.targets.some(target => target.lastOutcome) && <section aria-label="Latest recovery outcomes">
+      <div className="fy-set__eyebrow">LATEST RECOVERY OUTCOMES</div>
+      <p className="fy-diag__meta">One latest attempt per service target. These receipts describe that attempt, not current health or completed creative work.</p>
+      {policy.targets.map(target => target.lastOutcome && <div className="fy-set__row" key={target.key}>
+        <div className="fy-set__name fy-set__name--wide"><div className="fy-set__title">{{ comfyui: "ComfyUI", ollama: "Ollama", ming: "Ming", voice: "Local voice", harness: "Writing service" }[target.service]}</div>
+          <div className="fy-set__caps">{target.lastOutcome.automatic ? "Automatic restart" : "Reviewed restart"} · {new Date(target.lastOutcome.settledAt).toLocaleString()}</div></div>
+        <span className="fy-diag__meta">{{ verified: "Readiness verified", failed: "Attempt failed", "not-started": "Did not start", unknown: "Outcome unconfirmed" }[target.lastOutcome.outcome]}</span>
+      </div>)}
+    </section>}
     {message && <p role="status" className="fy-diag__meta">{message}</p>}
   </section>;
 }

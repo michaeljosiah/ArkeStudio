@@ -132,6 +132,13 @@ release before activation. `test/ollama-engine.test.ts` checks retained installa
 after unconfirmed cleanup and release only after owner-confirmed stop. These establish the Ollama/ComfyUI paths, not other recovery owners, reviewed
 interruption actions or successful inference. `test/job-leash.test.ts`
 also verifies shared storage-reader job reuse and kernel cleanup on forced parent death on Windows.
+Latest repair receipts are checked in contracts `test/recovery-policy.test.ts` and coordinator
+`test/recovery/control.test.ts`: exact settled identity, restart/unknown reconciliation,
+uncertain writes, retained attempts, legacy files and maximum receipts within the existing
+256 KiB cap. The native supervisor case verifies its replacement produces the receipt for
+the original failed generation. `test/recovery/export.test.ts` rejects injected/free-form
+receipt fields and excludes execution identity; client `test/recovery-controls.test.tsx`
+checks unconfirmed outcome wording without treating a past receipt as present health.
 
 Incident checks (#2194) use contracts `test/recovery-incidents.test.ts`, coordinator
 `test/recovery/history.test.ts` / `history-application.test.ts`, and client

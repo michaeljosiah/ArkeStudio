@@ -13,6 +13,42 @@ const request = { ...identity, context, automatic: true };
 const fresh = (): RecoveryControl => ({ version: 1, policyRevision: 1, mode: "automatic", targets: [] });
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 
+it("atomically retains exact owner outcome receipts across restart without refunding attempts or exposing authority", async () => {
+  const h = harness(); await h.service.open();
+  try {
+    const automatic = await h.service.authorize(request); assert(automatic.status === "authorized");
+    h.advance(1000); assert(await h.service.settleFromOwner(key, automatic.intent.id, "failed"));
+    for (const outcome of ["failed", "not-started", "unknown", "verified"] as const) {
+      const grant = await h.service.authorize({ ...request, automatic: false }); assert(grant.status === "authorized");
+      h.advance(1);
+      assert(await h.service.settleFromOwner(key, grant.intent.id, outcome));
+      const target = h.disk().targets[0]!; assert.equal(target.lastOutcome?.intentId, grant.intent.id); assert.equal(target.lastOutcome?.generation, context.generation);
+      assert.equal(target.attempts.length, 1, "receipt replacement does not refund rolling attempts");
+      assert.equal(target.lastOutcome?.componentDigest, context.componentDigest); assert.equal(target.lastOutcome?.outcome, outcome);
+      assert.equal(target.intent !== null, outcome === "unknown");
+      const summary = h.service.policySnapshot().targets[0]!.lastOutcome!; assert.equal(summary.outcome, outcome);
+      assert(!JSON.stringify(summary).includes(grant.intent.id)); assert(!JSON.stringify(summary).includes(context.componentDigest));
+      assert.equal(await h.service.settleFromOwner(key, "c".repeat(64), "verified"), false);
+      if (outcome === "unknown") assert(await h.service.settleFromOwner(key, grant.intent.id, "not-started"));
+    }
+    const restarted = new RecoveryControlService({ store: h.store, now: h.now }); await restarted.open();
+    assert.equal(restarted.policySnapshot().targets[0]!.lastOutcome?.outcome, "verified"); await restarted.stop();
+  } finally { await h.service.stop(); }
+});
+
+it("reconstructs interrupted outcomes as unknown and downgrades an uncertain receipt write", async () => {
+  const h = harness(); await h.service.open(); const grant = await h.service.authorize(request); assert(grant.status === "authorized");
+  await h.service.stop(); const restarted = new RecoveryControlService({ store: h.store, now: h.now }); await restarted.open();
+  assert.equal(restarted.policySnapshot().targets[0]!.lastOutcome?.outcome, "unknown");
+  assert.equal(restarted.snapshot().control.targets[0]!.intent?.id, grant.intent.id);
+  await restarted.stop();
+  const failing = new RecoveryControlService({ now: h.now, store: { load: () => h.store.load(), save: async () => { throw Object.assign(Error("PRIVATE_DISK_ERROR"), { code: "ENOSPC" }); } } });
+  await failing.open(); assert.equal(await failing.settleFromOwner(key, grant.intent.id, "verified"), false);
+  assert.equal(failing.policySnapshot().targets[0]!.lastOutcome?.outcome, "unknown");
+  assert.equal(failing.snapshot().control.targets[0]!.intent?.phase, "unknown"); assert.equal(failing.snapshot().reason, "disk-full");
+  assert(!JSON.stringify(failing.policySnapshot()).includes("PRIVATE_DISK_ERROR")); await failing.stop();
+});
+
 for (const phase of ["read", "authorize", "begin"] as const) it(`bounds an in-flight ${phase} during shutdown without granting late authority`, { timeout: 5000 }, async () => {
   const entered = deferred(), finish = deferred(); let disk = fresh(), blocked = phase === "read", now = 2_000_000;
   const service = new RecoveryControlService({ now: () => now, stopTimeoutMs: 20, store: {
@@ -67,6 +103,7 @@ it("retains unknown intent and spent attempts when a blocked mode write prevents
   now += 1000; assert.deepEqual(await service.begin(key, grant.intent.id, () => context), { status: "begin" });
   block = true; const mode = service.setMode("suggest-only"); await entered.promise; service.closeAdmission();
   assert.equal(await mode, false); assert.equal(await service.settleFromOwner(key, grant.intent.id, "failed"), false);
+  assert.equal(service.policySnapshot().targets[0]!.lastOutcome?.outcome, "unknown");
   await service.stop(); assert.equal(service.snapshot().control.targets[0]!.intent!.phase, "unknown");
   assert.equal(service.snapshot().control.targets[0]!.attempts.length, 1);
   finish.resolve(); await new Promise(resolve => setImmediate(resolve));
@@ -234,4 +271,19 @@ it("persists bounded control separately from history and refuses torn/oversized 
     await writeFile(path, raw); const failed = new RecoveryControlService({ store }); await failed.open();
     assert.equal(failed.snapshot().audit, "unavailable"); assert.equal(await readFile(path, "utf8"), raw); await failed.stop();
   }
+});
+
+it("keeps maximum per-target receipts and pending intents inside the existing control-file cap", async () => {
+  const path = join(await tempDir("arke-recovery-receipts-"), "control.json"), store = new FileRecoveryControlStore(path), at = Number.MAX_SAFE_INTEGER - 1;
+  const disk = fresh();
+  disk.targets = Array.from({ length: 128 }, (_, index) => ({
+    key: index.toString(16).padStart(64, "0"), service: "comfyui" as const, stoppedByUser: true, circuitOpen: true,
+    lastObservedAt: at, consecutiveFailures: 3, attempts: [at - 2, at - 1, at], healthySince: null,
+    intent: { id: "d".repeat(64), action: "restart-managed-runtime" as const, generation: at, componentDigest,
+      authorizedAt: at, notBefore: at, automatic: true, phase: "unknown" as const },
+    lastOutcome: { intentId: "d".repeat(64), action: "restart-managed-runtime" as const, generation: at, componentDigest,
+      automatic: true, authorizedAt: at, settledAt: at, outcome: "unknown" as const },
+  }));
+  await store.save(disk); assert(Buffer.byteLength(await readFile(path, "utf8")) < 256 * 1024);
+  assert.deepEqual(await store.load(), disk);
 });

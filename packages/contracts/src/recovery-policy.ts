@@ -6,6 +6,18 @@ export const RECOVERY_POLICY = Object.freeze({ revision: 1, windowMs: 15 * 60_00
   delaysMs: [1_000, 5_000, 30_000] as const, healthyResetMs: 5 * 60_000, maxTargets: 128 });
 const timestamp = z.number().int().nonnegative().safe();
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
+const outcomeFields = z.object({
+  intentId: digest, action: z.literal("restart-managed-runtime"), generation: timestamp, componentDigest: digest,
+  automatic: z.boolean(), authorizedAt: timestamp, settledAt: timestamp,
+  outcome: z.enum(["verified", "failed", "not-started", "unknown"]),
+}).strict();
+/** One latest receipt per target, kept with minimum control so clearing presentation history
+ * cannot erase the last uncertain repair. This is evidence, never a fresh execution grant. */
+export const RecoveryOutcomeReceiptSchema = outcomeFields.refine(value => value.settledAt >= value.authorizedAt, "Recovery receipt moved backwards");
+export type RecoveryOutcomeReceipt = z.infer<typeof RecoveryOutcomeReceiptSchema>;
+export const RecoveryOutcomeSummarySchema = outcomeFields.omit({ intentId: true, generation: true, componentDigest: true })
+  .refine(value => value.settledAt >= value.authorizedAt, "Recovery summary moved backwards");
+export type RecoveryOutcomeSummary = z.infer<typeof RecoveryOutcomeSummarySchema>;
 export const RecoveryModeSchema = z.enum(["suggest-only", "automatic"]);
 export type RecoveryMode = z.infer<typeof RecoveryModeSchema>;
 export const RecoveryTargetSchema = z.object({
@@ -17,6 +29,7 @@ export const RecoveryTargetSchema = z.object({
   consecutiveFailures: z.number().int().min(0).max(3),
   attempts: z.array(timestamp).max(3),
   healthySince: timestamp.nullable(),
+  lastOutcome: RecoveryOutcomeReceiptSchema.optional(),
   intent: z.object({
     id: digest, action: z.literal("restart-managed-runtime"), generation: timestamp, componentDigest: digest,
     authorizedAt: timestamp, notBefore: timestamp, automatic: z.boolean(),

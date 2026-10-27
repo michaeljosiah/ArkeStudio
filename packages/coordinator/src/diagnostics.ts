@@ -4,6 +4,7 @@ import {
   RECOVERY_FACT_NAMES,
   RECOVERY_HISTORY_LIMITS,
   RECOVERY_POLICY,
+  RecoveryOutcomeSummarySchema,
   type ClientState,
   type DiagnosticsSnapshot,
   type Finding,
@@ -91,8 +92,15 @@ function exportedRecovery(input: NonNullable<Parameters<typeof buildDiagnosticsB
       })),
     },
     policy: policy === null ? null : { audit: policy.audit, accepting: policy.accepting, mode: policy.mode, ...(policy.reason ? { reason: policy.reason } : {}),
-      targets: policy.targets.slice(0, RECOVERY_POLICY.maxTargets).map(target => ({ resourceId: target.key, service: target.service, stoppedByUser: target.stoppedByUser, circuitOpen: target.circuitOpen, pendingOutcome: target.pendingOutcome })) },
+      targets: policy.targets.slice(0, RECOVERY_POLICY.maxTargets).map(target => ({ resourceId: target.key, service: target.service, stoppedByUser: target.stoppedByUser, circuitOpen: target.circuitOpen, pendingOutcome: target.pendingOutcome,
+        ...(target.lastOutcome ? { lastOutcome: exportedOutcome(target.lastOutcome) } : {}) })) },
   };
+}
+
+function exportedOutcome(value: NonNullable<RecoveryPolicySnapshot["targets"][number]["lastOutcome"]>) {
+  const parsed = RecoveryOutcomeSummarySchema.safeParse({ action: value.action, automatic: value.automatic,
+    authorizedAt: value.authorizedAt, settledAt: value.settledAt, outcome: value.outcome });
+  return parsed.success ? parsed.data : { unavailable: true };
 }
 
 /**

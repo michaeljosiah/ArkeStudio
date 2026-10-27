@@ -64,6 +64,13 @@ Recovery control foundation (#2194, SPEC-061 R-7/R-11/R-25): contracts `recovery
 defines the closed restart context and rolling budget. Coordinator `recovery/control.ts` serializes
 single-use durable intents, unknown-outcome reconciliation, Suggest only/user Stop, final owner-fence
 checks and shutdown; `recovery/control-file.ts` keeps minimal authority in a separate bounded file.
+Each target retains one exact latest outcome receipt atomically with owner settlement. Startup
+projects interrupted intents as unknown; rejected receipt writes retain unknown authority.
+The policy snapshot and opt-in `diagnostics.ts` export include only closed outcome/time facts,
+excluding intent IDs, component digests and process generations. Client `recovery-controls.tsx`
+shows these as past attempts, not current service health or completed creative work. Removable
+incident history cannot erase them or refund rolling attempts; the 128-target/256 KiB control
+cap remains unchanged. This is latest-outcome evidence, not complete action history or a repair grant.
 `recovery/supervisor.ts` admits the existing owner's restart through the shared GPU lane. The host
 factory enables control; Coordinator connects managed Ollama and ComfyUI before their first child starts.
 ComfyUI's primary and isolated recipe processes each retain a stable recovery target;

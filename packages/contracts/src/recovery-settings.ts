@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RecoveryModeSchema, RECOVERY_POLICY } from "./recovery-policy.js";
+import { RecoveryModeSchema, RecoveryOutcomeSummarySchema, RECOVERY_POLICY } from "./recovery-policy.js";
 import { RecoveryHistorySnapshotSchema, RecoveryIncidentSchema, RECOVERY_HISTORY_LIMITS } from "./recovery-incidents.js";
 
 /** SPEC-061 R-7/R-18/R-25. Presentation of policy carries no intent/capability or repair grant. */
@@ -8,6 +8,7 @@ export const RecoveryPolicySnapshotSchema = z.object({
   reason: z.enum(["invalid", "permission", "disk-full", "read-failed", "write-failed"]).optional(),
   targets: z.array(z.object({ key: z.string().regex(/^[a-f0-9]{64}$/), service: z.enum(["comfyui", "ollama", "ming", "voice", "harness"]),
     stoppedByUser: z.boolean(), circuitOpen: z.boolean(), pendingOutcome: z.boolean(),
+    lastOutcome: RecoveryOutcomeSummarySchema.optional(),
   }).strict()).max(RECOVERY_POLICY.maxTargets),
 }).strict();
 export type RecoveryPolicySnapshot = z.infer<typeof RecoveryPolicySnapshotSchema>;
