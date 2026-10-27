@@ -794,3 +794,57 @@ it('touch chrome stays held until every active pointer has released, including c
  emit(dom.window as unknown as EventTarget,'pointercancel',2);assert.equal(p.root.hasAttribute('data-held'),false);
  p.handle.destroy();emit(p.root as unknown as EventTarget,'pointerdown',3);assert.equal(p.root.hasAttribute('data-held'),false);
 });
+
+
+describe("remembered facts in the shared player (turn 240)", () => {
+  function storyOptions(): Partial<InteractivePlayerOptions> {
+    const story = {
+      start: "sc_quarter",
+      facts: [{ id: "elsie", label: "Elsie Ward", type: "boolean" as const, default: true }],
+      choices: [
+        { id: "ch_rescue", from: "sc_quarter", to: "sc_causeway", label: "Rescue Elsie" },
+        { id: "ch_seal", from: "sc_quarter", to: "sc_causeway", label: "Seal the bore", effects: [{ fact: "elsie", value: false }] },
+        { id: "ch_aux", from: "sc_causeway", to: "sc_pier", label: "Ask Elsie", when: { op: "eq" as const, fact: "elsie", value: true } },
+        { id: "ch_manual", from: "sc_causeway", to: "sc_pier", label: "Manual release" },
+      ],
+      presentation: [{ sceneId: "sc_causeway", blocks: [{ blockId: "blk_elsie", when: { op: "eq" as const, fact: "elsie", value: true } }], shots: [] }],
+      endings: [{ sceneId: "sc_pier", title: "Above the Quiet", variants: [
+        { id: "together", title: "Together", text: "Elsie is aboard.", when: { op: "eq" as const, fact: "elsie", value: true } },
+        { id: "empty", title: "An empty seat", text: "Elsie was lost at the bore.", fallback: true as const },
+      ] }],
+    };
+    return { start: story.start, story, choices: story.choices, endings: story.endings, scenes: {
+      sc_quarter: { title: "The bore", clips: [] },
+      sc_causeway: { title: "The collar", beats: [{ blockId: "blk_elsie", text: "Elsie speaks", audio: "elsie.mp3" }] },
+      sc_pier: { title: "Above the Quiet", clips: [] },
+    }, autoplay: true };
+  }
+  it("filters unavailable choices and voices, selects the ending, and restores facts on rewind", () => {
+    const p = mount(storyOptions());
+    p.click(p.all(".aip-choice").find(el => el.textContent?.includes("Seal the bore")));
+    assert.equal(p.all(".aip-choice").length, 1);
+    assert.doesNotMatch(p.root.textContent ?? "", /Elsie speaks|Ask Elsie/);
+    assert.ok(!p.all("audio").some(el => el.getAttribute("src") === "elsie.mp3"));
+    p.click(p.all(".aip-choice")[0]);
+    assert.match(p.text(".aip-hero"), /An empty seat.*Elsie was lost/s);
+    p.key("r"); p.click(p.q('[data-again="0"]'));
+    p.click(p.all(".aip-choice").find(el => el.textContent?.includes("Rescue Elsie")));
+    assert.match(p.root.textContent ?? "", /Elsie speaks/);
+  });
+  it("replays a saved prefix once and refuses a changed story with a restart notice", () => {
+    const options = { ...storyOptions(), storageKey: "stateful-save" };
+    const p = mount(options);
+    p.click(p.all(".aip-choice").find(el => el.textContent?.includes("Seal the bore")));
+    const saved = JSON.parse(store.get("stateful-save")!);
+    assert.deepEqual(saved.route, ["ch_seal"]); assert.equal(saved.formatVersion, 2);
+    p.handle.destroy();
+    const resumed = mount(options);
+    assert.equal(resumed.all(".aip-choice").length, 1);
+    assert.doesNotMatch(resumed.root.textContent ?? "", /Elsie speaks/);
+    resumed.handle.destroy();
+    const changed = storyOptions(); changed.story!.choices[1]!.effects![0]!.value = true;
+    const stale = mount({ ...changed, storageKey: "stateful-save" });
+    assert.equal(stale.root.getAttribute("data-mode"), "poster");
+    assert.match(stale.root.textContent ?? "", /changed story|damaged/);
+  });
+});

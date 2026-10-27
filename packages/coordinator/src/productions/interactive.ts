@@ -18,6 +18,8 @@ import {
   productionShape,
   productionExportFingerprint,
   publicationBlockers,
+  storyReplay,
+  storyIdentity,
   routingFindings,
   RoutingSchema,
   sceneBeats,
@@ -43,9 +45,8 @@ import type { CommitInput } from "../world/commit.js";
 import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
 
 /**
- * Save the routing record — the import boundary where the no-state rule is enforced twice:
- * the strict parse here refuses a `condition` key by name, and the gate's own routing lane
- * (JSON_TRACK_SCHEMAS) refuses the same shape arriving through a proposal.
+ * Save the strict routing record. Story rules opt into SPEC-063 schemaVersion 2; the same
+ * schema is used by the gate lane for proposals and by the scanner on reopen.
  */
 export async function saveRouting(
   store: WorldStore,
@@ -137,8 +138,18 @@ export function applyRoutingCommand(current: Routing | null, command: RoutingCom
     if (command.operation !== "set-start") throw new Error("Set the start scene before editing routing.");
     return RoutingSchema.parse({ version: 1, start: command.sceneId, choices: [], endings: [], excluded: [], groups: [] });
   }
+  if ("baseVersion" in command && command.baseVersion !== undefined && current.version !== command.baseVersion) throw new Error("Story rules changed while this dialog was open. Review the current rules before saving.");
   let next: Routing;
   switch (command.operation) {
+    case "set-facts":
+      next = { ...current, schemaVersion: 2, facts: command.facts };
+      break;
+    case "set-presentation":
+      next = { ...current, schemaVersion: 2, presentation: [...(current.presentation ?? []).filter(p => p.sceneId !== command.presentation.sceneId), command.presentation] };
+      break;
+    case "set-ending-variants":
+      next = { ...current, schemaVersion: 2, endings: [...current.endings.filter(e => e.sceneId !== command.sceneId), { sceneId: command.sceneId, title: command.title, variants: command.variants }] };
+      break;
     case "set-start":
       next = { ...current, start: command.sceneId };
       break;
@@ -153,7 +164,7 @@ export function applyRoutingCommand(current: Routing | null, command: RoutingCom
       if (index < 0) throw new Error(`Choice ${command.choiceId} does not exist.`);
       next = {
         ...current,
-        choices: current.choices.map((choice, at) => at === index ? { ...choice, ...command.changes } : choice),
+        choices: current.choices.map((choice, at) => at === index ? { ...choice, ...command.changes, when: command.changes.when === null ? undefined : command.changes.when ?? choice.when } : choice),
       };
       break;
     }
@@ -225,6 +236,8 @@ export function applyRoutingCommand(current: Routing | null, command: RoutingCom
   ) {
     refuseExcludedOnRoute(next);
   }
+  if (next.choices.some(c => c.when !== undefined || c.effects?.length)) next = { ...next, schemaVersion: 2 };
+  if (next.schemaVersion !== 2) next = { ...next, choices: next.choices.map(({ when: _when, effects: _effects, ...choice }) => choice) };
   return RoutingSchema.parse({ ...next, version: current.version + 1 });
 }
 
@@ -237,6 +250,7 @@ function scenesNamedBy(command: RoutingCommand): string[] {
   switch (command.operation) {
     case "set-start":
     case "set-ending":
+    case "set-ending-variants":
     case "exclude-scene":
       return [command.sceneId];
     case "add-choice":
@@ -247,6 +261,7 @@ function scenesNamedBy(command: RoutingCommand): string[] {
       return command.group.scenes;
     case "edit-group":
       return command.changes.scenes ?? [];
+    case "set-presentation": return [command.presentation.sceneId];
     default:
       return [];
   }
@@ -277,6 +292,12 @@ export function applyRoutingCommandOnDisk(
     const known = new Set(production.scenes.map((scene) => scene.id));
     const missing = scenesNamedBy(command).find((sceneId) => !known.has(sceneId));
     if (missing !== undefined) throw new Error(`Scene ${missing} is no longer in this production.`);
+    if (command.operation === "set-presentation") {
+      const scene = production.scenes.find(s => s.id === command.presentation.sceneId)!;
+      const blocks = new Set((scene.script?.blocks ?? []).map(b => b.id));
+      const shots = new Set(orderedShots(scene).map(s => s.id));
+      if (command.presentation.blocks.some(b => !blocks.has(b.blockId)) || command.presentation.shots.some(s => !shots.has(s.shotId))) throw new Error("A presentation rule refers to a missing dialogue block or shot");
+    }
     // The map derives a new choice's id from its label against the routing it last saw; two quick
     // adds with one label derive the same id, and the second would be refused as a duplicate. The
     // id is the map's own coinage, so it is made unique here, against the file it applies to.
@@ -307,6 +328,15 @@ export async function appendTraversal(
 ): Promise<void> {
   const parsed = TraversalEvidenceSchema.parse(line);
   await store.gateOp(async () => {
+    const routing = store.getBundle().productions.find(p => p.meta.id === productionId)?.routing;
+    if (routing?.schemaVersion === 2) {
+      if (!parsed.story || parsed.story.identity !== storyIdentity(routing)) throw new Error("Story traversal is stale or missing its route witness");
+      const before = storyReplay(routing, parsed.story.prefix);
+      const after = storyReplay(routing, [...parsed.story.prefix, parsed.choiceId]);
+      const expectedRoute = [routing.start, ...parsed.story.prefix.map(id => routing.choices.find(c => c.id === id)!.to)];
+      if (JSON.stringify(parsed.route) !== JSON.stringify(expectedRoute)) throw new Error("Story traversal scene route does not match its choice prefix");
+      if (before.sceneId !== parsed.from || after.sceneId !== parsed.to || parsed.story.before !== storyIdentity(before.state) || parsed.story.after !== storyIdentity(after.state)) throw new Error("Story traversal does not replay");
+    }
     if (options.requestId !== undefined) {
       const existing = await readStoredTraversal(store, productionId);
       if (existing.some((entry) => entry.requestId === options.requestId)) return;
@@ -349,7 +379,7 @@ export async function readTraversal(store: WorldStore, productionId: string): Pr
 }
 
 export async function readTraversalFromDirectory(dir: string, productionId: string, routing?: Routing): Promise<TraversalEvidence[]> {
-  if (!routing) return (await readStoredTraversal({dir}, productionId)).map(({ requestId: _requestId, ...entry }) => entry);
+  if (!routing || routing.schemaVersion === 2) return (await readStoredTraversal({dir}, productionId)).map(({ requestId: _requestId, ...entry }) => entry);
   if (!routing.choices.length) return [];
   const byChoice = new Map(routing.choices.map(choice => [choice.id, choice])), found = new Map<string, TraversalEvidence>();
   const input = createReadStream(toExtendedLength(join(dir, "productions", productionId, EVIDENCE_FILE)), { encoding: "utf8" });
@@ -482,7 +512,7 @@ function playerHtml(
   presentation: { worldId: string; title: string; eyebrow: string; titles: Record<string, string> },
 ): string {
   const json = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
-  const player = INTERACTIVE_PLAYER_SOURCE.replace("export function mountInteractivePlayer", "function mountInteractivePlayer").replace(/<\/script/gi, "<\\/script");
+  const player = INTERACTIVE_PLAYER_SOURCE.replace(/^export function /gm, "function ").replace(/<\/script/gi, "<\\/script");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>${presentation.title.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!)}</title>
@@ -507,6 +537,7 @@ mountInteractivePlayer(document.getElementById("app"), {
     title: titles[m.sceneId] || m.sceneId,
     clips: m.windows && m.windows.length > 0 ? m.windows.map((w) => ({ src: m.file, from: w.from, to: w.to })) : [m.file],
   }]).concat((manifest.beats || []).map((s) => [s.sceneId, { title: titles[s.sceneId] || s.sceneId, beats: s.beats }]))),
+  story: manifest.routing.schemaVersion === 2 ? manifest.routing : undefined,
   choices: manifest.routing.choices,
   endings: manifest.routing.endings,
   storageKey: KEY,
@@ -602,6 +633,8 @@ function parseInteractiveManifest(value: unknown): InteractiveExportManifest | n
       // A beat names only files the package lists, so every one of them is re-hashed below.
       return (b["picture"] === undefined || (packaged(b["picture"]) && listed.has(b["picture"] as string))) &&
         (b["audio"] === undefined || (packaged(b["audio"]) && listed.has(b["audio"] as string))) &&
+        (routing.data.schemaVersion !== 2 || (typeof b["shotId"] === "string" && /^sh_[a-z0-9-]+$/.test(b["shotId"]) && typeof b["pictureShotId"] === "string" && /^sh_[a-z0-9-]+$/.test(b["pictureShotId"]))) &&
+        (b["blockId"] === undefined || (typeof b["blockId"] === "string" && /^blk_[a-z0-9-]+$/.test(b["blockId"]))) &&
         (b["text"] === undefined || typeof b["text"] === "string") &&
         (b["speaker"] === undefined || typeof b["speaker"] === "string") &&
         ["voice", "tap", "hold"].includes(b["advance"] as string) &&
@@ -743,6 +776,7 @@ export async function exportInteractive(
   if (routing === null) return { ok: false, blockers: ["this production has no routing yet"] };
   const findings = await interactiveFindings(store, production);
   const blockers = publicationBlockers(findings).map((finding) => finding.detail);
+  if (routing.schemaVersion === 2 && routing.presentation?.length && !productionShape(production.meta).playsAsBeats) return { ok: false, blockers: ["Conditional dialogue and shots require beat playback; composite movies cannot hide inactive content."] };
   if (productionShape(production.meta).playsAsBeats) return exportBeats(store, production, routing, blockers, clock, options);
 
   // Every routed, unexcluded scene ships ONE file that covers the whole scene: a pass take, or
@@ -1010,6 +1044,7 @@ async function exportBeats(
     let beats: PlayerBeat[];
     try {
       beats = playerBeats(scene, {
+        story: routing.schemaVersion === 2,
         picture: (shotId) => {
           const source = beatPicturePath(production, artifacts, shotId);
           pictures.set(shotId, source);

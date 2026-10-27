@@ -1,3 +1,4 @@
+import { TraversalEvidenceSchema } from "./routing.js";
 import { GuideVoiceLinesRequestSchema, SetGuideEntrySchema, SetGuideTeasersSchema } from "./world-guide.js";
 import { ARKE_PLAYER_PICTURE_SIZES } from "./world-package.js";
 import { ArkePlayerPartRequestSchema } from "./arke-player-release.js";
@@ -2763,6 +2764,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       from: SceneIdSchema,
       to: SceneIdSchema,
       route: z.array(SceneIdSchema),
+      story: TraversalEvidenceSchema.shape.story,
     })
     .strict(),
   /** Epic 401 (brief §4): ask for the named findings. */

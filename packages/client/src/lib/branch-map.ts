@@ -225,6 +225,10 @@ export function findingRows(
   for (const [index, finding] of findings.entries()) {
     const base = { key: `${finding.kind}-${index}`, severity: finding.severity, kind: finding.kind, sceneIds: finding.sceneIds, choiceIds: finding.choiceIds };
     switch (finding.kind) {
+      case "state-route":
+      case "state-incomplete":
+        rows.push({ ...base, title: "Story state", note: finding.detail, evidence: finding.choiceIds.map(labelOf) });
+        break;
       case "unreachable":
         rows.push({ ...base, title: titleOf(finding.sceneIds[0]!), note: "no way in", evidence: [] });
         break;
@@ -244,6 +248,8 @@ export function findingRows(
         rows.push({ ...base, title: titleOf(finding.sceneIds[0]!), note: `${finding.choiceIds.length} ways in`, evidence: finding.choiceIds.map(labelOf) });
         break;
       case "untraversed-edge":
+        if (finding.detail.includes("Facts:")) rows.push({ ...base, title: labelOf(finding.choiceIds[0]!), note: finding.detail, evidence: [] });
+        break;
       case "unvisited-route":
         break;
     }

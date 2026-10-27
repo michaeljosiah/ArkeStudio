@@ -1,0 +1,16 @@
+.story-dialog.fy-page-sheet { width:min(620px,calc(100vw - 24px)); max-width:calc(100vw - 24px); inset:0; height:auto; max-height:calc(100dvh - 24px); margin:auto; border-radius:18px; }
+.story-dialog .fy-page-sheet__grab { display:none; }
+.story-dialog .fy-page-sheet__body { overflow:auto; min-height:0; max-height:none; display:flex; flex-direction:column; gap:20px; padding:24px; }
+.story-dialog .fy-page-sheet__foot { display:flex; justify-content:flex-end; gap:10px; flex-shrink:0; }
+.story-dialog h3 { font-size:14px; margin:0 0 8px; }
+.story-dialog p { font-size:12px; color:var(--muted-foreground); margin:0 0 12px; }
+.story-field { display:flex; flex-direction:column; gap:8px; flex:1; font-size:12px; min-width:0; }
+.story-rule-row { display:flex; align-items:end; flex-wrap:wrap; gap:8px; margin-bottom:8px; }
+.story-rule-row > select { flex:1; min-width:100px; }
+.story-condition { border-left:2px solid var(--border); padding-left:12px; margin:8px 0; }
+.story-fact { border:1px solid var(--border); border-radius:12px; padding:16px; display:flex; flex-direction:column; gap:12px; min-width:0; }
+.story-map-pick { position:absolute; top:80px; left:24px; z-index:10; padding:12px; background:var(--background); border:1px solid var(--border); border-radius:12px; }
+.story-dialog .ui-btn,.story-dialog input,.story-dialog select { min-height:44px; }
+@media(max-width:599px) { .story-dialog.fy-page-sheet { border-radius:18px; height:auto; max-height:calc(100dvh - 24px); margin:auto; inset:0; } .story-dialog .fy-page-sheet__body { padding:16px; } }
+
+.bm[data-picking="true"] .bm-node { outline:2px dashed var(--ring); outline-offset:5px; cursor:crosshair; }

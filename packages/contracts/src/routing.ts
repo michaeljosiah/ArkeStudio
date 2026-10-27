@@ -1,12 +1,15 @@
+import { orderedShots, type SceneRecord } from "./scene-flow.js";
 import { z } from "zod";
+import { StoryFactSchema, StoryPredicateSchema, StoryEffectSchema, StoryPresentationSchema, StoryEndingSchema } from "./story-state-schema.js";
+import { validateStoryProgram, exploreStory, storyIdentity, storyReplay } from "./story-state.js";
 import { IsoDateTimeSchema, SceneIdSchema } from "./ids.js";
 
 /**
  * Interactive video's routing (epic #401; brief rev 1 §2–§4; Scope §03).
  *
- * One graph authority per production: routing.json. A choice selects the next scene and does
- * nothing else — the schemas are strict, so a `condition`, `state`, or `unlock` key does not
- * fail a rule, it fails PARSE with the key named. That is what "unrepresentable" means here.
+ * One graph authority per production: routing.json. Legacy choices select the next scene.
+ * SPEC-063 schemaVersion 2 explicitly adds typed facts, predicates and literal effects.
+ * Both formats stay strict: executable expressions and unknown fields fail parse.
  * Scenes stay ordinary SPEC-012 scenes; endings and exclusions are designations, never a
  * second scene kind. Validation is named findings with evidence — no score of any kind.
  */
@@ -21,17 +24,21 @@ export const ChoiceSchema = z
     to: SceneIdSchema,
   })
   .strict();
-export type Choice = z.infer<typeof ChoiceSchema>;
+export const StatefulChoiceSchema = ChoiceSchema.extend({ when: StoryPredicateSchema.optional(), effects: z.array(StoryEffectSchema).max(32).optional() });
+export type Choice = z.infer<typeof StatefulChoiceSchema>;
 
 export const RoutingSchema = z
   .object({
     version: z.number().int().min(1),
+    schemaVersion: z.literal(2).optional(),
+    facts: z.array(StoryFactSchema).max(32).optional(),
+    presentation: z.array(StoryPresentationSchema).optional(),
     /** Exactly one start scene — where every route begins. */
     start: SceneIdSchema,
     /** The complete edge list, in authored order — the map's in-layer tiebreak. */
-    choices: z.array(ChoiceSchema),
+    choices: z.array(StatefulChoiceSchema),
     /** Designations of existing scenes; an ending offers no choices (finding, not parse). */
-    endings: z.array(z.object({ sceneId: SceneIdSchema, title: z.string().min(1) }).strict()),
+    endings: z.array(z.object({ sceneId: SceneIdSchema, title: z.string().min(1), variants: z.array(StoryEndingSchema).min(1).optional() }).strict()),
     /** The durable record that makes "unreachable" an author's decision, with its reason. */
     excluded: z.array(z.object({ sceneId: SceneIdSchema, reason: z.string().min(1) }).strict()),
     /** Optional, non-logical, presentation-only. Any other field fails parse. */
@@ -50,6 +57,12 @@ export const RoutingSchema = z
   // traversal vouch for an edge nobody previewed, and one "remove" delete both. Refused at
   // parse, so the shape cannot exist on disk.
   .superRefine((routing, ctx) => {
+    if (routing.schemaVersion !== 2 && (routing.facts !== undefined || routing.presentation !== undefined || routing.choices.some(c => c.when !== undefined || c.effects !== undefined) || routing.endings.some(e => e.variants !== undefined))) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Story rules require routing schemaVersion 2" });
+    }
+    try { validateStoryProgram(routing); } catch (error) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: (error as Error).message });
+    }
     const duplicate = routing.choices.find(
       (choice, index) => routing.choices.findIndex((other) => other.id === choice.id) !== index,
     );
@@ -75,6 +88,7 @@ export const TraversalEvidenceSchema = z
     to: SceneIdSchema,
     /** The route walked to get here, for the unvisited-route finding's evidence. */
     route: z.array(SceneIdSchema),
+    story: z.object({ identity: z.string(), prefix: z.array(z.string()), before: z.string(), after: z.string(), provenance: z.enum(["human", "automated"]) }).strict().optional(),
   })
   .strict();
 export type TraversalEvidence = z.infer<typeof TraversalEvidenceSchema>;
@@ -85,6 +99,8 @@ export type TraversalEvidence = z.infer<typeof TraversalEvidenceSchema>;
 
 export interface RoutingFinding {
   kind:
+    | "state-route"
+    | "state-incomplete"
     | "unreachable"
     | "invalid-destination"
     | "cannot-reach-ending"
@@ -126,6 +142,7 @@ export function routingFindings(
   scenes: ReadonlyArray<{ id: string }>,
   evidence: readonly TraversalEvidence[] = [],
 ): RoutingFinding[] {
+  if (routing.schemaVersion === 2) return stateRoutingFindings(routing, scenes, evidence);
   const findings: RoutingFinding[] = [];
   const sceneIds = new Set(scenes.map((scene) => scene.id));
   const excluded = new Set(routing.excluded.map((entry) => entry.sceneId));
@@ -366,4 +383,44 @@ export function layoutRouting(routing: Routing, scenes: ReadonlyArray<{ id: stri
     .filter((id) => !placed.has(id) && !excluded.has(id))
     .sort();
   return { layers, unplaced };
+}
+
+/** State-aware coverage needs a replayable witness for each pre-state and choice. */
+function stateRoutingFindings(routing: Routing, scenes: readonly {id: string; title?: string}[], evidence: readonly TraversalEvidence[]): RoutingFinding[] {
+  const result: RoutingFinding[] = [];
+  const graph = exploreStory(routing);
+  const identity = storyIdentity(routing);
+  const known = new Set(scenes.map(s => s.id));
+  const add = (detail: string, sceneIds: string[], choiceIds: string[] = [], kind: RoutingFinding["kind"] = "state-route") => result.push({ kind, severity: "blocks", detail, sceneIds, choiceIds });
+  if (!graph.complete) add("State exploration reached its limit; qualified export is unavailable", [], [], "state-incomplete");
+  for (const choice of routing.choices) for (const id of [choice.from, choice.to]) if (!known.has(id)) add(`Choice ${choice.label} names missing scene ${id}`, [id], [choice.id], "invalid-destination");
+  for (const rule of routing.presentation ?? []) {
+    const scene = scenes.find(s => s.id === rule.sceneId);
+    if (!scene) { add(`Presentation rules name missing scene ${rule.sceneId}`, [rule.sceneId]); continue; }
+    if ("shots" in scene || "flow" in scene) {
+      const record = scene as SceneRecord;
+      const blocks = new Set((record.script?.blocks ?? []).map(b => b.id));
+      if (rule.blocks.some(b => !blocks.has(b.blockId))) add(`Show when names a missing script block in ${scene.id}`, [scene.id]);
+      try { const shots = new Set(orderedShots(record).map(s => s.id)); if (rule.shots.some(s => !shots.has(s.shotId))) add(`Show when names a missing shot in ${scene.id}`, [scene.id]); }
+      catch { add(`Cannot read guarded shots in ${scene.id}`, [scene.id]); }
+    }
+  }
+  for (const point of graph.points) if (!known.has(point.sceneId)) add(`Missing scene ${point.sceneId}`, [point.sceneId]);
+  for (const scene of scenes) if (!routing.excluded.some(e => e.sceneId === scene.id) && !graph.points.some(p => p.sceneId === scene.id)) add(`No reachable story state enters ${scene.title ?? scene.id}`, [scene.id], [], "unreachable");
+  for (const problem of graph.problems) add(`${problem.detail} at ${problem.sceneId}. Route: ${problem.prefix.join(" → ") || "start"}. Facts: ${JSON.stringify(problem.state)}`, [problem.sceneId], problem.prefix);
+  const covered = new Set<string>();
+  for (const entry of evidence) {
+    if (!entry.story || entry.story.identity !== identity) continue;
+    try {
+      const before = storyReplay(routing, entry.story.prefix);
+      const choice = routing.choices.find(c => c.id === entry.choiceId);
+      const after = storyReplay(routing, [...entry.story.prefix, entry.choiceId]);
+      if (choice?.from === before.sceneId && entry.from === before.sceneId && entry.to === after.sceneId && entry.story.before === storyIdentity(before.state) && entry.story.after === storyIdentity(after.state)) covered.add(storyIdentity([before.sceneId, before.state, entry.choiceId]));
+    } catch { /* Stale or corrupt evidence cannot vouch for a route. */ }
+  }
+  for (const edge of graph.transitions) {
+    const point = graph.points[edge.from]!;
+    if (!covered.has(storyIdentity([point.sceneId, point.state, edge.choiceId]))) add(`Choice ${edge.choiceId} has not been walked in this state. Route: ${point.prefix.join(" → ") || "start"}. Facts: ${JSON.stringify(point.state)}`, [point.sceneId], [edge.choiceId], "untraversed-edge");
+  }
+  return result;
 }

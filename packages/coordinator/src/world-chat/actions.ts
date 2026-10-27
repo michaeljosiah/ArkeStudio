@@ -4438,6 +4438,7 @@ async function executeSharedResource(
         from: choice.from,
         to: choice.to,
         route: payload.action.route,
+        ...(payload.action.story ? { story: { ...payload.action.story, provenance: "automated" as const } } : {}),
       }, { requestId: action.actionId, precondition });
       return {
         status: "completed",

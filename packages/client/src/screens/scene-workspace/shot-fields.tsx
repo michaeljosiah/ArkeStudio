@@ -378,7 +378,7 @@ export function ShotFields({
     <div className="fy-shot__fields" data-testid="shot-fields">
       {playsAsBeats ? (
         <Section icon={<Speaker size={15} />} name="Beat">
-          <BeatLines beats={shotBeats} sheets={sheets} voices={lineVoices(tableRead.plan)} />
+          <BeatLines story={{ worldId: world.meta.worldId, production, scene }} beats={shotBeats} sheets={sheets} voices={lineVoices(tableRead.plan)} />
           <p className="fy-shot__hint">From the scene’s script · narration is read by the narrator, a line by its speaker</p>
           <div className="fy-shot__row">
             <span className="fy-shot__rowlabel">advance</span>

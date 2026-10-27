@@ -1,9 +1,10 @@
+import { storyReplay, storyPredicate, storyIdentity, storyEnding, storyVisibleBeats, validateStoryProgram } from "./story-state.js";
 /*
  * The interactive video player (design turn 156): one player for the preview in the app and the
  * exported package. The app imports this module and mounts it over the window; the exporter
  * inlines this file's own text into player.html, so what an author previews is what a viewer
- * gets. That is why it is plain JavaScript with no imports and nothing outside the function:
- * it has to run as it is written, in a page with nothing else on it.
+ * gets. Both the player and its pure story-state dependency are plain JavaScript; the source
+ * generator composes them for an offline page without external module dependencies.
  *
  * Its text is also checked. `interactive-player-source.ts` holds a copy the exporter reads, kept
  * identical by `node scripts/interactive-player-source.mjs`, and the tests read the package for
@@ -28,6 +29,20 @@ export function mountInteractivePlayer(root, options) {
   const author = options.author || null;
   const scenes = options.scenes;
   const choices = options.choices;
+  const story = options.story || null;
+  if (story) validateStoryProgram(story);
+  const composite = story && (story.presentation || []).some(rule => (rule.blocks.length || rule.shots.length) && scenes[rule.sceneId]?.clips?.length && !scenes[rule.sceneId]?.beats?.length);
+  if (composite) {
+    const notice = doc.createElement("p");
+    notice.setAttribute("role", "alert");
+    notice.textContent = "Conditional content needs beat playback. A rendered film cannot hide individual lines or people.";
+    root.replaceChildren(notice);
+    if (author?.onClose) { const close = doc.createElement("button"); close.textContent = "Close preview"; close.addEventListener("click", author.onClose); root.append(close); }
+    return { setUnwalked() {}, destroy() { root.replaceChildren(); } };
+  }
+  const identity = story ? storyIdentity({ story, scenes }) : null;
+  let facts = story ? storyReplay(story).state : {};
+  let resumeProblem = "";
   const endings = Object.fromEntries(options.endings.map((e) => [e.sceneId, e.title]));
   /** Which clips each scene plays, in order; a scene with none plays as a slate. */
   // A clip is a file, or a window into one: the cut plays a shot's trimmed range, and a pass's
@@ -39,7 +54,10 @@ export function mountInteractivePlayer(root, options) {
     ]),
   );
   /** A visual novel's scenes read as beats (turn 174); a scene with beats plays no clips. */
-  const beatsOf = (id) => (scenes[id] && Array.isArray(scenes[id].beats) ? scenes[id].beats : []);
+  const beatsOf = (id) => {
+    const beats = scenes[id] && Array.isArray(scenes[id].beats) ? scenes[id].beats : [];
+    return story ? storyVisibleBeats(story, id, beats, facts) : beats;
+  };
   const isBeats = (id) => beatsOf(id).length > 0;
   /** The loaded clip's window in its file: where it starts, and how long it runs once that is known. */
   function span() {
@@ -52,28 +70,41 @@ export function mountInteractivePlayer(root, options) {
   function into() {
     return Math.max(0, (video.currentTime || 0) - span().from);
   }
-  const origin = options.from && scenes[options.from] ? options.from : options.start;
+  const origin = story ? options.start : options.from && scenes[options.from] ? options.from : options.start;
+  const initialPrefix = story ? options.prefix || [] : [];
+  const initial = story ? storyReplay(story, initialPrefix) : null;
+  if (initial) facts = initial.state;
   let unwalked = new Set(author ? author.unwalked : []);
 
   // Playback state only (brief §1, §5): the scene, the position, the route, when. Nothing else
   // exists to persist, by construction.
   // "Play from here" names a place in the scene it starts from: a beat's index, or seconds.
-  const at = origin === options.from && typeof options.at === "number" && options.at > 0 ? options.at : 0;
+  const at = (initial ? initial.sceneId : origin) === options.from && typeof options.at === "number" && options.at > 0 ? options.at : 0;
   let state = { sceneId: origin, positionSec: at, route: [], updatedAt: new Date().toISOString() };
+  if (story) state = { ...state, sceneId: initial.sceneId, route: initialPrefix.slice(), formatVersion: 2, identity };
   let saved = null;
   if (KEY) {
     try {
       saved = JSON.parse(win.localStorage.getItem(KEY) || "null");
     } catch {
+      if (story) resumeProblem = "This saved route is damaged or unavailable. Start again.";
       saved = null;
     }
     // A saved scene this package does not contain is ignored rather than played blind.
-    if (saved && media[saved.sceneId]) state = saved;
+    if (story && saved) {
+      try {
+        if (saved.formatVersion !== 2 || saved.identity !== identity || !Number.isFinite(saved.positionSec) || saved.positionSec < -1) throw new Error("This saved route belongs to a changed story or is damaged. Start again to use this version.");
+        const replay = storyReplay(story, saved.route);
+        if (replay.sceneId !== saved.sceneId || !media[replay.sceneId]) throw new Error("This saved route cannot be replayed. Start again.");
+        facts = replay.state;
+        state = saved;
+      } catch (error) { resumeProblem = error.message; saved = null; }
+    } else if (saved && media[saved.sceneId]) state = saved;
     else saved = null;
   }
 
   /** What the viewer is looking at; the route panel is drawn over any of them. */
-  let mode = author || options.autoplay ? "playing" : "poster";
+  let mode = resumeProblem ? "poster" : author || options.autoplay ? "playing" : "poster";
   let routeOpen = false;
   let clipIndex = 0;
   const durations = [];
@@ -109,7 +140,7 @@ export function mountInteractivePlayer(root, options) {
     return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
   };
   const titleOf = (id) => (scenes[id] ? scenes[id].title : id);
-  const outOf = (id) => choices.filter((c) => c.from === id);
+  const outOf = (id) => choices.filter((c) => c.from === id && (!story || storyPredicate(c.when, facts)));
   const choiceById = (id) => choices.find((c) => c.id === id);
   /** The scenes walked, origin first: the route's vocabulary for evidence (brief §4). */
   const walked = () => [origin].concat(state.route.map((id) => (choiceById(id) || { to: origin }).to));
@@ -655,7 +686,14 @@ export function mountInteractivePlayer(root, options) {
   }
 
   function choose(choice) {
-    if (author && author.onChoice) author.onChoice(choice, walked());
+    if (!outOf(state.sceneId).some(c => c.id === choice.id)) return;
+    let evidence;
+    if (story) {
+      const replay = storyReplay(story, [...state.route, choice.id]);
+      evidence = { identity: storyIdentity(story), prefix: state.route.slice(), before: storyIdentity(facts), after: storyIdentity(replay.state), provenance: "human" };
+      facts = replay.state;
+    }
+    if (author && author.onChoice) author.onChoice(choice, walked(), evidence);
     state.route = state.route.concat([choice.id]);
     unwalked.delete(choice.id);
     play(choice.to, 0);
@@ -666,6 +704,7 @@ export function mountInteractivePlayer(root, options) {
     const choice = choiceById(state.route[index]);
     if (!choice) return;
     state.route = state.route.slice(0, index);
+    if (story) facts = storyReplay(story, state.route).state;
     state.sceneId = choice.from;
     routeOpen = false;
     video.pause && video.pause();
@@ -681,6 +720,8 @@ export function mountInteractivePlayer(root, options) {
 
   function startAgain() {
     state.route = [];
+    if (story) facts = storyReplay(story).state;
+    resumeProblem = "";
     routeOpen = false;
     play(origin, 0);
   }
@@ -712,7 +753,7 @@ export function mountInteractivePlayer(root, options) {
       // A beat scene's place is a beat, so its bar is beats read of the scene's beats.
       const beatCount = resume ? beatsOf(saved.sceneId).length : 0;
       const pct = over ? 100 : resume && beatCount > 0 ? Math.min(100, (100 * (saved.positionSec + 1)) / beatCount) : resume && total ? Math.min(100, (100 * saved.positionSec) / total) : 0;
-      el.hero.innerHTML =
+      el.hero.innerHTML = (resumeProblem ? '<p role="alert" class="aip-resume-problem">' + esc(resumeProblem) + "</p>" : "") +
         '<div class="aip-poster-back"></div><div class="aip-hero">' +
         (options.eyebrow ? '<div class="aip-eyebrow">' + esc(options.eyebrow) + "</div>" : "") +
         '<div class="aip-hero-title">' + esc(options.title) + '</div><div class="aip-hero-actions">' +
@@ -725,12 +766,16 @@ export function mountInteractivePlayer(root, options) {
       return;
     }
     if (mode === "ending") {
-      const ending = endings[state.sceneId];
+      let variant;
+      let ending = endings[state.sceneId];
+      try { if (story) { variant = storyEnding(story, state.sceneId, facts); ending = variant?.title; } }
+      catch (error) { ending = error.message; }
       const trail = walked();
       el.hero.innerHTML =
         '<div class="aip-poster-back"></div><div class="aip-hero">' +
         '<div class="aip-eyebrow">' + (ending !== undefined ? "Ending" : "No choices from here") + "</div>" +
         '<div class="aip-hero-title">' + esc(ending !== undefined ? ending : titleOf(state.sceneId)) + "</div>" +
+        (variant?.text ? '<div class="aip-ending-text">' + esc(variant.text) + "</div>" : "") +
         (trail.length > 1
           ? '<div class="aip-trail">' + trail.map((id, i) => (i > 0 ? "<span>→ " + esc((choiceById(state.route[i - 1]) || { label: "" }).label) + " →</span>" : "") + "<b>" + esc(titleOf(id)) + "</b>").join("") + "</div>"
           : "") +
@@ -763,7 +808,10 @@ export function mountInteractivePlayer(root, options) {
     });
     el.panel.innerHTML =
       '<div class="aip-panel-head"><span style="flex:1">Route</span><button type="button" class="aip-ib" data-act="route" aria-label="Close">' + icon(I.x) + "</button></div>" +
-      '<div class="aip-panel-list">' + list + "</div>" +
+      '<div class="aip-panel-list">' + list + (story && author ? '<section aria-label="Preview facts"><h3>Preview facts</h3>' + (story.facts || []).map(fact => {
+        const origin = storyReplay(story, state.route).origins[fact.id];
+        return '<p><b>' + esc(fact.label) + '</b>: ' + esc(facts[fact.id]) + '<br><small>' + esc(origin ? (choiceById(origin)?.label || origin) : "Starting value") + '</small></p>';
+      }).join("") + '</section>' : "") + "</div>" +
       '<div class="aip-panel-foot"><button type="button" class="aip-btn small" data-act="restart">' + icon(I.back, 15) + "Start over</button></div>";
   }
 
@@ -772,6 +820,7 @@ export function mountInteractivePlayer(root, options) {
     el.strip.innerHTML =
       "<b>Preview</b><span class=\"aip-muted\">from " + esc(titleOf(origin)) + '</span><span class="aip-spacer"></span>' +
       (unwalked.size > 0 ? "<span>" + unwalked.size + " choice" + (unwalked.size === 1 ? "" : "s") + " not walked</span>" : '<span class="aip-muted">every choice walked</span>') +
+      (story ? '<button type="button" class="aip-btn small" data-act="route">Preview facts</button>' : "") +
       (author.onBranchMap ? '<button type="button" class="aip-btn small" data-act="map" aria-label="Branch map">' + icon(I.map, 15) + '<span class="t">Branch map</span></button>' : "") +
       (author.onClose ? '<button type="button" class="aip-btn small" data-act="close" aria-label="Close preview">' + icon(I.x, 15) + '<span class="t">Close preview</span> <span class="aip-kbd">Esc</span></button>' : "");
   }

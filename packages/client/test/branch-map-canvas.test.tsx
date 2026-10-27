@@ -389,16 +389,36 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.deepEqual(commands(item), [{ operation: "exclude-scene", sceneId: "sc_undertow", reason: "kept for the audio" }]);
   });
 
-  it("draws a choice from the Inspector, the pointer-free way to what dragging does", async () => {
+  it("defines a connector in the dialog from the Inspector entry point", async () => {
     const item = await mount();
     await click(card(item, "sc_vigil"));
     await click(button(item, "Draw a choice from here"));
-    await change(all(item, 'input[aria-label="Choice label"]')[0], "Take the bell stair");
-    await change(all(item, 'select[aria-label="To scene"]')[0], "sc_towers");
+    await change(all(item, 'input[aria-label="Choice text"]')[0], "Take the bell stair");
+    await change(all(item, 'select[aria-label="Destination scene"]')[0], "sc_towers");
     await click(button(item, "Add choice"));
     assert.deepEqual(commands(item), [
       { operation: "add-choice", choice: { id: "ch_take-the-bell-stair", from: "sc_vigil", label: "Take the bell stair", to: "sc_towers" } },
     ]);
+  });
+
+  it("the node plus defines one connector and retains typed rules across map selection", async () => {
+    const item = await mount({ ...ROUTING, schemaVersion: 2, facts: [{ id: "dev", label: "Dev Malik", type: "enum", values: ["Alive", "Lost at release"], default: "Alive" }] });
+    await click(card(item, "sc_quarter"));
+    await click(all(item, '[data-scene="sc_quarter"] .bm-port')[0]);
+    assert.ok(all(item, 'dialog.story-dialog')[0]);
+    assert.equal(button(item, "Add choice")!.hasAttribute("disabled"), true);
+    await change(all(item, 'input[aria-label="Choice text"]')[0], "Ask Dev to hold the release");
+    await click(button(item, "Add condition"));
+    await click(button(item, "Remember a value"));
+    await change(all(item, 'select[aria-label="Remember value"]')[0], "Lost at release");
+    await click(button(item, "Choose on map"));
+    assert.equal(all(item, 'dialog.story-dialog').length, 0);
+    await click(card(item, "sc_towers"));
+    assert.equal((all(item, 'input[aria-label="Choice text"]')[0] as HTMLInputElement).value, "Ask Dev to hold the release");
+    assert.equal(button(item, "Add choice")!.hasAttribute("disabled"), false);
+    await click(button(item, "Add choice"));
+    assert.deepEqual(commands(item), [{ operation: "add-choice", choice: { id: "ch_ask-dev-to-hold-the-release", from: "sc_quarter", to: "sc_towers", label: "Ask Dev to hold the release", when: { op: "eq", fact: "dev", value: "Alive" }, effects: [{ fact: "dev", value: "Lost at release" }] } }]);
+    assert.ok(all(item, 'dialog.story-dialog')[0], "the draft stays until its saved snapshot arrives");
   });
 
   it("previews in the shared player over the window, and a choice pressed there is walk evidence", async () => {

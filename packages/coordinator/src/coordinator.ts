@@ -12017,6 +12017,7 @@ export class Coordinator {
           from: msg.from,
           to: msg.to,
           route: msg.route,
+          ...(msg.story ? { story: msg.story } : {}),
         }).catch(() => {});
         if (!this.stillOpen(store)) return;
         await this.emitRoutingFindings(store, msg.worldId, msg.productionId);

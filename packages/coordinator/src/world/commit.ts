@@ -616,6 +616,7 @@ function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: strin
   for (const file of files) {
     if (!file.newContent || !file.path.endsWith(".json")) continue;
     try {
+      if (/^productions\/[^/]+\/routing\.json$/.test(file.path) && JSON.parse(file.newContent)?.schemaVersion === 2) boundary = Math.max(boundary, 113);
       if (/^productions\/[^/]+\/editor-requests\.json$/.test(file.path) && JSON.parse(file.newContent)?.schemaVersion === 2)
         boundary = Math.max(boundary, EDITOR_EFFECT_PROPOSALS_SCHEMA_VERSION);
       if (/^references\/[^/]+\/kit\.json$/.test(file.path)) {
