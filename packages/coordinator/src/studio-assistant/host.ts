@@ -130,6 +130,7 @@ export class StudioAssistantHost {
       default: return result("refused", "invalid");
     }
   }
+  reconcileRetirement(): Promise<void> { return this.service.reconcileRetirement(); }
   stop(): Promise<void> {
     this.closed.abort(); for (const client of this.clients.values()) client.detach();
     return this.service.stop();

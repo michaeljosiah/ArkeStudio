@@ -225,6 +225,7 @@ ${JSON.stringify(evidence)}`;
     try { this.stopModelEvents?.(); } catch { /* Closed admission already suppresses late observation. */ }
     this.turn?.share?.resolve(false); this.turn?.control.abort(); this.subscribers.clear();
   }
+  reconcileRetirement(): Promise<void> { return this.deps.model.reconcileRetirement?.() ?? Promise.resolve(); }
   stop(): Promise<void> {
     this.closeAdmission();
     return this.stopping ??= (async () => {

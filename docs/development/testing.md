@@ -2008,6 +2008,15 @@ Adapter retirement regressions separately cover exited versus disposed owners an
 replacement receiving no request. Runner tests retain pending creation/files until the late
 original owner receives the captured cleanup confirmation. This finite Windows synthetic
 qualification does not establish live-model GPU cleanup, cross-restart or other-platform acceptance.
+`test/supervisor-origin-cleanup.test.ts` verifies native confirmed Stop versus ordinary Stop,
+failed cleanup/retry, forged origin refusal and replacement-generation isolation. Runner checks
+bind immutable original writer/provider cleanup proof, retaining unknown or incomplete outcomes.
+The pinned Stop scenario now uses those actual captured witnesses rather than a manual combined
+confirmation. `test/studio-assistant/owner-shutdown.test.ts` opens an authenticated production
+host and active world with two native stand-ins, verifies retirement reconciliation after both
+native stops, and checks durable world closure before reporting a retirement error. Run these
+with native process/socket access, then coordinator typecheck after the last test edit. Synthetic
+stand-ins do not establish binary provenance, live model/GPU or remaining activation gates.
 
 ## System status (master turn 241; System 240 review)
 

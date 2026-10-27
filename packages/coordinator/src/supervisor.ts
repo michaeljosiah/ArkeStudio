@@ -263,6 +263,9 @@ export interface SupervisedProcessOrigin {
 }
 const processOrigins = new WeakSet<SupervisedProcessOrigin>();
 export const isSupervisedProcessOrigin = (value: SupervisedProcessOrigin): boolean => processOrigins.has(value);
+const processOriginCleanup = new WeakMap<SupervisedProcessOrigin, () => boolean>();
+/** Original host capability only: loss of readiness/current() is never native cleanup proof. */
+export const isSupervisedProcessCleanupConfirmed = (value: SupervisedProcessOrigin): boolean => processOriginCleanup.get(value)?.() === true;
 
 export class ChildSupervisor extends EventEmitter {
   readonly id: string;
@@ -273,6 +276,7 @@ export class ChildSupervisor extends EventEmitter {
   private readonly deps: SupervisorDeps;
   private child: ChildProcess | null = null;
   private processOrigin: SupervisedProcessOrigin | null = null;
+  private confirmedCleanupEpoch = -1;
   private _port: number | null = null;
   private _status: SupervisorStatus = "stopped";
   private _reason: string | undefined;
@@ -344,6 +348,7 @@ export class ChildSupervisor extends EventEmitter {
       current: () => this.processOrigin === origin && !this.stopping && this.status === "healthy" && this.child === child &&
         this.launchEpoch === epoch && child.exitCode === null && child.signalCode === null });
     this.processOrigin = origin; processOrigins.add(origin);
+    processOriginCleanup.set(origin, () => this.confirmedCleanupEpoch >= epoch && (child.exitCode !== null || child.signalCode !== null));
     return origin;
   }
 
@@ -952,6 +957,7 @@ export class ChildSupervisor extends EventEmitter {
       throw new Error(`${this.id} has not confirmed process exit; its memory cannot be handed over.`);
     }
     if (this.descendants.length > 0) throw new Error(`${this.id} has not confirmed descendant exit; its memory cannot be handed over.`);
+    this.confirmedCleanupEpoch = this.launchEpoch;
     await this.recovery?.ownerStopped();
   }
 

@@ -1536,6 +1536,14 @@ cleanup retries. The existing host-only `SessionRef.privateOwnerStopped` confirm
 original native owners retires only captured local session/cache state, even after exit/disposal,
 without querying a dead/replacement endpoint. A pending creation retains this confirmation and
 its files until its original host work settles. Writer exit or HTTP Stop alone is insufficient.
+`supervisor.ts` now keeps a host-only cleanup witness for each captured process generation;
+only successful native `stopAndConfirm()` qualifies it, independently of current readiness.
+The original writer and managed provider expose their own captured witnesses. A private
+transport may bind their conjunction into its runner entry; reconciliation snapshots that
+method and retains unknown/incomplete proof. Production coordinator shutdown calls retirement
+reconciliation after supervised writer and managed provider cleanup. A retirement failure joins
+the existing cleanup error report after durable world closure, rather than skipping that closure.
+This wires shutdown housekeeping, not default Studio destination/model activation.
 
 Actual bundled Windows fixtures qualify normal completion, upstream overflow, verified writer/
 provider composition and Stop with a held synthetic provider. They retain address/GPU planning

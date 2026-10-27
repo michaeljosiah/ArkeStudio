@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
 import type { PrivateSessionRequest, PrivateSessionWriter } from "@arke-studio/contracts";
+import { isSupervisedProcessCleanupConfirmed, type SupervisedProcessOrigin } from "../supervisor.js";
 import { VerifiedLoopbackHttpTransport, type VerifiedHttpOptions, type VerifiedHttpPolicy } from "../local-ai/verified-loopback-http.js";
 
 const refused = () => new Error("The private writing connection is outside its captured session.");
@@ -18,8 +19,10 @@ export class ManagedStudioWriterTransport extends VerifiedLoopbackHttpTransport 
   private creating = false;
   private generated = false;
   private sealed = false;
+  private readonly originalOwner: SupervisedProcessOrigin;
   constructor(options: VerifiedHttpOptions & { authorization: string; request: PrivateSessionRequest }) {
     super({ ...options, timeoutMs: options.timeoutMs ?? 300_000 }, 900_000);
+    this.originalOwner = options.origin;
     const { model, system, prompt, outputTokenLimit } = options.request;
     if (!model || model.length > 512 || model.indexOf("/") < 1 || typeof system !== "string" || typeof prompt !== "string" ||
       Buffer.byteLength(system) + Buffer.byteLength(prompt) > 1024 ** 2 || !Number.isSafeInteger(outputTokenLimit) || outputTokenLimit < 1 || outputTokenLimit > 4096 ||
@@ -28,6 +31,8 @@ export class ManagedStudioWriterTransport extends VerifiedLoopbackHttpTransport 
     this.identity = createHash("sha256").update(JSON.stringify([options.origin.identity, this.authorization, this.requestInput])).digest("hex");
   }
   current(): boolean { return this.available(); }
+  /** No inference claim: the backing provider must confirm its own original process separately. */
+  ownerStopped(): boolean { return isSupervisedProcessCleanupConfirmed(this.originalOwner); }
   bindDirectory(directory: string, agent: string): boolean {
     if (!this.available() || this.sealed || this.directory !== null || typeof directory !== "string" || !isAbsolute(directory) || directory.length > 4096 || [...directory].some(character => character.charCodeAt(0) < 32) ||
       !["studio-assistant", "diagnostic-specialist"].includes(agent)) return false;

@@ -3,6 +3,7 @@ import type { OllamaEngineService } from "../local-ai/ollama.js";
 import { ManagedOllamaTransport } from "../local-ai/managed-ollama-transport.js";
 import type { windowsConnectionOrigin } from "../local-ai/windows-connection-origin.js";
 import { StudioProviderBridge } from "./provider-bridge.js";
+import { isSupervisedProcessCleanupConfirmed } from "../supervisor.js";
 
 /** Trusted composition of the existing managed Ollama owner and private native bridge.
  * No personal URL or caller-selected upstream can acquire this capability. The original
@@ -34,6 +35,8 @@ export class ManagedStudioProviderBridge {
   approve(): boolean { return this.owner.current() && this.bridge.approve(); }
   seal(): void { this.sealed = true; this.bridge.seal(); this.transport.seal(); }
   busy(): boolean { return this.bridge.busy() || this.transport.busy(); }
+  /** Original managed native owner, including its tracked descendants; never HTTP health/Stop. */
+  ownerStopped(): boolean { return isSupervisedProcessCleanupConfirmed(this.owner.process); }
   async stop(): Promise<boolean> {
     this.seal();
     const results = await Promise.allSettled([this.bridge.stop(), this.transport.stop()]);

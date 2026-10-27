@@ -100,7 +100,8 @@ for (const { overflow, managedWriter, managedProvider, interrupted } of scenario
           catch (error) { writerReads.push({ method: init?.method ?? "GET", path, ms: Date.now() - at }); throw error; }
         };
       }
-      return { configuration: { baseURL: route.baseURL, apiKey: route.apiKey }, identity: route.identity, approve: () => bridge.approve(), seal: () => bridge.seal(), stop: () => bridge.stop(), ...(writer ? { writer } : {}) }; } });
+      return { configuration: { baseURL: route.baseURL, apiKey: route.apiKey }, identity: route.identity, approve: () => bridge.approve(), seal: () => bridge.seal(), stop: () => bridge.stop(),
+        ...(writer && bridge instanceof ManagedStudioProviderBridge ? { ownersStopped: () => writer.ownerStopped() && bridge.ownerStopped() } : {}), ...(writer ? { writer } : {}) }; } });
   try {
     phase = "native readiness";
     await wiring.relaunchHarness({}); await wiring.supervisor.start(); await until(() => wiring.supervisor!.status === "healthy", "the isolated pinned native bridge owner", 35_000);
@@ -124,9 +125,10 @@ for (const { overflow, managedWriter, managedProvider, interrupted } of scenario
       const refused = await fetch(route.baseURL + "/chat/completions", { method: "POST", body: JSON.stringify(expected), headers: { authorization: `Bearer ${route.apiKey}` } });
       assert.equal(refused.status, 401); await refused.arrayBuffer();
       await adapter.dispose?.(); await wiring.supervisor.stopAndConfirm();
+      await runner.reconcileRetirement();
       assert(runner.busy()); assert(gpu.isBusy("Ollama"), "writer exit alone cannot release the backing inference lane");
       await assertBridgeAddress(route.baseURL, true);
-      await service!.dispose(); await runner.ownerStopped();
+      await service!.dispose(); await runner.reconcileRetirement();
       await until(() => !runner.busy() && !gpu.isBusy("Ollama"), "both exact native owners confirmed cleanup");
       await assertBridgeAddress(route.baseURL, false);
     } else if (overflow) { await assert.rejects(operation, /could not be completed/); assert(runner.busy()); assert(gpu.isBusy("Ollama")); }

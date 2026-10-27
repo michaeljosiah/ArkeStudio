@@ -13,6 +13,7 @@ export interface StudioModelPort {
   run(input: { role: StudioRole; model: string; prompt: string }, signal: AbortSignal,
     authorize: (disclosure: StudioModelDisclosure, signal: AbortSignal) => Promise<{ cloudApproved: boolean }>): Promise<string>;
   stop(): Promise<void>;
+  reconcileRetirement?(): Promise<void>;
 }
 export interface StudioPrivateTransport {
   configuration: PrivateSessionTransport; identity: string; approve(): boolean;
@@ -20,6 +21,8 @@ export interface StudioPrivateTransport {
   seal(): void;
   /** Final release, only after native retirement and original writer HTTP cleanup. */
   stop(): Promise<boolean>;
+  /** Trusted captured proof for BOTH original native owners, independent of HTTP cleanup. */
+  ownersStopped?(): boolean;
   writer?: PrivateSessionWriter;
 }
 interface Active { control: AbortController; transport?: StudioPrivateTransport; listen?: AbortController; ownerStopped?: () => void; ownersStopped?: boolean; retire?: (signal: AbortSignal) => Promise<boolean>; retired?: boolean; retireFiles?: () => Promise<boolean>; finishing?: Promise<void>; dir?: string; sessionId?: string; work?: Promise<string>; confirmed: boolean; started: boolean; workFinished: boolean; failed?: boolean }
@@ -103,7 +106,8 @@ export class HarnessStudioModelRunner implements StudioModelPort {
         bindSession: route.writer.bindSession.bind(route.writer), current: route.writer.current.bind(route.writer), fetch: route.writer.fetch.bind(route.writer),
         seal: route.writer.seal.bind(route.writer), busy: route.writer.busy.bind(route.writer), close: route.writer.close.bind(route.writer) }) : undefined;
       entry.transport = Object.freeze({ configuration: Object.freeze({ ...route.configuration }), identity: route.identity,
-        approve: route.approve.bind(route), seal: route.seal.bind(route), stop: route.stop.bind(route), ...(writer ? { writer } : {}) });
+        approve: route.approve.bind(route), seal: route.seal.bind(route), stop: route.stop.bind(route),
+        ...(route.ownersStopped ? { ownersStopped: route.ownersStopped.bind(route) } : {}), ...(writer ? { writer } : {}) });
       if (!/^[a-f0-9]{64}$/.test(entry.transport.identity)) throw new Error("The private transport identity is invalid.");
       if (writer && (!/^[a-f0-9]{64}$/.test(writer.identity) || !writer.current())) throw new Error("The private writer identity is unavailable.");
       signal.throwIfAborted();
@@ -222,7 +226,13 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     entry.finishing = work().finally(() => { entry.finishing = undefined; }); return entry.finishing;
   }
   /** Trusted housekeeping only: retry known-complete/unsent native retirement, never inference. */
-  async reconcileRetirement(): Promise<void> { for (const entry of this.active) if (entry.workFinished && (!entry.started || entry.confirmed)) await this.finish(entry); }
+  async reconcileRetirement(): Promise<void> {
+    for (const entry of this.active) {
+      let stopped = false; try { stopped = entry.transport?.ownersStopped?.() === true; } catch { /* Unknown native cleanup retains ownership. */ }
+      if (stopped) { entry.ownersStopped = true; entry.control.abort(); entry.ownerStopped?.(); }
+      if (entry.workFinished && (!entry.started || entry.confirmed || entry.ownersStopped)) await this.finish(entry);
+    }
+  }
   async stop(): Promise<void> {
     for (const entry of this.active) this.seal(entry);
     this.lifetime.abort(); for (const entry of this.active) entry.control.abort();

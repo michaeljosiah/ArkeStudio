@@ -214,7 +214,7 @@ export interface AssembleHarnessOptions {
 
 export interface AssembledHarness {
   /** Host-only original bundled writer. No existing-install ownership or model approval. */
-  createPrivateWriter?(request: PrivateSessionRequest): PrivateSessionWriter | null;
+  createPrivateWriter?(request: PrivateSessionRequest): (PrivateSessionWriter & { ownerStopped(): boolean }) | null;
   recovery?: HarnessRecoveryOwner;
   reconfigureOllama?: (apply?: () => Promise<void>) => Promise<void>;
   harness: DiscoveredHarness | null;

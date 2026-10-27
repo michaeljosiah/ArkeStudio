@@ -167,6 +167,30 @@ it("Stop retains the sealed bridge through unknown native work and failed sessio
     assert.equal(closes, 1); assert.equal(h.sent.length, 1); assert.deepEqual(await readdir(h.scratch), []);
   } finally { retired = true; await runner.stop(); await runner.ownerStopped(); }
 });
+it("retirement uses the captured proof of both original owners and retains unknown or incomplete cleanup", async () => {
+  const h = await fixture(); nativeCapabilities(h.raw); h.fail();
+  let writerStopped = false, providerStopped = false, unavailable = false, confirmations = 0, closes = 0;
+  const original = h.raw.createSession.bind(h.raw);
+  h.raw.createSession = async value => {
+    const session = await original(value);
+    return { ...session, privateDestination: async () => ({ provider: "ollama", model: "ollama/test", local: true, identity: "a".repeat(64) }),
+      privateOwnerStopped: () => { confirmations++; session.privateOwnerStopped?.(); }, privateRetire: async () => writerStopped && providerStopped };
+  };
+  const transport = { configuration: { baseURL: "http://127.0.0.1:43210/v1", apiKey: "e".repeat(64) }, identity: "f".repeat(64),
+    approve: () => true, seal() {}, stop: async () => { closes++; return true; },
+    ownersStopped() { if (unavailable) throw Error("Unknown original cleanup"); return writerStopped && providerStopped; } };
+  const runner = new HarnessStudioModelRunner({ ...h.deps, privateTransport: async () => transport });
+  try {
+    await assert.rejects(runner.run(input, new AbortController().signal, allow), /could not be completed/);
+    transport.ownersStopped = () => true; // Later mutation cannot replace original host proof.
+    await runner.reconcileRetirement(); assert(runner.busy()); assert.equal(confirmations, 0); assert.equal(closes, 0);
+    writerStopped = true; await runner.reconcileRetirement(); assert(runner.busy()); assert.equal(confirmations, 0);
+    unavailable = true; await runner.reconcileRetirement(); assert(runner.busy()); assert.equal(confirmations, 0);
+    unavailable = false; providerStopped = true; await runner.reconcileRetirement();
+    await until(() => !runner.busy(), "both original native owners permit exact retirement");
+    assert.equal(confirmations, 1); assert.equal(closes, 1); assert.equal(h.sent.length, 1); assert.deepEqual(await readdir(h.scratch), []);
+  } finally { writerStopped = true; providerStopped = true; unavailable = false; await runner.stop(); await runner.ownerStopped(); }
+});
 it("retained bridge cleanup does not repeat native retirement after closing its original writer", async () => {
   const h = await fixture(); nativeCapabilities(h.raw); let writerClosed = false, cleanupReady = false, retires = 0, closes = 0;
   const original = h.raw.createSession.bind(h.raw);

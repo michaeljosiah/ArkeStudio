@@ -23465,6 +23465,9 @@ export class Coordinator {
         this.opts.ming?.dispose().then(() => this.localGpu.confirmMingCleanup(AbortSignal.timeout(30_000))),
         this.opts.ollama?.service.dispose(),
       ]);
+      // The captured transport checks BOTH original native owners itself. Failed cleanup of
+      // either owner cannot be replaced by a successful stop of a newer process or HTTP client.
+      const studioRetirementStops = await Promise.allSettled([Promise.resolve().then(() => this.studioAssistantHost?.reconcileRetirement())]);
       await historyStopped;
       await studioStopped;
       await this.worldQuery.stop();
@@ -23479,7 +23482,7 @@ export class Coordinator {
       // called, so a fault recorded in the last moments of a run — the kind most worth having,
       // because the run ended — could still be in the queue when the process left.
       await this.appLog?.drain();
-      const failedRuntimeStops = [...setupStops, ...comfyUiStops, ...runtimeStops, ...supervisedStops].filter(result => result.status === "rejected");
+      const failedRuntimeStops = [...setupStops, ...comfyUiStops, ...runtimeStops, ...supervisedStops, ...studioRetirementStops].filter(result => result.status === "rejected");
       if (failedRuntimeStops.length) throw new AggregateError(failedRuntimeStops.map(result => result.reason), "Local runtime cleanup did not confirm exit.");
       await this.opts.storageHealth?.stop();
       await systemResourcesStopped;
