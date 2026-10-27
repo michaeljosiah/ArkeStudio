@@ -156,6 +156,7 @@ export function beatPreviewOptions({
   voices,
   from,
   at,
+  shotId,
   prefix,
   unwalked,
   onChoice,
@@ -169,6 +170,8 @@ export function beatPreviewOptions({
   from: string;
   /** The beat of `from` to begin on; its first when absent. */
   at?: number;
+  /** A shot is resolved after the selected prefix's visibility rules, including its first active line. */
+  shotId?: string;
   prefix?: string[];
   unwalked: readonly string[];
   onChoice: NonNullable<NonNullable<InteractivePlayerOptions["author"]>["onChoice"]>;
@@ -179,10 +182,11 @@ export function beatPreviewOptions({
   const routing = production.routing;
   const scenes = Object.fromEntries(production.scenes.map(scene => [scene.id, { title: scene.title, beats: scenePlayerBeats(production, world.artifacts, world.sheets, world.meta.slug, scene, voices) }]));
   let startAt = at;
-  if (routing?.schemaVersion === 2 && at !== undefined && at > 0 && scenes[from]) {
-    const target = scenes[from]!.beats[at];
+  if (routing?.schemaVersion === 2 && (shotId !== undefined || at !== undefined) && scenes[from]) {
+    const target = at === undefined ? undefined : scenes[from]!.beats[at];
     const active = storyVisibleBeats(routing, from, scenes[from]!.beats, storyReplay(routing, prefix ?? []).state);
-    startAt = target ? Math.max(0, active.findIndex(beat => beat.shotId === target.shotId && beat.blockId === target.blockId)) : 0;
+    startAt = shotId !== undefined ? active.findIndex(beat=>beat.shotId===shotId) : target ? active.findIndex(beat => beat.shotId === target.shotId && beat.blockId === target.blockId) : -1;
+    if (startAt < 0) throw new Error("This shot is hidden or unavailable on the selected route.");
   }
   return {
     title: production.meta.title,

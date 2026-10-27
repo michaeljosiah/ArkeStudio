@@ -4,9 +4,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { storyIdentity, storyReplay, type ClientMessage, type ClientState, type RoutingCommand, type Routing, type Scene } from "@arke-studio/contracts";
+import { storyIdentity, storyReplay, storyVisibleBeats, type ClientMessage, type ClientState, type RoutingCommand, type Routing, type Scene } from "@arke-studio/contracts";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { BranchMapScreen, sceneClips } from "../src/screens/branch-map.js";
+import { beatPreviewOptions, BranchMapScreen, sceneClips } from "../src/screens/branch-map.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -516,7 +516,7 @@ describe("the branch map canvas (design turn 157)", () => {
     await change(all(item,'select[aria-label="Remember value"]')[0],"Lost");
     await change(all(item,'select[aria-label="If unavailable"]')[0],"disabled");
     assert.ok(button(item,"Review change")!.hasAttribute("disabled"),"an authored reason is required");
-    await change(all(item,'textarea[aria-label="Unavailable reason"]')[0],"Dev cannot reach the release.");
+    await change(all(item,'textarea[aria-label="Unavailable reason"]')[0],"  Dev cannot reach the release.  ");
     await click(button(item,"Review change"));
     assert.deepEqual(commands(item),[],"review does not write");
     assert.match(text(item.container.ownerDocument.body),/Dev Malik is not Alive/);
@@ -560,10 +560,29 @@ describe("the branch map canvas (design turn 157)", () => {
     await click(button(item,"Story facts · 1"));
     await click(button(item,"Edit Dev Malik"));
     const input=all(item,'input[aria-label="Values for dev"]')[0] as HTMLInputElement;
+    await change(all(item,'input[aria-label="Name for dev"]')[0],"  Dev Malik  ");
     for(const value of ["Alive, Lost ","Alive, Lost at ","Alive, Lost at release"]){await change(input,value);assert.equal(input.value,value);}
     await blur(input);
     await click(button(item,"Keep fact"));
     assert.deepEqual(commands(item),[{operation:"set-facts",baseVersion:routing.version,facts:[{id:"dev",label:"Dev Malik",type:"enum",values:["Alive","Lost at release"],default:"Alive"}]}]);
+    await act(async()=>__setStateForTest(state({...routing,version:routing.version+1,facts:[{id:"dev",label:"Dev Malik",type:"enum",values:["Alive","Lost at release"],default:"Alive"}]})));
+    assert.equal(button(item,"Keep fact"),undefined,"the normalized acknowledgement closes the fact editor");
+    assert.equal(button(item,"Load current rules"),undefined);
+  });
+
+  it("resolves a requested shot after route guards and refuses a hidden shot", () => {
+    const routing:Routing={...ROUTING,schemaVersion:2,facts:[{id:"dev",label:"Dev",type:"boolean",default:false}],presentation:[{sceneId:"sc_quarter",blocks:[],shots:[{shotId:"sh_1",when:{op:"eq",fact:"dev",value:true}}]}]};
+    const snapshot=state(routing);
+    const production=snapshot.world!.productions.find(p=>p.meta.id==="low-water")!;
+    production.scenes=[{...SCENES[0]!,shots:[1,2,3].map(number=>({id:`sh_${number}`,number,title:`Shot ${number}`,description:`Shot ${number}`,audio:{kind:"vo" as const,line:`Line ${number}`}}))}];
+    const options=(shotId:string)=>beatPreviewOptions({world:snapshot.world!,production,voices:new Map(),from:routing.start,shotId,unwalked:[],onChoice:()=>{},onClose:()=>{}});
+    for(const [shotId,index] of [["sh_2",0],["sh_3",1]] as const){
+      const preview=options(shotId);
+      const active=storyVisibleBeats(routing,routing.start,preview.scenes[routing.start]!.beats,storyReplay(routing,[]).state);
+      assert.equal(preview.at??0,index);
+      assert.equal(active[preview.at??0]!.shotId,shotId,"the preview opens on the requested visible shot");
+    }
+    assert.throws(()=>options("sh_1"),/This shot is hidden or unavailable/);
   });
 
   it("keeps shot-condition controls reachable in a scripted scene", async () => {

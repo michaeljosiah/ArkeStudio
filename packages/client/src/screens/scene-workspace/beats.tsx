@@ -163,23 +163,22 @@ export function SceneBeatPreview({
   }, [production.scenes, sceneId, startShotId]);
   if (production.routing?.schemaVersion === 2 && sceneId !== production.routing.start && prefix === null) return <StoryPreviewStart routing={production.routing} sceneId={sceneId} onClose={onClose} onStart={setPrefix} />;
   if (!voices.ready) return <p className="fy-swbeat__none" role="status">Gathering the voices…</p>;
-  return (
-    <InteractivePlayerView
-      className="bm-player"
-      label="Preview"
-      unwalked={unwalked}
-      options={beatPreviewOptions({
+  let options:ReturnType<typeof beatPreviewOptions>;
+  try {
+    options=beatPreviewOptions({
         world,
         production,
         voices: voices.files,
         from: sceneId,
         ...(prefix ? { prefix } : {}),
-        ...(at > 0 ? { at } : {}),
+        ...(production.routing?.schemaVersion === 2 && startShotId ? {shotId:startShotId} : at > 0 ? { at } : {}),
         unwalked,
         onChoice: (choice, walked, story) => recordTraversal(worldId, productionId, choice.id, choice.from, choice.to, walked, story),
         ...(production.routing ? { onBranchMap: () => navigate(`/w/${worldId}/p/${productionId}/branch-map`) } : {}),
         onClose,
-      })}
-    />
-  );
+    });
+  } catch (error) {
+    return <div className="fy-swbeat__none" role="alert"><p>{error instanceof Error && error.message.startsWith("This shot") ? error.message : "This shot cannot be previewed on the selected route."}</p>{production.routing?.schemaVersion === 2 && sceneId !== production.routing.start && <Button onClick={()=>setPrefix(null)}>Choose another route</Button>}<Button onClick={onClose}>Close preview</Button></div>;
+  }
+  return <InteractivePlayerView className="bm-player" label="Preview" unwalked={unwalked} options={options}/>;
 }
