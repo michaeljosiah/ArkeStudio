@@ -342,6 +342,10 @@ export interface HarnessAdapter {
   /** Seals a supplied PrivateSessionRequest into native destination proof and provider
    * dispatch. Native defaults/ambient context cannot expand the reviewed request body. */
   readonly privatePayloads?: true;
+  /** Sealed private requests use qualified transient generation, without native transcript
+   * persistence or message/SSE completion fallback. This does not qualify upstream allocation,
+   * monetary receipts, physical cleanup or arbitrary native/plugin versions. */
+  readonly privateTransient?: true;
   /** Transport support alone is insufficient: the pinned session must also accept images. */
   readonly imageInput?: boolean;
   imageInputForSession?(sessionId: string): boolean;

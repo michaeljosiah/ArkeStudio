@@ -67,6 +67,9 @@ export interface OpenCodeV2AdapterOptions {
   modelReadyMs?: number;
   /** Finite per-adapter private identity budget, including failed creation/retired tombstones. */
   privateSessionLimit?: number;
+  /** Deadline for observing the transient API result. Expiry leaves inference unknown;
+   * requester Stop does not cancel this independent completion observation. */
+  privateGenerationMs?: number;
   /** One line per adapter-lifecycle fact; the host appends them to logs/harness.jsonl. */
   onTrace?: (line: Record<string, unknown>) => void;
 }
@@ -121,6 +124,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   readonly privateSessions = true as const;
   readonly privateDestinations = true as const;
   readonly privatePayloads = true as const;
+  readonly privateTransient = true as const;
   readonly imageInput = true;
   imageInputForSession(id: string): boolean { return this.sessions.get(id)?.image.supported === true; }
   imageDestinationForSession(id: string) {
@@ -172,6 +176,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
 
   constructor(private readonly opts: OpenCodeV2AdapterOptions) {
     if (opts.privateSessionLimit !== undefined && (!Number.isSafeInteger(opts.privateSessionLimit) || opts.privateSessionLimit < 1 || opts.privateSessionLimit > 8192)) throw new Error("Invalid private native session budget");
+    if (opts.privateGenerationMs !== undefined && (!Number.isSafeInteger(opts.privateGenerationMs) || opts.privateGenerationMs < 1 || opts.privateGenerationMs > 900_000)) throw new Error("Invalid private native generation deadline");
     this.http = new OpenCodeV2Http({ baseUrl: opts.baseUrl, password: opts.password });
   }
 
@@ -282,7 +287,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     const operational = ROSTER.some(member => member.name === input.agent && member.operationalOnly);
     if (operational && !directory) throw new Error("Private native control requires its session directory.");
     if (request && (!operational || request.model !== input.model)) throw new Error("The private request does not match its prepared model.");
-    return [...(operational ? privateControlFiles(request) : []), { name: "opencode.json", contents: `${JSON.stringify(buildSessionConfigV2(input, operational ? privateControlDirectory(directory!) : undefined, request ? privateWireBody(request) : undefined), null, 2)}
+    return [...(operational ? privateControlFiles(request, request ? "generate" : "primary") : []), { name: "opencode.json", contents: `${JSON.stringify(buildSessionConfigV2(input, operational ? privateControlDirectory(directory!) : undefined, request ? privateWireBody(request) : undefined), null, 2)}
 ` }];
   }
 
@@ -472,8 +477,9 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       if (privateTurn.dispatched) throw new Error("A private operational session permits one model turn only.");
       if (tracked.privateResponseRejected) throw new Error("The private response observation was refused before dispatch.");
       if (tracked.privateRoute?.requested() && (!tracked.privateRoute.verified() || !await tracked.privateRoute.verify(this.runtimeRequests.signal))) throw new Error("The private model destination changed or could not be verified. No prompt was sent.");
-      if (!tracked.privateRoute?.requested() && (!tracked.cwd || !await privateControlProof(tracked.ownerHttp!, tracked.cwd, this.runtimeRequests.signal, tracked.privateRequest))) throw new Error("The private native retry control could not be verified. No prompt was sent.");
+      if (!tracked.privateRoute?.requested() && (!tracked.cwd || !await privateControlProof(tracked.ownerHttp!, tracked.cwd, this.runtimeRequests.signal, tracked.privateRequest, tracked.privateRequest ? "generate" : "primary"))) throw new Error("The private native retry control could not be verified. No prompt was sent.");
       if (tracked.privateRequest && (input.parts.length !== 1 || input.parts[0]?.type !== "text" || input.parts[0].text !== tracked.privateRequest.prompt)) throw new Error("The private prompt does not match its reviewed request. No prompt was sent.");
+      if (tracked.privateRequest && input.correlationId !== undefined && input.correlationId.length > 256) throw new Error("The private correlation identity exceeds its bound.");
       if (privateTurn.stopped || privateTurn.dispatched || tracked.privateResponseRejected || this.disposed) throw new Error("The private operational owner changed before dispatch.");
       beforeDispatch?.();
       privateTurn.dispatched = true;
@@ -485,6 +491,10 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     const prompt = imagePrompt(input.parts);
     const runtime = this.runtimeRequests;
     this.pendingTurns.add(input.sessionId);
+    if (tracked?.privateRequest) {
+      void this.dispatchTransient(input.sessionId, correlationId, tracked, runtime);
+      return { sessionId: input.sessionId, correlationId };
+    }
     void (async () => {
       try {
         await (tracked?.ownerHttp ?? this.http).reqData<{ id?: string }>("POST", `/api/session/${input.sessionId}/prompt`, {
@@ -504,6 +514,32 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       }
     })();
     return { sessionId: input.sessionId, correlationId };
+  }
+
+  /** The response hook admits a complete stream before native /generate returns its text.
+   * Only that guarded API result can confirm this owner. Errors, Stop acknowledgements,
+   * stream notifications and cached messages cannot provide a substitute result/proof. */
+  private async dispatchTransient(sessionId: string, correlationId: string, owner: TrackedSession, runtime: AbortController): Promise<void> {
+    const current = () => !runtime.signal.aborted && !this.disposed && this.sessions.get(sessionId) === owner;
+    const signal = AbortSignal.any([runtime.signal, AbortSignal.timeout(this.opts.privateGenerationMs ?? 300_000)]);
+    try {
+      const result = await owner.ownerHttp!.reqData<unknown>("POST", `/api/session/${encodeURIComponent(sessionId)}/generate`, { prompt: owner.privateRequest!.prompt },
+        { signal, responseBytes: 2 * 1024 ** 2 });
+      if (!current()) return;
+      if (!result || typeof result !== "object" || Array.isArray(result) || Object.keys(result).length !== 1 ||
+        !("text" in result) || typeof result.text !== "string" || Buffer.byteLength(result.text) > STUDIO_ASSISTANT_LIMITS.responseBytes) {
+        this.rejectPrivateResponse(sessionId); return;
+      }
+      // A control lost while native was awaiting its provider cannot borrow earlier approval.
+      if (!owner.cwd || !await privateControlProof(owner.ownerHttp!, owner.cwd, signal, owner.privateRequest, "generate")) { this.rejectPrivateResponse(sessionId); return; }
+      if (!current()) return;
+      owner.privateTurn!.complete();
+      if (owner.privateTurn!.stopped || owner.privateResponseRejected) { this.pendingTurns.delete(sessionId); return; }
+      this.push({ type: "message.completed", sessionId, correlationId, text: result.text });
+    } catch {
+      if (!current() || owner.privateResponseRejected) return;
+      this.push({ type: "session.error", sessionId, message: "The private transient model request could not be confirmed." });
+    }
   }
 
   /** Synchronous send: resolves when this session's turn completes (or errors). */
@@ -537,6 +573,16 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
 
   /** Interrupt a running turn; the proposal keeps whatever the agent had written (R-12). */
   async interrupt(sessionId: string): Promise<void> {
+    if (this.disposed) throw new Error("The writing adapter is closed.");
+    const owner = this.sessions.get(sessionId);
+    if (owner?.privateRequest) {
+      if (owner.privateTurn!.stopped) return;
+      owner.privateTurn!.stopped = true;
+      this.rejectPrivateResponse(sessionId);
+      await owner.ownerHttp!.req("POST", `/api/session/${encodeURIComponent(sessionId)}/interrupt`, {},
+        { signal: AbortSignal.any([this.runtimeRequests.signal, AbortSignal.timeout(5_000)]), responseBytes: 64 * 1024 });
+      return;
+    }
     await this.http.req("POST", `/api/session/${sessionId}/interrupt`, {});
   }
 
@@ -571,7 +617,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     const tracked = this.sessions.get(sessionId); if (!tracked && !this.pendingTurns.has(sessionId)) return;
     const stillAdmitted = () => tracked ? this.sessions.get(sessionId) === tracked : this.pendingTurns.has(sessionId) && !this.retiredPrivateIds.has(sessionId);
     const runtime = this.runtimeRequests;
-    if (tracked?.privateResponseRejected) return;
+    if (tracked?.privateResponseRejected || tracked?.privateRequest) return;
     const finishWithAccumulated = (why: string): void => {
       const last = this.normalizeState.textBySession.get(sessionId);
       this.normalizeState.textBySession.delete(sessionId);
@@ -950,6 +996,11 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
             if (typeof rawType === "string" && rawType.startsWith("session.") && typeof rawSessionId !== "string") continue;
             if (typeof rawSessionId === "string" && (this.retiredPrivateIds.has(rawSessionId) || !this.sessions.has(rawSessionId) && !this.pendingTurns.has(rawSessionId))) continue;
             const owner = typeof rawSessionId === "string" ? this.sessions.get(rawSessionId) : undefined;
+            if (owner?.privateRequest) {
+              if (rawType === "session.deleted") { if (!owner.privateTurn?.stopped) this.rejectPrivateResponse(rawSessionId as string); continue; }
+              // Transient completion/text/usage belongs to its guarded API result only.
+              if (!["permission.asked", "session.execution.failed", "session.execution.interrupted"].includes(String(rawType))) continue;
+            }
             let normalizedRaw = raw;
             if (owner?.private && typeof rawType === "string") {
               if (owner.privateResponseRejected && rawType !== "session.execution.succeeded") continue;
@@ -999,7 +1050,9 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
             }
           }
         } catch (err) {
-          if (err instanceof SseFrameLimitError) for (const sessionId of this.pendingTurns) if (this.sessions.get(sessionId)?.private) this.rejectPrivateResponse(sessionId);
+          if (err instanceof SseFrameLimitError) for (const sessionId of this.pendingTurns) {
+            const owner = this.sessions.get(sessionId); if (owner?.private && !owner.privateRequest) this.rejectPrivateResponse(sessionId);
+          }
           this.trace("stream.dropped", { reason: err instanceof SseFrameLimitError ? "frame-limit" : "connection-lost" });
         } finally {
           clearTimeout(watchdog);

@@ -67,6 +67,16 @@ it("a qualified native destination cannot borrow payload authority without its e
     assert.equal(h.created.length, 0); assert.equal(h.sent.length, 0);
   } finally { await h.runner.stop(); await h.runner.ownerStopped(); }
 });
+it("a sealed native payload cannot borrow transient completion authority without its explicit capability", async () => {
+  const h = await fixture();
+  Object.defineProperty(h.raw, "privateDestinations", { value: true });
+  Object.defineProperty(h.raw, "privatePayloads", { value: true });
+  h.raw.sendMessageWithFence = async () => { throw new Error("MUST_NOT_DISPATCH"); };
+  try {
+    await assert.rejects(h.runner.run(input, new AbortController().signal, allow), /qualified transient completion/);
+    assert.equal(h.created.length, 0); assert.equal(h.sent.length, 0);
+  } finally { await h.runner.stop(); await h.runner.ownerStopped(); }
+});
 it("prepared-session composition preserves opaque prototype capabilities and their original native receiver", async () => {
   const h = await fixture(), create = h.raw.createSession.bind(h.raw); h.fail(); let cleaned = false;
   h.raw.createSession = async input => {

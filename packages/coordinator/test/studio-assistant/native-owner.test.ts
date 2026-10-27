@@ -13,7 +13,7 @@ import { LocalGpu } from "../../src/local-ai/gpu.js";
 import { tempDir } from "../tmp.js";
 import { until } from "../wait.js";
 
-it("keeps real v2 private HTTP/SSE work owned after an error and releases it only on late native completion", async () => {
+it("keeps real v2 transient work owned after Stop and releases it only on its late guarded API result", async () => {
   const provider = createServer((req, res) => { req.resume(); req.on("end", () => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ model_info: { "general.architecture": "gemma" } })); }); });
   provider.listen(0, "127.0.0.1"); await once(provider, "listening");
   const address = provider.address(); assert(address && typeof address !== "string");
@@ -32,9 +32,10 @@ it("keeps real v2 private HTTP/SSE work owned after an error and releases it onl
   const reading = (async () => { for await (const event of adapter.streamEvents(sharedStop.signal)) shared.push(event); })();
   try {
     await raw.init(); assert(raw.readiness().ready);
-    stub.failNextPrompt = "PRIVATE_NATIVE_PROMPT_ECHO";
-    await assert.rejects(runner.run({ role: "studio-assistant", model: "ollama/test", prompt: "One private question" }, new AbortController().signal, async () => ({ cloudApproved: false })), /could not be completed/);
-    const prompt = stub.requests.find(request => request.method === "POST" && request.path.endsWith("/prompt")); assert(prompt);
+    const stop = new AbortController();
+    const stopped = assert.rejects(runner.run({ role: "studio-assistant", model: "ollama/test", prompt: "One private question" }, stop.signal, async () => ({ cloudApproved: false })), /stopped/);
+    await until(() => stub.generations.size === 1, "the native transient request is in flight"); stop.abort(); await stopped;
+    const prompt = stub.requests.find(request => request.method === "POST" && request.path.endsWith("/generate")); assert(prompt);
     const sessionId = prompt.path.split("/")[3]!;
     assert(runner.busy()); assert(gpu.isBusy("Ollama"));
     await assert.rejects(changes.run(async () => {}), /Finish or cancel writing/);
@@ -43,10 +44,14 @@ it("keeps real v2 private HTTP/SSE work owned after an error and releases it onl
     // The visible private reader already ended. The adapter's native proof must keep
     // observing its original owner, independently of request cancellation or UI closure.
     stub.emitTurn(sessionId, "PRIVATE_LATE_RESPONSE");
+    await assert.rejects(changes.run(async () => {}), /Finish or cancel writing/);
+    assert.equal(unloading, false); assert.equal(admitted, false);
+    stub.finishGeneration(sessionId, { text: "PRIVATE_GUARDED_LATE_API_RESPONSE" });
     await until(() => !runner.busy() && unloading, "late v2 completion retires the old owner and starts normal handover");
     assert.equal(admitted, false); finishUnload(); await creative; assert(admitted);
     await changes.run(async () => {});
-    assert.equal(stub.requests.filter(request => request.method === "POST" && request.path.endsWith("/prompt")).length, 1);
+    assert.equal(stub.requests.filter(request => request.method === "POST" && request.path.endsWith("/generate")).length, 1);
+    assert(!stub.requests.some(request => request.method === "POST" && request.path.endsWith("/prompt")));
     assert(!shared.some(event => "sessionId" in event && event.sessionId === sessionId));
     assert(!JSON.stringify(traces).includes("PRIVATE_")); assert(!JSON.stringify(traces).includes(sessionId));
   } finally {

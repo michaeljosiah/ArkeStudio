@@ -1199,7 +1199,8 @@ opt-in `pinned-native.test.ts` drives the actual launcher/runner through a zero-
 completion and scripted provider failures. Unguarded 2.0.26 retried two HTTP 503/429 responses:
 one Arke dispatch/approval produced three identical provider requests before success. A terminal
 HTTP 400 remains unknown to inference ownership and is never replayed by the application;
-its failed native assistant row still has `time.completed`. The private completion reader
+its failed native assistant row on the prompt protocol still has `time.completed`. The unsealed
+comparison protocol's private completion reader
 therefore requires the newest assistant's error-free `finish: "stop"`; missing/unknown finish,
 truncation, tool requests and cached error rows cannot publish a reply. It cannot search behind
 a newer unfinished assistant to reveal an older reply after reconnect. These checks preserve
@@ -1220,7 +1221,7 @@ filesystem writes remain host-owned. `harness/private-files.ts` retires only cap
 bytes after native retirement, protects successor generations/links/changed or unrelated files,
 and keeps failed known-file cleanup reachable for reconciliation without inference replay.
 
-Qualified Studio invocation also requires `HarnessAdapter.privatePayloads`. The runner captures
+Qualified Studio invocation also requires `HarnessAdapter.privatePayloads` and `privateTransient`. The runner captures
 immutable request values, constructs the exact roster system instructions and a 4,096-token
 answer cap, and supplies `CreateSessionInput.privateRequest` through the host file writer.
 V2 binds that manifest's digest to native control activation and verifies its options at setup.
@@ -1252,14 +1253,21 @@ restart reconciliation or full financial-record retention; production activation
 
 Native qualification now measures the retained copy: retired prompt-path markers remain in
 SQLite WAL, while direct `/generate` leaves message history unchanged. The separately identified
-`privateControlFiles(request, "generate")` candidate seals the reviewed body, denies retries and
+`privateControlFiles(request, "generate")` control seals the reviewed body, denies retries and
 reconstructs only a complete zero-tool response after bounded UTF-8/SSE/finish validation.
 Its activation proof cannot borrow a primary control. Adapter `test/v2-transient-control.test.ts`
 executes the emitted source; coordinator `test/studio-assistant/transient-native.test.ts` checks
 eleven direct native scenarios and bounded entire-profile scans before/after owned native exit,
 with retained prompt-path markers as the detector's positive control. Native `/generate` alone
-returns truncated output as HTTP success. Production dispatch still uses its existing primary
-protocol: transient adapter completion/Stop/ownership integration remains to be implemented.
+returns truncated output as HTTP success. Sealed private dispatch now uses the guarded API,
+rechecks control after its bounded result, and never consults cached messages or native SSE
+text/completion/usage. Stop suppresses publication while an independent API observer may still
+confirm the exact original owner. Its five-minute deadline (host override up to fifteen minutes),
+HTTP/shape/text refusal, runtime exit or interruption acknowledgement cannot release unknown
+inference. Adapter `v2-private-transient.test.ts` and coordinator `native-owner.test.ts` cover
+those boundaries; pinned runner fixtures include acknowledged Stop, late completion and complete
+bounded profile scans through owned exit. Ordinary writing and unsealed comparison ports keep
+the prompt protocol. Production host route attestation still defaults to refusal.
 Native's HTTP bridge buffers upstream bytes before the response hook, so its allocation remains
 a separate qualification gap; the hook's admission limit does not bound that allocation.
 
@@ -1270,7 +1278,8 @@ pairs), coalesces pending deltas, caps private queues/control requests at 64, bo
 and opaque IDs, and redacts native error/end text. Private prompt receipts, completion JSON
 and permission reconciliation have finite body bounds. An absent/oversized/failed private
 retrieval cannot promote partial stream text into a reply. Positive native execution success
-settles inference independently of reply retrieval; a size/error refusal alone does not.
+settles unsealed comparison-protocol inference independently of reply retrieval; a size/error
+refusal alone does not. Sealed transient requests exclude that native SSE authority entirely.
 Unscoped native session errors and raw stream exception text never enter shared observations.
 Private unsupported/malformed events also stay out of the common dead-letter buffer. After
 an observed private error or Stop, cached assistant rows on reconnect cannot settle its unknown

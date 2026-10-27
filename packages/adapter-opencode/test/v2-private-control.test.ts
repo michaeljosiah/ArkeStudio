@@ -35,7 +35,7 @@ it("binds the private manifest to native activation without turning request text
   const adapter = new OpenCodeV2Adapter({ baseUrl: () => "http://127.0.0.1:0", password: () => null });
   const request = { model: "ollama/model", system: "Reviewed system", prompt: 'PRIVATE_PROMPT"; throw new Error("injection");', outputTokenLimit: 4096 };
   const files = adapter.sessionFiles({ agent: "studio-assistant", model: request.model }, "/private/manifest", request);
-  assert.match(files[1]!.contents, /id: "arke\.studio\.private-control\.v1\.[a-f0-9]{64}"/);
+  assert.match(files[1]!.contents, /id: "arke\.studio\.private-control\.v1\.transient\.[a-f0-9]{64}"/);
   assert(!files[1]!.contents.includes(request.prompt));
   assert.deepEqual(JSON.parse(files[2]!.contents).plugins[0].options.body, privateWireBody(request));
   const changed = adapter.sessionFiles({ agent: "studio-assistant", model: request.model }, "/private/manifest", { ...request, prompt: "Different reviewed prompt" });

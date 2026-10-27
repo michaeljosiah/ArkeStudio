@@ -61,6 +61,7 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     if (adapter.privateSessions !== true) throw new Error("The Studio model owner does not support private operational sessions.");
     if (adapter.privateDestinations === true && !adapter.sendMessageWithFence) throw new Error("The Studio model owner has no native destination dispatch fence.");
     if (adapter.privateDestinations === true && adapter.privatePayloads !== true) throw new Error("The Studio native owner cannot seal the reviewed provider payload.");
+    if (adapter.privateDestinations === true && adapter.privateTransient !== true) throw new Error("The Studio native owner has no qualified transient completion protocol.");
     const sameOwner = () => this.deps.adapter() === adapter && adapter.lifecycleRevision?.() === revision && adapter.readiness().ready;
     signal.throwIfAborted();
     const catalog = await adapter.listModels?.(); signal.throwIfAborted();

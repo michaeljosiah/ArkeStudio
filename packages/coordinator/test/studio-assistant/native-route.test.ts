@@ -32,8 +32,9 @@ async function fixture() {
   const scratch = await tempDir("arke-studio-native-route-");
   const runner = new HarnessStudioModelRunner({ adapter: () => adapter, scratch, sessionInput: async value => value,
     destination: () => ({ identity, local }), timeoutMs: 10_000 });
-  const prompts = () => stub.requests.filter(request => request.method === "POST" && request.path.endsWith("/prompt"));
-  const complete = async () => { await until(() => prompts().length === 1 && stub.streamCount > 0, "the sole qualified private prompt"); stub.emitTurn(prompts()[0]!.path.split("/")[3]!, '{"kind":"reply","text":"A qualified reply."}'); };
+  const prompts = () => stub.requests.filter(request => request.method === "POST" && request.path.endsWith("/generate"));
+  const complete = async () => { await until(() => prompts().length === 1 && stub.generations.has(prompts()[0]!.path.split("/")[3]!), "the sole qualified private generation");
+    stub.finishGeneration(prompts()[0]!.path.split("/")[3]!, { text: '{"kind":"reply","text":"A qualified reply."}' }); };
   return { runner, raw, adapter, gpu, changes, stub, prompts, complete, scratch,
     metadata: (value: unknown) => { metadata = value; }, host: (value: boolean) => { local = value; }, changeHost: () => { identity = "d".repeat(64); },
     close: async () => { await runner.stop(); await adapter.dispose?.(); await runner.ownerStopped(); gpu.stop(); await stub.stop(); provider.closeAllConnections(); await new Promise<void>(resolve => provider.close(() => resolve())); } };
@@ -134,17 +135,21 @@ it("host ownership changes during native payload approval cannot dispatch or reu
   } finally { resume(); await h.close(); }
 });
 
-it("an oversized private stream keeps unknown GPU/runtime ownership until positive native completion, without replay", async () => {
+it("an invalid transient result keeps unknown GPU/runtime ownership and cannot borrow SSE completion, without replay", async () => {
   const h = await fixture();
   try {
     const refused = assert.rejects(h.runner.run(input, new AbortController().signal, async () => ({ cloudApproved: false })), /could not be completed/);
     await until(() => h.prompts().length === 1, "the admitted private prompt");
     const sessionId = h.prompts()[0]!.path.split("/")[3]!;
-    h.stub.emit({ type: "session.text.delta", data: { sessionID: sessionId, assistantMessageID: "private", delta: "x".repeat(STUDIO_ASSISTANT_LIMITS.responseBytes + 1) } });
+    h.stub.finishGeneration(sessionId, { text: "x".repeat(STUDIO_ASSISTANT_LIMITS.responseBytes + 1) });
     await refused; assert(h.runner.busy()); assert(h.gpu.isBusy("Ollama"));
     await assert.rejects(h.changes.run(async () => {}), /Finish or cancel writing/);
     h.stub.emit({ type: "session.execution.succeeded", data: { sessionID: sessionId } });
-    await until(() => !h.runner.busy() && !h.gpu.isBusy("Ollama"), "positive native completion and exact retirement release the original owner");
+    h.stub.disconnectEvents();
+    await assert.rejects(h.changes.run(async () => {}), /Finish or cancel writing/);
+    assert(h.runner.busy()); assert(h.gpu.isBusy("Ollama"));
+    await h.runner.ownerStopped();
+    await until(() => !h.runner.busy() && !h.gpu.isBusy("Ollama"), "trusted matched physical cleanup releases only the original owner");
     await h.changes.run(async () => {}); assert.equal(h.prompts().length, 1);
   } finally { await h.close(); }
 });

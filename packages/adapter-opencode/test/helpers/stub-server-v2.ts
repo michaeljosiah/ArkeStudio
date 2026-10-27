@@ -37,6 +37,8 @@ export class StubOpenCodeV2 {
   readonly pendingPermissions = new Map<string, Array<{ id: string; action: string; resources: string[]; save?: string[] }>>();
   /** What GET /api/session/:id/message replays, newest first, per session. */
   readonly messagesBySession = new Map<string, unknown[]>();
+  /** Synchronous transient generation has no message-history/SSE completion. */
+  readonly generations = new Map<string, ServerResponse>();
   /** Extra latency on the first health answer — the server-global warm-up switch. */
   coldHealthMs = 0;
   version = "2.0.26";
@@ -206,6 +208,15 @@ export class StubOpenCodeV2 {
           return;
         }
 
+        m = /^\/api\/session\/([^/]+)\/generate$/.exec(url.pathname);
+        if (req.method === "POST" && m) {
+          const id = m[1]!;
+          if (!this.sessionStates.has(id)) { res.writeHead(404).end(); return; }
+          if (this.generations.has(id)) { res.writeHead(409).end(); return; }
+          this.generations.set(id, res);
+          res.on("close", () => { if (this.generations.get(id) === res) this.generations.delete(id); });
+          return;
+        }
         m = /^\/api\/session\/([^/]+)\/interrupt$/.exec(url.pathname);
         if (m && req.method === "POST") {
           res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ interrupted: false }));
@@ -406,6 +417,14 @@ export class StubOpenCodeV2 {
     this.emit({ id: this.eventId(), type: "session.execution.succeeded", data: { sessionID: sessionId } });
   }
 
+  /** Finish the transient API without creating a transcript row or an SSE notification. */
+  finishGeneration(sessionId: string, data: unknown, status = 200): void {
+    const response = this.generations.get(sessionId);
+    if (!response) throw new Error("No pending synthetic native generation");
+    this.generations.delete(sessionId);
+    response.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify({ data }));
+  }
+
   /** Script a held tool call: input streams, the call is recorded unexecuted, the ask fires. */
   emitHeldToolCall(sessionId: string, permissionId: string, command: string): void {
     const callId = `call_stub_${++this.turnCounter}`;
@@ -441,6 +460,8 @@ export class StubOpenCodeV2 {
 
   async stop(): Promise<void> {
     this.disconnectEvents();
+    for (const response of this.generations.values()) response.destroy();
+    this.generations.clear();
     const server = this.server;
     this.server = null;
     if (server) await new Promise<void>((resolve) => server.close(() => resolve()));

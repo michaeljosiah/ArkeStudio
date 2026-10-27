@@ -1635,10 +1635,10 @@ provider, checking one approved zero-tool completion, settlement and private tra
 An earlier unguarded 2.0.26 probe measured three provider requests after two HTTP 503/429 failures
 despite one application approval/dispatch. The fixed Arke control now refuses native retries:
 success, HTTP 503/429/400 and an uncertain dropped socket each produce exactly one request.
-The scoped plugin must be active at its expected source before dispatch. Terminal HTTP 400 produces
-a failed native assistant with `time.completed`, `finish: "error"` and structured error metadata;
-the runner refuses its response and retains unknown GPU/runtime ownership through Stop without
-application replay. Success also verifies the exact control/config files and empty turn directory
+The scoped transient plugin must be active at its expected source before dispatch and after its
+API result. Sealed private requests use `/generate`, leaving no native user/assistant rows even
+on failure. The runner retains unknown GPU/runtime ownership through Stop without application
+replay. Success also verifies the exact control/config files and empty turn directory
 are retired. Other SDK transports, production spend/payload and physical cleanup remain gates.
 Set `ARKE_TEST_OPENCODE2` for that test; it makes no real inference or paid request. Production
 host attestation still defaults to refusal. These checks do not prove complete cloud payload,
@@ -1668,9 +1668,10 @@ boundaries, many valid frames in one chunk, malformed input, sanitized size erro
 without waiting for an uncooperative cancellation callback. `test/v2-private-payload.test.ts`
 checks the 192 KiB decoded private response limit, split surrogate pairs, delta coalescing,
 64-event/control bounds, metadata limits, native error/end redaction, unscoped-error exclusion
-and refusal of missing/oversized final retrieval without accepting partial text. The native-route
-composition holds GPU/runtime ownership after a refused oversized stream until positive native
-completion, then retires the exact session without another prompt. These make no model/paid
+and refusal of missing/oversized final retrieval without accepting partial text on the unsealed
+comparison protocol. The native-route composition holds unknown GPU/runtime ownership after
+an invalid transient result, ignores native SSE/cache completion and requires matched trusted
+physical cleanup before release. These make no model/paid
 request and do not establish complete native payload disclosure, spend or subprocess persistence.
 The same suite checks cached rows after an observed private error cannot become completion
 proof during reconnect, and private unknown event names cannot reach common dead-letter
@@ -1691,17 +1692,17 @@ uncertain unlink/reconciliation. No generic scratch/history deletion is exercise
 The pinned Studio runner now compares the complete provider JSON to its reviewed system/prompt,
 4,096-token cap and closed stream/storage fields, and checks native directory/session identifiers
 are absent. A changed config manifest fails its digest before approval or provider traffic.
-An injected HTTP-hook refusal produces zero requests and no successful assistant row while the
-input/unknown owner remain retained. `runner.test.ts` additionally reproduces caller mutation
+An injected HTTP-hook refusal produces zero requests and no native user/assistant transcript
+while the unknown owner remains retained. `runner.test.ts` additionally reproduces caller mutation
 across authorization and verifies immutable capture; native destination support without the
-explicit payload capability refuses before creation. Control tests cover prompt-as-data/code
+explicit payload or transient capability refuses before creation. Control tests cover prompt-as-data/code
 separation and manifest bounds. Contracts and client approval tests verify bounded system/cap
 disclosure inside the existing private review. Full client tests still use the client cwd.
 These checks qualify the pinned body enforcement, not arbitrary SDKs or native metadata:
 the native transport adds `b3`/`traceparent` after the HTTP hook. Managed-origin, remaining
 network metadata, spend, raw persistence and physical/durable cleanup stay separate gates.
 
-Run adapter `test/v2-transient-control.test.ts` for the separately identified candidate control.
+Run adapter `test/v2-transient-control.test.ts` for the separately identified transient control.
 It executes the exact emitted code and checks canonical response/header reconstruction, closed
 finish/tool/refusal/model policy, UTF-8/body/text/frame/read bounds, unknown missing usage,
 options mutation, one transmission/response, generic failures and nonblocking cancellation.
@@ -1712,8 +1713,17 @@ model/oversize/400/429/503/socket loss refuse without retry. Messages stay uncha
 the complete bounded synthetic profile before and after native exit find no transient system,
 prompt, reply or provider-error markers; retired prompt-path markers in WAL prove the detector
 is live. This is finite Windows profile evidence, not secure erasure or arbitrary-platform proof.
-Production dispatch has not switched to the candidate. Native HTTP bridge allocation precedes
-the response hook; passing its admission bounds does not prove bounded upstream native memory.
+Sealed private adapter dispatch now uses that guarded API. `v2-private-transient.test.ts` checks
+strict result/HTTP/text/deadline bounds, post-result control loss, one dispatch, SSE/cache exclusion
+through reconnect, Stop-before-send, retained unknown faults and late qualified completion after
+Stop. An ordinary-session sentinel proves injected native SSE was consumed. `native-owner.test.ts`
+checks actual wrapper-order GPU/runtime handover: fake SSE cannot release a stopped owner; its
+late guarded API result permits normal handover without publishing a late reply. Pinned runner
+fixtures measure that behavior after a real interruption acknowledgement and scan the bounded
+native profile for system/prompt/reply/error copies through native exit. Ordinary writing and
+unsealed comparison ports retain their existing prompt path. Production host attestation remains
+closed; native HTTP bridge allocation precedes the response hook, so passing its admission
+bounds does not prove bounded upstream native memory, full financial policy or all platforms.
 
 The Effects browser fixture logs its actual browser version, a bounded stderr tail on failure
 and Linux cgroup memory counters every five seconds and before each decoder stage. Two Linux
