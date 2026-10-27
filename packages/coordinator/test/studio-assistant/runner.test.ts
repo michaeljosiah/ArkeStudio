@@ -90,6 +90,23 @@ it("a private bridge factory cannot replace missing managed-host route authority
   try { await assert.rejects(runner.run(input, new AbortController().signal, allow), /destination could not be verified/); assert.equal(factories, 0); assert.equal(h.created.length, 0); }
   finally { await runner.stop(); await runner.ownerStopped(); }
 });
+it("trusted physical cleanup during pending creation retains files until the late original owner drains", async () => {
+  const h = await fixture(); nativeCapabilities(h.raw); const gate = deferred(); h.create(gate.promise);
+  let confirmations = 0, closes = 0;
+  const original = h.raw.createSession.bind(h.raw);
+  h.raw.createSession = async value => { const ref = await original(value); return { ...ref,
+    privateOwnerStopped() { confirmations++; ref.privateOwnerStopped!(); }, privateRetire: async () => confirmations > 0 }; };
+  const runner = new HarnessStudioModelRunner({ ...h.deps, privateTransport: async () => ({
+    configuration: { baseURL: "http://127.0.0.1:43210/v1", apiKey: "e".repeat(64) }, identity: "f".repeat(64), approve: () => true, seal() {}, stop: async () => { closes++; return true; } }) });
+  try {
+    const stopped = assert.rejects(runner.run(input, new AbortController().signal, allow), /stopped/);
+    await until(() => h.created.length === 1, "original native creation is still pending");
+    await runner.ownerStopped(); await stopped; assert(runner.busy()); assert.equal(closes, 0); assert.equal(confirmations, 0);
+    assert.equal(await readFile(join(h.created[0]!.cwd!, "opencode.json"), "utf8"), "{}");
+    gate.resolve(); await until(() => !runner.busy(), "late original creation receives the retained cleanup proof");
+    assert.equal(confirmations, 1); assert.equal(closes, 1); assert.equal(h.sent.length, 0); assert.deepEqual(await readdir(h.scratch), []);
+  } finally { gate.resolve(); await runner.stop(); await runner.ownerStopped(); }
+});
 it("keeps a late private bridge and its original cleanup capability after Stop until actual retirement", async () => {
   const h = await fixture(); nativeCapabilities(h.raw); const gate = deferred(), control = new AbortController();
   let entered = false, stops = 0, confirmed = false;

@@ -3,7 +3,7 @@ import { it } from "node:test";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { execFile } from "node:child_process";
-import { copyFile, mkdir, readFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { agentPromptFor, ROSTER } from "@arke-studio/contracts";
 import { privateWireBody } from "../../../adapter-opencode/src/v2/private-control.js";
@@ -21,7 +21,21 @@ import { assertNativeProfileExcludes } from "./native-profile.js";
 import { tempDir, closeOnCleanup } from "../tmp.js";
 import { until, untilAsync } from "../wait.js";
 
-for (const { overflow, managedWriter, managedProvider } of [{ overflow: false, managedWriter: false, managedProvider: false }, { overflow: true, managedWriter: false, managedProvider: false }, { overflow: false, managedWriter: true, managedProvider: false }, { overflow: false, managedWriter: true, managedProvider: true }]) it(`pinned native private generation through the bounded bridge: ${managedProvider ? "verified managed writer and provider" : managedWriter ? "verified managed writer" : overflow ? "upstream overflow" : "complete response"}`, {
+async function assertBridgeAddress(baseURL: string, retained: boolean): Promise<void> {
+  const replacement = createServer();
+  try {
+    const listening = new Promise<void>((resolve, reject) => {
+      replacement.once("error", reject); replacement.listen(Number(new URL(baseURL).port), "127.0.0.1", () => resolve());
+    });
+    if (retained) await assert.rejects(listening, { code: "EADDRINUSE" }); else await listening;
+  } finally { if (replacement.listening) await new Promise<void>(resolve => replacement.close(() => resolve())); }
+}
+const scenarios: Array<{ overflow: boolean; managedWriter: boolean; managedProvider: boolean; interrupted?: boolean }> = [
+  { overflow: false, managedWriter: false, managedProvider: false }, { overflow: true, managedWriter: false, managedProvider: false },
+  { overflow: false, managedWriter: true, managedProvider: false }, { overflow: false, managedWriter: true, managedProvider: true },
+  { overflow: false, managedWriter: true, managedProvider: true, interrupted: true },
+];
+for (const { overflow, managedWriter, managedProvider, interrupted } of scenarios) it(`pinned native private generation through the bounded bridge: ${interrupted ? "Stop retains listener and backing owner" : managedProvider ? "verified managed writer and provider" : managedWriter ? "verified managed writer" : overflow ? "upstream overflow" : "complete response"}`, {
   skip: !process.env.ARKE_TEST_OPENCODE2 || managedWriter && process.platform !== "win32", timeout: managedWriter ? 150_000 : 75_000,
 }, async () => {
   const root = await tempDir("arke-studio-native-bridge-"), model = "bridge-selected", profile = harnessProfileDir(root);
@@ -50,7 +64,8 @@ for (const { overflow, managedWriter, managedProvider } of [{ overflow: false, m
     await mkdir(join(providerRoot, "ollama-runtime"), { recursive: true }); await copyFile(process.execPath, join(providerRoot, "ollama-runtime", "ollama.exe"));
     service = new OllamaEngineService({ appRoot: providerRoot, port: await allocateLoopbackPort(),
       supervise: spec => new ChildSupervisor({ ...spec, args: [join(import.meta.dirname, "../fixtures/managed-http-origin.mjs")],
-        env: { ...spec.env, SERVICE_VERSION: OLLAMA_VERSION, ORIGIN_MARKER: marker!, NATIVE_PROVIDER_MODEL: model, NATIVE_PROVIDER_REPLY: answer } }) });
+        env: { ...spec.env, SERVICE_VERSION: OLLAMA_VERSION, ORIGIN_MARKER: marker!, NATIVE_PROVIDER_MODEL: model, NATIVE_PROVIDER_REPLY: answer,
+          ...(interrupted ? { NATIVE_PROVIDER_HOLD: "1" } : {}) } }) });
     closeOnCleanup(() => service?.dispose());
     await service.applySettings({ engineUrl: null, modelsDir: null }); assert(service.captureManagedOrigin()?.current()); providerEndpoint = service.endpoint();
   } else {
@@ -94,13 +109,27 @@ for (const { overflow, managedWriter, managedProvider } of [{ overflow: false, m
     await untilAsync(async () => (await adapter.listModels?.())?.some(row => row.provider === "ollama" && row.id === model) === true, "original native catalogue");
     let approvals = 0;
     phase = "private run";
-    const operation = runner.run({ role: "studio-assistant", model: `ollama/${model}`, prompt }, new AbortController().signal, async disclosure => {
+    const caller = new AbortController();
+    const operation = runner.run({ role: "studio-assistant", model: `ollama/${model}`, prompt }, caller.signal, async disclosure => {
       approvals++; assert(disclosure.local); assert.equal(disclosure.prompt, prompt); assert.equal(calls.length, 0);
       phase = "approved private run";
       if (marker) assert.equal((await readFile(marker, "utf8")).trim().split("\n").map(line => JSON.parse(line) as { path: string }).filter(row => row.path === "/v1/chat/completions").length, 0);
       return { cloudApproved: false };
     });
-    if (overflow) { await assert.rejects(operation, /could not be completed/); assert(runner.busy()); assert(gpu.isBusy("Ollama")); }
+    if (interrupted) {
+      const stopped = assert.rejects(operation, /stopped/);
+      await untilAsync(async () => (await readFile(marker!, "utf8")).trim().split("\n").some(line => (JSON.parse(line) as { path: string }).path === "/v1/chat/completions"), "one actual native request is held by the original provider", 60_000);
+      caller.abort(); await stopped; await runner.stop();
+      assert(runner.busy()); assert(gpu.isBusy("Ollama")); await assertBridgeAddress(route.baseURL, true);
+      const refused = await fetch(route.baseURL + "/chat/completions", { method: "POST", body: JSON.stringify(expected), headers: { authorization: `Bearer ${route.apiKey}` } });
+      assert.equal(refused.status, 401); await refused.arrayBuffer();
+      await adapter.dispose?.(); await wiring.supervisor.stopAndConfirm();
+      assert(runner.busy()); assert(gpu.isBusy("Ollama"), "writer exit alone cannot release the backing inference lane");
+      await assertBridgeAddress(route.baseURL, true);
+      await service!.dispose(); await runner.ownerStopped();
+      await until(() => !runner.busy() && !gpu.isBusy("Ollama"), "both exact native owners confirmed cleanup");
+      await assertBridgeAddress(route.baseURL, false);
+    } else if (overflow) { await assert.rejects(operation, /could not be completed/); assert(runner.busy()); assert(gpu.isBusy("Ollama")); }
     else { assert.equal(await operation, answer); await until(() => !runner.busy(), "completed native bridge result retired"); assert.equal(gpu.isBusy("Ollama"), false); }
     const actualCalls = marker ? (await readFile(marker, "utf8")).trim().split("\n").map(line => JSON.parse(line) as { path: string; body: string; headers: Record<string, unknown> })
       .filter(row => row.path === "/v1/chat/completions").map(row => ({ body: JSON.parse(row.body), headers: row.headers })) : calls;
@@ -113,7 +142,10 @@ for (const { overflow, managedWriter, managedProvider } of [{ overflow: false, m
       const providerPaths = marker ? (await readFile(marker, "utf8").catch(() => "")).trim().split("\n").filter(Boolean).map(line => (JSON.parse(line) as { path: string }).path) : [];
       console.log(JSON.stringify({ managedNativePhase: phase, writerReads, providerPaths, providerState: service?.status().state, providerCurrent: service?.captureManagedOrigin()?.current() }));
     }
-    try { await runner.stop(); await adapter.dispose?.(); await wiring.supervisor.stop(); await runner.ownerStopped(); gpu.stop(); assert(await bridge.stop());
+    try { await runner.stop(); await adapter.dispose?.(); await wiring.supervisor.stopAndConfirm(); await service?.dispose();
+      if (provider.listening) { provider.closeAllConnections(); await new Promise<void>(resolve => provider.close(() => resolve())); }
+      await runner.ownerStopped(); await until(() => !runner.busy(), "original native session/files retired after confirmed owned cleanup"); gpu.stop(); assert(await bridge.stop());
+      assert.deepEqual(await readdir(join(root, "studio", "turns")).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; }), []);
       await assertNativeProfileExcludes(profile, [prompt, answer, "PRIVATE_UPSTREAM_OVERFLOW", route.apiKey]); }
     finally { await service?.dispose(); if (provider.listening) { provider.closeAllConnections(); await new Promise<void>(resolve => provider.close(() => resolve())); } }
   }

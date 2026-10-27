@@ -37,7 +37,11 @@ const server = createServer(async (request, response) => {
     if (path === "/api/show") { response.end(JSON.stringify({ capabilities: ["completion", "tools"], model_info: { "general.architecture": "gemma", "gemma.context_length": 262144 } })); return; }
     if (path === "/v1/chat/completions") {
       const chunk = (delta, finish_reason) => ({ id: "synthetic", object: "chat.completion.chunk", created: 1, model, choices: [{ index: 0, delta, finish_reason }] });
-      response.end(`data: ${JSON.stringify(chunk({ content: process.env.NATIVE_PROVIDER_REPLY }, null))}\n\ndata: ${JSON.stringify({ ...chunk({}, "stop"), usage: { prompt_tokens: 10, completion_tokens: 5 } })}\n\ndata: [DONE]\n\n`); return;
+      const completion = `data: ${JSON.stringify(chunk({ content: process.env.NATIVE_PROVIDER_REPLY }, null))}\n\ndata: ${JSON.stringify({ ...chunk({}, "stop"), usage: { prompt_tokens: 10, completion_tokens: 5 } })}\n\ndata: [DONE]\n\n`;
+      if (process.env.NATIVE_PROVIDER_HOLD === "1") {
+        const timer = setTimeout(() => response.end(completion), 90_000); response.once("close", () => clearTimeout(timer));
+      } else response.end(completion);
+      return;
     }
     response.end("{}"); return;
   }

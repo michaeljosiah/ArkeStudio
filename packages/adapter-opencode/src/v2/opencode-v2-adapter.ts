@@ -437,6 +437,14 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     };
     this.sessions.set(sessionId, tracked);
     let retired = false, retiring: Promise<boolean> | undefined;
+    const retireCapturedState = (): boolean => {
+      const current = this.sessions.get(sessionId);
+      if (current !== tracked && !(this.disposed && current === undefined)) return false;
+      this.retiredPrivateIds.add(sessionId); if (current === tracked) this.sessions.delete(sessionId); this.sessionWindows.delete(sessionId);
+      this.normalizeState.textBySession.delete(sessionId); this.normalizeState.tokensBySession.delete(sessionId); this.reportedMessage.delete(sessionId); this.pendingTurns.delete(sessionId);
+      for (const [permissionId, owner] of this.permissionSessions) if (owner === sessionId) this.permissionSessions.delete(permissionId);
+      privateTurn!.stopped = true; privateTurn!.complete(); retired = true; return true;
+    };
     const retire = (callerSignal: AbortSignal): Promise<boolean> => {
       if (retired) return Promise.resolve(true);
       if (retiring) return retiring;
@@ -454,10 +462,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
           }
           if (!await absent(path) || !await absent(`${path}/message`)) return false;
           signal.throwIfAborted(); if (this.runtimeRevision !== revision || this.sessions.get(sessionId) !== tracked) return false;
-          this.retiredPrivateIds.add(sessionId); this.sessions.delete(sessionId); this.sessionWindows.delete(sessionId);
-          this.normalizeState.textBySession.delete(sessionId); this.normalizeState.tokensBySession.delete(sessionId); this.reportedMessage.delete(sessionId); this.pendingTurns.delete(sessionId);
-          for (const [permissionId, owner] of this.permissionSessions) if (owner === sessionId) this.permissionSessions.delete(permissionId);
-          privateTurn.complete(); retired = true; return true;
+          return retireCapturedState();
         } catch { return false; }
       };
       retiring = work().finally(() => { retiring = undefined; }); return retiring;
@@ -468,7 +473,9 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     return { sessionId, ...(privateTurn ? { privateTurnSettled: privateTurn.settled,
       privateDestination: verifyRoute,
       privateRetire: retire,
-      privateOwnerStopped: () => { privateTurn.stopped = true; privateTurn.complete(); }, privateEvents: (signal: AbortSignal) => {
+      // This existing host-only capability confirms BOTH original writer and backing work
+      // are gone. It must not query a dead or replacement endpoint to retire local state.
+      privateOwnerStopped: () => { privateTurn.stopped = true; privateTurn.complete(); if (!retired) retireCapturedState(); }, privateEvents: (signal: AbortSignal) => {
       if (retired) throw new Error("The private operational session was retired.");
       if (observed) throw new Error("The private session observer was already used.");
       observed = true;

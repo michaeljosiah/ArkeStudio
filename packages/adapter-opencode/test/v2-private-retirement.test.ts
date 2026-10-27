@@ -106,6 +106,25 @@ it("pins retirement to its original authenticated server and refuses a confirmed
     assert.equal(await stale.privateRetire!(new AbortController().signal), false); assert.equal(h.stub.requests.length, mark);
   } finally { await h.close(); await replacement.stop(); }
 });
+for (const disposed of [false, true]) it(`retires only its captured local private state after trusted cleanup with ${disposed ? "disposed" : "exited"} writing owner`, async () => {
+  const h = await fixture(), replacement = new StubOpenCodeV2(); await replacement.start();
+  try {
+    const ref = await h.create(); h.stub.failNextPrompt = "UNKNOWN_ORIGINAL_WORK";
+    await h.adapter.sendMessage({ sessionId: ref.sessionId, parts: [{ type: "text", text: "PRIVATE_ORIGINAL_REQUEST" }] });
+    let settled = false; void ref.privateTurnSettled!.then(() => { settled = true; });
+    if (disposed) await h.adapter.dispose(); else h.adapter.runtimeExited();
+    await h.stub.stop(); h.endpoint(replacement.baseUrl());
+    replacement.sessionStates.set(ref.sessionId, { id: ref.sessionId, agent: "world-builder", location: { directory: "/world" } });
+    assert.equal(await ref.privateRetire!(new AbortController().signal), false); assert.equal(settled, false, "writer exit/disposal cannot confirm backing inference");
+    const requests = h.stub.requests.length;
+    ref.privateOwnerStopped!(); // The owning fixture now confirms BOTH original native owners are cleaned up.
+    await ref.privateTurnSettled; assert(settled);
+    assert.equal(await ref.privateRetire!(new AbortController().signal), true); ref.privateOwnerStopped!();
+    assert.equal(h.stub.requests.length, requests); assert.equal(replacement.requests.length, 0);
+    assert(replacement.sessionStates.has(ref.sessionId)); assert.throws(() => ref.privateEvents!(new AbortController().signal), /retired/);
+    assert(!JSON.stringify(h.shared).includes("PRIVATE_")); assert(!JSON.stringify(h.traces).includes("PRIVATE_"));
+  } finally { await h.close(); await replacement.stop(); }
+});
 
 it("keeps retired identities private and bounds admission/tombstones before further native creation", async () => {
   const h = await fixture(1);

@@ -1481,55 +1481,47 @@ Private history preserves sent documents across restart within the existing aggr
 Images/audio and extracted PDF/Office attachments remain unimplemented and explicitly refused.
 The default native inference route still refuses absent host proof. Remaining media attachments,
 effort selection, reviewed repair/cleanup cards and actual matched turn-239 rendering remain pending.
-Candidate native transport qualification uses `studio-assistant/provider-bridge.ts`. It captures
-one exact reviewed body and literal loopback upstream, owns a private authenticated ephemeral
-HTTP listener, bounds request/response bytes/fragments before forwarding, strips native headers
-and retains pending cleanup. `runner.ts` accepts its trusted host factory, binds its identity
-into disclosure and keeps it through native/private-file retirement. Contracts' separate
-`PrivateSessionTransport` carries only the ephemeral bridge capability through the existing
-session-file writer; OpenCode v2 config/destination proof pins that exact route. It is absent
-from model input, ordinary sessions and wire commands. Real pinned-binary success/overflow and
-profile tests qualify this seam. Default production destination proof remains closed: managed
-process/socket origin, broader network/spend/persistence/cleanup and platform acceptance are
-still required. This bridge adds no model process or independent agent loop.
-The optional managed composition is `studio-assistant/managed-provider-bridge.ts`:
-`local-ai/ollama.ts` captures only its current managed child, excluding explicit existing
-installs, installation and shutdown. `supervisor.ts` supplies an immutable host-only direct-child
-capability, permanently revoked by unhealthy status/Stop/replacement; copied fields cannot mint it.
-`local-ai/windows-connection-origin.ts` uses a bounded kernel-leashed native reader to match the
-actual established reverse TCP tuple to that original live child and its executable image path.
-`local-ai/managed-ollama-transport.ts` connects without HTTP bytes, verifies that exact socket,
-then sends through it with a final owner check before Node flushes. It has closed provider paths,
-finite byte/fragment/concurrency bounds, no pooling/retry/redirect and retained proof/request/body/
-socket cleanup. HTTP settlement is not GPU/inference completion. Windows synthetic-provider
-checks qualify this port; other platforms refuse native proof. Managed writer/socket proof,
-binary integrity, full native integration/network/spend/persistence/cleanup acceptance and the
-actual Studio master visual gate remain outstanding. Default production activation stays closed.
-The common finite socket/proof/request/body owner is now `local-ai/verified-loopback-http.ts`;
-the provider subclass keeps its closed Ollama grammar. `harness/managed-writer-transport.ts`
-adds the separate native API policy: one captured private request, one directory/session,
-original launch authentication, one generation and bounded read/retirement/denial routes.
-`harness/v2-launch.ts` offers this capability only for the current bundled Windows writer.
-Contracts `PrivateSessionWriter` carries host-only closures through the Studio runner and
-prepared-session owner, never through model input, configuration or wire commands. Failed
-creation retains exact private files until original HTTP work drains. Stop seals new native
-writes immediately while retaining an already-sent completion observation; native completion,
-GPU release and confirmed session/file retirement remain separate authorities.
-The pinned native provider discovery has a one-second metadata deadline. Managed bridge startup
-therefore verifies two unwritten one-use TCP sockets before exposing its URL. Only initial
-metadata may consume them; current child/service/socket checks still precede every write.
-They expire after thirty seconds, stay within the eight-socket cap and drain on Stop. No
-metadata response is cached, no HTTP connection is reused and later route probes remain fresh.
-Real pinned OpenCode fixtures qualify writer alone and writer plus managed synthetic provider,
-with one exact approved request and bounded profile scans. Runner Stop seals the original
-provider/writer without closing the bridge listener: it keeps refusing new traffic at the same
-address while already-sent bounded completion may drain. Process proof still waiting at seal
-cannot send late bytes. Confirmed native retirement precedes writer HTTP cleanup and final
-listener release; failed creation retains the address until original writer HTTP drains.
-A confirmed retirement is retained across later bridge cleanup retries rather than queried
-again through an already closed writer. Binary provenance, native interrupted-work/physical
-cleanup qualification, remaining network/spend/persistence/platform gates
-and actual turn-239 visual acceptance still prevent default production activation.
+Optional native Studio transport uses `studio-assistant/provider-bridge.ts`: one exact reviewed
+body, private authenticated loopback listener, bounded response collection before native
+buffering and stripped native metadata. `runner.ts` binds the opaque identity into disclosure
+and owns the route through native, HTTP and exact private-file retirement. Contracts
+`PrivateSessionTransport` carries only its ephemeral URL/capability through existing native
+configuration; it is absent from model input, ordinary sessions and wire commands.
+`PrivateSessionWriter` separately carries host-only original native API closures, never config.
+
+`studio-assistant/managed-provider-bridge.ts` composes the existing managed Ollama owner with
+`local-ai/managed-ollama-transport.ts`. `ollama.ts` captures only its current managed selection,
+excluding explicit existing installs, installation and shutdown. `supervisor.ts` supplies an
+immutable original-child capability, revoked by unhealthy status/Stop/exit/replacement.
+`local-ai/windows-connection-origin.ts` verifies the established reverse TCP tuple and image
+path against that original live process before HTTP bytes. `local-ai/verified-loopback-http.ts`
+owns the exact paused socket, proof, bounded request/response and actual close; it never pools,
+redirects, reconnects or retries. Other platforms refuse native proof pending qualification.
+`harness/managed-writer-transport.ts` adds a closed original-auth API policy for one private
+directory/role/session/request and one generation. `harness/v2-launch.ts` supplies it only for
+the current bundled Windows writer. Failed creation retains original files until HTTP drains.
+
+The pinned native metadata deadline is one second. Managed startup verifies two unwritten
+one-use sockets before exposing the URL; initial metadata can consume each once, with final
+child/service/socket checks. They expire after thirty seconds within the eight-socket cap.
+Responses are fresh; later metadata uses a new verified socket, never cached data or HTTP reuse.
+
+Stop seals new writer/provider writes and retains the bound refusing listener while work is
+uncertain. Already-sent bounded completion may drain. Native retirement precedes writer HTTP
+drain, final listener release and exact file retirement. Known retirement survives later
+cleanup retries. The existing host-only `SessionRef.privateOwnerStopped` confirmation of BOTH
+original native owners retires only captured local session/cache state, even after exit/disposal,
+without querying a dead/replacement endpoint. A pending creation retains this confirmation and
+its files until its original host work settles. Writer exit or HTTP Stop alone is insufficient.
+
+Actual bundled Windows fixtures qualify normal completion, upstream overflow, verified writer/
+provider composition and Stop with a held synthetic provider. They retain address/GPU planning
+ownership after writer exit, then verify release and exact file retirement after original
+provider process cleanup. These are finite protocol/process tests, not live GPU/model evidence.
+Production host activation, binary provenance, remaining network/spend/persistence/live-model/
+cross-restart/platform acceptance and actual matched turn-239 visuals remain open. Default
+production destination attestation stays closed; the bridge adds no model process or agent loop.
+
 History replacement reads wait for an already admitted same-path write that outlived bounded
 shutdown in this process. This prevents a late old rename from overwriting a successor's history;
 it is not a cross-process/multiple-active-host lock. Private state is not replayed on reconnect

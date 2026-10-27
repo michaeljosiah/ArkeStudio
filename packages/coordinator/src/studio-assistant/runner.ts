@@ -22,7 +22,7 @@ export interface StudioPrivateTransport {
   stop(): Promise<boolean>;
   writer?: PrivateSessionWriter;
 }
-interface Active { control: AbortController; transport?: StudioPrivateTransport; listen?: AbortController; ownerStopped?: () => void; retire?: (signal: AbortSignal) => Promise<boolean>; retired?: boolean; retireFiles?: () => Promise<boolean>; finishing?: Promise<void>; dir?: string; sessionId?: string; work?: Promise<string>; confirmed: boolean; started: boolean; workFinished: boolean; failed?: boolean }
+interface Active { control: AbortController; transport?: StudioPrivateTransport; listen?: AbortController; ownerStopped?: () => void; ownersStopped?: boolean; retire?: (signal: AbortSignal) => Promise<boolean>; retired?: boolean; retireFiles?: () => Promise<boolean>; finishing?: Promise<void>; dir?: string; sessionId?: string; work?: Promise<string>; confirmed: boolean; started: boolean; workFinished: boolean; failed?: boolean }
 
 /** One explicit model call at a time. Native tools are denied by the operational roster;
  * structured delegation is handled by the coordinator, never a native subagent command.
@@ -136,6 +136,7 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     if (!session.privateEvents) throw new Error("The Studio model owner did not return a private session observer.");
     if (!session.privateTurnSettled) throw new Error("The Studio model owner did not return a native completion proof.");
     entry.ownerStopped = session.privateOwnerStopped?.bind(session);
+    if (entry.ownersStopped) entry.ownerStopped?.();
     signal.throwIfAborted(); if (!sameOwner() || !sameDestination()) throw new Error("The selected Studio model owner changed before dispatch.");
     if (adapter.privateDestinations === true) {
       if (!session.privateDestination) throw new Error("The Studio model owner did not return native destination proof.");
@@ -196,7 +197,7 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     }
   }
   private async finish(entry: Active): Promise<void> {
-    if (!this.active.has(entry)) return;
+    if (!this.active.has(entry) || !entry.workFinished || entry.started && !entry.confirmed && !entry.ownersStopped) return;
     if (entry.finishing) return entry.finishing;
     entry.listen?.abort();
     const work = async () => {
@@ -229,5 +230,5 @@ export class HarnessStudioModelRunner implements StudioModelPort {
   /** Trusted confirmation that both the exact backing inference and its writing owner have
    * completed native cleanup/no further dispatch. A writer exit or Stop reply is insufficient.
    * Never a model/renderer tool; callers must retain the matched native cleanup authority. */
-  async ownerStopped(): Promise<void> { for (const entry of this.active) { entry.control.abort(); entry.ownerStopped?.(); await this.finish(entry); } }
+  async ownerStopped(): Promise<void> { for (const entry of this.active) { entry.ownersStopped = true; entry.control.abort(); entry.ownerStopped?.(); await this.finish(entry); } }
 }
