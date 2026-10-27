@@ -1,5 +1,5 @@
 import { StorySceneDialog, StoryEndingDialog, StoryPreviewStart } from "../components/story-scene-controls.js";
-import { ConnectorDialog, StoryChoiceRules, StoryFactsInspector } from "../components/story-controls.js";
+import { ConnectorDialog, StoryChoiceRules, StoryFactsInspector, StoryRuleSummary } from "../components/story-controls.js";
 import type { Choice } from "@arke-studio/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Link, useParams } from "react-router";
@@ -253,11 +253,13 @@ export function BranchMapScreen() {
   const [connector, setConnector] = useState<Choice | null>(null);
   const [connectorEditing, setConnectorEditing] = useState(false);
   const [connectorSave, setConnectorSave] = useState<{ choice: Choice; version: number; ids: string[] } | null>(null);
+  const [addedChoice, setAddedChoice] = useState<string | null>(null);
+  const [choiceSavedLabel,setChoiceSavedLabel] = useState("Added");
   useEffect(() => {
     if (!connectorSave || !routing || routing.version <= connectorSave.version) return;
     const draft = connectorSave.choice;
     const saved = routing.choices.find(c => (c.id === draft.id || (!connectorSave.ids.includes(c.id) && c.id.startsWith(draft.id + "-"))) && c.from === draft.from && c.to === draft.to && c.label === draft.label && JSON.stringify(c.when) === JSON.stringify(draft.when) && JSON.stringify(c.effects ?? []) === JSON.stringify(draft.effects ?? []) && JSON.stringify(c.unavailable) === JSON.stringify(draft.unavailable));
-    if (saved) { setConnectorSave(null); setConnector(null); setMapPick(false); setSelection({ kind: "choice", id: saved.id }); }
+    if (saved) { setChoiceSavedLabel(connectorSave.ids.includes(saved.id) ? "Saved" : "Added"); setConnectorSave(null); setConnector(null); setMapPick(false); setAddedChoice(saved.id); setSelection({ kind: "choice", id: saved.id }); }
   }, [routing, connectorSave]);
   const [mapPick, setMapPick] = useState(false);
   const [mapDestination, setMapDestination] = useState<string | null>(null);
@@ -310,6 +312,7 @@ export function BranchMapScreen() {
     setSelection(null);
     setConnector(null);
     setConnectorSave(null);
+    setAddedChoice(null);
     setSceneRules(null);
     setEndingRules(null);
     setMapPick(false);
@@ -1087,6 +1090,7 @@ export function BranchMapScreen() {
     if (selection.kind === "choice") {
       if (!selectedChoice) return null;
       const walked = !unwalked.has(selectedChoice.id);
+      if (addedChoice === selectedChoice.id) return <Inspector title="Choice" onClose={() => setSelection(null)}><span className="bm-eyebrow">{choiceSavedLabel} · {walked ? "walked" : "not walked"}</span><h2 className="story-choice-title">{selectedChoice.label}</h2><p className="bm-muted">{titleOf(selectedChoice.from)} → {titleOf(selectedChoice.to)}</p><StoryRuleSummary routing={routing} when={selectedChoice.when} effects={selectedChoice.effects ?? []}/><p className="story-consequence">The connection is saved with its text, conditions and values in one change. {walked ? "Walked in preview." : "Preview is still needed."}</p><Button className="story-review-action" onClick={() => { setConnectorEditing(true); setConnector(selectedChoice); setMapDestination(null); }}>Edit choice</Button></Inspector>;
       return (
         <Inspector title="Choice" sub={selectedChoice.id} onClose={() => setSelection(null)}>
           <Button onClick={() => { setConnectorEditing(true); setConnector(selectedChoice); setMapDestination(null); }}>Edit connector</Button>
@@ -1406,7 +1410,7 @@ export function BranchMapScreen() {
         )}
       </div>
       {routing && endingRules && <StoryEndingDialog routing={routing} sceneId={endingRules} onClose={() => setEndingRules(null)} onSave={(variants, baseVersion) => command({ operation: "set-ending-variants", sceneId: endingRules, title: routing.endings.find(e => e.sceneId === endingRules)!.title, variants, baseVersion })} />}
-      {routing && connector && <ConnectorDialog key={connector.id} editing={connectorEditing} routing={routing} initial={connector} onDraft={setConnector} scenes={scenes} picking={mapPick} destination={mapDestination} onPick={from => { setConnector(current => current ? { ...current, from } : null); setMapPick(true); }} onClose={() => { setConnector(null); setConnectorSave(null); setMapPick(false); setFocused(`s:${connector.from}`); setSelection(null); }} onSave={(choice, baseVersion) => {
+      {routing && connector && <ConnectorDialog key={connector.id} editing={connectorEditing} routing={routing} initial={connector} onDraft={setConnector} scenes={scenes} picking={mapPick} destination={mapDestination} onPick={from => { setConnector(current => current ? { ...current, from } : null); setMapPick(true); }} onClose={() => { setConnector(null); setConnectorSave(null); setMapPick(false); setFocused(connectorEditing ? `c:${connector.id}` : `s:${connector.from}`); setSelection(connectorEditing ? {kind:"choice",id:connector.id} : null); }} onSave={(choice, baseVersion) => {
         const editing = connectorEditing;
         const id = editing ? choice.id : choiceIdFor(choice.label, routing);
         if (editing) command({ operation: "edit-choice", choiceId: id, baseVersion, changes: { label: choice.label, to: choice.to, when: choice.when ?? null, effects: choice.effects ?? [], unavailable:choice.unavailable ?? null } });

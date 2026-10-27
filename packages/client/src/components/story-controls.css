@@ -117,6 +117,9 @@
 .story-scene-inspector .story-inspector-footer .ui-btn { flex:1; width:auto; }
 .story-witness { background:var(--muted); padding:12px; border-radius:8px; font:var(--type-label); }
 .story-witness p { margin:8px 0; line-height:1.6; }
+.story-choice-title { font:var(--type-h3); margin:8px 0; }
+.story-rule-summary { font:var(--type-label); }
+.story-rule-summary h3 { font:var(--type-ui); margin-top:20px; }
 .story-destination-list { flex:1; min-height:0; overflow:auto; padding:16px; display:flex; flex-direction:column; gap:12px; }
 .story-destination-list h2 { font:var(--type-h2); margin:0; }
 .story-destination-list p { font:var(--type-label); color:var(--muted-foreground); margin:0; }

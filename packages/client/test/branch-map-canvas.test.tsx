@@ -419,6 +419,15 @@ describe("the branch map canvas (design turn 157)", () => {
     await click(button(item, "Add choice"));
     assert.deepEqual(commands(item), [{ operation: "add-choice", choice: { id: "ch_ask-dev-to-hold-the-release", from: "sc_quarter", to: "sc_towers", label: "Ask Dev to hold the release", when: { op: "eq", fact: "dev", value: "Alive" }, effects: [{ fact: "dev", value: "Lost at release" }] } }]);
     assert.ok(all(item, 'dialog.story-dialog')[0], "the draft stays until its saved snapshot arrives");
+    const add=commands(item)[0]!;
+    assert.equal(add.operation,"add-choice");
+    if(add.operation!=="add-choice") throw new Error("Expected add");
+    await act(async()=>__setStateForTest(state({...ROUTING,schemaVersion:2,version:ROUTING.version+1,facts:[{id:"dev",label:"Dev Malik",type:"enum",values:["Alive","Lost at release"],default:"Alive"}],choices:[...ROUTING.choices,add.choice]})));
+    assert.equal(all(item,'dialog.story-dialog').length,0);
+    assert.match(text(all(item,'.bm-insp')[0]!),/Added · not walked.*Dev Malik is Alive.*Dev Malik → Lost at release/);
+    await click(button(item,"Edit choice"));
+    await click(button(item,"Cancel"));
+    assert.ok(button(item,"Edit choice"),"canceling an edit returns to the selected connector");
   });
 
   it("forwards a stateful walk witness through the React player wrapper", async () => {
