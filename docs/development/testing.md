@@ -1878,6 +1878,26 @@ keeps its pending admission, permits cancellation and cannot start late work aft
 history waits for its settlement before reading/saving. The same-path barrier is not a multi-host
 lock. These tests do not qualify real model-route/spend/trace privacy integration or the dialog.
 
+Private Studio reply playback uses contracts `test/studio-speech.test.ts`, voice
+`test/private-speech.test.ts`, coordinator `test/studio-assistant/speech.test.ts` and
+`speech-host.test.ts`, `test/voice/private-speech.test.ts`, and client `studio-read-replies`
+and extended Studio conversation tests. The production host fixture uses its actual private
+RPC and Voxa client with a tiny synthetic HTTP voice server, without opening a world. It checks
+authoritative reply-only resolution, 450-character parts, exact source/voice binding, no model
+replay, unchanged chat history, no audio cache file, no common voice event and no data to the
+second authenticated socket. It requires native filesystem/loopback access; it does not run
+Kokoro, prove voice quality, physical cleanup or private sidecar profile erasure.
+Streaming client faults cover declared/actual size, fragment bounds, redirect refusal, literal
+loopback pinning and cancelled body cleanup retaining the original synthesis/runtime ownership.
+Host tests cover requester-bound cancellation, a retained unconfirmed producer after timeout,
+archive revocation and late-audio suppression. Client tests exercise the shared app player,
+sequential pull, one latest unsent reply waiting behind the current read, history/visibility/reconnect baselines, different playback taking over, local
+narrator changes before the first part, and refusal of cloud/world-bound voices. Read replies
+and explicit Listen are currently qualified for the app's selected local Kokoro narrator;
+they do not silently substitute another reader. Other private speech engines/nonlocal consent,
+remaining dialog controls, native inference qualification and matched turn-239 visual acceptance
+remain separate work. Run typecheck after the final test edits.
+
 ## System status (turn 240)
 
 Run contracts/coordinator/desktop `system-resources.test.ts`, coordinator

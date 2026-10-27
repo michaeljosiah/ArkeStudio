@@ -2,7 +2,7 @@ import { savedPicture, openSavedPicture, type SavedPicture } from "./productions
 import { createStudioAssistantHost, type StudioAssistantHost, type StudioAssistantHostOptions } from "./studio-assistant/host.js";
 import { RecoveryActionRegistry } from "./recovery/actions.js";
 import { restartActionHistory, reviewedActionHistory } from "./recovery/action-history.js";
-import { RECOVERY_POLICY, type RecoveryPolicySnapshot, type RecoveryRetryPlan, type MingCleanupSnapshot } from "@arke-studio/contracts";
+import { RECOVERY_POLICY, studioLocalNarrator, type RecoveryPolicySnapshot, type RecoveryRetryPlan, type MingCleanupSnapshot } from "@arke-studio/contracts";
 import { chapterReviewSummary } from "@arke-studio/contracts";
 import { rebuildBenchPrefill } from "@arke-studio/contracts";
 import { MUSIC_IMPORT_EXTENSIONS } from "@arke-studio/contracts";
@@ -3248,6 +3248,13 @@ export class Coordinator {
       transcribe: (audio, contentType, signal) => {
         if (!this.voiceService) return Promise.reject(new Error("Local dictation is unavailable."));
         return this.voiceService.transcribe(audio, contentType, signal);
+      },
+      readSpeech: async (text, expectedVoice, signal, current) => {
+        const voice = this.voiceService, selected = this.readModel.getState().app.narrator;
+        const voiceId = studioLocalNarrator(selected);
+        if (!voice || !voiceId || expectedVoice && voiceId !== expectedVoice) throw new Error("Private local speech is unavailable.");
+        const allowed = () => current() && !this.stopping && this.voiceService === voice && studioLocalNarrator(this.readModel.getState().app.narrator) === voiceId;
+        const audio = await voice.privateLocalSpeech(voiceId, text, signal, allowed); return { audio, voiceId };
       },
       now: () => Date.parse(this.nowIso()), evidence: () => ({ history: this.opts.recoveryHistory?.snapshot(),
         policy: this.opts.recoveryControl?.policySnapshot(), storage: this.opts.storageHealth?.snapshot(), jobs: this.jobQueue?.listJobs() }) });

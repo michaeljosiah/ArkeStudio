@@ -43,6 +43,11 @@ export class StudioAssistantService {
       threads: structuredClone(this.file.threads), share: this.turn?.share?.value ?? null, ephemeralReply: this.ephemeralReply });
   }
   subscribe(listener: (snapshot: StudioAssistantSnapshot) => void): () => void { this.subscribers.add(listener); return () => this.subscribers.delete(listener); }
+  readableReply(threadId: string, messageId: string): string | null {
+    if (this.closing || this.audit !== "available") return null;
+    const thread = this.file.threads.find(row => row.id === threadId && !row.archived);
+    return thread?.messages.find(row => row.id === messageId && row.role === "arke")?.text ?? null;
+  }
   open(): Promise<void> {
     return this.opening ??= this.writes.enqueue(async () => {
       if (this.closing) return;

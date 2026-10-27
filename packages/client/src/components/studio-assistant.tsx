@@ -13,6 +13,8 @@ import { useGlobalChat } from "./global-chat-context.js";
 import { PageSheet } from "./page-sheet.js";
 import { Composer } from "./composer.js";
 import { StudioDictation } from "./studio-dictation.js";
+import { useStudioReadReplies } from "./studio-read-replies.js";
+import { TextActions } from "./player.js";
 import type { DictationPhase } from "./dictation.js";
 import { ModelChip } from "./model-chip.js";
 import { ConversationReply } from "./conversation-reply.js";
@@ -56,6 +58,7 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
   const [history, setHistory] = useState(false), [focus, requestFocus] = useState(0);
   const [dictationPhase, setDictationPhase] = useState<DictationPhase>("idle");
   const thread = view.state?.threads.find(thread => thread.id === view.selected), pending = thread?.pending;
+  const reading = useStudioReadReplies(client, view, !history && dictationPhase === "idle");
   const share = view.state?.share && view.state.share.threadId === thread?.id ? view.state.share : null;
   const working = pending && pending.state !== "interrupted";
   const unavailable = !view.connected ? "Reconnect to use Studio. Your draft is retained."
@@ -68,7 +71,7 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
   const draft = (text: string) => { client.draft(text); requestFocus(value => value + 1); };
   return <>
     <header className="fy-studio-head"><div><h2 tabIndex={-1}>Arke</h2><span>Studio assistant</span></div>
-      <button type="button" className="fy-studio-icon" aria-label="Studio conversations" aria-expanded={history} onClick={() => setHistory(value => !value)}><ListBullet size={16} /></button>
+      <button type="button" className="fy-studio-icon" aria-label="Studio conversations" aria-expanded={history} onClick={() => { reading.stop(); setHistory(value => !value); }}><ListBullet size={16} /></button>
       <button type="button" className="fy-studio-icon" aria-label="Close Studio assistant" onClick={client.close}><X size={16} /></button>
     </header>
     <div className="fy-studio-scope"><b>Studio</b><span>Setup, local AI &amp; help</span></div>
@@ -89,7 +92,9 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
           <button type="button" className="fy-studio-prompt" onClick={() => draft("Review storage")}><Folder size={14} />Review storage</button>
           <button type="button" className="fy-studio-prompt" onClick={() => draft("Help with Arke")}><Help size={14} />Help with Arke</button>
         </div></div>}
-      {thread?.messages.map(message => <StudioMessage key={message.id} message={message} appState={appState} close={client.close} />)}
+      {thread?.messages.map(message => <StudioMessage key={message.id} message={message} appState={appState} close={client.close}
+        actions={message.role === "arke" && reading.offered ? <TextActions clip={null} onRead={() => reading.listen(message.id)} copyText={message.text} readLabel="Listen to Studio reply"
+          note={reading.reading === message.id ? <button type="button" className="fy-studio-button" onClick={reading.stop}>Stop reading</button> : undefined} /> : undefined} />)}
       {view.state?.ephemeralReply && view.selected === view.state.threads.find(row => row.pending)?.id && <div className="fy-studio-unsaved" role="status">
         <p>This reply could not be saved. Copy it before leaving this session.</p><StudioMessage message={view.state.ephemeralReply} appState={appState} close={client.close} />
       </div>}
@@ -106,13 +111,14 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
       placeholder="Ask Arke…" agentLabel="Arke" focusRequest={focus} busy={view.submitting || !!working || !!view.state?.busy || dictationPhase !== "idle"} disabledReason={unavailable}
       busyLabel={dictationPhase === "requesting" ? "Microphone permission…" : dictationPhase === "listening" ? "Dictating…" : dictationPhase === "transcribing" ? "Transcribing…" : "Working…"}
       dictationControl={<StudioDictation client={client} onPhase={setDictationPhase} enabled={view.open && view.connected && view.fresh && !view.submitting && !working && !view.state?.busy && !thread?.archived && pending?.state !== "interrupted"} />}
+      readReplies={reading.composer}
       modelControl={<ModelChip state={appState} value={model} set={modelSet} onPick={pickModel} unsetLabel="Use Studio’s configured model" disabled={view.submitting || !!view.state?.busy} />} />
       {view.draft.length > STUDIO_ASSISTANT_LIMITS.requestChars && <p className="fy-studio-note" role="status">Studio accepts up to {STUDIO_ASSISTANT_LIMITS.requestChars.toLocaleString()} characters per request.</p>}
     </footer>
   </>;
 }
 
-function StudioMessage({ message, appState, close }: { message: StudioAssistantMessage; appState: ClientState | null; close(): void }) {
+function StudioMessage({ message, appState, close, actions }: { message: StudioAssistantMessage; appState: ClientState | null; close(): void; actions?: ReactNode }) {
   return <article className={message.role === "user" ? "fy-studio-user" : "fy-studio-answer"} aria-label={message.role === "user" ? "You" : "Arke"}>
     {message.role === "arke" && <div className="fy-studio-answer-label">Arke</div>}
     <ConversationReply text={message.text} />
@@ -121,6 +127,7 @@ function StudioMessage({ message, appState, close }: { message: StudioAssistantM
       {message.diagnostic.answer.hypotheses.length > 0 && <><b>Possible causes</b><ul>{message.diagnostic.answer.hypotheses.map((hypothesis, index) => <li key={index}>{hypothesis}</li>)}</ul></>}
     </div>}
     {message.handoff && <StudioHandoff handoff={message.handoff} appState={appState} close={close} />}
+    {actions}
   </article>;
 }
 

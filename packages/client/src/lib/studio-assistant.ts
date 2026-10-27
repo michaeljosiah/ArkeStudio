@@ -1,7 +1,7 @@
 import type { StudioAssistantCommand, StudioAssistantResponse, StudioAssistantSnapshot } from "@arke-studio/contracts";
 import { STUDIO_ASSISTANT_LIMITS, StudioAssistantCommandSchema } from "@arke-studio/contracts";
 
-type Command = StudioAssistantCommand["command"];
+type Command = Exclude<StudioAssistantCommand["command"], { action: "dictate" | "read-reply" }>;
 type Reply = Extract<StudioAssistantResponse, { type: "result" }>;
 export interface StudioConversationView {
   open: boolean; connected: boolean; fresh: boolean; submitting: boolean; state: StudioAssistantSnapshot | null;
@@ -20,6 +20,7 @@ export class StudioConversationClient {
   private selectingNew = false;
   private connectionEpoch = 0;
   private dictation: { id: string; resolve(text: string | null): void; timer: ReturnType<typeof setTimeout> } | null = null;
+  private speech: { id: string; finish(value: Extract<StudioAssistantResponse, { type: "speech" }> | null): void; timer: ReturnType<typeof setTimeout> } | null = null;
   private readonly pending = new Map<string, { resolve(reply: Reply): void; timer: ReturnType<typeof setTimeout> }>();
   constructor(private readonly wire: { send(message: StudioAssistantCommand): boolean; id(): string }, private readonly timeoutMs = 7000) {}
   getSnapshot = (): StudioConversationView => this.view;
@@ -28,6 +29,7 @@ export class StudioConversationClient {
   setConnected(connected: boolean): void {
     if (this.view.connected === connected) return;
     this.connectionEpoch++;
+    if (!connected) this.stopSpeech(false);
     if (this.dictation) { clearTimeout(this.dictation.timer); this.dictation.resolve(null); this.dictation = null; }
     this.watchId = null;
     if (!connected) { for (const request of this.pending.values()) { clearTimeout(request.timer); request.resolve(uncertain()); } this.pending.clear(); }
@@ -35,6 +37,7 @@ export class StudioConversationClient {
   }
   open = (): void => { this.change({ open: true }); if (this.view.connected) this.watch(); };
   close = (): void => {
+    this.stopSpeech();
     this.connectionEpoch++;
     if (this.dictation) { clearTimeout(this.dictation.timer); this.dictation.resolve(null); this.dictation = null; }
     if (this.watchId && this.view.connected) this.wire.send({ kind: "studio-assistant", requestId: this.wire.id(), command: { action: "unwatch" } });
@@ -45,6 +48,10 @@ export class StudioConversationClient {
     if (!this.wire.send({ kind: "studio-assistant", requestId, command: { action: "watch" } })) { this.watchId = null; this.change({ fresh: false, trouble: "Studio is disconnected. Your draft is retained." }); }
   }
   receive(frame: { requestId: string; response: StudioAssistantResponse }): void {
+    if (frame.requestId === this.speech?.id) {
+      const pending = this.speech; this.speech = null; clearTimeout(pending.timer);
+      pending.finish(frame.response.type === "speech" ? frame.response : null); return;
+    }
     if (frame.requestId === this.dictation?.id) {
       const pending = this.dictation; this.dictation = null; clearTimeout(pending.timer);
       pending.resolve(frame.response.type === "dictation" ? frame.response.text : null); return;
@@ -68,10 +75,33 @@ export class StudioConversationClient {
   pickModel = (model: string | undefined): void => { if (model) this.models.set(this.view.selected ?? "new", model); else this.models.delete(this.view.selected ?? "new"); this.change({ model }); };
   select = (id: string | null): void => {
     if (id && !this.view.state?.threads.some(thread => thread.id === id && !thread.archived)) return;
+    this.stopSpeech();
     this.selectingNew = id === null;
     this.drafts.set(this.view.selected ?? "new", this.view.draft);
     this.change({ selected: id, model: this.models.get(id ?? "new"), draft: this.drafts.get(id ?? "new") ?? "", trouble: null });
   };
+  private stopSpeech(send = this.view.connected): void {
+    const pending = this.speech; if (!pending) return;
+    this.speech = null; clearTimeout(pending.timer); pending.finish(null);
+    if (send) this.wire.send({ kind: "studio-assistant", requestId: this.wire.id(), command: { action: "stop-reply-read", readRequestId: pending.id } });
+  }
+  async readReplyPart(threadId: string, messageId: string, part: number, signal: AbortSignal,
+    previous?: { source?: string; voiceId: string }): Promise<Extract<StudioAssistantResponse, { type: "speech" }> | null> {
+    const epoch = this.connectionEpoch, expected = previous ? { ...previous } : undefined;
+    if (signal.aborted || !this.view.open || !this.view.connected || !this.view.fresh || this.view.selected !== threadId || this.speech) return null;
+    const parsed = StudioAssistantCommandSchema.safeParse({ kind: "studio-assistant", requestId: this.wire.id(), command: {
+      action: "read-reply", threadId, messageId, part, ...expected } });
+    if (!parsed.success) return null;
+    const response = await new Promise<Extract<StudioAssistantResponse, { type: "speech" }> | null>(resolve => {
+      const id = parsed.data.requestId, abort = () => { if (this.speech?.id === id) this.stopSpeech(); };
+      const finish = (value: Extract<StudioAssistantResponse, { type: "speech" }> | null) => { signal.removeEventListener("abort", abort); resolve(value); };
+      const timer = setTimeout(abort, 55_000); this.speech = { id, finish, timer };
+      signal.addEventListener("abort", abort, { once: true });
+      if (!this.wire.send(parsed.data)) this.stopSpeech(false);
+    });
+    return signal.aborted || this.connectionEpoch !== epoch || !this.view.open || !this.view.connected || this.view.selected !== threadId || response?.part !== part ||
+      expected && (expected.source !== undefined && response?.source !== expected.source || response?.voiceId !== expected.voiceId) ? null : response;
+  }
   /** Capture the draft destination when the microphone opens. A later thread selection cannot
    * redirect its words, and close/reconnect/cancel never submits or replays the recording. */
   dictationTarget(): (audioBase64: string, contentType: string, signal: AbortSignal) => Promise<boolean> {
@@ -119,7 +149,7 @@ export class StudioConversationClient {
   }
   async send(model: string): Promise<boolean> {
     const text = this.view.draft, before = this.view.selected; if (!text.trim() || text.length > STUDIO_ASSISTANT_LIMITS.requestChars || !model || this.view.submitting || this.dictation) return false;
-    this.change({ submitting: true });
+    this.stopSpeech(); this.change({ submitting: true });
     try {
     let threadId = before;
     if (!threadId) {

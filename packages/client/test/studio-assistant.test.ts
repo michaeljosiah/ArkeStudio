@@ -16,6 +16,33 @@ function fixture() {
     response: { type: "result", status, reason: null, threadId, runId: status === "accepted" ? other : null } });
   return { client, sent, deliver, reply };
 }
+it("requests private speech by reply ID, binds parts and keeps audio outside conversation state", async () => {
+  const h = fixture(); h.deliver(state([id])); h.client.select(id); const control = new AbortController();
+  const response = { type: "speech" as const, part: 0, parts: 2, source: "a".repeat(64), voiceId: "bm_george", format: "wav" as const, audioBase64: "AQID" };
+  const pending = h.client.readReplyPart(id, other, 0, control.signal), first = h.sent.at(-1)!;
+  assert.deepEqual(first.command, { action: "read-reply", threadId: id, messageId: other, part: 0 });
+  h.client.receive({ requestId: first.requestId, response }); assert.deepEqual(await pending, response);
+  assert(!JSON.stringify(h.client.getSnapshot()).includes("AQID"));
+  const binding = { source: response.source, voiceId: response.voiceId };
+  const next = h.client.readReplyPart(id, other, 1, control.signal, binding), request = h.sent.at(-1)!;
+  assert(request.command.action === "read-reply" && request.command.source === response.source);
+  binding.source = "b".repeat(64);
+  h.client.receive({ requestId: request.requestId, response: { ...response, part: 1, source: "b".repeat(64) } }); assert.equal(await next, null);
+  h.client.dispose();
+});
+it("cancels private speech on close, selection and abort, never resends on reconnect or consumes late audio", async () => {
+  for (const end of ["close", "selection", "abort", "disconnect"] as const) {
+    const h = fixture(); h.deliver(state([id, other])); h.client.select(id); const control = new AbortController();
+    const pending = h.client.readReplyPart(id, other, 0, control.signal), first = h.sent.at(-1)!;
+    if (end === "close") h.client.close(); else if (end === "selection") h.client.select(other); else if (end === "abort") control.abort(); else h.client.setConnected(false);
+    assert.equal(await pending, null);
+    const stops = h.sent.filter(message => message.command.action === "stop-reply-read"); assert.equal(stops.length, end === "disconnect" ? 0 : 1);
+    h.client.receive({ requestId: first.requestId, response: { type: "speech", part: 0, parts: 1, source: "a".repeat(64), voiceId: "bm_george", format: "wav", audioBase64: "AQID" } });
+    const count = h.sent.length; h.client.setConnected(true); h.client.open(); h.deliver(state([id, other]));
+    assert(h.sent.slice(count).every(message => message.command.action === "watch")); assert(!JSON.stringify(h.client.getSnapshot()).includes("AQID"));
+    h.client.dispose();
+  }
+});
 it("private dictation appends to its captured draft, preserves newer typing and never sends a model request", async () => {
   const h = fixture(); h.deliver(state([id, other])); h.client.select(id); h.client.draft("Typed first");
   const destination = h.client.dictationTarget(), control = new AbortController();

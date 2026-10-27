@@ -1459,7 +1459,18 @@ later typing requires fresh review. Staging creates/sends no coordinator convers
 explicit start/stop, one-minute/6 MB limits, cancelled pending microphone permission and
 discard-on-close/disconnect. `StudioConversationClient.dictationTarget` captures the original
 thread/new-draft key; newer typing is preserved and no transcript is automatically submitted.
-The default native inference route still refuses absent host proof. Attachment/read-reply controls, effort
+Studio reply playback now uses `studio-read-replies.ts` and the existing single app player. The
+private host resolves saved Arke reply IDs, normalizes/splits bounded text, and returns one WAV
+part only to its requester. `voice/service.ts` shares the existing synthesis lane with no world
+cache or cloud fallback. Voice client private reads pin literal loopback, forbid redirects and
+bound streamed bytes/fragments before assembly. Cancelled body cleanup retains its original
+inference/lane owner until actual consumer settlement. Subsequent parts bind source digest and
+chosen local narrator; changing scope/voice, closing, history navigation or disconnect stops the
+read without replay. Restored/offscreen history is never read automatically. Tests:
+`test/studio-assistant/speech{,-host}.test.ts`, `test/voice/private-speech.test.ts`, voice/client
+private-speech and Studio read-reply suites. Actual model/physical cleanup qualification remains
+separate; selected cloud or world-bound voices are unavailable for this private local path.
+The default native inference route still refuses absent host proof. Attachment controls, effort
 selection, reviewed repair/cleanup cards and actual matched turn-239 rendering remain pending.
 History replacement reads wait for an already admitted same-path write that outlived bounded
 shutdown in this process. This prevents a late old rename from overwriting a successor's history;

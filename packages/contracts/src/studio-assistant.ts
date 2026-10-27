@@ -5,10 +5,16 @@ import { JobStatusSchema } from "./job.js";
 import { FINDING_KIND_IDS, FindingSeveritySchema } from "./diagnostics.js";
 import { RecoveryEvidenceStateSchema, RecoveryFactSchema, RecoveryIncidentPhaseSchema } from "./recovery-incidents.js";
 import { StorageLimitationSchema, StorageProbeSourceSchema, StorageRootRoleSchema } from "./storage-health.js";
+import { DEFAULT_NARRATOR, KOKORO_VOICE_MODEL } from "./voice.js";
 
 export const STUDIO_ASSISTANT_LIMITS = Object.freeze({ storeBytes: 2 * 1024 ** 2, evidenceBytes: 32 * 1024,
   threads: 20, messages: 100, requestChars: 8000, replyChars: 16000, responseBytes: 192 * 1024, modelCalls: 3,
-  dictationBytes: 6_000_000, dictationMs: 60_000 });
+  dictationBytes: 6_000_000, dictationMs: 60_000, speechBytes: 6_000_000, speechChunkChars: 450, speechParts: 128 });
+/** Studio has no world narrator or implicit cloud/fallback permission. */
+export function studioLocalNarrator(stored: { provider: string; model?: string; voiceId: string; worldId?: string } | null | undefined): string | null {
+  if (!stored) return DEFAULT_NARRATOR.voiceId;
+  return stored.provider === "kokoro" && (!stored.model || stored.model === KOKORO_VOICE_MODEL) && stored.worldId === undefined && stored.voiceId.length > 0 && stored.voiceId.length <= 128 ? stored.voiceId : null;
+}
 export const StudioDictationContentTypeSchema = z.enum(["audio/webm", "audio/webm;codecs=opus", "audio/ogg", "audio/ogg;codecs=opus", "audio/mp4", "audio/wav"]);
 const instant = z.number().int().nonnegative().safe().max(8_640_000_000_000_000), digest = z.string().regex(/^[a-f0-9]{64}$/);
 const bytes = z.number().int().nonnegative().safe(), audit = z.enum(["starting", "available", "unavailable"]);
@@ -101,6 +107,9 @@ export const StudioAssistantCommandSchema = z.object({ kind: z.literal("studio-a
   command: z.discriminatedUnion("action", [
     z.object({ action: z.literal("watch") }).strict(), z.object({ action: z.literal("unwatch") }).strict(),
     z.object({ action: z.literal("create") }).strict(),
+    z.object({ action: z.literal("read-reply"), threadId: UlidSchema, messageId: UlidSchema,
+      part: z.number().int().min(0).max(STUDIO_ASSISTANT_LIMITS.speechParts - 1), source: digest.optional(), voiceId: z.string().min(1).max(128).optional() }).strict(),
+    z.object({ action: z.literal("stop-reply-read"), readRequestId: z.string().uuid() }).strict(),
     z.object({ action: z.literal("dictate"), audioBase64: z.string().min(4).max(8_000_000)
       .regex(/^[A-Za-z0-9+/]+={0,2}$/).refine(value => value.length % 4 === 0), contentType: StudioDictationContentTypeSchema }).strict(),
     z.object({ action: z.literal("archive"), threadId: UlidSchema, archived: z.boolean() }).strict(),
@@ -115,8 +124,13 @@ export type StudioAssistantCommand = z.infer<typeof StudioAssistantCommandSchema
 export const StudioAssistantResponseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("state"), state: StudioAssistantSnapshotSchema }).strict(),
   z.object({ type: z.literal("dictation"), text: z.string().max(STUDIO_ASSISTANT_LIMITS.requestChars) }).strict(),
+  z.object({ type: z.literal("speech"), part: z.number().int().min(0).max(STUDIO_ASSISTANT_LIMITS.speechParts - 1),
+    parts: z.number().int().min(1).max(STUDIO_ASSISTANT_LIMITS.speechParts), source: digest,
+    voiceId: z.string().min(1).max(128), format: z.literal("wav"),
+    audioBase64: z.string().min(4).max(8_000_000).regex(/^[A-Za-z0-9+/]+={0,2}$/).refine(value => value.length % 4 === 0),
+  }).strict(),
   z.object({ type: z.literal("result"), status: z.enum(["ok", "accepted", "refused", "unconfirmed"]),
     reason: z.enum(["invalid", "missing-thread", "busy", "interrupted", "unavailable", "full", "stopped", "timeout"]).nullable(),
     threadId: UlidSchema.nullable(), runId: UlidSchema.nullable() }).strict(),
-]);
+]).refine(value => value.type !== "speech" || value.part < value.parts);
 export type StudioAssistantResponse = z.infer<typeof StudioAssistantResponseSchema>;
