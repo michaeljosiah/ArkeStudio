@@ -1533,6 +1533,15 @@ read, and refuses changed bytes, owner, cancellation or aliases. Original pendin
 before the task returns. This is byte qualification, not an atomic loader-image/hostile-filesystem
 fence. Packaging checks the same executable/archive/version pin before probing/staging it.
 Failed native creation retains original files until HTTP drains.
+`local-ai/runtime-content.ts` verifies the fixed Ollama executable/library tree from the
+archive-derived `ollama-private-pin-x64.json` before a managed private provider opens sockets.
+It bounds directory iteration and streamed file reads, refuses missing/extra/linked code and
+rechecks all earlier files before qualifying. File evidence is cached only for the captured
+process generation; subsequent requests check metadata/identity and the complete fixed tree.
+`OllamaEngineService.qualifyManagedOrigin` couples this to existing selection/install/shutdown
+fences. The bridge retains pending qualification through Stop and cannot publish a late route.
+Only host fixtures can inject a synthetic content pin; normal settings/wire state cannot.
+Managed startup allows sixty seconds for cold GPU discovery while retaining exact version health.
 
 The pinned native metadata deadline is one second. Managed startup verifies two unwritten
 one-use sockets before exposing the URL; initial metadata can consume each once, with final

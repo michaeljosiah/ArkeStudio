@@ -21,6 +21,12 @@ update this pin with the version change. `prepare-opencode2.mjs` refuses incoher
 mismatched extracted bytes before its version probe/stage. A staged runtime's own manifest does
 not supply this expected digest. Repeat content-reader and actual bundled private-writer checks;
 the content check alone does not qualify the full managed stack or activate Studio model calls.
+Managed Ollama's private provider additionally pins every runtime file in coordinator
+`local-ai/ollama-private-pin-x64.json`. With the catalogue's exact archive available locally,
+`node --import tsx scripts/update-ollama-private-pin.mjs <archive.zip>` verifies its archive
+digest and streams its fixed members to compare the committed pin. Add `--write` only when
+intentionally updating that pin. It neither downloads, extracts nor executes runtime code.
+Repeat actual managed readiness/content/cleanup and private bridge checks after changing it.
 OpenCode remains the bundled default while the
 Arke replacement in [issue #1698](https://github.com/michaeljosiah/ArkeStudio/issues/1698) is deferred.
 

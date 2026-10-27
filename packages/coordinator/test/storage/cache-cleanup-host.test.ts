@@ -50,8 +50,9 @@ it("the authenticated host previews without deletion, approves the exact native 
     await until(() => events.some(event => event.type === "voice.catalogue"), "local preset catalogue", 5000);
     const previewId = ulid();
     socket.send(JSON.stringify({ kind: "catalogue-voice-preview", requestId: previewId, provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", maxMicroUsd: 0 }));
-    await until(() => events.some(event => event.type === "voice.catalogue-preview" && event.requestId === previewId && event.status === "ready"), "generated local preview", 5000);
+    await until(() => events.some(event => event.type === "voice.catalogue-preview" && event.requestId === previewId && (event.status === "ready" || event.status === "failed")), "generated local preview outcome", 20_000);
     const ready = events.findLast(event => event.type === "voice.catalogue-preview" && event.requestId === previewId) as Extract<DomainEvent, { type: "voice.catalogue-preview" }>;
+    assert.equal(ready.status, "ready", ready.error);
     assert.match(ready.file!, /^local-[a-f0-9]{64}\.wav$/);
     const directory = join(root, "voice-previews", "local-presets-v1"), key = ready.file!.slice(6, -4), path = join(directory, `${key}.wav`);
     // Simulate elapsed retention time only in this producer-created fixture. Preserve identity/content.

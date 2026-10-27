@@ -3,7 +3,7 @@ import { it } from "node:test";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { execFile } from "node:child_process";
-import { copyFile, mkdir, readFile, readdir } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { agentPromptFor, ROSTER } from "@arke-studio/contracts";
 import { privateWireBody } from "../../../adapter-opencode/src/v2/private-control.js";
@@ -20,6 +20,7 @@ import { LocalGpu } from "../../src/local-ai/gpu.js";
 import { assertNativeProfileExcludes } from "./native-profile.js";
 import { tempDir, closeOnCleanup } from "../tmp.js";
 import { until, untilAsync } from "../wait.js";
+import { nodeRuntimeContentPin } from "../fixtures/runtime-content.js";
 
 async function assertBridgeAddress(baseURL: string, retained: boolean): Promise<void> {
   const replacement = createServer();
@@ -38,7 +39,7 @@ const scenarios: Array<{ overflow: boolean; managedWriter: boolean; managedProvi
 for (const { overflow, managedWriter, managedProvider, interrupted } of scenarios) it(`pinned native private generation through the bounded bridge: ${interrupted ? "Stop retains listener and backing owner" : managedProvider ? "verified managed writer and provider" : managedWriter ? "verified managed writer" : overflow ? "upstream overflow" : "complete response"}`, {
   skip: !process.env.ARKE_TEST_OPENCODE2 || managedWriter && process.platform !== "win32", timeout: managedWriter ? 150_000 : 75_000,
 }, async () => {
-  const root = await tempDir("arke-studio-native-bridge-"), model = "bridge-selected", profile = harnessProfileDir(root);
+  const root = await realpath(await tempDir("arke-studio-native-bridge-")), model = "bridge-selected", profile = harnessProfileDir(root);
   const prompt = "PRIVATE_BRIDGE_QUESTION", answer = '{"kind":"reply","text":"PRIVATE_BRIDGE_REPLY"}';
   const system = agentPromptFor({ ...ROSTER.find(row => row.name === "studio-assistant")!, researchWeb: false });
   const expected = privateWireBody({ model: `ollama/${model}`, prompt, system, outputTokenLimit: 4096 });
@@ -63,6 +64,7 @@ for (const { overflow, managedWriter, managedProvider, interrupted } of scenario
     const providerRoot = join(root, "managed-provider"); marker = join(providerRoot, "requests.jsonl");
     await mkdir(join(providerRoot, "ollama-runtime"), { recursive: true }); await copyFile(process.execPath, join(providerRoot, "ollama-runtime", "ollama.exe"));
     service = new OllamaEngineService({ appRoot: providerRoot, port: await allocateLoopbackPort(),
+      privateContentPin: await nodeRuntimeContentPin(),
       supervise: spec => new ChildSupervisor({ ...spec, args: [join(import.meta.dirname, "../fixtures/managed-http-origin.mjs")],
         env: { ...spec.env, SERVICE_VERSION: OLLAMA_VERSION, ORIGIN_MARKER: marker!, NATIVE_PROVIDER_MODEL: model, NATIVE_PROVIDER_REPLY: answer,
           ...(interrupted ? { NATIVE_PROVIDER_HOLD: "1" } : {}) } }) });

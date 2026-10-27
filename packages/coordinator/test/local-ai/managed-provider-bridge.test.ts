@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { copyFile, mkdir, readFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
 import { ChildSupervisor, allocateLoopbackPort, isSupervisedProcessOrigin } from "../../src/supervisor.js";
@@ -8,22 +8,39 @@ import { OLLAMA_VERSION } from "../../src/setup/catalogue.js";
 import { ManagedStudioProviderBridge } from "../../src/studio-assistant/managed-provider-bridge.js";
 import { tempDir } from "../tmp.js";
 import { until } from "../wait.js";
+import { nodeRuntimeContentPin } from "../fixtures/runtime-content.js";
 
 const CHILD = join(import.meta.dirname, "../fixtures/managed-http-origin.mjs");
 const managed = { engineUrl: null, modelsDir: null };
 const body = JSON.stringify({ model: "fixture", messages: [{ role: "user", content: "private synthetic managed-provider text" }], stream: true });
 
+it("a healthy managed protocol stand-in cannot open a private provider route with unqualified runtime files", { timeout: 40_000 }, async () => {
+  const root = await realpath(await tempDir("arke-provider-content-refusal-")), marker = join(root, "requests.jsonl"); await mkdir(join(root, "ollama-runtime"));
+  await copyFile(process.execPath, join(root, "ollama-runtime", "ollama.exe"));
+  const service = new OllamaEngineService({ appRoot: root, port: await allocateLoopbackPort(),
+    supervise: spec => new ChildSupervisor({ ...spec, args: [CHILD], readyTimeoutMs: 20_000, env: { ...spec.env, SERVICE_VERSION: OLLAMA_VERSION, ORIGIN_MARKER: marker } }) });
+  let bridge: ManagedStudioProviderBridge | undefined;
+  try {
+    await service.applySettings(managed); assert(service.captureManagedOrigin()?.current());
+    bridge = new ManagedStudioProviderBridge(service, { model: "fixture", requestBody: body });
+    await assert.rejects(bridge.start(), /content could not be verified/); assert.equal(bridge.approve(), false);
+    await assert.rejects(readFile(marker), { code: "ENOENT" }); assert(await bridge.stop());
+  } finally { await bridge?.stop(); await service.dispose(); }
+});
+
 it("composes exact managed origin, one approved private provider request and retained cleanup across installation/override", { timeout: 120_000 }, async t => {
-  const root = await tempDir("arke-managed-provider-"), marker = join(root, "requests.jsonl");
+  const root = await realpath(await tempDir("arke-managed-provider-")), marker = join(root, "requests.jsonl");
   await mkdir(join(root, "ollama-runtime"));
   // A disposable Node image stands in for Ollama; this qualifies ownership/protocol, not model quality.
   await copyFile(process.execPath, join(root, "ollama-runtime", "ollama.exe"));
   const service = new OllamaEngineService({ appRoot: root, port: await allocateLoopbackPort(),
+    privateContentPin: await nodeRuntimeContentPin(),
     fetch: async () => Response.json({ version: "explicit-personal-fixture" }),
     supervise: spec => new ChildSupervisor({ ...spec, args: [CHILD], readyTimeoutMs: 20_000,
       env: { ...spec.env, SERVICE_VERSION: OLLAMA_VERSION, ORIGIN_MARKER: marker } }),
   });
-  let bridge: ManagedStudioProviderBridge | undefined, held: ManagedStudioProviderBridge | undefined, finishProof: ((ok: boolean) => void) | undefined;
+  let bridge: ManagedStudioProviderBridge | undefined, held: ManagedStudioProviderBridge | undefined, qualifying: ManagedStudioProviderBridge | undefined;
+  let finishProof: ((ok: boolean) => void) | undefined, finishContent: (() => void) | undefined;
   let releaseInstall: (() => void) | undefined;
   const rows = async () => (await readFile(marker, "utf8")).trim().split("\n").map(line => JSON.parse(line) as { body: string; headers: Record<string, string> });
   try {
@@ -56,6 +73,16 @@ it("composes exact managed origin, one approved private provider request and ret
     finishProof!(true); await until(() => !held!.busy(), "retained managed bridge cleanup"); assert.equal(await held.stop(), true);
     assert.equal((await rows()).length, 1, "late proof cannot send another provider request");
 
+    const qualify = service.qualifyManagedOrigin.bind(service); let checking = false;
+    const content = new Promise<void>(resolve => { finishContent = resolve; });
+    service.qualifyManagedOrigin = async signal => { checking = true; await content; return qualify(signal); };
+    qualifying = new ManagedStudioProviderBridge(service, { model: "fixture", requestBody: body });
+    const opening = assert.rejects(qualifying.start(), /content could not be verified/);
+    await until(() => checking, "original content qualification is pending"); assert(qualifying.busy()); assert.equal(await qualifying.stop(), false);
+    finishContent!(); await opening; assert(!qualifying.busy()); assert(await qualifying.stop());
+    assert.equal((await rows()).length, 1, "a cancelled content qualification cannot prepare or dispatch another request");
+    service.qualifyManagedOrigin = qualify;
+
     const installing = service.reserveInstallation(); assert(!first.current()); assert.equal(service.captureManagedOrigin(), null);
     assert.throws(() => new ManagedStudioProviderBridge(service, { model: "fixture", requestBody: body }));
     releaseInstall = await installing; releaseInstall(); releaseInstall = undefined;
@@ -65,7 +92,7 @@ it("composes exact managed origin, one approved private provider request and ret
     assert.equal(service.status().source, "user-url"); assert(!next.current()); assert.equal(service.captureManagedOrigin(), null);
     assert.throws(() => new ManagedStudioProviderBridge(service, { model: "fixture", requestBody: body }));
     service.beginShutdown(); assert.equal(service.captureManagedOrigin(), null);
-  } finally { finishProof?.(false); releaseInstall?.(); await held?.stop(); await bridge?.stop(); await service.dispose(); }
+  } finally { finishContent?.(); finishProof?.(false); releaseInstall?.(); await qualifying?.stop(); await held?.stop(); await bridge?.stop(); await service.dispose(); }
 });
 
 it("does not acquire managed origin from a healthy explicitly selected existing Ollama install", async () => {

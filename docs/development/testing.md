@@ -2031,6 +2031,18 @@ manifest, generic protocol reply or test stand-in can replace the committed expe
 This qualifies the pinned writer content within Arke's existing owned local desktop trust model.
 Managed provider dependencies and remaining activation/native acceptance are separate requirements;
 no protection against compromise of the local user/OS is claimed.
+`test/local-ai/runtime-content.test.ts` covers fixed runtime/library pins, changed and unexpected
+code, missing files, bounded metadata exceptions, path escapes/aliases, owner/cancellation and
+single verification ownership. `managed-provider-bridge.test.ts` refuses a healthy unqualified
+stand-in before metadata HTTP and retains an unfinished content check across Stop. Native
+synthetic providers explicitly pin their own Node image; they do not claim Ollama provenance.
+An actual isolated pinned 0.40.11 tree also qualified all 75 files (2.23 GB), withheld inference
+before approval and confirmed native cleanup. Cold GPU discovery exceeded the old thirty-second
+startup budget; the managed service now allows sixty seconds without changing protocol validation.
+Canonical-path fixtures avoid DOS-short-path aliases in positive checksum cases while preserving
+explicit alias refusal. The authenticated cleanup fixture observes terminal preview outcomes for
+up to twenty seconds (storage admission itself can observe for sixteen), reporting a failed
+outcome directly. Job/CI silence and timeout guards are unchanged.
 
 ## System status (master turn 241; System 240 review)
 

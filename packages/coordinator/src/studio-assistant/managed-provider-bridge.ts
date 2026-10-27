@@ -14,7 +14,10 @@ export class ManagedStudioProviderBridge {
   private readonly owner: NonNullable<ReturnType<OllamaEngineService["captureManagedOrigin"]>>;
   private opening: Promise<{ baseURL: string; apiKey: string; identity: string }> | null = null;
   private sealed = false;
-  constructor(service: OllamaEngineService, options: { model: string; requestBody: string; verify?: typeof windowsConnectionOrigin; timeoutMs?: number; shutdownMs?: number }) {
+  private readonly admission = new AbortController();
+  private qualifying = false;
+  private qualified = false;
+  constructor(private readonly service: OllamaEngineService, options: { model: string; requestBody: string; verify?: typeof windowsConnectionOrigin; timeoutMs?: number; shutdownMs?: number }) {
     const owner = service.captureManagedOrigin();
     if (!owner?.current()) throw new Error("The managed private provider is unavailable.");
     this.owner = owner;
@@ -23,23 +26,29 @@ export class ManagedStudioProviderBridge {
     this.bridge = new StudioProviderBridge({ upstream: owner.baseUrl + "/v1", requestBody: options.requestBody, model: options.model,
       fetch: this.transport.fetch, timeoutMs: options.timeoutMs, shutdownMs: options.shutdownMs });
   }
-  start(): Promise<{ baseURL: string; apiKey: string; identity: string }> {
+  start(signal: AbortSignal = AbortSignal.timeout(60_000)): Promise<{ baseURL: string; apiKey: string; identity: string }> {
     if (this.sealed) return Promise.reject(new Error("The managed private provider is stopped."));
     return this.opening ??= (async () => {
+      this.qualifying = true;
+      try {
+        const owner = await this.service.qualifyManagedOrigin(AbortSignal.any([signal, this.admission.signal]));
+        if (!owner || owner.process.identity !== this.owner.process.identity || this.sealed || signal.aborted || !this.owner.current()) throw new Error("The managed private provider content could not be verified.");
+        this.qualified = true;
+      } finally { this.qualifying = false; }
       await this.transport.prepareMetadata();
       const route = await this.bridge.start();
-      if (!this.owner.current()) { await this.stop(); throw new Error("The managed private provider changed."); }
+      if (this.sealed || signal.aborted || !this.owner.current()) { await this.stop(); throw new Error("The managed private provider changed."); }
       return Object.freeze({ ...route, identity: createHash("sha256").update(JSON.stringify([this.owner.process.identity, route.identity])).digest("hex") });
     })();
   }
-  approve(): boolean { return this.owner.current() && this.bridge.approve(); }
-  seal(): void { this.sealed = true; this.bridge.seal(); this.transport.seal(); }
-  busy(): boolean { return this.bridge.busy() || this.transport.busy(); }
+  approve(): boolean { return this.qualified && this.owner.current() && this.bridge.approve(); }
+  seal(): void { this.sealed = true; this.admission.abort(); this.bridge.seal(); this.transport.seal(); }
+  busy(): boolean { return this.qualifying || this.bridge.busy() || this.transport.busy(); }
   /** Original managed native owner, including its tracked descendants; never HTTP health/Stop. */
   ownerStopped(): boolean { return isSupervisedProcessCleanupConfirmed(this.owner.process); }
   async stop(): Promise<boolean> {
     this.seal();
     const results = await Promise.allSettled([this.bridge.stop(), this.transport.stop()]);
-    return results.every(row => row.status === "fulfilled" && row.value === true);
+    return !this.qualifying && results.every(row => row.status === "fulfilled" && row.value === true);
   }
 }

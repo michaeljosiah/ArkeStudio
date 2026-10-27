@@ -21,6 +21,13 @@ Hosts that do not configure both engine services cannot report local AI setup as
 Shutdown refuses late installation activation and quiesces an admitted Ollama startup before
 waiting for setup to drain. Healthy inference retains its owned child until normal job draining
 and confirmed process cleanup; quiescing does not discard the child or its exit backstop.
+Managed Ollama readiness allows sixty seconds for cold GPU discovery before its pinned version
+route becomes responsive. Readiness still does not establish model inference or output quality.
+The optional private Studio provider route additionally verifies the pinned executable/library
+tree before opening metadata/inference sockets. Same-process reuse checks current file identity,
+metadata and the fixed tree; an install, selection or owner change invalidates qualification.
+Missing/modified/unexpected code holds that private route without deleting files or reinstalling.
+Production Studio destination/model activation remains separately gated.
 
 Setup commands also have an owned lifetime. An internal anchor starts the catalogue program only
 after native ownership is established; completion waits for its ordinary helpers as well as the

@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { normalizeOllamaUrl, type OllamaSettings, type OllamaRuntimeStatus } from "@arke-studio/contracts";
 import { ChildSupervisor, registerExitBackstop, type SupervisorDeps, type SupervisorRecoveryPort, type SupervisedProcessOrigin } from "../supervisor.js";
 import { OLLAMA_VERSION } from "../setup/catalogue.js";
+import { RuntimeContentVerifier, type RuntimeContentPin } from "./runtime-content.js";
+import privatePin from "./ollama-private-pin-x64.json" with { type: "json" };
 
 interface OllamaEngineOptions {
   appRoot: string;
@@ -14,6 +16,8 @@ interface OllamaEngineOptions {
   supervise?: (spec: ConstructorParameters<typeof ChildSupervisor>[0]) => ChildSupervisor;
   registerBackstop?: (supervisor: ChildSupervisor) => () => void;
   externalHealthIntervalMs?: number;
+  /** Trusted native-fixture seam, never Settings/wire state; stand-ins pin their own real bytes. */
+  privateContentPin?: RuntimeContentPin;
 }
 
 /** Arke owns the portable child; an explicit URL remains owned by the user. */
@@ -30,6 +34,7 @@ export class OllamaEngineService {
   private generation = 0;
   private externalHealthTimer: ReturnType<typeof setInterval> | null = null;
   private externalHealthRevision = 0;
+  private privateContent: { identity: string; verifier: RuntimeContentVerifier } | null = null;
   private readonly listeners = new Set<() => void>();
   private current: OllamaRuntimeStatus = { source: "managed", state: "absent", url: null, version: null, detail: "Install the Arke-managed Ollama runtime." };
 
@@ -60,6 +65,16 @@ export class OllamaEngineService {
     if (!origin || origin.executable !== this.executable() || baseUrl !== `http://127.0.0.1:${origin.port}`) return null;
     return Object.freeze({ process: origin, baseUrl, current: () => this.supervisor === supervisor && this.generation === generation &&
       !this.externallySelected() && !this.closing && !this.installing && !this.installationLane && this.baseUrl() === baseUrl && origin.current() });
+  }
+  async qualifyManagedOrigin(signal: AbortSignal): Promise<ReturnType<OllamaEngineService["captureManagedOrigin"]>> {
+    const owner = this.captureManagedOrigin(), pin = this.opts.privateContentPin ?? privatePin;
+    if (!owner || signal.aborted || pin.version !== OLLAMA_VERSION) return null;
+    try {
+      if (this.privateContent?.identity !== owner.process.identity) this.privateContent = { identity: owner.process.identity,
+        verifier: new RuntimeContentVerifier(join(this.opts.appRoot, "ollama-runtime"), pin) };
+      if (!await this.privateContent.verifier.verify(signal, owner.current) || signal.aborted || !owner.current()) return null;
+      return owner;
+    } catch { return null; }
   }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
 
@@ -102,7 +117,8 @@ export class OllamaEngineService {
         id: "ollama", command: this.executable(), port: this.opts.port, args: ["serve"], inheritEnv: false,
         env: { ...env, HOME: home, USERPROFILE: home, LOCALAPPDATA: join(home, "local"), APPDATA: join(home, "roaming"),
           OLLAMA_HOST: "127.0.0.1:{port}", OLLAMA_MODELS: this.modelsDir()!, OLLAMA_KEEP_ALIVE: "5m", OLLAMA_MAX_LOADED_MODELS: "1" },
-        healthPath: "/api/version", readyTimeoutMs: 30_000, healthIntervalMs: 15_000,
+        // Cold driver/GPU discovery can exceed thirty seconds before the version route serves.
+        healthPath: "/api/version", readyTimeoutMs: 60_000, healthIntervalMs: 15_000,
         logFile: join(this.opts.appRoot, "logs", "engines", "ollama.log"),
         validateHealth: async (response: Response) => {
           const value = await response.json().catch(() => null) as { version?: unknown } | null;
