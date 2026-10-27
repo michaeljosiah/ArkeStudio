@@ -92,6 +92,12 @@ first-run native application acceptance remain distinct; other write owners and 
 Observation regressions also change mapping/capacity or fail a native read during a pending flush,
 without calling explicit invalidation, and verify the grant is revoked with uncertain intent retained.
 
+Media ownership uses `test/media-read-leases.test.ts` with the real authenticated HTTP transport.
+It checks full/ranged reads, failed opens, late resolver results, backpressured disconnect/shutdown
+and injected pending/failed descriptor closure. `test/transport.test.ts` and
+`test/voice/catalogue-preview.test.ts` preserve existing authentication/range/paid-preview behavior.
+These tests establish read-lease settlement, not disposable cache ownership or deletion.
+
 Recovery control tests (#2194) use contracts `test/recovery-policy.test.ts` and coordinator
 `test/recovery/control.test.ts`. They inject crash/unknown writes, competing attempts, rolling
 budgets, clock reversal, deliberate Stop/Suggest only, target changes during flush and shutdown.

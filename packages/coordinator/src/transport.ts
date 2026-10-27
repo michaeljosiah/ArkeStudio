@@ -1,8 +1,8 @@
 import { SocketWriter } from "./socket-writer.js";
 import { timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
-import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import type { ReadStream } from "node:fs";
+import { open, type FileHandle } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
@@ -58,6 +58,14 @@ export interface TransportAuth {
   allowedOrigins: readonly string[];
 }
 
+/** Host-only media ownership. Release follows descriptor closure, including aborted reads. */
+export interface ResolvedMediaFile {
+  path: string;
+  contentType: string;
+  downloadName?: string;
+  release?: () => void;
+}
+
 export interface TransportOptions {
   auth: TransportAuth;
   getSnapshot(): ClientState;
@@ -74,7 +82,7 @@ export interface TransportOptions {
    * `/media/<world-slug>/<world-relative-file>` to an absolute file, or null to 404. The
    * resolver owns path-traversal guarding; the transport owns nothing but the plumbing.
    */
-  serveFile?: (urlPath: string) => Promise<{ path: string; contentType: string; downloadName?: string } | null>;
+  serveFile?: (urlPath: string) => Promise<ResolvedMediaFile | null>;
 }
 
 /**
@@ -107,6 +115,7 @@ export function parseByteRange(
 }
 
 export class Transport {
+  private readonly mediaReads = new Set<ReadStream>();
   private wss: WebSocketServer | null = null;
   private http: Server | null = null;
   private readonly connections = new Set<Connection>();
@@ -155,8 +164,20 @@ export class Transport {
           res.writeHead(404).end();
           return;
         }
+        let hit: ResolvedMediaFile | null = null;
+        let file: FileHandle | undefined;
+        let stream: ReadStream | undefined;
+        let handedOff = false;
+        let released = false;
+        const release = (): void => {
+          if (released) return;
+          released = true;
+          try { hit?.release?.(); } catch { this.opts.log?.("media ownership release failed"); }
+        };
+        const disconnected = (): void => { stream?.destroy(); };
+        res.once("close", disconnected);
         try {
-          const hit = await this.opts.serveFile(decodeURIComponent(url.pathname));
+          hit = await this.opts.serveFile(decodeURIComponent(url.pathname));
           if (!hit) {
             res.writeHead(404).end();
             return;
@@ -167,7 +188,12 @@ export class Transport {
            * every `currentTime` assignment — playback works, scrubbing does not, and nothing
            * anywhere says why.
            */
-          const size = (await stat(hit.path)).size;
+          if (res.destroyed || this.http !== server) return;
+          file = await open(hit.path, "r");
+          const info = await file.stat();
+          if (!info.isFile()) throw new Error("media is not a regular file");
+          if (res.destroyed || this.http !== server) return;
+          const size = info.size;
           // Kit grids and boards are overwritten in place on recompile — never cache.
           const headers: Record<string, string> = {
             "Content-Type": hit.contentType,
@@ -180,19 +206,40 @@ export class Transport {
             res.writeHead(416, { ...headers, "Content-Range": `bytes */${size}` }).end();
             return;
           }
-          const stream =
+          stream =
             asked === null
-              ? (res.writeHead(200, { ...headers, "Content-Length": String(size) }), createReadStream(hit.path))
+              ? (res.writeHead(200, { ...headers, "Content-Length": String(size) }), file.createReadStream({ autoClose: false }))
               : (res.writeHead(206, {
                   ...headers,
                   "Content-Range": `bytes ${asked.start}-${asked.end}/${size}`,
                   "Content-Length": String(asked.end - asked.start + 1),
                 }),
-                createReadStream(hit.path, { start: asked.start, end: asked.end }));
+                file.createReadStream({ start: asked.start, end: asked.end, autoClose: false }));
+          const ownedFile = file;
+          this.mediaReads.add(stream);
+          stream.once("close", () => {
+            this.mediaReads.delete(stream!);
+            res.off("close", disconnected);
+            if (!res.writableEnded) res.destroy();
+            // A failed close leaves ownership unknown. It cannot make this file disposable.
+            void ownedFile.close().then(release, () => this.opts.log?.("media descriptor cleanup is unknown"));
+          });
           stream.on("error", () => res.destroy());
+          stream.once("end", () => stream!.destroy());
+          handedOff = true;
           stream.pipe(res);
         } catch {
-          res.writeHead(404).end();
+          if (res.headersSent) res.destroy();
+          else if (!res.destroyed) res.writeHead(404).end();
+        } finally {
+          if (!handedOff) {
+            res.off("close", disconnected);
+            let closed = true;
+            if (file) {
+              try { await file.close(); } catch { closed = false; this.opts.log?.("media descriptor cleanup is unknown"); }
+            }
+            if (closed) release();
+          }
         }
       })();
     });
@@ -375,6 +422,7 @@ export class Transport {
     this.wss = null;
     const http = this.http;
     this.http = null;
+    for (const stream of this.mediaReads) stream.destroy();
     for (const conn of this.connections) { conn.lifetime.abort(); conn.writer.dispose({ preserveCloseTimeout: true }); conn.socket.close(1001, "coordinator stopping"); }
     this.connections.clear();
     await Promise.allSettled(this.initialisations);

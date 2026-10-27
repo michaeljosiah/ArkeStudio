@@ -31,6 +31,13 @@ authority also bounds stalled reads/saves during shutdown, retaining uncertain i
 late write permission. Unsupported host ports retain their existing unknown-capacity policy and
 do not claim shared admission. Runtime-owned pulls, other write owners,
 restart reconciliation, other native ports and reviewed cleanup remain outstanding.
+Media-reader protection: `transport.ts` accepts an optional host-only `ResolvedMediaFile.release`
+lease from a resolver. It opens one descriptor for size/range and streaming, retains ownership
+through pending resolution/open/close, and releases only after confirmed descriptor closure.
+Playback disconnect and transport shutdown destroy admitted streams and their unfinished HTTP
+responses. Failed descriptor cleanup retains the lease as unknown. This is a cleanup prerequisite;
+preview producers do not yet register disposable ownership or offer deletion plans. Tests:
+`test/media-read-leases.test.ts`, `test/transport.test.ts`, `test/voice/catalogue-preview.test.ts`.
 Capacity invalidation/root changes revoke captured admission evidence across a reservation flush;
 an already-saved intent remains uncertain until its owner settles it. Completed-only destinations
 are excluded from direct-file admission, so a full old model volume does not block a different
