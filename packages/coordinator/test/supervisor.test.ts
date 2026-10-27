@@ -418,6 +418,7 @@ describe("ChildSupervisor", () => {
       await waitForStatus(sup, "healthy", HEALTHY_WAIT_MS);
       const wrapperPid = sup.pid;
       assert.ok(wrapperPid !== null);
+      assert.equal(sup.captureProcessOrigin(), null, "a shell wrapper cannot attest the worker's connected socket");
       const res = await fetch(`http://127.0.0.1:${sup.port}/health`);
       grandchild = (JSON.parse(await res.text()) as { pid: number }).pid;
       assert.notEqual(grandchild, wrapperPid, "the worker must be a grandchild, not the wrapper");

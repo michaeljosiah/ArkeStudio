@@ -1492,6 +1492,19 @@ from model input, ordinary sessions and wire commands. Real pinned-binary succes
 profile tests qualify this seam. Default production destination proof remains closed: managed
 process/socket origin, broader network/spend/persistence/cleanup and platform acceptance are
 still required. This bridge adds no model process or independent agent loop.
+The optional managed composition is `studio-assistant/managed-provider-bridge.ts`:
+`local-ai/ollama.ts` captures only its current managed child, excluding explicit existing
+installs, installation and shutdown. `supervisor.ts` supplies an immutable host-only direct-child
+capability, permanently revoked by unhealthy status/Stop/replacement; copied fields cannot mint it.
+`local-ai/windows-connection-origin.ts` uses a bounded kernel-leashed native reader to match the
+actual established reverse TCP tuple to that original live child and its executable image path.
+`local-ai/managed-ollama-transport.ts` connects without HTTP bytes, verifies that exact socket,
+then sends through it with a final owner check before Node flushes. It has closed provider paths,
+finite byte/fragment/concurrency bounds, no pooling/retry/redirect and retained proof/request/body/
+socket cleanup. HTTP settlement is not GPU/inference completion. Windows synthetic-provider
+checks qualify this port; other platforms refuse native proof. Managed writer/socket proof,
+binary integrity, full native integration/network/spend/persistence/cleanup acceptance and the
+actual Studio master visual gate remain outstanding. Default production activation stays closed.
 History replacement reads wait for an already admitted same-path write that outlived bounded
 shutdown in this process. This prevents a late old rename from overwriting a successor's history;
 it is not a cross-process/multiple-active-host lock. Private state is not replayed on reconnect

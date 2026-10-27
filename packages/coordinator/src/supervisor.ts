@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
+import { randomBytes } from "node:crypto";
 import net from "node:net";
-import { basename, dirname } from "node:path";
+import { basename, dirname, isAbsolute } from "node:path";
 import { createWriteStream, mkdirSync, openSync, renameSync, statSync, type WriteStream } from "node:fs";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
@@ -251,6 +252,18 @@ export class EngineLog {
   }
 }
 
+/** Host-only identity of one directly spawned child. A healthy endpoint/PID alone is not
+ * connection proof. Native consumers must verify their connected socket and recheck current(). */
+export interface SupervisedProcessOrigin {
+  readonly identity: string;
+  readonly pid: number;
+  readonly executable: string;
+  readonly port: number;
+  current(): boolean;
+}
+const processOrigins = new WeakSet<SupervisedProcessOrigin>();
+export const isSupervisedProcessOrigin = (value: SupervisedProcessOrigin): boolean => processOrigins.has(value);
+
 export class ChildSupervisor extends EventEmitter {
   readonly id: string;
   private readonly spec: Required<
@@ -259,6 +272,7 @@ export class ChildSupervisor extends EventEmitter {
     Pick<SupervisedSpec, "command" | "args" | "env" | "validateHealth" | "healthHeaders" | "onStdoutLine" | "logFile" | "port">;
   private readonly deps: SupervisorDeps;
   private child: ChildProcess | null = null;
+  private processOrigin: SupervisedProcessOrigin | null = null;
   private _port: number | null = null;
   private _status: SupervisorStatus = "stopped";
   private _reason: string | undefined;
@@ -321,6 +335,18 @@ export class ChildSupervisor extends EventEmitter {
     return this.launchEpoch;
   }
 
+  captureProcessOrigin(): SupervisedProcessOrigin | null {
+    const child = this.child, command = this.spec.command, port = this.port, epoch = this.launchEpoch;
+    if (this.stopping || this.status !== "healthy" || !child?.pid || child.exitCode !== null || child.signalCode !== null ||
+      !command || !isAbsolute(command) || process.platform === "win32" && !/^[a-z]:[\\/].*\.exe$/i.test(command) || !port) return null;
+    if (this.processOrigin?.current()) return this.processOrigin;
+    const origin: SupervisedProcessOrigin = Object.freeze({ identity: randomBytes(32).toString("hex"), pid: child.pid, executable: command, port,
+      current: () => this.processOrigin === origin && !this.stopping && this.status === "healthy" && this.child === child &&
+        this.launchEpoch === epoch && child.exitCode === null && child.signalCode === null });
+    this.processOrigin = origin; processOrigins.add(origin);
+    return origin;
+  }
+
   prepareRecoveryRetry(): PreparedSupervisorRetry | null {
     const generation = this.launchEpoch, port = this.recovery;
     const available = () => !this.stopping && this.launchEpoch === generation && this.child === null && this.descendants.length === 0 &&
@@ -350,6 +376,7 @@ export class ChildSupervisor extends EventEmitter {
   }
 
   private setStatus(status: SupervisorStatus, reason?: string): void {
+    if (status !== "healthy") this.processOrigin = null;
     this._status = status;
     this._reason = reason;
     const event: SupervisorStatusEvent = { id: this.id, status, ...(reason ? { reason } : {}) };

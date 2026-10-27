@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { normalizeOllamaUrl, type OllamaSettings, type OllamaRuntimeStatus } from "@arke-studio/contracts";
-import { ChildSupervisor, registerExitBackstop, type SupervisorDeps, type SupervisorRecoveryPort } from "../supervisor.js";
+import { ChildSupervisor, registerExitBackstop, type SupervisorDeps, type SupervisorRecoveryPort, type SupervisedProcessOrigin } from "../supervisor.js";
 import { OLLAMA_VERSION } from "../setup/catalogue.js";
 
 interface OllamaEngineOptions {
@@ -51,6 +51,16 @@ export class OllamaEngineService {
   executable(): string { return join(this.opts.appRoot, "ollama-runtime", "ollama.exe"); }
   modelsDir(): string | null { return this.settings.modelsDir ?? (this.externallySelected() ? null : join(this.opts.appRoot, "models", "ollama")); }
   externallySelected(): boolean { return this.settings.engineUrl !== null; }
+  /** Private host composition only. Explicit existing installs never acquire managed origin. */
+  captureManagedOrigin(): { process: SupervisedProcessOrigin; baseUrl: string; current(): boolean } | null {
+    const supervisor = this.supervisor, generation = this.generation, baseUrl = this.baseUrl();
+    if (!supervisor || !baseUrl || this.externallySelected() || this.closing || this.installing || this.installationLane ||
+      this.current.source !== "managed" || this.current.version !== OLLAMA_VERSION) return null;
+    const origin = supervisor.captureProcessOrigin();
+    if (!origin || origin.executable !== this.executable() || baseUrl !== `http://127.0.0.1:${origin.port}`) return null;
+    return Object.freeze({ process: origin, baseUrl, current: () => this.supervisor === supervisor && this.generation === generation &&
+      !this.externallySelected() && !this.closing && !this.installing && !this.installationLane && this.baseUrl() === baseUrl && origin.current() });
+  }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
 
   private publish(patch: Partial<OllamaRuntimeStatus>): void {

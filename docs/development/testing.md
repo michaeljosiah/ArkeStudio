@@ -1931,6 +1931,22 @@ remains a separate regression. Missing binary skips these optional native cases;
 or Windows-only native results do not qualify other platforms, managed socket/process identity,
 live-model memory, full tracing/spend/result persistence or default production activation.
 
+Managed provider origin uses coordinator `test/local-ai/connection-origin.test.ts`,
+`managed-ollama-transport.test.ts` and `managed-provider-bridge.test.ts`, plus `ollama-engine.test.ts`
+and supervisor lifecycle/recovery regressions. Run with native process/socket/filesystem access
+and bounded file concurrency (two). The real Windows reader checks the established socket before
+any HTTP bytes and refuses a healthy impostor on the managed port. HTTP tests confirm the same
+client port reaches the provider, bounded response reconstruction, closed destinations/headers,
+no retry, Stop/timeout/late-proof retention and actual request/response/socket drain. The managed
+service fixture copies one disposable Node executable to its temporary runtime path and exercises
+the real supervisor, version gate, private bridge approval, installation/replacement and explicit
+personal override. It downloads no model, uses no personal profile and allocates no GPU. On
+non-Windows hosts, composition/protocol tests explicitly inject proof; the default native port
+still refuses and Windows native cases skip. These tests are not actual OpenCode-plus-managed-
+provider, binary integrity, live Ollama, physical GPU or cross-restart qualification. Default native
+activation and actual turn-239 matched visual acceptance remain separate gates. Run coordinator
+typecheck after the final test edit.
+
 ## System status (master turn 241; System 240 review)
 
 Run contracts/coordinator/desktop `system-resources.test.ts`, coordinator
