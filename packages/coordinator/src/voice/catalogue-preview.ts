@@ -7,6 +7,9 @@ import type { EnqueueInput } from "../queue/dispatcher.js";
 import type { SidecarLike } from "./service.js";
 import { cachedVoiceAudioLooksRight } from "./service.js";
 import { atomicWriteFile } from "../world/atomic.js";
+import { LocalPreviewCache } from "../storage/local-preview-cache.js";
+import type { ResolvedMediaFile } from "../transport.js";
+import type { AppStorageService } from "../storage/service.js";
 
 const MAX_SAMPLE_BYTES = 12 * 1024 * 1024;
 
@@ -25,6 +28,7 @@ export class CataloguePreviewService {
   private requests = new Map<string, { abort: AbortController; jobId?: string }>();
   private results = new Map<string, Extract<DomainEvent, { type: "voice.catalogue-preview" }>>();
   private closed = false;
+  private readonly localCache: LocalPreviewCache;
   constructor(private readonly deps: {
     root: string;
     sidecar: SidecarLike | null;
@@ -33,7 +37,8 @@ export class CataloguePreviewService {
     cancel?: (id: string) => Promise<void>;
     emit: (event: DomainEvent) => void;
     fetch?: typeof fetch;
-  }) {}
+    storage?: AppStorageService;
+  }) { this.localCache = new LocalPreviewCache(deps.root, deps.storage); }
 
   catalogue(voices: VoiceCandidate[]): VoiceCandidate[] {
     const annotated = voices.map(voice => {
@@ -89,6 +94,21 @@ export class CataloguePreviewService {
       const model = this.deps.manifest?.models.find(m => m.id === voice.model && m.provider === voice.provider);
       const format = sample ? "mp3" : voice.provider === "kokoro" ? "wav" : model ? voiceFormatForModel(model) : "mp3";
       const hash = createHash("sha256").update(JSON.stringify([voiceTargetKey(voice), sample ? voice.previewUrl : NARRATOR_PREVIEW_TEXT, format, 1])).digest("hex");
+      if (!sample && voice.provider === "kokoro") {
+        const file = `local-${hash}.wav`;
+        const cached = await this.localCache.read(hash);
+        if (work.abort.signal.aborted) return;
+        if (!cached) {
+          if (input.maxMicroUsd < 0) throw new Error("Refresh the preview price before generating it.");
+          await this.localCache.generate(hash, async () => {
+            const bytes = await this.deps.sidecar!.synthesize({ voiceId: voice.voiceId, text: NARRATOR_PREVIEW_TEXT }, { signal: work.abort.signal });
+            if (!cachedVoiceAudioLooksRight(bytes, "wav")) throw new Error("The voice engine returned invalid audio.");
+            return bytes;
+          }, work.abort.signal);
+        } else if (!cachedVoiceAudioLooksRight(cached, "wav")) throw new Error("The cached voice preview needs attention.");
+        if (!work.abort.signal.aborted) this.result(input.requestId, { status: "ready", file });
+        return;
+      }
       const file = `${hash}.${format}`;
       const absolute = join(this.deps.root, "audio", file);
       const cached = await readFile(absolute).catch(() => null);
@@ -118,11 +138,6 @@ export class CataloguePreviewService {
         } finally { await reader.cancel().catch(() => {}); }
         const bytes = Buffer.concat(chunks);
         if (!cachedVoiceAudioLooksRight(bytes, "mp3")) throw new Error("The provider sample is not valid audio.");
-        if (work.abort.signal.aborted) return;
-        await atomicWriteFile(absolute, bytes);
-      } else if (voice.provider === "kokoro") {
-        const bytes = await this.deps.sidecar!.synthesize({ voiceId: voice.voiceId, text: NARRATOR_PREVIEW_TEXT }, { signal: work.abort.signal });
-        if (!cachedVoiceAudioLooksRight(bytes, "wav")) throw new Error("The voice engine returned invalid audio.");
         if (work.abort.signal.aborted) return;
         await atomicWriteFile(absolute, bytes);
       } else {
@@ -170,10 +185,15 @@ export class CataloguePreviewService {
 
   close(): void {
     this.closed = true;
+    this.localCache.close();
     for (const request of this.requests.values()) request.abort.abort();
   }
 
-  async serve(file: string): Promise<{ path: string; contentType: string } | null> {
+  localPreviewInventory(): ReturnType<LocalPreviewCache["inventory"]> { return this.localCache.inventory(); }
+
+  async serve(file: string): Promise<ResolvedMediaFile | null> {
+    const local = /^local-([a-f0-9]{64})\.wav$/.exec(file);
+    if (local) return this.localCache.serve(local[1]!);
     if (!/^[a-f0-9]{64}\.(mp3|wav|flac)$/.test(file)) return null;
     try {
       const root = await realpath(join(this.deps.root, "audio"));

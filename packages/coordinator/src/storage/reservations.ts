@@ -4,7 +4,7 @@ import { WriteQueue } from "../change-log.js";
 
 const key = z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/);
 const bytes = z.number().int().nonnegative().safe();
-const owner = z.object({ kind: z.enum(["setup", "job", "import", "export", "publication", "scratch"]), id: key }).strict();
+const owner = z.object({ kind: z.enum(["setup", "job", "import", "export", "publication", "scratch", "preview"]), id: key }).strict();
 const demand = z.object({ rootId: key, volumeId: key, mappingRevision: key, remainingBytes: bytes, reserveBytes: bytes }).strict();
 export const StorageReservationSchema = z.object({
   id: key, owner, state: z.enum(["active", "uncertain"]), demands: z.array(demand).min(1).max(32),

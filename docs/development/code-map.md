@@ -35,9 +35,19 @@ Media-reader protection: `transport.ts` accepts an optional host-only `ResolvedM
 lease from a resolver. It opens one descriptor for size/range and streaming, retains ownership
 through pending resolution/open/close, and releases only after confirmed descriptor closure.
 Playback disconnect and transport shutdown destroy admitted streams and their unfinished HTTP
-responses. Failed descriptor cleanup retains the lease as unknown. This is a cleanup prerequisite;
-preview producers do not yet register disposable ownership or offer deletion plans. Tests:
+responses. Failed descriptor cleanup retains the lease as unknown. Local fixed-preset previews
+now supply these read leases through `storage/local-preview-cache.ts`; deletion plans remain pending. Tests:
 `test/media-read-leases.test.ts`, `test/transport.test.ts`, `test/voice/catalogue-preview.test.ts`.
+The local cache records producer identity/hash/size receipts only for new, fixed-line free Kokoro
+previews in a separate app directory. Legacy/public/paid/ledgered previews are never adopted.
+Its bounded receipt overview is explicitly incomplete for unscanned files and reports allocation
+as unknown. Per-file read/write holds survive service replacement; failed native close or uncertain
+storage settlement retains the exact owner capabilities. Qualified storage ports reserve at most
+12 MiB audio plus 256 KiB new metadata before inference, then replan from fresh capacity and the
+actual audio size before opening output. The closed `preview` reservation owner reduces confirmed
+writes and settles only after file/receipt handles close. Unsupported ports make no fit claim.
+Tests: `test/storage/local-preview-cache.test.ts`; native identity-based deletion, reviewed cleanup,
+automatic maintenance, broader inventory and remaining write owners remain unfinished.
 Capacity invalidation/root changes revoke captured admission evidence across a reservation flush;
 an already-saved intent remains uncertain until its owner settles it. Completed-only destinations
 are excluded from direct-file admission, so a full old model volume does not block a different

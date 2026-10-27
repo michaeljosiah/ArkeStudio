@@ -4051,6 +4051,7 @@ export class Coordinator {
       : null;
     if (opts.appRoot && opts.voice) this.cataloguePreviews = new CataloguePreviewService({
       root: join(opts.appRoot, "voice-previews"), sidecar: opts.voice.sidecar, get manifest() { return opts.manifest; },
+      storage: opts.storageHealth ?? undefined,
       ...(this.jobQueue ? { enqueue: input => this.jobQueue!.enqueue(input), cancel: id => this.jobQueue!.cancel(id) } : {}),
       emit: event => this.emit(event),
     });
@@ -4185,7 +4186,7 @@ export class Coordinator {
         if (edition) return this.storyPublications.serve(edition[1]!, edition[2]!);
         const storyPreview = /^\/story-preview-media\/([a-f0-9-]+)\/(cover|illustration-\d+\.(?:png|jpg)|story\.(?:epub|m4b|pdf))$/.exec(urlPath);
         if (storyPreview) return this.storyPublications.previewMedia(storyPreview[1]!, storyPreview[2]!);
-        const preview = /^\/voice-preview-media\/([a-f0-9]{64}\.(?:wav|mp3|flac))$/.exec(urlPath);
+        const preview = /^\/voice-preview-media\/((?:local-[a-f0-9]{64}\.wav)|(?:[a-f0-9]{64}\.(?:wav|mp3|flac)))$/.exec(urlPath);
         if (preview) return this.cataloguePreviews?.serve(preview[1]!) ?? null;
         // GET /genesis-media/<genesis-id>/<sandbox-relative-file> — the look preview, which
         // exists before any world does (SPEC-031 R-50). A distinct prefix, not a magic slug:

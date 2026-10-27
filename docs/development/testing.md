@@ -98,6 +98,16 @@ and injected pending/failed descriptor closure. `test/transport.test.ts` and
 `test/voice/catalogue-preview.test.ts` preserve existing authentication/range/paid-preview behavior.
 These tests establish read-lease settlement, not disposable cache ownership or deletion.
 
+`test/storage/local-preview-cache.test.ts` exercises the fixed local catalogue producer's bounded
+receipts, restart replay, reader/writer exclusion across service instances, retained unknown native
+close/storage ownership, changed identities/bytes, hard links, root junctions/symlinks, unrecorded
+files, corrupt/oversized metadata, audio/directory bounds and cancelled late output. Shared storage
+fixtures refuse inference when the bounded peak cannot fit, prevent competing producers from
+spending the same volume twice, and require fresh capacity after inference before output opens.
+`test/voice/catalogue-preview.test.ts` proves fixed audition text, legacy-file retention and opaque
+local-token playback through the actual coordinator's authenticated range route. These do not
+qualify generic cache deletion, reclaimed allocation, cross-process exclusion or native cleanup plans.
+
 Recovery control tests (#2194) use contracts `test/recovery-policy.test.ts` and coordinator
 `test/recovery/control.test.ts`. They inject crash/unknown writes, competing attempts, rolling
 budgets, clock reversal, deliberate Stop/Suggest only, target changes during flush and shutdown.
