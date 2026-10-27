@@ -57,6 +57,28 @@ async function fixture() {
   return { root, path, bytes, proof: row.proof };
 }
 
+it("waits for the host's durable worker admission before any removal input", native, async () => {
+  const h = await fixture(); let workerPid = 0;
+  const rows = await windowsCacheFiles({ root: h.root, mode: "remove", items: [{ key, expected: h.proof }] }, signal(), async pid => {
+    workerPid = pid; assert(pid > 0 && pid !== process.pid); assert.deepEqual(await readFile(h.path), h.bytes); return false;
+  });
+  assert(workerPid > 0); assert.equal(rows[0]?.state, "unknown"); assert.deepEqual(await readFile(h.path), h.bytes);
+});
+
+it("observes original absence under the pinned root without deleting or adopting a successor", native, async () => {
+  const h = await fixture();
+  assert.equal((await windowsCacheFiles({ root: h.root, mode: "remove", items: [{ key, expected: h.proof }] }, signal()))[0]?.state, "removed");
+  const missing = (await windowsCacheFiles({ root: h.root, mode: "reconcile", items: [{ key, expected: h.proof }] }, signal()))[0]!;
+  assert.equal(missing.state, "absent"); if (missing.state !== "absent") return;
+  assert.equal(missing.rootIdentity, h.proof.rootIdentity); assert.equal(missing.nodeRootIdentity, h.proof.nodeRootIdentity);
+  await writeFile(h.path, "protected successor");
+  const replacement = (await windowsCacheFiles({ root: h.root, mode: "reconcile", items: [{ key, expected: h.proof }] }, signal()))[0]!;
+  assert.equal(replacement.state, "measured"); if (replacement.state !== "measured") return;
+  assert.notEqual(replacement.proof.fileIdentity, h.proof.fileIdentity); assert.equal(await readFile(h.path, "utf8"), "protected successor");
+  const wrongRoot = (await windowsCacheFiles({ root: h.root, mode: "reconcile", items: [{ key, expected: { ...h.proof, rootIdentity: "f".repeat(64) } }] }, signal()))[0]!;
+  assert.equal(wrongRoot.state, "refused");
+});
+
 it("qualifies the real Windows identity/hash/allocation observation and receipt binding", { skip: process.platform !== "win32", timeout: 30_000 }, async () => {
   const root = await tempDir("arke-cache-native-"); const bytes = Buffer.from("generated disposable native fixture");
   const path = join(root, `${key}.wav`); await writeFile(path, bytes);
@@ -117,8 +139,11 @@ it("reports deletion as unknown while a metadata-only handle keeps it pending", 
   try {
     const row = (await windowsCacheFiles({ root: h.root, mode: "remove", items: [{ key, expected: h.proof }] }, signal()))[0]!;
     assert.equal(row.state, "unknown", JSON.stringify(row));
+    const pending = (await windowsCacheFiles({ root: h.root, mode: "reconcile", items: [{ key, expected: h.proof }] }, signal()))[0]!;
+    assert.equal(pending.state, "refused", "a deletion-pending file is not verified absence");
   } finally { await close(); }
   await assert.rejects(readFile(h.path), { code: "ENOENT" });
+  assert.equal((await windowsCacheFiles({ root: h.root, mode: "reconcile", items: [{ key, expected: h.proof }] }, signal()))[0]?.state, "absent");
 });
 
 it("refuses a replaced root, root junction and leaf directory reparse point", native, async () => {

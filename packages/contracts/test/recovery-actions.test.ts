@@ -3,7 +3,7 @@ import { it } from "node:test";
 import { CACHE_CLEANUP_POLICY, ClientMessageSchema, RecoveryActionCommandSchema, RecoveryRetryPlanSchema, RecoveryCachePlanSchema, isRemoteHostCommand } from "../src/index.js";
 const requestId = "01ARZ3NDEKTSV4RRFFQ69G5FAV", key = "a".repeat(64);
 it("requires separate host-only preview, approval and cancellation with no launch arguments", () => {
-  for (const command of [{ action: "preview-retry", resourceKey: key }, { action: "approve-retry", planId: key }, { action: "cancel", planId: key }, { action: "preview-cleanup" }, { action: "approve-cleanup", planId: key }]) {
+  for (const command of [{ action: "preview-retry", resourceKey: key }, { action: "approve-retry", planId: key }, { action: "cancel", planId: key }, { action: "preview-cleanup" }, { action: "approve-cleanup", planId: key }, { action: "reconcile-cleanup" }]) {
     const request = { kind: "recovery-action", requestId, command };
     assert(isRemoteHostCommand(ClientMessageSchema.parse(request)));
     assert(!RecoveryActionCommandSchema.safeParse({ ...request, command: { ...command, path: "PRIVATE_PATH" } }).success);

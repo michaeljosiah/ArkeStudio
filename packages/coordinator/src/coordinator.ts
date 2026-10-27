@@ -4057,6 +4057,7 @@ export class Coordinator {
     });
     if (this.cataloguePreviews) this.recoveryActions.registerCleanup({
       available: () => this.cataloguePreviews!.cleanupAvailability(), prepare: signal => this.cataloguePreviews!.prepareCleanup(signal),
+      reconcile: signal => this.cataloguePreviews!.reconcileCleanup(signal),
     });
     this.serverApplication = {
       attachTransport: sink => {
@@ -4982,6 +4983,7 @@ export class Coordinator {
       this.lifecycleDisposers.add(control.subscribe(() => { this.recoveryActions.invalidateReviews(); this.publishRecoveryPolicy(); }));
       await control.open();
       await this.cataloguePreviews?.initializeCleanup();
+      await this.cataloguePreviews?.reconcileCleanup();
       this.publishRecoveryPolicy();
     }
     if (this.opts.recoveryHistory) {

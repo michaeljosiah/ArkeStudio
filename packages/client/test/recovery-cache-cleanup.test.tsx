@@ -38,3 +38,29 @@ it("reviews before approving cleanup, bounds duplicate clicks and never replays 
     await act(async () => root.render(<RecoveryCacheCleanupControls />)); assert(button("Review previews…").disabled);
   } finally { await act(async () => root.unmount()); container.remove(); __setBridgeForTest(null); }
 });
+
+it("checks an uncertain cleanup without granting deletion and preserves held outcomes and remote refusal", async () => {
+  const dom = parseHTML("<!doctype html><html><head></head><body></body></html>");
+  Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node, Element: dom.Element, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });
+  const state = structuredClone(FIXTURE_STATE);
+  state.app.recoveryPolicy = { audit: "available", accepting: true, mode: "suggest-only", targets: [], cleanup: { available: false, pending: true, audit: "available" } };
+  __setStateForTest(state, { connection: "open" }); const sent: ClientMessage[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json) { sent.push(JSON.parse(json)); } });
+  const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  const button = () => [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Check cleanup outcome")!;
+  const respond = (result: RecoveryActionResult) => act(async () => __applyEventForTest({ type: "recovery.action-result", at: new Date().toISOString(), result }));
+  try {
+    await act(async () => root.render(<RecoveryCacheCleanupControls />)); assert.equal(sent.length, 0);
+    await act(async () => { button().click(); button().click(); }); assert.equal(sent.length, 1);
+    const first = sent[0]!; assert(first.kind === "recovery-action"); assert.deepEqual(first.command, { action: "reconcile-cleanup" });
+    await respond({ requestId: first.requestId, status: "accepted" }); assert(container.textContent?.includes("No deletion will be repeated"));
+    await respond({ requestId: first.requestId, status: "unknown", reconciliation: { outcome: "unconfirmed", availableBytes: null } });
+    assert(container.textContent?.includes("its hold remains")); assert.equal(sent.length, 1);
+    await act(async () => button().click()); const second = sent[1]!; assert(second.kind === "recovery-action");
+    await respond({ requestId: second.requestId, status: "verified", reconciliation: { outcome: "retained", availableBytes: 1000 } });
+    assert(container.textContent?.includes("original audition is intact")); assert(container.textContent?.includes("No deletion was repeated"));
+    assert(sent.every(message => message.kind === "recovery-action" && message.command.action === "reconcile-cleanup"));
+    const meta = document.createElement("meta"); meta.name = "arke-remote"; meta.content = "true"; document.head.append(meta);
+    await act(async () => root.render(<RecoveryCacheCleanupControls />)); assert(button().disabled);
+  } finally { await act(async () => root.unmount()); container.remove(); __setBridgeForTest(null); }
+});

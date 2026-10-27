@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { lstat, readFile, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
@@ -10,7 +12,8 @@ import { FsWorldProvider } from "../../src/world/provider.js";
 import { RecoveryControlService } from "../../src/recovery/control.js";
 import { FileRecoveryControlStore } from "../../src/recovery/control-file.js";
 import { tempDir } from "../tmp.js";
-import { until } from "../wait.js";
+import { until, untilAsync } from "../wait.js";
+import { probeProcesses } from "../../src/child-ledger.js";
 
 it("the authenticated host previews without deletion, approves the exact native cleanup and refuses replay", { skip: process.platform !== "win32", timeout: 60_000 }, async () => {
   const root = await tempDir("arke-cleanup-host-"); const events: DomainEvent[] = [];
@@ -50,7 +53,11 @@ it("the authenticated host previews without deletion, approves the exact native 
       await until(() => events.some(event => event.type === "recovery.action-result" && event.result.requestId === requestId && event.result.status !== "accepted"), "cleanup host receipt", 15_000);
       return (events.findLast(event => event.type === "recovery.action-result" && event.result.requestId === requestId) as Extract<DomainEvent, { type: "recovery.action-result" }>).result;
     };
-    const review = await action({ action: "preview-cleanup" }); assert.equal(review.status, "preview"); assert(review.cleanupPlan);
+    // A loaded Windows runner can refuse its bounded, read-only native observation. Wait for
+    // a verified review; do not retry approval or turn a refused probe into deletion authority.
+    let review: Awaited<ReturnType<typeof action>> | undefined;
+    await untilAsync(async () => { review = await action({ action: "preview-cleanup" }); return review.status === "preview"; }, "verified native cleanup review", 35_000);
+    assert(review?.cleanupPlan);
     assert.equal(review.cleanupPlan.files, 1); assert.deepEqual(await readFile(path), bytes); assert.equal(syntheses, 1);
     await assert.rejects(readFile(join(root, "voice-previews", "cleanup-control.json")), { code: "ENOENT" });
     const completed = await action({ action: "approve-cleanup", planId: review.cleanupPlan.id });
@@ -63,4 +70,37 @@ it("the authenticated host previews without deletion, approves the exact native 
     assert(events.some(event => event.type === "recovery.policy" && event.policy.cleanup?.pending), "the flushed intent publishes its hold before final outcome");
   } finally { socket?.close(); await coordinator.stop(); await provider.close(); }
   assert(!(await readFile(join(root, "changes.jsonl"), "utf8")).includes("cleanup-local-preset-previews"), "cleanup authority never enters the diagnostic journal");
+});
+
+it("a new authenticated host settles a crashed native worker intent without deletion or synthesis replay", { skip: process.platform !== "win32", timeout: 180_000 }, async () => {
+  const root = await tempDir("arke-cleanup-restart-"), protectedPath = join(root, "retained-artifact.txt");
+  await writeFile(protectedPath, "protected fixture sibling");
+  const stdout = await new Promise<string>((resolve, reject) => execFile(process.execPath,
+    ["--import", "tsx", fileURLToPath(new URL("./cache-cleanup-crash-fixture.ts", import.meta.url)), root],
+    { windowsHide: true, timeout: 60_000, maxBuffer: 64 * 1024 }, (error, stdout) => error ? reject(error) : resolve(stdout)));
+  assert(stdout.includes("worker-intent-flushed"));
+  const controlPath = join(root, "voice-previews", "cleanup-control.json"), disk = JSON.parse(await readFile(controlPath, "utf8"));
+  assert(disk.pending?.workerPid); assert.notEqual(disk.pending.owner.pid, process.pid);
+  const pids = [disk.pending.owner.pid, disk.pending.workerPid];
+  // Reuse the process ledger's bounded 30s native probe; a loaded Windows host can spend
+  // more than five seconds starting PowerShell/CIM without revealing any process evidence.
+  await untilAsync(async () => { const rows = await probeProcesses(pids); return pids.every(pid => !rows.has(pid)); }, "original owner and leashed native worker exit", 45_000);
+  const path = join(root, "voice-previews", "local-presets-v1", `${disk.pending.key}.wav`), original = await readFile(path);
+  const events: DomainEvent[] = [], provider = new FsWorldProvider(root);
+  const coordinator = new Coordinator({ provider, adapter: null, appRoot: root, appVersion: "restart-fixture", changeLogPath: join(root, "changes.jsonl"),
+    recoveryControl: new RecoveryControlService({ store: new FileRecoveryControlStore(join(root, "operations", "recovery.json")) }),
+    voice: { localPresets: [], cloudSources: [], sidecar: null }, observeEvent: event => events.push(event) });
+  let socket: WebSocket | undefined;
+  try {
+    const { port, token } = await coordinator.start();
+    const settled = JSON.parse(await readFile(controlPath, "utf8")); assert.equal(settled.pending, null); assert.equal(settled.outcomes.at(-1).status, "retained");
+    assert.deepEqual(await readFile(path), original); assert.equal(await readFile(protectedPath, "utf8"), "protected fixture sibling");
+    socket = new WebSocket(`ws://127.0.0.1:${port}`); let hello = false;
+    socket.on("message", data => { if (JSON.parse(String(data)).kind === "snapshot") hello = true; });
+    await once(socket, "open"); socket.send(JSON.stringify({ kind: "hello", token })); await until(() => hello, "reopened authenticated host", 5000);
+    const requestId = ulid(); socket.send(JSON.stringify({ kind: "recovery-action", requestId, command: { action: "reconcile-cleanup" } }));
+    await until(() => events.some(event => event.type === "recovery.action-result" && event.result.requestId === requestId), "already settled reconciliation refusal", 5000);
+    assert.equal((events.findLast(event => event.type === "recovery.action-result" && event.result.requestId === requestId) as Extract<DomainEvent, { type: "recovery.action-result" }>).result.status, "refused");
+    assert(!events.some(event => event.type === "voice.catalogue-preview"), "reopening never requests synthesis");
+  } finally { socket?.close(); await coordinator.stop(); await provider.close(); }
 });

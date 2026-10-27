@@ -2,12 +2,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, open, opendir, realpath, type FileHandle } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import { CACHE_CLEANUP_POLICY, STORAGE_POLICY, storageWarningFloor, type RecoveryCacheOutcome, type RecoveryCachePlan, type StorageCapacity } from "@arke-studio/contracts";
+import { CACHE_CLEANUP_POLICY, STORAGE_POLICY, storageWarningFloor, type RecoveryCacheOutcome, type RecoveryCachePlan, type RecoveryCacheReconciliation, type StorageCapacity } from "@arke-studio/contracts";
 import { windowsCacheFiles, type WindowsCacheProof } from "./windows-cache-file.js";
 import type { CacheCleanupControl } from "./cache-cleanup-control.js";
 import type { AppStorageService } from "./service.js";
 import type { ResolvedMediaFile } from "../transport.js";
 import { atomicWriteFile, serializeFileMutation } from "../world/atomic.js";
+import { platformProbe, type ProcessProbe } from "../child-ledger.js";
 
 const MAX_AUDIO = 12 * 1024 * 1024;
 const MAX_INDEX = 256 * 1024;
@@ -53,7 +54,8 @@ async function boundedRead(handle: FileHandle, limit: number): Promise<Buffer> {
 const leases = new Map<string, { readers: number; writer: boolean }>();
 // Unknown owners keep their exact handles and release/settlement capabilities. Neither a new
 // service instance nor an inventory refresh can turn that uncertainty into released capacity.
-const retainedOwners = new Set<{ path: string; file?: FileHandle; release(): void; settle?: () => Promise<boolean> }>();
+const retainedOwners = new Set<{ path: string; file?: FileHandle; release(): void; settle?: () => Promise<boolean>;
+  cleanup?: { id: string; complete(): boolean } }>();
 let writers = 0, readers = 0;
 function lease(path: string, write: boolean): (() => void) | null {
   const key = process.platform === "win32" ? resolve(path).toLowerCase() : resolve(path);
@@ -78,7 +80,7 @@ export class LocalPreviewCache {
   private readonly indexPath: string;
   private closed = false;
   constructor(parent: string, private readonly storage?: AppStorageService, private readonly cleanupDeps: {
-    control?: CacheCleanupControl; now?: () => number; native?: typeof windowsCacheFiles; platform?: string;
+    control?: CacheCleanupControl; now?: () => number; native?: typeof windowsCacheFiles; platform?: string; processProbe?: ProcessProbe;
   } = {}) {
     this.root = join(parent, "local-presets-v1");
     this.indexPath = join(this.root, "receipts.json");
@@ -272,7 +274,8 @@ export class LocalPreviewCache {
     return proof.nodeRootIdentity === receipt.rootIdentity && proof.nodeFileIdentity === receipt.fileIdentity &&
       proof.contentHash === receipt.contentHash && proof.bytes === receipt.bytes && proof.modifiedNs === receipt.modifiedNs;
   }
-  private stableProof(proof: WindowsCacheProof): string { const { observedAt: _at, ...stable } = proof; return JSON.stringify(stable); }
+  private stableProof(proof: WindowsCacheProof): string { return JSON.stringify([proof.rootIdentity, proof.fileIdentity,
+    proof.nodeRootIdentity, proof.nodeFileIdentity, proof.contentHash, proof.bytes, proof.allocatedBytes, proof.modifiedNs, proof.writeTicks]); }
   async prepareCleanup(allowed: ReadonlySet<string>, signal: AbortSignal): Promise<PreparedPreviewCleanup | null> {
     const control = this.cleanupDeps.control;
     if (this.closed || signal.aborted || (this.cleanupDeps.platform ?? process.platform) !== "win32" || !control) return null;
@@ -328,7 +331,7 @@ export class LocalPreviewCache {
     const active = () => { try { return !this.closed && !signal.aborted && valid(); } catch { return false; } };
     let rootHold: ReturnType<AppStorageService["acquireRoot"]> | undefined, before: StorageCapacity | null = null;
     let intentId: string | null = null, currentKey: string | null = null;
-    let mutated = false, measuredAfter = false;
+    let mutated = false, measuredAfter = false, completed = false;
     const measure = async () => {
       if (!this.storage || !rootHold) return;
       const fence = this.now(); await this.storage.wake(); const after = await this.storage.measure(rootHold.rootId, signal, fence);
@@ -336,7 +339,9 @@ export class LocalPreviewCache {
       if (after && after.measuredAt >= fence && (!before || before.volumeId === after.volumeId && before.mappingRevision === after.mappingRevision)) cleanup.availableAfter = after.availableBytes;
     };
     const keep = (key: string, file?: FileHandle) => {
-      const release = held.get(key); if (release) { retained.add(key); retainedOwners.add({ path: this.path(key), file, release }); }
+      const release = held.get(key), pending = control.pendingForReconciliation();
+      if (release) { retained.add(key); retainedOwners.add({ path: this.path(key), file, release,
+        ...(pending?.key === key ? { cleanup: { id: pending.id, complete: () => completed && control.quiescent() } } : {}) }); }
     };
     try {
       if (!active() || !control.snapshot().available || await this.rootIdentity() !== root) return { status: "refused", cleanup };
@@ -362,7 +367,7 @@ export class LocalPreviewCache {
         if (!active()) return { status: "cancelled", cleanup };
         currentKey = entry.receipt.key;
         intentId = await control.begin(planId, { key: currentKey, evidence: digest(JSON.stringify(entry.receipt)),
-          rootIdentity: entry.proof.rootIdentity, fileIdentity: entry.proof.fileIdentity }, active);
+          rootIdentity: entry.proof.rootIdentity, fileIdentity: entry.proof.fileIdentity, proof: entry.proof }, active);
         if (!intentId) {
           if (control.snapshot().pending) { keep(currentKey); return { status: "unknown", cleanup }; }
           return { status: "refused", cleanup };
@@ -373,7 +378,9 @@ export class LocalPreviewCache {
           intentId = null; return { status: signal.aborted ? "cancelled" : "refused", cleanup };
         }
         mutated = true; measuredAfter = false;
-        const row = (await native({ root: this.root, mode: "remove", items: [{ key: currentKey, expected: entry.proof }] }, signal))[0];
+        const admittedIntent = intentId;
+        const row = (await native({ root: this.root, mode: "remove", items: [{ key: currentKey, expected: entry.proof }] }, signal,
+          pid => control.admitWorker(admittedIntent, pid, active)))[0];
         if (!row || row.key !== currentKey || row.state === "unknown" || row.state === "removed" && this.stableProof(row.proof) !== this.stableProof(entry.proof)) {
           await control.settle(intentId, "unknown"); keep(currentKey); return { status: "unknown", cleanup };
         }
@@ -407,7 +414,69 @@ export class LocalPreviewCache {
     } finally {
       if (mutated && !measuredAfter) try { await measure(); } catch { /* Capacity remains explicitly unknown. */ }
       rootHold?.release(); for (const [key, release] of held) if (!retained.has(key)) release();
+      completed = true;
     }
+  }
+  /** Observe an uncertain original effect; this method never invokes native removal. */
+  async reconcileCleanup(signal: AbortSignal): Promise<RecoveryCacheReconciliation> {
+    const held: RecoveryCacheReconciliation = { outcome: "unconfirmed", availableBytes: null }, control = this.cleanupDeps.control;
+    if (!control || this.closed || signal.aborted || (this.cleanupDeps.platform ?? process.platform) !== "win32") return held;
+    await control.open();
+    const pending = control.pendingForReconciliation();
+    if (!pending?.owner || !pending.proof) return held; // Legacy unknowns lack worker-admission evidence.
+    const valid = () => !this.closed && !signal.aborted && control.pendingForReconciliation()?.id === pending.id;
+    const owners = [...retainedOwners].filter(owner => owner.path === this.path(pending.key) && owner.cleanup?.id === pending.id);
+    let release: (() => void) | null = null, rootHold: ReturnType<AppStorageService["acquireRoot"]> | undefined;
+    try {
+      if (owners.some(owner => !owner.cleanup!.complete())) return held;
+      if (control.ownsPending(pending.id)) {
+        if (!owners.length) return held;
+      } else {
+        // A live/reused PID or unavailable process observation is never treated as exit.
+        const pids = [pending.owner.pid, ...(pending.workerPid ? [pending.workerPid] : [])];
+        const processes = await (this.cleanupDeps.processProbe ?? platformProbe)(pids);
+        if (pids.some(pid => processes.has(pid))) return held;
+      }
+      if (!valid()) return held;
+      for (const owner of owners) if (owner.file) { await close(owner.file); delete owner.file; }
+      if (!owners.length) { release = lease(this.path(pending.key), true); if (!release) return held; }
+      if (await this.rootIdentity() !== pending.proof.nodeRootIdentity) return held;
+      const fence = this.now(), row = (await (this.cleanupDeps.native ?? windowsCacheFiles)({ root: this.root, mode: "reconcile",
+        items: [{ key: pending.key, expected: pending.proof }] }, signal))[0], at = this.now();
+      if (!valid() || !row || row.key !== pending.key) return held;
+      const observedAt = row.state === "measured" ? row.proof.observedAt : row.state === "absent" ? row.observedAt : NaN;
+      if (!Number.isSafeInteger(at) || observedAt < fence || observedAt > at || at - observedAt > 5000) return held;
+      const root = row.state === "measured" ? row.proof : row.state === "absent" ? row : null;
+      if (!root || root.rootIdentity !== pending.rootIdentity || root.nodeRootIdentity !== pending.proof.nodeRootIdentity) return held;
+      const removed = row.state === "absent" || row.state === "measured" && row.proof.fileIdentity !== pending.fileIdentity;
+      if (!removed && (row.state !== "measured" || this.stableProof(row.proof) !== this.stableProof(pending.proof))) return held;
+      await serializeFileMutation(this.indexPath, async () => {
+        if (!valid() || await this.rootIdentity() !== pending.proof!.nodeRootIdentity) throw unavailable();
+        const index = await this.index(pending.proof!.nodeRootIdentity), receipt = index.entries.find(entry => entry.key === pending.key);
+        if (receipt ? digest(JSON.stringify(receipt)) !== pending.evidence : !removed) throw unavailable();
+        if (removed && receipt) await atomicWriteFile(this.indexPath, JSON.stringify({ ...index,
+          entries: index.entries.filter(entry => entry.key !== pending.key) }) + "\n", { stage: async path => {
+            const file = await open(path, "wx"); return { writeFile: file.writeFile.bind(file), sync: file.sync.bind(file), close: () => close(file) };
+          } });
+      });
+      if (!valid() || await this.rootIdentity() !== pending.proof.nodeRootIdentity ||
+        !await control.resolve(pending.id, removed ? "removed" : "retained", valid)) return held;
+      for (const owner of owners) { owner.release(); retainedOwners.delete(owner); }
+      let availableBytes: number | null = null;
+      if (this.storage && !signal.aborted && !this.closed) {
+        try {
+          rootHold = this.storage.acquireRoot(this.root, "working-files"); const after = this.now(); await this.storage.wake();
+          availableBytes = (await this.storage.measure(rootHold.rootId, signal, after))?.availableBytes ?? null;
+        } catch { /* Known file settlement survives an unavailable capacity observation. */ }
+      }
+      return { outcome: removed ? "removed" : "retained", availableBytes };
+    } catch (error) {
+      if (error instanceof UnknownClose) {
+        retainedOwners.add({ path: this.path(pending.key), file: error.file, release: release ?? (() => {}), cleanup: { id: pending.id, complete: () => true } });
+        release = null;
+      }
+      return held;
+    } finally { rootHold?.release(); release?.(); }
   }
   /** Metadata only: recorded bytes are not a claim of reclaimable allocation or cleanup authority. */
   async inventory(): Promise<{ state: "recorded" | "unavailable"; scope: "producer-receipts"; complete: false; entries: Array<{

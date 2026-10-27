@@ -12,20 +12,24 @@ export const WindowsCacheProofSchema = z.object({ rootIdentity: hash, fileIdenti
 export type WindowsCacheProof = z.infer<typeof WindowsCacheProofSchema>;
 const reason = z.enum(["missing", "busy", "permission", "identity", "unsupported", "changed", "links", "native", "cancelled"]);
 export type WindowsCacheFileResult = { key: string; state: "measured" | "removed"; proof: WindowsCacheProof } |
+  { key: string; state: "absent"; rootIdentity: string; nodeRootIdentity: string; observedAt: number } |
   { key: string; state: "refused" | "unknown"; reason: z.infer<typeof reason> };
 const legacy = z.object({ dev: z.string().regex(/^\d+$/), ino: z.string().regex(/^\d+$/), created: z.string().regex(/^\d+$/) }).strict();
 const nativeProof = WindowsCacheProofSchema.omit({ nodeRootIdentity: true, nodeFileIdentity: true, modifiedNs: true }).extend({
   rootDos: z.string().max(32767), rootNode: legacy, fileNode: legacy,
 }).strict();
+const absentProof = z.object({ key: hash, state: z.literal("absent"), rootIdentity: hash,
+  rootDos: z.string().max(32767), rootNode: legacy, observedAt: amount }).strict();
 const rowSchema = z.discriminatedUnion("state", [
   z.object({ key: hash, state: z.literal("measured"), proof: nativeProof }).strict(),
   z.object({ key: hash, state: z.literal("removed"), proof: nativeProof }).strict(),
+  absentProof,
   z.object({ key: hash, state: z.literal("refused"), reason }).strict(),
   z.object({ key: hash, state: z.literal("unknown"), reason }).strict(),
 ]);
 const inputSchema = z.object({ root: z.string().min(1).max(32767).refine(path => win32.isAbsolute(path) && win32.parse(path).root.length > 1),
   items: z.array(z.object({ key: hash, expected: WindowsCacheProofSchema.optional() }).strict()).min(1).max(8),
-  mode: z.enum(["inspect", "remove"]),
+  mode: z.enum(["inspect", "remove", "reconcile"]),
 }).strict().refine(input => new Set(input.items.map(row => row.key)).size === input.items.length &&
   (input.mode === "inspect" || (input.items.length === 1 && input.items[0]!.expected !== undefined)));
 type Input = z.infer<typeof inputSchema>;
@@ -92,11 +96,17 @@ $rows=@(foreach($item in $inputData.items) {
   $rootName=canonical $root 1
   $why='unsupported'; if($rootName -notmatch '^\\\\\?\\Volume\{[a-fA-F0-9-]{36}\}\\'){throw 'volume'}
   $why='identity'; $rootId=digest ($rootName.ToLowerInvariant()+[char]0+[Convert]::ToBase64String((info $root 18 24)))
+  if($inputData.mode -eq 'reconcile' -and $rootId -cne [string]$item.expected.rootIdentity){throw 'changed-root'}
   $access=[uint32]2147483648; if($inputData.mode -eq 'remove'){$access=$access -bor [uint32]65536}
   $filePath=([string]$inputData.root).TrimEnd('\')+'\'+[string]$item.key+'.wav'
   $file=$k::CreateFileW($filePath,$access,0,[IntPtr]::Zero,3,0x00200000,[IntPtr]::Zero)
   if($file -eq [IntPtr](-1)) {
    $err=[Runtime.InteropServices.Marshal]::GetLastWin32Error()
+   if($inputData.mode -eq 'reconcile' -and $err -eq 2) {
+    if((canonical $root 1) -cne $rootName){throw 'changed-root'}
+    $answer=@{key=[string]$item.key;state='absent';rootIdentity=$rootId;rootDos=(canonical $root 0);rootNode=(nodeInfo $root);observedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}
+    throw 'verified-absence'
+   }
    $why=if($err -eq 2 -or $err -eq 3){'missing'}elseif($err -eq 32 -or $err -eq 33){'busy'}elseif($err -eq 5){'permission'}else{'native'}
    throw 'open'
   }
@@ -131,7 +141,7 @@ $rows=@(foreach($item in $inputData.items) {
    } finally {[Runtime.InteropServices.Marshal]::FreeHGlobal($ptr)}
   }
   $answer=@{key=[string]$item.key;state=$(if($inputData.mode -eq 'remove'){'removed'}else{'measured'});proof=$proof}
- } catch {$answer=@{key=[string]$item.key;state=$(if($attempted){'unknown'}else{'refused'});reason=$why}}
+ } catch {if($null -eq $answer){$answer=@{key=[string]$item.key;state=$(if($attempted){'unknown'}else{'refused'});reason=$why}}}
  finally {
   if($null -ne $stream){$stream.Dispose()}
   if($file -ne [IntPtr]::Zero -and $file -ne [IntPtr](-1)) {
@@ -163,7 +173,7 @@ ConvertTo-Json -InputObject $rows -Depth 8 -Compress
 `;
 const ENCODED = Buffer.from(PROGRAM, "utf16le").toString("base64");
 
-async function run(input: Input, signal: AbortSignal): Promise<string> {
+async function run(input: Input, signal: AbortSignal, admitWorker?: (pid: number) => Promise<boolean>): Promise<string> {
   if (ENCODED.length > 28_000) throw new Error("Native cache program exceeds its command bound.");
   const text = JSON.stringify(input); if (Buffer.byteLength(text) > 64 * 1024) throw new Error("Native cache input exceeds its bound.");
   const closed = new AbortController(); let leashed: Promise<unknown> = Promise.resolve();
@@ -176,7 +186,9 @@ async function run(input: Input, signal: AbortSignal): Promise<string> {
     child.stdin?.on("error", () => {});
     leashed = (async () => {
       const leash = child.pid ? await leashStorageReaderToParent(child.pid, process.pid, AbortSignal.any([signal, closed.signal])) : { ok: false };
-      if (leash.ok && !signal.aborted && child.exitCode === null && child.signalCode === null) child.stdin?.end(text);
+      const admitted = leash.ok && !signal.aborted && child.pid !== undefined &&
+        (input.mode !== "remove" || !admitWorker || await admitWorker(child.pid));
+      if (admitted && !signal.aborted && child.exitCode === null && child.signalCode === null) child.stdin?.end(text);
       else child.kill("SIGKILL");
     })().catch(() => { child.kill("SIGKILL"); });
     child.once("close", () => { closed.abort(); if (failure) reject(new Error("Native cache operation outcome unavailable.")); else resolve(output); });
@@ -195,16 +207,18 @@ function proof(raw: z.infer<typeof nativeProof>): WindowsCacheProof {
 
 /** Host-only native primitive. It proves file identity, not producer ownership or permission.
  * Callers must supply producer receipts, lease fences, durable intent and approved plans. */
-export async function windowsCacheFiles(input: Input, signal: AbortSignal): Promise<WindowsCacheFileResult[]> {
+export async function windowsCacheFiles(input: Input, signal: AbortSignal, admitWorker?: (pid: number) => Promise<boolean>): Promise<WindowsCacheFileResult[]> {
   const parsed = inputSchema.parse(input);
   if (process.platform !== "win32") return parsed.items.map(item => ({ key: item.key, state: "refused", reason: "unsupported" }));
   if (signal.aborted) return parsed.items.map(item => ({ key: item.key, state: "refused", reason: "cancelled" }));
   try {
-    const rows = z.array(rowSchema).max(8).parse(JSON.parse(await run(parsed, signal)));
+    const rows = z.array(rowSchema).max(8).parse(JSON.parse(await run(parsed, signal, admitWorker)));
     if (rows.length !== parsed.items.length || new Set(rows.map(row => row.key)).size !== rows.length ||
       rows.some(row => !parsed.items.some(item => item.key === row.key) ||
-        row.state === "removed" && parsed.mode !== "remove" || row.state === "measured" && parsed.mode !== "inspect")) throw new Error("Incomplete native cache result.");
-    return rows.map(row => row.state === "measured" || row.state === "removed" ? { key: row.key, state: row.state, proof: proof(row.proof) } : row);
+        row.state === "removed" && parsed.mode !== "remove" || row.state === "measured" && parsed.mode === "remove" || row.state === "absent" && parsed.mode !== "reconcile")) throw new Error("Incomplete native cache result.");
+    return rows.map(row => row.state === "measured" || row.state === "removed" ? { key: row.key, state: row.state, proof: proof(row.proof) }
+      : row.state === "absent" ? { key: row.key, state: row.state, rootIdentity: row.rootIdentity, observedAt: row.observedAt,
+        nodeRootIdentity: digest(JSON.stringify([row.rootDos.replace(/^\\\\\?\\/, "").toLowerCase(), row.rootNode.dev, row.rootNode.ino, unixNs(row.rootNode.created)])) } : row);
   } catch {
     return parsed.items.map(item => ({ key: item.key, state: input.mode === "remove" ? "unknown" : "refused", reason: "native" }));
   }

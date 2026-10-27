@@ -73,3 +73,15 @@ it("cleanup expiry, invalidation and cancellation consume reviews before any del
     await h.handle({ action: "approve-cleanup", planId: plan.id }); assert.equal(calls, 0); assert.equal(h.results.at(-1)?.reason, "stale"); h.registry.closeAdmission();
   }
 });
+
+it("read-only cleanup reconciliation shares the executor and never prepares another deletion", async () => {
+  const h = fixture(); let calls = 0, prepares = 0, finish!: () => void;
+  const waiting = new Promise<void>(resolve => { finish = resolve; });
+  h.registry.registerCleanup({ available: () => ({ available: false, pending: true }), prepare: async () => { prepares++; return null; },
+    reconcile: async () => { calls++; await waiting; return { outcome: "retained", availableBytes: null }; } });
+  const observing = h.handle({ action: "reconcile-cleanup" }); assert.equal(h.results.at(-1)?.status, "accepted");
+  await h.handle({ action: "preview-retry", resourceKey: key }); assert.equal(h.results.at(-1)?.reason, "busy");
+  finish(); await observing;
+  assert.equal(h.results.at(-1)?.reconciliation?.outcome, "retained"); assert.equal(h.results.at(-1)?.status, "verified");
+  assert.equal(calls, 1); assert.equal(prepares, 0); assert.equal(h.calls(), 0); h.registry.closeAdmission();
+});

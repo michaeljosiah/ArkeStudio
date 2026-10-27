@@ -32,6 +32,7 @@ export class CataloguePreviewService {
   private closed = false;
   private readonly localCache: LocalPreviewCache;
   private readonly cleanupControl: CacheCleanupControl;
+  private readonly cleanupLifetime = new AbortController();
   constructor(private readonly deps: {
     root: string;
     sidecar: SidecarLike | null;
@@ -49,6 +50,10 @@ export class CataloguePreviewService {
     this.localCache = new LocalPreviewCache(deps.root, deps.storage, { control: this.cleanupControl, now });
   }
   initializeCleanup(): Promise<void> { return this.cleanupControl.open(); }
+  async reconcileCleanup(signal: AbortSignal = this.cleanupLifetime.signal) {
+    await this.initializeCleanup();
+    return this.localCache.reconcileCleanup(AbortSignal.any([signal, this.cleanupLifetime.signal]));
+  }
   cleanupAvailability(): NonNullable<import("@arke-studio/contracts").RecoveryPolicySnapshot["cleanup"]> {
     const state = this.cleanupControl.snapshot();
     return { available: !this.closed && process.platform === "win32" && state.available, pending: state.pending, audit: state.audit,
@@ -208,6 +213,7 @@ export class CataloguePreviewService {
 
   close(): void {
     this.closed = true;
+    this.cleanupLifetime.abort();
     this.localCache.close();
     this.cleanupControl.closeAdmission();
     for (const request of this.requests.values()) request.abort.abort();

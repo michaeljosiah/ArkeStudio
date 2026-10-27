@@ -29,6 +29,9 @@ export const RecoveryCacheOutcomeSchema = z.object({
   availableBefore: instant.nullable(), availableAfter: instant.nullable(), reclaimedBytes: z.null(),
 }).strict();
 export type RecoveryCacheOutcome = z.infer<typeof RecoveryCacheOutcomeSchema>;
+export const RecoveryCacheReconciliationSchema = z.object({ outcome: z.enum(["removed", "retained", "unconfirmed"]),
+  availableBytes: instant.nullable() }).strict();
+export type RecoveryCacheReconciliation = z.infer<typeof RecoveryCacheReconciliationSchema>;
 /** Review and approval are separate host commands. No path, launch setting or arbitrary action. */
 export const RecoveryActionCommandSchema = z.object({ kind: z.literal("recovery-action"), requestId: UlidSchema,
   command: z.discriminatedUnion("action", [
@@ -36,6 +39,7 @@ export const RecoveryActionCommandSchema = z.object({ kind: z.literal("recovery-
     z.object({ action: z.literal("approve-retry"), planId: digest }).strict(),
     z.object({ action: z.literal("preview-cleanup") }).strict(),
     z.object({ action: z.literal("approve-cleanup"), planId: digest }).strict(),
+    z.object({ action: z.literal("reconcile-cleanup") }).strict(),
     z.object({ action: z.literal("cancel"), planId: digest }).strict(),
   ]),
 }).strict();
@@ -44,6 +48,8 @@ export const RecoveryActionResultSchema = z.object({ requestId: UlidSchema,
   status: z.enum(["preview", "accepted", "verified", "failed", "unknown", "refused", "cancelled"]),
   plan: RecoveryRetryPlanSchema.optional(),
   cleanupPlan: RecoveryCachePlanSchema.optional(), cleanup: RecoveryCacheOutcomeSchema.optional(),
+  reconciliation: RecoveryCacheReconciliationSchema.optional(),
   reason: z.enum(["unavailable", "stale", "busy", "cancelled"]).optional(),
-}).strict().refine(value => !(value.plan && value.cleanupPlan) && (!value.cleanup || value.cleanupPlan !== undefined));
+}).strict().refine(value => !(value.plan && value.cleanupPlan) && (!value.cleanup || value.cleanupPlan !== undefined) &&
+  (!value.reconciliation || !value.plan && !value.cleanupPlan && !value.cleanup));
 export type RecoveryActionResult = z.infer<typeof RecoveryActionResultSchema>;

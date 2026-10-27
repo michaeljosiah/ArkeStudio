@@ -7,7 +7,8 @@ import type { PreparedPreviewCleanup } from "../storage/local-preview-cache.js";
 interface Target { service: RecoveryRetryPlan["service"]; prepare(): PreparedSupervisorRetry | null }
 interface Preview { plan: RecoveryRetryPlan; target: Target; prepared: PreparedSupervisorRetry }
 type CleanupAvailability = NonNullable<import("@arke-studio/contracts").RecoveryPolicySnapshot["cleanup"]>;
-interface CleanupTarget { available(): CleanupAvailability; prepare(signal: AbortSignal): Promise<PreparedPreviewCleanup | null> }
+interface CleanupTarget { available(): CleanupAvailability; prepare(signal: AbortSignal): Promise<PreparedPreviewCleanup | null>;
+  reconcile?(signal: AbortSignal): Promise<import("@arke-studio/contracts").RecoveryCacheReconciliation> }
 /** Typed review broker over the existing supervisor executor. Volatile plans are not durable
  * execution authority: the original owner still flushes its exact intent before a spawn. */
 export class RecoveryActionRegistry {
@@ -55,6 +56,18 @@ export class RecoveryActionRegistry {
       reply({ status: "cancelled" }); return;
     }
     if (this.active || this.preparing) { reply({ status: "refused", reason: "busy" }); return; }
+    if (command.action === "reconcile-cleanup") {
+      const target = this.cleanupTarget;
+      if (!target?.reconcile || !target.available().pending) { reply({ status: "refused", reason: "unavailable" }); return; }
+      const plan = { id: randomBytes(32).toString("hex") }, control = new AbortController(); this.active = { plan, control };
+      const timer = setTimeout(() => control.abort(), 30_000); reply({ status: "accepted" });
+      try {
+        const reconciliation = await target.reconcile(AbortSignal.any([control.signal, this.closed.signal]));
+        reply({ status: reconciliation.outcome === "unconfirmed" ? "unknown" : "verified", reconciliation });
+      } catch { reply({ status: "unknown", reconciliation: { outcome: "unconfirmed", availableBytes: null } }); }
+      finally { clearTimeout(timer); if (this.active?.plan === plan) this.active = null; }
+      return;
+    }
     if (command.action === "preview-cleanup") {
       const target = this.cleanupTarget, revision = this.revision;
       if (!target?.available().available || this.previews.size + this.cleanupPreviews.size >= RECOVERY_ACTION_LIMITS.previews) { reply({ status: "refused", reason: "unavailable" }); return; }

@@ -64,7 +64,12 @@ before each native removal and retains unknown outcomes across restart. The cata
 owns the fixed-recipe allowlist and lifecycle; `recovery-cache-cleanup.tsx` presents review,
 approval, cancellation and measured outcomes in Settings. `storage/service.ts` supplies a
 post-fence capacity reading through the existing collector; observed improvement is never
-attributed wholly to cleanup. Unknown reconciliation, standing automatic maintenance and
+attributed wholly to cleanup. Native input waits until its exact worker PID is flushed to the
+intent. Startup and the host-only Check cleanup outcome control reconcile without deletion:
+the original owner/control chain must be finished, or both recorded processes positively absent;
+then current native root/file proof distinguishes intact, absent and changed targets. Unknown
+handles retain their exact capabilities until confirmed close. Audit restoration refuses a
+different intent. Legacy/unprovable unknown resolution, standing automatic maintenance and
 affected-volume incident actions remain unfinished. Tests: `test/storage/cache-cleanup*.test.ts`,
 contracts `test/recovery-actions.test.ts`, client `test/recovery-cache-cleanup.test.tsx`.
 Capacity invalidation/root changes revoke captured admission evidence across a reservation flush;
