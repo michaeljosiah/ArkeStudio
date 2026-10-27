@@ -1481,6 +1481,17 @@ Private history preserves sent documents across restart within the existing aggr
 Images/audio and extracted PDF/Office attachments remain unimplemented and explicitly refused.
 The default native inference route still refuses absent host proof. Remaining media attachments,
 effort selection, reviewed repair/cleanup cards and actual matched turn-239 rendering remain pending.
+Candidate native transport qualification uses `studio-assistant/provider-bridge.ts`. It captures
+one exact reviewed body and literal loopback upstream, owns a private authenticated ephemeral
+HTTP listener, bounds request/response bytes/fragments before forwarding, strips native headers
+and retains pending cleanup. `runner.ts` accepts its trusted host factory, binds its identity
+into disclosure and keeps it through native/private-file retirement. Contracts' separate
+`PrivateSessionTransport` carries only the ephemeral bridge capability through the existing
+session-file writer; OpenCode v2 config/destination proof pins that exact route. It is absent
+from model input, ordinary sessions and wire commands. Real pinned-binary success/overflow and
+profile tests qualify this seam. Default production destination proof remains closed: managed
+process/socket origin, broader network/spend/persistence/cleanup and platform acceptance are
+still required. This bridge adds no model process or independent agent loop.
 History replacement reads wait for an already admitted same-path write that outlived bounded
 shutdown in this process. This prevents a late old rename from overwriting a successor's history;
 it is not a cross-process/multiple-active-host lock. Private state is not replayed on reconnect

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
-import { ROSTER, type CreateSessionInput, type HarnessAdapter, type SessionConfigInput, type SessionRef, type SessionFile, type PrivateSessionRequest } from "@arke-studio/contracts";
+import { ROSTER, type CreateSessionInput, type HarnessAdapter, type SessionConfigInput, type SessionRef, type SessionFile, type PrivateSessionRequest, type PrivateSessionTransport } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { loadSkillBodies } from "./skills.js";
 import { privateFileRetirement } from "./private-files.js";
@@ -57,6 +57,7 @@ export async function writeSessionFiles(
   signal?: AbortSignal,
   capture?: (files: readonly SessionFile[]) => void,
   request?: PrivateSessionRequest,
+  transport?: PrivateSessionTransport,
 ): Promise<string> {
   // A configuration still being decided (issue 1247) is bounded like the creation it feeds:
   // a caller that gave up must not find a session created for it once discovery settles.
@@ -74,7 +75,7 @@ export async function writeSessionFiles(
   // caller offering only one silently configures nothing for the harnesses using the other.
   try {
     adapter.prepareSession?.(prepared);
-    const files = adapter.sessionFiles?.(prepared, dir, request) ?? [];
+    const files = adapter.sessionFiles?.(prepared, dir, request, transport) ?? [];
     capture?.(files);
     for (const file of files) {
       await atomicWriteFile(join(dir, file.name), file.contents);
@@ -128,7 +129,7 @@ export async function createPreparedSession(
         };
         retirePrivateFiles = () => serialized(dir, retireUnsentFiles!);
         capturePrivateRetirement?.(retirePrivateFiles);
-      } : undefined, session.visibility === "private" ? session.privateRequest : undefined);
+      } : undefined, session.visibility === "private" ? session.privateRequest : undefined, session.visibility === "private" ? session.privateTransport : undefined);
       try {
         // A stop that landed while the files were written creates nothing: not every adapter
         // refuses an already-fired signal, and a session opened for a stopped run is an orphan.

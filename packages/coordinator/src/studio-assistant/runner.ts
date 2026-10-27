@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rmdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { agentPromptFor, ROSTER, findHarnessModel, harnessModelReference, STUDIO_ASSISTANT_LIMITS, type HarnessAdapter } from "@arke-studio/contracts";
+import { agentPromptFor, ROSTER, findHarnessModel, harnessModelReference, STUDIO_ASSISTANT_LIMITS, type HarnessAdapter, type PrivateSessionRequest, type PrivateSessionTransport } from "@arke-studio/contracts";
 import { createPreparedSession, scopeSessionInput, sessionTurnTimeoutMs, type SessionInput } from "../harness/session-files.js";
 import { toExtendedLength } from "../world/paths.js";
 
@@ -14,7 +14,10 @@ export interface StudioModelPort {
     authorize: (disclosure: StudioModelDisclosure, signal: AbortSignal) => Promise<{ cloudApproved: boolean }>): Promise<string>;
   stop(): Promise<void>;
 }
-interface Active { control: AbortController; listen?: AbortController; ownerStopped?: () => void; retire?: (signal: AbortSignal) => Promise<boolean>; retireFiles?: () => Promise<boolean>; finishing?: Promise<void>; dir?: string; sessionId?: string; work?: Promise<string>; confirmed: boolean; started: boolean; workFinished: boolean; failed?: boolean }
+export interface StudioPrivateTransport {
+  configuration: PrivateSessionTransport; identity: string; approve(): boolean; stop(): Promise<boolean>;
+}
+interface Active { control: AbortController; transport?: StudioPrivateTransport; listen?: AbortController; ownerStopped?: () => void; retire?: (signal: AbortSignal) => Promise<boolean>; retireFiles?: () => Promise<boolean>; finishing?: Promise<void>; dir?: string; sessionId?: string; work?: Promise<string>; confirmed: boolean; started: boolean; workFinished: boolean; failed?: boolean }
 
 /** One explicit model call at a time. Native tools are denied by the operational roster;
  * structured delegation is handled by the coordinator, never a native subagent command.
@@ -26,7 +29,9 @@ export class HarnessStudioModelRunner implements StudioModelPort {
   constructor(private readonly deps: { adapter(): HarnessAdapter | null; sessionInput: SessionInput; scratch: string; timeoutMs?: number;
     /** Trusted host ownership/route attestation, never inferred from a provider/model name.
      * Qualified native adapters additionally bind their exact per-session route into approval. */
-    destination(model: string, provider: string): { local: boolean; identity: string } | null }) {}
+    destination(model: string, provider: string): { local: boolean; identity: string } | null;
+    /** Trusted host composition only. This does not supply missing managed-origin proof. */
+    privateTransport?(request: PrivateSessionRequest, signal: AbortSignal): Promise<StudioPrivateTransport> }) {}
   busy(): boolean { return this.active.size > 0; }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private changed(): void { for (const listener of this.listeners) { try { listener(); } catch { /* Observation grants no inference authority. */ } } }
@@ -81,13 +86,24 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     const member = ROSTER.find(value => value.name === input.role)!;
     const system = agentPromptFor({ ...member, researchWeb: false, ...(customBrief !== undefined ? { brief: customBrief } : {}) });
     if (Buffer.byteLength(system) > 32 * 1024) throw new Error("The Studio system instructions exceed their bound.");
-    const privateRequest = { model: reference, system, prompt: input.prompt, outputTokenLimit: 4096 };
+    const privateRequest = Object.freeze({ model: reference, system, prompt: input.prompt, outputTokenLimit: 4096 });
+    if (this.deps.privateTransport) {
+      if (adapter.privateDestinations !== true) throw new Error("The native owner cannot verify a private bridge route.");
+      const route = await this.deps.privateTransport(privateRequest, signal);
+      entry.transport = Object.freeze({ configuration: Object.freeze({ ...route.configuration }), identity: route.identity,
+        approve: route.approve.bind(route), stop: route.stop.bind(route) });
+      if (!/^[a-f0-9]{64}$/.test(entry.transport.identity)) throw new Error("The private transport identity is invalid.");
+      signal.throwIfAborted();
+    }
     const approve = async (route: { local: boolean; identity: string }) => {
-      const approval = await authorize({ role: input.role, model: reference, provider: model.provider, local: route.local, destination: route.identity, prompt: input.prompt,
+      const destinationIdentity = entry.transport ? createHash("sha256").update(JSON.stringify([route.identity, entry.transport.identity])).digest("hex") : route.identity;
+      const approval = await authorize({ role: input.role, model: reference, provider: model.provider, local: route.local, destination: destinationIdentity, prompt: input.prompt,
         system, outputTokenLimit: privateRequest.outputTokenLimit,
         ...(customBrief !== undefined ? { customBrief } : {}), ...(config.modelVariant ? { variant: config.modelVariant } : {}) }, signal);
       signal.throwIfAborted();
       if (!route.local && !approval.cloudApproved) throw new Error("Cloud explanation requires explicit approval of this payload.");
+      if (!sameOwner() || !sameDestination()) throw new Error("The selected Studio model owner changed before dispatch.");
+      if (entry.transport && !entry.transport.approve()) throw new Error("The selected Studio transport changed before dispatch.");
     };
     // Synthetic host ports retain their original contract. Qualified native owners must
     // create an unsent private session before approval can name its actual scoped route.
@@ -95,7 +111,8 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     if (!sameOwner() || !sameDestination()) throw new Error("The selected Studio model owner changed before dispatch.");
     await mkdir(toExtendedLength(this.deps.scratch), { recursive: true });
     entry.dir = await mkdtemp(join(this.deps.scratch, "turn-"));
-    const session = await createPreparedSession(adapter, entry.dir, config, { purpose: "ask", agent: input.role, visibility: "private", privateRequest }, undefined, signal,
+    const session = await createPreparedSession(adapter, entry.dir, config, { purpose: "ask", agent: input.role, visibility: "private", privateRequest,
+      ...(entry.transport ? { privateTransport: entry.transport.configuration } : {}) }, undefined, signal,
       retire => { entry.retireFiles = retire; });
     entry.sessionId = session.sessionId;
     entry.retire = session.privateRetire?.bind(session);
@@ -172,6 +189,10 @@ export class HarnessStudioModelRunner implements StudioModelPort {
         try { if (!await entry.retire(AbortSignal.timeout(5_000))) return; }
         catch { return; } // Unknown retirement retains one reachable owner/config, never a replay.
       }
+      if (entry.transport) {
+        try { if (!await entry.transport.stop()) return; }
+        catch { return; }
+      }
       if (entry.dir) {
       if (entry.retireFiles && !await entry.retireFiles()) return;
       // Exact captured preparation bytes, then an empty UUID directory. Unknown/changed
@@ -184,7 +205,10 @@ export class HarnessStudioModelRunner implements StudioModelPort {
   }
   /** Trusted housekeeping only: retry known-complete/unsent native retirement, never inference. */
   async reconcileRetirement(): Promise<void> { for (const entry of this.active) if (entry.workFinished && (!entry.started || entry.confirmed)) await this.finish(entry); }
-  async stop(): Promise<void> { this.lifetime.abort(); for (const entry of this.active) entry.control.abort(); }
+  async stop(): Promise<void> {
+    this.lifetime.abort(); for (const entry of this.active) entry.control.abort();
+    await Promise.allSettled([...this.active].map(entry => entry.transport?.stop()));
+  }
   /** Trusted confirmation that both the exact backing inference and its writing owner have
    * completed native cleanup/no further dispatch. A writer exit or Stop reply is insufficient.
    * Never a model/renderer tool; callers must retain the matched native cleanup authority. */

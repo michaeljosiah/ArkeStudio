@@ -61,6 +61,9 @@ export type SessionPurpose = z.infer<typeof SessionPurpose>;
 /** Host-reviewed single private inference input. Never a renderer/tool authority or a
  * credential container; concrete adapters render their measured provider grammar. */
 export interface PrivateSessionRequest { model: string; system: string; prompt: string; outputTokenLimit: number }
+/** Host-only ephemeral loopback bridge capability. Separate from the reviewed model input;
+ * never a provider credential, renderer/model argument or ordinary session setting. */
+export interface PrivateSessionTransport { baseURL: string; apiKey: string }
 
 export interface CreateSessionInput {
   purpose: SessionPurpose;
@@ -68,6 +71,7 @@ export interface CreateSessionInput {
    * to the shared event stream. A supporting adapter returns the private observer on SessionRef. */
   visibility?: "private";
   privateRequest?: PrivateSessionRequest;
+  privateTransport?: PrivateSessionTransport;
   /** The one-use preparation returned by the coordinator's session-file step. */
   preparationId?: string;
   /** Bounds session creation; adapters SHALL pass it to every request on the creation path. */
@@ -382,7 +386,7 @@ export interface HarnessAdapter {
    */
   /** The host supplies the resolved directory when a native control needs a literal path.
    * File contents remain adapter output; filesystem writes remain with the host. */
-  sessionFiles?(input: SessionConfigInput, directory?: string, request?: PrivateSessionRequest): ReadonlyArray<SessionFile>;
+  sessionFiles?(input: SessionConfigInput, directory?: string, request?: PrivateSessionRequest, transport?: PrivateSessionTransport): ReadonlyArray<SessionFile>;
   /**
    * The same settings, for a harness that takes them as call options rather than as a file.
    *

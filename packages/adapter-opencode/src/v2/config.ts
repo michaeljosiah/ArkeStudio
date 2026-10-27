@@ -7,9 +7,10 @@ import {
   ToolIntent,
   type AgentConfinement,
   type SessionConfigInput,
+  type PrivateSessionTransport,
 } from "@arke-studio/contracts";
 import { assessMappedPermission, type SessionPermissionPolicy } from "../permission-policy.js";
-import type { privateWireBody } from "./private-control.js";
+import { privateBridgeTransport, type privateWireBody } from "./private-control.js";
 
 /**
  * Session configuration in OpenCode v2 shapes. Contracts owns confinement policy;
@@ -106,11 +107,13 @@ export interface SessionConfigV2Input extends SessionConfigInput {
 }
 
 /** The opencode.json object written into a v2 session's working directory. */
-export function buildSessionConfigV2(input: SessionConfigV2Input, privateControl?: string, privateBody?: ReturnType<typeof privateWireBody>): Record<string, unknown> {
+export function buildSessionConfigV2(input: SessionConfigV2Input, privateControl?: string, privateBody?: ReturnType<typeof privateWireBody>, transport?: PrivateSessionTransport): Record<string, unknown> {
   if (privateControl && (privateControl.length > 4096 || privateControl.includes("\0") || [...privateControl].some(character => "\\*?[]{}!".includes(character)))) throw new Error("The private native control path cannot be pinned to a literal policy.");
   const operational = ROSTER.find(member => member.name === (input.agent ?? input.defaultAgent) && member.operationalOnly);
   const reference = input.model ?? (operational ? input.agents?.[operational.name]?.model : undefined);
   const provider = reference?.slice(0, reference.indexOf("/"));
+  if (transport && (!operational || !privateBody || !privateControl || provider !== "ollama")) throw new Error("A private bridge requires the sealed operational Ollama session.");
+  const bridge = transport && privateBridgeTransport(transport);
   if (operational && reference && (!reference.includes("/") || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(provider ?? ""))) {
     throw new Error("The Studio provider identifier cannot be pinned to a literal native policy.");
   }
@@ -142,6 +145,9 @@ export function buildSessionConfigV2(input: SessionConfigV2Input, privateControl
     $schema: "https://opencode.ai/config.json",
     ...(operational ? { default_agent: operational.name } : input.defaultAgent ? { default_agent: input.defaultAgent } : {}),
     agents,
+    // Only an ephemeral host bridge capability belongs in this private configuration.
+    // The actual upstream provider credential remains with the bridge's host owner.
+    ...(bridge ? { providers: { ollama: { settings: bridge } } } : {}),
     ...(operational ? {
       ...(privateControl ? { plugins: [privateBody ? { package: privateControl, options: { body: privateBody } } : privateControl] } : {}),
       compaction: { auto: false }, warming: false, websearch: false,

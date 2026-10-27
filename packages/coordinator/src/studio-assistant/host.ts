@@ -1,11 +1,11 @@
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { STUDIO_ASSISTANT_LIMITS, normalizeSpeechText, type HarnessAdapter, type StudioAssistantCommand, type StudioAssistantResponse } from "@arke-studio/contracts";
+import { STUDIO_ASSISTANT_LIMITS, normalizeSpeechText, type HarnessAdapter, type StudioAssistantCommand, type StudioAssistantResponse, type PrivateSessionRequest } from "@arke-studio/contracts";
 import { splitForSpeech } from "../voice/split.js";
 import type { SessionInput } from "../harness/session-files.js";
 import type { TransportRequester } from "../transport.js";
 import { studioDiagnosticEvidence, type StudioEvidenceSources } from "./evidence.js";
-import { HarnessStudioModelRunner, type StudioModelPort } from "./runner.js";
+import { HarnessStudioModelRunner, type StudioModelPort, type StudioPrivateTransport } from "./runner.js";
 import { StudioAssistantService } from "./service.js";
 import { FileStudioConversationStore } from "./store.js";
 
@@ -13,6 +13,7 @@ export interface StudioAssistantHostOptions {
   /** Trusted host seam, never a renderer/model command. */
   model?: StudioModelPort;
   destination?(model: string, provider: string): { local: boolean; identity: string } | null;
+  privateTransport?(request: PrivateSessionRequest, signal: AbortSignal): Promise<StudioPrivateTransport>;
   responseMs?: number;
 }
 interface Client { pending: number; seen: Set<string>; unwatch?: () => void; detach(): void }
@@ -139,7 +140,8 @@ export function createStudioAssistantHost(deps: { root: string; adapter(): Harne
   transcribe?(audio: Uint8Array, contentType: string, signal: AbortSignal): Promise<string>;
   readSpeech?(text: string, expectedVoice: string | undefined, signal: AbortSignal, current: () => boolean): Promise<{ audio: Uint8Array; voiceId: string }> }): StudioAssistantHost {
   const model = deps.options?.model ?? new HarnessStudioModelRunner({ adapter: deps.adapter, sessionInput: deps.sessionInput,
-    scratch: join(deps.root, "studio-assistant", "turns"), destination: (model, provider) => deps.options?.destination?.(model, provider) ?? null });
+    scratch: join(deps.root, "studio-assistant", "turns"), destination: (model, provider) => deps.options?.destination?.(model, provider) ?? null,
+    ...(deps.options?.privateTransport ? { privateTransport: deps.options.privateTransport } : {}) });
   const service = new StudioAssistantService({ store: new FileStudioConversationStore(join(deps.root, "studio-assistant", "conversations.json")),
     model, now: deps.now, evidence: topic => studioDiagnosticEvidence(topic, deps.evidence(), deps.now()) });
   return new StudioAssistantHost(service, deps.options?.responseMs, deps.transcribe, deps.readSpeech);

@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import type { PrivateSessionDestination, PrivateSessionRequest } from "@arke-studio/contracts";
+import type { PrivateSessionDestination, PrivateSessionRequest, PrivateSessionTransport } from "@arke-studio/contracts";
 import { modelEnabled, type WireModel } from "../model-metadata.js";
 import { boundedResponseText, OpenCodeV2Http, sameDirectory, type V2Envelope } from "./http.js";
 import { localOllamaModelEndpoint } from "./image-input.js";
 import { privateControlProof } from "./private-control.js";
 
-interface Pin { sessionId: string; directory: string; agent: string; model: { providerID: string; id: string; variant?: string }; request?: PrivateSessionRequest }
+interface Pin { sessionId: string; directory: string; agent: string; model: { providerID: string; id: string; variant?: string }; request?: PrivateSessionRequest; transport?: PrivateSessionTransport }
 interface State { id?: string; agent?: string; model?: Pin["model"]; location?: { directory?: string } }
 
 function matchesPin(state: State | undefined, pin: Pin): boolean {
@@ -48,6 +48,7 @@ export async function privateSessionDestination(http: OpenCodeV2Http, pin: Pin, 
     const row = matches[0]!, endpoint = localOllamaModelEndpoint(row);
     if (!endpoint) return null;
     const settings = row.settings as Record<string, unknown>;
+    if (pin.transport && (settings.baseURL !== pin.transport.baseURL || settings.apiKey !== pin.transport.apiKey)) return null;
     if (Object.keys(settings).some(key => !["baseURL", "apiKey", "provider"].includes(key)) ||
       settings.provider !== undefined && settings.provider !== "ollama" ||
       settings.apiKey !== undefined && (typeof settings.apiKey !== "string" || settings.apiKey.length > 16_384)) return null;

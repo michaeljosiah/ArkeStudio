@@ -1,10 +1,17 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
-import type { SessionFile, PrivateSessionRequest } from "@arke-studio/contracts";
+import type { SessionFile, PrivateSessionRequest, PrivateSessionTransport } from "@arke-studio/contracts";
 import { sameDirectory, type OpenCodeV2Http, type V2Envelope } from "./http.js";
 
 const DIRECTORY = ".arke-private-control";
 const ID = "arke.studio.private-control.v1";
+export function privateBridgeTransport(value: PrivateSessionTransport): Readonly<PrivateSessionTransport> {
+  if (typeof value.baseURL !== "string" || value.baseURL.length > 128) throw new Error("Invalid private native bridge capability.");
+  const route = new URL(value.baseURL);
+  if (Object.keys(value).some(key => key !== "baseURL" && key !== "apiKey") || route.protocol !== "http:" || route.hostname !== "127.0.0.1" ||
+    route.pathname !== "/v1" || route.username || route.password || route.search || route.hash || value.baseURL !== route.origin + "/v1" || !/^[a-f0-9]{64}$/.test(value.apiKey)) throw new Error("Invalid private native bridge capability.");
+  return Object.freeze({ baseURL: value.baseURL, apiKey: value.apiKey });
+}
 const SOURCE = `export default {
   id: "${ID}",
   async setup(api) {

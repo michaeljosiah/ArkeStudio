@@ -19,6 +19,7 @@ import {
   type SessionFile,
   type PrivateSessionDestination,
   type PrivateSessionRequest,
+  type PrivateSessionTransport,
   type VendorIntegration,
   type VendorOAuthAttempt,
   type VendorOAuthAttemptState,
@@ -34,7 +35,7 @@ import { waitForSessionModel } from "./model-readiness.js";
 import { imagePrompt, sessionImageInput, qualifySessionImageInput, type SessionImageInput } from "./image-input.js";
 import { createNormalizeV2State, normalizeOpenCodeV2, type NormalizeV2State } from "./normalize.js";
 import { privateSessionDestination } from "./private-destination.js";
-import { privateControlFiles, privateControlDirectory, privateControlProof, privateWireBody } from "./private-control.js";
+import { privateControlFiles, privateControlDirectory, privateControlProof, privateWireBody, privateBridgeTransport } from "./private-control.js";
 import {
   normalizeAttempt,
   normalizeAttemptStatus,
@@ -283,11 +284,11 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
    * OpenCode reads Studio's roster, tool limits and MCP registration from a config file beside
    * the work — so this is where the session's confinement actually reaches the harness (R-5).
    */
-  sessionFiles(input: SessionConfigInput, directory?: string, request?: PrivateSessionRequest): ReadonlyArray<SessionFile> {
+  sessionFiles(input: SessionConfigInput, directory?: string, request?: PrivateSessionRequest, transport?: PrivateSessionTransport): ReadonlyArray<SessionFile> {
     const operational = ROSTER.some(member => member.name === input.agent && member.operationalOnly);
     if (operational && !directory) throw new Error("Private native control requires its session directory.");
     if (request && (!operational || request.model !== input.model)) throw new Error("The private request does not match its prepared model.");
-    return [...(operational ? privateControlFiles(request, request ? "generate" : "primary") : []), { name: "opencode.json", contents: `${JSON.stringify(buildSessionConfigV2(input, operational ? privateControlDirectory(directory!) : undefined, request ? privateWireBody(request) : undefined), null, 2)}
+    return [...(operational ? privateControlFiles(request, request ? "generate" : "primary") : []), { name: "opencode.json", contents: `${JSON.stringify(buildSessionConfigV2(input, operational ? privateControlDirectory(directory!) : undefined, request ? privateWireBody(request) : undefined, transport), null, 2)}
 ` }];
   }
 
@@ -310,6 +311,8 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     }
     const privateSession = input.visibility === "private";
     const privateRequest = input.privateRequest ? Object.freeze({ ...input.privateRequest }) : undefined;
+    const privateTransport = input.privateTransport ? privateBridgeTransport(input.privateTransport) : undefined;
+    if (privateTransport && (!privateSession || !privateRequest)) throw new Error("A private bridge requires a sealed private request.");
     if (privateRequest) {
       privateWireBody(privateRequest);
       if (!privateSession || !model || privateRequest.model !== `${model.providerID}/${model.id}` || model.variant && model.variant !== "default") throw new Error("The private request does not match its prepared model or qualified variant.");
@@ -401,7 +404,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       const signal = AbortSignal.any([callerSignal, runtime.signal, AbortSignal.timeout(5_000)]);
       let destination: PrivateSessionDestination | null;
       try {
-        destination = await privateSessionDestination(http, { sessionId, directory: location, agent: input.agent, model, request: privateRequest }, signal, !routePin);
+        destination = await privateSessionDestination(http, { sessionId, directory: location, agent: input.agent, model, request: privateRequest, transport: privateTransport }, signal, !routePin);
         signal.throwIfAborted();
       } catch (error) { routeRefused = true; throw error; }
       if (this.disposed || this.runtimeRevision !== revision || privateTurn.stopped || privateTurn.dispatched) return null;

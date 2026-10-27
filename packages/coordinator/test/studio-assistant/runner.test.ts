@@ -46,6 +46,41 @@ async function fixture() {
     send: (gate: Promise<void>) => { sendGate = gate; }, fail: () => { failure = true; }, keep: () => { retained = true; } };
 }
 const input = { role: "studio-assistant" as const, model: "ollama/test", prompt: "A bounded Studio question." }, allow = async () => ({ cloudApproved: false });
+function nativeCapabilities(adapter: HarnessAdapter): void {
+  Object.assign(adapter, { privateDestinations: true, privatePayloads: true, privateTransient: true });
+  adapter.sendMessageWithFence = async (input, dispatch) => { dispatch(); return adapter.sendMessage(input); };
+}
+it("a private bridge factory cannot replace missing managed-host route authority", async () => {
+  const h = await fixture(); nativeCapabilities(h.raw); let factories = 0;
+  const runner = new HarnessStudioModelRunner({ ...h.deps, destination: () => null, privateTransport: async () => { factories++; throw Error("MUST_NOT_CREATE_ROUTE"); } });
+  try { await assert.rejects(runner.run(input, new AbortController().signal, allow), /destination could not be verified/); assert.equal(factories, 0); assert.equal(h.created.length, 0); }
+  finally { await runner.stop(); await runner.ownerStopped(); }
+});
+it("keeps a late private bridge and its original cleanup capability after Stop until actual retirement", async () => {
+  const h = await fixture(); nativeCapabilities(h.raw); const gate = deferred(), control = new AbortController();
+  let entered = false, stops = 0, confirmed = false;
+  const runner = new HarnessStudioModelRunner({ ...h.deps, privateTransport: async () => {
+    entered = true; await gate.promise;
+    return { configuration: { baseURL: "http://127.0.0.1:43210/v1", apiKey: "e".repeat(64) }, identity: "f".repeat(64), approve: () => { throw Error("MUST_NOT_APPROVE_LATE_ROUTE"); }, stop: async () => { stops++; return confirmed; } };
+  } });
+  try {
+    const stopped = assert.rejects(runner.run(input, control.signal, allow), /stopped/);
+    await until(() => entered, "the original bridge factory is in flight"); control.abort(); await stopped; assert(runner.busy());
+    gate.resolve(); await until(() => stops > 0, "the late route is retained for original cleanup"); assert(runner.busy()); assert.equal(h.created.length, 0); assert.equal(h.sent.length, 0);
+    confirmed = true; await runner.reconcileRetirement(); assert(!runner.busy());
+  } finally { gate.resolve(); confirmed = true; await runner.stop(); await runner.ownerStopped(); }
+});
+it("captures a bridge route before approval and retains failed bridge cleanup without repeating inference", async () => {
+  const h = await fixture(); nativeCapabilities(h.raw); let approved = 0, cleaned = false;
+  const original = h.raw.createSession.bind(h.raw), configuration = { baseURL: "http://127.0.0.1:43210/v1", apiKey: "e".repeat(64) };
+  h.raw.createSession = async input => ({ ...await original(input), privateDestination: async () => ({ provider: "ollama", model: "ollama/test", local: true, identity: "a".repeat(64) }), privateRetire: async () => true });
+  const runner = new HarnessStudioModelRunner({ ...h.deps, privateTransport: async request => { assert(Object.isFrozen(request)); return { configuration, identity: "f".repeat(64), approve: () => { approved++; return true; }, stop: async () => { if (!cleaned) throw Error("Native route cleanup is unconfirmed"); return true; } }; } });
+  try {
+    assert.equal(await runner.run(input, new AbortController().signal, async disclosure => { assert(!JSON.stringify(disclosure).includes(configuration.apiKey)); configuration.apiKey = "b".repeat(64); return allow(); }), '{"kind":"reply","text":"A reply."}');
+    assert.equal(h.created[0]?.privateTransport?.apiKey, "e".repeat(64)); assert.equal(approved, 1); assert(runner.busy()); assert.equal(h.sent.length, 1);
+    cleaned = true; await runner.reconcileRetirement(); assert(!runner.busy()); assert.equal(h.sent.length, 1);
+  } finally { cleaned = true; await runner.stop(); await runner.ownerStopped(); }
+});
 it("the reviewed request cannot be rebound by a caller mutation during authorization", async () => {
   const h = await fixture(), request = { ...input }; h.cloud();
   try {

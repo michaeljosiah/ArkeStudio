@@ -2,8 +2,21 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { OpenCodeV2Adapter } from "../src/v2/opencode-v2-adapter.js";
 import { buildSessionConfigV2 } from "../src/v2/config.js";
-import { privateControlDirectory, privateWireBody } from "../src/v2/private-control.js";
+import { privateControlDirectory, privateWireBody, privateBridgeTransport } from "../src/v2/private-control.js";
 
+it("keeps an ephemeral native bridge capability separate from the reviewed provider body and ordinary sessions", () => {
+  const adapter = new OpenCodeV2Adapter({ baseUrl: () => "http://127.0.0.1:0", password: () => null });
+  const request = { model: "ollama/model", system: "Reviewed system", prompt: "Reviewed question", outputTokenLimit: 4096 };
+  const transport = { baseURL: "http://127.0.0.1:43210/v1", apiKey: "e".repeat(64) };
+  const pinned = privateBridgeTransport(transport); assert(Object.isFrozen(pinned));
+  const files = adapter.sessionFiles({ agent: "studio-assistant", model: request.model }, "/private/bridge", request, transport);
+  const config = JSON.parse(files.at(-1)!.contents); assert.deepEqual(config.providers, { ollama: { settings: transport } });
+  assert(!JSON.stringify(config.plugins[0].options.body).includes(transport.apiKey));
+  assert.throws(() => adapter.sessionFiles({ agent: "scene-writer" }, undefined, undefined, transport), /sealed operational/);
+  assert.throws(() => adapter.sessionFiles({ agent: "studio-assistant", model: request.model }, "/private/bridge", undefined, transport), /sealed operational/);
+  for (const value of [{ ...transport, baseURL: "http://localhost:43210/v1" }, { ...transport, baseURL: "https://127.0.0.1/v1" }, { ...transport, baseURL: transport.baseURL + "?secret=x" },
+    { ...transport, baseURL: "http://127.0.0.1:43210/other" }, { ...transport, apiKey: "provider-key" }, { ...transport, extra: true }]) assert.throws(() => privateBridgeTransport(value), /Invalid private/);
+});
 it("writes fixed private control code before its config with one literal native integration allow", () => {
   const adapter = new OpenCodeV2Adapter({ baseUrl: () => "http://127.0.0.1:0", password: () => null });
   for (const agent of ["studio-assistant", "diagnostic-specialist"]) {

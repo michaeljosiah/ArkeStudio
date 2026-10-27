@@ -1914,6 +1914,22 @@ after final test edits; production build and sandboxed file-page transport smoke
 drain fixtures. A worker error cannot race ahead of the write the test intends to hold open;
 the assertion still requires draining an admitted write and skipping later queued phases.
 
+Candidate private provider transport uses coordinator `test/studio-assistant/provider-bridge.test.ts`
+and runner/native-route/host regressions, plus adapter `test/v2-private-control.test.ts` and
+private destination/payload/transient/retirement tests. The loopback fixtures require native
+filesystem/socket access and cover one exact approved body, private authentication, metadata
+stripping, declared/actual/fragment bounds, failed body cancellation, startup/shutdown and original
+cleanup capability retention. A bridge factory cannot replace absent host-origin proof.
+With `ARKE_TEST_OPENCODE2` explicitly set to the pinned 2.0.26 executable, run coordinator
+`test/studio-assistant/provider-bridge-native.test.ts` and `pinned-native.test.ts` with bounded
+concurrency. They use disposable native profiles and a synthetic Ollama HTTP endpoint, not an
+installed model or personal profile. The new cases exercise actual runner/configuration transport,
+one native request, success versus upstream overflow, preserved unknown GPU ownership and bounded
+full-profile marker/capability scans before/after owned native exit. The original transient suite
+remains a separate regression. Missing binary skips these optional native cases; synthetic tests
+or Windows-only native results do not qualify other platforms, managed socket/process identity,
+live-model memory, full tracing/spend/result persistence or default production activation.
+
 ## System status (turn 240)
 
 Run contracts/coordinator/desktop `system-resources.test.ts`, coordinator
