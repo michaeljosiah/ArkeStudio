@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { once } from "node:events";
 import { StudioProviderBridge } from "../../src/studio-assistant/provider-bridge.js";
 import { until } from "../wait.js";
 
 const body = JSON.stringify({ model: "selected", messages: [{ role: "user", content: "PRIVATE_QUESTION" }], stream: true });
+async function canBind(baseURL: string): Promise<boolean> {
+  const server = createServer();
+  try {
+    return await new Promise<boolean>((resolve, reject) => {
+      server.once("error", (error: NodeJS.ErrnoException) => { if (error.code === "EADDRINUSE") resolve(false); else reject(error); });
+      server.listen(Number(new URL(baseURL).port), "127.0.0.1", () => resolve(true));
+    });
+  } finally { if (server.listening) await new Promise<void>(resolve => server.close(() => resolve())); }
+}
 async function fixture(implementation?: typeof fetch) {
   const calls: Array<{ body: string; headers: Record<string, unknown> }> = [];
   const upstream = createServer((request, response) => {
@@ -36,6 +45,39 @@ it("a changed body spends no provider request and cannot retry using the same ro
   const h = await fixture();
   try { assert(h.bridge.approve()); assert.equal((await h.send(body + " ")).status, 502); assert.equal(h.calls.length, 0); assert.equal((await h.send()).status, 409); }
   finally { await h.close(); }
+});
+it("sealing retains the exact refusing listener until final native retirement releases it", async () => {
+  const h = await fixture();
+  try {
+    assert(h.bridge.approve()); h.bridge.seal(); h.bridge.seal();
+    assert(!h.bridge.approve()); await assert.rejects(h.bridge.start(), /stopped/);
+    assert.equal((await h.send()).status, 401); assert.equal(h.calls.length, 0);
+    assert.equal(await canBind(h.route.baseURL), false, "a replacement listener cannot receive a late native prompt");
+    assert(await h.bridge.stop()); assert.equal(await canBind(h.route.baseURL), true, "only final cleanup releases the port");
+  } finally { await h.close(); }
+});
+it("sealing preserves an already-sent completion while refusing successors and keeping its address", async () => {
+  let release!: () => void, calls = 0;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const h = await fixture(async () => { calls++; await gate; return new Response("data: ORIGINAL_COMPLETION\n\n", { headers: { "content-type": "text/event-stream" } }); });
+  try {
+    h.bridge.approve(); const pending = h.send(); await until(() => calls === 1, "the original upstream was sent");
+    h.bridge.seal(); assert(h.bridge.busy()); assert.equal(await canBind(h.route.baseURL), false);
+    assert.equal((await h.send()).status, 401); assert.equal(calls, 1);
+    release(); const response = await pending; assert.equal(response.status, 200); assert.equal(await response.text(), "data: ORIGINAL_COMPLETION\n\n");
+    await until(() => !h.bridge.busy(), "the existing completion drained without releasing its listener");
+    assert.equal(await canBind(h.route.baseURL), false); assert.equal(calls, 1);
+  } finally { release(); await h.close(); }
+});
+it("sealing a partially received native request prevents any subsequent upstream transmission", async () => {
+  const h = await fixture(); h.bridge.approve();
+  const request = httpRequest(h.route.baseURL + "/chat/completions", { method: "POST", headers: { authorization: `Bearer ${h.route.apiKey}`, "content-length": Buffer.byteLength(body) } });
+  const response = new Promise<number>((resolve, reject) => { request.once("error", reject); request.once("response", incoming => { incoming.resume(); incoming.once("end", () => resolve(incoming.statusCode!)); }); });
+  try {
+    request.flushHeaders(); await until(() => h.bridge.busy(), "the native body is still arriving");
+    h.bridge.seal(); request.end(body); assert.equal(await response, 502); assert.equal(h.calls.length, 0);
+    assert.equal(await canBind(h.route.baseURL), false);
+  } finally { request.destroy(); await h.close(); }
 });
 for (const fault of ["declared", "actual", "fragments", "status", "type"] as const) it(`bounds upstream ${fault} before publishing any native body`, async () => {
   let cancelled = 0, chunks = 0;

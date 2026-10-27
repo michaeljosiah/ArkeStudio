@@ -12,6 +12,7 @@ export class ManagedStudioProviderBridge {
   private readonly transport: ManagedOllamaTransport;
   private readonly owner: NonNullable<ReturnType<OllamaEngineService["captureManagedOrigin"]>>;
   private opening: Promise<{ baseURL: string; apiKey: string; identity: string }> | null = null;
+  private sealed = false;
   constructor(service: OllamaEngineService, options: { model: string; requestBody: string; verify?: typeof windowsConnectionOrigin; timeoutMs?: number; shutdownMs?: number }) {
     const owner = service.captureManagedOrigin();
     if (!owner?.current()) throw new Error("The managed private provider is unavailable.");
@@ -22,6 +23,7 @@ export class ManagedStudioProviderBridge {
       fetch: this.transport.fetch, timeoutMs: options.timeoutMs, shutdownMs: options.shutdownMs });
   }
   start(): Promise<{ baseURL: string; apiKey: string; identity: string }> {
+    if (this.sealed) return Promise.reject(new Error("The managed private provider is stopped."));
     return this.opening ??= (async () => {
       await this.transport.prepareMetadata();
       const route = await this.bridge.start();
@@ -30,8 +32,10 @@ export class ManagedStudioProviderBridge {
     })();
   }
   approve(): boolean { return this.owner.current() && this.bridge.approve(); }
+  seal(): void { this.sealed = true; this.bridge.seal(); this.transport.seal(); }
   busy(): boolean { return this.bridge.busy() || this.transport.busy(); }
   async stop(): Promise<boolean> {
+    this.seal();
     const results = await Promise.allSettled([this.bridge.stop(), this.transport.stop()]);
     return results.every(row => row.status === "fulfilled" && row.value === true);
   }

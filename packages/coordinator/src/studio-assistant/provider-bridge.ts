@@ -22,6 +22,7 @@ export class StudioProviderBridge {
   private readonly server = createServer({ maxHeaderSize: 8192 }, (request, response) => this.handle(request, response));
   private opening: Promise<{ baseURL: string; apiKey: string; identity: string }> | null = null;
   private closed: Promise<void> | null = null;
+  private sealed = false;
   private stopping = false;
   private approved = false;
   private submitted = false;
@@ -39,13 +40,13 @@ export class StudioProviderBridge {
     this.server.on("error", () => { this.stopping = true; this.lifetime.abort(); this.server.closeAllConnections(); });
   }
   start(): Promise<{ baseURL: string; apiKey: string; identity: string }> {
-    if (this.stopping) return Promise.reject(new Error("Private bridge is stopped."));
+    if (this.stopping || this.sealed) return Promise.reject(new Error("Private bridge is stopped."));
     return this.opening ??= new Promise((resolve, reject) => {
       this.server.once("error", reject);
       this.server.listen(0, "127.0.0.1", () => {
         this.server.removeListener("error", reject);
         const address = this.server.address();
-        if (this.stopping || !address || typeof address === "string") { reject(new Error("Private bridge stopped during startup.")); return; }
+        if (this.stopping || this.sealed || !address || typeof address === "string") { reject(new Error("Private bridge stopped during startup.")); return; }
         const baseURL = `http://127.0.0.1:${address.port}/v1`;
         resolve(Object.freeze({ baseURL, apiKey: this.key,
           identity: createHash("sha256").update(JSON.stringify([baseURL, this.upstream.href, this.key, this.body.toString("utf8")])).digest("hex") }));
@@ -53,7 +54,10 @@ export class StudioProviderBridge {
     });
   }
   /** Trusted host gate for this already sealed request, after its normal one-use review. */
-  approve(): boolean { if (this.stopping || this.submitted) return false; this.approved = true; return true; }
+  approve(): boolean { if (this.stopping || this.sealed || this.submitted) return false; this.approved = true; return true; }
+  /** Refuse new work while retaining the listener address and any already-sent completion.
+   * The native writer may still hold this URL; only its final retirement permits stop(). */
+  seal(): void { this.sealed = true; }
   busy(): boolean { return this.work.size > 0; }
   private refuse(request: IncomingMessage, response: ServerResponse, status: number): void {
     response.writeHead(status, { connection: "close", "content-type": "text/plain" });
@@ -62,7 +66,7 @@ export class StudioProviderBridge {
   private handle(request: IncomingMessage, response: ServerResponse): void {
     response.on("error", () => request.destroy());
     const auth = Buffer.from(typeof request.headers.authorization === "string" ? request.headers.authorization : "");
-    if (this.stopping || auth.length !== this.auth.length || !timingSafeEqual(auth, this.auth)) { this.refuse(request, response, 401); return; }
+    if (this.stopping || this.sealed || auth.length !== this.auth.length || !timingSafeEqual(auth, this.auth)) { this.refuse(request, response, 401); return; }
     const generate = request.method === "POST" && request.url === "/v1/chat/completions";
     const metadata = request.method === "GET" && request.url === "/api/tags" || request.method === "POST" && request.url === "/api/show";
     if (!generate && !metadata) { this.refuse(request, response, 404); return; }
@@ -109,6 +113,7 @@ export class StudioProviderBridge {
     response.once("close", disconnected);
     try {
       const body = await this.requestBytes(request, generate ? LIMIT : 4096); signal.throwIfAborted();
+      if (this.sealed) throw new Error("Private bridge is sealed.");
       if (generate && !body.equals(this.body)) throw new Error("Private request changed.");
       if (!generate && request.method === "POST") {
         const input = JSON.parse(body.toString("utf8"));
@@ -133,7 +138,7 @@ export class StudioProviderBridge {
   /** Observation is bounded; a pending body/cancel owner remains reachable and refuses
    * replacement. HTTP cleanup is not proof that native inference/GPU memory has stopped. */
   async stop(): Promise<boolean> {
-    this.stopping = true; this.lifetime.abort();
+    this.seal(); this.stopping = true; this.lifetime.abort();
     this.closed ??= (async () => {
       await this.opening?.catch(() => {});
       if (!this.server.listening) return;

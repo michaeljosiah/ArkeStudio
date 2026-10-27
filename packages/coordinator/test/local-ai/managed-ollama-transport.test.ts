@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
 import { ChildSupervisor } from "../../src/supervisor.js";
@@ -11,10 +11,10 @@ import { until, untilAsync } from "../wait.js";
 const CHILD = join(import.meta.dirname, "../fixtures/managed-http-origin.mjs");
 const deferred = () => { let resolve!: (value: boolean) => void; const promise = new Promise<boolean>(done => { resolve = done; }); return { promise, resolve }; };
 async function fixture() {
-  const root = await tempDir("arke-private-socket-"), marker = join(root, "requests.jsonl");
-  const supervisor = new ChildSupervisor({ id: "private-socket", command: process.execPath, args: [CHILD], env: { ORIGIN_MARKER: marker }, readyTimeoutMs: 20_000 });
+  const root = await tempDir("arke-private-socket-"), marker = join(root, "requests.jsonl"), release = join(root, "release");
+  const supervisor = new ChildSupervisor({ id: "private-socket", command: process.execPath, args: [CHILD], env: { ORIGIN_MARKER: marker, PROVIDER_RELEASE: release }, readyTimeoutMs: 20_000 });
   await supervisor.start(); const origin = supervisor.captureProcessOrigin(); assert(origin);
-  return { supervisor, origin, marker, base: `http://127.0.0.1:${origin.port}`,
+  return { supervisor, origin, marker, release, base: `http://127.0.0.1:${origin.port}`,
     rows: async () => (await readFile(marker, "utf8")).trim().split("\n").map(line => JSON.parse(line) as { body: string; path: string; headers: Record<string, string>; clientPort: number }) };
 }
 
@@ -100,6 +100,26 @@ it("retains a timed-out proof and refuses any late dispatch", { timeout: 60_000 
     await until(() => !transport.busy(), "timed-out proof owner finally closes");
     await assert.rejects(readFile(h.marker), { code: "ENOENT" });
   } finally { proof.resolve(false); await transport.stop(); await h.supervisor.stopAndConfirm(); }
+});
+it("sealing refuses a proof-waiting provider dispatch without releasing its original cleanup owner", { timeout: 60_000 }, async () => {
+  const h = await fixture(), proof = deferred(); let entered = false;
+  const transport = new ManagedOllamaTransport({ origin: h.origin, current: () => true, verify: async () => { entered = true; return proof.promise; } });
+  try {
+    const failed = assert.rejects(transport.fetch(h.base + "/v1/chat/completions", { method: "POST", body: "{}" }));
+    await until(() => entered, "original provider proof is pending"); transport.seal(); assert(transport.busy());
+    await assert.rejects(transport.fetch(h.base + "/api/tags")); proof.resolve(true); await failed;
+    assert(!transport.busy()); assert(h.origin.current()); await assert.rejects(readFile(h.marker), { code: "ENOENT" });
+  } finally { proof.resolve(false); await transport.stop(); await h.supervisor.stopAndConfirm(); }
+});
+it("sealing preserves the original already-sent provider response until its bounded completion", { timeout: 60_000 }, async () => {
+  const h = await fixture(), transport = new ManagedOllamaTransport({ origin: h.origin, current: () => true, verify: async () => true });
+  try {
+    const response = transport.fetch(h.base + "/v1/chat/completions", { method: "POST", body: JSON.stringify({ mode: "hold" }) });
+    await untilAsync(async () => !!await readFile(h.marker, "utf8").catch(() => ""), "the provider accepted the original request");
+    transport.seal(); assert(transport.busy()); await assert.rejects(transport.fetch(h.base + "/api/tags"));
+    await writeFile(h.release, "complete"); assert.match(await (await response).text(), /fixture-complete/);
+    assert(!transport.busy()); assert(h.origin.current()); assert.equal((await h.rows()).length, 1);
+  } finally { await writeFile(h.release, "finish"); await transport.stop(); await h.supervisor.stopAndConfirm(); }
 });
 
 it("retains cancelled proof work until it actually settles and never sends on a late answer", { timeout: 60_000 }, async () => {

@@ -48,7 +48,15 @@ const server = createServer(async (request, response) => {
   if (mode === "wrong-type") { response.writeHead(200, { "content-type": "text/plain" }); response.end("private upstream error must not escape"); return; }
   if (mode === "failed") { response.writeHead(500, { "content-type": type }); response.end("private upstream error must not escape"); return; }
   response.writeHead(200, { "content-type": type, "set-cookie": "private-provider-cookie=fixture", "x-internal-trace": "private-provider-trace" });
-  if (mode === "hold") { response.write("data: waiting\n\n"); return; }
+  if (mode === "hold") {
+    response.write("data: waiting\n\n");
+    if (process.env.PROVIDER_RELEASE) {
+      const deadline = Date.now() + 20_000;
+      const timer = setInterval(() => { if (existsSync(process.env.PROVIDER_RELEASE) || Date.now() >= deadline) { clearInterval(timer); response.end("data: fixture-complete\n\ndata: [DONE]\n\n"); } }, 10);
+      response.once("close", () => clearInterval(timer));
+    }
+    return;
+  }
   response.end(type === "text/event-stream" ? "data: fixture-complete\n\ndata: [DONE]\n\n" : JSON.stringify({ models: [] }));
 });
 server.listen(Number(process.env.PORT), "127.0.0.1");

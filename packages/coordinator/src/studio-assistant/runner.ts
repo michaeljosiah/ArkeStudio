@@ -15,10 +15,14 @@ export interface StudioModelPort {
   stop(): Promise<void>;
 }
 export interface StudioPrivateTransport {
-  configuration: PrivateSessionTransport; identity: string; approve(): boolean; stop(): Promise<boolean>;
+  configuration: PrivateSessionTransport; identity: string; approve(): boolean;
+  /** Refuse new work without releasing a URL still held by an uncertain native writer. */
+  seal(): void;
+  /** Final release, only after native retirement and original writer HTTP cleanup. */
+  stop(): Promise<boolean>;
   writer?: PrivateSessionWriter;
 }
-interface Active { control: AbortController; transport?: StudioPrivateTransport; listen?: AbortController; ownerStopped?: () => void; retire?: (signal: AbortSignal) => Promise<boolean>; retireFiles?: () => Promise<boolean>; finishing?: Promise<void>; dir?: string; sessionId?: string; work?: Promise<string>; confirmed: boolean; started: boolean; workFinished: boolean; failed?: boolean }
+interface Active { control: AbortController; transport?: StudioPrivateTransport; listen?: AbortController; ownerStopped?: () => void; retire?: (signal: AbortSignal) => Promise<boolean>; retired?: boolean; retireFiles?: () => Promise<boolean>; finishing?: Promise<void>; dir?: string; sessionId?: string; work?: Promise<string>; confirmed: boolean; started: boolean; workFinished: boolean; failed?: boolean }
 
 /** One explicit model call at a time. Native tools are denied by the operational roster;
  * structured delegation is handled by the coordinator, never a native subagent command.
@@ -36,6 +40,10 @@ export class HarnessStudioModelRunner implements StudioModelPort {
   busy(): boolean { return this.active.size > 0; }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private changed(): void { for (const listener of this.listeners) { try { listener(); } catch { /* Observation grants no inference authority. */ } } }
+  private seal(entry: Active): void {
+    try { entry.transport?.writer?.seal(); } catch { /* Retain the original cleanup owner. */ }
+    try { entry.transport?.seal(); } catch { /* A failed refusal never confirms retirement. */ }
+  }
 
   async run(input: { role: StudioRole; model: string; prompt: string }, signal: AbortSignal,
     authorize: (disclosure: StudioModelDisclosure, signal: AbortSignal) => Promise<{ cloudApproved: boolean }>): Promise<string> {
@@ -46,13 +54,13 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     const combined = AbortSignal.any([signal, this.lifetime.signal, entry.control.signal]);
     let stop!: () => void, timer: ReturnType<typeof setTimeout> | undefined;
     const stopped = new Promise<never>((_, reject) => {
-      stop = () => { entry.transport?.writer?.seal(); reject(new Error(entry.failed ? "The Studio model response could not be completed within its limits." : "Studio inference stopped. Submitted work was not replayed.")); };
+      stop = () => { this.seal(entry); reject(new Error(entry.failed ? "The Studio model response could not be completed within its limits." : "Studio inference stopped. Submitted work was not replayed.")); };
       combined.addEventListener("abort", stop, { once: true }); if (combined.aborted) stop();
     });
     entry.work = this.execute(entry, input, combined, authorize);
     // Keep native work and its private config reachable after observation stops. An unknown
     // dispatch holds this runner until the actual owner confirms settlement or host shutdown.
-    void entry.work.then(() => { entry.workFinished = true; return this.finish(entry); }, () => { entry.workFinished = true; entry.transport?.writer?.seal(); if (!entry.started || entry.confirmed) void this.finish(entry); });
+    void entry.work.then(() => { entry.workFinished = true; return this.finish(entry); }, () => { entry.workFinished = true; this.seal(entry); if (!entry.started || entry.confirmed) void this.finish(entry); });
     timer = setTimeout(() => entry.control.abort(), this.deps.timeoutMs ?? sessionTurnTimeoutMs(input.model, 180_000));
     try { const text = await Promise.race([entry.work, stopped]); await Promise.race([this.finish(entry), stopped]); return text; }
     finally { clearTimeout(timer); combined.removeEventListener("abort", stop); }
@@ -95,7 +103,7 @@ export class HarnessStudioModelRunner implements StudioModelPort {
         bindSession: route.writer.bindSession.bind(route.writer), current: route.writer.current.bind(route.writer), fetch: route.writer.fetch.bind(route.writer),
         seal: route.writer.seal.bind(route.writer), busy: route.writer.busy.bind(route.writer), close: route.writer.close.bind(route.writer) }) : undefined;
       entry.transport = Object.freeze({ configuration: Object.freeze({ ...route.configuration }), identity: route.identity,
-        approve: route.approve.bind(route), stop: route.stop.bind(route), ...(writer ? { writer } : {}) });
+        approve: route.approve.bind(route), seal: route.seal.bind(route), stop: route.stop.bind(route), ...(writer ? { writer } : {}) });
       if (!/^[a-f0-9]{64}$/.test(entry.transport.identity)) throw new Error("The private transport identity is invalid.");
       if (writer && (!/^[a-f0-9]{64}$/.test(writer.identity) || !writer.current())) throw new Error("The private writer identity is unavailable.");
       signal.throwIfAborted();
@@ -192,14 +200,14 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     if (entry.finishing) return entry.finishing;
     entry.listen?.abort();
     const work = async () => {
-      if (entry.retire) {
-        try { if (!await entry.retire(AbortSignal.timeout(entry.transport?.writer ? 30_000 : 5_000))) return; }
+      if (entry.retire && !entry.retired) {
+        try { if (!await entry.retire(AbortSignal.timeout(entry.transport?.writer ? 30_000 : 5_000))) return; entry.retired = true; }
         catch { return; } // Unknown retirement retains one reachable owner/config, never a replay.
       }
       if (entry.transport) {
-        try { if (!await entry.transport.stop()) return; }
-        catch { return; }
         try { if (entry.transport.writer && !await entry.transport.writer.close()) return; }
+        catch { return; }
+        try { if (!await entry.transport.stop()) return; }
         catch { return; }
       }
       if (entry.dir) {
@@ -215,9 +223,8 @@ export class HarnessStudioModelRunner implements StudioModelPort {
   /** Trusted housekeeping only: retry known-complete/unsent native retirement, never inference. */
   async reconcileRetirement(): Promise<void> { for (const entry of this.active) if (entry.workFinished && (!entry.started || entry.confirmed)) await this.finish(entry); }
   async stop(): Promise<void> {
-    for (const entry of this.active) entry.transport?.writer?.seal();
+    for (const entry of this.active) this.seal(entry);
     this.lifetime.abort(); for (const entry of this.active) entry.control.abort();
-    await Promise.allSettled([...this.active].map(entry => entry.transport?.stop()));
   }
   /** Trusted confirmation that both the exact backing inference and its writing owner have
    * completed native cleanup/no further dispatch. A writer exit or Stop reply is insufficient.

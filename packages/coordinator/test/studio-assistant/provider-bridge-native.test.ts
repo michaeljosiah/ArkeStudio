@@ -85,7 +85,7 @@ for (const { overflow, managedWriter, managedProvider } of [{ overflow: false, m
           catch (error) { writerReads.push({ method: init?.method ?? "GET", path, ms: Date.now() - at }); throw error; }
         };
       }
-      return { configuration: { baseURL: route.baseURL, apiKey: route.apiKey }, identity: route.identity, approve: () => bridge.approve(), stop: () => bridge.stop(), ...(writer ? { writer } : {}) }; } });
+      return { configuration: { baseURL: route.baseURL, apiKey: route.apiKey }, identity: route.identity, approve: () => bridge.approve(), seal: () => bridge.seal(), stop: () => bridge.stop(), ...(writer ? { writer } : {}) }; } });
   try {
     phase = "native readiness";
     await wiring.relaunchHarness({}); await wiring.supervisor.start(); await until(() => wiring.supervisor!.status === "healthy", "the isolated pinned native bridge owner", 35_000);

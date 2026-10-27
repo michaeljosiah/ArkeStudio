@@ -1521,8 +1521,14 @@ metadata may consume them; current child/service/socket checks still precede eve
 They expire after thirty seconds, stay within the eight-socket cap and drain on Stop. No
 metadata response is cached, no HTTP connection is reused and later route probes remain fresh.
 Real pinned OpenCode fixtures qualify writer alone and writer plus managed synthetic provider,
-with one exact approved request and bounded profile scans. Binary provenance, uncertain writer/
-bridge-listener lifetime, remaining network/spend/persistence/physical cleanup/platform gates
+with one exact approved request and bounded profile scans. Runner Stop seals the original
+provider/writer without closing the bridge listener: it keeps refusing new traffic at the same
+address while already-sent bounded completion may drain. Process proof still waiting at seal
+cannot send late bytes. Confirmed native retirement precedes writer HTTP cleanup and final
+listener release; failed creation retains the address until original writer HTTP drains.
+A confirmed retirement is retained across later bridge cleanup retries rather than queried
+again through an already closed writer. Binary provenance, native interrupted-work/physical
+cleanup qualification, remaining network/spend/persistence/platform gates
 and actual turn-239 visual acceptance still prevent default production activation.
 History replacement reads wait for an already admitted same-path write that outlived bounded
 shutdown in this process. This prevents a late old rename from overwriting a successor's history;

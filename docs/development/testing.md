@@ -1967,9 +1967,19 @@ Run these native cases with file concurrency one. Qualified writer creation is b
 sixty seconds; scoped metadata and retirement at thirty seconds. Its independent generation
 observation defaults to five minutes (at most fifteen), separate from requester Stop; provider
 HTTP retains its three-minute ceiling. Ordinary/unqualified ports keep their prior bounds.
-These fixtures do not qualify live model/GPU output, unknown writer/listener lifetime, binary
-provenance or cross-restart cleanup. Default Studio activation and actual master parity remain
+These fixtures do not qualify live model/GPU output, native interrupted-work/physical cleanup,
+binary provenance or cross-restart cleanup. Default Studio activation and actual master parity remain
 open. Run affected workspace typechecks after the final test edit.
+
+Private bridge Stop/retirement checks additionally exercise a real bound HTTP address: seal
+refuses new work while a competing listener cannot bind that port, retains an already-sent
+completion, and prevents a partially received body or proof-waiting provider request from
+dispatching after Stop. Runner tests retain the original captured refusal/cleanup methods,
+private files and address through unknown inference, failed native retirement and failed
+creation/HTTP cleanup. A successful native retirement is not repeated through an already
+closed writer when bridge cleanup needs another attempt. These protocol/lifetime checks and
+normal pinned-binary completion are finite evidence; actual interrupted native/backing-owner
+cleanup, cross-restart and platform acceptance remain required.
 
 ## System status (master turn 241; System 240 review)
 

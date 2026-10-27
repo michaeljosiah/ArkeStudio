@@ -51,21 +51,21 @@ function nativeCapabilities(adapter: HarnessAdapter): void {
   adapter.sendMessageWithFence = async (input, dispatch) => { dispatch(); return adapter.sendMessage(input); };
 }
 it("retains the original writer and private files after failed native creation until exact HTTP cleanup", async () => {
-  const h = await fixture(); nativeCapabilities(h.raw); let closed = false, seals = 0;
+  const h = await fixture(); nativeCapabilities(h.raw); let closed = false, seals = 0, bridgeStops = 0;
   const writer: PrivateSessionWriter = { identity: "1".repeat(64), bindDirectory: () => true, bindSession: () => true, current: () => true,
     fetch: async () => { throw Error("Unused synthetic writer HTTP"); }, seal: () => { seals++; }, busy: () => !closed, close: async () => closed };
   h.raw.createSession = async value => { h.created.push(value); throw Error("Native creation failed"); };
   const runner = new HarnessStudioModelRunner({ ...h.deps, privateTransport: async () => ({ writer,
-    configuration: { baseURL: "http://127.0.0.1:43210/v1", apiKey: "e".repeat(64) }, identity: "f".repeat(64), approve: () => true, stop: async () => true }) });
+    configuration: { baseURL: "http://127.0.0.1:43210/v1", apiKey: "e".repeat(64) }, identity: "f".repeat(64), approve: () => true, seal() {}, stop: async () => { bridgeStops++; return true; } }) });
   try {
     await assert.rejects(runner.run(input, new AbortController().signal, allow), /Native creation failed/);
-    await until(() => seals > 0, "failed original writer is sealed"); assert(runner.busy()); assert.equal(h.sent.length, 0);
+    await until(() => seals > 0, "failed original writer is sealed"); assert(runner.busy()); assert.equal(h.sent.length, 0); assert.equal(bridgeStops, 0);
     const captured = h.created[0]!.privateWriter!; assert(Object.isFrozen(captured)); assert.notEqual(captured, writer);
     assert.equal(await readFile(join(h.created[0]!.cwd!, "opencode.json"), "utf8"), "{}");
     writer.close = async () => true; // A changed caller method cannot replace the captured cleanup capability.
-    await runner.reconcileRetirement(); assert(runner.busy());
+    await runner.reconcileRetirement(); assert(runner.busy()); assert.equal(bridgeStops, 0, "uncertain creation cannot release its bridge address");
     assert.equal(await readFile(join(h.created[0]!.cwd!, "opencode.json"), "utf8"), "{}");
-    closed = true; await runner.reconcileRetirement(); assert(!runner.busy()); assert.deepEqual(await readdir(h.scratch), []);
+    closed = true; await runner.reconcileRetirement(); assert(!runner.busy()); assert.equal(bridgeStops, 1); assert.deepEqual(await readdir(h.scratch), []);
   } finally { closed = true; await runner.stop(); await runner.ownerStopped(); }
 });
 it("Stop seals an admitted writer immediately while its native session creation is still pending", async () => {
@@ -75,7 +75,7 @@ it("Stop seals an admitted writer immediately while its native session creation 
   const writer: PrivateSessionWriter = { identity: "1".repeat(64), bindDirectory: () => true, bindSession: () => true, current: () => true,
     fetch: async () => { throw Error("Unused synthetic writer HTTP"); }, seal: () => { seals++; }, busy: () => false, close: async () => { closes++; return true; } };
   const runner = new HarnessStudioModelRunner({ ...h.deps, privateTransport: async () => ({ writer,
-    configuration: { baseURL: "http://127.0.0.1:43210/v1", apiKey: "e".repeat(64) }, identity: "f".repeat(64), approve: () => true, stop: async () => true }) });
+    configuration: { baseURL: "http://127.0.0.1:43210/v1", apiKey: "e".repeat(64) }, identity: "f".repeat(64), approve: () => true, seal() {}, stop: async () => true }) });
   try {
     const stopped = assert.rejects(runner.run(input, abort.signal, allow), /stopped/);
     await until(() => h.created.length === 1, "original native creation remains admitted"); abort.abort(); await stopped;
@@ -95,7 +95,7 @@ it("keeps a late private bridge and its original cleanup capability after Stop u
   let entered = false, stops = 0, confirmed = false;
   const runner = new HarnessStudioModelRunner({ ...h.deps, privateTransport: async () => {
     entered = true; await gate.promise;
-    return { configuration: { baseURL: "http://127.0.0.1:43210/v1", apiKey: "e".repeat(64) }, identity: "f".repeat(64), approve: () => { throw Error("MUST_NOT_APPROVE_LATE_ROUTE"); }, stop: async () => { stops++; return confirmed; } };
+    return { configuration: { baseURL: "http://127.0.0.1:43210/v1", apiKey: "e".repeat(64) }, identity: "f".repeat(64), approve: () => { throw Error("MUST_NOT_APPROVE_LATE_ROUTE"); }, seal() {}, stop: async () => { stops++; return confirmed; } };
   } });
   try {
     const stopped = assert.rejects(runner.run(input, control.signal, allow), /stopped/);
@@ -108,7 +108,7 @@ it("captures a bridge route before approval and retains failed bridge cleanup wi
   const h = await fixture(); nativeCapabilities(h.raw); let approved = 0, cleaned = false;
   const original = h.raw.createSession.bind(h.raw), configuration = { baseURL: "http://127.0.0.1:43210/v1", apiKey: "e".repeat(64) };
   h.raw.createSession = async input => ({ ...await original(input), privateDestination: async () => ({ provider: "ollama", model: "ollama/test", local: true, identity: "a".repeat(64) }), privateRetire: async () => true });
-  const runner = new HarnessStudioModelRunner({ ...h.deps, privateTransport: async request => { assert(Object.isFrozen(request)); return { configuration, identity: "f".repeat(64), approve: () => { approved++; return true; }, stop: async () => { if (!cleaned) throw Error("Native route cleanup is unconfirmed"); return true; } }; } });
+  const runner = new HarnessStudioModelRunner({ ...h.deps, privateTransport: async request => { assert(Object.isFrozen(request)); return { configuration, identity: "f".repeat(64), approve: () => { approved++; return true; }, seal() {}, stop: async () => { if (!cleaned) throw Error("Native route cleanup is unconfirmed"); return true; } }; } });
   try {
     assert.equal(await runner.run(input, new AbortController().signal, async disclosure => { assert(!JSON.stringify(disclosure).includes(configuration.apiKey)); configuration.apiKey = "b".repeat(64); return allow(); }), '{"kind":"reply","text":"A reply."}');
     assert.equal(h.created[0]?.privateTransport?.apiKey, "e".repeat(64)); assert.equal(approved, 1); assert(runner.busy()); assert.equal(h.sent.length, 1);
@@ -126,6 +126,45 @@ it("the reviewed request cannot be rebound by a caller mutation during authoriza
     assert.equal(h.created[0]!.privateRequest!.prompt, input.prompt);
     assert.equal(h.sent[0]!.parts[0]!.type === "text" && h.sent[0]!.parts[0]!.text, input.prompt);
   } finally { await h.runner.stop(); await h.runner.ownerStopped(); }
+});
+it("Stop retains the sealed bridge through unknown native work and failed session retirement", async () => {
+  const h = await fixture(); nativeCapabilities(h.raw); h.fail();
+  let seals = 0, closes = 0, retires = 0, retired = false;
+  const original = h.raw.createSession.bind(h.raw);
+  h.raw.createSession = async value => ({ ...await original(value), privateDestination: async () => ({ provider: "ollama", model: "ollama/test", local: true, identity: "a".repeat(64) }),
+    privateRetire: async () => { retires++; return retired; } });
+  const transport = { configuration: { baseURL: "http://127.0.0.1:43210/v1", apiKey: "e".repeat(64) }, identity: "f".repeat(64),
+    approve: () => true, seal: () => { seals++; }, stop: async () => { closes++; return true; } };
+  const runner = new HarnessStudioModelRunner({ ...h.deps, privateTransport: async () => transport });
+  try {
+    await assert.rejects(runner.run(input, new AbortController().signal, allow), /could not be completed/);
+    assert(runner.busy()); assert(seals > 0); assert.equal(closes, 0); assert.equal(retires, 0);
+    transport.seal = () => { throw Error("MUST_NOT_REPLACE_CAPTURED_REFUSAL"); };
+    transport.stop = async () => { throw Error("MUST_NOT_REPLACE_CAPTURED_CLEANUP"); };
+    const previousSeals = seals; await runner.stop(); assert(seals > previousSeals); assert.equal(closes, 0);
+    h.emit({ type: "message.completed", sessionId: "studio-1", text: "LATE_MUST_NOT_PUBLISH" });
+    await until(() => retires > 0, "late completion still requires original native retirement");
+    assert(runner.busy()); assert.equal(closes, 0); assert.equal(h.sent.length, 1);
+    assert.equal(await readFile(join(h.created[0]!.cwd!, "opencode.json"), "utf8"), "{}");
+    retired = true; await untilAsync(async () => { await runner.reconcileRetirement(); return !runner.busy(); }, "retired session releases the original bridge");
+    assert.equal(closes, 1); assert.equal(h.sent.length, 1); assert.deepEqual(await readdir(h.scratch), []);
+  } finally { retired = true; await runner.stop(); await runner.ownerStopped(); }
+});
+it("retained bridge cleanup does not repeat native retirement after closing its original writer", async () => {
+  const h = await fixture(); nativeCapabilities(h.raw); let writerClosed = false, cleanupReady = false, retires = 0, closes = 0;
+  const original = h.raw.createSession.bind(h.raw);
+  h.raw.createSession = async value => ({ ...await original(value), privateDestination: async () => ({ provider: "ollama", model: "ollama/test", local: true, identity: "a".repeat(64) }),
+    privateRetire: async () => { assert(!writerClosed, "a closed writer cannot prove retirement a second time"); retires++; return true; } });
+  const writer: PrivateSessionWriter = { identity: "1".repeat(64), bindDirectory: () => true, bindSession: () => true, current: () => !writerClosed,
+    fetch: async () => { throw Error("Unused synthetic writer HTTP"); }, seal() {}, busy: () => false, close: async () => { writerClosed = true; return true; } };
+  const runner = new HarnessStudioModelRunner({ ...h.deps, privateTransport: async () => ({ writer,
+    configuration: { baseURL: "http://127.0.0.1:43210/v1", apiKey: "e".repeat(64) }, identity: "f".repeat(64), approve: () => true, seal() {}, stop: async () => { closes++; return cleanupReady; } }) });
+  try {
+    assert.equal(await runner.run(input, new AbortController().signal, allow), '{"kind":"reply","text":"A reply."}');
+    assert(runner.busy()); assert(writerClosed); assert.equal(retires, 1); assert.equal(closes, 1);
+    cleanupReady = true; await runner.reconcileRetirement(); assert(!runner.busy()); assert.equal(retires, 1); assert.equal(closes, 2);
+    assert.deepEqual(await readdir(h.scratch), []);
+  } finally { cleanupReady = true; await runner.stop(); await runner.ownerStopped(); }
 });
 it("a qualified native destination cannot borrow payload authority without its explicit capability", async () => {
   const h = await fixture();
