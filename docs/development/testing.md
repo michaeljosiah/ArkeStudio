@@ -637,6 +637,10 @@ asserts the version actually exercised. Runner-provided Chrome varied between gr
 terminated jobs on the same Ubuntu image. This pins the previously passing decoder rather
 than relaxing assertions, deadlines or Linux coverage. Local runs can still choose their own
 `ARKE_CHROME`; a different browser is a separate qualification result.
+Ubuntu CI grants user-namespace access only to that exact installed fixture binary using a
+root-owned AppArmor profile, following Chromium's documented per-binary approach. The downloaded
+testing browser does not inherit Ubuntu's packaged-Chrome profile. The workflow preserves
+Chrome's sandbox and the system-wide namespace restriction; it changes no end-user installation.
 `node --import tsx scripts/benchmark-editor-effects.ts --output <report.json>` records the
 runtime, hardware, capability profile, frame digests, near/far seek times, worst overlap raster
 times and process memory. The native production acceptance CI job repeats these measurements

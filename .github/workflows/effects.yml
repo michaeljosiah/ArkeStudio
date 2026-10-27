@@ -75,6 +75,32 @@ jobs:
         uses: browser-actions/setup-chrome@48483d551c22a1fe6154c6a195ccc6d5773dc8c4 # v2
         with:
           chrome-version: '156.0.8078.47'
+      - name: Allow the fixture browser's user-namespace sandbox
+        if: runner.os == 'Linux'
+        env:
+          ARKE_EFFECT_CHROME: ${{ steps.effect-chrome.outputs.chrome-path }}
+        shell: bash
+        # Ubuntu's packaged-Chrome profile does not cover the downloaded testing binary.
+        # Use Chromium's documented per-binary grant, leaving the browser sandbox enabled.
+        run: |
+          chrome_path="$(realpath "$ARKE_EFFECT_CHROME")"
+          expected=/opt/hostedtoolcache/setup-chrome/chrome/156.0.8078.47/x64/chrome
+          if [[ "$chrome_path" != "$expected" || ! -x "$chrome_path" ]]; then
+            echo "Unexpected effect-fixture browser path" >&2
+            exit 1
+          fi
+          if [[ -r /sys/module/apparmor/parameters/enabled && "$(cat /sys/module/apparmor/parameters/enabled)" == Y ]]; then
+            profile="$RUNNER_TEMP/arke-effect-fixture-chrome.apparmor"
+            cat > "$profile" <<EOF
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile arke-effect-fixture-chrome "$chrome_path" flags=(unconfined) {
+            userns,
+          }
+          EOF
+            sudo install -o root -g root -m 0644 "$profile" /etc/apparmor.d/arke-effect-fixture-chrome
+            sudo apparmor_parser -r /etc/apparmor.d/arke-effect-fixture-chrome
+          fi
       - name: Verify browser effect pixels
         if: runner.os == 'Linux'
         env:
