@@ -1701,6 +1701,20 @@ These checks qualify the pinned body enforcement, not arbitrary SDKs or native m
 the native transport adds `b3`/`traceparent` after the HTTP hook. Managed-origin, remaining
 network metadata, spend, raw persistence and physical/durable cleanup stay separate gates.
 
+Run adapter `test/v2-transient-control.test.ts` for the separately identified candidate control.
+It executes the exact emitted code and checks canonical response/header reconstruction, closed
+finish/tool/refusal/model policy, UTF-8/body/text/frame/read bounds, unknown missing usage,
+options mutation, one transmission/response, generic failures and nonblocking cancellation.
+With `ARKE_TEST_OPENCODE2` set, coordinator `test/studio-assistant/transient-native.test.ts` runs
+eleven direct `/generate` scenarios through the shared pinned launcher and a scripted provider.
+Unguarded truncation returns HTTP success; guarded truncation/tools/missing termination/wrong
+model/oversize/400/429/503/socket loss refuse without retry. Messages stay unchanged. Scans of
+the complete bounded synthetic profile before and after native exit find no transient system,
+prompt, reply or provider-error markers; retired prompt-path markers in WAL prove the detector
+is live. This is finite Windows profile evidence, not secure erasure or arbitrary-platform proof.
+Production dispatch has not switched to the candidate. Native HTTP bridge allocation precedes
+the response hook; passing its admission bounds does not prove bounded upstream native memory.
+
 The Effects browser fixture logs its actual browser version, a bounded stderr tail on failure
 and Linux cgroup memory counters every five seconds and before each decoder stage. Two Linux
 runs stopped after the same decoder stage despite ample host `freemem`; the cgroup samples

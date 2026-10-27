@@ -1250,6 +1250,19 @@ an answer. Native protocol/service fixtures verify canonical history/creative by
 This qualifies logical native API retirement, not secure erasure of database/WAL/log bytes,
 restart reconciliation or full financial-record retention; production activation remains closed.
 
+Native qualification now measures the retained copy: retired prompt-path markers remain in
+SQLite WAL, while direct `/generate` leaves message history unchanged. The separately identified
+`privateControlFiles(request, "generate")` candidate seals the reviewed body, denies retries and
+reconstructs only a complete zero-tool response after bounded UTF-8/SSE/finish validation.
+Its activation proof cannot borrow a primary control. Adapter `test/v2-transient-control.test.ts`
+executes the emitted source; coordinator `test/studio-assistant/transient-native.test.ts` checks
+eleven direct native scenarios and bounded entire-profile scans before/after owned native exit,
+with retained prompt-path markers as the detector's positive control. Native `/generate` alone
+returns truncated output as HTTP success. Production dispatch still uses its existing primary
+protocol: transient adapter completion/Stop/ownership integration remains to be implemented.
+Native's HTTP bridge buffers upstream bytes before the response hook, so its allocation remains
+a separate qualification gap; the hook's admission limit does not bound that allocation.
+
 `adapter-opencode/src/sse.ts` bounds each native frame at 64 MiB, above the current 20 MB
 encoded image budget, and cancels its reader on refusal/abort without echoing frame data.
 V2 checks private decoded UTF-8 response bytes before normalization (including split surrogate
