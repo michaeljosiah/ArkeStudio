@@ -71,6 +71,7 @@ import "./screens/quiet.css";
 import "./components/production-card-body.css";
 import "./components/production-studio.css";
 import "./components/global-chat.css";
+import "./components/studio-assistant.css";
 import "./components/conversation-reply.css";
 // After fidelity.css: the panel re-dresses the provider-call inspector with a rule of equal
 // specificity, and the later sheet wins.

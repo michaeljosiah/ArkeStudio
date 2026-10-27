@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { Bell, ChevronLeft, Cog, Cpu, Message } from "./icons.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useGlobalChat } from "./global-chat-context.js";
+import { useStudioAssistant } from "./studio-assistant-context.js";
 import { AccountControl } from "./account-menu.js";
 import { cx } from "./ui.js";
 import { useStore } from "../lib/store.js";
@@ -92,8 +93,9 @@ export function AppChrome({
   const phone = useMediaQuery("(max-width: 599px)");
   const { state, connection } = useStore();
   const chat = useGlobalChat();
-  const chatView = useSyncExternalStore(chat?.subscribe ?? (() => () => {}), chat?.getSnapshot ?? (() => null), () => null);
-  const chatRunning = !!chatView?.selected && state?.worldChat?.conversationId === chatView.selected.conversationId && state?.worldChat?.runStatus === "running";
+  const studio = useStudioAssistant();
+  const studioView = useSyncExternalStore(studio?.subscribe ?? (() => () => {}), studio?.getSnapshot ?? (() => null), () => null);
+  const chatRunning = !!studioView?.state?.busy;
   // Same derivation as Activity: rare unattended proposals must light this from every screen,
   // alongside reconciliation, paused providers, external edits and paid work awaiting review.
   const attention = state ? computeNeedsYou(state).length > 0 : false;
@@ -140,9 +142,9 @@ export function AppChrome({
         {aside}
         {controls && (
           <>
-            <button type="button" className={cx("fy-iconbtn", chatView?.open && "fy-iconbtn--current")} title="Chat" aria-label="Chat"
-              aria-expanded={chatView?.open ?? false} data-global-chat-trigger=""
-              onClick={() => { closeSystemPanel(); chatView?.open ? chat?.close() : chat?.open(); }}>
+            <button type="button" className={cx("fy-iconbtn", studioView?.open && "fy-iconbtn--current")} title="Chat" aria-label="Chat"
+              aria-haspopup="dialog" aria-expanded={studioView?.open ?? false} data-studio-chat-trigger=""
+              onClick={() => { closeSystemPanel(); if (studioView?.open) studio?.close(); else { chat?.close(); studio?.open(); } }}>
               <Message size={13} />{chatRunning && <span className="fy-iconbtn__dot fy-iconbtn__dot--new" />}
             </button>
             {/* Turn 240 replaces the shortcut only. Proposal routes and review remain intact. */}
@@ -150,7 +152,7 @@ export function AppChrome({
               title={storageWarning ? "System — storage needs attention" : "System"}
               aria-label={storageWarning ? "System — storage needs attention" : "System"}
               aria-haspopup="dialog" aria-expanded={system} data-system-trigger=""
-              onClick={() => { if (system) closeSystemPanel(); else { chat?.close(); openSystemPanel(); } }}>
+              onClick={() => { if (system) closeSystemPanel(); else { studio?.close(); chat?.close(); openSystemPanel(); } }}>
               <Cpu size={13} />{storageWarning && <span className="fy-iconbtn__dot" />}
             </button>
             {/* The bell opens Activity over this screen rather than leaving it (design turn 136,
@@ -163,7 +165,7 @@ export function AppChrome({
               aria-label={attention ? "Activity — something needs you" : fresh ? "Activity — something new" : "Activity"}
               aria-expanded={panel.open}
               data-activity-bell=""
-              onClick={() => { closeSystemPanel(); panel.open ? closeActivityPanel() : openActivityPanel(attention ? "inbox" : "new"); }}
+              onClick={() => { closeSystemPanel(); studio?.close(); panel.open ? closeActivityPanel() : openActivityPanel(attention ? "inbox" : "new"); }}
             >
               <Bell size={13} />
               {attention ? (

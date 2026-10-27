@@ -1577,6 +1577,14 @@ and client `test/studio-assistant-transport.test.ts` (run client tests from that
 They check two authenticated sockets, per-connection sequencing, initial reconciliation,
 closed/refused reply capabilities, host-only paired-browser refusal, strict command bounds
 and exclusion from common client state. Reconnect sends no private history automatically.
+Client `test/studio-assistant.test.ts` covers retained drafts/model choices, repeated send
+presses, correlated create/send, late receipts and observation-only reconnect. The component
+suite `test/studio-assistant-view.test.tsx` mounts the production provider and titlebar to check
+lazy private watch/unwatch, focus return, prompt-only draft changes and disclosure-specific
+cloud consent. `test/global-chat.test.ts` checks named draft staging, exact replacement review
+and capture/creation holds. Run from `packages/client`, then run the client typecheck after the
+last test edit. These DOM/protocol checks do not establish native model operation or rendered
+turn-239 parity. Do not replace required visual evidence with source/CSS assertions.
 After building, `node --import tsx apps/desktop/scripts/smoke-transport-flow.mjs` checks a real
 hidden sandboxed Electron file page and built preload, including a correlated private reply,
 history negotiation/reset, hidden capability and authenticated media range. No model, paid

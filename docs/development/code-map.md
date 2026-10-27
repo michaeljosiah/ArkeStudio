@@ -1156,7 +1156,7 @@ defines the closed schemas and limits. Private transcripts/sharing payloads must
 common app snapshot, broadcast events, world journal or support export. These modules are tested
 together with the actual session/GPU wrappers. `host.ts` lazily composes the private conversation
 owner on the first authenticated Studio command, using `R/studio-assistant/conversations.json`.
-Production model-route/spend authorization, UI, reviewed actions and matched
+Production model-route/spend authorization, remaining UI controls, reviewed actions and matched
 visual acceptance remain required before claiming the Studio assistant is delivered.
 
 Guarded Studio sends use `HarnessAdapter.sendMessageWithFence`: the GPU and runtime-change
@@ -1178,11 +1178,24 @@ controller bounds pending asynchronous work (eight total, two per socket) and ob
 uncertain operations retain admission until actual settlement. Cancel/sharing/unwatch controls
 remain available. A 64-ID volatile duplicate window is not a durable execution ledger.
 Default model invocation refuses absent host-proved routes; native route/spend composition,
-reviewed repairs and the turn-239 UI remain unfinished.
+reviewed repairs and full turn-239 interaction/visual acceptance remain unfinished.
 Private snapshots have a 2.5 MiB aggregate UTF-8 bound (the 2 MiB conversation plus one
 disclosure/unsaved reply); individual field limits do not multiply into an oversized frame.
 The reply callback's boolean acknowledges handoff to the bounded writer, not peer receipt or
 successful execution.
+
+Studio dialog: client `components/studio-assistant.tsx` mounts inside `GlobalChatProvider`
+with its own `studio-assistant-context.tsx` owner. `lib/studio-assistant.ts` retains private
+per-thread drafts/model choices, correlates results and restores only a watch on reconnect;
+unconfirmed mutations are never replayed. The titlebar Chat button opens Studio. Existing
+World/Builder page entries keep their contextual controller and layout. The new dialog uses
+the native PageSheet, composer, ModelChip, reply renderer and icons; its CSS affects only Studio,
+including compact modal focus and keyboard inset. History is private, cloud consent is scoped
+to one disclosure, and `GlobalChatController.stageDraft` carries only the editable request to
+a named World/Builder destination. Replacement consent matches the exact existing draft;
+later typing requires fresh review. Staging creates/sends no coordinator conversation command.
+The default native inference route still refuses absent host proof. Media controls, effort
+selection, reviewed repair/cleanup cards and actual matched turn-239 rendering remain pending.
 History replacement reads wait for an already admitted same-path write that outlived bounded
 shutdown in this process. This prevents a late old rename from overwriting a successor's history;
 it is not a cross-process/multiple-active-host lock. Private state is not replayed on reconnect
