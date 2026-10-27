@@ -35,14 +35,14 @@ export function StoryCondition({ facts, value, onChange, depth = 1 }: { facts: S
   const fresh = (): StoryPredicate => ({ op: "eq", fact: first!.id, value: first!.default });
   if (!value) return <Button disabled={!first} onClick={() => onChange(fresh())}>Add condition</Button>;
   return <div className="story-condition">
-    <div className="story-rule-row"><Select label="Condition type" value={value.op} onChange={e => {
+    <div className="story-rule-row"><Select label="Condition type" disabled={!first} value={value.op} onChange={e => {
       const op = e.target.value;
       onChange(op === "eq" ? fresh() : op === "not" ? { op, arg: fresh() } : { op: op as "all" | "any", args: [fresh()] });
     }}><option value="eq">Equals</option>{depth < 8 && <><option value="all">All of</option><option value="any">Any of</option><option value="not">Not</option></>}</Select>
     <Button variant="ghost" onClick={() => onChange(undefined)}>Remove condition</Button></div>
     {value.op === "eq" ? <div className="story-rule-row"><Select label="Condition fact" value={value.fact} onChange={e => { const f = facts.find(f => f.id === e.target.value)!; onChange({ op: "eq", fact: f.id, value: f.default }); }}>{facts.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}</Select>{facts.find(f => f.id === value.fact) ? <FactValue fact={facts.find(f => f.id === value.fact)!} value={value.value} label="Condition value" onChange={next => onChange({ ...value, value: next })} /> : <span role="alert">Missing fact</span>}</div>
       : value.op === "not" ? <StoryCondition facts={facts} value={value.arg} depth={depth + 1} onChange={arg => onChange(arg ? { op: "not", arg } : undefined)} />
-      : <>{value.args.map((arg, index) => <StoryCondition key={index} facts={facts} value={arg} depth={depth + 1} onChange={next => { const args = value.args.flatMap((a, i) => i === index ? next ? [next] : [] : [a]); onChange(args.length ? { ...value, args } : undefined); }} />)}<Button disabled={value.args.length >= 128} onClick={() => onChange({ ...value, args: [...value.args, fresh()] })}>Add condition</Button></>}
+      : <>{value.args.map((arg, index) => <StoryCondition key={index} facts={facts} value={arg} depth={depth + 1} onChange={next => { const args = value.args.flatMap((a, i) => i === index ? next ? [next] : [] : [a]); onChange(args.length ? { ...value, args } : undefined); }} />)}<Button disabled={!first || value.args.length >= 128} onClick={() => onChange({ ...value, args: [...value.args, fresh()] })}>Add condition</Button></>}
   </div>;
 }
 

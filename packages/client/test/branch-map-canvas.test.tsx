@@ -490,6 +490,19 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.deepEqual(commands(item), [{ operation: "set-facts", baseVersion: latest.version, facts: latest.facts }]);
   });
 
+  it("keeps a stale unsaved condition repairable when its fact is removed elsewhere", async () => {
+    const routing: Routing = { ...ROUTING, schemaVersion: 2, facts: [{ id: "dev", label: "Dev", type: "boolean", default: true }] };
+    const item = await mount(routing);
+    await click(all(item, '[data-scene="sc_quarter"] .bm-port')[0]);
+    await click(button(item, "Add condition"));
+    await act(async () => __setStateForTest(state({ ...routing, version: routing.version + 1, facts: [] })));
+    assert.match(text(item.container.ownerDocument.body), /Missing fact/);
+    assert.ok(all(item, 'select[aria-label="Condition type"]')[0]!.hasAttribute("disabled"));
+    await click(button(item, "Remove condition"));
+    assert.doesNotMatch(text(item.container.ownerDocument.body), /Missing fact/);
+    assert.deepEqual(commands(item), []);
+  });
+
   it("retains an ending draft when another author removes its ending", async () => {
     const routing: Routing = { ...ROUTING, schemaVersion: 2 };
     const item = await mount(routing);
