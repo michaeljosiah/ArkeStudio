@@ -7,6 +7,7 @@ import type { AdapterAction } from "./adapters.js";
  * credentials, installation or machine processes. Payload cases mix both and are checked below. */
 export const REMOTE_COMMAND_ACCESS = {
   // host
+  "studio-assistant": "host",
   "upload-world-image": "host", "upload-master-look": "host", "world-chat-attach": "host",
   "world-chat-attach-files": "host", "setup-skip": "host", "setup-retry": "host",
   "comfyui-update-runtime": "host", "setup-pause": "host", "setup-resume": "host",

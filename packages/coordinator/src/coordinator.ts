@@ -1,4 +1,5 @@
 import { savedPicture, openSavedPicture, type SavedPicture } from "./productions/audiobook-picture-reuse.js";
+import { createStudioAssistantHost, type StudioAssistantHost, type StudioAssistantHostOptions } from "./studio-assistant/host.js";
 import { chapterReviewSummary } from "@arke-studio/contracts";
 import { rebuildBenchPrefill } from "@arke-studio/contracts";
 import { MUSIC_IMPORT_EXTENSIONS } from "@arke-studio/contracts";
@@ -935,6 +936,8 @@ export interface CoordinatorOptions {
   /** Persistent restart authority, separate from removable diagnostic history. */
   recoveryControl?: RecoveryControlService | null;
   recoveryHistory?: RecoveryHistoryService | null;
+  /** Private app conversation. Model routing must be proved by native host composition. */
+  studioAssistant?: StudioAssistantHostOptions | null;
   /**
    * The Arke account behind the chrome's control (design turn 151). Absent, Studio has no cloud
    * — `NoArkeCloud`, the local default — and the control says so when pressed.
@@ -3187,6 +3190,14 @@ export class Coordinator {
   }
 
   private readonly sessionInput: SessionInput;
+  private studioAssistantHost: StudioAssistantHost | null = null;
+  private studioConversation(): StudioAssistantHost | null {
+    if (this.stopping || !this.opts.appRoot || this.opts.studioAssistant === null) return null;
+    return this.studioAssistantHost ??= createStudioAssistantHost({ root: this.opts.appRoot,
+      adapter: () => this.opts.adapter ?? null, sessionInput: this.sessionInput, options: this.opts.studioAssistant,
+      now: () => Date.parse(this.nowIso()), evidence: () => ({ history: this.opts.recoveryHistory?.snapshot(),
+        policy: this.opts.recoveryControl?.policySnapshot(), storage: this.opts.storageHealth?.snapshot(), jobs: this.jobQueue?.listJobs() }) });
+  }
 
   /**
    * Put a clip somewhere the clone can read it, and say what is wrong with it if anything is.
@@ -4093,8 +4104,21 @@ export class Coordinator {
         const conversationId = this.readModel.getState().worldChat?.conversationId;
         if (conversationId) await this.openWorldChat(store, conversationId, conversationId);
       },
-      onMessage: (msg) => {
+      onMessage: (msg, requester) => {
         if (this.stopping) return;
+        // Private Studio transport is separate from broadcast/world command handling.
+        if (msg.kind === "studio-assistant") {
+          const studio = requester && this.studioConversation();
+          if (!studio || !requester) requester?.reply(msg.requestId, { type: "result", status: "refused", reason: "unavailable", threadId: null, runId: null });
+          else {
+            const handling = studio.handle(msg, requester).catch(() => {
+              try { requester.reply(msg.requestId, { type: "result", status: "unconfirmed", reason: "unavailable", threadId: null, runId: null }); }
+              catch { /* Private presentation must not disable model-free diagnostics. */ }
+            }).finally(() => this.activeMessages.delete(handling));
+            this.activeMessages.add(handling);
+          }
+          return;
+        }
         const updateCommand =
           msg.kind === "install-update-and-restart" || msg.kind === "install-update-on-close";
         // Every handler answers its own failures; this is the backstop. One that throws instead
@@ -7308,6 +7332,8 @@ export class Coordinator {
       }
       case "hello":
         return; // handled inside the transport
+      case "studio-assistant":
+        return; // owner reply channel only; never entered through world/model commands
       case "open-world":
         try {
           await this.openWorld(msg.worldId);
@@ -23235,6 +23261,7 @@ export class Coordinator {
     // Presentation handlers are part of activeMessages. Start their bounded drain now, before
     // waiting for those handlers, so stalled nonessential I/O cannot prevent native cleanup.
     const historyStopped = this.opts.recoveryHistory?.stop();
+    const studioStopped = this.studioAssistantHost?.stop();
     this.sampleInstallAbort?.abort();
     const audioStudioStopped = this.audioStudioPreviews.stop();
     this.cataloguePreviews?.close();
@@ -23318,6 +23345,7 @@ export class Coordinator {
         this.opts.ollama?.service.dispose(),
       ]);
       await historyStopped;
+      await studioStopped;
       await this.worldQuery.stop();
       // Provider close is the critical gate: it saves pending state and releases the world lock.
       this.engineClosed = true;

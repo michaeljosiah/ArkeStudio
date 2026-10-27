@@ -79,9 +79,11 @@ import { ProductionSetupCommandSchema } from "./production-setup.js";
 import { NarrativeFieldsSchema } from "./production-narrative.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
 import { DecideConversationActionSchema, PrepareConversationTakeReviewSchema } from "./arke-actions.js";
+import { StudioAssistantCommandSchema, StudioAssistantResponseSchema } from "./studio-assistant.js";
 
 /**
- * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then `event` frames, sequence
+ * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then events and requester-only
+ * Studio replies. Private replies never enter shared app/world state. Sequence
  * numbers monotonic per connection. A reconnecting client sends its last-seen sequence and
  * receives a fresh snapshot — partial replay is deliberately not offered (D4).
  */
@@ -97,6 +99,7 @@ export const PASSAGE_KEPT_MAX = 2_400;
 export const FrameSchema = valueSchema(z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema, retainedHistory: z.array(z.enum(["jobs", "ledger"])).optional() }).strict(),
   z.object({ kind: z.literal("event"), seq: z.number().int().min(1), event: DomainEventSchema }).strict(),
+  z.object({ kind: z.literal("studio-assistant"), seq: z.number().int().min(1), requestId: z.string().uuid(), response: StudioAssistantResponseSchema }).strict(),
 ]));
 export type Frame = z.infer<typeof FrameSchema>;
 
@@ -134,6 +137,7 @@ export const MusicImportSchema = z.object({ productionId: SlugSchema, makeAlbum:
 export type MusicImport = z.infer<typeof MusicImportSchema>;
 
 export const ClientMessageSchema = z.discriminatedUnion("kind", [
+  StudioAssistantCommandSchema,
   ProductionSetupCommandSchema,
   z.object({ kind: z.literal("save-production-narrative"), worldId: UlidSchema, productionId: SlugSchema,
     requestId: UlidSchema, expectedVersion: z.number().int().min(1).nullable(), narrative: NarrativeFieldsSchema }).strict(),

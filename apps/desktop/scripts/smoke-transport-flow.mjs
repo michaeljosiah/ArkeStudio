@@ -26,7 +26,11 @@ state.app.ledger = [{ ts: at, worldId: state.app.jobs[0].worldId, jobId: state.a
   provider: "fixture", model: "fixture", outcome: "succeeded", estimatedMicroUsd: 123, actualMicroUsd: 123 }];
 const token = randomBytes(32).toString("hex");
 const transport = new Transport({ auth: { token, allowedOrigins: ["file://", "null"] }, getSnapshot: () => state,
-  onMessage: message => { if (message.kind === "refresh-diagnostics") transport.broadcastSnapshot(); },
+  onMessage: (message, requester) => {
+    if (message.kind === "refresh-diagnostics") transport.broadcastSnapshot();
+    if (message.kind === "studio-assistant") requester?.reply(message.requestId,
+      { type: "result", status: "refused", reason: "unavailable", threadId: null, runId: null });
+  },
   serveFile: async path => path === "/media/test/range.txt" ? { path: join(dir, "range.txt"), contentType: "text/plain" } : null });
 try {
   await writeFile(join(dir, "range.txt"), "0123456789");
@@ -61,11 +65,15 @@ app.whenReady().then(async () => {
   assert.deepEqual(next.retainedHistory, ["jobs", "ledger"]); assert.deepEqual(next.state.app.ledger, []);
   const reset = await read({ kind: "hello", retainHistory: true }, 3);
   assert.equal(reset.retainedHistory, undefined); assert.equal(reset.state.app.ledger[0].actualMicroUsd, 123);
+  const requestId = "12345678-1234-4234-8234-123456789abc";
+  const privateReply = await read({ kind: "studio-assistant", requestId, command: { action: "watch" } }, 4);
+  assert.equal(privateReply.kind, "studio-assistant"); assert.equal(privateReply.requestId, requestId); assert.equal(privateReply.seq, 4);
+  assert.deepEqual(privateReply.response, { type: "result", status: "refused", reason: "unavailable", threadId: null, runId: null });
   const media = await window.webContents.executeJavaScript('fetch(window.arke.coordinatorHttpBase()+"/media/test/range.txt",{headers:{Range:"bytes=2-5"}}).then(async r=>({status:r.status,body:await r.text()}))');
   assert.deepEqual(media, { status: 206, body: "2345" });
   assert.ok(!JSON.stringify(first).includes(session.token));
   assert.equal(await window.webContents.executeJavaScript('typeof process'), "undefined");
-  console.log("[smoke] sandboxed file-page hello, compact/retained history, reset and authenticated media range passed");
+  console.log("[smoke] sandboxed file-page hello, compact/retained history, reset, private Studio reply and authenticated media range passed");
   window.destroy(); clearTimeout(timeout); app.exit(0);
 }).catch(error => { console.error(error); app.exit(1); });
 `);

@@ -13,11 +13,12 @@ import {
   type ClientState,
   type DomainEvent,
   type Frame,
+  type StudioAssistantResponse,
 } from "@arke-studio/contracts";
 
 /**
  * The coordinator transport (SPEC-001 §2.5, R-3): ordered, monotonically sequenced,
- * schema-validated frames — one snapshot, then events. Sequence numbers are per connection.
+ * schema-validated frames — one snapshot, then events and private requester replies. Sequence numbers are per connection.
  * A reconnecting client sends its last-seen sequence and receives a fresh snapshot; partial
  * replay is deliberately not offered (D4).
  */
@@ -30,6 +31,8 @@ interface HistoryBase {
 }
 
 interface Connection {
+  lifetime: AbortController;
+  requester: TransportRequester;
   writer: SocketWriter;
   retainHistory: boolean;
   jobs?: ClientState["app"]["jobs"];
@@ -40,6 +43,13 @@ interface Connection {
   initialising: boolean;
   refused: boolean;
   pending: ClientMessage[];
+}
+
+/** Captured authenticated socket only. Never serialize or expose to world/model tools. */
+export interface TransportRequester {
+  readonly signal: AbortSignal;
+  /** True means handed to the bounded writer, not acknowledged delivery or execution. */
+  reply(requestId: string, response: StudioAssistantResponse): boolean;
 }
 
 export interface TransportAuth {
@@ -56,7 +66,7 @@ export interface TransportOptions {
   /** Reconcile durable state before a new or reconnecting renderer receives its snapshot. */
   beforeInitialSnapshot?(): Promise<void>;
   /** Client → coordinator messages, after the hello. */
-  onMessage?: (msg: ClientMessage) => void;
+  onMessage?: (msg: ClientMessage, requester?: TransportRequester) => void;
   /** Somewhere for the transport to say what it dropped; silence is the default, not the goal. */
   log?: (line: string) => void;
   /**
@@ -200,16 +210,22 @@ export class Transport {
 
   private accept(socket: WebSocket, origin: string | undefined): void {
     const writer = new SocketWriter(socket, { label: "coordinator", trace: detail => this.opts.log?.(JSON.stringify(detail)) });
-    const conn: Connection = { socket, writer, retainHistory: false, seq: 0, helloed: false, initialising: false, refused: false, pending: [] };
+    const lifetime = new AbortController();
+    const requester: TransportRequester = { signal: lifetime.signal, reply: (requestId, response) => {
+      if (lifetime.signal.aborted || !this.connections.has(conn) || !conn.helloed || conn.refused || socket.readyState !== 1) return false;
+      this.sendFrame(conn, { kind: "studio-assistant", seq: ++conn.seq, requestId, response }); return true;
+    } };
+    const conn: Connection = { socket, writer, lifetime, requester, retainHistory: false, seq: 0, helloed: false, initialising: false, refused: false, pending: [] };
     const refuse = () => {
       conn.refused = true;
       conn.helloed = false;
+      lifetime.abort(); conn.pending = [];
       this.opts.log?.("refused unauthenticated WebSocket session");
       socket.close(1008, "session authentication required");
     };
     this.connections.add(conn);
-    socket.on("close", () => { writer.dispose(); this.connections.delete(conn); });
-    socket.on("error", () => { writer.dispose(); this.connections.delete(conn); });
+    socket.on("close", () => { lifetime.abort(); writer.dispose(); this.connections.delete(conn); });
+    socket.on("error", () => { lifetime.abort(); writer.dispose(); this.connections.delete(conn); });
     if (!this.allowedOrigin(origin)) {
       refuse();
       return;
@@ -261,7 +277,7 @@ export class Transport {
           for (const event of this.opts.getInitialEvents?.() ?? []) {
             this.sendFrame(conn, { kind: "event", seq: ++conn.seq, event });
           }
-          for (const pending of conn.pending.splice(0)) this.opts.onMessage?.(pending);
+          for (const pending of conn.pending.splice(0)) this.opts.onMessage?.(pending, requester);
         };
         if (this.opts.beforeInitialSnapshot && !conn.helloed) {
           conn.helloed = false;
@@ -294,7 +310,7 @@ export class Transport {
         socket.close(1002, "expected hello before any other message");
         return;
       }
-      this.opts.onMessage?.(msg);
+      this.opts.onMessage?.(msg, requester);
     });
   }
 
@@ -323,7 +339,7 @@ export class Transport {
       } }, ...(retainedHistory.length ? { retainedHistory } : {}) };
       conn.jobs = jobs; conn.ledger = ledger;
       snapshot = { key, base, ...(options.supersede ? {} : { keep: true as const }) };
-    } else if (conn.retainHistory && (frame.event.type === "job.updated" || frame.event.type === "job.ready")) {
+    } else if (frame.kind === "event" && conn.retainHistory && (frame.event.type === "job.updated" || frame.event.type === "job.ready")) {
       outgoing = { ...frame, event: { ...frame.event, job: jobSummary(frame.event.job) } };
     }
     conn.writer.send(JSON.stringify(FrameSchema.parse(outgoing)), snapshot !== undefined ? { snapshot } : {});
@@ -359,7 +375,7 @@ export class Transport {
     this.wss = null;
     const http = this.http;
     this.http = null;
-    for (const conn of this.connections) { conn.writer.dispose({ preserveCloseTimeout: true }); conn.socket.close(1001, "coordinator stopping"); }
+    for (const conn of this.connections) { conn.lifetime.abort(); conn.writer.dispose({ preserveCloseTimeout: true }); conn.socket.close(1001, "coordinator stopping"); }
     this.connections.clear();
     await Promise.allSettled(this.initialisations);
     await new Promise<void>((resolve) => wss.close(() => resolve()));

@@ -1141,10 +1141,10 @@ query URLs, skills and other-role overrides before adapter preparation/file writ
 `local-ai/gpu.ts`: normal creative/recovery waiters precede background explanations, without
 preempting any admitted owner. Tests cover actual OpenCode v2/Claude/Codex gates, role pinning,
 configuration isolation, normal FIFO/background ordering and cancellation. These are session
-prerequisites; the production Studio transport, reviewed repair registry and turn-239
+prerequisites; production route/spend integration, the reviewed repair registry and turn-239
 dialog/visual acceptance remain unfinished.
 
-The unwired Studio core lives in coordinator `studio-assistant/`: `service.ts` owns one
+The Studio core lives in coordinator `studio-assistant/`: `service.ts` owns one
 on-demand conversation turn, flushed phase intents, a closed diagnostic delegation and editable
 handoff data. `evidence.ts` selects bounded enumerated operational facts without world content,
 free-text causes, provider IDs, paths or raw logs. `store.ts` keeps a separate bounded private
@@ -1154,8 +1154,9 @@ and retains unknown native work until actual owner settlement. Nonlocal calls ne
 approval of each application-controlled payload and destination. `contracts/studio-assistant.ts`
 defines the closed schemas and limits. Private transcripts/sharing payloads must never enter the
 common app snapshot, broadcast events, world journal or support export. These modules are tested
-together with the actual session/GPU wrappers, but are not yet instantiated by the shipped host.
-Production route/spend authorization, targeted private transport, UI, reviewed actions and matched
+together with the actual session/GPU wrappers. `host.ts` lazily composes the private conversation
+owner on the first authenticated Studio command, using `R/studio-assistant/conversations.json`.
+Production model-route/spend authorization, UI, reviewed actions and matched
 visual acceptance remain required before claiming the Studio assistant is delivered.
 
 Guarded Studio sends use `HarnessAdapter.sendMessageWithFence`: the GPU and runtime-change
@@ -1164,6 +1165,28 @@ GPU waiter that never reaches that check is known not-dispatched and can retire;
 unknown outcome remains held. OpenCode v2 increments `lifecycleRevision` on host-confirmed runtime
 exit/disposal; Studio refuses adapters without a verified revision instead of equating missing
 tokens. These host-only callbacks carry no renderer/model repair authority.
+
+Private Studio transport: `contracts/studio-assistant.ts` defines closed correlated commands
+and replies; `frames.ts` adds a requester-only frame on the existing per-connection sequence.
+Coordinator `transport.ts` supplies an authenticated `TransportRequester` callback, captured for
+one socket and revoked on refusal/close/error/stop. It sends after the initial snapshot and
+never broadcasts private replies. Client `store.ts` dispatches these frames to explicit private
+subscribers without folding them into app/world state. The remote gateway and world action
+registry refuse the command. Coordinator routes it through `studio-assistant/host.ts`, separately
+from common world commands, and stops its admission before draining ordinary handlers. The
+controller bounds pending asynchronous work (eight total, two per socket) and observation waits;
+uncertain operations retain admission until actual settlement. Cancel/sharing/unwatch controls
+remain available. A 64-ID volatile duplicate window is not a durable execution ledger.
+Default model invocation refuses absent host-proved routes; native route/spend composition,
+reviewed repairs and the turn-239 UI remain unfinished.
+Private snapshots have a 2.5 MiB aggregate UTF-8 bound (the 2 MiB conversation plus one
+disclosure/unsaved reply); individual field limits do not multiply into an oversized frame.
+The reply callback's boolean acknowledges handoff to the bounded writer, not peer receipt or
+successful execution.
+History replacement reads wait for an already admitted same-path write that outlived bounded
+shutdown in this process. This prevents a late old rename from overwriting a successor's history;
+it is not a cross-process/multiple-active-host lock. Private state is not replayed on reconnect
+until the owner explicitly watches again, and no user/model operation is automatically resent.
 
 ## System status overview
 

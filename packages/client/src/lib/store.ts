@@ -1699,6 +1699,12 @@ function handleFrame(json: string): void {
     return;
   }
   lastSeq = frame.seq;
+  if (frame.kind === "studio-assistant") {
+    for (const listener of studioAssistantReplyListeners) {
+      try { listener(frame); } catch { /* A private panel cannot interrupt shared state folding. */ }
+    }
+    return;
+  }
   if (frame.kind === "snapshot") {
     if (frame.retainedHistory?.length) {
       if (!current.state || rejoining) { send({ kind: "hello", lastSeq, retainHistory: true }); return; }
@@ -7763,6 +7769,11 @@ export function generatePerformance(input: Omit<Extract<ClientMessage, { kind: "
 }
 
 const remoteRefusalListeners = new Set<(refusal: RemoteCommandRefusal) => void>();
+const studioAssistantReplyListeners = new Set<(frame: Extract<Frame, { kind: "studio-assistant" }>) => void>();
+/** Private panel subscription only: no transcript is folded into app/world state. */
+export function onStudioAssistantReply(listener: (frame: Extract<Frame, { kind: "studio-assistant" }>) => void): () => void {
+  studioAssistantReplyListeners.add(listener); return () => studioAssistantReplyListeners.delete(listener);
+}
 export function subscribeRemoteRefusals(listener: (refusal: RemoteCommandRefusal) => void): () => void {
   remoteRefusalListeners.add(listener);
   return () => remoteRefusalListeners.delete(listener);

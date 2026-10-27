@@ -86,5 +86,31 @@ export type StudioCloudShare = z.infer<typeof StudioCloudShareSchema>;
 export const StudioAssistantSnapshotSchema = z.object({
   audit, accepting: z.boolean(), busy: z.boolean(), threads: z.array(StudioAssistantThreadSchema).max(STUDIO_ASSISTANT_LIMITS.threads),
   share: StudioCloudShareSchema.nullable(), ephemeralReply: StudioAssistantMessageSchema.nullable(),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  // A bounded conversation plus one disclosure/unsaved response, never the unbounded
+  // cross-product of every individual thread/message field limit.
+  if (new TextEncoder().encode(JSON.stringify(value)).length > STUDIO_ASSISTANT_LIMITS.storeBytes + 512 * 1024) ctx.addIssue({ code: "custom", message: "Private Studio state exceeds its byte bound." });
+});
 export type StudioAssistantSnapshot = z.infer<typeof StudioAssistantSnapshotSchema>;
+
+/** Owner-only commands. No pathname, world binding, repair execution or standing consent. */
+export const StudioAssistantCommandSchema = z.object({ kind: z.literal("studio-assistant"), requestId: z.string().uuid(),
+  command: z.discriminatedUnion("action", [
+    z.object({ action: z.literal("watch") }).strict(), z.object({ action: z.literal("unwatch") }).strict(),
+    z.object({ action: z.literal("create") }).strict(),
+    z.object({ action: z.literal("archive"), threadId: UlidSchema, archived: z.boolean() }).strict(),
+    z.object({ action: z.literal("send"), threadId: UlidSchema, text: z.string().trim().min(1).max(STUDIO_ASSISTANT_LIMITS.requestChars),
+      model: z.string().min(1).max(512), diagnosticModel: z.string().min(1).max(512).optional() }).strict(),
+    z.object({ action: z.literal("cancel"), threadId: UlidSchema, runId: UlidSchema }).strict(),
+    z.object({ action: z.literal("acknowledge"), threadId: UlidSchema, runId: UlidSchema }).strict(),
+    z.object({ action: z.literal("approve-cloud"), threadId: UlidSchema, runId: UlidSchema, shareId: UlidSchema, digest }).strict(),
+  ]),
+}).strict();
+export type StudioAssistantCommand = z.infer<typeof StudioAssistantCommandSchema>;
+export const StudioAssistantResponseSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("state"), state: StudioAssistantSnapshotSchema }).strict(),
+  z.object({ type: z.literal("result"), status: z.enum(["ok", "accepted", "refused", "unconfirmed"]),
+    reason: z.enum(["invalid", "missing-thread", "busy", "interrupted", "unavailable", "full", "stopped", "timeout"]).nullable(),
+    threadId: UlidSchema.nullable(), runId: UlidSchema.nullable() }).strict(),
+]);
+export type StudioAssistantResponse = z.infer<typeof StudioAssistantResponseSchema>;

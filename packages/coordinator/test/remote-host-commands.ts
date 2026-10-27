@@ -21,6 +21,7 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
     ];
 
     const payloads: Record<string, Record<string, unknown>> = {
+      "studio-assistant": { requestId: "12345678-1234-4234-8234-123456789abc", command: { action: "watch" } },
       "account-open": { page: "account" }, "set-background-notifications": { preference: "off" },
       "recovery-set-mode": { requestId: worldId, mode: "suggest-only" },
       "recovery-set-preferences": { requestId: worldId, preferences: { desktopOptIn: true } },

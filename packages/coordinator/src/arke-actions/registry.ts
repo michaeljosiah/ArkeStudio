@@ -233,6 +233,7 @@ const CLIENT_COMMAND_METADATA = {
   "discard-master-look": action("world", "destructive", "world-store", "destructive-change", ["art-direction", "references"]),
   "archive-world": action("world", "destructive", "world-store", "world-administration", ["world-metadata", "jobs"]),
   "install-sample-world": globalOnly(GLOBAL_OPERATION),
+  "studio-assistant": globalOnly("Studio conversations require a separate authenticated owner reply channel; world tools cannot invoke them."),
   "cancel-sample-world-download": globalOnly(GLOBAL_OPERATION),
   "discard-sample-world-download": globalOnly(GLOBAL_OPERATION),
   "refresh-sample-world-download": globalOnly(GLOBAL_OPERATION),

@@ -29,6 +29,7 @@ A new world does **not** start with empty `canon`, `characters`, `productions`, 
 |---|---|
 | First launch | Creates `R\worlds\`, `R\queue\`, `R\logs\`, and `R\config.json` if absent. Opening the app index creates `R\.index\app.db`; SQLite may add `-wal` and `-shm` files. |
 | Save settings | Creates or replaces `R\settings.json` by temporary-file rename. |
+| Private Studio conversation | On an authenticated owner request, creates/replaces `R\studio-assistant\conversations.json` with flushed atomic writes. History is bounded to 2 MiB, independent of worlds and operational support exports. Corrupt/full/unavailable history is retained and blocks further assistant work. A same-path in-process barrier makes replacement reads wait for an admitted old write after bounded shutdown; it is not a multi-host lock. Settled model sessions remove only their known config and empty `R\studio-assistant\turns\turn-*` directory; unknown contents remain. Native model-route/spend integration and the dialog are unfinished. |
 | Save provider key | Creates or replaces encrypted `R\credentials.dat`, then restricts its ACL to the current user. Keys are never stored in a world. |
 | Remember or revoke permission | Creates or replaces `R\grants.json`. Revocation marks a grant revoked rather than deleting its history. |
 | Queue or update a job | Appends the complete job state to `R\queue\jobs.jsonl`. |

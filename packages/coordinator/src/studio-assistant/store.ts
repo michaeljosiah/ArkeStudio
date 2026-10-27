@@ -1,15 +1,22 @@
 import { lstat, open } from "node:fs/promises";
+import { resolve } from "node:path";
 import { StudioAssistantFileSchema, STUDIO_ASSISTANT_LIMITS, type StudioAssistantFile } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 
 export interface StudioConversationStore { load(): Promise<unknown>; save(value: StudioAssistantFile): Promise<void> }
+const writing = new Map<string, Promise<void>>();
+const keyFor = (path: string) => process.platform === "win32" || process.platform === "darwin" ? resolve(path).toLowerCase() : resolve(path);
 
 /** Private application conversation history. It never writes a world, job journal, ledger
  * or recovery summary. Unknown/corrupt history is kept, never overwritten with an empty file. */
 export class FileStudioConversationStore implements StudioConversationStore {
-  constructor(readonly path: string) {}
+  constructor(readonly path: string, private readonly write: (path: string, text: string) => Promise<void> = atomicWriteFile) {}
   async load(): Promise<unknown> {
+    // Bounded service shutdown may leave an admitted atomic write settling in this process.
+    // A replacement must read after that write, not overwrite a successor with its late rename.
+    // This same-path I/O barrier is not a cross-process or multiple-active-host lock.
+    await writing.get(keyFor(this.path))?.catch(() => {});
     let entry;
     try { entry = await lstat(toExtendedLength(this.path)); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { version: 1, threads: [] }; throw error; }
@@ -28,6 +35,10 @@ export class FileStudioConversationStore implements StudioConversationStore {
   async save(value: StudioAssistantFile): Promise<void> {
     const text = JSON.stringify(StudioAssistantFileSchema.parse(value)) + "\n";
     if (Buffer.byteLength(text) > STUDIO_ASSISTANT_LIMITS.storeBytes) throw new Error("Studio history is full.");
-    await atomicWriteFile(this.path, text);
+    const key = keyFor(this.path), previous = writing.get(key);
+    const work = (previous ?? Promise.resolve()).catch(() => {}).then(() => this.write(this.path, text));
+    writing.set(key, work);
+    try { await work; }
+    finally { if (writing.get(key) === work) writing.delete(key); }
   }
 }

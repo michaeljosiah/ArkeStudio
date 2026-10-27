@@ -1554,14 +1554,14 @@ preserve FIFO within each priority and cancel without releasing the admitted own
 These tests make no model call and do not qualify the production Studio integration, repair
 registry, cloud/spend authorization or matched turn-239 visual gate.
 
-Run coordinator `test/studio-assistant/*.test.ts` for the unwired conversation core. Its native
+Run coordinator `test/studio-assistant/*.test.ts` for the conversation core and private owner. Its native
 file-backed/protocol fixtures verify bounded private history, interrupted phase reconciliation,
 closed evidence and delegation, one-use nonlocal payload approval, route/generation fences,
 late shutdown suppression, retained unknown model ownership and explicit draft-only handoff.
 The composition case joins the actual conversation store, service, session runner and shared
 GPU wrapper behind admitted creative work. It uses a synthetic protocol adapter, not a live
 model. Native filesystem access is required for flushed atomic replacement. These tests establish
-the core boundaries; they do not prove production host/transport/UI wiring, provider spend
+the core boundaries; they do not prove production model-route/spend or UI integration, provider spend
 approval, live explanation quality, reviewed repair execution or visual parity.
 Review regressions run through model validation, shared GPU and runtime-change wrappers in
 production order: changing the route/locality or process generation during the GPU wait must
@@ -1570,6 +1570,24 @@ without releasing admitted creative work. Missing lifecycle revisions are refuse
 `test/v2-adapter.test.ts` verifies the concrete revision changes on confirmed exit/disposal;
 `test/harness-runtime-change.test.ts` checks guarded sends cannot bypass runtime replacement/
 recovery admission and that a rejecting final fence makes no native call.
+
+Private-channel checks use coordinator `test/studio-assistant/transport.test.ts`, the existing
+`test/transport.test.ts`/`test/remote-access.test.ts`, contracts `test/studio-assistant.test.ts`
+and client `test/studio-assistant-transport.test.ts` (run client tests from that package).
+They check two authenticated sockets, per-connection sequencing, initial reconciliation,
+closed/refused reply capabilities, host-only paired-browser refusal, strict command bounds
+and exclusion from common client state. Reconnect sends no private history automatically.
+After building, `node --import tsx apps/desktop/scripts/smoke-transport-flow.mjs` checks a real
+hidden sandboxed Electron file page and built preload, including a correlated private reply,
+history negotiation/reset, hidden capability and authenticated media range. No model, paid
+request or approved design-master rendering is involved.
+`host.test.ts` additionally runs the production coordinator with a synthetic host model: private
+history survives world opening/restart, wrong/duplicate cloud approvals cannot dispatch, and
+non-requesting sockets/common state receive no transcript. Held history I/O returns unconfirmed,
+keeps its pending admission, permits cancellation and cannot start late work after stop.
+`store.test.ts` holds an actual atomic write through bounded shutdown, then verifies replacement
+history waits for its settlement before reading/saving. The same-path barrier is not a multi-host
+lock. These tests do not qualify real model-route/spend/trace privacy integration or the dialog.
 
 ## System status (turn 240)
 
