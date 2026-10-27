@@ -31,8 +31,11 @@ export class StudioAssistantService {
   private ephemeralReply: Message | null = null;
   private readonly writes = new WriteQueue();
   private readonly subscribers = new Set<(snapshot: StudioAssistantSnapshot) => void>();
+  private readonly stopModelEvents: (() => void) | undefined;
   constructor(private readonly deps: { store: StudioConversationStore; model: StudioModelPort;
-    evidence(topic: StudioDiagnosticTopic): StudioDiagnosticEvidence; now?: () => number; shutdownMs?: number }) {}
+    evidence(topic: StudioDiagnosticTopic): StudioDiagnosticEvidence; now?: () => number; shutdownMs?: number }) {
+    this.stopModelEvents = deps.model.subscribe?.(() => this.publish());
+  }
   private now(): number { return (this.deps.now ?? Date.now)(); }
   private publish(): void { if (this.closing) return; const snapshot = this.snapshot(); for (const listener of this.subscribers) { try { listener(snapshot); } catch { /* Presentation grants no authority. */ } } }
   snapshot(): StudioAssistantSnapshot {
@@ -211,7 +214,12 @@ ${JSON.stringify(evidence)}`;
       this.publish();
     }
   }
-  closeAdmission(): void { this.closing = true; this.turn?.share?.resolve(false); this.turn?.control.abort(); this.subscribers.clear(); }
+  closeAdmission(): void {
+    if (this.closing) return;
+    this.closing = true;
+    try { this.stopModelEvents?.(); } catch { /* Closed admission already suppresses late observation. */ }
+    this.turn?.share?.resolve(false); this.turn?.control.abort(); this.subscribers.clear();
+  }
   stop(): Promise<void> {
     this.closeAdmission();
     return this.stopping ??= (async () => {

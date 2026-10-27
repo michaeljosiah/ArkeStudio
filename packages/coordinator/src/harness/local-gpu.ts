@@ -15,7 +15,8 @@ export function withLocalGpu(
   const models = new Map<string, string | undefined>();
   const priorities = new Map<string, "normal" | "background">();
   const privateSessions = new Set<string>();
-  const turns = new Map<string, { abort: AbortController; started: boolean }>();
+  const privateCompletion = new Map<string, Promise<void>>();
+  const turns = new Map<string, { abort: AbortController; started: boolean; release?: () => void }>();
   const closed = new AbortController();
   const events = new EventEmitter();
   events.setMaxListeners(0);
@@ -35,9 +36,9 @@ export function withLocalGpu(
   const send = async (input: SendMessageInput, beforeDispatch?: () => void) => {
     if (closed.signal.aborted) throw new Error("The writing harness is stopping.");
     if (turns.has(input.sessionId)) throw new Error("This writing session already has a turn in progress.");
-    const turn = { abort: new AbortController(), started: false };
+    const turn: { abort: AbortController; started: boolean; release?: () => void } = { abort: new AbortController(), started: false };
     turns.set(input.sessionId, turn);
-    let release: (() => void) | undefined;
+    let confirmed = false;
     try {
       const model = models.get(input.sessionId);
       // Claude cannot dispatch to Ollama. Its SDK catalog starts a separate process, so
@@ -52,17 +53,29 @@ export function withLocalGpu(
       const local = canUseOllama && (model !== undefined ? model.startsWith("ollama/") :
         catalog === undefined || catalog.some((row) => row.provider === "ollama" && (row.isDefault || !hasDefault)));
       const signal = AbortSignal.any([turn.abort.signal, closed.signal]);
-      if (local) release = await gpu.acquire("Ollama", signal, (reason) => publish({
+      if (local) turn.release = await gpu.acquire("Ollama", signal, (reason) => publish({
         type: "tool.activity", sessionId: input.sessionId, tool: "local-inference",
         summary: reason ?? "Writing with Ollama",
       }), priorities.get(input.sessionId));
       signal.throwIfAborted();
       if (local && model !== undefined) onLocalModel(model.replace(/^ollama\//, ""));
       const dispatch = () => { signal.throwIfAborted(); beforeDispatch?.(); turn.started = true; };
-      if (adapter.sendMessageWithFence) return await adapter.sendMessageWithFence(input, dispatch);
-      dispatch();
-      return await adapter.sendMessage(input);
-    } finally { release?.(); turns.delete(input.sessionId); settled(); }
+      let receipt: Awaited<ReturnType<HarnessAdapter["sendMessage"]>> | undefined, failed = false, failure: unknown;
+      try {
+        if (adapter.sendMessageWithFence) receipt = await adapter.sendMessageWithFence(input, dispatch);
+        else { dispatch(); receipt = await adapter.sendMessage(input); }
+      } catch (error) { failed = true; failure = error; }
+      // A private send can settle on an HTTP/stream error while inference continues. Its
+      // native proof outlives the requester/observer; Stop and disposal are not that proof.
+      if (privateSessions.has(input.sessionId) && turn.started) {
+        await privateCompletion.get(input.sessionId)!;
+        confirmed = true;
+      }
+      if (failed) throw failure;
+      return receipt!;
+    } finally {
+      if (!privateSessions.has(input.sessionId) || !turn.started || confirmed) { turn.release?.(); turns.delete(input.sessionId); settled(); }
+    }
   };
   const overrides: Partial<HarnessAdapter> = {
     prepareSession(input) {
@@ -71,11 +84,15 @@ export function withLocalGpu(
     },
     abandonSessionPreparation(id) { prepared.delete(id); adapter.abandonSessionPreparation?.(id); },
     async createSession(input) {
+      if (input.visibility === "private" && adapter.privateSessions !== true) throw new Error("The harness does not support private operational sessions.");
       const config = input.preparationId ? prepared.get(input.preparationId) : undefined;
       const session = await adapter.createSession(input);
       models.set(session.sessionId, config?.model ?? (input.agent ? config?.agents?.[input.agent]?.model : undefined));
       priorities.set(session.sessionId, config?.inferencePriority ?? "normal");
-      if (input.visibility === "private") privateSessions.add(session.sessionId);
+      if (input.visibility === "private") {
+        if (!session.privateEvents || !session.privateTurnSettled) throw new Error("The private session has no native completion proof.");
+        privateSessions.add(session.sessionId); privateCompletion.set(session.sessionId, session.privateTurnSettled);
+      }
       if (input.preparationId) prepared.delete(input.preparationId);
       return session;
     },
@@ -110,7 +127,10 @@ export function withLocalGpu(
     async dispose() {
       closed.abort();
       await adapter.dispose?.();
-      prepared.clear(); models.clear(); priorities.clear(); privateSessions.clear();
+      prepared.clear(); models.clear(); priorities.clear();
+      // Unknown turns still own their exact release capability after the adapter closes.
+      // A writing child ending cannot prove an external model finished. Closed admission
+      // prevents another turn entering this wrapper while its native proof remains pending.
     },
   };
   // Preserve optional adapter capabilities and bind their private state to the real adapter.

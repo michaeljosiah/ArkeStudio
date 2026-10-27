@@ -19,16 +19,20 @@ const deferred = () => { let resolve!: () => void; const promise = new Promise<v
 async function fixture() {
   const scratch = await tempDir("arke-studio-runner-"), events = new EventEmitter(); events.setMaxListeners(0);
   const prepared: SessionConfigInput[] = [], created: CreateSessionInput[] = [], sent: SendMessageInput[] = [];
+  const interrupts: string[] = [];
+  const completions = new Map<string, ReturnType<typeof deferred>>();
   let revision = 1, identity = "c".repeat(64), local = true, answer = '{"kind":"reply","text":"A reply."}',
     catalogGate: Promise<void> | undefined, creationGate: Promise<void> | undefined, sendGate: Promise<void> | undefined, failure = false, retained = false;
   const raw: HarnessAdapter = { id: "test", privateSessions: true, capabilities: () => new Set(["events", "models"]), readiness: () => ({ ready: true }), lifecycleRevision: () => revision,
     async listModels() { await catalogGate; return [{ id: "test", provider: "ollama" }]; },
     prepareSession(input) { prepared.push(input); }, sessionFiles: () => [{ name: "opencode.json", contents: "{}" }],
-    async createSession(input) { created.push(input); await creationGate; if (retained) await writeFile(join(input.cwd!, "unrecognized.txt"), "KEEP_UNKNOWN_BYTES"); return { sessionId: `studio-${created.length}`, privateEvents: (signal: AbortSignal) => raw.streamEvents(signal) }; },
+    async createSession(input) { created.push(input); await creationGate; if (retained) await writeFile(join(input.cwd!, "unrecognized.txt"), "KEEP_UNKNOWN_BYTES");
+      const sessionId = `studio-${created.length}`, completion = deferred(); completions.set(sessionId, completion);
+      return { sessionId, privateEvents: (signal: AbortSignal) => raw.streamEvents(signal), privateTurnSettled: completion.promise, privateOwnerStopped: () => completion.resolve() }; },
     async sendMessage(input) { sent.push(input); await sendGate;
       if (failure) { events.emit("event", { type: "session.error", sessionId: input.sessionId, message: "private backend failure" } satisfies HarnessEvent); throw new Error("unknown outcome"); }
-      events.emit("event", { type: "message.completed", sessionId: input.sessionId, text: answer } satisfies HarnessEvent); return { sessionId: input.sessionId, correlationId: input.correlationId! }; },
-    dispatchAsync: async () => { throw new Error("Only sendMessage owns model completion"); }, interrupt: async () => {},
+      events.emit("event", { type: "message.completed", sessionId: input.sessionId, text: answer } satisfies HarnessEvent); completions.get(input.sessionId)!.resolve(); return { sessionId: input.sessionId, correlationId: input.correlationId! }; },
+    dispatchAsync: async () => { throw new Error("Only sendMessage owns model completion"); }, interrupt: async id => { interrupts.push(id); },
     streamEvents(signal) { const iterator = on(events, "event", { signal }); return { async *[Symbol.asyncIterator]() {
       try { for await (const [event] of iterator) yield event as HarnessEvent; } catch (error) { if (!signal?.aborted) throw error; }
     } }; },
@@ -36,12 +40,110 @@ async function fixture() {
   const deps = { adapter: () => raw, scratch, sessionInput: async (input: SessionConfigInput) => ({ ...input, worldQueryUrl: "PRIVATE_WORLD_TOKEN", memoryDir: "PRIVATE_WORLD_NOTES", authorNotesFile: "PRIVATE_AUTHOR_NOTES", researchWeb: true,
     agents: { "world-builder": { brief: "PRIVATE_WORLD_OVERRIDE" } } }), destination: () => ({ identity, local }), timeoutMs: 5000 };
   const runner = new HarnessStudioModelRunner(deps);
-  return { raw, deps, runner, scratch, prepared, created, sent, revision: () => { revision++; }, destination: () => { identity = "d".repeat(64); }, cloud: () => { local = false; },
-    emit: (event: HarnessEvent) => { events.emit("event", event); },
+  return { raw, deps, runner, scratch, prepared, created, sent, interrupts, revision: () => { revision++; }, destination: () => { identity = "d".repeat(64); }, cloud: () => { local = false; },
+    emit: (event: HarnessEvent) => { if (event.type === "message.completed") completions.get(event.sessionId)?.resolve(); events.emit("event", event); },
     answer: (text: string) => { answer = text; }, catalog: (gate: Promise<void>) => { catalogGate = gate; }, create: (gate: Promise<void>) => { creationGate = gate; },
     send: (gate: Promise<void>) => { sendGate = gate; }, fail: () => { failure = true; }, keep: () => { retained = true; } };
 }
 const input = { role: "studio-assistant" as const, model: "ollama/test", prompt: "A bounded Studio question." }, allow = async () => ({ cloudApproved: false });
+it("prepared-session composition preserves opaque prototype capabilities and their original native receiver", async () => {
+  const h = await fixture(), create = h.raw.createSession.bind(h.raw); h.fail(); let cleaned = false;
+  h.raw.createSession = async input => {
+    const original = await create(input);
+    const native = Object.create({
+      privateTurnSettled: original.privateTurnSettled,
+      privateEvents(signal: AbortSignal) { assert.equal(this, native); return original.privateEvents!(signal); },
+      privateOwnerStopped() { assert.equal(this, native); cleaned = true; original.privateOwnerStopped!(); },
+    });
+    Object.defineProperty(native, "sessionId", { value: original.sessionId, enumerable: true }); return native;
+  };
+  try {
+    await assert.rejects(h.runner.run(input, new AbortController().signal, allow), /could not be completed/);
+    assert(h.runner.busy()); assert.equal(cleaned, false); await h.runner.ownerStopped(); assert(cleaned); assert(!h.runner.busy());
+  } finally { await h.runner.stop(); await h.runner.ownerStopped(); }
+});
+it("cancellation never sends an old session interrupt to a replacement writing generation", async () => {
+  const h = await fixture(), gate = deferred(), stop = new AbortController(); h.send(gate.promise);
+  try {
+    const rejected = assert.rejects(h.runner.run(input, stop.signal, allow), /stopped/);
+    await until(() => h.sent.length === 1, "the original generation owns the turn"); h.revision(); stop.abort(); await rejected;
+    assert.deepEqual(h.interrupts, []); assert(h.runner.busy());
+    gate.resolve(); await until(() => !h.runner.busy(), "the original owner later confirms its own completion");
+  } finally { gate.resolve(); await h.runner.stop(); await h.runner.ownerStopped(); }
+});
+
+it("trusted confirmed backing-owner cleanup releases only its retained GPU/runtime reservation", async () => {
+  const h = await fixture(), gpu = new LocalGpu(async () => {}), changes = new HarnessRuntimeChanges(); h.fail();
+  const adapter = withLocalGpu(changes.wrap(h.raw), gpu), runner = new HarnessStudioModelRunner({ ...h.deps, adapter: () => adapter });
+  let nextRelease: (() => void) | undefined;
+  try {
+    await assert.rejects(runner.run(input, new AbortController().signal, allow), /could not be completed/); assert(gpu.isBusy("Ollama"));
+    const next = gpu.acquire("ComfyUI", new AbortController().signal).then(release => { nextRelease = release; });
+    // This is a trusted test owner confirming both inference and writer cleanup, not Stop
+    // acknowledgement or a writing process exit. Production native plans must prove that fact.
+    await runner.ownerStopped(); await next; assert(gpu.isBusy("ComfyUI")); assert(!runner.busy());
+    await changes.run(async () => {});
+    await runner.ownerStopped(); h.emit({ type: "message.completed", sessionId: "studio-1", text: "Old completion cannot release the new owner" });
+    await Promise.resolve(); assert(gpu.isBusy("ComfyUI")); assert.equal(h.sent.length, 1);
+  } finally { nextRelease?.(); await runner.stop(); await adapter.dispose?.(); await runner.ownerStopped(); gpu.stop(); }
+});
+
+it("refuses a private session without native turn settlement proof before sending", async () => {
+  const h = await fixture(), create = h.raw.createSession.bind(h.raw);
+  h.raw.createSession = async value => { const session = await create(value); delete session.privateTurnSettled; return session; };
+  try { await assert.rejects(h.runner.run(input, new AbortController().signal, allow), /native completion proof/); assert.equal(h.sent.length, 0); }
+  finally { await h.runner.stop(); await h.runner.ownerStopped(); }
+});
+
+it("an error while queued cancels that unsent GPU waiter rather than dispatching it later", async () => {
+  const h = await fixture(), gpu = new LocalGpu(async () => {}), owner = await gpu.acquire("ComfyUI", new AbortController().signal);
+  const adapter = withLocalGpu(h.raw, gpu), runner = new HarnessStudioModelRunner({ ...h.deps, adapter: () => adapter });
+  try {
+    const rejected = assert.rejects(runner.run(input, new AbortController().signal, allow), /could not be completed/);
+    await until(() => gpu.isBusy("Ollama"), "Studio queued before its native owner reports an error");
+    h.emit({ type: "session.error", sessionId: "studio-1", message: "Private owner failed before dispatch" }); await rejected;
+    await until(() => !gpu.isBusy("Ollama") && !runner.busy(), "known-unsent waiter and runner retire");
+    assert(gpu.isBusy("ComfyUI")); assert.equal(h.sent.length, 0);
+    owner(); const next = await runner.run(input, new AbortController().signal, allow);
+    assert(next.includes("A reply.")); assert.equal(h.sent.length, 1); assert.equal(h.sent[0]!.sessionId, "studio-2");
+  } finally { owner(); await runner.stop(); await adapter.dispose?.(); await runner.ownerStopped(); gpu.stop(); }
+});
+
+it("retains an unknown private GPU turn through Stop until late native completion, then still waits for handover", async () => {
+  const h = await fixture(), unload = deferred(); h.fail(); let handover = false, admitted = false;
+  const gpu = new LocalGpu(async engine => { if (engine === "Ollama") { handover = true; await unload.promise; } });
+  const adapter = withLocalGpu(h.raw, gpu), runner = new HarnessStudioModelRunner({ ...h.deps, adapter: () => adapter });
+  let releaseNext: (() => void) | undefined;
+  try {
+    await assert.rejects(runner.run(input, new AbortController().signal, allow), /could not be completed/);
+    assert(runner.busy()); assert(gpu.isBusy("Ollama"));
+    const next = gpu.acquire("ComfyUI", new AbortController().signal).then(release => { admitted = true; releaseNext = release; });
+    await adapter.interrupt?.("studio-1"); assert(runner.busy()); assert.equal(handover, false); assert.equal(admitted, false);
+    h.emit({ type: "message.completed", sessionId: "studio-1", text: "Late private answer is not republished" });
+    await until(() => handover && !runner.busy(), "late native completion retires only the old turn and starts normal unload");
+    assert.equal(admitted, false); unload.resolve(); await next; assert(admitted); assert.equal(h.sent.length, 1);
+  } finally { unload.resolve(); releaseNext?.(); await runner.stop(); await adapter.dispose?.(); await runner.ownerStopped(); gpu.stop(); }
+});
+
+it("publishes late settlement so an interrupted request becomes acknowledgeable without polling or replay", async () => {
+  const h = await fixture(), gpu = new LocalGpu(async () => {}); h.fail();
+  const adapter = withLocalGpu(h.raw, gpu), runner = new HarnessStudioModelRunner({ ...h.deps, adapter: () => adapter });
+  const service = new StudioAssistantService({ store: new FileStudioConversationStore(join(h.scratch, "late-settlement.json")), model: runner,
+    evidence: topic => studioDiagnosticEvidence(topic, {}, Date.now()) });
+  const states: ReturnType<StudioAssistantService["snapshot"]>[] = [], unsubscribe = service.subscribe(state => states.push(state));
+  try {
+    const threadId = (await service.createThread())!;
+    const sent = await service.send({ threadId, text: "One explicit question", model: input.model }); assert.equal(sent.status, "accepted");
+    await until(() => service.snapshot().threads[0]!.pending?.state === "interrupted", "unknown request retains its interrupted intent");
+    assert(states.at(-1)?.busy); assert.equal(h.sent.length, 1);
+    h.emit({ type: "message.completed", sessionId: h.sent[0]!.sessionId, text: "Late content must not become a new reply" });
+    await until(() => states.at(-1)?.busy === false, "native settlement publishes through the existing private subscription");
+    assert(!JSON.stringify(states).includes("Late content must not become a new reply"));
+    const pending = service.snapshot().threads[0]!.pending!;
+    assert(await service.acknowledgeInterruption(threadId, pending.id)); assert.equal(h.sent.length, 1);
+  } finally { unsubscribe(); await service.stop(); await adapter.dispose?.(); await runner.ownerStopped(); gpu.stop(); }
+});
+
 it("refuses a harness without private session isolation before preparing or sending content", async () => {
   const h = await fixture(); delete (h.raw as { privateSessions?: true }).privateSessions;
   try { await assert.rejects(h.runner.run(input, new AbortController().signal, allow), /private operational sessions/); assert.equal(h.created.length, 0); assert.equal(h.prepared.length, 0); assert.equal(h.sent.length, 0); }

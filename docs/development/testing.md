@@ -1595,6 +1595,16 @@ loopback/filesystem access. These fixtures make no live-model or paid request an
 complete route/spend or unknown-inference cleanup qualification. Client Bench/chapter/Generate/
 scene regression suites check contextual access independently from Studio. The real-browser
 `audiobook-show-layout.test.tsx` checks titlebar separation and 44px touch targets with long titles.
+Private ownership regressions use coordinator `test/local-gpu.test.ts` (at the test root),
+`test/harness-runtime-change.test.ts` and `test/studio-assistant/*.test.ts`, plus the adapter's
+v2 suites. `studio-assistant/native-owner.test.ts` drives actual v2 HTTP/SSE and the production
+model-validation/GPU/runtime wrapper order: an echoed send error and Stop acknowledgement
+must keep ownership; a late native completion retires the original turn, then the next engine
+still waits for normal unload. Other cases cover exact trusted cleanup, prototype capability
+receivers, stale-generation interrupts, missing proof, single-prompt private sessions and
+private late-settlement notification without transcript replay. Combine with model-routing,
+recovery/harness and v2-launch tests for the native gate. These use scripted local providers,
+not physical model-memory measurements; the optional pinned-native launch case is separate.
 After building, `node --import tsx apps/desktop/scripts/smoke-transport-flow.mjs` checks a real
 hidden sandboxed Electron file page and built preload, including a correlated private reply,
 history negotiation/reset, hidden capability and authenticated media range. No model, paid

@@ -110,7 +110,12 @@ export async function createPreparedSession(
         // refuses an already-fired signal, and a session opened for a stopped run is an orphan.
         abort.signal.throwIfAborted();
         const created = await adapter.createSession({ ...session, ...(agent ? { agent } : {}), cwd: dir, preparationId, signal: abort.signal });
-        return { ...created, ...(model !== undefined ? { model } : {}) };
+        return { ...created, ...(model !== undefined ? { model } : {}),
+          // Native capabilities may be prototype methods/getters. Preserve their receiver
+          // and promise identity; spreading a SessionRef must not drop or retarget authority.
+          ...(created.privateEvents ? { privateEvents: created.privateEvents.bind(created) } : {}),
+          ...(created.privateTurnSettled ? { privateTurnSettled: created.privateTurnSettled } : {}),
+          ...(created.privateOwnerStopped ? { privateOwnerStopped: created.privateOwnerStopped.bind(created) } : {}) };
       } finally {
         adapter.abandonSessionPreparation?.(preparationId);
       }

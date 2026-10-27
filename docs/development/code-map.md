@@ -1167,7 +1167,22 @@ events and session trace facts (including backend errors that echo content), and
 unexpected private tool permission internally. Grants cannot override that rejection. The GPU
 wrapper also excludes private session activity from its common stream. Ordinary authoring
 events/traces keep their existing path. Other adapters have not yet qualified private sessions;
-native route/spend, unknown-inference/GPU cleanup and complete payload bounds remain gates.
+native route/spend, actual backing-inference cleanup qualification and complete payload bounds
+remain gates.
+
+Private inference ownership uses `SessionRef.privateTurnSettled`: native v2 completion or the
+exact host-only `privateOwnerStopped` cleanup capability can settle one turn. A send error,
+Stop acknowledgement, writing-child exit or adapter disposal cannot. Private sessions admit
+only one prompt. The GPU and runtime-change wrappers keep the admitted lease/fence after an
+unknown send and release it only after native proof plus send settlement; an error before
+dispatch cancels that queued waiter. `session-files.ts` preserves opaque capability receivers
+and promise identity through prepared-session composition. The runner retains its private
+config until settlement, fences old-session interrupts against replacement generations and
+does not publish a late reply. Its optional busy subscription updates the private service so
+an interrupted request can be explicitly acknowledged without polling or replay. Closing
+admission removes that observer. The cleanup capability is ephemeral native authority, not
+a model, renderer, persisted-plan or wire command. Actual reviewed cleanup plans, route/spend
+composition and physical runtime/platform qualification remain unfinished.
 
 Guarded Studio sends use `HarnessAdapter.sendMessageWithFence`: the GPU and runtime-change
 wrappers propagate a synchronous final owner/route check through admission waits. A cancelled

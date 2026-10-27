@@ -24,6 +24,16 @@ export interface SessionRef {
   /** Host-only, one-use observer for this exact private operational session. Its events
    * SHALL be excluded from streamEvents and ordinary traces; never serialize this capability. */
   privateEvents?(signal: AbortSignal): AsyncIterable<HarnessEvent>;
+  /** Host-only proof for the private session's single model turn. Resolves only on confirmed
+   * native completion or the owning host's confirmed backing-inference cleanup, never on a
+   * send error, interrupt acknowledgement or writing-process exit. A pending proof retains
+   * inference ownership. Never serialize this promise. */
+  privateTurnSettled?: Promise<void>;
+  /** Opaque host-only capability for this exact private owner. Invoke only after BOTH its
+   * backing inference and writing owner have confirmed native cleanup/no further dispatch.
+   * A local writer exiting cannot confirm remote inference. Never expose this to a model,
+   * renderer, log, persisted plan or wire command. It also retires the native session. */
+  privateOwnerStopped?(): void;
 }
 
 /** What a session is for — selects the agent configuration and the confinement posture (§17.1). */

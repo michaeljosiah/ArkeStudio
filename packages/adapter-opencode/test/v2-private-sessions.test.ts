@@ -88,6 +88,40 @@ it("keeps backend errors that echo private content out of shared events and harn
     assert(JSON.stringify(h.traces).includes("PUBLIC_TRACE_FAILURE"), "the scripted failure really contains the backend error body");
   } finally { observation?.stop.abort(); await observation?.done.catch(() => {}); await h.close(); }
 });
+it("keeps private native settlement unknown after an error/interrupt and forbids reusing the session for another prompt", async () => {
+  const h = await fixture(); let observation: ReturnType<typeof observe> | undefined;
+  try {
+    const ref = await h.create(); let settled = false;
+    assert(ref.privateTurnSettled); void ref.privateTurnSettled.then(() => { settled = true; });
+    observation = observe(ref, event => event.type === "session.error");
+    h.stub.failNextPrompt = "The private request outcome is unknown";
+    await h.adapter.sendMessage({ sessionId: ref.sessionId, parts: [{ type: "text", text: "One request" }] }); await observation.done;
+    assert.equal(settled, false);
+    await h.adapter.interrupt(ref.sessionId); assert.equal(settled, false);
+    await assert.rejects(h.adapter.sendMessage({ sessionId: ref.sessionId, parts: [{ type: "text", text: "Another request must use a new session" }] }), /one model turn/);
+    assert.equal(h.stub.requests.filter(request => request.path === `/api/session/${ref.sessionId}/prompt`).length, 1);
+    h.stub.emitTurn(ref.sessionId, "A late confirmed native completion");
+    await until(() => settled, "the original native turn finally confirms completion");
+  } finally { observation?.stop.abort(); await observation?.done.catch(() => {}); await h.close(); }
+});
+it("does not claim backing-model completion when the writing process exits or the adapter is disposed", async () => {
+  const h = await fixture();
+  try {
+    const ref = await h.create(); let settled = false;
+    void ref.privateTurnSettled!.then(() => { settled = true; });
+    h.adapter.runtimeExited(); await h.adapter.dispose();
+    assert.equal(settled, false);
+    ref.privateOwnerStopped!(); await ref.privateTurnSettled; assert.equal(settled, true, "only the owning host can confirm the backing inference cleanup");
+  } finally { await h.close(); }
+});
+it("the trusted cleanup capability retires its exact unused session and cannot authorize a later prompt", async () => {
+  const h = await fixture();
+  try {
+    const ref = await h.create(); ref.privateOwnerStopped!(); await ref.privateTurnSettled;
+    await assert.rejects(h.adapter.sendMessage({ sessionId: ref.sessionId, parts: [{ type: "text", text: "Retired owner must not dispatch" }] }), /owner has been retired/);
+    assert.equal(h.stub.requests.filter(request => request.path === `/api/session/${ref.sessionId}/prompt`).length, 0);
+  } finally { await h.close(); }
+});
 it("rejects unexpected private tool permissions within the native owner without opening the world permission path", async () => {
   const h = await fixture(); let observation: ReturnType<typeof observe> | undefined;
   try {

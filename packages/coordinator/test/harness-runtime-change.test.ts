@@ -2,6 +2,32 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import type { HarnessAdapter } from "@arke-studio/contracts";
 import { HarnessRuntimeChanges } from "../src/harness/runtime-change.js";
+import { until } from "./wait.js";
+
+it("a private send error keeps settings/recovery admission held until native turn settlement", async () => {
+  const gate = new HarnessRuntimeChanges(); let complete!: () => void, sent = 0;
+  const native = new Promise<void>(resolve => { complete = resolve; });
+  const raw = { createSession: async () => ({ sessionId: "private", privateTurnSettled: native }),
+    sendMessage: async () => { sent++; throw new Error("native outcome unknown"); } } as unknown as HarnessAdapter;
+  const adapter = gate.wrap(raw); await adapter.createSession({ purpose: "ask", agent: "studio-assistant", visibility: "private" });
+  const turn = assert.rejects(adapter.sendMessage({ sessionId: "private", parts: [] }), /native outcome unknown/);
+  await until(() => sent === 1, "the private send reaches its native owner");
+  await assert.rejects(gate.run(async () => {}), /Finish or cancel writing/);
+  let reserved = false; const recovery = gate.reserveRecovery(new AbortController().signal).then(release => { reserved = true; return release; });
+  await Promise.resolve(); assert.equal(reserved, false);
+  await assert.rejects(adapter.sendMessage({ sessionId: "other", parts: [] }), /recovering/);
+  complete(); await turn; const release = await recovery; assert(reserved); release();
+  await gate.run(async () => {}); assert.equal(sent, 1, "only a newly authorized turn can dispatch again");
+});
+
+it("a rejected private final fence retires without waiting for an unstarted native turn", async () => {
+  const gate = new HarnessRuntimeChanges(); let sent = 0;
+  const raw = { createSession: async () => ({ sessionId: "private", privateTurnSettled: new Promise<void>(() => {}) }),
+    sendMessage: async () => { sent++; return { sessionId: "private", correlationId: "private" }; } } as unknown as HarnessAdapter;
+  const adapter = gate.wrap(raw); await adapter.createSession({ purpose: "ask", visibility: "private", agent: "studio-assistant" });
+  await assert.rejects(adapter.sendMessageWithFence!({ sessionId: "private", parts: [] }, () => { throw new Error("route changed"); }), /route changed/);
+  await gate.run(async () => {}); assert.equal(sent, 0);
+});
 
 it("keeps guarded dispatch inside runtime admission and lets a rejected final fence prevent the send", async () => {
   const gate = new HarnessRuntimeChanges(); let sent = 0, checked = 0, finish!: () => void;

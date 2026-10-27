@@ -18,16 +18,35 @@ export class HarnessRuntimeChanges {
   private changed(): void { for (const listener of this.idle) listener(); }
 
   wrap<T extends HarnessAdapter>(adapter: T): T {
+    const privateCompletion = new Map<string, Promise<void>>();
     return new Proxy(adapter, { get: (target, property) => {
+      if (property === "createSession") return async (input: Parameters<HarnessAdapter["createSession"]>[0]) => {
+        const session = await target.createSession(input);
+        if (input.visibility === "private") {
+          if (!session.privateTurnSettled) throw new Error("The private session has no native completion proof.");
+          privateCompletion.set(session.sessionId, session.privateTurnSettled);
+        }
+        return session;
+      };
       if (property === "sendMessage" || property === "sendMessageWithFence") return async (input: Parameters<HarnessAdapter["sendMessage"]>[0], beforeDispatch?: () => void) => {
         if (this.changing || this.recoveryWaiting || this.recoveryHeld) throw new Error("Writing runtime settings are changing or recovering. Try again shortly.");
         this.active++;
+        const completion = privateCompletion.get(input.sessionId);
+        let dispatched = false, confirmed = false;
         try {
-          if (beforeDispatch && target.sendMessageWithFence) return await target.sendMessageWithFence(input, beforeDispatch);
-          beforeDispatch?.();
-          return await target.sendMessage(input);
+          let receipt: Awaited<ReturnType<HarnessAdapter["sendMessage"]>> | undefined, failure: unknown, failed = false;
+          const dispatch = () => { beforeDispatch?.(); dispatched = true; };
+          try {
+            if (target.sendMessageWithFence) receipt = await target.sendMessageWithFence(input, dispatch);
+            else { dispatch(); receipt = await target.sendMessage(input); }
+          } catch (error) { failed = true; failure = error; }
+          // A settled private HTTP/SDK call is not proof that its backing inference stopped.
+          // Settings/recovery keep their admitted owner until the same native turn completes.
+          if (completion && dispatched) { await completion; confirmed = true; }
+          if (failed) throw failure;
+          return receipt!;
         }
-        finally { this.active--; this.changed(); }
+        finally { if (!completion || !dispatched || confirmed) { this.active--; this.changed(); } }
       };
       const value = Reflect.get(target, property);
       return typeof value === "function" ? value.bind(target) : value;

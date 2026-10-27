@@ -66,6 +66,7 @@ export interface OpenCodeV2AdapterOptions {
 
 interface TrackedSession {
   private: boolean;
+  privateTurn?: { dispatched: boolean; stopped: boolean; settled: Promise<void>; complete(): void };
   purpose: CreateSessionInput["purpose"];
   cwd?: string;
   agent?: string;
@@ -349,8 +350,11 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       throw error;
     }
     if (window !== undefined) this.sessionWindows.set(sessionId, window);
+    let complete!: () => void;
+    const privateTurn = privateSession ? { dispatched: false, stopped: false, settled: new Promise<void>(resolve => { complete = resolve; }), complete: () => complete() } : undefined;
     this.sessions.set(sessionId, {
       private: privateSession,
+      ...(privateTurn ? { privateTurn } : {}),
       purpose: input.purpose,
       ...(location ? { cwd: location } : {}),
       ...(input.agent ? { agent: input.agent } : {}),
@@ -360,7 +364,8 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     this.trace("session.created", { sessionId, agent: input.agent ?? null, baseUrl: this.opts.baseUrl() });
     this.push({ type: "session.created", sessionId });
     let observed = false;
-    return { sessionId, ...(privateSession ? { privateEvents: (signal: AbortSignal) => {
+    return { sessionId, ...(privateTurn ? { privateTurnSettled: privateTurn.settled,
+      privateOwnerStopped: () => { privateTurn.stopped = true; privateTurn.complete(); }, privateEvents: (signal: AbortSignal) => {
       if (observed) throw new Error("The private session observer was already used.");
       observed = true;
       return this.events(signal, sessionId);
@@ -377,6 +382,12 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     if (this.disposed) throw new Error("The writing adapter is closed.");
     if (input.parts.some(part => part.type === "image") && !this.imageInputForSession(input.sessionId)) {
       throw new Error("This OpenCode session cannot inspect images. Select a model with verified image input.");
+    }
+    const privateTurn = this.sessions.get(input.sessionId)?.privateTurn;
+    if (privateTurn) {
+      if (privateTurn.stopped) throw new Error("The private operational owner has been retired.");
+      if (privateTurn.dispatched) throw new Error("A private operational session permits one model turn only.");
+      privateTurn.dispatched = true;
     }
     // The turn's completion arrives only on the stream — make sure someone is listening even
     // if the host never called streamEvents(), or sendMessage waits on silence forever.
@@ -718,6 +729,10 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
 
   private push(event: HarnessEvent): void {
     const parsed = HarnessEventSchema.parse(event);
+    if (parsed.type === "message.completed") {
+      const turn = this.sessions.get(parsed.sessionId)?.privateTurn;
+      if (turn?.dispatched) turn.complete();
+    }
     if ((parsed.type === "message.completed" || parsed.type === "session.error" || parsed.type === "session.ended") && "sessionId" in parsed && parsed.sessionId) {
       this.pendingTurns.delete(parsed.sessionId);
     }
