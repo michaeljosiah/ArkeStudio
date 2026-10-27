@@ -66,6 +66,20 @@ The mounted-destination fixture keeps a published file on a full volume while do
 file to a different volume. Reservation/replan fixtures invalidate another owner's capacity during
 a blocked flush, refresh it, then verify the old grant stays revoked and its intent remains uncertain.
 
+Ming cleanup recovery uses coordinator `test/recovery/ming-cleanup.test.ts` and
+`test/recovery/ming-host.test.ts`, contracts `test/ming-recovery.test.ts` and the extended
+diagnostics/incident/action-history suites, plus client `test/recovery-ming-cleanup.test.tsx`
+and Diagnostics navigation checks. The production host fixture uses the real Ming batch owner
+with a tiny Node worker, flushed child ledger, native kernel ownership and authenticated socket.
+It injects failed termination, checks a competing GPU waiter remains held, previews without
+acting, then approves original cleanup and verifies process exit before release. Narration runs
+once and unrelated creative bytes remain intact. Runner tests withhold the ledger flush and
+refuse a later record to verify cleanup authority cannot be fabricated or reused by a new worker.
+Use native process/filesystem/loopback permissions and bounded concurrency (for example two
+files); no model download or actual GPU is required. These are lifecycle checks, not Python/model
+quality, GPU allocation or cross-restart incident-correlation qualification. Run typecheck after
+the final test edit. The full epic and actual matched turn-239 visual acceptance remain separate.
+
 Setup native ownership checks use `test/setup/process.test.ts` and
 `test/setup/host-process-cleanup.test.ts`, with native process/loopback/filesystem access. They run
 literal disposable commands, hold the ownership gate, observe a helper surviving its command's exit,
@@ -617,6 +631,12 @@ stills, video, scoped alpha and composition alpha at exact
 half-open intervals after gaps, at 24/25/30 fps and inside nonzero export windows. Run
 `node --import tsx scripts/smoke-editor-effects-preview.mjs` for real Chrome decoding, source
 alpha, contained targets, multiple picture layers, all six presets and seek/worker checks.
+The Effects workflow installs Chrome for Testing 156.0.8078.47 through a commit-pinned setup
+action and passes its exact binary through `ARKE_CHROME`; `ARKE_EFFECT_CHROME_VERSION`
+asserts the version actually exercised. Runner-provided Chrome varied between green and
+terminated jobs on the same Ubuntu image. This pins the previously passing decoder rather
+than relaxing assertions, deadlines or Linux coverage. Local runs can still choose their own
+`ARKE_CHROME`; a different browser is a separate qualification result.
 `node --import tsx scripts/benchmark-editor-effects.ts --output <report.json>` records the
 runtime, hardware, capability profile, frame digests, near/far seek times, worst overlap raster
 times and process memory. The native production acceptance CI job repeats these measurements

@@ -22,6 +22,7 @@ export class MingProcessCleanupPending extends Error {
  * completed Python parent cannot release its descendants' CUDA context or batch files. */
 export class MingProcess {
   get running(): boolean { return this.programs.running || this.launching; }
+  get cleanupAuthorized(): boolean { return !this.launching && this.programs.durableCleanupAuthorized; }
   private launching = false;
   private disposed = false;
   private readonly programs: SetupProcessRunner;

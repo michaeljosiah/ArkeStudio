@@ -12,6 +12,27 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });
 
+it("opens the exact Ming cleanup review without acting and refreshes stale owner evidence", async () => {
+  for (const stale of [false, true]) {
+    const at = Date.now(), now = new Date(at).toISOString(), sent: ClientMessage[] = [], state = structuredClone(FIXTURE_STATE);
+    state.app.recoveryPolicy = { audit: "available", accepting: true, mode: "suggest-only", targets: [], mingCleanup: { state: "held", scope: "d".repeat(64),
+      authority: "original-worker", available: true, waiting: 1, measuredAt: at - (stale ? 60_001 : 0), confirmation: null } };
+    const snapshot = deriveDiagnostics({ sources: diagnosticsSources(state.app), tails: { appLog: [] }, previous: null, now });
+    __setStateForTest(state, { connection: "open", diagnostics: snapshot });
+    __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json) { sent.push(JSON.parse(json)); } });
+    const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+    try {
+      await act(async () => root.render(<MemoryRouter initialEntries={["/settings/diagnostics"]}><SettingsDiagnosticsScreen /></MemoryRouter>));
+      const count = sent.filter(message => message.kind === "refresh-diagnostics").length;
+      const row = container.querySelector('[data-kind="ming-cleanup-unconfirmed"]')!;
+      await act(async () => row.querySelector<HTMLButtonElement>(".fy-diag__go")!.click());
+      assert(!sent.some(message => message.kind === "recovery-action"));
+      if (stale) assert.equal(sent.filter(message => message.kind === "refresh-diagnostics").length, count + 1);
+      else assert(container.textContent?.includes("Opening this review starts no cleanup"));
+    } finally { await act(async () => root.unmount()); container.remove(); __setBridgeForTest(null); }
+  }
+});
+
 it("requests storage measurement from the finding and stale Refresh without remounting Diagnostics", async () => {
   const now = new Date().toISOString(), sent: ClientMessage[] = [];
   const snapshot = deriveDiagnostics({ sources: diagnosticsSources({ ...FIXTURE_STATE.app,

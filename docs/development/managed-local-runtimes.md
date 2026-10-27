@@ -108,6 +108,17 @@ confirm release even after its ready URL disappears; healthy sibling workers rem
 Ollama model readiness is rechecked against the selected store, including models downloaded
 earlier in the same session, and an old service's pull cannot mark a new service ready.
 
+When a settled Ming batch cannot confirm original-worker cleanup, Diagnostics now shows its
+retained graphics-card hold proactively. **Review Ming cleanup** shows impact; a separate
+approval retries only that original owned cleanup. It can terminate the original worker's
+remaining processes, starts no inference and repeats no narration. The GPU reservation is
+released only after confirmed exit. General recovery-audit degradation does not block this
+protective cleanup when its original child-ledger authority is intact. Missing original authority
+requires owned-process checks during shutdown/next startup; it grants no arbitrary process kill.
+Current-session incidents and outcome summaries distinguish unknown cleanup from confirmed
+release, and never claim a creative result succeeded. Cross-restart correlation of this
+ephemeral GPU hold remains unqualified.
+
 ## Ming qualification and delivery boundary
 
 The [managed-runtime qualification](../research/ming-managed-runtime-2026-10-25.md) proves

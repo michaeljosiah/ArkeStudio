@@ -98,6 +98,19 @@ an already-saved intent remains uncertain until its owner settles it. Completed-
 are excluded from direct-file admission, so a full old model volume does not block a different
 volume that has room for the missing files.
 
+Ming retained cleanup: `local-ai/gpu.ts` observes the exact failed batch lease and captures a
+generation-bound confirmation; `setup/process.ts` latches original cleanup authority only after
+native binding and the child-ledger flush. `local-ai/ming.ts` exposes that authority after the
+batch settles. Coordinator publishes a closed `recoveryPolicy.mingCleanup` observation, and
+contracts `ming-recovery.ts` derives the proactive finding without probing a process or guessing
+inference health. `recovery/actions.ts` uses its existing single executor for separate review and
+approval of original cleanup. `recovery-ming-cleanup.tsx` presents impact and never resubmits a
+reading. Positive confirmation clears only the matching incident; missing state does not.
+Chronological outcomes contain hashed presentation IDs, with no executable scope/PID/path.
+Tests: `test/recovery/ming-{cleanup,host}.test.ts`, native runner/Ming tests and corresponding
+contracts/client suites. Cross-restart correlation of the ephemeral hold remains unqualified;
+the original child ledger keeps its existing startup cleanup authority.
+
 Setup native ownership: `setup/process.ts` gates catalogue commands behind a private anchor;
 `setup/process-job.ts` binds Windows trees to a reused non-breakaway job, queries active processes
 and confirms termination. Ordinary POSIX helpers share the still-live anchor's private process

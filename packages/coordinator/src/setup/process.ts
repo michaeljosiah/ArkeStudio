@@ -50,6 +50,10 @@ const live = (child: ChildProcess) => child.exitCode === null && child.signalCod
  * unresolved cleanup retains the anchor/job for an explicit later owner cleanup attempt. */
 export class SetupProcessRunner {
   get running(): boolean { return this.active !== null; }
+  /** The original worker passed the kernel bind and flushed-ledger gate. Kept through
+   * confirmed exit so a retained GPU owner can finish its original cleanup confirmation. */
+  get durableCleanupAuthorized(): boolean { return this.cleanupAuthorized; }
+  private cleanupAuthorized = false;
   private active: Active | null = null;
   private closing = false;
   private readonly lifetime = new AbortController();
@@ -99,6 +103,7 @@ export class SetupProcessRunner {
     context?: { cwd: string; env: NodeJS.ProcessEnv }): Promise<{ code: number; output: string }> {
     if (this.closing || this.active) throw new SetupProcessCleanupPending(); signal.throwIfAborted();
     const request = JSON.stringify({ command, args }); if (Buffer.byteLength(request) > 64 * 1024) throw new Error("Setup command exceeds its supported bound.");
+    this.cleanupAuthorized = false;
     const allowed = new Set(["SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PATH", "COMSPEC", "PATHEXT", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "HOME", "TMP", "TEMP", "TMPDIR", "LD_LIBRARY_PATH", "OLLAMA_HOST", "OLLAMA_MODELS"]);
     const env = Object.fromEntries(Object.entries(process.env).filter((row): row is [string, string] => row[1] !== undefined && allowed.has(row[0].toUpperCase())));
     const child = spawn(process.execPath, ["-e", WORKER], { shell: false, windowsHide: true, detached: process.platform !== "win32",
@@ -146,6 +151,7 @@ export class SetupProcessRunner {
       await this.wait(active.binding, readySignal);
       await this.wait(this.deps.ledger?.record({ id: this.deps.ledgerId ?? "setup", pid: child.pid, image: process.platform === "linux" ? basename(process.execPath) : basename(process.execPath).toLowerCase(),
         ...(process.platform === "linux" ? { imageKind: "executable" as const, processGroupLeader: true as const } : {}), ...ownerStamp(), recordedAt: Date.now() }) ?? Promise.resolve(), readySignal);
+      this.cleanupAuthorized = this.deps.ledger !== undefined;
       combined.throwIfAborted(); active.launched = true; child.stdin?.write(request + "\n");
       const code = await this.wait(completed, combined);
       while (await this.job.active(child.pid, combined) > 1) await this.pause(combined);

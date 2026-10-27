@@ -68,6 +68,7 @@ it("settles failed cancellation while retaining the native process and GPU for c
     abort.abort(new Error("cancelled"));
     await rejected;
     assert.equal(gpu.isBusy("Ming"), true);
+    assert.equal(owner.cleanupAuthorized, false, "an unledgered native fixture cannot advertise reviewed cleanup");
     assert.doesNotThrow(() => process.kill(pid, 0));
     let admitted = false;
     const waiting = gpu.acquire("ComfyUI", new AbortController().signal).then(release => { admitted = true; return release; });

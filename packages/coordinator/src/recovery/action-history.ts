@@ -42,6 +42,8 @@ export function partialCleanupHistory(pending: { planId: string; key: string; at
 }
 export function reviewedActionHistory(result: RecoveryActionResult, at: number): RecoveryActionSummary[] {
   if (result.status === "preview" || result.status === "accepted") return [];
+  if (result.mingPlan) return [{ id: hash("ming-cleanup", result.mingPlan.id), resourceId: hash("ming-cleanup-scope", result.mingPlan.scope),
+    action: "confirm-ming-cleanup", automatic: false, authorizedAt: null, outcomeAt: at, outcome: result.status, evidence: "executor-result" }];
   if (result.reconciliation) return [cleanupCheckHistory(result.requestId, at, result.status === "verified")];
   if (!result.cleanupPlan) return [];
   return [{ id: hash("preview-cleanup", result.cleanupPlan.id), resourceId: previewHistoryResource, action: "cleanup-local-preset-previews",

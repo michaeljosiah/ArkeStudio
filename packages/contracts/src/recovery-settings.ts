@@ -2,10 +2,11 @@ import { z } from "zod";
 import { RecoveryActionSummarySchema } from "./recovery-action-history.js";
 import { RecoveryModeSchema, RecoveryOutcomeSummarySchema, RECOVERY_POLICY } from "./recovery-policy.js";
 import { RecoveryHistorySnapshotSchema, RecoveryIncidentSchema, RECOVERY_HISTORY_LIMITS } from "./recovery-incidents.js";
-import { RecoveryCacheMaintenanceSchema, RecoveryCacheScopeSchema } from "./recovery-actions.js";
+import { RecoveryCacheMaintenanceSchema, RecoveryCacheScopeSchema, MingCleanupSnapshotSchema } from "./recovery-actions.js";
 
 /** SPEC-061 R-7/R-18/R-25. Presentation of policy carries no intent/capability or repair grant. */
 export const RecoveryPolicySnapshotSchema = z.object({
+  mingCleanup: MingCleanupSnapshotSchema.optional(),
   cleanup: z.object({ available: z.boolean(), pending: z.boolean(), audit: z.enum(["starting", "available", "unavailable"]).optional(),
     maintenance: RecoveryCacheMaintenanceSchema.optional(),
     scope: RecoveryCacheScopeSchema.optional(),

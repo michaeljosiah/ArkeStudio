@@ -7,6 +7,7 @@ import { formatGb } from "./runtime-gate.js";
 import type { ClientState } from "./client-state.js";
 import { deriveStorageFindings } from "./storage-diagnostics.js";
 import type { RecoveryPolicySnapshot } from "./recovery-settings.js";
+import { mingCleanupFindings } from "./ming-recovery.js";
 
 /**
  * The diagnostics snapshot (SPEC-032): the set of findings true right now, derived from state
@@ -64,6 +65,8 @@ export const FINDING_SEVERITY_RANK: Record<FindingSeverity, number> = {
 export const CONTROL_REGISTRY = {
   "storage-refresh": { label: "Refresh", place: "Settings · Diagnostics", route: "/settings/diagnostics" },
   "local-preview-cleanup-review": { label: "Review preview cleanup", place: "Settings · Diagnostics", route: "/settings/diagnostics", targetParam: "cleanupScope" },
+  "ming-cleanup-review": { label: "Review Ming cleanup", place: "Settings · Diagnostics", route: "/settings/diagnostics", targetParam: "mingCleanupScope" },
+  "ming-cleanup-refresh": { label: "Refresh", place: "Settings · Diagnostics", route: "/settings/diagnostics" },
   /** Stops the supervised child and resolves the selection again (Settings · Providers). */
   "comfyui-restart": {
     label: "Restart",
@@ -186,6 +189,7 @@ export const CONTROL_IDS = Object.keys(CONTROL_REGISTRY) as [ControlId, ...Contr
  * a finding of a kind that declares it references it as a consequence in the same snapshot.
  */
 export const FINDING_KINDS = {
+  "ming-cleanup-unconfirmed": { subsumes: [] },
   "storage-pressure": { subsumes: [] },
   "storage-capacity-unknown": { subsumes: [] },
   "storage-control-unavailable": { subsumes: [] },
@@ -423,7 +427,7 @@ export type DiagnosticsSources = Pick<
   | "drift"
   | "builds"
   | "update"
-> & { cleanup?: Pick<NonNullable<RecoveryPolicySnapshot["cleanup"]>, "available" | "pending" | "scope"> };
+> & { cleanup?: Pick<NonNullable<RecoveryPolicySnapshot["cleanup"]>, "available" | "pending" | "scope">; mingCleanup?: RecoveryPolicySnapshot["mingCleanup"] };
 
 export function diagnosticsSources(app: ClientState["app"]): DiagnosticsSources {
   return {
@@ -432,6 +436,10 @@ export function diagnosticsSources(app: ClientState["app"]): DiagnosticsSources 
     env: app.env,
     runtime: app.runtime,
     storageHealth: app.storageHealth,
+    ...(app.recoveryPolicy?.mingCleanup ? { mingCleanup: { state: app.recoveryPolicy.mingCleanup.state, scope: app.recoveryPolicy.mingCleanup.scope,
+      authority: app.recoveryPolicy.mingCleanup.authority, available: app.recoveryPolicy.mingCleanup.available,
+      waiting: app.recoveryPolicy.mingCleanup.waiting, measuredAt: app.recoveryPolicy.mingCleanup.measuredAt,
+      confirmation: app.recoveryPolicy.mingCleanup.confirmation ? { scope: app.recoveryPolicy.mingCleanup.confirmation.scope, at: app.recoveryPolicy.mingCleanup.confirmation.at } : null } } : {}),
     ...(app.recoveryPolicy?.cleanup ? { cleanup: { available: app.recoveryPolicy.cleanup.available, pending: app.recoveryPolicy.cleanup.pending,
       ...(app.recoveryPolicy.cleanup.scope ? { scope: { revision: app.recoveryPolicy.cleanup.scope.revision, volumeId: app.recoveryPolicy.cleanup.scope.volumeId,
         mappingRevision: app.recoveryPolicy.cleanup.scope.mappingRevision, measuredAt: app.recoveryPolicy.cleanup.scope.measuredAt,
@@ -1300,6 +1308,7 @@ const STATE_RULES: readonly Rule[] = [
   hardwareFacts,
   windowsCommitFacts,
   { kind: "storage-pressure", run: ctx => deriveStorageFindings(ctx.sources.storageHealth, ctx.now, ctx.sources.cleanup) },
+  { kind: "ming-cleanup-unconfirmed", run: ctx => mingCleanupFindings(ctx.sources.mingCleanup, ctx.now) },
   providerRepeatedFaults,
   spendAbovePrevious,
 ];

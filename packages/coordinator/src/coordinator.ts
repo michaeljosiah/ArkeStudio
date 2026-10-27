@@ -2,7 +2,7 @@ import { savedPicture, openSavedPicture, type SavedPicture } from "./productions
 import { createStudioAssistantHost, type StudioAssistantHost, type StudioAssistantHostOptions } from "./studio-assistant/host.js";
 import { RecoveryActionRegistry } from "./recovery/actions.js";
 import { restartActionHistory, reviewedActionHistory } from "./recovery/action-history.js";
-import { RECOVERY_POLICY, type RecoveryPolicySnapshot, type RecoveryRetryPlan } from "@arke-studio/contracts";
+import { RECOVERY_POLICY, type RecoveryPolicySnapshot, type RecoveryRetryPlan, type MingCleanupSnapshot } from "@arke-studio/contracts";
 import { chapterReviewSummary } from "@arke-studio/contracts";
 import { rebuildBenchPrefill } from "@arke-studio/contracts";
 import { MUSIC_IMPORT_EXTENSIONS } from "@arke-studio/contracts";
@@ -91,7 +91,7 @@ import { tmpdir } from "node:os";
 import type { SessionInput } from "./harness/session-files.js";
 import { existsSync, mkdirSync } from "node:fs";
 import { copyFile, mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { basename, extname, join, resolve, sep } from "node:path";
 import {
   DomainEventSchema,
@@ -1056,7 +1056,7 @@ export interface CoordinatorOptions {
     reconfigureHarness?: (apply?: () => Promise<void>) => Promise<void>;
   };
   /** Ming owns a separate process even when its interpreter belongs to ComfyUI. */
-  ming?: { readonly running?: boolean; run(command: MingBatchCommand, signal: AbortSignal): Promise<void>; unload(signal: AbortSignal): Promise<void>; dispose(): Promise<void> };
+  ming?: { readonly running?: boolean; readonly cleanupAuthorized?: boolean; run(command: MingBatchCommand, signal: AbortSignal): Promise<void>; unload(signal: AbortSignal): Promise<void>; dispose(): Promise<void> };
   /** Real filesystem worker path for a packaged host; never supplied by renderer commands. */
   mingWorkerPath?: string;
   /**
@@ -3195,12 +3195,25 @@ export class Coordinator {
   private readonly sessionInput: SessionInput;
   private studioAssistantHost: StudioAssistantHost | null = null;
   private readonly recoveryTargetObservers = new Map<string, () => void>();
+  private readonly mingObservationKey = randomBytes(32).toString("hex");
+  private mingConfirmation: { revision: number; at: number } | null = null;
+  private mingScope(revision: number): string { return createHash("sha256").update(JSON.stringify(["ming-original-cleanup", this.mingObservationKey, revision])).digest("hex"); }
+  private mingCleanupSnapshot(): MingCleanupSnapshot | undefined {
+    if (!this.opts.ming) return undefined;
+    const source = this.localGpu.mingCleanupState(), at = Date.parse(this.nowIso());
+    if (source.confirmed !== null && source.confirmed !== this.mingConfirmation?.revision) this.mingConfirmation = { revision: source.confirmed, at };
+    return { state: source.state, scope: source.state === "held" || source.state === "checking" ? this.mingScope(source.revision) : null,
+      authority: this.opts.ming.cleanupAuthorized === true ? "original-worker" : "unavailable",
+      available: source.state === "held" && this.opts.ming.cleanupAuthorized === true && this.recoveryActions.mingCleanupAvailable(),
+      waiting: source.waiting, measuredAt: at,
+      confirmation: this.mingConfirmation ? { scope: this.mingScope(this.mingConfirmation.revision), at: this.mingConfirmation.at } : null };
+  }
   private readonly recoveryActions = new RecoveryActionRegistry({ now: () => Date.parse(this.nowIso()), publish: result => {
     if (!this.stopping) {
       this.opts.recoveryHistory?.observeActions(reviewedActionHistory(result, Date.parse(this.nowIso())));
       this.emit({ type: "recovery.action-result", at: this.nowIso(), result }); this.publishRecoveryPolicy();
     }
-  }, maintenanceSettled: () => this.publishRecoveryPolicy(), automaticAllowed: () => {
+  }, ownerSettled: () => this.publishRecoveryPolicy(), automaticAllowed: () => {
     const policy = this.opts.recoveryControl?.policySnapshot();
     return this.started && !this.stopping && policy?.accepting === true && policy.audit === "available" && policy.mode === "automatic";
   } });
@@ -3211,7 +3224,8 @@ export class Coordinator {
       if (!targets.has(target.key) && targets.size >= RECOVERY_POLICY.maxTargets) continue;
       targets.set(target.key, { stoppedByUser: false, circuitOpen: false, pendingOutcome: false, ...targets.get(target.key), ...target });
     }
-    return { ...policy, targets: [...targets.values()], cleanup: this.recoveryActions.cleanupAvailability() };
+    return { ...policy, targets: [...targets.values()], cleanup: this.recoveryActions.cleanupAvailability(),
+      ...(this.opts.ming ? { mingCleanup: this.mingCleanupSnapshot() } : {}) };
   }
   private publishRecoveryPolicy(reconstructed = false): void {
     if (!this.started || this.stopping) return;
@@ -3642,6 +3656,17 @@ export class Coordinator {
       await opts.dispatchClients?.[engine === "Ollama" ? "ollama" : "comfyui"]?.unload?.(signal);
       this.clearLocalResidency(engine === "Ollama" ? "ollama" : "comfyui");
     }, ["Ollama", "ComfyUI", "Ming"]);
+    if (opts.ming) {
+      const owner = opts.ming;
+      this.recoveryActions.registerMingCleanup({ prepare: () => {
+        if (this.stopping || this.opts.ming !== owner || owner.cleanupAuthorized !== true) return null;
+        const prepared = this.localGpu.prepareMingCleanup(); if (!prepared) return null;
+        const current = () => !this.stopping && this.opts.ming === owner && owner.cleanupAuthorized === true && prepared.current();
+        return { scope: this.mingScope(prepared.revision), current,
+          run: (signal, allowed) => prepared.run(AbortSignal.any([signal, this.runtimeStop.signal]), () => allowed() && current()) };
+      } });
+      this.lifecycleDisposers.add(this.localGpu.subscribeMingCleanup(() => this.publishRecoveryPolicy()));
+    }
     if (opts.recoveryControl && opts.ollama && opts.appRoot) {
       const service = opts.ollama.service, control = opts.recoveryControl;
       // The control file already belongs to this app root. Path spelling or a replacement
@@ -4656,7 +4681,7 @@ export class Coordinator {
       this.exportReads.set(parsed.exportId, exportReadRecord(parsed, this.exportReads.get(parsed.exportId)));
     }
     this.readModel.apply(parsed);
-    if (parsed.type === "storage.health" || parsed.type === "comfyui.status") this.opts.recoveryHistory?.observeAvailability(this.readModel.getState().app);
+    if (parsed.type === "storage.health" || parsed.type === "comfyui.status" || parsed.type === "recovery.policy") this.opts.recoveryHistory?.observeAvailability(this.readModel.getState().app);
     if (parsed.type === "export.progress" && exportStatusChanged) {
       const state = this.readModel.getState();
       if (state.world?.meta.worldId === parsed.worldId && state.worldChat?.messages.some(m => m.productionPlan?.productionId === parsed.productionId)) {
@@ -14570,6 +14595,7 @@ export class Coordinator {
         // Schedules only; the derivation runs on the next immediate, off this handler's path
         // (R-34), and reaches the asker as the ordinary broadcast.
         this.diagnosticsSnapshot?.refresh();
+        this.publishRecoveryPolicy();
         if (this.opts.storageHealth) this.trackBackground(this.opts.storageHealth.refresh());
         if (this.cataloguePreviews) this.trackBackground(this.cataloguePreviews.refreshCleanupScope());
         return;

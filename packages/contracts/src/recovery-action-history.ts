@@ -6,7 +6,7 @@ export const RECOVERY_ACTION_HISTORY_LIMITS = Object.freeze({ maxActions: 1000, 
  * plan or native target capabilities. A closed outcome does not establish a creative result. */
 export const RecoveryActionSummarySchema = z.object({
   id: digest, resourceId: digest,
-  action: z.enum(["restart-managed-runtime", "cleanup-local-preset-previews", "check-preview-cleanup"]),
+  action: z.enum(["restart-managed-runtime", "cleanup-local-preset-previews", "check-preview-cleanup", "confirm-ming-cleanup"]),
   service: z.enum(["comfyui", "ollama", "ming", "voice", "harness"]).optional(), automatic: z.boolean(),
   authorizedAt: instant.nullable(), outcomeAt: instant,
   outcome: z.enum(["verified", "failed", "not-started", "unknown", "cancelled", "refused"]),
@@ -53,7 +53,7 @@ export function retainRecoveryActions(rows: readonly RecoveryActionSummary[], in
 
 export function recoveryActionSummaryLabel(row: RecoveryActionSummary): string {
   const action = row.action === "restart-managed-runtime" ? `${({ comfyui: "ComfyUI", ollama: "Ollama", ming: "Ming", voice: "Voice engine", harness: "Writing engine" })[row.service!]} restart`
-    : row.action === "cleanup-local-preset-previews" ? "Local preset preview cleanup" : "Preview cleanup outcome check";
+    : row.action === "cleanup-local-preset-previews" ? "Local preset preview cleanup" : row.action === "confirm-ming-cleanup" ? "Original Ming worker cleanup" : "Preview cleanup outcome check";
   const outcome = { verified: "Verified", failed: "Failed", "not-started": "Not started", unknown: "Unconfirmed", cancelled: "Cancelled", refused: "Refused" }[row.outcome];
   return `${action} · ${outcome}`;
 }

@@ -73,6 +73,18 @@ it("reports failed recovery and verified availability separately from a creative
   assert.equal(recoveryNoticeDecision(incident, incident, history, now + 3, session), null);
 });
 
+it("notifies a failed Ming check once and describes cleanup without claiming narration success", () => {
+  let history = observeRecoveryIncident(emptyRecoveryHistory(), observation({ kind: "ming-cleanup-unconfirmed", phase: "verifying" }), id(1), now);
+  const checking = history.incidents[0]!;
+  history = observeRecoveryIncident(history, observation({ kind: "ming-cleanup-unconfirmed", phase: "action-available", observedAt: now + 1 }), id(2), now + 1);
+  const held = history.incidents[0]!; recordRecoveryNotice(held, now);
+  assert.equal(recoveryNoticeDecision(held, checking, history, now + 1, session), "recovery-failed");
+  recordRecoveryNotice(held, now + 1); assert.equal(recoveryNoticeDecision(held, held, history, now + 2, session), null);
+  history = observeRecoveryIncident(history, observation({ kind: "ming-cleanup-unconfirmed", phase: "recovered", resolution: "verified-condition-clear", observedAt: now + 3 }), id(3), now + 3);
+  const summary = recoveryIncidentSummary(history.incidents[0]!);
+  assert.equal(summary.title, "Ming cleanup confirmed"); assert(JSON.stringify(summary).includes("existing outcome"));
+});
+
 it("caps active history and wire-safe summaries without evicting active faults", () => {
   const observations = Array.from({ length: 1001 }, (_, index) => ({ id: id(index + 1), observation: observation({ key: id(index + 1) }) }));
   const history = observeRecoveryIncidents(emptyRecoveryHistory(), observations, now);

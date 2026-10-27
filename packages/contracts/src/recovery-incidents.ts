@@ -10,7 +10,7 @@ export const RecoveryEvidenceStateSchema = z.enum(["fresh", "stale", "unavailabl
 /** Closed operational facts only. Free-form causes, paths, titles and worker output are never
  * copied from a diagnostic finding into saved history or an assistant's evidence payload. */
 export const RECOVERY_FACT_NAMES = ["held-jobs", "disabled-recipes", "download-mb", "needs-mb", "volume-free-mb", "fault-count", "waiting",
-  "destinations", "available-bytes", "reserve-bytes", "warning-floor-bytes", "estimated-time-to-reserve-ms", "forecast-window-ms", "uncertain-reservations", "reviewable-previews"] as const;
+  "destinations", "available-bytes", "reserve-bytes", "warning-floor-bytes", "estimated-time-to-reserve-ms", "forecast-window-ms", "uncertain-reservations", "reviewable-previews", "cleanup-checking"] as const;
 export const RecoveryFactSchema = z.object({ name: z.enum(RECOVERY_FACT_NAMES), value: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(), measuredAt: instant }).strict();
 export type RecoveryFact = z.infer<typeof RecoveryFactSchema>;
 export const RecoveryObservationSchema = z.object({
@@ -149,7 +149,7 @@ export function recoveryNoticeDecision(incident: RecoveryIncident, previous: Rec
   if (!["advisory", "degraded", "blocking"].includes(incident.severity) || ["observing", "recovering", "verifying"].includes(incident.phase)) return null;
   if (delivered.lastAt === null) return "first-actionable";
   if (critical || delivered.lastSeverity !== null && FINDING_SEVERITY_RANK[incident.severity] < FINDING_SEVERITY_RANK[delivered.lastSeverity]) return "severity-escalated";
-  if (previous && ["recovering", "verifying"].includes(previous.phase) && ["needs-user", "unresolved"].includes(incident.phase)) return "recovery-failed";
+  if (previous && ["recovering", "verifying"].includes(previous.phase) && ["action-available", "needs-user", "unresolved"].includes(incident.phase)) return "recovery-failed";
   return incident.severity === "advisory" && now - delivered.lastAt >= RECOVERY_HISTORY_LIMITS.advisoryIntervalMs ? "advisory-reminder" : null;
 }
 export function recordRecoveryNotice(incident: RecoveryIncident, now: number): void {
@@ -163,6 +163,10 @@ export function recoveryIncidentSummary(incident: RecoveryIncident): { title: st
   const title = incident.kind.startsWith("storage-") || incident.kind === "component-disk-short" ? "Storage needs attention"
     : incident.kind.startsWith("comfyui-") || incident.kind === "work-held-by-engine" ? "Local AI needs attention" : "Studio needs attention";
   if (incident.evidence !== "fresh") return { title, detail: "Current evidence is unavailable. Refresh Diagnostics before taking action." };
+  if (incident.kind === "ming-cleanup-unconfirmed") return incident.phase === "recovered"
+    ? { title: "Ming cleanup confirmed", detail: "The original worker exit was confirmed and its graphics-card hold is settled. Submitted narration keeps its existing outcome." }
+    : { title: "Ming cleanup needs attention", detail: incident.phase === "verifying" ? "Arke is checking the original worker's cleanup. Its graphics-card reservation stays held until exit is confirmed."
+      : "Ming's graphics-card reservation is retained because original worker cleanup is unconfirmed. Review Diagnostics for the next action. Submitted narration is not repeated." };
   if (incident.phase === "recovered") return incident.resolution === "verified-capacity"
     ? { title: "Storage space has recovered", detail: "Fresh measurements confirm available space above the recovery threshold. Held work still needs fresh admission checks." }
     : { title: "Capability is available again", detail: "Service readiness does not establish a completed creative result. Check held work." };

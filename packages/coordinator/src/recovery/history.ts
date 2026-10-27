@@ -158,7 +158,8 @@ export class RecoveryHistoryService {
     const observations: RecoveryObservation[] = primaryFindings(snapshot).filter(finding => finding.severity !== "unmeasured").slice(0, 1000).map(finding => {
       const key = createHash("sha256").update(findingRef(finding)).digest("hex"), facts = recoveryFindingFacts(finding);
       const evidence = finding.stale ? "stale" as const : ["unknown", "unmeasured"].includes(finding.severity) ? "unavailable" as const : "fresh" as const;
-      const phase = evidence !== "fresh" ? "observing" as const : finding.remedy ? "action-available" as const : "needs-user" as const;
+      const phase = evidence !== "fresh" ? "observing" as const : finding.kind === "ming-cleanup-unconfirmed" && facts.some(fact => fact.name === "cleanup-checking" && fact.value === 1)
+        ? "verifying" as const : finding.remedy ? "action-available" as const : "needs-user" as const;
       const evidenceRevision = createHash("sha256").update(JSON.stringify([finding.kind, finding.severity, phase, evidence, facts.map(fact => [fact.name, fact.value])])).digest("hex");
       return { key, kind: finding.kind, evidenceRevision, observedAt, severity: finding.severity, phase, evidence, facts };
     });
@@ -175,7 +176,7 @@ export class RecoveryHistoryService {
   }
   /** Domain-specific resolution evidence, independent of finding disappearance. A persisted
    * volume incident qualifies two fresh high readings even after the app was restarted. */
-  observeAvailability(app: Pick<ClientState["app"], "storageHealth" | "comfyui">): void {
+  observeAvailability(app: Pick<ClientState["app"], "storageHealth" | "comfyui" | "recoveryPolicy">): void {
     if (this.closing || this.audit === "starting") return;
     const now = this.now(), observations: RecoveryObservation[] = [], hash = (value: string) => createHash("sha256").update(value).digest("hex");
     if (!Number.isSafeInteger(now) || now < this.history.lastObservedAt) { this.capacityClears.clear(); return; }
@@ -185,6 +186,12 @@ export class RecoveryHistoryService {
       observations.push({ key, kind: prior.kind, evidenceRevision: hash(JSON.stringify([resolution, evidence])), observedAt: now,
         severity: prior.severity, phase: "recovered", evidence: "fresh", resolution, facts });
     };
+    const ming = app.recoveryPolicy?.mingCleanup, confirmation = ming?.confirmation;
+    if (ming && confirmation && confirmation.scope !== ming.scope && ming.measuredAt <= now && now - ming.measuredAt <= 60_000 && confirmation.at <= now) {
+      const key = hash(findingRef({ kind: "ming-cleanup-unconfirmed", occurrence: confirmation.scope })), prior = active.get(key);
+      if (prior && confirmation.at >= prior.firstObservedAt) resolved(key, "verified-condition-clear",
+        [{ name: "uncertain-reservations", value: 0, measuredAt: confirmation.at }], [confirmation.scope, confirmation.at]);
+    }
     const comfy = app.comfyui, checkedAt = comfy ? Date.parse(comfy.checkedAt) : NaN;
     if (comfy?.engine.state === "ready" && checkedAt <= now && now - checkedAt <= 60000) {
       if (comfy.engine.instanceId) resolved(hash(`comfyui-engine-unavailable:${comfy.engine.instanceId}`), "verified-readiness", [], [comfy.engine.instanceId, checkedAt]);

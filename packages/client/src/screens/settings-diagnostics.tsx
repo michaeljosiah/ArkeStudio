@@ -50,6 +50,7 @@ const CHECK_WORDS: Record<string, string> = {
   "hardware-unmeasured": "hardware",
   "windows-commit": "Windows memory",
   "storage-pressure": "storage",
+  "ming-cleanup-unconfirmed": "Ming cleanup",
   "provider-repeated-faults": "provider faults",
   "spend-above-previous": "spend",
 };
@@ -90,7 +91,7 @@ export function controlHref(remedy: NonNullable<Finding["remedy"]>): string {
 }
 
 function followRemedy(navigate: ReturnType<typeof useNavigate>, remedy: NonNullable<Finding["remedy"]>): void {
-  if (remedy.control === "storage-refresh") refreshDiagnostics();
+  if (["storage-refresh", "ming-cleanup-refresh"].includes(remedy.control)) refreshDiagnostics();
   else followLink(navigate, controlHref(remedy));
 }
 
@@ -169,7 +170,8 @@ function StaleRemeasure({ remedy }: { remedy: NonNullable<Finding["remedy"]> }) 
 
 export function SettingsDiagnosticsScreen() {
   const snapshot = useDiagnostics();
-  const cleanupScope = new URLSearchParams(useLocation().search).get("cleanupScope") ?? undefined;
+  const query = new URLSearchParams(useLocation().search);
+  const cleanupScope = query.get("cleanupScope") ?? undefined, mingCleanupScope = query.get("mingCleanupScope") ?? undefined;
   const target = new URLSearchParams(useLocation().search).get("finding"), focused = useRef<string | null>(null);
   useEffect(() => {
     if (!target || focused.current === target) return;
@@ -192,7 +194,7 @@ export function SettingsDiagnosticsScreen() {
           <span style={{ flex: 1 }} />
           <span className="fy-diag__meta">not derived yet</span>
         </div>
-        <RecoveryControls cleanupScope={cleanupScope} />
+        <RecoveryControls cleanupScope={cleanupScope} mingCleanupScope={mingCleanupScope} />
         <RecoveryHistoryBrowser history={history} />
       </div>
     );
@@ -241,7 +243,7 @@ export function SettingsDiagnosticsScreen() {
             </div>
           ))
       )}
-      <RecoveryControls cleanupScope={cleanupScope} />
+      <RecoveryControls cleanupScope={cleanupScope} mingCleanupScope={mingCleanupScope} />
       <RecoveryHistoryBrowser history={history} />
     </div>
   );

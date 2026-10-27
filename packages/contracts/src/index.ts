@@ -229,6 +229,7 @@ export * from "./ming.js";
 export * from "./storage-health.js";
 export * from "./recovery-incidents.js";
 export * from "./recovery-action-history.js";
+export * from "./ming-recovery.js";
 export * from "./recovery-policy.js";
 export * from "./recovery-actions.js";
 export * from "./recovery-settings.js";

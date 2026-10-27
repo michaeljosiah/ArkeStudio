@@ -5,6 +5,16 @@ import { RecoveryHistoryService } from "../../src/recovery/history.js";
 import { restartActionHistory, cleanupActionHistory, reviewedActionHistory, partialCleanupHistory } from "../../src/recovery/action-history.js";
 
 const key = "a".repeat(64), intent = "b".repeat(64), component = "c".repeat(64), now = 2_000_000;
+
+it("records a reviewed Ming cleanup outcome without executable scope or a narration-success claim", () => {
+  const mingPlan = { id: intent, scope: component, action: "confirm-ming-cleanup" as const, preparedAt: now, expiresAt: now + 300_000,
+    authority: "retained-original-worker" as const, startsInference: false as const, replaysJobs: false as const, releasesGpuOnlyAfterConfirmedExit: true as const };
+  for (const status of ["preview", "accepted"] as const) assert.deepEqual(reviewedActionHistory({ requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV", status, mingPlan }, now), []);
+  const [row] = reviewedActionHistory({ requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV", status: "unknown", mingPlan }, now);
+  assert(row); assert.equal(row.action, "confirm-ming-cleanup"); assert.equal(row.outcome, "unknown"); assert.equal(row.evidence, "executor-result");
+  assert.equal(row.authorizedAt, null); assert.equal(row.cleanup, undefined);
+  assert(!JSON.stringify(row).includes(intent)); assert(!JSON.stringify(row).includes(component));
+});
 function control(id = intent, outcome: "verified" | "unknown" = "verified"): RecoveryControl {
   return { version: 1, policyRevision: 1, mode: "automatic", targets: [{ ...emptyRecoveryTarget(key, "ollama", now), lastOutcome: {
     intentId: id, action: "restart-managed-runtime", generation: 27, componentDigest: component, automatic: true,

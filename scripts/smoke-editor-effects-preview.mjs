@@ -158,7 +158,9 @@ try {
   });
   const js = async expression => { const response = await cdp("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }); if (response.exceptionDetails) throw new Error(JSON.stringify(response.exceptionDetails)); return response.result.value; };
   step("browser connected; verifying target alpha");
-  console.log("[effect-preview] browser version", JSON.stringify(await cdp("Browser.getVersion")));
+  const browserVersion = await cdp("Browser.getVersion");
+  console.log("[effect-preview] browser version", JSON.stringify(browserVersion));
+  if (process.env.ARKE_EFFECT_CHROME_VERSION) assert.equal(browserVersion.product, `Chrome/${process.env.ARKE_EFFECT_CHROME_VERSION}`, "CI must exercise the qualified decoder version");
   await cdp("Page.navigate", { url: origin });
   await until(() => js("window.preview?.frame()==='120'"));
   assert.equal(await js("window.preview.error()"), undefined);

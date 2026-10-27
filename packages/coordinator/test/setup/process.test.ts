@@ -5,12 +5,29 @@ import { readFile, stat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { NativeSetupProcessJob } from "../../src/setup/process-job.js";
+import { ChildLedger } from "../../src/child-ledger.js";
 import { SetupProcessRunner, SetupProcessCleanupPending } from "../../src/setup/process.js";
 import { tempDir } from "../tmp.js";
 import { until } from "../wait.js";
 
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 const gone = (pid: number) => { try { process.kill(pid, 0); return false; } catch { return true; } };
+
+it("latches original cleanup authority only after its child ledger flush and resets it before a new worker", { timeout: 90_000 }, async () => {
+  const root = await tempDir("setup-cleanup-authority-"), marker = join(root, "started"), gate = deferred(), entered = deferred();
+  const ledger = new ChildLedger(join(root, "children.json")), record = ledger.record.bind(ledger);
+  ledger.record = async row => { entered.resolve(); await gate.promise; await record(row); };
+  const runner = new SetupProcessRunner({ ledger });
+  const running = runner.run(process.execPath, ["-e", `require('node:fs').writeFileSync(${JSON.stringify(marker)},'once')`], new AbortController().signal);
+  try {
+    await entered.promise; assert(!runner.durableCleanupAuthorized); assert.equal(await stat(marker).catch(() => null), null);
+    gate.resolve(); assert.equal((await running).code, 0); assert(runner.durableCleanupAuthorized); assert(!runner.running);
+    ledger.record = async () => { throw new Error("synthetic ledger failure"); };
+    const next = runner.run(process.execPath, ["-e", "process.exit(0)"], new AbortController().signal);
+    assert(!runner.durableCleanupAuthorized); await assert.rejects(next); assert(!runner.durableCleanupAuthorized);
+    assert.equal(await readFile(marker, "utf8"), "once");
+  } finally { gate.resolve(); await runner.dispose(); await running.catch(() => {}); }
+});
 
 it("streams bounded archive metadata beyond the ordinary log cap without retaining member names", { timeout: 90000 }, async () => {
   const runner = new SetupProcessRunner(); let bytes = 0;

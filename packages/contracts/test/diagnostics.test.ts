@@ -71,6 +71,20 @@ function derive(over: Partial<DiagnosticsSources> = {}, previous = null as Param
   return deriveDiagnostics({ sources: sources(over), tails: { appLog: [] }, previous, now: NOW });
 }
 
+it("projects only closed Ming cleanup observations and derives the same event-driven finding", () => {
+  const mingCleanup = { state: "held" as const, scope: "a".repeat(64), available: true, authority: "original-worker" as const,
+    waiting: 2, measuredAt: Date.parse(NOW), confirmation: { scope: "b".repeat(64), at: Date.parse(NOW) - 1, pid: 7, secret: "PRIVATE_NATIVE" },
+    pid: 42, nativeToken: "PRIVATE_NATIVE", path: "PRIVATE_PATH" };
+  const app = { ...sources(), recoveryPolicy: { mode: "suggest-only", audit: "available", accepting: true, targets: [], mingCleanup, privateSetting: "PRIVATE_POLICY" } };
+  const projected = diagnosticsSources(app as unknown as Parameters<typeof diagnosticsSources>[0]);
+  assert.equal(projected.mingCleanup?.waiting, 2);
+  const serialized = JSON.stringify(projected.mingCleanup);
+  for (const excluded of ["PRIVATE_NATIVE", "PRIVATE_PATH", "PRIVATE_POLICY", "pid", "nativeToken"]) assert(!serialized.includes(excluded));
+  const snapshot = derive({ mingCleanup: projected.mingCleanup });
+  const finding = primaryFindings(snapshot).find(row => row.kind === "ming-cleanup-unconfirmed");
+  assert(finding); assert.equal(finding.remedy?.target, mingCleanup.scope);
+});
+
 const ENGINE_INSTANCE = "abc123def4567890";
 
 function comfyui(over: {

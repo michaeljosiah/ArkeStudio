@@ -10,6 +10,21 @@ export const RecoveryRetryPlanSchema = z.object({
   downloadBytes: z.literal(0), diskBytes: z.null(), interruptsWork: z.literal(false), replaysJobs: z.literal(false),
 }).strict().refine(value => value.expiresAt > value.preparedAt && value.expiresAt - value.preparedAt <= RECOVERY_ACTION_LIMITS.previewMs);
 export type RecoveryRetryPlan = z.infer<typeof RecoveryRetryPlanSchema>;
+export const RecoveryMingCleanupPlanSchema = z.object({
+  id: digest, action: z.literal("confirm-ming-cleanup"), scope: digest, preparedAt: instant, expiresAt: instant,
+  authority: z.literal("retained-original-worker"), startsInference: z.literal(false), replaysJobs: z.literal(false),
+  releasesGpuOnlyAfterConfirmedExit: z.literal(true),
+}).strict().refine(value => value.expiresAt > value.preparedAt && value.expiresAt - value.preparedAt <= RECOVERY_ACTION_LIMITS.previewMs);
+export type RecoveryMingCleanupPlan = z.infer<typeof RecoveryMingCleanupPlanSchema>;
+export const MingCleanupSnapshotSchema = z.object({
+  state: z.enum(["unavailable", "idle", "working", "held", "checking"]), scope: digest.nullable(), available: z.boolean(),
+  authority: z.enum(["original-worker", "unavailable"]),
+  waiting: instant, measuredAt: instant,
+  confirmation: z.object({ scope: digest, at: instant }).strict().nullable(),
+}).strict().refine(value => (["held", "checking"].includes(value.state) ? value.scope !== null : value.scope === null) &&
+  (!value.available || value.state === "held" && value.authority === "original-worker") &&
+  (value.scope === null || value.confirmation?.scope !== value.scope));
+export type MingCleanupSnapshot = z.infer<typeof MingCleanupSnapshotSchema>;
 export const CACHE_CLEANUP_POLICY = Object.freeze({ revision: 1, minAgeMs: 7 * 24 * 60 * 60_000, maxFiles: 8, maxBytes: 2 * 1024 ** 3 });
 export const RecoveryCachePlanSchema = z.object({
   id: digest, action: z.literal("cleanup-local-preset-previews"), evidence: digest, policyRevision: z.literal(1),
@@ -52,6 +67,8 @@ export const RecoveryActionCommandSchema = z.object({ kind: z.literal("recovery-
     z.object({ action: z.literal("preview-retry"), resourceKey: digest }).strict(),
     z.object({ action: z.literal("approve-retry"), planId: digest }).strict(),
     z.object({ action: z.literal("preview-cleanup"), scope: digest.optional() }).strict(),
+    z.object({ action: z.literal("preview-ming-cleanup"), scope: digest }).strict(),
+    z.object({ action: z.literal("approve-ming-cleanup"), planId: digest }).strict(),
     z.object({ action: z.literal("approve-cleanup"), planId: digest }).strict(),
     z.object({ action: z.literal("reconcile-cleanup") }).strict(),
     z.object({ action: z.literal("set-cleanup-maintenance"), enabled: z.boolean() }).strict(),
@@ -62,11 +79,12 @@ export type RecoveryActionCommand = z.infer<typeof RecoveryActionCommandSchema>;
 export const RecoveryActionResultSchema = z.object({ requestId: UlidSchema,
   status: z.enum(["preview", "accepted", "verified", "failed", "unknown", "refused", "cancelled"]),
   plan: RecoveryRetryPlanSchema.optional(),
+  mingPlan: RecoveryMingCleanupPlanSchema.optional(),
   cleanupPlan: RecoveryCachePlanSchema.optional(), cleanup: RecoveryCacheOutcomeSchema.optional(),
   reconciliation: RecoveryCacheReconciliationSchema.optional(),
   maintenanceSaved: z.boolean().optional(),
   reason: z.enum(["unavailable", "stale", "busy", "cancelled"]).optional(),
-}).strict().refine(value => !(value.plan && value.cleanupPlan) && (!value.cleanup || value.cleanupPlan !== undefined) &&
-  (!value.reconciliation || !value.plan && !value.cleanupPlan && !value.cleanup) &&
-  (value.maintenanceSaved === undefined || value.status === "verified" && !value.plan && !value.cleanupPlan && !value.cleanup && !value.reconciliation));
+}).strict().refine(value => [value.plan, value.cleanupPlan, value.mingPlan].filter(Boolean).length <= 1 && (!value.cleanup || value.cleanupPlan !== undefined) &&
+  (!value.reconciliation || !value.plan && !value.cleanupPlan && !value.mingPlan && !value.cleanup) &&
+  (value.maintenanceSaved === undefined || value.status === "verified" && !value.plan && !value.cleanupPlan && !value.mingPlan && !value.cleanup && !value.reconciliation));
 export type RecoveryActionResult = z.infer<typeof RecoveryActionResultSchema>;

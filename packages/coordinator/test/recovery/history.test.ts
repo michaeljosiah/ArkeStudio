@@ -22,6 +22,26 @@ function harness(options: { disk?: RecoveryHistory; save?: (value: RecoveryHisto
 }
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 
+it("resolves a Ming hold only with positive confirmation for its exact original scope", async () => {
+  const h = harness(), scope = "c".repeat(64), key = createHash("sha256").update(`ming-cleanup-unconfirmed:${scope}`).digest("hex");
+  await h.service.open(); h.service.observe([observation({ key, kind: "ming-cleanup-unconfirmed", phase: "action-available", severity: "degraded" })]);
+  const app = (confirmation: { scope: string; at: number } | null, measuredAt = now): Parameters<typeof h.service.observeAvailability>[0] => ({ comfyui: null, storageHealth: null,
+    recoveryPolicy: { audit: "available", accepting: true, mode: "suggest-only", targets: [], mingCleanup: {
+      state: "idle", scope: null, authority: "original-worker", available: false, waiting: 0, measuredAt, confirmation } } });
+  try {
+    const contradictory = app({ scope, at: now }); contradictory.recoveryPolicy!.mingCleanup!.state = "held";
+    contradictory.recoveryPolicy!.mingCleanup!.scope = scope;
+    h.service.observeAvailability(contradictory); assert.equal(h.service.snapshot().resolvedCount, 0, "a still-held original scope cannot confirm its own release");
+    for (const input of [app(null), app({ scope: "d".repeat(64), at: now }), app({ scope, at: now - 1 }), app({ scope, at: now + 1 }),
+      app({ scope, at: now }, now - 60_001), app({ scope, at: now }, now + 1)]) {
+      h.service.observeAvailability(input); assert.equal(h.service.snapshot().resolvedCount, 0);
+    }
+    h.service.observeAvailability(app({ scope, at: now })); assert.equal(h.service.snapshot().resolvedCount, 1);
+    assert.equal(h.service.snapshot().incidents[0]!.resolution, "verified-condition-clear");
+    h.service.observeAvailability(app({ scope, at: now })); assert.equal(h.service.snapshot().incidents.length, 1);
+  } finally { await h.service.stop(); }
+});
+
 it("flushes the notice budget before delivery and deduplicates repeated probes across restart", async () => {
   const entered = deferred(), finish = deferred(), h = harness({ save: async () => { entered.resolve(); await finish.promise; } }); await h.service.open();
   try {
