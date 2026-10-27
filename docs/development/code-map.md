@@ -1187,9 +1187,15 @@ Cloud forwarding stays nonlocal; URLs/credentials remain behind an opaque route 
 the capability pins its first proof. Native dispatch rechecks the route before its final fence,
 including changes during metadata I/O; failed or cancelled proof cannot authorize a prompt.
 Adapter `test/v2-private-destination.test.ts` and the exact-binary operational fixture qualify
-this boundary. The Studio runner/host does not consume this native capability yet: production
-destination binding, complete payload/spend/persistence qualification and default invocation
-remain unfinished and closed.
+this boundary. Qualified adapters advertise `privateDestinations` and must supply both the
+session capability and native dispatch fence; GPU/runtime wrappers refuse a missing native
+fence rather than fabricating it through their ordinary fallback. The Studio runner combines
+the native proof with a trusted host attestation before approval. Either nonlocal verdict
+requires cloud consent, and the disclosure digest binds both identities. Coordinator
+`test/studio-assistant/native-route.test.ts` covers the production wrapper composition;
+opt-in `pinned-native.test.ts` drives the actual launcher/runner through one zero-tool native
+completion. The production host attestation port still defaults to refusal. Full payload,
+spend, native retention/cleanup and production authorization remain unfinished gates.
 
 Private inference ownership uses `SessionRef.privateTurnSettled`: native v2 completion or the
 exact host-only `privateOwnerStopped` cleanup capability can settle one turn. A send error,

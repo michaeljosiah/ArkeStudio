@@ -85,6 +85,7 @@ export function withLocalGpu(
     abandonSessionPreparation(id) { prepared.delete(id); adapter.abandonSessionPreparation?.(id); },
     async createSession(input) {
       if (input.visibility === "private" && adapter.privateSessions !== true) throw new Error("The harness does not support private operational sessions.");
+      if (input.visibility === "private" && adapter.privateDestinations === true && !adapter.sendMessageWithFence) throw new Error("The private native destination has no dispatch fence.");
       const config = input.preparationId ? prepared.get(input.preparationId) : undefined;
       const session = await adapter.createSession(input);
       models.set(session.sessionId, config?.model ?? (input.agent ? config?.agents?.[input.agent]?.model : undefined));

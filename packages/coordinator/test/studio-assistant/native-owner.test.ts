@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
+import { createServer } from "node:http";
+import { once } from "node:events";
 import type { HarnessEvent } from "@arke-studio/contracts";
 import { OpenCodeV2Adapter } from "@arke-studio/adapter-opencode";
 import { StubOpenCodeV2, STUB_V2_PASSWORD } from "../../../adapter-opencode/test/helpers/stub-server-v2.js";
@@ -12,7 +14,10 @@ import { tempDir } from "../tmp.js";
 import { until } from "../wait.js";
 
 it("keeps real v2 private HTTP/SSE work owned after an error and releases it only on late native completion", async () => {
-  const stub = new StubOpenCodeV2(); stub.models = [{ id: "test", providerID: "ollama" }];
+  const provider = createServer((req, res) => { req.resume(); req.on("end", () => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ model_info: { "general.architecture": "gemma" } })); }); });
+  provider.listen(0, "127.0.0.1"); await once(provider, "listening");
+  const address = provider.address(); assert(address && typeof address !== "string");
+  const stub = new StubOpenCodeV2(); stub.models = [{ id: "test", providerID: "ollama", package: "@opencode/ai/providers/openai-compatible", settings: { baseURL: `http://127.0.0.1:${address.port}/v1` } }];
   await stub.start();
   const traces: Record<string, unknown>[] = [];
   const raw = new OpenCodeV2Adapter({ baseUrl: () => stub.baseUrl(), password: () => STUB_V2_PASSWORD, warmupMs: 3000, onTrace: line => traces.push(line) });
@@ -46,6 +51,6 @@ it("keeps real v2 private HTTP/SSE work owned after an error and releases it onl
     assert(!JSON.stringify(traces).includes("PRIVATE_")); assert(!JSON.stringify(traces).includes(sessionId));
   } finally {
     finishUnload(); releaseCreative?.(); sharedStop.abort(); await runner.stop(); await adapter.dispose?.(); await reading;
-    await runner.ownerStopped(); gpu.stop(); await stub.stop();
+    await runner.ownerStopped(); gpu.stop(); await stub.stop(); provider.closeAllConnections(); await new Promise<void>(resolve => provider.close(() => resolve()));
   }
 });

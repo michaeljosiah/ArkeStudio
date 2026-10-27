@@ -325,6 +325,10 @@ export interface HarnessAdapter {
   /** True only after private operational sessions, event exclusion and trace privacy are
    * implemented by this adapter. A private caller refuses an absent guarantee. */
   readonly privateSessions?: true;
+  /** Qualifies scoped private destination proof plus native revalidation before the final
+   * dispatch fence. A supporting adapter must return SessionRef.privateDestination and
+   * implement sendMessageWithFence; this is separate from event/trace isolation. */
+  readonly privateDestinations?: true;
   /** Transport support alone is insufficient: the pinned session must also accept images. */
   readonly imageInput?: boolean;
   imageInputForSession?(sessionId: string): boolean;

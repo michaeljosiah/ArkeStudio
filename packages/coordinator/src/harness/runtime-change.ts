@@ -21,6 +21,7 @@ export class HarnessRuntimeChanges {
     const privateCompletion = new Map<string, Promise<void>>();
     return new Proxy(adapter, { get: (target, property) => {
       if (property === "createSession") return async (input: Parameters<HarnessAdapter["createSession"]>[0]) => {
+        if (input.visibility === "private" && target.privateDestinations === true && !target.sendMessageWithFence) throw new Error("The private native destination has no dispatch fence.");
         const session = await target.createSession(input);
         if (input.visibility === "private") {
           if (!session.privateTurnSettled) throw new Error("The private session has no native completion proof.");

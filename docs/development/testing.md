@@ -1622,8 +1622,16 @@ generation loss. A failed proof must send no prompt and must not cross the admit
 fence. The exact-binary operational test also verifies the pinned native session/default variant,
 actual Ollama settings shape and route proof before a single zero-tool request per role.
 Prepared-session tests preserve prototype capability receivers. These checks qualify the native
-capability; the Studio runner/host has not yet bound it into production authorization, and they
-do not prove complete cloud payload, spend or native transcript-retention requirements.
+capability. Coordinator `test/studio-assistant/native-route.test.ts` combines actual native
+HTTP/SSE, model metadata, the runner and production wrappers: native proof precedes approval,
+both identities enter its digest, either nonlocal verdict requires consent, and a route change
+while queued refuses before dispatch without retaining unsent GPU/runtime admission. Missing
+native proof/fence cannot fall back to the host claim. Opt-in `pinned-native.test.ts` runs the
+same runner through the shared actual 2.0.26 launcher, a credential-free profile and scripted
+provider, checking one approved zero-tool completion, settlement and private trace exclusion.
+Set `ARKE_TEST_OPENCODE2` for that test; it makes no real inference or paid request. Production
+host attestation still defaults to refusal. These checks do not prove complete cloud payload,
+spend, native transcript retention or physical backing-inference cleanup requirements.
 After building, `node --import tsx apps/desktop/scripts/smoke-transport-flow.mjs` checks a real
 hidden sandboxed Electron file page and built preload, including a correlated private reply,
 history negotiation/reset, hidden capability and authenticated media range. No model, paid

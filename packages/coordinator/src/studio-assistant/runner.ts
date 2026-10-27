@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, rmdir, unlink } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { findHarnessModel, harnessModelReference, STUDIO_ASSISTANT_LIMITS, type HarnessAdapter } from "@arke-studio/contracts";
 import { createPreparedSession, scopeSessionInput, sessionTurnTimeoutMs, type SessionInput } from "../harness/session-files.js";
@@ -23,7 +24,8 @@ export class HarnessStudioModelRunner implements StudioModelPort {
   private readonly active = new Set<Active>();
   private readonly listeners = new Set<() => void>();
   constructor(private readonly deps: { adapter(): HarnessAdapter | null; sessionInput: SessionInput; scratch: string; timeoutMs?: number;
-    /** Actual host-owned route identity/locality, never inferred from a provider/model name. */
+    /** Trusted host ownership/route attestation, never inferred from a provider/model name.
+     * Qualified native adapters additionally bind their exact per-session route into approval. */
     destination(model: string, provider: string): { local: boolean; identity: string } | null }) {}
   busy(): boolean { return this.active.size > 0; }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
@@ -56,6 +58,7 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     const revision = adapter.lifecycleRevision?.();
     if (!Number.isSafeInteger(revision) || revision === undefined || revision < 0) throw new Error("The Studio model owner has no verified generation fence.");
     if (adapter.privateSessions !== true) throw new Error("The Studio model owner does not support private operational sessions.");
+    if (adapter.privateDestinations === true && !adapter.sendMessageWithFence) throw new Error("The Studio model owner has no native destination dispatch fence.");
     const sameOwner = () => this.deps.adapter() === adapter && adapter.lifecycleRevision?.() === revision && adapter.readiness().ready;
     signal.throwIfAborted();
     const catalog = await adapter.listModels?.(); signal.throwIfAborted();
@@ -71,10 +74,15 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     const customBrief = config.agents?.[input.role]?.brief;
     if (customBrief && customBrief.length > 16_000) throw new Error("The Studio role instructions exceed their bound.");
     if (config.modelVariant && config.modelVariant.length > 512) throw new Error("The Studio model variant exceeds its bound.");
-    const approval = await authorize({ role: input.role, model: reference, provider: model.provider, local: destination.local, destination: destination.identity, prompt: input.prompt,
-      ...(customBrief !== undefined ? { customBrief } : {}), ...(config.modelVariant ? { variant: config.modelVariant } : {}) }, signal);
-    signal.throwIfAborted();
-    if (!destination.local && !approval.cloudApproved) throw new Error("Cloud explanation requires explicit approval of this payload.");
+    const approve = async (route: { local: boolean; identity: string }) => {
+      const approval = await authorize({ role: input.role, model: reference, provider: model.provider, local: route.local, destination: route.identity, prompt: input.prompt,
+        ...(customBrief !== undefined ? { customBrief } : {}), ...(config.modelVariant ? { variant: config.modelVariant } : {}) }, signal);
+      signal.throwIfAborted();
+      if (!route.local && !approval.cloudApproved) throw new Error("Cloud explanation requires explicit approval of this payload.");
+    };
+    // Synthetic host ports retain their original contract. Qualified native owners must
+    // create an unsent private session before approval can name its actual scoped route.
+    if (adapter.privateDestinations !== true) await approve(destination);
     if (!sameOwner() || !sameDestination()) throw new Error("The selected Studio model owner changed before dispatch.");
     await mkdir(toExtendedLength(this.deps.scratch), { recursive: true });
     entry.dir = await mkdtemp(join(this.deps.scratch, "turn-"));
@@ -84,6 +92,18 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     if (!session.privateTurnSettled) throw new Error("The Studio model owner did not return a native completion proof.");
     entry.ownerStopped = session.privateOwnerStopped?.bind(session);
     signal.throwIfAborted(); if (!sameOwner() || !sameDestination()) throw new Error("The selected Studio model owner changed before dispatch.");
+    if (adapter.privateDestinations === true) {
+      if (!session.privateDestination) throw new Error("The Studio model owner did not return native destination proof.");
+      const native = await session.privateDestination(signal);
+      signal.throwIfAborted();
+      if (!native || native.model !== reference || native.provider !== model.provider || typeof native.local !== "boolean" || !/^[a-f0-9]{64}$/.test(native.identity)) throw new Error("The Studio native model destination could not be verified.");
+      if (!sameOwner() || !sameDestination()) throw new Error("The selected Studio model owner changed before approval.");
+      // Neither a host-local claim nor native loopback metadata may override the other's
+      // nonlocal verdict. The one-use disclosure binds both independent identities.
+      await approve({ local: destination.local && native.local,
+        identity: createHash("sha256").update(JSON.stringify([destination.identity, destination.local, native.identity, native.local])).digest("hex") });
+      if (!sameOwner() || !sameDestination()) throw new Error("The selected Studio model owner changed before dispatch.");
+    }
     const listen = entry.listen = new AbortController(); let completed = false;
     const interrupt = () => { if (sameOwner()) void adapter.interrupt?.(session.sessionId).catch(() => {}); };
     signal.addEventListener("abort", interrupt, { once: true }); if (signal.aborted) interrupt();

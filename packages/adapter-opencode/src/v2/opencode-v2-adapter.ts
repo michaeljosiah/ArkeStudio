@@ -108,6 +108,7 @@ function freshWireId(): string {
 export class OpenCodeV2Adapter implements HarnessAdapter {
   readonly id = "opencode2";
   readonly privateSessions = true as const;
+  readonly privateDestinations = true as const;
   readonly imageInput = true;
   imageInputForSession(id: string): boolean { return this.sessions.get(id)?.image.supported === true; }
   imageDestinationForSession(id: string) {
