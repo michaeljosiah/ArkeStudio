@@ -1,6 +1,8 @@
 # System status
 
-The System control replaces the former proposal shortcut (approved design turn 240). It is
+The System control replaces the former proposal shortcut (approved System design, now master
+turn 241; originally reviewed as 240). The `system-status-240.*` review URLs remain stable after
+reconciling main's separate Branch Map turn 240. It is
 available before a world is opened. Proposal routes, in-context review and Activity's existing
 proposal decisions remain available.
 

@@ -38,4 +38,4 @@ export const FRAMES=[
   ['e','Tablet · same rounded window',834,900,'overview','tablet',true,'A modal 440px card floats over the current tablet drawing with a 16px outside gap. Readings still describe the host desktop.'],
   ['f','Phone · read the host, not the phone',390,844,'warning','phone',true,'The same dialog has 12px outside gaps, four rounded corners and 44px controls. This desktop remains visible; the content scrolls above a stable footer.'],
   ['g','Small visible height',390,550,'unavailable','phone',true,'Header, close, Refresh and Diagnostics stay reachable in a reduced visible area. Old or unavailable measurements remain explicit in the scrolling content.'],
-].map(([letter,title,width,height,state,device,open,note])=>({id:`240${letter}`,title,width,height,state,device,open,note,markup:screen({state,device,width,height,open,label:`240${letter} ${title}`})}));
+].map(([letter,title,width,height,state,device,open,note])=>({id:`241${letter}`,title,width,height,state,device,open,note,markup:screen({state,device,width,height,open,label:`241${letter} ${title}`})}));

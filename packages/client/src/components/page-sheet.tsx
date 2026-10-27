@@ -5,7 +5,7 @@ import { ChevronLeft, X } from "./icons.js";
 import { focusNewestLayer, useCoveredAfter, useOverlay } from "../lib/overlays.js";
 
 /** Turn 163 uses the character sheet's shape with native focus containment and an inert page. */
-export function PageSheet({ open, onClose, title, subtitle, children, footer, className, style, onBack, resetKey, keepMounted = false, headless = false, modeless = false, preserveReturnFocus = false }: {
+export function PageSheet({ open, onClose, title, subtitle, children, footer, className, style, onBack, resetKey, keepMounted = false, headless = false, modeless = false, preserveReturnFocus = false, dismissOnBackdrop = true, returnFocus }: {
   open: boolean;
   onClose: () => void;
   /** The sheet's heading, or with `headless` only its accessible name. */
@@ -34,8 +34,12 @@ export function PageSheet({ open, onClose, title, subtitle, children, footer, cl
   modeless?: boolean;
   /** Turns 207/209 return to the same control and original opener after a nested sheet. */
   preserveReturnFocus?: boolean;
+  dismissOnBackdrop?: boolean;
+  returnFocus?: () => HTMLElement | null;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const focusTarget = useRef(returnFocus);
+  focusTarget.current = returnFocus;
   const heading = useId();
   const originalOpener = useRef<HTMLElement | null>(null);
   const lastFocus = useRef<HTMLElement | null>(null);
@@ -71,7 +75,7 @@ export function PageSheet({ open, onClose, title, subtitle, children, footer, cl
       // Put away for a sheet in front, the focus goes to that sheet, not back to the page under both.
       if (coveredNow.current) focusNewestLayer();
       else {
-        const backTo = preserveReturnFocus ? originalOpener.current ?? opener : opener;
+        const backTo = focusTarget.current?.() ?? (preserveReturnFocus ? originalOpener.current ?? opener : opener);
         if (backTo instanceof HTMLElement && backTo.isConnected) {
           if (preserveReturnFocus) backTo.focus({ preventScroll: true });
           else backTo.focus();
@@ -91,7 +95,7 @@ export function PageSheet({ open, onClose, title, subtitle, children, footer, cl
       onFocusCapture={(event) => { if (preserveReturnFocus && !coveredNow.current && event.target instanceof HTMLElement) lastFocus.current = event.target; }}
       onCancel={(event) => { event.preventDefault(); event.stopPropagation(); onClose(); }}
       onClick={(event) => {
-        if (event.target !== event.currentTarget) return;
+        if (!dismissOnBackdrop || event.target !== event.currentTarget) return;
         const rect = event.currentTarget.getBoundingClientRect();
         if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose();
       }}>

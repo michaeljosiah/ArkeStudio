@@ -28,4 +28,4 @@ const nativeIcons=createRequire(import.meta.url)(out).icons;
 snapshots.phone=snapshots.phone.replace('<!--system-status-back-->',nativeIcons.back);
 const receipt={masterFrames:['227a','227k','227m'],shell:'206b Activity / 239 approved geometry: 12px corners, 440px desktop width, full border and shadow-lg',iconsSource,iconsSha256:createHash('sha256').update(fs.readFileSync(iconsPath)).digest('hex'),names};
 fs.writeFileSync(path.join(here,'system-status-240.references.mjs'),'// Existing 227 writing-room drawings; current client icons. Source snapshots only.\nexport const references='+JSON.stringify(snapshots)+';\nexport const nativeIcons='+JSON.stringify(nativeIcons)+';\nexport const receipt='+JSON.stringify(receipt,null,2)+';\n');
-console.log('Captured 227a/k/m page sources and current native icons for new turn 240. No master rendering.');
+console.log('Captured 227a/k/m page sources and current native icons for new turn 241. No master rendering.');

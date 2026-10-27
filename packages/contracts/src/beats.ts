@@ -101,6 +101,9 @@ export function beatPictureShotId(shots: readonly Pick<Shot, "id" | "beat">[], s
 
 /** One beat as the player reads it (`InteractivePlayerBeat`), before its media are addressed. */
 export interface PlayerBeat {
+  shotId?: string;
+  pictureShotId?: string;
+  blockId?: string;
   picture?: string;
   text?: string;
   speaker?: string;
@@ -123,6 +126,7 @@ export function playerBeats(
   scene: SceneRecord,
   resolve: {
     /** The shot's picture, or none. */
+    story?: boolean;
     picture: (shotId: string) => string | undefined;
     /** The line's voice, or none (it reads as text). */
     audio: (lineId: string) => string | undefined;
@@ -141,6 +145,7 @@ export function playerBeats(
     const picture = resolve.picture(pictureShot);
     const audio = beat.lineId === undefined ? undefined : resolve.audio(beat.lineId);
     return {
+      ...(resolve.story ? { shotId: beat.shot.id, pictureShotId: pictureShot, ...(beat.blockId ? { blockId: beat.blockId } : {}) } : {}),
       ...(picture !== undefined ? { picture } : {}),
       ...(keep && picture !== undefined ? { keep: true as const } : {}),
       ...(beat.text ? { text: beat.text } : {}),

@@ -16,7 +16,7 @@ const master=parseHTML(fs.readFileSync(path.join(here,'Arke Studio.dc.html'),'ut
 const head=execFileSync('git',['show','HEAD:design-system/Arke Studio.dc.html'],{cwd:root,encoding:'utf8',maxBuffer:50000000});
 function turns(source){const starts=[...source.matchAll(/<section class="dv-turn" id="t(\d+)"/g)];return starts.map((match,i)=>[match[1],source.slice(match.index,i+1<starts.length?starts[i+1].index:undefined)]);}
 const current=new Map(turns(fs.readFileSync(path.join(here,'Arke Studio.dc.html'),'utf8')));
-for(const [id,body] of turns(head))if(id!=='240')assert.equal(current.get(id),body,'Historical turn '+id+' stays byte-identical');
+for(const [id,body] of turns(head))if(id!=='241'&&!(id==='240'&&body.includes('System · replace the proposal shortcut')))assert.equal(current.get(id),body,'Historical turn '+id+' stays byte-identical');
 for(const [device,id] of Object.entries({desktop:'227a',tablet:'227k',phone:'227m'})){
   const old=master.querySelector(`#${id} .dv-card>div`),copy=parseHTML(references[device]).document.querySelector('div');
   const selector=device==='phone'?'.pscroll':'.body';
@@ -60,5 +60,5 @@ assert.equal(host.querySelector('.s240-dialog').getAttribute('aria-modal'),'true
 const tabEvent=new window.Event('keydown',{bubbles:true,cancelable:true});tabEvent.key='Tab';
 host.querySelector('.s240-foot [data-action=diagnostics]').focus();host.dispatchEvent(tabEvent);assert.equal(document.activeElement.dataset.action,'close','Modal Tab wraps to close');
 const escape=new window.Event('keydown',{bubbles:true,cancelable:true});escape.key='Escape';host.dispatchEvent(escape);assert.equal(host.firstElementChild.dataset.open,'false');assert.equal(document.activeElement.dataset.action,'system');
-console.log('Turn 240: 7 source-backed frames; exact page content; native icon hash; shortcut order; example/freshness/absence labels; harmless actions; close/reopen, modal Tab and Escape focus return: pass.');
+console.log('Turn 241: 7 source-backed frames; exact page content; native icon hash; shortcut order; example/freshness/absence labels; harmless actions; close/reopen, modal Tab and Escape focus return: pass.');
 console.log('These checks do not establish rendered visual fidelity or native application acceptance.');

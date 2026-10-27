@@ -1080,7 +1080,9 @@ export class WorldChatTargetReads {
         readTarget = target("routing", productionId);
         rows = routing
           ? [
-              { key: "metadata", value: { version: routing.version, start: routing.start } },
+              { key: "metadata", value: { version: routing.version, start: routing.start, ...(routing.schemaVersion ? { schemaVersion: routing.schemaVersion } : {}) } },
+              ...(routing.facts ?? []).map((fact, index) => ({ key: `fact:${padded(index)}:${fact.id}`, value: { kind: "fact", fact } })),
+              ...(routing.presentation ?? []).map((presentation, index) => ({ key: `presentation:${padded(index)}:${presentation.sceneId}`, value: { kind: "presentation", presentation } })),
               ...routing.choices.map((choice, index) => ({ key: `choice:${padded(index)}:${choice.id}`, value: { kind: "choice", choice } })),
               ...routing.endings.map((ending, index) => ({ key: `ending:${padded(index)}:${ending.sceneId}`, value: { kind: "ending", ending } })),
               ...routing.excluded.map((excluded, index) => ({ key: `excluded:${padded(index)}:${excluded.sceneId}`, value: { kind: "excluded", excluded } })),

@@ -1,6 +1,11 @@
 # System · a glance at the Arke host
 
-Design turn **240**, revision 1, **approved by the owner** on 26 October 2026. The owner requested a design
+System design revision 1 was **approved by the owner** on 26 October 2026 as turn **240**.
+Its canonical master entry is now **241**: main independently registered Branch Map as 240
+before this branch merged. Both approved drawings are retained. The `system-status-240.*`
+review URLs and CSS namespace remain stable; System master frame IDs are 241a–241g. This is
+an identifier reconciliation, not a new design approval or rendered-parity claim.
+The owner requested a design
 turn replacing the top-right proposal shortcut with a system icon showing resources and
 performance. The owner subsequently authorized implementation of the System panel. The proposal screen and its workflows remain.
 
@@ -58,13 +63,13 @@ The fixture's Diagnostics and Refresh controls explain intended handoffs without
 
 | Frame | State |
 |---|---|
-| 240a | New native System shortcut in existing chrome, closed |
-| 240b | Desktop overview, CPU/RAM/GPU/storage/services |
-| 240c | Measured storage warning with Diagnostics handoff |
-| 240d | Stale CPU/RAM, unsupported GPU and unavailable storage |
-| 240e | Tablet modal, 834 × 900 |
-| 240f | Phone warning, 390 × 844 |
-| 240g | Reduced visible height, 390 × 550 |
+| 241a | New native System shortcut in existing chrome, closed |
+| 241b | Desktop overview, CPU/RAM/GPU/storage/services |
+| 241c | Measured storage warning with Diagnostics handoff |
+| 241d | Stale CPU/RAM, unsupported GPU and unavailable storage |
+| 241e | Tablet modal, 834 × 900 |
+| 241f | Phone warning, 390 × 844 |
+| 241g | Reduced visible height, 390 × 550 |
 
 All frames and interactive states use the same markup and support light/dark tokens.
 
@@ -95,7 +100,7 @@ node design-system/build-review.mjs --check
 node design-system/system-status-240.serve.mjs
 ```
 
-The last command serves **only new turn 240** and its existing CSS/assets at
+The last command serves **only new turn 241** and its existing CSS/assets at
 `http://127.0.0.1:4240/system-status-240.review.html`; it refuses the master, consolidated review
 and other turn previews. It is not a renderer for the previously denied master.
 
@@ -108,7 +113,7 @@ Actual browser review of the isolated new-turn URL was completed on 26 October 2
 font, scrollbar and stacking corrections. Reviewed desktop 1360 × 820, tablet 834 × 900 with
 top/footer captures, phone 390 × 844 and reduced height 390 × 550 in light and dark. Captures
 show the inset rounded card, reachable header/footer, contained background controls and explicit
-stale readings. This review concerns turn 240 only; it does not establish turn 239 parity.
+stale readings. This review concerns turn 241 only; it does not establish turn 239 parity.
 
 Final captures in the gitignored `.dev/recovery-design/` folder: `system240-desktop-light.png`,
 `system240-desktop-dark.png`, `system240-phone-light.png`, `system240-phone-dark.png`,
@@ -151,5 +156,5 @@ clipped the 1360px iframe fixture, so that iframe capture does not establish 136
 Actual component geometry/theme review does not establish matched-pixel equivalence: service
 and evidence copy correctly differs from the example drawing. Tab can leave the iframe for the outer fixture/browser chrome; this review
 does not establish physical-device keyboard acceptance. Packaged Electron, live transport and
-successful hardware GPU counters are distinct qualifications. This is turn 240 component
+successful hardware GPU counters are distinct qualifications. This is turn 241 component
 comparison only and makes no claim of parity with turn 239.

@@ -1,4 +1,7 @@
 import {screen} from './system-status-240.frames.mjs';
+// Existing System review bookmarks predate main's separate Branch Map turn 240.
+const legacyFrame=/^#240([a-g])$/.exec(globalThis.location?.hash??'');
+if(legacyFrame)requestAnimationFrame(()=>document.getElementById(`241${legacyFrame[1]}`)?.scrollIntoView());
 const host=document.getElementById('s240-prototype');
 const status=document.getElementById('s240-prototype-status');
 let state='overview',open=true,format='desktop';

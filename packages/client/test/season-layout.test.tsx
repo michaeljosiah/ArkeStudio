@@ -56,10 +56,10 @@ it('Arke retains its composer draft across phone, Fold and desktop',async()=>{
 });
 it('the phone choice form creates a route and preserves its label across resize',async()=>{
  await mount('p/low-water/branch-map',390,'branch');const row=[...document.querySelectorAll<HTMLElement>('.bm-row')].find(e=>e.textContent?.includes('The Vigil'))!;await click(row);
- await act(async()=>props(find('input[aria-label="Choice label"]')).onChange!({target:{value:'Take the bell stair'}} as never));
- await act(async()=>{width=984;for(const listener of listeners)listener();});assert.equal((find('input[aria-label="Choice label"]') as HTMLInputElement).value,'Take the bell stair');
- await act(async()=>props(find('select[aria-label="To scene"]')).onChange!({target:{value:'sc_bells'}} as never));
- await click([...document.querySelectorAll<HTMLElement>('.bm-new-actions button')].find(b=>b.textContent==='Add choice')!);
+ await act(async()=>props(find('textarea[aria-label="Choice text"]')).onChange!({target:{value:'Take the bell stair'}} as never));
+ await act(async()=>{width=984;for(const listener of listeners)listener();});assert.equal((find('textarea[aria-label="Choice text"]') as HTMLInputElement).value,'Take the bell stair');
+ await act(async()=>props(find('select[aria-label="Destination scene"]')).onChange!({target:{value:'sc_bells'}} as never));
+ await click([...document.querySelectorAll<HTMLElement>('.story-dialog .fy-page-sheet__foot button')].find(b=>b.textContent==='Add choice')!);
  const message=sent.find(m=>m.kind==='routing-command');assert.ok(message);assert.equal(message.command.operation,'add-choice');if(message.command.operation==='add-choice'){assert.equal(message.command.choice.from,'sc_vigil');assert.equal(message.command.choice.to,'sc_bells');assert.equal(message.command.choice.label,'Take the bell stair');}
 });
 it('two pointers zoom the map without creating a choice, and cancellation releases the gesture',async()=>{

@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { RoutingSchema, type ClientMessage, type DomainEvent, type RoutingCommand } from "@arke-studio/contracts";
+import { storyIdentity, storyReplay, RoutingSchema, type ClientMessage, type DomainEvent, type RoutingCommand } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
-import { applyRoutingCommand, saveRouting } from "../../src/productions/interactive.js";
+import { applyRoutingCommand, readTraversal, saveRouting } from "../../src/productions/interactive.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
@@ -209,6 +209,24 @@ describe("the branch map's routing commands", () => {
     await assert.rejects(readFile(join(worldDir, "productions", PRODUCTION, "routing-evidence.jsonl"), "utf8"), /ENOENT/);
     await walk(WORLD_ID);
     assert.match(await readFile(join(worldDir, "productions", PRODUCTION, "routing-evidence.jsonl"), "utf8"), /"choiceId":"ch_on"/);
+  });
+
+  it("reports a refused stateful witness and only clears coverage after a durable valid walk", async (t) => {
+    const { send, routing, message, events, store } = await harness(t);
+    await send({ operation: "set-start", sceneId: "sc_02" });
+    await send({ operation: "set-facts", facts: [{ id: "dev", label: "Dev", type: "boolean", default: true }] });
+    await send({ operation: "add-choice", choice: { id: "ch_on", from: "sc_02", to: "sc_04", label: "Go on", effects: [{ fact: "dev", value: false }] } });
+    const program = await routing();
+    const story = { identity: storyIdentity(program), prefix: [], before: storyIdentity(storyReplay(program).state), after: storyIdentity(storyReplay(program, ["ch_on"]).state), provenance: "human" as const };
+    const walk = { kind: "record-traversal" as const, worldId: WORLD_ID, productionId: PRODUCTION, choiceId: "ch_on", from: "sc_02", to: "sc_04", route: ["sc_02"] };
+    await message({ ...walk, story: { ...story, identity: "stale" } });
+    assert.ok(events.some(event => event.type === "command.failed" && event.command === "record-traversal"));
+    assert.equal((await readTraversal(store(), PRODUCTION)).length, 0);
+    await message({ ...walk, story });
+    assert.equal((await readTraversal(store(), PRODUCTION)).length, 1);
+    const latest = events.filter(event => event.type === "production.routing-findings").at(-1);
+    assert.ok(latest?.type === "production.routing-findings");
+    assert.ok(!latest.findings.some(finding => finding.kind === "untraversed-edge" && finding.choiceIds.includes("ch_on")));
   });
 
   it("a first edit that is not a start is refused, and no routing file appears", async (t) => {

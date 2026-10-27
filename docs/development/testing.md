@@ -1930,7 +1930,7 @@ remains a separate regression. Missing binary skips these optional native cases;
 or Windows-only native results do not qualify other platforms, managed socket/process identity,
 live-model memory, full tracing/spend/result persistence or default production activation.
 
-## System status (turn 240)
+## System status (master turn 241; System 240 review)
 
 Run contracts/coordinator/desktop `system-resources.test.ts`, coordinator
 `system-resources-application.test.ts`, and client `system-panel.test.tsx`, `chrome.test.tsx`
@@ -1944,8 +1944,18 @@ parent-lifetime and native cleanup boundary. Typecheck affected consumers after 
 The deterministic actual-component review is built by
 `node design-system/system-status-240.native-build.mjs` and served by
 `node design-system/system-status-240.serve.mjs`. Compare native SystemPanel/AppChrome/PageSheet
-against approved turn 240 at desktop/tablet/phone/reduced height in light/dark. Verify fixed
+against approved System master turn 241 at desktop/tablet/phone/reduced height in light/dark.
+Its `system-status-240.*` URLs remain stable after the Branch Map 240 identifier collision. Verify fixed
 header/footer, independent body scroll, native modal Tab/Escape/focus return, unavailable/stale
 readings, no refresh-time future-clock flicker and the existing Diagnostics handoff. This fixture
 is separate from live-host collection and packaged Electron/physical-device keyboard acceptance;
 see [system status](system-status.md).
+
+Remembered story state (SPEC-063, turn 240) uses contracts `test/story-state.test.ts`, coordinator `test/productions/story-state.test.ts`, `test/productions/interactive.test.ts`, `test/productions/routing-command.test.ts`, and client `test/interactive-player.test.ts`, `test/branch-map-canvas.test.tsx`, `test/season-layout.test.tsx` and `test/visual-novel-beats.test.tsx`. Check distinct states after reconvergence, unavailable choices, inactive text/voice/pictures, ending selection, rewind, corrupted/changed saves, state-specific coverage, stale replacement refusal, native save/reopen and the older-reader fence. Compile the actual exported HTML script, not only the player module. After changing either shared JavaScript module run `node scripts/interactive-player-source.mjs` and commit the generated copy. Native UI checks cover click/keyboard +, map-pick draft retention, Escape/cancel, focus return, backdrop behavior and rounded phone dialogs with fixed footer actions. The private First Contact parity fixture lives with SPEC-063 and must exercise all 104 routes in both native and inlined players without rewriting the original world. It is not a public manuscript fixture.
+
+Compare the native controls alongside turn 240 at 1360×850 and 390×844, using the same authored
+example and theme. Check fit-content dialog height, 640px connector/460px fact widths, 16px
+corners, 12px phone margins, scrolling body/fixed footer and 44px phone targets. Include the
+facts Inspector, choice Review/Keep, selected-line Show when, draft/map-pick round trip and
+witness preview. Verify disabled choices show literal reasons, cannot advance on click or
+shortcut, and do not change the shortcut numbers of legal choices.
