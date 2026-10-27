@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { StorageHealthSnapshot, StorageRootRole } from "@arke-studio/contracts";
 import { FileStorageReservationStore } from "./reservation-file.js";
 import { StorageReservations, type StorageReservationStore } from "./reservations.js";
@@ -18,6 +18,7 @@ interface Root {
   role: StorageRootRole;
   fixed: boolean;
   world: boolean;
+  worldScope?: string;
   leases: number;
 }
 const rootKey = (path: string) => createHash("sha256").update("storage-root\0" + path).digest("hex");
@@ -98,20 +99,29 @@ export class AppStorageService {
   setWorld(directory: string | null): void {
     const path = directory ? resolve(directory) : null;
     if (this.closing || this.currentWorld === path) return;
-    if (this.currentWorld) { const old = this.roots.get(rootKey(this.currentWorld)); if (old) old.world = false; }
+    if (this.currentWorld) for (const root of this.roots.values()) {
+      if (root.rootId === rootKey(this.currentWorld) || root.worldScope === this.currentWorld) root.world = false;
+    }
     this.currentWorld = path;
+    if (path) for (const root of this.roots.values()) if (root.worldScope === path) root.world = true;
     this.syncRoots();
   }
 
   /** A background operation retains just its known destination after its world leaves the UI.
    * It does not authorize scanning every closed world or deleting anything in this root. */
-  acquireRoot(directory: string, role: StorageRootRole): { rootId: string; release(): void } {
+  acquireRoot(directory: string, role: StorageRootRole, retainInWorld = false): { rootId: string; release(): void } {
     if (this.closing) throw new Error("Storage observation is stopping.");
     const path = resolve(directory), rootId = rootKey(path);
     let root = this.roots.get(rootId);
     if (!root) {
       if (this.roots.size >= 128) throw new Error("Too many active storage destinations.");
       root = { rootId, path, role, fixed: false, world: false, leases: 0 }; this.roots.set(rootId, root);
+    }
+    // Only an explicit stable destination opts in. Per-job staging/UUID roots keep their
+    // ordinary lease lifetime and cannot accumulate for the life of an open world.
+    if (retainInWorld && this.currentWorld) {
+      const rel = relative(this.currentWorld, path);
+      if (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(".." + sep)) { root.worldScope = this.currentWorld; root.world = true; }
     }
     root.leases++; this.syncRoots();
     let held = true;

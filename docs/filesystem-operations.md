@@ -41,6 +41,7 @@ A new world does **not** start with empty `canon`, `characters`, `productions`, 
 | Stage an application update | Creates or replaces the update receipt `R\update\pending.json` by temporary-file rename, recording the target version and whether it lands on restart or on close. The next start reads the receipt and removes it before reporting the outcome; the paths that abandon an install remove it too. |
 | Download local runtime | Streams to `R\models\<component>\<file>.partial`, validates it, then renames it to the real filename. Ollama's installer is staged at `R\models\.staging\OllamaSetup.exe` and removed after successful installation. |
 | Paste a file | Writes `R\.spool\<id>\<name>`. Filing copies it into a world; the next application start removes the spool. |
+| Import selected files | Qualified host paths reserve each new decoded payload on the actual `W\artifacts\` volume before copying; a browser upload separately reserves its whole bounded temporary spool. Shared planning includes competing setup/result owners. Duplicate media is reused. Original file handles and normal sidecar/journal work settle before reservation release; a failed accounting/metadata write keeps valid source/copied bytes. This does not yet plan every batch/metadata/export/scratch peak. |
 
 ## World lifecycle
 

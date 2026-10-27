@@ -31,6 +31,22 @@ authority also bounds stalled reads/saves during shutdown, retaining uncertain i
 late write permission. Unsupported host ports retain their existing unknown-capacity policy and
 do not claim shared admission. Runtime-owned pulls, other write owners,
 restart reconciliation, other native ports and broader cleanup remain outstanding.
+Known import payloads use `storage/import-files.ts`. Its closed Node-copy owner joins the same
+durable per-volume registry as setup/results, reports written bytes and settles after original
+file/metadata work. `artifacts/filing.ts` admits each new decoded copy after content deduplication,
+then rechecks world ownership before its atomic write. Small authored sidecars/journals keep the
+world's existing commit path; full batch/metadata peak planning is not claimed. Duplicate creative
+bytes are reused, not deleted. `artifacts/browser-media-import.ts` separately admits the bounded
+whole spool before payload writes and holds it through filing/cleanup, so shared/separate spool
+and world volumes cannot be confused. Coordinator UI, editor/audio/music, folder import and scoped
+World Chat controls pass only host-owned capabilities. Failed accounting retains valid media.
+Startup reconciles only this port's known imports after host exit; a process-wide live-owner set
+protects pending writes across service instances, and unrelated imports remain uncertain.
+`storage/service.ts` can retain an explicitly stable destination while its world stays active,
+keeping a mounted artifact-volume warning after an operation fails. Temporary/per-job roots keep
+their lease lifetime. No directory scan, native worker, generic cleanup or new write authority is
+added. Provider pre-dispatch/scratch, full batch planning, other import/export owners and remaining
+storage/platform acceptance are still open.
 Media-reader protection: `transport.ts` accepts an optional host-only `ResolvedMediaFile.release`
 lease from a resolver. It opens one descriptor for size/range and streaming, retains ownership
 through pending resolution/open/close, and releases only after confirmed descriptor closure.

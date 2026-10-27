@@ -364,6 +364,7 @@ export interface WorldChatActionTurn {
 }
 
 export interface WorldChatActionAdapterDeps {
+  readonly importSpace?: import("../storage/import-files.js").ImportFileSpace;
   /** Choose a music track's take (SPEC-060 R-10): kept to the shelf as Keep keeps one, then the track's. */
   readonly chooseMusicTake?: (productionId: string, trackId: string, sessionId: string, takeId: string, baseHash: string) => Promise<void>;
   readonly reconcileChapterReview?: (productionId: string, chapterId: string, requestId: string) => Promise<{ id: string; summary: string } | null>;
@@ -3837,7 +3838,7 @@ async function executeSharedResource(
         if (!folder) return { status: "cancelled", detail: "No folder was selected." };
         const stale = precondition();
         if (stale) throw new WorldStateStaleError(stale);
-        const report = await importFolder(store, folder, deps.mediaProbe, () => store.isClosed());
+        const report = await importFolder(store, folder, deps.mediaProbe, () => store.isClosed(), deps.importSpace);
         await store.commit({ kind: "world-chat-artifact-import", source: options.source, files: [], requestId: action.actionId });
         return {
           status: "completed",
@@ -3857,6 +3858,7 @@ async function executeSharedResource(
       let refused = 0;
       for (const [index, sourcePath] of selected.entries()) {
         const filed = await fileArtifact(store, {
+          ...(deps.importSpace ? { importSpace: deps.importSpace } : {}),
           sourcePath,
           links: payload.action.links,
           ...(payload.action.allowLarge !== undefined ? { allowLarge: payload.action.allowLarge } : {}),

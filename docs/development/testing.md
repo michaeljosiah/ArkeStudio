@@ -67,6 +67,20 @@ The mounted-destination fixture keeps a published file on a full volume while do
 file to a different volume. Reservation/replan fixtures invalidate another owner's capacity during
 a blocked flush, refresh it, then verify the old grant stays revoked and its intent remains uncertain.
 
+Known import admission uses `test/storage/import-files.test.ts`, `storage/service.test.ts`,
+`artifacts/browser-media-import.test.ts` and `artifacts/artifacts.test.ts`, with editor import
+and `productions/audio-studio.test.ts` regressions. Run with native filesystem/process access
+and bounded concurrency. Synthetic capacity protects the real small source/result files; tests
+never fill a volume. The production browser path checks healthy destinations, full spool/full
+mounted artifact volumes, a shared-volume shortfall, source/path privacy and stable warning
+scope after refusal. Other cases cover competing result reservations, dedup/retirement retention,
+unknown capacity, failed post-write accounting and cancellation without late payload. A disposable
+Node host exits with flushed import intents; reconciliation settles only this finite port and
+leaves valid files/unrelated intents intact. Another service instance cannot release a live owner.
+These checks qualify per-file copies and the bounded browser spool, not full batch/metadata peaks,
+provider pre-dispatch/scratch, remaining import/export owners or all native platforms. Run the
+coordinator typecheck after the final test edit; optional FFmpeg cases report explicit skips.
+
 Ming cleanup recovery uses coordinator `test/recovery/ming-cleanup.test.ts` and
 `test/recovery/ming-host.test.ts`, contracts `test/ming-recovery.test.ts` and the extended
 diagnostics/incident/action-history suites, plus client `test/recovery-ming-cleanup.test.tsx`

@@ -275,6 +275,7 @@ import type { AppStorageService } from "./storage/service.js";
 import { SetupFileStorage } from "./storage/setup-files.js";
 import { SetupArchiveStorage } from "./storage/setup-archive.js";
 import { JobArtifactStorage } from "./storage/job-artifacts.js";
+import { ImportFileStorage } from "./storage/import-files.js";
 import type { RecoveryControlService } from "./recovery/control.js";
 import type { RecoveryHistoryService } from "./recovery/history.js";
 import { recoveryCommand } from "./recovery/commands.js";
@@ -3526,7 +3527,8 @@ export class Coordinator {
   /** In-flight dispatch-scene-planned requestIds (SPEC-024 R-12): the same redelivery guard. */
   private readonly creatingPlans = new Set<string>();
   private readonly activeMessages = new Set<Promise<void>>();
-  private readonly browserMediaImports = new BrowserMediaImports();
+  private readonly browserMediaImports: BrowserMediaImports;
+  private readonly importFileSpace?: ImportFileStorage;
   private cataloguePreviews: CataloguePreviewService | null = null;
   private readonly backgroundWork = new Set<Promise<unknown>>();
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
@@ -3627,6 +3629,8 @@ export class Coordinator {
   private readonly storyPublications: StoryPublicationService;
   private readonly dramaEditions: DramaEditionService;
   constructor(private readonly opts: CoordinatorOptions) {
+    this.importFileSpace = opts.storageHealth?.supportsAdmission ? new ImportFileStorage(opts.storageHealth) : undefined;
+    this.browserMediaImports = new BrowserMediaImports(this.importFileSpace);
     this.dramaEditions = new DramaEditionService(opts.appRoot ? join(opts.appRoot, "drama-editions") : opts.changeLogPath + ".drama-editions", opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {});
     this.storyPublications = new StoryPublicationService(opts.appRoot ? join(opts.appRoot, "story-publications") : opts.changeLogPath + ".story-publications", { ...(opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {}), ...(opts.mediaProbe ? { probe: opts.mediaProbe } : {}) });
     this.effectAnalysis = new EditorEffectAnalysisService(opts.effectAudioAnalysisHost, (analysis, scope) => this.emit({
@@ -5062,7 +5066,7 @@ export class Coordinator {
         }
       }));
       this.syncStorageObservation();
-      this.trackBackground(this.opts.storageHealth.start());
+      this.trackBackground(this.importFileSpace?.reconcileIdleImports() ?? this.opts.storageHealth.start());
     }
     for (const run of (await this.audiobookActivity.load()).reverse()) this.readModel.apply({ type: "audiobook.activity", at: run.updatedAt, run });
     // The engine must be resolved BEFORE queue recovery, not after (SPEC-021 §2.11). Recovery
@@ -8833,7 +8837,7 @@ export class Coordinator {
         const attachments = new WorldChatAttachmentStore(store.dir, () => this.nowIso());
         try {
           await attachments.promote(msg.conversationId, attachment, msg.requestId, async ({ sourcePath }) => {
-            const outcome = await fileArtifact(store, {
+            const outcome = await fileArtifact(store, { ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
               sourcePath,
               importedFrom: `world-chat:${msg.conversationId}/${msg.attachmentId}`,
               ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
@@ -15054,6 +15058,7 @@ export class Coordinator {
           msg.sourcePath,
           this.opts.mediaProbe,
           () => !this.stillOpen(store) || this.stopping,
+          this.importFileSpace,
         ).catch(() => null);
         if (report) {
           this.emit({ at: new Date().toISOString(), type: "import.report", worldId: msg.worldId, ...report });
@@ -18812,7 +18817,7 @@ export class Coordinator {
           if (browserFiles.length === 0) { this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true); return; }
           try {
             await this.browserMediaImports.run(browserFiles, () => !this.stillOpen(store) || this.stopping,
-              sourcePaths => this.handleClientMessage({ ...request, sourcePaths }, false, false, false, store));
+              sourcePaths => this.handleClientMessage({ ...request, sourcePaths }, false, false, false, store), store.closingSignal);
           } catch (error) { this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error)); }
           return;
         }
@@ -18833,6 +18838,7 @@ export class Coordinator {
         if (msg.audioStudio) {
           try {
             const failures = await importAudioStudioMedia(store, chosen, msg.audioStudio, {
+              ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
               ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
               ...(this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
               ...(this.opts.confirmLargeMediaImport ? { confirmLarge: this.opts.confirmLargeMediaImport } : {}),
@@ -18857,7 +18863,7 @@ export class Coordinator {
             if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
             const name = basename(sourcePath);
             if (!(MUSIC_IMPORT_EXTENSIONS as readonly string[]).includes(extname(name).slice(1).toLowerCase())) { failures.push({ index, reason: `${name}: a track is WAV, MP3, M4A or FLAC` }); continue; }
-            const outcome = await fileArtifact(store, {
+            const outcome = await fileArtifact(store, { ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
               sourcePath,
               ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
               abandoned: () => !this.stillOpen(store) || this.stopping,
@@ -18875,6 +18881,7 @@ export class Coordinator {
         if (msg.editor) {
           try {
             const failures = await importEditorMedia(store, chosen, msg.editor, {
+              ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
               ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
               ...(this.opts.takePosterMaker ? { poster: this.opts.takePosterMaker } : {}),
               onPosterUnavailable: (artifactId, reason) => {
@@ -18897,7 +18904,7 @@ export class Coordinator {
         for (const [index, sourcePath] of chosen.entries()) {
           if (!this.stillOpen(store)) return;
           if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
-          const outcome = await fileArtifact(store, {
+          const outcome = await fileArtifact(store, { ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
             sourcePath,
             // Measured as it is filed (#283): an artifact is immutable, so its length and whether
             // it carries audio are true once and true forever.
@@ -21049,7 +21056,7 @@ export class Coordinator {
   private async fileGenesisAttachments(dir: string, store: WorldStore): Promise<void> {
     try {
       for (const sourcePath of await sandboxAttachments(dir)) {
-        const outcome = await fileArtifact(store, { sourcePath,
+        const outcome = await fileArtifact(store, { ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}), sourcePath,
           ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
           abandoned: () => this.stopping,
         });
@@ -21931,7 +21938,7 @@ export class Coordinator {
   ): Promise<string | null> {
     const store = this.opts.provider.openStore?.();
     if (!store || store.worldId !== worldId) return null;
-    const outcome = await fileArtifact(store, {
+    const outcome = await fileArtifact(store, { ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
       sourcePath,
       // Measured once, at the moment the bytes land, rather than by every reader afterwards (#283).
       ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
@@ -22705,6 +22712,7 @@ export class Coordinator {
       activePlans: (productionId) => this.activeScenePlans(store, productionId),
       ...(this.opts.pickFiles ? { pickFiles: this.opts.pickFiles } : {}),
       ...(this.opts.pickFolder ? { pickFolder: this.opts.pickFolder } : {}),
+      ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
       ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
       extractArtifact: (artifactId, mutation) =>
         this.extractArtifactForConversationAction(store, artifactId, mutation),
