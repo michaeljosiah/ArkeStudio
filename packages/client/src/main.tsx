@@ -61,6 +61,7 @@ import "./screens/editor-transitions.css";
 import "./components/editor-effect-proposal-card.css";
 import "./screens/develop-responsive.css";
 import "./screens/branch-map.css";
+import "./components/story-controls.css";
 import "./screens/season-responsive.css";
 import "./screens/chapter-responsive.css";
 import "./screens/chapter-audio-studio.css";

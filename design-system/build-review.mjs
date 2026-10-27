@@ -28,6 +28,26 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN BRANCH MAP STATE 240
+  { group: "Remembered choices · turn 240", screen: "A Branch Map that remembers", frame: "240a", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Story facts · six crew and the account", frame: "240b", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "A named value with a clear starting state", frame: "240c", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Remember · sealing the bore loses Elsie", frame: "240d", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Available when · both rescuers must survive", frame: "240e", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Show when · Wei speaks only if he survived", frame: "240f", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Preview facts · why the remote release is absent", frame: "240g", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "The ending · the manifest follows the route", frame: "240h", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "A finding carries the state that makes it fail", frame: "240i", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Phone · the same rule in a sheet", frame: "240j", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Start at the node’s +", frame: "240k", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "The + opens Define connector", frame: "240l", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Write the choice on the draft connection", frame: "240m", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Set conditions and remembered values before adding", frame: "240n", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Add choice · the new connector is selected", frame: "240o", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Phone · the same rounded dialog helper", frame: "240p", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  { group: "Remembered choices · turn 240", screen: "Choose on map · return to the same dialog", frame: "240q", route: "Interactive / Branch map", status: "drawn", checked: "2026-10-27", controls: [], notes: ["Approved 2026-10-27; implementation in progress. SPEC-063, issue #2199."] },
+  // END BRANCH MAP STATE 240
+
   // BEGIN GLOBAL CHAT 239
   { group: "Studio assistant · turn 239", screen: "The current notification reference · 206b", frame: "239a", route: "App chrome / Studio assistant", status: "drawn", checked: "2026-10-26", controls: [], notes: ["Approved 26 October 2026; not built. The actual 206b master drawing, reused intact. Its floating notification card supplies the shell grammar."] },
   { group: "Studio assistant · turn 239", screen: "Global chat · the Studio assistant", frame: "239b", route: "App chrome / Studio assistant", status: "drawn", checked: "2026-10-26", controls: [], notes: ["Approved 26 October 2026; not built. A rounded dialog over the unchanged 227a writing-room drawing, using current Arke icons and the shared 225 composer."] },
@@ -909,6 +929,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "branch-map-state-240.review.html", what: "Turn 240: remembered values, conditional choices and dialogue in First Contact, plus the click-connector creation flow; local interactive prototype.", state: "proposed 27 October 2026; not built" },
   { file: "global-chat-239.review.html", what: "Turn 239: the Studio assistant in a notification-style rounded dialog, diagnosis, reviewed repair, world handoff, phone, tablet and keyboard viewport.", state: "approved 26 October 2026; not built" },
   { file: "music-238.review.html", what: "Turn 238: Music as a production — Make music at the door, an album’s cover and tracks, Add track from Bench or a file, a track open with its lyrics and Heard in, a character’s theme in the Guide, a song teaser, Export → Arke Player for an album, a track’s composer and takes, the track editor, and the album’s sequence.", state: "approved 24 October 2026; not built" },
   { file: "picture-marks-237.review.html", what: "Turn 237: Picture marks — pictures set on the words inside a beat, + Picture at a sentence, a new mark’s panel, and Illustrate choosing pictures from the story under a cap.", state: "approved 24 October 2026; not built" },
@@ -1092,6 +1113,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="global-chat-239.css">
 <link rel="stylesheet" href="../packages/client/src/components/model-chip.css">
 <link rel="stylesheet" href="global-chat-239.reference.css">
+<link rel="stylesheet" href="branch-map-state-240.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">

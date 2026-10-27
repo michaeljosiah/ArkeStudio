@@ -1328,7 +1328,7 @@ function Row({
             </div>
           ) : null}
         </div>
-        {beat === undefined ? null : <BeatLines beats={beat.lines} sheets={sheets} voices={beat.voices} />}
+        {beat === undefined ? null : <BeatLines story={{ worldId, production, scene }} beats={beat.lines} sheets={sheets} voices={beat.voices} />}
         <section className="fy-swrow__descwrap">
           {scriptEditor}
         </section>

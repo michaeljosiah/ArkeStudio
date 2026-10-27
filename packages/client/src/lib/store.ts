@@ -1,3 +1,4 @@
+import type { TraversalEvidence } from "@arke-studio/contracts";
 import type { ArkePlayerPartRequest, ArkePlayerPictureSize, SetGuideEntry, SetGuideTeasers } from "@arke-studio/contracts";
 import type { StoryPublishAction } from "@arke-studio/contracts";
 import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
@@ -5558,8 +5559,9 @@ export function recordTraversal(
   from: string,
   to: string,
   route: string[],
+  story?: TraversalEvidence["story"],
 ): void {
-  send({ kind: "record-traversal", worldId, productionId, choiceId, from, to, route });
+  send({ kind: "record-traversal", worldId, productionId, choiceId, from, to, route, ...(story ? { story } : {}) });
 }
 
 /** Ask for the named routing findings (epic 401) — evidence, never a score. */

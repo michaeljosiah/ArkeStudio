@@ -1365,3 +1365,13 @@ review flags, exact saved-take/part preservation and explicitly confirmed recove
 and witnessed terminal errors remain separate. Compare the existing turn-206 Activity interruption
 wording at phone, tablet and desktop widths. Synthetic component screenshots do not establish
 native provider recovery; report any controlled live interruption separately.
+
+
+Remembered story state (SPEC-063, turn 240) uses contracts `test/story-state.test.ts`, coordinator `test/productions/story-state.test.ts`, `test/productions/interactive.test.ts`, `test/productions/routing-command.test.ts`, and client `test/interactive-player.test.ts`, `test/branch-map-canvas.test.tsx`, `test/season-layout.test.tsx` and `test/visual-novel-beats.test.tsx`. Check distinct states after reconvergence, unavailable choices, inactive text/voice/pictures, ending selection, rewind, corrupted/changed saves, state-specific coverage, stale replacement refusal, native save/reopen and the older-reader fence. Compile the actual exported HTML script, not only the player module. After changing either shared JavaScript module run `node scripts/interactive-player-source.mjs` and commit the generated copy. Native UI checks cover click/keyboard +, map-pick draft retention, Escape/cancel, focus return, backdrop behavior and rounded phone dialogs with fixed footer actions. The private First Contact parity fixture lives with SPEC-063 and must exercise all 104 routes in both native and inlined players without rewriting the original world. It is not a public manuscript fixture.
+
+Compare the native controls alongside turn 240 at 1360×850 and 390×844, using the same authored
+example and theme. Check fit-content dialog height, 640px connector/460px fact widths, 16px
+corners, 12px phone margins, scrolling body/fixed footer and 44px phone targets. Include the
+facts Inspector, choice Review/Keep, selected-line Show when, draft/map-pick round trip and
+witness preview. Verify disabled choices show literal reasons, cannot advance on click or
+shortcut, and do not change the shortcut numbers of legal choices.

@@ -1,3 +1,5 @@
+import { TraversalEvidenceSchema, UnavailableChoiceSchema } from "./routing.js";
+import { StoryFactSchema, StoryPredicateSchema, StoryEffectSchema, StoryPresentationSchema, StoryEndingSchema } from "./story-state-schema.js";
 import { z } from "zod";
 import { AudioStudioProposalInputSchema } from "./audio-arrangement-schema.js";
 import { DraftScriptBlockSchema } from "./audio-drama.js";
@@ -1180,19 +1182,23 @@ const NonEmptyRoutingChangesSchema = <T extends z.ZodRawShape>(shape: T, message
 
 /** Closed semantic edits replace the legacy whole-routing JSON submission. */
 export const RoutingCommandSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("set-facts"), baseVersion: z.number().int().min(1).optional(), facts: z.array(StoryFactSchema).max(32) }).strict(),
+  z.object({ operation: z.literal("set-presentation"), baseVersion: z.number().int().min(1).optional(), presentation: StoryPresentationSchema }).strict(),
+  z.object({ operation: z.literal("set-ending-variants"), baseVersion: z.number().int().min(1).optional(), sceneId: SceneIdSchema, title: z.string().min(1), variants: z.array(StoryEndingSchema).min(1) }).strict(),
   z.object({ operation: z.literal("set-start"), sceneId: SceneIdSchema }).strict(),
   z
     .object({
       operation: z.literal("add-choice"),
-      choice: z.object({ id: RoutingChoiceIdSchema, from: SceneIdSchema, label: z.string().trim().min(1), to: SceneIdSchema }).strict(),
+      choice: z.object({ id: RoutingChoiceIdSchema, from: SceneIdSchema, label: z.string().trim().min(1), to: SceneIdSchema, when: StoryPredicateSchema.optional(), effects: z.array(StoryEffectSchema).max(32).optional(), unavailable:UnavailableChoiceSchema.optional() }).strict(),
     })
     .strict(),
   z
     .object({
       operation: z.literal("edit-choice"),
+      baseVersion: z.number().int().min(1).optional(),
       choiceId: RoutingChoiceIdSchema,
       changes: NonEmptyRoutingChangesSchema(
-        { from: SceneIdSchema.optional(), label: z.string().trim().min(1).optional(), to: SceneIdSchema.optional() },
+        { from: SceneIdSchema.optional(), label: z.string().trim().min(1).optional(), to: SceneIdSchema.optional(), when: StoryPredicateSchema.nullable().optional(), effects: z.array(StoryEffectSchema).max(32).optional(), unavailable:UnavailableChoiceSchema.nullable().optional() },
         "a choice edit must change at least one field",
       ),
     })
@@ -1238,6 +1244,7 @@ export const ProductionTraversalModelActionSchema = z
     from: SceneIdSchema,
     to: SceneIdSchema,
     route: z.array(SceneIdSchema).min(1),
+    story: TraversalEvidenceSchema.shape.story,
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();

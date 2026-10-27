@@ -56,7 +56,7 @@
 .bm-viewport--empty { display: flex; align-items: flex-start; justify-content: center; padding-top: 72px; cursor: default; }
 .bm-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .bm-edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-.bm-nodes { position: absolute; inset: 0; }
+.bm-nodes { position: absolute; inset: 0; pointer-events: none; }
 .bm-nodes:focus-within { outline: none; }
 
 .bm-edge { fill: none; stroke: var(--foreground); stroke-width: 1.5; opacity: 0.45; }
@@ -87,6 +87,7 @@
 
 /* A scene card: its frame at 16:9, its title, one meta line. 148 wide, as the layout pitches. */
 .bm-node {
+  pointer-events: auto;
   position: absolute;
   width: 148px;
   border: 1px solid var(--border);

@@ -1,3 +1,7 @@
+import { StorySceneDialog, StoryPreviewStart } from "../../components/story-scene-controls.js";
+import { Button } from "../../components/ui.js";
+import { sendRoutingCommand } from "../../lib/store.js";
+import type { SceneRecord } from "@arke-studio/contracts";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { formatMicroUsd, routingFindings, sceneBeats, type ProductionBundle, type RoutingFinding, type SceneBeat, type Sheet, type TableReadPlan, type WorldBundle } from "@arke-studio/contracts";
@@ -27,14 +31,19 @@ export function BeatLines({
   beats,
   sheets,
   voices,
+  story,
 }: {
   beats: readonly SceneBeat[];
   sheets: readonly Pick<Sheet, "id" | "name">[];
   voices: ReadonlyMap<string, LineVoice>;
+  story?: { worldId: string; production: ProductionBundle; scene: SceneRecord };
 }) {
+  const [rule, setRule] = useState<string | null>(null);
   const spoken = beats.filter((beat) => beat.kind !== "picture");
   if (spoken.length === 0) return <p className="fy-swbeat__none">No line · the picture alone</p>;
   return (
+    <>
+    {story?.production.routing && rule && <StorySceneDialog routing={story.production.routing} scene={story.scene} blockId={rule} onClose={() => setRule(null)} onSave={(presentation, baseVersion) => sendRoutingCommand(story.worldId, story.production.meta.id, { operation: "set-presentation", presentation, baseVersion })} />}
     <ul className="fy-swbeat" data-testid="beat-lines">
       {spoken.map((beat) => {
         const voice = beat.lineId === undefined ? "unvoiced" : voices.get(beat.lineId) ?? "unvoiced";
@@ -42,6 +51,7 @@ export function BeatLines({
           <li key={beat.lineId ?? beat.shot.id} className="fy-swbeat__line" data-kind={beat.kind}>
             <span className="fy-swbeat__who">{beatSpeakerName(beat, sheets)}</span>
             <span className="fy-swbeat__text">{beat.text}</span>
+            {story?.production.routing && beat.blockId && <Button size="sm" onClick={event => { event.stopPropagation(); setRule(beat.blockId!); }}>Show when{story.production.routing.presentation?.find(p => p.sceneId === story.scene.id)?.blocks.some(b => b.blockId === beat.blockId) ? " · conditional" : ""}</Button>}
             <span className="fy-swbeat__voice" data-voice={voice}>
               <i aria-hidden="true" />
               {VOICE_WORD[voice]}
@@ -50,6 +60,7 @@ export function BeatLines({
         );
       })}
     </ul>
+    </>
   );
 }
 
@@ -131,6 +142,7 @@ export function SceneBeatPreview({
   const worldId = world.meta.worldId;
   const productionId = production.meta.id;
   const [opened] = useState(() => Date.now());
+  const [prefix, setPrefix] = useState<string[] | null>(null);
   const voices = useProductionVoiceFiles({ worldId, productionId, scenes: production.scenes, key: opened });
   const [served, setServed] = useState<RoutingFinding[] | null>(null);
   useEffect(() => {
@@ -149,23 +161,24 @@ export function SceneBeatPreview({
     const scene = production.scenes.find((candidate) => candidate.id === sceneId);
     return startShotId === undefined || scene === undefined ? -1 : sceneBeats(scene).findIndex((beat) => beat.shot.id === startShotId);
   }, [production.scenes, sceneId, startShotId]);
+  if (production.routing?.schemaVersion === 2 && sceneId !== production.routing.start && prefix === null) return <StoryPreviewStart routing={production.routing} sceneId={sceneId} onClose={onClose} onStart={setPrefix} />;
   if (!voices.ready) return <p className="fy-swbeat__none" role="status">Gathering the voices…</p>;
-  return (
-    <InteractivePlayerView
-      className="bm-player"
-      label="Preview"
-      unwalked={unwalked}
-      options={beatPreviewOptions({
+  let options:ReturnType<typeof beatPreviewOptions>;
+  try {
+    options=beatPreviewOptions({
         world,
         production,
         voices: voices.files,
         from: sceneId,
-        ...(at > 0 ? { at } : {}),
+        ...(prefix ? { prefix } : {}),
+        ...(production.routing?.schemaVersion === 2 && startShotId ? {shotId:startShotId} : at > 0 ? { at } : {}),
         unwalked,
-        onChoice: (choice, walked) => recordTraversal(worldId, productionId, choice.id, choice.from, choice.to, walked),
+        onChoice: (choice, walked, story) => recordTraversal(worldId, productionId, choice.id, choice.from, choice.to, walked, story),
         ...(production.routing ? { onBranchMap: () => navigate(`/w/${worldId}/p/${productionId}/branch-map`) } : {}),
         onClose,
-      })}
-    />
-  );
+    });
+  } catch (error) {
+    return <div className="fy-swbeat__none" role="alert"><p>{error instanceof Error && error.message.startsWith("This shot") ? error.message : "This shot cannot be previewed on the selected route."}</p>{production.routing?.schemaVersion === 2 && sceneId !== production.routing.start && <Button onClick={()=>setPrefix(null)}>Choose another route</Button>}<Button onClick={onClose}>Close preview</Button></div>;
+  }
+  return <InteractivePlayerView className="bm-player" label="Preview" unwalked={unwalked} options={options}/>;
 }

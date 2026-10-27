@@ -12010,14 +12010,17 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId) return;
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production || production.routing === null) return;
-        await appendTraversal(store, msg.productionId, {
+        try { await appendTraversal(store, msg.productionId, {
           ts: new Date().toISOString(),
           routingVersion: production.routing.version,
           choiceId: msg.choiceId,
           from: msg.from,
           to: msg.to,
           route: msg.route,
-        }).catch(() => {});
+          ...(msg.story ? { story: msg.story } : {}),
+        }); } catch (error) {
+          if (this.stillOpen(store) && production.routing.schemaVersion === 2) this.emit({ type: "command.failed", at: new Date().toISOString(), command: msg.kind, requestId: null, reason: error instanceof Error ? error.message : String(error) });
+        }
         if (!this.stillOpen(store)) return;
         await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
         await this.refreshWorldSnapshot(msg.worldId);

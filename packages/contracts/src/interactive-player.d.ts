@@ -1,3 +1,5 @@
+import type { StoryProgram } from "./story-state.js";
+import type { StoryPredicate, StoryEffect } from "./story-state-schema.js";
 /**
  * Types for `interactive-player.js` (design turn 156): the one player the branch map's preview
  * mounts and the exporter inlines into player.html. The module is plain JavaScript so that its
@@ -14,6 +16,9 @@ export interface InteractivePlayerScene {
 
 /** One beat: a picture and a line, read at the viewer's pace. */
 export interface InteractivePlayerBeat {
+  shotId?: string;
+  pictureShotId?: string;
+  blockId?: string;
   picture?: string;
   /** The line; none is the picture alone. */
   text?: string;
@@ -39,6 +44,9 @@ export interface InteractivePlayerClip {
 }
 
 export interface InteractivePlayerChoice {
+  unavailable?: { label?: string; reason:string };
+  when?: StoryPredicate;
+  effects?: StoryEffect[];
   id: string;
   from: string;
   label: string;
@@ -49,12 +57,18 @@ export interface InteractivePlayerAuthor {
   /** Choices nobody has walked in preview; their cards say so. */
   unwalked: readonly string[];
   /** A choice pressed, with the scenes walked to reach it — the evidence route (brief §4). */
-  onChoice?: (choice: InteractivePlayerChoice, walked: string[]) => void;
+  onChoice?: (choice: InteractivePlayerChoice, walked: string[], story?: { identity: string; prefix: string[]; before: string; after: string; provenance: "human" | "automated" }) => void;
   onBranchMap?: () => void;
   onClose?: () => void;
+  /** Pick another reachable prefix into the current scene; never an authored state override. */
+  onTestRoute?: (sceneId:string) => void;
 }
 
 export interface InteractivePlayerOptions {
+  story?: StoryProgram;
+  /** Resume a named stateful playthrough; Start again creates a separate run. */
+  playthroughId?: string;
+  prefix?: string[];
   /** The production's title: the poster's heading and the eyebrow over each scene. */
   title: string;
   /** Above the poster's title: the world. */

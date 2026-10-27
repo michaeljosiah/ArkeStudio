@@ -969,3 +969,21 @@ take selection or acoustic word-timing record is changed. Tests: coordinator
 Explicit same-file audiobook picture choices preserve the existing generation look/shot, focus and motion, and may record a separate current-look review (SPEC-047 R-98/R-103, #2125). `setAudiobookPicture` fences source/selection/look freshness; `pictureLookChanged` applies that review consistently in the existing picker and illustrated EPUB preflight. `writeAudiobook` raises reader boundary105 before the first review field.
 
 Audio-only story publication fingerprints exclude chapter pictures, look/own-look choices and their shared update timestamp; all other narration fields and the existing resolved blocks/mix/arrangement, text, metadata, rights and media identities remain checked in `publications/story-review.ts` (#2122, SPEC-048 section2.11). Illustrated outputs retain picture dependencies; coherent capture and immutable ready-edition verification are unchanged.
+
+### Remembered interactive story state (SPEC-063, approved turn 240)
+
+`packages/contracts/src/story-state-schema.ts` owns finite fact declarations and the closed predicate/effect vocabulary. `routing.ts` keeps legacy routing strict and opts story rules into `schemaVersion: 2` separately from the authored `version`. `story-state.js` is the dependency-free authority for evaluation, prefix replay, scene-entry projection, ending selection, canonical SHA-256 identity, fact references and bounded state exploration (100,000 states, 1,000,000 transitions, 1,000,000 retained witness entries and depth 2,048). Its declarations are in `story-state.d.ts`.
+
+Client `components/story-controls.tsx` owns the connector helper and facts form, typed predicate/effect controls and acknowledged draft saves; `story-scene-controls.tsx` owns dialogue/shot guards, ending variants and explicit valid-route preview entry. `screens/branch-map.tsx` owns map destination picking and the selected connector. Scene `BeatLines` opens the same Show when control. `productions/interactive.ts` in coordinator persists semantic commands and replay-validated evidence through the world gate, and packages the shared player. Stateful export saves are namespaced by publication and retain separate restarted playthroughs; legacy saves keep their existing namespace and four-field shape. New full-rule replacement forms carry `baseVersion` to refuse stale replacements while retaining the draft. Loading current rules explicitly replaces that draft with the latest saved fields before advancing its base version. Compact map rows have a separate Settings control; destination-first repairs can choose a source, and keyboard map picking shares the pointer path. Production Chat reads all facts/presentation rows through `get_routing` and uses those same commands.
+
+The generic commit boundary raises the world minimum reader to 113 when any routing write introduces schema version 2, including proposals and whole-file imports. The original production is never automatically migrated. `scripts/interactive-player-source.mjs` composes the evaluator and player into the exact exporter source; regenerate it after changing either JavaScript module. Conditional composite films are refused because they cannot remove an inactive line or person; beat packages carry block, shot and picture-source identities.
+
+Focused coverage: contracts `test/story-state.test.ts`; client `test/branch-map-canvas.test.tsx`, `test/interactive-player.test.ts`, `test/season-layout.test.tsx`; coordinator `test/productions/story-state.test.ts`, `test/productions/interactive.test.ts` and `test/world/schema-version.test.ts`.
+
+Turn 240's visual alignment adds the Story facts Inspector and individual fact dialog, compact
+is/is-not condition rows, an unsaved draft path and atomic Review/Keep in the choice and dialogue
+Inspectors. Optional `choice.unavailable` carries an authored disabled label/reason; omitted
+means hidden. Stateful findings carry `witnessPrefix`, so the map can display named facts and
+preview that exact state without parsing diagnostic text. Preview facts link values back to
+their originating choice; Test another route opens the reachable-prefix picker through
+`InteractivePlayerAuthor.onTestRoute`, rather than inventing audience state.
