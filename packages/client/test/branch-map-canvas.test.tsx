@@ -571,7 +571,7 @@ describe("the branch map canvas (design turn 157)", () => {
     const item=await mount(routing);
     const snapshot=state(routing);
     const production=snapshot.world!.productions.find(p=>p.meta.id==="low-water")!;
-    production.scenes=production.scenes.map(scene=>scene.id==="sc_quarter"?{...scene,script:{version:1,blocks:[{id:"blk_line",kind:"action",text:"The room goes silent."}]},shots:[{id:"sh_rule",number:1,title:"The first shot",description:"A silent room"}]} as Scene:scene);
+    production.scenes=production.scenes.map(scene=>scene.id==="sc_quarter"?{...scene,script:{blocks:[{id:"blk_line",kind:"action",text:"The room goes silent."}]},shots:[{id:"sh_rule",number:1,title:"The first shot",description:"A silent room"}]} as Scene:scene);
     await act(async()=>__setStateForTest(snapshot));
     await click(card(item,"sc_quarter"));
     await click(button(item,"Show when"));
