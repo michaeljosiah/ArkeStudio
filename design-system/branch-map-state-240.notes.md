@@ -1,7 +1,7 @@
 # Turn 240 · Remembered choices
 
-27 October 2026, revision 3. Proposed for owner review, not approved or implemented. Extends
-turn 157's Branch Map; requirement authority is SPEC-063 revision 4 and ArkeStudio issue #2199.
+27 October 2026, revision 3. Approved by the owner; implementation authorized and in progress. Extends
+turn 157's Branch Map; requirement authority is SPEC-063 revision 5 and ArkeStudio issue #2199.
 
 The owner requested a new turn showing remembered values, conditional choices and dialogue,
 using The Red Quiet as the example. These drawings use First Contact, the existing interactive
