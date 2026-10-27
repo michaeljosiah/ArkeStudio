@@ -2,28 +2,35 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { execFile } from "node:child_process";
+import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { agentPromptFor, ROSTER } from "@arke-studio/contracts";
 import { privateWireBody } from "../../../adapter-opencode/src/v2/private-control.js";
 import { assembleHarness, harnessProfileDir, v2ProfileEnv } from "../../src/harness/v2-launch.js";
-import { ChildSupervisor } from "../../src/supervisor.js";
+import { ChildSupervisor, allocateLoopbackPort } from "../../src/supervisor.js";
 import { HarnessStudioModelRunner } from "../../src/studio-assistant/runner.js";
 import { StudioProviderBridge } from "../../src/studio-assistant/provider-bridge.js";
+import { ManagedStudioProviderBridge } from "../../src/studio-assistant/managed-provider-bridge.js";
+import { OllamaEngineService } from "../../src/local-ai/ollama.js";
+import { OLLAMA_VERSION } from "../../src/setup/catalogue.js";
 import { withLocalGpu } from "../../src/harness/local-gpu.js";
 import { withModelValidation } from "../../src/harness/model-validation.js";
 import { LocalGpu } from "../../src/local-ai/gpu.js";
 import { assertNativeProfileExcludes } from "./native-profile.js";
-import { tempDir } from "../tmp.js";
+import { tempDir, closeOnCleanup } from "../tmp.js";
 import { until, untilAsync } from "../wait.js";
 
-for (const overflow of [false, true]) it(`pinned native private generation through the bounded bridge: ${overflow ? "upstream overflow" : "complete response"}`, {
-  skip: !process.env.ARKE_TEST_OPENCODE2, timeout: 75_000,
+for (const { overflow, managedWriter, managedProvider } of [{ overflow: false, managedWriter: false, managedProvider: false }, { overflow: true, managedWriter: false, managedProvider: false }, { overflow: false, managedWriter: true, managedProvider: false }, { overflow: false, managedWriter: true, managedProvider: true }]) it(`pinned native private generation through the bounded bridge: ${managedProvider ? "verified managed writer and provider" : managedWriter ? "verified managed writer" : overflow ? "upstream overflow" : "complete response"}`, {
+  skip: !process.env.ARKE_TEST_OPENCODE2 || managedWriter && process.platform !== "win32", timeout: managedWriter ? 150_000 : 75_000,
 }, async () => {
   const root = await tempDir("arke-studio-native-bridge-"), model = "bridge-selected", profile = harnessProfileDir(root);
   const prompt = "PRIVATE_BRIDGE_QUESTION", answer = '{"kind":"reply","text":"PRIVATE_BRIDGE_REPLY"}';
   const system = agentPromptFor({ ...ROSTER.find(row => row.name === "studio-assistant")!, researchWeb: false });
   const expected = privateWireBody({ model: `ollama/${model}`, prompt, system, outputTokenLimit: 4096 });
   const calls: Array<{ body: unknown; headers: Record<string, unknown> }> = [], traces: unknown[] = [];
+  let phase = "provider startup";
+  const writerReads: Array<{ method: string; path: string; status?: number; ms: number }> = [];
   const provider = createServer((request, response) => {
     let body = ""; request.on("data", chunk => { body += String(chunk); if (body.length > 1024 ** 2) request.destroy(); });
     request.on("end", () => {
@@ -37,10 +44,28 @@ for (const overflow of [false, true]) it(`pinned native private generation throu
       response.end(`data: ${JSON.stringify(chunk({ content: answer }, null))}\n\ndata: ${JSON.stringify({ ...chunk({}, "stop"), usage: { prompt_tokens: 10, completion_tokens: 5 } })}\n\ndata: [DONE]\n\n`);
     });
   });
-  provider.listen(0, "127.0.0.1"); await once(provider, "listening"); const address = provider.address(); assert(address && typeof address !== "string");
-  const bridge = new StudioProviderBridge({ upstream: `http://127.0.0.1:${address.port}/v1`, requestBody: JSON.stringify(expected), model });
+  let service: OllamaEngineService | undefined, providerEndpoint: string, marker: string | undefined;
+  if (managedProvider) {
+    const providerRoot = join(root, "managed-provider"); marker = join(providerRoot, "requests.jsonl");
+    await mkdir(join(providerRoot, "ollama-runtime"), { recursive: true }); await copyFile(process.execPath, join(providerRoot, "ollama-runtime", "ollama.exe"));
+    service = new OllamaEngineService({ appRoot: providerRoot, port: await allocateLoopbackPort(),
+      supervise: spec => new ChildSupervisor({ ...spec, args: [join(import.meta.dirname, "../fixtures/managed-http-origin.mjs")],
+        env: { ...spec.env, SERVICE_VERSION: OLLAMA_VERSION, ORIGIN_MARKER: marker!, NATIVE_PROVIDER_MODEL: model, NATIVE_PROVIDER_REPLY: answer } }) });
+    closeOnCleanup(() => service?.dispose());
+    await service.applySettings({ engineUrl: null, modelsDir: null }); assert(service.captureManagedOrigin()?.current()); providerEndpoint = service.endpoint();
+  } else {
+    provider.listen(0, "127.0.0.1"); await once(provider, "listening"); const address = provider.address(); assert(address && typeof address !== "string"); providerEndpoint = `http://127.0.0.1:${address.port}`;
+  }
+  const bridge = service ? new ManagedStudioProviderBridge(service, { requestBody: JSON.stringify(expected), model, timeoutMs: 90_000 })
+    : new StudioProviderBridge({ upstream: providerEndpoint + "/v1", requestBody: JSON.stringify(expected), model });
   const route = await bridge.start();
-  const wiring = await assembleHarness({ appRoot: root, v2: { configuredPath: process.env.ARKE_TEST_OPENCODE2! }, ollamaEndpoint: () => `http://127.0.0.1:${address.port}`, onTrace: value => traces.push(value),
+  const wiring = await assembleHarness({ appRoot: root, v2: managedWriter ? { bundledPath: process.env.ARKE_TEST_OPENCODE2!,
+    runCommand: async (command, args, timeoutMs, env) => {
+      if (command === "where" || command === "which") return { status: 1, stdout: "" }; // deterministic bundled discovery
+      assert.equal(command, process.env.ARKE_TEST_OPENCODE2!); assert.deepEqual(args, ["--version"]);
+      return new Promise(resolve => { execFile(command, args, { env, timeout: timeoutMs, maxBuffer: 4096, windowsHide: true, encoding: "utf8" },
+        (error, stdout) => resolve({ status: error ? 1 : 0, stdout })); });
+    } } : { configuredPath: process.env.ARKE_TEST_OPENCODE2! }, ollamaEndpoint: () => providerEndpoint, onTrace: value => traces.push(value),
     createSupervisor: (spec, deps) => new ChildSupervisor({ ...spec, inheritEnv: false, env: {
       ...Object.fromEntries(["SYSTEMROOT", "WINDIR", "COMSPEC", "PATH", "PATHEXT", "TEMP", "TMP"].flatMap(key => process.env[key] === undefined ? [] : [[key, process.env[key]!]])),
       ...v2ProfileEnv(profile), APPDATA: join(profile, "roaming"), LOCALAPPDATA: join(profile, "local"),
@@ -48,25 +73,48 @@ for (const overflow of [false, true]) it(`pinned native private generation throu
   assert(wiring.adapter && wiring.supervisor && wiring.recovery); assert.equal(wiring.harnessInfo?.version, "2.0.26");
   const gpu = new LocalGpu(async () => {}), adapter = withModelValidation(withLocalGpu(wiring.adapter, gpu), async () => ({}));
   const runner = new HarnessStudioModelRunner({ adapter: () => adapter, scratch: join(root, "studio", "turns"), sessionInput: async value => value,
-    destination: () => ({ local: true, identity: wiring.recovery!.componentDigest() }), timeoutMs: 30_000,
-    privateTransport: async request => { assert.deepEqual(privateWireBody(request), expected); return { configuration: { baseURL: route.baseURL, apiKey: route.apiKey }, identity: route.identity, approve: () => bridge.approve(), stop: () => bridge.stop() }; } });
+    destination: () => ({ local: true, identity: wiring.recovery!.componentDigest() }), timeoutMs: managedWriter ? 90_000 : 30_000,
+    privateTransport: async request => { assert.deepEqual(privateWireBody(request), expected);
+      const writer = managedWriter ? wiring.createPrivateWriter?.(request) : undefined;
+      if (managedWriter) assert(writer, "the actual bundled supervisor must supply its original writer connection");
+      if (writer && managedProvider) {
+        const original = writer.fetch.bind(writer);
+        writer.fetch = async (url, init) => {
+          const at = Date.now(), path = new URL(String(url)).pathname.replace(/\/session\/[^/]+/, "/session/<id>");
+          try { const result = await original(url, init); writerReads.push({ method: init?.method ?? "GET", path, status: result.status, ms: Date.now() - at }); return result; }
+          catch (error) { writerReads.push({ method: init?.method ?? "GET", path, ms: Date.now() - at }); throw error; }
+        };
+      }
+      return { configuration: { baseURL: route.baseURL, apiKey: route.apiKey }, identity: route.identity, approve: () => bridge.approve(), stop: () => bridge.stop(), ...(writer ? { writer } : {}) }; } });
   try {
+    phase = "native readiness";
     await wiring.relaunchHarness({}); await wiring.supervisor.start(); await until(() => wiring.supervisor!.status === "healthy", "the isolated pinned native bridge owner", 35_000);
     await adapter.init?.(); assert(adapter.readiness().ready);
+    phase = "global catalogue";
     await untilAsync(async () => (await adapter.listModels?.())?.some(row => row.provider === "ollama" && row.id === model) === true, "original native catalogue");
     let approvals = 0;
+    phase = "private run";
     const operation = runner.run({ role: "studio-assistant", model: `ollama/${model}`, prompt }, new AbortController().signal, async disclosure => {
-      approvals++; assert(disclosure.local); assert.equal(disclosure.prompt, prompt); assert.equal(calls.length, 0); return { cloudApproved: false };
+      approvals++; assert(disclosure.local); assert.equal(disclosure.prompt, prompt); assert.equal(calls.length, 0);
+      phase = "approved private run";
+      if (marker) assert.equal((await readFile(marker, "utf8")).trim().split("\n").map(line => JSON.parse(line) as { path: string }).filter(row => row.path === "/v1/chat/completions").length, 0);
+      return { cloudApproved: false };
     });
     if (overflow) { await assert.rejects(operation, /could not be completed/); assert(runner.busy()); assert(gpu.isBusy("Ollama")); }
     else { assert.equal(await operation, answer); await until(() => !runner.busy(), "completed native bridge result retired"); assert.equal(gpu.isBusy("Ollama"), false); }
-    assert.equal(approvals, 1); assert.equal(calls.length, 1); assert.deepEqual(calls[0]?.body, expected);
-    for (const key of ["authorization", "b3", "traceparent", "x-session-id", "x-opencode-session-id"]) assert.equal(calls[0]?.headers[key], undefined);
+    const actualCalls = marker ? (await readFile(marker, "utf8")).trim().split("\n").map(line => JSON.parse(line) as { path: string; body: string; headers: Record<string, unknown> })
+      .filter(row => row.path === "/v1/chat/completions").map(row => ({ body: JSON.parse(row.body), headers: row.headers })) : calls;
+    assert.equal(approvals, 1); assert.equal(actualCalls.length, 1); assert.deepEqual(actualCalls[0]?.body, expected);
+    for (const key of ["authorization", "b3", "traceparent", "x-session-id", "x-opencode-session-id"]) assert.equal(actualCalls[0]?.headers[key], undefined);
     assert(!JSON.stringify(traces).includes("PRIVATE_")); assert(!JSON.stringify(traces).includes(route.apiKey));
     await assertNativeProfileExcludes(profile, [prompt, answer, "PRIVATE_UPSTREAM_OVERFLOW", route.apiKey]);
   } finally {
+    if (managedProvider) {
+      const providerPaths = marker ? (await readFile(marker, "utf8").catch(() => "")).trim().split("\n").filter(Boolean).map(line => (JSON.parse(line) as { path: string }).path) : [];
+      console.log(JSON.stringify({ managedNativePhase: phase, writerReads, providerPaths, providerState: service?.status().state, providerCurrent: service?.captureManagedOrigin()?.current() }));
+    }
     try { await runner.stop(); await adapter.dispose?.(); await wiring.supervisor.stop(); await runner.ownerStopped(); gpu.stop(); assert(await bridge.stop());
       await assertNativeProfileExcludes(profile, [prompt, answer, "PRIVATE_UPSTREAM_OVERFLOW", route.apiKey]); }
-    finally { provider.closeAllConnections(); await new Promise<void>(resolve => provider.close(() => resolve())); }
+    finally { await service?.dispose(); if (provider.listening) { provider.closeAllConnections(); await new Promise<void>(resolve => provider.close(() => resolve())); } }
   }
 });

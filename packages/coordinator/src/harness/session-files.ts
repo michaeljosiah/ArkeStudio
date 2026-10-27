@@ -97,6 +97,7 @@ export async function createPreparedSession(
   signal?: AbortSignal,
   capturePrivateRetirement?: (retire: () => Promise<boolean>) => void,
 ): Promise<SessionRef & { model?: string; retirePrivateFiles?: () => Promise<boolean> }> {
+  if (session.privateWriter && (!capturePrivateRetirement || session.visibility !== "private")) throw new Error("A private writer requires its original file-retirement owner.");
   return serialized(dir, async () => {
     const key = directoryKey(dir), token = randomUUID();
     privatePreparations.delete(key);
@@ -150,7 +151,9 @@ export async function createPreparedSession(
     } catch (error) {
       // No private prompt has been dispatched by preparation/creation. Release only our
       // exact unsent control bytes, inside the directory critical section already held.
-      await retireUnsentFiles?.();
+      // A private HTTP observation may end before its original proof/body/socket work.
+      // Its caller retains the captured files and retires them only after that owner drains.
+      if (!session.privateWriter) await retireUnsentFiles?.();
       if (!retireUnsentFiles && session.visibility === "private" && privatePreparations.get(key) === token) privatePreparations.delete(key);
       if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error("session creation stopped", { cause: error });
       if (abort.signal.aborted) throw new Error("session creation timed out", { cause: error });

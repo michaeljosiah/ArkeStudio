@@ -123,11 +123,13 @@ npm test            # node --test per workspace
 ```
 
 CI runs lint, typecheck and build once, on ubuntu-latest, in a job beside the tests, and the tests
-on **both** windows-latest and ubuntu-latest, in four coordinator shards plus a separate
+on **both** windows-latest and ubuntu-latest, in eight coordinator shards plus a separate
 other-workspaces job per platform, each with a 30-minute ceiling. Typecheck used to ride on shard
 1 of both platforms, 9.5 minutes each, and took Windows shard 1 to the ceiling on 2026-10-23. The
 other workspaces outgrew their former place alongside shard 2: on 2026-10-17 that combination
-exhausted the ceiling without a failed test. Three things run elsewhere, each named in
+exhausted the ceiling without a failed test. The four-way Windows shard 2 reached the ceiling
+again while tests were passing on 2026-10-27; eight automatically discovered shards split that
+work without extending the ceiling or silence guard. Three things run elsewhere, each named in
 `scripts/ci-test-plan.mjs` or its workflow: the Production Chat film runs only in its own job
 (the shards skip it by name), and the effect benchmarks (`effects.yml`) and the engine's package
 check (`engine.yml`) run on main and on pull requests that touch what they cover. Windows jobs

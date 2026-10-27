@@ -1505,6 +1505,25 @@ socket cleanup. HTTP settlement is not GPU/inference completion. Windows synthet
 checks qualify this port; other platforms refuse native proof. Managed writer/socket proof,
 binary integrity, full native integration/network/spend/persistence/cleanup acceptance and the
 actual Studio master visual gate remain outstanding. Default production activation stays closed.
+The common finite socket/proof/request/body owner is now `local-ai/verified-loopback-http.ts`;
+the provider subclass keeps its closed Ollama grammar. `harness/managed-writer-transport.ts`
+adds the separate native API policy: one captured private request, one directory/session,
+original launch authentication, one generation and bounded read/retirement/denial routes.
+`harness/v2-launch.ts` offers this capability only for the current bundled Windows writer.
+Contracts `PrivateSessionWriter` carries host-only closures through the Studio runner and
+prepared-session owner, never through model input, configuration or wire commands. Failed
+creation retains exact private files until original HTTP work drains. Stop seals new native
+writes immediately while retaining an already-sent completion observation; native completion,
+GPU release and confirmed session/file retirement remain separate authorities.
+The pinned native provider discovery has a one-second metadata deadline. Managed bridge startup
+therefore verifies two unwritten one-use TCP sockets before exposing its URL. Only initial
+metadata may consume them; current child/service/socket checks still precede every write.
+They expire after thirty seconds, stay within the eight-socket cap and drain on Stop. No
+metadata response is cached, no HTTP connection is reused and later route probes remain fresh.
+Real pinned OpenCode fixtures qualify writer alone and writer plus managed synthetic provider,
+with one exact approved request and bounded profile scans. Binary provenance, uncertain writer/
+bridge-listener lifetime, remaining network/spend/persistence/physical cleanup/platform gates
+and actual turn-239 visual acceptance still prevent default production activation.
 History replacement reads wait for an already admitted same-path write that outlived bounded
 shutdown in this process. This prevents a late old rename from overwriting a successor's history;
 it is not a cross-process/multiple-active-host lock. Private state is not replayed on reconnect

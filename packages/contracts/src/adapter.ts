@@ -64,6 +64,19 @@ export interface PrivateSessionRequest { model: string; system: string; prompt: 
 /** Host-only ephemeral loopback bridge capability. Separate from the reviewed model input;
  * never a provider credential, renderer/model argument or ordinary session setting. */
 export interface PrivateSessionTransport { baseURL: string; apiKey: string }
+/** Host-only original writing connection. These closures never enter configuration, wire
+ * commands, model input or logs. The caller retains close/drain ownership even when native
+ * creation fails. Sealing blocks new generation without cancelling a completion observation. */
+export interface PrivateSessionWriter {
+  readonly identity: string;
+  bindDirectory(directory: string, agent: string): boolean;
+  bindSession(sessionId: string): boolean;
+  current(): boolean;
+  fetch: typeof fetch;
+  seal(): void;
+  busy(): boolean;
+  close(): Promise<boolean>;
+}
 
 export interface CreateSessionInput {
   purpose: SessionPurpose;
@@ -72,6 +85,7 @@ export interface CreateSessionInput {
   visibility?: "private";
   privateRequest?: PrivateSessionRequest;
   privateTransport?: PrivateSessionTransport;
+  privateWriter?: PrivateSessionWriter;
   /** The one-use preparation returned by the coordinator's session-file step. */
   preparationId?: string;
   /** Bounds session creation; adapters SHALL pass it to every request on the creation path. */

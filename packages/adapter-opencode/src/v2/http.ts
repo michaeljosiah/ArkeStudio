@@ -23,6 +23,8 @@ export interface OpenCodeV2HttpOptions {
    * guessing.
    */
   password: () => string | null;
+  /** Captured host-only private connection; absent only for ordinary/unqualified ports. */
+  fetch?: typeof fetch;
 }
 
 /** The `{ data, location }` envelope v2 wraps most JSON responses in. */
@@ -88,7 +90,7 @@ export class OpenCodeV2Http {
     if (init?.responseBytes !== undefined && (!Number.isSafeInteger(init.responseBytes) || init.responseBytes <= 0 || init.responseBytes > 16 * 1024 ** 2)) {
       throw new Error("Invalid native response bound");
     }
-    const res = await fetch(this.url(path, init?.location), {
+    const res = await (this.opts.fetch ?? fetch)(this.url(path, init?.location), {
       method,
       headers: {
         "Content-Type": "application/json",
@@ -141,7 +143,7 @@ export class OpenCodeV2Http {
         (t as { unref?: () => void }).unref?.();
       });
     }
-    const res = await fetch(this.url("/api/event"), {
+    const res = await (this.opts.fetch ?? fetch)(this.url("/api/event"), {
       headers: { Accept: "text/event-stream", authorization: this.authHeader() },
       ...(signal ? { signal } : {}),
     }).catch(() => null);

@@ -3,7 +3,7 @@ import { EventEmitter, on } from "node:events";
 import { it } from "node:test";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { STUDIO_ASSISTANT_LIMITS, type CreateSessionInput, type HarnessAdapter, type HarnessEvent, type SendMessageInput, type SessionConfigInput } from "@arke-studio/contracts";
+import { STUDIO_ASSISTANT_LIMITS, type CreateSessionInput, type HarnessAdapter, type HarnessEvent, type SendMessageInput, type SessionConfigInput, type PrivateSessionWriter } from "@arke-studio/contracts";
 import { HarnessStudioModelRunner } from "../../src/studio-assistant/runner.js";
 import { StudioAssistantService } from "../../src/studio-assistant/service.js";
 import { FileStudioConversationStore } from "../../src/studio-assistant/store.js";
@@ -50,6 +50,40 @@ function nativeCapabilities(adapter: HarnessAdapter): void {
   Object.assign(adapter, { privateDestinations: true, privatePayloads: true, privateTransient: true });
   adapter.sendMessageWithFence = async (input, dispatch) => { dispatch(); return adapter.sendMessage(input); };
 }
+it("retains the original writer and private files after failed native creation until exact HTTP cleanup", async () => {
+  const h = await fixture(); nativeCapabilities(h.raw); let closed = false, seals = 0;
+  const writer: PrivateSessionWriter = { identity: "1".repeat(64), bindDirectory: () => true, bindSession: () => true, current: () => true,
+    fetch: async () => { throw Error("Unused synthetic writer HTTP"); }, seal: () => { seals++; }, busy: () => !closed, close: async () => closed };
+  h.raw.createSession = async value => { h.created.push(value); throw Error("Native creation failed"); };
+  const runner = new HarnessStudioModelRunner({ ...h.deps, privateTransport: async () => ({ writer,
+    configuration: { baseURL: "http://127.0.0.1:43210/v1", apiKey: "e".repeat(64) }, identity: "f".repeat(64), approve: () => true, stop: async () => true }) });
+  try {
+    await assert.rejects(runner.run(input, new AbortController().signal, allow), /Native creation failed/);
+    await until(() => seals > 0, "failed original writer is sealed"); assert(runner.busy()); assert.equal(h.sent.length, 0);
+    const captured = h.created[0]!.privateWriter!; assert(Object.isFrozen(captured)); assert.notEqual(captured, writer);
+    assert.equal(await readFile(join(h.created[0]!.cwd!, "opencode.json"), "utf8"), "{}");
+    writer.close = async () => true; // A changed caller method cannot replace the captured cleanup capability.
+    await runner.reconcileRetirement(); assert(runner.busy());
+    assert.equal(await readFile(join(h.created[0]!.cwd!, "opencode.json"), "utf8"), "{}");
+    closed = true; await runner.reconcileRetirement(); assert(!runner.busy()); assert.deepEqual(await readdir(h.scratch), []);
+  } finally { closed = true; await runner.stop(); await runner.ownerStopped(); }
+});
+it("Stop seals an admitted writer immediately while its native session creation is still pending", async () => {
+  const h = await fixture(); nativeCapabilities(h.raw); const gate = deferred(), abort = new AbortController(); h.create(gate.promise);
+  const original = h.raw.createSession.bind(h.raw); let seals = 0, closes = 0;
+  h.raw.createSession = async value => ({ ...await original(value), privateRetire: async () => true });
+  const writer: PrivateSessionWriter = { identity: "1".repeat(64), bindDirectory: () => true, bindSession: () => true, current: () => true,
+    fetch: async () => { throw Error("Unused synthetic writer HTTP"); }, seal: () => { seals++; }, busy: () => false, close: async () => { closes++; return true; } };
+  const runner = new HarnessStudioModelRunner({ ...h.deps, privateTransport: async () => ({ writer,
+    configuration: { baseURL: "http://127.0.0.1:43210/v1", apiKey: "e".repeat(64) }, identity: "f".repeat(64), approve: () => true, stop: async () => true }) });
+  try {
+    const stopped = assert.rejects(runner.run(input, abort.signal, allow), /stopped/);
+    await until(() => h.created.length === 1, "original native creation remains admitted"); abort.abort(); await stopped;
+    assert(seals > 0); assert.equal(closes, 0); assert(runner.busy()); assert.equal(h.sent.length, 0);
+    gate.resolve(); await until(() => !runner.busy(), "late unsent native session and HTTP owner retire"); assert(closes > 0); assert.equal(h.sent.length, 0);
+    assert.deepEqual(await readdir(h.scratch), []);
+  } finally { gate.resolve(); await runner.stop(); await runner.ownerStopped(); }
+});
 it("a private bridge factory cannot replace missing managed-host route authority", async () => {
   const h = await fixture(); nativeCapabilities(h.raw); let factories = 0;
   const runner = new HarnessStudioModelRunner({ ...h.deps, destination: () => null, privateTransport: async () => { factories++; throw Error("MUST_NOT_CREATE_ROUTE"); } });

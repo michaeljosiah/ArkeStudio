@@ -46,10 +46,10 @@ it("composes exact managed origin, one approved private provider request and ret
     const repeat = await fetch(route.baseURL + "/chat/completions", { method: "POST", body, headers }); assert.equal(repeat.status, 409); await repeat.arrayBuffer();
     assert.equal(await bridge.stop(), true); assert(!bridge.busy()); assert(first.current());
 
-    let entered = false;
+    let entered = false, holdProof = false;
     held = new ManagedStudioProviderBridge(service, { model: "fixture", requestBody: body, shutdownMs: 20,
-      verify: async () => { entered = true; return new Promise<boolean>(resolve => { finishProof = resolve; }); } });
-    const heldRoute = await held.start(); assert(held.approve());
+      verify: async () => { if (!holdProof) return true; entered = true; return new Promise<boolean>(resolve => { finishProof = resolve; }); } });
+    const heldRoute = await held.start(); holdProof = true; assert(held.approve());
     const request = fetch(heldRoute.baseURL + "/chat/completions", { method: "POST", body, headers: { authorization: `Bearer ${heldRoute.apiKey}` } }).then(response => response.arrayBuffer(), () => null);
     await until(() => entered, "managed provider proof owns the connected socket");
     assert.equal(await held.stop(), false); await request; assert(held.busy()); assert.equal((await rows()).length, 1);

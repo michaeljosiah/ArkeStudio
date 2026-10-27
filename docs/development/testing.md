@@ -1391,7 +1391,7 @@ inspection and removes its temporary profile/package. The same variables enable 
 real encode/ZIP/decode test. The smoke requires a desktop display (or an appropriate Linux display
 environment); ordinary CI unit tests do not replace it.
 
-[ci.yml](../../.github/workflows/ci.yml) runs on Windows and Linux with four coordinator shards and a separate other-workspaces job per platform. Shard 1 runs lint, typecheck, build and the CI planner tests. [ci-test.mjs](../../scripts/ci-test.mjs) partitions coordinator tests using Node's discovered file list and discovers every other workspace with a test script. To inspect a shard locally, run `node scripts/ci-test.mjs 1/4` from the root; this is only that coordinator shard, not the complete CI gate. Run `node scripts/ci-test.mjs workspaces` for the other workspaces, or omit the selector for the complete unsharded test run. `node --test scripts/ci-test-plan.test.mjs` checks that the job plans cover every discovered workspace without duplication or omission.
+[ci.yml](../../.github/workflows/ci.yml) runs on Windows and Linux with eight coordinator shards and a separate other-workspaces job per platform. A separate Ubuntu job runs lint, typecheck, build and CI planner tests. [ci-test.mjs](../../scripts/ci-test.mjs) partitions coordinator tests using Node's discovered file list and discovers every other workspace with a test script. To inspect a shard locally, run `node scripts/ci-test.mjs 1/8` from the root; this is only that coordinator shard, not the complete CI gate. Run `node scripts/ci-test.mjs workspaces` for the other workspaces, or omit the selector for the complete unsharded test run. `node --test scripts/ci-test-plan.test.mjs` checks workflow coverage and runs Node's actual discovered-file sharding over a disposable fixture to catch omission or duplication. The expanded split follows Windows shard 2 exhausting thirty minutes with passing output in run 40577520866; the thirty-minute ceiling and ten-minute silence guard remain unchanged.
 
 The runner uses a silence guard as well as a workflow timeout. Diagnose leaked resources before treating a silent run as merely slow. Local Windows success cannot establish Linux path/case correctness. Packaging/release workflows perform additional delivery work beyond CI's build.
 
@@ -1946,6 +1946,30 @@ still refuses and Windows native cases skip. These tests are not actual OpenCode
 provider, binary integrity, live Ollama, physical GPU or cross-restart qualification. Default native
 activation and actual turn-239 matched visual acceptance remain separate gates. Run coordinator
 typecheck after the final test edit.
+
+
+
+Private writer qualification uses coordinator `test/harness/managed-writer-transport.test.ts`,
+`test/studio-assistant/runner.test.ts`, `test/harness/session-files.test.ts` and adapter
+`test/v2-private-writer.test.ts`, alongside existing private route/payload/transient/retirement
+checks. They cover directory/session/auth/prompt confinement, no ordinary-session adoption,
+captured method receivers, stale owner refusal, native 204/404 handling without raw errors,
+Stop before transmission versus retained completion, and original files after failed creation.
+Provider transport tests additionally check two prepared unwritten sockets, exact one-use port
+identity, fresh later metadata, idle closure and retained cancelled preparation. The native
+one-second discovery deadline is checked against the actual pinned binary's embedded source;
+preparation moves process proof outside that window without caching metadata or retrying.
+With `ARKE_TEST_OPENCODE2` set, `test/studio-assistant/provider-bridge-native.test.ts` includes
+real bundled-writer and bundled-writer plus managed-provider cases. They isolate the native
+profile and use one disposable Node image for the provider, checking one exact request after
+approval, stripped native headers and full bounded marker/capability scans before/after exit.
+Run these native cases with file concurrency one. Qualified writer creation is bounded at
+sixty seconds; scoped metadata and retirement at thirty seconds. Its independent generation
+observation defaults to five minutes (at most fifteen), separate from requester Stop; provider
+HTTP retains its three-minute ceiling. Ordinary/unqualified ports keep their prior bounds.
+These fixtures do not qualify live model/GPU output, unknown writer/listener lifetime, binary
+provenance or cross-restart cleanup. Default Studio activation and actual master parity remain
+open. Run affected workspace typechecks after the final test edit.
 
 ## System status (master turn 241; System 240 review)
 

@@ -18,6 +18,39 @@ async function fixture() {
     rows: async () => (await readFile(marker, "utf8")).trim().split("\n").map(line => JSON.parse(line) as { body: string; path: string; headers: Record<string, string>; clientPort: number }) };
 }
 
+it("prepares two unwritten original sockets and consumes them once for fresh metadata", { timeout: 60_000 }, async () => {
+  const h = await fixture(); const ports: number[] = [];
+  const transport = new ManagedOllamaTransport({ origin: h.origin, current: () => true,
+    verify: async (_origin, connection) => { ports.push(connection.clientPort); return true; } });
+  try {
+    await transport.prepareMetadata(); assert.equal(ports.length, 2);
+    await assert.rejects(readFile(h.marker), { code: "ENOENT" });
+    const tags = await transport.fetch(h.base + "/api/tags"); await tags.arrayBuffer();
+    const show = await transport.fetch(h.base + "/api/show", { method: "POST", body: JSON.stringify({ model: "fixture" }) }); await show.arrayBuffer();
+    assert.equal(ports.length, 2, "the native metadata window contains no new process/helper startup");
+    const fresh = await transport.fetch(h.base + "/api/show", { method: "POST", body: JSON.stringify({ model: "fixture" }) }); await fresh.arrayBuffer();
+    assert.equal(ports.length, 3, "later metadata is a new verified request, never a cached response");
+    assert.deepEqual((await h.rows()).map(row => row.clientPort), ports);
+    assert.equal(await transport.stop(), true);
+  } finally { await transport.stop(); await h.supervisor.stopAndConfirm(); }
+});
+it("Stop drains unused prepared sockets and retains preparation proof that ignores cancellation", { timeout: 60_000 }, async () => {
+  const h = await fixture(), proof = deferred(); let entered = false;
+  const transport = new ManagedOllamaTransport({ origin: h.origin, current: () => true, shutdownMs: 20,
+    verify: async () => true });
+  try {
+    await transport.prepareMetadata(); assert.equal(await transport.stop(), true); assert(!transport.busy());
+    await assert.rejects(readFile(h.marker), { code: "ENOENT" });
+    const next = new ManagedOllamaTransport({ origin: h.origin, current: () => true, shutdownMs: 20,
+      verify: async () => { entered = true; return proof.promise; } });
+    try {
+      const failed = assert.rejects(next.prepareMetadata()); await until(() => entered, "original preparation proof");
+      assert.equal(await next.stop(), false); assert(next.busy()); proof.resolve(true); await failed;
+      assert.equal(await next.stop(), true); assert(!next.busy()); await assert.rejects(readFile(h.marker), { code: "ENOENT" });
+    } finally { proof.resolve(false); await next.stop(); }
+  } finally { proof.resolve(false); await transport.stop(); await h.supervisor.stopAndConfirm(); }
+});
+
 it("uses the exact verified socket and forwards only a bounded closed response", { timeout: 60_000 }, async () => {
   const h = await fixture(); let connection: LoopbackConnection | undefined;
   // Injected proof tests HTTP behavior on all platforms; separate tests use the native port.

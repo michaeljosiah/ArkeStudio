@@ -1,7 +1,7 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import type { HarnessEngine } from "@arke-studio/contracts";
+import type { HarnessEngine, PrivateSessionRequest, PrivateSessionWriter } from "@arke-studio/contracts";
 import {
   credentialEnvPatch,
   discoverPreferredHarness,
@@ -28,6 +28,7 @@ import { ChildSupervisor, type SupervisedSpec, type SupervisorDeps } from "../su
 import { atomicWriteFile } from "../world/atomic.js";
 import { ownedChildHooks } from "./owned-child.js";
 import { HarnessRuntimeChanges, type HarnessRecoveryOwner } from "./runtime-change.js";
+import { ManagedStudioWriterTransport } from "./managed-writer-transport.js";
 
 // This package owns shared desktop/dev composition, so every adapter is a runtime dependency.
 // Keep concrete adapter imports here; Coordinator itself consumes the HarnessAdapter contract.
@@ -212,6 +213,8 @@ export interface AssembleHarnessOptions {
 }
 
 export interface AssembledHarness {
+  /** Host-only original bundled writer. No existing-install ownership or model approval. */
+  createPrivateWriter?(request: PrivateSessionRequest): PrivateSessionWriter | null;
   recovery?: HarnessRecoveryOwner;
   reconfigureOllama?: (apply?: () => Promise<void>) => Promise<void>;
   harness: DiscoveredHarness | null;
@@ -374,6 +377,13 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     isV2,
     supervisor,
     adapter,
+    createPrivateWriter: request => {
+      if (process.platform !== "win32" || !harness || harness.discovery.source !== "bundled") return null;
+      const origin = supervisor.captureProcessOrigin(), secret = password.current();
+      if (!origin || !secret || origin.executable !== harness.discovery.command || baseUrl() !== `http://127.0.0.1:${origin.port}`) return null;
+      return new ManagedStudioWriterTransport({ origin, current: () => password.current() === secret && baseUrl() === `http://127.0.0.1:${origin.port}`,
+        authorization: v2BasicAuth(secret), request });
+    },
     ...(harness ? { recovery: { ownership: harness.discovery.source === "bundled" ? "managed" as const : "external" as const,
       componentDigest: () => createHash("sha256").update(JSON.stringify([harness.generation, harness.discovery.command, harness.discovery.version, opts.ollamaEndpoint?.()])).digest("hex"),
       reserve: (signal: AbortSignal) => runtimeChanges.reserveRecovery(signal) } } : {}),

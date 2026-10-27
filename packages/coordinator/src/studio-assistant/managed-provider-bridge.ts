@@ -11,6 +11,7 @@ export class ManagedStudioProviderBridge {
   private readonly bridge: StudioProviderBridge;
   private readonly transport: ManagedOllamaTransport;
   private readonly owner: NonNullable<ReturnType<OllamaEngineService["captureManagedOrigin"]>>;
+  private opening: Promise<{ baseURL: string; apiKey: string; identity: string }> | null = null;
   constructor(service: OllamaEngineService, options: { model: string; requestBody: string; verify?: typeof windowsConnectionOrigin; timeoutMs?: number; shutdownMs?: number }) {
     const owner = service.captureManagedOrigin();
     if (!owner?.current()) throw new Error("The managed private provider is unavailable.");
@@ -20,10 +21,13 @@ export class ManagedStudioProviderBridge {
     this.bridge = new StudioProviderBridge({ upstream: owner.baseUrl + "/v1", requestBody: options.requestBody, model: options.model,
       fetch: this.transport.fetch, timeoutMs: options.timeoutMs, shutdownMs: options.shutdownMs });
   }
-  async start(): Promise<{ baseURL: string; apiKey: string; identity: string }> {
-    const route = await this.bridge.start();
-    if (!this.owner.current()) { await this.stop(); throw new Error("The managed private provider changed."); }
-    return Object.freeze({ ...route, identity: createHash("sha256").update(JSON.stringify([this.owner.process.identity, route.identity])).digest("hex") });
+  start(): Promise<{ baseURL: string; apiKey: string; identity: string }> {
+    return this.opening ??= (async () => {
+      await this.transport.prepareMetadata();
+      const route = await this.bridge.start();
+      if (!this.owner.current()) { await this.stop(); throw new Error("The managed private provider changed."); }
+      return Object.freeze({ ...route, identity: createHash("sha256").update(JSON.stringify([this.owner.process.identity, route.identity])).digest("hex") });
+    })();
   }
   approve(): boolean { return this.owner.current() && this.bridge.approve(); }
   busy(): boolean { return this.bridge.busy() || this.transport.busy(); }

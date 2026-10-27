@@ -310,6 +310,13 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       throw new Error("session preparation is missing or was already consumed");
     }
     const privateSession = input.visibility === "private";
+    const suppliedWriter = input.privateWriter;
+    if (suppliedWriter && (!privateSession || !input.privateRequest || !input.cwd || !input.agent ||
+      !/^[a-f0-9]{64}$/.test(suppliedWriter.identity) || [suppliedWriter.bindDirectory, suppliedWriter.bindSession, suppliedWriter.fetch,
+        suppliedWriter.current, suppliedWriter.seal, suppliedWriter.busy, suppliedWriter.close].some(method => typeof method !== "function"))) throw new Error("The private writing connection could not be bound.");
+    const writer = suppliedWriter ? Object.freeze({ identity: suppliedWriter.identity, bindDirectory: suppliedWriter.bindDirectory.bind(suppliedWriter),
+      bindSession: suppliedWriter.bindSession.bind(suppliedWriter), fetch: suppliedWriter.fetch.bind(suppliedWriter), current: suppliedWriter.current.bind(suppliedWriter) }) : undefined;
+    if (writer && (!writer.current() || !writer.bindDirectory(input.cwd!, input.agent!))) throw new Error("The private writing connection could not be bound.");
     const privateRequest = input.privateRequest ? Object.freeze({ ...input.privateRequest }) : undefined;
     const privateTransport = input.privateTransport ? privateBridgeTransport(input.privateTransport) : undefined;
     if (privateTransport && (!privateSession || !privateRequest)) throw new Error("A private bridge requires a sealed private request.");
@@ -326,7 +333,13 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     }
     const revision = this.runtimeRevision, runtime = this.runtimeRequests;
     const ownerBase = this.opts.baseUrl(), ownerPassword = this.opts.password();
-    const http = privateSession ? new OpenCodeV2Http({ baseUrl: () => ownerBase, password: () => ownerPassword }) : this.http;
+    const http = privateSession ? new OpenCodeV2Http({ baseUrl: () => ownerBase, password: () => ownerPassword,
+      ...(writer ? { fetch: async (url, init) => {
+        if (!writer.current()) throw new Error("The original private writing connection changed.");
+        const response = await writer.fetch(url, init);
+        if (!writer.current()) { await response.body?.cancel(); throw new Error("The original private writing connection changed."); }
+        return response;
+      } } : {}) }) : this.http;
     const location = input.cwd;
     // The model is session state, pinned at creation (issue 1247). Measured against the pinned
     // build: an agent's `model` in opencode.json shows on GET /api/agent and is never consulted
@@ -346,6 +359,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     const sessionId = session?.id ?? "";
     if (!sessionId) throw new Error("OpenCode v2 did not return a session id");
     if (privateSession && sessionId.length > 256) throw new Error("The private native session identity exceeds its bound.");
+    if (writer && !writer.bindSession(sessionId)) throw new Error("The private writing connection returned an unexpected session.");
     // Never reclassify an existing World/private session or delete somebody else's session
     // as failed-creation cleanup when a malformed backend reuses its identity.
     if (this.sessions.has(sessionId) || this.retiredPrivateIds.has(sessionId)) throw new Error("OpenCode v2 returned an already owned session identity");
@@ -371,7 +385,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       // model name is not evidence for this location; failed/unknown metadata stays unreadable.
       if (model !== null) {
         try {
-          const signal = AbortSignal.any([AbortSignal.timeout(5_000), ...(input.signal ? [input.signal] : [])]);
+          const signal = AbortSignal.any([AbortSignal.timeout(writer ? 30_000 : 5_000), ...(input.signal ? [input.signal] : [])]);
           const scopedLocation = location ?? session.location?.directory;
           const envelope = await http.req<{ data: WireModel[]; location?: { directory?: string } }>("GET", "/api/model", undefined,
             { location: scopedLocation, signal, ...(privateSession ? { responseBytes: 1024 ** 2 } : {}) });
@@ -401,7 +415,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     const verifyRoute = async (callerSignal: AbortSignal): Promise<PrivateSessionDestination | null> => {
       routeRequested = true;
       if (!privateTurn || privateTurn.stopped || privateTurn.dispatched || routeRefused || !model || !location || !input.agent || this.disposed || this.runtimeRevision !== revision) return null;
-      const signal = AbortSignal.any([callerSignal, runtime.signal, AbortSignal.timeout(5_000)]);
+      const signal = AbortSignal.any([callerSignal, runtime.signal, AbortSignal.timeout(writer ? 30_000 : 5_000)]);
       let destination: PrivateSessionDestination | null;
       try {
         destination = await privateSessionDestination(http, { sessionId, directory: location, agent: input.agent, model, request: privateRequest, transport: privateTransport }, signal, !routePin);
@@ -429,7 +443,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       const work = async () => {
         if (!privateTurn || privateTurn.dispatched && !privateTurn.confirmed || this.disposed || this.runtimeRevision !== revision || this.sessions.get(sessionId) !== tracked) return false;
         privateTurn.stopped = true;
-        const signal = AbortSignal.any([callerSignal, runtime.signal, AbortSignal.timeout(5_000)]);
+        const signal = AbortSignal.any([callerSignal, runtime.signal, AbortSignal.timeout(writer ? 30_000 : 5_000)]);
         const absent = async (path: string) => { try { await http.reqData("GET", path, undefined, { signal, responseBytes: 64 * 1024 }); return false; } catch (error) { if (error instanceof OpenCodeError && error.status === 404) return true; throw error; } };
         try {
           const path = `/api/session/${encodeURIComponent(sessionId)}`;
@@ -745,11 +759,12 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     try {
       // The contracts' verbs are v2's verbs — once | always | reject — and the optional
       // message carries the refusal reason to the agent (issue 327 §6).
-      await this.http.req("POST", `/api/session/${sessionId}/permission/${decision.permissionId}/reply`, {
+      const owner = this.sessions.get(sessionId);
+      await (owner?.ownerHttp ?? this.http).req("POST", `/api/session/${sessionId}/permission/${decision.permissionId}/reply`, {
         // The stable API renamed the request field; its event still calls the value `reply`.
         decision: decision.decision,
         ...(decision.message !== undefined ? { message: decision.message } : {}),
-      });
+      }, owner?.private ? { signal: AbortSignal.any([this.runtimeRequests.signal, AbortSignal.timeout(5_000)]), responseBytes: 64 * 1024 } : undefined);
     } catch (error) {
       const stale = error instanceof OpenCodeError && (error.status === 404 || error.status === 409);
       if (stale) this.permissionSessions.delete(decision.permissionId);

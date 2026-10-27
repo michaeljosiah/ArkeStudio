@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rmdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { agentPromptFor, ROSTER, findHarnessModel, harnessModelReference, STUDIO_ASSISTANT_LIMITS, type HarnessAdapter, type PrivateSessionRequest, type PrivateSessionTransport } from "@arke-studio/contracts";
+import { agentPromptFor, ROSTER, findHarnessModel, harnessModelReference, STUDIO_ASSISTANT_LIMITS, type HarnessAdapter, type PrivateSessionRequest, type PrivateSessionTransport, type PrivateSessionWriter } from "@arke-studio/contracts";
 import { createPreparedSession, scopeSessionInput, sessionTurnTimeoutMs, type SessionInput } from "../harness/session-files.js";
 import { toExtendedLength } from "../world/paths.js";
 
@@ -16,6 +16,7 @@ export interface StudioModelPort {
 }
 export interface StudioPrivateTransport {
   configuration: PrivateSessionTransport; identity: string; approve(): boolean; stop(): Promise<boolean>;
+  writer?: PrivateSessionWriter;
 }
 interface Active { control: AbortController; transport?: StudioPrivateTransport; listen?: AbortController; ownerStopped?: () => void; retire?: (signal: AbortSignal) => Promise<boolean>; retireFiles?: () => Promise<boolean>; finishing?: Promise<void>; dir?: string; sessionId?: string; work?: Promise<string>; confirmed: boolean; started: boolean; workFinished: boolean; failed?: boolean }
 
@@ -45,13 +46,13 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     const combined = AbortSignal.any([signal, this.lifetime.signal, entry.control.signal]);
     let stop!: () => void, timer: ReturnType<typeof setTimeout> | undefined;
     const stopped = new Promise<never>((_, reject) => {
-      stop = () => { reject(new Error(entry.failed ? "The Studio model response could not be completed within its limits." : "Studio inference stopped. Submitted work was not replayed.")); };
+      stop = () => { entry.transport?.writer?.seal(); reject(new Error(entry.failed ? "The Studio model response could not be completed within its limits." : "Studio inference stopped. Submitted work was not replayed.")); };
       combined.addEventListener("abort", stop, { once: true }); if (combined.aborted) stop();
     });
     entry.work = this.execute(entry, input, combined, authorize);
     // Keep native work and its private config reachable after observation stops. An unknown
     // dispatch holds this runner until the actual owner confirms settlement or host shutdown.
-    void entry.work.then(() => { entry.workFinished = true; return this.finish(entry); }, () => { entry.workFinished = true; if (!entry.started || entry.confirmed) void this.finish(entry); });
+    void entry.work.then(() => { entry.workFinished = true; return this.finish(entry); }, () => { entry.workFinished = true; entry.transport?.writer?.seal(); if (!entry.started || entry.confirmed) void this.finish(entry); });
     timer = setTimeout(() => entry.control.abort(), this.deps.timeoutMs ?? sessionTurnTimeoutMs(input.model, 180_000));
     try { const text = await Promise.race([entry.work, stopped]); await Promise.race([this.finish(entry), stopped]); return text; }
     finally { clearTimeout(timer); combined.removeEventListener("abort", stop); }
@@ -90,13 +91,18 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     if (this.deps.privateTransport) {
       if (adapter.privateDestinations !== true) throw new Error("The native owner cannot verify a private bridge route.");
       const route = await this.deps.privateTransport(privateRequest, signal);
+      const writer = route.writer ? Object.freeze({ identity: route.writer.identity, bindDirectory: route.writer.bindDirectory.bind(route.writer),
+        bindSession: route.writer.bindSession.bind(route.writer), current: route.writer.current.bind(route.writer), fetch: route.writer.fetch.bind(route.writer),
+        seal: route.writer.seal.bind(route.writer), busy: route.writer.busy.bind(route.writer), close: route.writer.close.bind(route.writer) }) : undefined;
       entry.transport = Object.freeze({ configuration: Object.freeze({ ...route.configuration }), identity: route.identity,
-        approve: route.approve.bind(route), stop: route.stop.bind(route) });
+        approve: route.approve.bind(route), stop: route.stop.bind(route), ...(writer ? { writer } : {}) });
       if (!/^[a-f0-9]{64}$/.test(entry.transport.identity)) throw new Error("The private transport identity is invalid.");
+      if (writer && (!/^[a-f0-9]{64}$/.test(writer.identity) || !writer.current())) throw new Error("The private writer identity is unavailable.");
       signal.throwIfAborted();
     }
     const approve = async (route: { local: boolean; identity: string }) => {
-      const destinationIdentity = entry.transport ? createHash("sha256").update(JSON.stringify([route.identity, entry.transport.identity])).digest("hex") : route.identity;
+      const destinationIdentity = entry.transport ? createHash("sha256").update(JSON.stringify([route.identity, entry.transport.identity,
+        ...(entry.transport.writer ? [entry.transport.writer.identity] : [])])).digest("hex") : route.identity;
       const approval = await authorize({ role: input.role, model: reference, provider: model.provider, local: route.local, destination: destinationIdentity, prompt: input.prompt,
         system, outputTokenLimit: privateRequest.outputTokenLimit,
         ...(customBrief !== undefined ? { customBrief } : {}), ...(config.modelVariant ? { variant: config.modelVariant } : {}) }, signal);
@@ -104,6 +110,7 @@ export class HarnessStudioModelRunner implements StudioModelPort {
       if (!route.local && !approval.cloudApproved) throw new Error("Cloud explanation requires explicit approval of this payload.");
       if (!sameOwner() || !sameDestination()) throw new Error("The selected Studio model owner changed before dispatch.");
       if (entry.transport && !entry.transport.approve()) throw new Error("The selected Studio transport changed before dispatch.");
+      if (entry.transport?.writer && !entry.transport.writer.current()) throw new Error("The selected Studio writer changed before dispatch.");
     };
     // Synthetic host ports retain their original contract. Qualified native owners must
     // create an unsent private session before approval can name its actual scoped route.
@@ -112,7 +119,7 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     await mkdir(toExtendedLength(this.deps.scratch), { recursive: true });
     entry.dir = await mkdtemp(join(this.deps.scratch, "turn-"));
     const session = await createPreparedSession(adapter, entry.dir, config, { purpose: "ask", agent: input.role, visibility: "private", privateRequest,
-      ...(entry.transport ? { privateTransport: entry.transport.configuration } : {}) }, undefined, signal,
+      ...(entry.transport ? { privateTransport: entry.transport.configuration, ...(entry.transport.writer ? { privateWriter: entry.transport.writer } : {}) } : {}) }, entry.transport?.writer ? 60_000 : undefined, signal,
       retire => { entry.retireFiles = retire; });
     entry.sessionId = session.sessionId;
     entry.retire = session.privateRetire?.bind(session);
@@ -186,11 +193,13 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     entry.listen?.abort();
     const work = async () => {
       if (entry.retire) {
-        try { if (!await entry.retire(AbortSignal.timeout(5_000))) return; }
+        try { if (!await entry.retire(AbortSignal.timeout(entry.transport?.writer ? 30_000 : 5_000))) return; }
         catch { return; } // Unknown retirement retains one reachable owner/config, never a replay.
       }
       if (entry.transport) {
         try { if (!await entry.transport.stop()) return; }
+        catch { return; }
+        try { if (entry.transport.writer && !await entry.transport.writer.close()) return; }
         catch { return; }
       }
       if (entry.dir) {
@@ -206,6 +215,7 @@ export class HarnessStudioModelRunner implements StudioModelPort {
   /** Trusted housekeeping only: retry known-complete/unsent native retirement, never inference. */
   async reconcileRetirement(): Promise<void> { for (const entry of this.active) if (entry.workFinished && (!entry.started || entry.confirmed)) await this.finish(entry); }
   async stop(): Promise<void> {
+    for (const entry of this.active) entry.transport?.writer?.seal();
     this.lifetime.abort(); for (const entry of this.active) entry.control.abort();
     await Promise.allSettled([...this.active].map(entry => entry.transport?.stop()));
   }
