@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, open, readFile, readdir } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { AppSettingsSchema, NEW_ONBOARDING, type OnboardingPlan } from "@arke-studio/contracts";
-import { atomicWriteFile } from "@arke-studio/coordinator";
+import { atomicWriteFile, checkOnboardingWorkspace } from "@arke-studio/coordinator";
 
 /** Desktop boot preference only. World files and application settings stay in their workspace. */
 export function workspaceRoot(preferenceFile: string, fallback: string, override?: string): string {
@@ -37,6 +37,8 @@ export async function prepareWorkspace(path: string, plan: OnboardingPlan): Prom
     } finally { await file.close(); }
   }
   await mkdir(join(path, "worlds"), { recursive: true });
+  const check = await checkOnboardingWorkspace(path);
+  if (!check?.ready) throw new Error(check?.detail ?? "Your Arke folder could not save a file.");
 }
 
 export async function rememberWorkspace(preferenceFile: string, path: string): Promise<void> {

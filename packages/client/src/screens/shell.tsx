@@ -24,7 +24,7 @@ import { reviewGenesisReadiness, leaveGenesisFinding } from "../lib/store.js";
 import { reviewGenesisVoices, generateGenesisVoice, decideGenesisVoice } from "../lib/store.js";
 import { GenesisImportCards } from "../components/genesis-imports.js";
 import { reviewGenesisImports, resolveGenesisImport } from "../lib/store.js";
-import { Archive, Book, ChartLine, ChevronDown, ChevronRight, More, Pencil, Plus, RotateCcw, Sparkle, X } from "../components/icons.js";
+import { Archive, Book, ChartLine, ChevronDown, ChevronRight, More, Pencil, Plus, RotateCcw, Sparkle, Upload, ArrowRight, X } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { AgentsPanel } from "./agents.js";
 import {
@@ -339,7 +339,7 @@ export function WorldPickerScreen() {
   const phone = useMediaQuery("(max-width: 599px)");
   const confirmingWorld = worlds.find((w) => w.worldId === confirming);
   return (
-    <div className="fy-app" data-screen="world-picker">
+    <div className={cx("fy-app", worlds.length === 0 && "fy-home-welcome")} data-screen="world-picker">
       {/* No back and no context: this is the top, and the wordmark already says where you are. */}
       <AppChrome divided={false} />
       <div className="fy-content">
@@ -349,17 +349,17 @@ export function WorldPickerScreen() {
             {worlds.length ? "Pick up where you left off." : "Your first world starts here."}
           </h1>
           <div className="fy-home-count">
-            <p className="fy-hero__lede" style={{ margin: "10px 0 0", maxWidth: 540 }}>
+            <p className="fy-hero__lede" style={{ margin: worlds.length ? "10px 0 0" : 0, maxWidth: 540 }}>
               {lede}
             </p>
-            <Button variant="ghost" className="fy-home-pub" onClick={() => navigate("/publications")}>
+            <Button variant="ghost" className={cx("fy-home-pub", worlds.length === 0 && "fy-home-action")} onClick={() => navigate("/publications")}>
               <Book size={18} />
               Open publication
             </Button>
-            {!isRemoteSession() && <Button variant="ghost" disabled={importing} onClick={() => {
-              setImportNote(null); importRequest.current = importWorld(); setImporting(importRequest.current !== null);
-            }}>{importing ? "Importing world…" : "Import a world"}</Button>}
           </div>
+            {!isRemoteSession() && <div className="fy-home-import"><Button variant="ghost" className="fy-home-action" disabled={importing} onClick={() => {
+              setImportNote(null); importRequest.current = importWorld(); setImporting(importRequest.current !== null);
+            }}><Upload size={18} />{importing ? "Importing world…" : "Import a world"}</Button></div>}
           {archiveNote && (
             <div className="fy-set__why" style={{ marginTop: 10 }}>
               <span className={cx("fy-set__dot", archiveNote.refused ? "fy-set__dot--warn" : "fy-set__dot--ok")} />
@@ -476,7 +476,7 @@ export function WorldPickerScreen() {
             ))}
         </div>
         }
-        {worlds.length === 0 && <div className="fy-home-setup"><span>Write and organise now. Add AI whenever you need it.</span><Button onClick={() => navigate("/setup")}>Set up an AI writing agent</Button></div>}
+        {worlds.length === 0 && <div className="fy-home-setup"><span>Write and organise now. Add AI whenever you need it.</span><Button className="fy-home-action" onClick={() => navigate("/settings/general")}>Settings <ArrowRight size={18} /></Button></div>}
       </div>
       {phone && confirmingWorld && (
         <ArchiveSheet

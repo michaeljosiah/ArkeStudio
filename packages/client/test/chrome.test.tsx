@@ -56,6 +56,7 @@ const WITHOUT_CONTROLS = new Set<string>();
  */
 const WITHOUT_CHROME = new Set([
   "startup",
+  "onboarding",
 
   "art-direction-proposal",
   "replace-main-photo",

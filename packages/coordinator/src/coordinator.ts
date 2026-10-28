@@ -20930,7 +20930,7 @@ export class Coordinator {
         if (this.stopping) return;
         const app = this.readModel.getState().app;
         let writingModel: string | undefined;
-        if (onboardingWritingReadiness(app, plan).ready && plan.modelId) {
+        if (msg.action !== "save" && onboardingWritingReadiness(app, plan).ready && plan.modelId) {
           const model = onboardingWritingModels(app, plan).find(m => harnessModelReference(m) === plan.modelId ||
             this.opts.manifest?.models.some(entry => entry.id === plan.modelId && (entry.providerModelId ?? entry.id) === m.id));
           if (model) {

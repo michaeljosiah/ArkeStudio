@@ -17,11 +17,11 @@ let where = "", commands: ClientMessage[] = [];
 function Where() { where = useLocation().pathname; return null; }
 afterEach(() => { __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE); commands = []; });
 
-async function mount(plan: OnboardingPlan = NEW_ONBOARDING) {
+async function mount(plan: OnboardingPlan = NEW_ONBOARDING, delayed = false) {
   const state = structuredClone(FIXTURE_STATE);
   state.app.onboarding = { plan, workspace: { path: "C:/Test/Arke", ready: true, detail: null }, localModel: null };
   state.app.runtime = null; state.app.harness = { engine: "opencode", claudePath: null, codexPath: null, harnesses: [] };
-  __setStateForTest(state);
+  __setStateForTest(state, delayed ? { connection: "connecting", state: null } : {});
   __setBridgeForTest({ send: (raw: string) => commands.push(JSON.parse(raw) as ClientMessage) } as unknown as ArkeBridge);
   const element = document.createElement("div"); document.body.append(element); const root = createRoot(element);
   await act(async () => { root.render(<MemoryRouter initialEntries={["/setup"]}><OnboardingScreen /><Where /></MemoryRouter>); await flush(); });
@@ -74,6 +74,15 @@ it("a delayed earlier check cannot undo a newly submitted setup choice", async (
     assert.match(element.textContent!, /Start small/);
     assert.match(element.textContent!, /Saving your choices/);
     await acknowledge(); assert.doesNotMatch(element.textContent!, /Saving your choices/);
+  } finally { await unmount(); }
+});
+
+it("restores the saved step when the opening snapshot arrives after the screen mounts", async () => {
+  const { element, state, unmount } = await mount({ ...NEW_ONBOARDING, persona: "guided", writing: "account", account: "github-copilot", step: "account" }, true);
+  try {
+    await act(async () => { __setStateForTest(state); await flush(); });
+    assert.match(element.textContent!, /Connect GitHub Copilot/);
+    assert.doesNotMatch(element.textContent!, /Make Arke yours/);
   } finally { await unmount(); }
 });
 

@@ -29,10 +29,12 @@ const accounts = [{ id: "openai" as const, name: "ChatGPT", detail: "Sign in wit
 
 /** Approved turns 242–244, backed by existing settings, discovery, sign-in and acquisition owners. */
 export function OnboardingScreen() {
+  const desktop = typeof window === "undefined" ? undefined : window.arke;
   const { state, connection } = useStore();
   const navigate = useNavigate();
   const saved = state?.app.onboarding;
   const [plan, setPlan] = useState<OnboardingPlan>(() => saved?.plan && saved.plan.step !== "done" ? saved.plan : { ...NEW_ONBOARDING });
+  const restored = useRef(saved != null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const finishing = useRef(false);
@@ -52,6 +54,7 @@ export function OnboardingScreen() {
   }), []);
   useEffect(() => {
     if (!saved) return;
+    if (!restored.current) { restored.current = true; setPlan(saved.plan.step === "done" ? { ...NEW_ONBOARDING } : saved.plan); }
     if (finishing.current && saved.plan.step === "done") { navigate("/worlds", { replace: true }); return; }
     if (expectedPlan.current === JSON.stringify(saved.plan)) { setPlan(saved.plan); setPending(false); expectedPlan.current = null; }
   }, [saved]);
@@ -101,13 +104,17 @@ export function OnboardingScreen() {
     }
   }, [plan.step, plan.modelId, plan.writing, missing.length, app?.ollama?.state, app?.ollama?.url]);
   const restart = async () => {
-    const result = await window.arke?.restartForSetup?.();
-    if (result?.reason) setError(result.reason);
+    try { const result = await desktop?.restartForSetup?.(); if (result?.reason) setError(result.reason); }
+    catch { setError("Arke could not restart. Wait for local work to stop, then try again."); }
+  };
+  const changeFolder = async () => {
+    try { const result = await desktop?.chooseWorkspaceFolder?.(); if (result?.reason) setError(result.reason); }
+    catch { setError("The folder chooser could not complete. Your current folder is unchanged."); }
   };
   const location = <div className="ij-location"><Folder size={18} /><div><strong>Your Arke folder</strong>
     <span>{saved?.workspace?.path ?? "Checking your workspace…"}{app?.runtime?.probes.diskFreeMb != null ? ` · ${size(app.runtime.probes.diskFreeMb)} free` : ""}</span>
     {saved?.workspace?.detail && <span role="alert">{saved.workspace.detail}</span>}</div>
-    <Action onClick={() => { void window.arke?.chooseWorkspaceFolder?.().then(result => { if (result.reason) setError(result.reason); }); }} disabled={!window.arke?.chooseWorkspaceFolder}>Change folder</Action></div>;
+    <Action onClick={() => { void changeFolder(); }} disabled={pending || !desktop?.chooseWorkspaceFolder}>Change folder</Action></div>;
   const back = (step: OnboardingPlan["step"]) => <Action onClick={() => update({ step })} disabled={pending}>Back</Action>;
   const enter = <Action primary disabled={pending || !connected || !saved?.workspace?.ready} onClick={() => update({}, "finish")}>Start using Arke</Action>;
   let body: ReactNode;
@@ -156,7 +163,7 @@ export function OnboardingScreen() {
     <div className="ij-choices">{accounts.map(a => <Choice key={a.id} title={a.name} detail={a.detail} note={a.note} icon={<Cloud />} disabled={pending} onClick={() => update({ account: a.id, modelId: null, step: "account" })} />)}
       <Choice title={<>Arke <small>Coming later</small></>} detail="Not available yet." icon={<Cloud />} onClick={() => {}} disabled />
     </div><p className="ij-note">Your writing requests go to the service you choose. You can change this later in Settings.</p>
-    <div className="ij-actions">{back("writing")}<Action onClick={later}>Set up writing later</Action></div>
+    <div className="ij-actions">{back(plan.persona === "lightweight" ? "lightweight" : "writing")}<Action onClick={later}>Set up writing later</Action></div>
   </>;
   else if (plan.step === "account") {
     const vendor = app?.vendorAuth.vendors.find(v => v.id === plan.account);
@@ -170,7 +177,7 @@ export function OnboardingScreen() {
         <option value="" disabled>Choose a model</option>{writingModels.map(m => <option key={harnessModelReference(m)} value={harnessModelReference(m)}>{m.displayName ?? m.id}{m.isDefault ? " · recommended by your provider" : ""}</option>)}</select></div>}
       <p className="ij-note">Your account’s allowance applies. Checking this connection does not generate content.</p>
       <div className="ij-actions"><Action onClick={recheck}>Check again</Action>{back(plan.writing === "existing" ? "assistant" : "accounts")}<Action onClick={later}>Set up writing later</Action>
-        {writing.detail.startsWith("Restart Arke") && window.arke?.restartForSetup && <Action primary onClick={() => { void restart(); }}>Restart and continue</Action>}
+        {writing.detail.startsWith("Restart Arke") && desktop?.restartForSetup && <Action primary onClick={() => { void restart(); }}>Restart and continue</Action>}
         <Action primary disabled={pending || !writing.ready} onClick={goReview}>Continue setup</Action></div>
     </>;
   }
@@ -206,7 +213,7 @@ export function OnboardingScreen() {
     {missing.some(c => c.blockedBy === "disk") && <p className="ij-note">Some selected downloads need more space. Their destination and required space are shown below. You can change the selection or start writing while you make room.</p>}
     <details><summary>{advanced ? "Dependencies and destinations" : "Download details"}</summary>{selected.map(c => <Row key={c.id} title={c.displayName} detail={c.installLocation ?? "Managed by the selected service"} state={componentIsSettled(c.state) ? "Already here" : size(c.sizeMb)} />)}</details>
     <div className="ij-actions">{back(advanced ? "capabilities" : "writing")}<Action onClick={recheck}>Check again</Action>
-      <Action primary disabled={pending || !saved?.workspace?.ready} onClick={() => update({}, "install")}>{advanced ? "Install selected" : "Set up these tools"}</Action></div>
+      {selected.length > 0 && <Action primary disabled={pending || !saved?.workspace?.ready} onClick={() => update({}, "install")}>{advanced ? "Install selected" : "Set up these tools"}</Action>}</div>
     <div className="ij-actions">{enter}</div>
   </>;
   else if (plan.step === "progress") {
@@ -232,7 +239,8 @@ export function OnboardingScreen() {
     <div className="ij-facts"><div><span>Extra downloads</span><strong>None</strong></div><div><span>Account needed</span><strong>No</strong></div></div>
     <p className="ij-note">Write and organise without an account or internet connection. Add AI help whenever you want it.</p>
     {!saved?.workspace?.ready && <>{location}<Action onClick={recheck}>Check workspace again</Action></>}
-    <Action onClick={() => update({ step: "assistant" })}>Set up an AI writing agent</Action>
+    <div className="ij-actions"><Action onClick={() => update({ writing: "account", harness: "opencode", step: "accounts" })}>Set up an AI writing agent</Action>
+      {detected.length > 0 && <Action onClick={() => update({ step: "assistant" })}>Use an existing assistant</Action>}</div>
     <div className="ij-actions">{back("choose")}{enter}</div>
   </>;
   return <div className="ij fy-onboarding" data-screen="onboarding"><LaunchFrame><div className="ij-content" ref={panel}>

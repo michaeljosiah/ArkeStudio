@@ -230,8 +230,15 @@
 }
 
 /* Approved Worlds empty state, turn 244b: retain the existing first-run card pair. */
+.fy-home-welcome .fy-titlebar{height:52px}
+.fy-home-welcome .fy-hero__title{font-size:var(--text-5xl)}
+.fy-home-welcome .fy-home-count{display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-top:10px}
+.fy-home-welcome .fy-home-pub svg{display:block}
+.fy-home-import{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}
+.fy-home-action.ui-btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:44px;padding:10px 14px;border:1px solid var(--border);background:var(--background);color:var(--foreground);border-radius:7px;cursor:pointer}
 .fy-home-empty.fy-firstrun{padding:0;flex:initial;min-height:0}
 .fy-home-empty .fy-firstrun__doors{justify-content:flex-start;gap:40px;padding:30px 88px 40px}
 .fy-home-setup{margin:0 88px 24px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font:var(--type-label);color:var(--muted-foreground)}
 @media(max-width:1099px){.fy-home-empty .fy-firstrun__doors{padding-inline:24px;flex-wrap:wrap}.fy-home-setup{margin-inline:24px}}
+@media(max-width:700px){.fy-home-welcome .fy-home-hero{padding:26px 24px 0}.fy-home-welcome .fy-hero__title{font-size:var(--text-3xl)}}
 @media(max-width:599px){.fy-home-empty .fy-firstrun__doors{padding:28px 20px 30px;gap:36px}}
