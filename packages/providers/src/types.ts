@@ -344,6 +344,8 @@ export interface ProviderTransportScope extends ProviderCallContext {
   provider: ProviderId;
   operation: ProviderOperation;
   capability?: Capability;
+  /** Ephemeral host policy for result retrieval; never part of recorded call context. */
+  artifactTransferSettings?: import("@arke-studio/contracts").ArtifactTransferSettings;
 }
 
 /** Host-owned operation policy. Provider clients continue to receive an ordinary FetchLike. */

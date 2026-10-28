@@ -74,8 +74,9 @@ and verifies exact-result filing/restart without regeneration. Run these with na
 access because sandbox-denied atomic renames cannot establish persistence behavior. No fixture
 fills a real disk or calls a paid provider. Headroom checks do not qualify complete provider
 output/scratch estimates or pre-dispatch peak reservations; those remain separate requirements.
-FAL bounded retrieval uses providers `test/artifact-transfer.test.ts`, `clients.test.ts` and
-`capture.test.ts`, plus contracts `test/artifact-result-limits.test.ts`. They cover declared and
+Shared bounded retrieval uses providers `test/artifact-transfer.test.ts`,
+`shared-artifact-transfer.test.ts`, `clients.test.ts`, `comfyui.test.ts` and `capture.test.ts`,
+desktop `test/provider-transport.test.ts`, plus contracts `test/artifact-result-limits.test.ts`. They cover declared and
 chunked/encoded length bounds, malformed/short bodies, excessive empty fragments, metadata/file
 counts, HTTP-error rejection, cancellation and lossless successful reads. Large-limit tests use
 headers or the pure aggregate calculation rather than allocating GiB buffers. Capture checks
@@ -83,8 +84,12 @@ keep host signals out of recorded context. Coordinator `queue/result-storage.tes
 the accepted identity/reported cost across a transfer-limit hold/restart, makes no repeated
 download in that session and no second submission, and refuses late filing after cancel/Stop.
 An oversized result remains a provider review case; no fixture promises indefinite remote
-retention or a local resumable prefix. Other clients and complete output/scratch reservation
-need separate implementation and acceptance.
+retention or a local resumable prefix. The shared matrix covers FAL/ComfyUI/Higgsfield file
+limits, selected deadlines, cancellation and refusal of late CLI-result downloads. Desktop
+checks prove selected long/short operation deadlines reach transport without changing
+generation or connection/inactivity policy. Synchronous clients have no separate download;
+their receipt admission uses the shared limits. Complete output/scratch reservation needs
+separate implementation and acceptance.
 The production-host file fixture additionally stalls progress-accounting persistence while a real
 partial-file handle is admitted, quits with that save still blocked, verifies bounded shutdown and
 the exact retained checkpoint, and refuses late grants after the old write finishes. Completed

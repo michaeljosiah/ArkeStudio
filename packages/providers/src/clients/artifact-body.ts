@@ -6,7 +6,10 @@ import { ARTIFACT_RESULT_LIMITS } from "@arke-studio/contracts";
  * reach the consumer. This is a transport bound, not disk allocation or a resumable receipt. */
 export async function readArtifactBody(response: Response, maximum: number, signal?: AbortSignal): Promise<Uint8Array> {
   if (!Number.isSafeInteger(maximum) || maximum < 0) throw new Error("Invalid artifact transfer limit.");
-  signal?.throwIfAborted();
+  if (signal?.aborted) {
+    void response.body?.cancel().catch(() => {});
+    signal.throwIfAborted();
+  }
   const encoded = response.headers.get("content-encoding");
   const rawLength = response.headers.get("content-length");
   let length: number | undefined;

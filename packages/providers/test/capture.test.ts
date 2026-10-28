@@ -1,4 +1,4 @@
-import { promptHash } from "@arke-studio/contracts";
+import { ArtifactTransferSettingsSchema, promptHash } from "@arke-studio/contracts";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { captureProviderClient } from "../src/capture.js";
@@ -58,6 +58,17 @@ it("forwards result-transfer cancellation separately from recorded transport con
   assert.equal(log.started.length, 2);
   assert(log.started.every(entry => entry.context?.jobId === "job-one" && !Object.hasOwn(entry.context, "signal")));
   assert.equal(JSON.stringify(log.started).includes("private-key"), false);
+});
+
+it("carries the selected download deadline to host transport without recording operator policy as call context", async () => {
+  const log = recorder(), scopes: ProviderTransportScope[] = [];
+  const settings = ArtifactTransferSettingsSchema.parse({ timeoutMinutes: 90 });
+  const transport: ProviderTransport = { async run(scope, operation) { scopes.push(scope); return operation(async () => Response.json({ images: [] })); } };
+  const client = captureProviderClient("fal", fetch => new FalClient(fetch), async () => { throw new Error("wrong transport"); }, log.capture, undefined, transport);
+  await client.fetchArtifacts("key", "fal-ai/flux-2-pro::accepted", { jobId: "job-one" }, { transferSettings: settings });
+  await log.drain();
+  assert.deepEqual(scopes[0]?.artifactTransferSettings, settings);
+  assert(log.started.every(entry => !Object.hasOwn(entry.context ?? {}, "artifactTransferSettings")));
 });
 
 it("redacts Gemini keys and nested audio bytes while preserving reported usage", async () => {

@@ -25,7 +25,7 @@ export function RecoveryAdvancedControls() {
     artifactTransfer: { ...previous.artifactTransfer, [field]: Number(value) } }));
   const fields = [
     ["maxFiles", "Files per result", 1, 256], ["maxFileMiB", "Maximum file size (MiB)", 1, 2048],
-    ["maxTotalMiB", "Maximum total result (MiB)", 1, 8192], ["timeoutMinutes", "FAL retrieval timeout (minutes)", 1, 240],
+    ["maxTotalMiB", "Maximum total result (MiB)", 1, 8192], ["timeoutMinutes", "Result download timeout (minutes)", 1, 240],
   ] as const;
   return <details className="fy-recovery-advanced">
     <summary>Advanced recovery settings</summary>
@@ -36,7 +36,7 @@ export function RecoveryAdvancedControls() {
       <input type="checkbox" checked={draft.checkStorageBeforeSubmission} disabled={disabled}
         onChange={event => setDraft(previous => ({ ...previous, checkStorageBeforeSubmission: event.target.checked }))} />
     </label>
-    <p className="fy-diag__meta">Result limits default to 64 files, 1,024 MiB per file and 4,096 MiB total. Larger results use more RAM and disk. The buffered implementation supports up to 2,048 MiB per file and 8,192 MiB total. FAL retrieval defaults to 30 minutes.</p>
+    <p className="fy-diag__meta">Result limits default to 64 files, 1,024 MiB per file and 4,096 MiB total. Larger results use more RAM and disk. The buffered implementation supports up to 2,048 MiB per file and 8,192 MiB total. Separate result downloads default to 30 minutes. This does not change generation timeouts.</p>
     {fields.map(([field, title, min, max]) => <label className="fy-set__row" key={field}>
       <span className="fy-set__name fy-set__name--wide"><span className="fy-set__title">{title}</span></span>
       <Input aria-label={title} type="number" min={min} max={max} step={1} value={draft.artifactTransfer[field]} disabled={disabled}

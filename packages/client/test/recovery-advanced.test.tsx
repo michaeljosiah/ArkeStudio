@@ -21,6 +21,8 @@ it("keeps advanced controls collapsed and saves explicit changes only after a ma
     await act(async () => root.render(<RecoveryAdvancedControls />));
     assert(!container.querySelector("details")!.hasAttribute("open")); assert.equal(sent.length, 0);
     assert.equal((container.querySelector('[aria-label="Files per result"]') as HTMLInputElement).value, "100");
+    assert(container.querySelector('[aria-label="Result download timeout (minutes)"]'));
+    assert.doesNotMatch(container.textContent!, /FAL/);
     await act(async () => button("Use default values").click()); assert.equal(sent.length, 0);
     await act(async () => button("Save advanced settings").click());
     const command = sent[0]!; assert.equal(command.kind, "recovery-set-advanced");

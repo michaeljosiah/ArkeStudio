@@ -68,7 +68,8 @@ or fit claim for generated media or scratch: complete provider output/scratch pl
 batch/import/export owners and remaining storage/platform acceptance are still open. Tests:
 `test/queue/submission-storage.test.ts`, `test/queue/result-storage.test.ts` and
 `test/storage/reservations.test.ts`; SPEC-062 R-7/R-10/R-11/R-14.
-FAL result retrieval now uses providers `clients/artifact-body.ts` and contracts
+Separate FAL, ComfyUI and Higgsfield result retrievals use providers `clients/artifact-transfer.ts`,
+`clients/artifact-body.ts` and contracts
 `artifact-result-limits.ts`. Remote metadata is capped at 1 MiB and each response at 128K read
 steps; decoded media shares receipt ceilings (64 files, 1 GiB/file, 4 GiB aggregate). Header
 limits reject before body reads; actual chunks enforce unknown/encoded lengths, and identity
@@ -80,9 +81,14 @@ restart may recheck the same remote result, never submit it again. The hold reas
 without another journal append. Original stalled readers retain their stream lock through
 settlement; their late bytes cannot file. These are supported transfer ceilings, not output
 estimates, disk reservations, resumable partial downloads or provider-retention guarantees.
-Other providers and complete pre-dispatch output/scratch planning remain unfinished. Tests:
+Synchronous providers retain their generation timing and share receipt admission limits.
+`capture.ts` forwards selected settings separately from recorded context to desktop
+`provider-transport.ts`, whose overall retrieval deadline honours them; connection/header/
+inactivity policy remains separate. Higgsfield's bounded original CLI query cannot start a late
+download after cancellation. Complete pre-dispatch output/scratch planning remains unfinished. Tests:
 contracts `test/artifact-result-limits.test.ts`, providers `test/artifact-transfer.test.ts` /
-`test/capture.test.ts`, coordinator `test/queue/result-storage.test.ts`; SPEC-062 R-9/R-10/R-11.
+`test/shared-artifact-transfer.test.ts` / `test/capture.test.ts`, desktop
+`test/provider-transport.test.ts`, coordinator `test/queue/result-storage.test.ts`; SPEC-062 R-9/R-10/R-11.
 Media-reader protection: `transport.ts` accepts an optional host-only `ResolvedMediaFile.release`
 lease from a resolver. It opens one descriptor for size/range and streaming, retains ownership
 through pending resolution/open/close, and releases only after confirmed descriptor closure.
@@ -1647,7 +1653,8 @@ Advanced recovery preferences live in contracts `recovery-policy.ts` and
 `artifact-result-limits.ts`, persisted by coordinator `recovery/control.ts` through host-only,
 human-only `recovery-set-advanced`. Client `components/recovery-advanced.tsx` renders the closed
 Advanced section and retains optional cache maintenance there. Queue preflight reads the saved
-preference; FAL captures transfer limits and timeout once per retrieval. `ArtifactResultFiles`
+preference; FAL, ComfyUI and Higgsfield capture shared limits and timeout once per retrieval,
+including the desktop transport's overall deadline. `ArtifactResultFiles`
 reads existing receipts against support ceilings, preserving accepted results after a lower
 admission preference. A saved changed transfer policy retries only the queue's witnessed remote
 result holds, sequentially through `retryHeldArtifactTransfers`, without dispatch or poll replay.

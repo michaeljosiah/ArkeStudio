@@ -9,6 +9,7 @@ import {
 } from "@arke-studio/contracts";
 import { responseReason, jsonRequest, tryProbe } from "./http.js";
 import { readArtifactBody } from "./artifact-body.js";
+import { withArtifactTransfer } from "./artifact-transfer.js";
 // Generated beside the manifest rows, from the same fetch, so a model can never be offered
 // with no route behind it — the failure that used to read "no endpoint mapping" at dispatch,
 // long after the estimate had been shown and accepted.
@@ -465,11 +466,7 @@ export class FalClient implements ProviderClient {
   }
 
   async fetchArtifacts(key: string, remoteId: string, _context?: ProviderCallContext, options?: ArtifactFetchOptions): Promise<FetchedArtifact[]> {
-    const limits = artifactTransferLimits(options?.transferSettings);
-    const abort = new AbortController();
-    const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(limits.timeoutMs), ...(options?.signal ? [options.signal] : [])]);
-    try { return await this.fetchResult(key, remoteId, signal, limits); }
-    catch (error) { abort.abort(error); throw error; }
+    return withArtifactTransfer(options, (signal, limits) => this.fetchResult(key, remoteId, signal, limits));
   }
 
   private async fetchResult(key: string, remoteId: string, signal: AbortSignal, limits: ReturnType<typeof artifactTransferLimits>): Promise<FetchedArtifact[]> {
