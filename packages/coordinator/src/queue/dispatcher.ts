@@ -1,7 +1,7 @@
 import { mkdir, rename, rmdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { mingReferenceHash } from "../local-ai/ming-reference.js";
-import { extname, join } from "node:path";
+import { dirname, extname, join } from "node:path";
 import {
   canDeleteJob,
   freeLimitReason,
@@ -47,7 +47,7 @@ import { JobJournal, type JobStateStore } from "./journal.js";
 import { audioFormatOf, imageFormatOf, verifyArtifact } from "./verify.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { ArtifactCheckpointInvalid, ArtifactResultFiles, artifactFileMatches, ARTIFACT_FILE_OVERHEAD, type SavedArtifactResult } from "./artifact-files.js";
-import { ArtifactStorageHeld, type ArtifactWriteSpace } from "../storage/job-artifacts.js";
+import { ArtifactStorageHeld, SubmissionStorageHeld, type ArtifactWriteSpace } from "../storage/job-artifacts.js";
 
 /**
  * The dispatch engine (SPEC-009): durable before the network, and never trust silence. Every
@@ -171,10 +171,12 @@ export interface EnqueueInput {
 }
 
 export interface JobQueueOptions {
-  /** Host-resolved finite completed-result writes; no renderer path or replay authority. */
+  /** Host-resolved result writes and optional unsent headroom checks; no renderer path or replay authority. */
   artifactSpace?: ArtifactWriteSpace;
   /** Local result persistence retries never call submit/poll/fetch again. */
   artifactRetryMs?: number;
+  /** Unsent storage holds yield the lane and recheck without spending an attempt. */
+  submissionStorageRetryMs?: number;
   /** `params` are the job's, for a narration job's coordinator-only binding (SPEC-049 R-12). */
   readDesignedVoice?: (worldId: string, target: string, params?: Record<string, unknown>) => Promise<{ target: string; remoteId: string }>;
   /** Resolve qualified speech pricing at admission and immediately before paid I/O. */
@@ -994,6 +996,8 @@ export class JobQueue {
     }
     if (!this.stillQueued(job)) return;
 
+    if (!await this.checkSubmissionStorage(job)) return;
+
     let audioInputs: PreparedAudioInput[] | undefined;
     let audioReferences: DispatchVoiceReference[] | undefined;
     let mediaAudioReferences: Array<DispatchVoiceReference & { durationSec: number }> | undefined;
@@ -1251,12 +1255,16 @@ export class JobQueue {
       await this.terminalize(job, "failed", `${freeLimitReason({ allowed: used.limit ?? 0, resetsAt: used.resetsAt })} · not sent`, undefined, "terminal");
       return;
     }
+    // Preparation and authorization may have taken time or written media. Recheck before the
+    // outbox flush; an earlier headroom observation is not a lasting grant.
+    if (!await this.checkSubmissionStorage(job)) return;
     // Persist the physical call before I/O. A crash may overcount one authorized call, but the
     // journal can never undercount requests that may have reached a paid provider.
     const submitting: Job = {
       ...job,
       status: "submitting",
       attempt: job.attempt + 1,
+      error: null,
       submissionRejected: undefined,
       providerResultKind: undefined,
       resultReceiptId: ulid(),
@@ -1368,6 +1376,44 @@ export class JobQueue {
       if (!this.cancelling.has(job.id) && !this.artifactAuditHeld.has(job.id)) this.acceptedSubmissions.delete(job.id);
       if (this.submitAborts.get(job.id) === submitAbort) this.submitAborts.delete(job.id);
     }
+  }
+
+  private async checkSubmissionStorage(job: Job): Promise<boolean> {
+    const check = this.opts.artifactSpace?.checkSubmission;
+    if (!check) return true;
+    const checking = new AbortController(); this.submitAborts.set(job.id, checking);
+    try {
+      const directories = [{ directory: join(dirname(this.opts.journalPath), "inline-artifacts"), role: "working-files" as const }];
+      if (job.landing) {
+        let failure: unknown;
+        const available = await this.opts.landInWorld(job.worldId, async (worldDir, assertOwnership) => {
+          try {
+            checking.signal.throwIfAborted(); await assertOwnership?.();
+            await check.call(this.opts.artifactSpace, [...directories,
+              { directory: join(worldDir, ".staging"), role: "generated-media" },
+              { directory: join(worldDir, job.landing!.dir), role: "generated-media" },
+            ], checking.signal);
+            checking.signal.throwIfAborted(); await assertOwnership?.();
+          } catch (error) { failure = error; throw error; }
+        });
+        if (failure) throw failure;
+        if (!available) throw new SubmissionStorageHeld();
+      } else await check.call(this.opts.artifactSpace, directories, checking.signal);
+      return !this.disposed && !checking.signal.aborted && this.stillQueued(job) && !this.lane(job.provider).paused;
+    } catch (error) {
+      if (this.disposed || checking.signal.aborted || !this.stillQueued(job)) return false;
+      const message = error instanceof SubmissionStorageHeld ? error.message : new SubmissionStorageHeld().message;
+      const current = this.jobs.get(job.id)!;
+      if (current.error !== message) {
+        // This is observation, like progress: the queued identity/attempt already flushed.
+        // Reporting a full app disk must not require another journal write. Restart rechecks
+        // capacity; this presentation neither authorizes I/O nor changes durable job status.
+        const waiting = { ...current, error: message, updatedAt: this.clock() };
+        this.jobs.set(job.id, waiting); this.opts.emit({ at: this.clock(), type: "job.updated", job: waiting });
+      }
+      if (!this.disposed && this.stillQueued(job)) this.lane(job.provider).notBefore.set(job.id, Date.now() + (this.opts.submissionStorageRetryMs ?? 30_000));
+      return false;
+    } finally { if (this.submitAborts.get(job.id) === checking) this.submitAborts.delete(job.id); }
   }
 
   private async handleSubmitError(job: Job, client: DispatchClient, err: unknown): Promise<void> {

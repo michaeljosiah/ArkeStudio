@@ -63,6 +63,17 @@ coalescing floor, early timer wakes within one clock tick, bounded frozen/revers
 and cancellation on stop. `reservations.test.ts` bounds stalled read/save shutdown
 and refuses late grants while retaining uncertain intent on reopen. Runtime-owned pull phases, other
 landing/scratch/export/import owners and restart reconciliation still need their own acceptance.
+`test/queue/submission-storage.test.ts` covers the unsent operational-headroom check: a full
+world cannot borrow capacity from a roomy app volume; unsent identity/attempt survive restart;
+another destination in the same provider lane can progress; reference preparation is followed
+by a fresh check; cancellation and Stop refuse late provider I/O. Hold observations require no
+additional journal append on the full app disk. `reservations.test.ts` checks
+read-only assessment against shared commitments without audit writes, grants or consumption.
+`queue/result-storage.test.ts` separately exhausts synthetic capacity after provider acceptance
+and verifies exact-result filing/restart without regeneration. Run these with native filesystem
+access because sandbox-denied atomic renames cannot establish persistence behavior. No fixture
+fills a real disk or calls a paid provider. Headroom checks do not qualify complete provider
+output/scratch estimates or pre-dispatch peak reservations; those remain separate requirements.
 The production-host file fixture additionally stalls progress-accounting persistence while a real
 partial-file handle is admitted, quits with that save still blocked, verifies bounded shutdown and
 the exact retained checkpoint, and refuses late grants after the old write finishes. Completed

@@ -15,6 +15,23 @@ const fact = (availableBytes = 10 * GiB, extra: Partial<StorageCapacity> = {}): 
 });
 const request = (id: string, remainingBytes: number | null, rootId = "media"): StorageReservationRequest => ({ id, owner, demands: [{ rootId, remainingBytes }] });
 
+it("read-only assessment uses shared commitments without granting, consuming or persisting a reservation", async () => {
+  let saves = 0;
+  const registry = new StorageReservations({ now: () => 600_000, probe: async () => fact(3 * GiB), store: {
+    async load() { return { version: 2, records: [], consumed: [] }; }, async save() { saves++; },
+  } });
+  try {
+    await registry.open();
+    assert.equal((await registry.reserve(request("other", GiB))).status, "reserved");
+    const before = registry.snapshot(); assert.equal(saves, 1);
+    for (let i = 0; i < 3; i++) assert.equal((await registry.assess([{ rootId: "media", remainingBytes: GiB }])).status, "fits");
+    const shortage = await registry.assess([{ rootId: "media", remainingBytes: GiB + 1 }]);
+    assert.equal(shortage.status, "held");
+    assert.equal((await registry.assess([{ rootId: "media", remainingBytes: null }])).status, "held", "Unknown output remains unknown");
+    assert.deepEqual(registry.snapshot(), before); assert.equal(saves, 1);
+  } finally { await registry.stop(); }
+});
+
 for (const change of ["mapping", "capacity", "unavailable"] as const) it(`revokes flushed admission when a concurrent observation detects ${change} without an explicit invalidation`, async () => {
   const root = await tempDir("arke-admission-observed-"), entered = deferred(), finish = deferred(); let now = 600_000, changed = false;
   const storage = new AppStorageService({ appRoot: root, now: () => now, store: {

@@ -18,7 +18,7 @@ const input: EnqueueInput = { worldId: '01J8F3K2QW9VZX4N7M0RTYB6HC', provider: '
   target: { kind: 'shot', id: 'shot_one' }, params: {}, estimatedMicroUsd: 100, landing: { dir: 'incoming', name: 'result.png' } };
 async function fixture(inline = false, custom?: ArtifactWriteSpace, acquireLocalGpu?: JobQueueOptions['acquireLocalGpu']) {
   const root = await tempDir('arke-result-queue-'), world = join(root, 'world'), journalPath = join(root, 'queue', 'jobs.jsonl');
-  let clock = Date.now(), free = 0, roots: readonly { rootId: string; path: string }[] = [], fetches = 0;
+  let clock = Date.now(), free = 100 * GiB, roots: readonly { rootId: string; path: string }[] = [], fetches = 0;
   const storage = new AppStorageService({ appRoot: root, now: () => clock, native: {
     setRoots(value) { roots = value; }, async stop() {}, async probe(rootId) {
       const isWorld = roots.find(value => value.rootId === rootId)!.path.startsWith(world);
@@ -27,6 +27,9 @@ async function fixture(inline = false, custom?: ArtifactWriteSpace, acquireLocal
     },
   } });
   const fake = new FakeProvider({ reportsCost: true }); fake.costMicroUsd = 37;
+  // Preflight is healthy; an external writer exhausts the world after the provider accepts.
+  const fullWorld = () => { free = 0; clock += 5001; for (const value of roots) if (value.path.startsWith(world)) storage.writeFailed(value.rootId); };
+  fake.onSubmitAccepted = fullWorld;
   const artifacts = [{ name: 'result.png', contentType: 'image/png', data: pngBytes() }];
   if (inline) fake.inlineArtifacts = artifacts; else fake.artifacts = artifacts;
   fake.onFetch = () => { fetches++; };
@@ -36,7 +39,7 @@ async function fixture(inline = false, custom?: ArtifactWriteSpace, acquireLocal
     landInWorld: async (_worldId, work) => { await work(world, verify); return true; }, baseIntervalMs: 1, pollIntervalMs: 5,
     ledger: { async readJobIds() { return new Set(ledger.map(value => value.jobId)); }, async has(id) { return ledger.some(value => value.jobId === id); }, async append(value) { ledger.push(value); } } });
   const freeWorld = () => { free = 10 * GiB; clock += 5001; for (const value of roots) if (value.path.startsWith(world)) storage.writeFailed(value.rootId); };
-  return { root, world, journalPath, storage, fake, artifacts, ledger, events, create, freeWorld, fetches: () => fetches };
+  return { root, world, journalPath, storage, fake, artifacts, ledger, events, create, freeWorld, fullWorld, fetches: () => fetches };
 }
 
 for (const mode of ['remote-checkpoint', 'inline-checkpoint', 'remote-world'] as const) {
@@ -141,6 +144,7 @@ it("files a smaller regenerated result over its existing ordinary destination af
 
 it("a pre-upgrade inline receipt survives repeated held restarts without an unmigrated nonce hiding it", { timeout: 30_000 }, async () => {
   const h = await fixture(true), disk = new JobJournal(h.journalPath), at = new Date().toISOString();
+  h.fullWorld();
   const legacy: Job = { ...input, id: 'jb_01J8F3K2QW9VZX4N7M0RTYB6HD', idempotencyKey: '01J8F3K2QW9VZX4N7M0RTYB6HD',
     status: 'running', providerJobId: 'legacy-accepted', providerResultKind: 'inline', providerCostMicroUsd: 37, attempt: 1, error: null, createdAt: at, updatedAt: at };
   const directory = join(h.root, 'queue', 'inline-artifacts', legacy.id);

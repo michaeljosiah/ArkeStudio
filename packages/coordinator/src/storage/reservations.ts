@@ -30,6 +30,7 @@ export interface StorageReservationStore {
 export type StorageReservationResult =
   | { status: "reserved"; reservation: StorageReservation }
   | { status: "held"; reason: "stopped" | "audit-unavailable" | "reconciliation-required" | "reservation-limit" | "capacity"; admission?: StorageAdmission; volumeId?: string };
+export type StorageAssessmentResult = { status: "fits" } | Extract<StorageReservationResult, { status: "held" }>;
 
 const requestSchema = z.object({
   id: key, owner, demands: z.array(z.object({ rootId: key, remainingBytes: bytes.nullable(), reserveBytes: bytes.optional() }).strict()).min(1).max(32),
@@ -157,17 +158,25 @@ export class StorageReservations {
     return this.admit(request, true, signal);
   }
 
-  private admit(request: StorageReservationRequest, replacing: boolean, signal?: AbortSignal): Promise<StorageReservationResult> {
+  /** Read-only preflight against the same serialized capacity/accounting lane. This neither
+   * reserves space nor authorizes a write; a writer still needs its own complete admission. */
+  assess(demands: StorageReservationRequest["demands"], signal?: AbortSignal): Promise<StorageAssessmentResult> {
+    return this.admit({ id: "assessment", owner: { kind: "job", id: "assessment" }, demands }, false, signal, true);
+  }
+
+  private admit(request: StorageReservationRequest, replacing: boolean, signal?: AbortSignal, assessment?: false): Promise<StorageReservationResult>;
+  private admit(request: StorageReservationRequest, replacing: boolean, signal: AbortSignal | undefined, assessment: true): Promise<StorageAssessmentResult>;
+  private admit(request: StorageReservationRequest, replacing: boolean, signal?: AbortSignal, assessment = false): Promise<StorageReservationResult | StorageAssessmentResult> {
     request = requestSchema.parse(request);
-    return this.duringShutdown<StorageReservationResult>(this.serial(async () => {
+    return this.duringShutdown<StorageReservationResult | StorageAssessmentResult>(this.serial(async () => {
       if (this.closing || signal?.aborted) return { status: "held", reason: "stopped" };
       if (!this.opened || !this.auditAvailable) return { status: "held", reason: "audit-unavailable" };
       // Idempotent retries must not acquire twice or silently change an existing operation's plan.
-      const previous = this.records.get(request.id);
+      const previous = assessment ? undefined : this.records.get(request.id);
       if (replacing ? !previous || previous.state !== "active" || !sameOwner(previous.owner, request.owner) : previous !== undefined) {
         return { status: "held", reason: "reconciliation-required" };
       }
-      if (!replacing && this.records.size >= 2048) return { status: "held", reason: "reservation-limit" };
+      if (!assessment && !replacing && this.records.size >= 2048) return { status: "held", reason: "reservation-limit" };
       const combined = signal ? AbortSignal.any([signal, this.control.signal]) : this.control.signal;
       const replanAfter = replacing ? this.now() : undefined;
       // A changed estimate can hide consumption even when the new peak grew. Replan therefore
@@ -235,6 +244,7 @@ export class StorageReservations {
           reserveBytes: Math.max(...[...own, ...other].map(d => d.reserveBytes)), now });
         if (admission.status !== "fits") return { status: "held", reason: "capacity", volumeId, admission };
       }
+      if (assessment) return { status: "fits" };
       const reservation: StorageReservation = { id: request.id, owner: request.owner, state: "active", demands };
       const next = new Map(this.records); next.set(reservation.id, reservation);
       if (!await this.persist(next, consumed)) return { status: "held", reason: "audit-unavailable" };

@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { StorageRootRole } from "@arke-studio/contracts";
 import type { AppStorageService } from "./service.js";
-import type { StorageReservationResult } from "./reservations.js";
+import type { StorageAssessmentResult, StorageReservationResult } from "./reservations.js";
 import { toExtendedLength } from "../world/paths.js";
 
 export interface ArtifactWriteDemand { directory: string; remainingBytes: number; role: StorageRootRole }
@@ -14,11 +14,24 @@ export interface ArtifactWriteLease {
   settle(): Promise<void>;
 }
 export interface ArtifactWriteSpace {
+  /** Operational headroom only, before provider I/O. Not an output/scratch fit claim. */
+  checkSubmission?(directories: readonly { directory: string; role: StorageRootRole }[], signal: AbortSignal): Promise<void>;
   reserve(jobId: string, demands: readonly ArtifactWriteDemand[], signal: AbortSignal, sameVolume?: boolean): Promise<ArtifactWriteLease>;
   /** Startup only, under the existing sole job-journal owner. Reconcile just this port's
    * Node file handles, which cannot survive the previous host, never a native worker lease. */
   reconcileIdleJobs?(jobIds: ReadonlySet<string>): Promise<void>;
 }
+export class SubmissionStorageHeld extends Error {
+  constructor(readonly result?: Extract<StorageAssessmentResult, { status: "held" }>) {
+    const admission = result?.admission;
+    super(admission?.status === "held"
+      ? `Not submitted: waiting for storage (${admission.availableBytes} bytes available, ${admission.reservedBytes} already committed, ${admission.peakBytes} minimum headroom and ${admission.reserveBytes} reserve). Check Diagnostics.`
+      : "Not submitted: storage capacity or the owning destination could not be verified. Check Diagnostics.");
+    this.name = "SubmissionStorageHeld";
+  }
+}
+// A disclosed bookkeeping floor, not an estimate or a bound on generated media.
+export const SUBMISSION_BOOKKEEPING_BYTES = 64 * 1024;
 export class ArtifactStorageHeld extends Error {
   constructor(readonly result?: Extract<StorageReservationResult, { status: "held" }>, readonly differentVolumes = false) {
     const admission = result?.admission;
@@ -31,12 +44,39 @@ export class ArtifactStorageHeld extends Error {
 const safe = (value: number) => { if (!Number.isSafeInteger(value) || value < 0) throw new Error("Invalid artifact storage plan."); return value; };
 const activeByStorage = new WeakMap<AppStorageService, Set<string>>();
 
-/** Finite, measured result bytes only. Provider dispatch, scratch and unknown output estimates
- * have their own owners; this port grants no generation, replay or cleanup authority. */
+/** Finite measured result writes and a read-only operational preflight (SPEC-062 R-7/R-10).
+ * Full dispatch/scratch/output plans have their own owners; neither operation grants
+ * generation, replay or cleanup authority. */
 export class JobArtifactStorage implements ArtifactWriteSpace {
   private readonly active: Set<string>;
   constructor(private readonly storage: AppStorageService) {
     let active = activeByStorage.get(storage); if (!active) { active = new Set(); activeByStorage.set(storage, active); } this.active = active;
+  }
+  async checkSubmission(input: readonly { directory: string; role: StorageRootRole }[], signal: AbortSignal): Promise<void> {
+    const roots = new Map<string, ReturnType<AppStorageService["acquireRoot"]>>();
+    try {
+      signal.throwIfAborted();
+      if (!input.length || input.length > 32) throw new Error("Invalid submission destinations.");
+      for (const item of input) {
+        signal.throwIfAborted(); const directory = resolve(item.directory);
+        if (roots.has(directory)) continue;
+        // Only empty destination metadata is prepared here, under the queue's normal world
+        // ownership envelope. No result, scratch payload or model execution is authorized.
+        await mkdir(toExtendedLength(directory), { recursive: true }); signal.throwIfAborted();
+        roots.set(directory, this.storage.acquireRoot(directory, item.role, item.role === "generated-media"));
+      }
+      await this.storage.start(); signal.throwIfAborted();
+      const result = await this.storage.reservations.assess([...roots.values()].map(root => ({
+        rootId: root.rootId, remainingBytes: SUBMISSION_BOOKKEEPING_BYTES,
+      })), signal);
+      signal.throwIfAborted();
+      if (result.status !== "fits") throw new SubmissionStorageHeld(result);
+    } catch (error) {
+      signal.throwIfAborted();
+      if (error instanceof SubmissionStorageHeld) throw error;
+      for (const root of roots.values()) this.storage.writeFailed(root.rootId);
+      throw new SubmissionStorageHeld();
+    } finally { for (const root of roots.values()) root.release(); }
   }
   async reconcileIdleJobs(jobIds: ReadonlySet<string>): Promise<void> {
     await this.storage.start();

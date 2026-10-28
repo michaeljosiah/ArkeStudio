@@ -55,8 +55,19 @@ protects pending writes across service instances, and unrelated imports remain u
 `storage/service.ts` can retain an explicitly stable destination while its world stays active,
 keeping a mounted artifact-volume warning after an operation fails. Temporary/per-job roots keep
 their lease lifetime. No directory scan, native worker, generic cleanup or new write authority is
-added. Provider pre-dispatch/scratch, other batch/import/export owners and remaining
-storage/platform acceptance are still open.
+added. `JobArtifactStorage.checkSubmission` uses the registry's read-only `assess` lane before
+reference preparation and again before the submission outbox flush. It checks the app receipt,
+world staging and selected landing volumes against existing commitments, reserve and 64 KiB of
+bookkeeping headroom per distinct directory. Empty destination metadata is prepared inside the
+existing world ownership envelope. A held job remains unsent with the same identity/attempt,
+yields its provider lane and rechecks after 30 seconds; cancellation/stop prevents late dispatch.
+The hold reason is an observation over the already durable queued row, requiring no journal
+append on a full app disk; restart remeasures it.
+Assessment never persists, consumes or grants an output reservation. This floor is not a bound
+or fit claim for generated media or scratch: complete provider output/scratch plans, other
+batch/import/export owners and remaining storage/platform acceptance are still open. Tests:
+`test/queue/submission-storage.test.ts`, `test/queue/result-storage.test.ts` and
+`test/storage/reservations.test.ts`; SPEC-062 R-7/R-10/R-11/R-14.
 Media-reader protection: `transport.ts` accepts an optional host-only `ResolvedMediaFile.release`
 lease from a resolver. It opens one descriptor for size/range and streaming, retains ownership
 through pending resolution/open/close, and releases only after confirmed descriptor closure.
