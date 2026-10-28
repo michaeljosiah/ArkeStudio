@@ -90,7 +90,7 @@ import {
   type SidecarHealth,
 } from "@arke-studio/voice";
 import { BackgroundNotificationController } from "./background-notifications.js";
-import { drainDesktop, isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "./startup.js";
+import { drainDesktop, guardDesktopClose, isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "./startup.js";
 import { boundaryFrameOptions, takePosterOptions, takeQcOptions } from "./take-qc.js";
 import { createExportFfmpegRunner } from "./export-ffmpeg.js";
 import { saveMediaHandler, revealMediaHandler } from "./save-media.js";
@@ -706,7 +706,10 @@ async function createWindow(): Promise<void> {
     if (!allowQuit && !shuttingDown && remoteAccess?.status().running && !updateController?.shouldKeepWindowVisible()) {
       event.preventDefault(); window?.hide(); return;
     }
-    if (allowQuit || !updateController?.shouldKeepWindowVisible()) return;
+    if (allowQuit || !updateController?.shouldKeepWindowVisible()) {
+      guardDesktopClose(event, allowQuit, () => app.quit());
+      return;
+    }
     event.preventDefault();
     if (!updateController.isInstallOnCloseArmed() || closeForUpdate) return;
     closeForUpdate = updateController.prepareInstallOnClose().then((ready) => {

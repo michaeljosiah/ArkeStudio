@@ -399,6 +399,13 @@ were ended after checking executable paths and creation times, before installing
 This is a retained shutdown observation, not proof of its root cause or that the update corrects
 every shutdown failure. The installed GPU display is now verified; wider acceptance remains open.
 
+The source now keeps an ordinary closing window alive while the existing before-quit owner
+drains local work. A rejected cleanup can therefore show its existing warning instead of leaving
+an invisible process. Only the owner's confirmed quit destroys the window. Remote-access
+hide-on-close and update-specific handling keep their existing branches. Twenty-three startup,
+runtime-owner and update tests pass, including delayed/failed cleanup followed by confirmed exit.
+This follow-up is not yet installed and does not establish why the old GPU cleanup was retained.
+
 The new Windows CI run failed the Ming cleanup fixture's immediate PID-exit assertion. Its
 readiness check could accept a newly created but empty PID file, which converts to process zero.
 It now waits for a positive integer PID and identifies that PID in an exit-assertion failure.

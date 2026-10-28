@@ -1176,7 +1176,9 @@ when cleanup fails, preservation of damaged records, and first launch without Ta
 Publication tests verify that ownership is committed before Serve runs, both initially and
 after Disable, and that a failed ownership write prevents publication.
 Desktop `test/startup.test.ts` covers cleanup retries without a second host and slow remote
-unpublication before the core shutdown deadline.
+unpublication before the core shutdown deadline. It also checks that ordinary window Close
+is deferred through failed/delayed cleanup and only the confirmed quit destroys the window;
+run `test/updates.test.ts` alongside it to retain install-on-close behavior.
 After building, an opt-in real HTTPS check is:
 
 ```powershell
