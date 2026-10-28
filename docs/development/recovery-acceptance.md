@@ -143,6 +143,20 @@ The regression fails before the change; all twenty-nine native cache cases pass 
 Node 22. Three actual authenticated cleanup/maintenance host cases, coordinator typecheck, lint,
 desktop build and main-bundle load smoke also pass. The new checkpoint still requires its own CI.
 
+## Installed checkpoint and Studio remedy reuse
+
+Public `99b084d37` passed all 21 CI jobs, Effects and Engine. Its Windows x64 NSIS installer
+was built locally with publishing disabled. The existing bundled tools were reused only after
+manifest, architecture/version and pinned OpenCode executable verification; the licence and
+packaged-resource gates passed. The installer is prepared for a normal upgrade after the current
+remote-access host quits. Building the installer does not establish installed-app acceptance.
+
+The latest Studio diagnostic message now offers current remedies and a direct Diagnostics link.
+Storage review reuses the existing scoped cleanup control, with separate approval and no model
+call or repair caused by opening the conversation. Nine focused client interaction checks pass,
+including the shared control's stale-target, reconnect and cancellation behavior. Historical
+observations remain labelled as observations; the repair control uses current host state.
+
 Restore temporary viewport overrides and stop the qualifier's original host when finished.
 Clear the two build environment variables before the normal production build. Retained test
 worlds/private fixture conversations are not automatic cleanup candidates.

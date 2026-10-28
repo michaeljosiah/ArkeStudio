@@ -6,7 +6,7 @@ import { Button } from "./ui.js";
 
 const bytes = (value: number | null) => value === null ? "unknown" : `${value.toLocaleString()} bytes`;
 
-export function RecoveryCacheCleanupControls({ scope }: { scope?: string } = {}) {
+export function RecoveryCacheCleanupControls({ scope, id = "recovery-cache-cleanup", focusOnScope = true }: { scope?: string; id?: string; focusOnScope?: boolean } = {}) {
   const { state, connection, recoveryActionResults } = useStore(), policy = state?.app.recoveryPolicy;
   const [request, setRequest] = useState<string | null>(null), [plan, setPlan] = useState<RecoveryCachePlan | null>(null);
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(""), [cancelled, setCancelled] = useState(false);
@@ -26,10 +26,10 @@ export function RecoveryCacheCleanupControls({ scope }: { scope?: string } = {})
     setPlan(null); setRequest(null); setBusy(false); submitting.current = false; setMessage("");
   }, [scope]);
   useEffect(() => {
-    if (!scope || focused.current === scope) return;
-    const section = document.getElementById("recovery-cache-cleanup");
+    if (!focusOnScope || !scope || focused.current === scope) return;
+    const section = document.getElementById(id);
     if (section) { section.scrollIntoView?.({ block: "center" }); section.focus?.({ preventScroll: true }); focused.current = scope; }
-  }, [scope, Boolean(policy?.cleanup)]);
+  }, [scope, Boolean(policy?.cleanup), id, focusOnScope]);
   useEffect(() => {
     if (!request) return;
     if (connection !== "open") {
@@ -68,7 +68,7 @@ export function RecoveryCacheCleanupControls({ scope }: { scope?: string } = {})
     if (!id) setMessage("The request could not be sent. Reconnect and check Diagnostics.");
   };
   if (!policy?.cleanup && !plan && !message) return null;
-  return <section aria-label="Review local preview cleanup" id="recovery-cache-cleanup" tabIndex={-1}>
+  return <section aria-label="Review local preview cleanup" id={id} tabIndex={-1}>
     <div className="fy-set__row">
       <div className="fy-set__name fy-set__name--wide"><div className="fy-set__title">Expired local preset previews</div>
         <div className="fy-set__caps">Needs your approval · Receipt-backed fixed auditions. New or active previews stay protected.</div></div>

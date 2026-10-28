@@ -4,7 +4,7 @@ import { act, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
-import type { StudioAssistantCommand, StudioAssistantSnapshot } from "@arke-studio/contracts";
+import { CACHE_CLEANUP_POLICY, type ClientMessage, type ClientState, type StudioAssistantCommand, type StudioAssistantSnapshot } from "@arke-studio/contracts";
 import { StudioConversationClient } from "../src/lib/studio-assistant.js";
 import { StudioAssistantProvider, StudioAssistantView } from "../src/components/studio-assistant.js";
 import { StudioAssistantContext } from "../src/components/studio-assistant-context.js";
@@ -12,7 +12,7 @@ import { GlobalChatContext } from "../src/components/global-chat-context.js";
 import { chatSurfaceForPage, GlobalChatController } from "../src/lib/global-chat.js";
 import { AppChrome } from "../src/components/chrome.js";
 import { closeSystemPanel } from "../src/lib/system-panel.js";
-import { __handleFrameForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __handleFrameForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -31,10 +31,44 @@ function fixture() {
   deliver(initial());
   return { client, sent, deliver };
 }
-function View({ client }: { client: StudioConversationClient }) {
+function View({ client, appState = FIXTURE_STATE }: { client: StudioConversationClient; appState?: ClientState }) {
   const view = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot);
-  return <StudioAssistantView view={view} client={client} appState={FIXTURE_STATE} model="provider/model" pickModel={client.pickModel} />;
+  return <StudioAssistantView view={view} client={client} appState={appState} model="provider/model" pickModel={client.pickModel} />;
 }
+it("offers current storage review inside Studio, requires separate approval and never invokes a model to repair", async () => {
+  const h = fixture(), container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  const appState = structuredClone(FIXTURE_STATE), scope = "d".repeat(64), sent: ClientMessage[] = [];
+  appState.app.recoveryPolicy = { audit: "available", accepting: true, mode: "suggest-only", targets: [], cleanup: { available: true, pending: false,
+    scope: { revision: scope, volumeId: "volume-a", mappingRevision: "mount-a", measuredAt: Date.now(), inventoryAt: Date.now(), candidateFiles: 1, recordedBytes: 60 } } };
+  __setStateForTest(appState, { connection: "open" });
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json) { sent.push(JSON.parse(json)); } });
+  const state = initial(), diagnostic = { evidence: { version: 1 as const, at: 1, topic: "storage" as const,
+    audit: { history: "available" as const, recovery: "available" as const, storage: "available" as const }, incidents: [], storage: [], jobs: [],
+    limited: { incidents: false, storage: false, jobs: false } }, answer: { explanation: "An old storage observation.", evidenceRefs: [], hypotheses: [] } };
+  state.threads = [{ id: threadId, createdAt: 1, updatedAt: 1, archived: false, pending: null, messages: [
+    { id: threadId, role: "arke", text: "Earlier diagnosis", at: 1, diagnostic },
+    { id: runId, role: "arke", text: "Latest diagnosis", at: 2, diagnostic },
+  ] }]; h.deliver(state); h.client.select(threadId);
+  const button = (text: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === text)!;
+  try {
+    await act(async () => root.render(<MemoryRouter><View client={h.client} appState={appState} /></MemoryRouter>));
+    assert.equal(container.querySelectorAll('[aria-label="Review local preview cleanup"]').length, 1);
+    assert.equal(container.querySelectorAll('a[href="/settings/diagnostics"]').length, 1);
+    assert.equal(sent.length, 0, "opening historical evidence grants no work");
+    await act(async () => button("Review previews…").click());
+    const review = sent[0]!; assert(review.kind === "recovery-action"); assert.deepEqual(review.command, { action: "preview-cleanup", scope });
+    const preparedAt = Date.now(), plan = { id: "b".repeat(64), action: "cleanup-local-preset-previews" as const, evidence: "a".repeat(64), policyRevision: 1 as const,
+      scope, preparedAt, expiresAt: preparedAt + 300000, category: "fixed-local-preset-previews" as const,
+      files: 1, logicalBytes: 60, allocatedBytes: 4096, minAgeMs: CACHE_CLEANUP_POLICY.minAgeMs, stopAtAvailableBytes: null,
+      targets: [{ resourceKey: "c".repeat(64), createdAt: 0, logicalBytes: 60, allocatedBytes: 4096 }],
+      replaysJobs: false as const, interruptsWork: false as const, undoable: false as const };
+    await act(async () => __applyEventForTest({ type: "recovery.action-result", at: new Date().toISOString(), result: { requestId: review.requestId, status: "preview", cleanupPlan: plan } }));
+    assert(container.textContent!.includes("Deletion cannot be undone")); assert.equal(sent.length, 1);
+    await act(async () => button("Approve this cleanup").click());
+    const approval = sent[1]!; assert(approval.kind === "recovery-action"); assert.deepEqual(approval.command, { action: "approve-cleanup", planId: plan.id });
+    assert(h.sent.every(message => message.command.action === "watch"), "the repair follows existing host controls without a model request");
+  } finally { await act(async () => root.unmount()); h.client.dispose(); container.remove(); __setBridgeForTest(null); }
+});
 it("explains an invalid diagnostic answer and acknowledges it without resending", async () => {
   const h = fixture(), container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
   const state = initial();
