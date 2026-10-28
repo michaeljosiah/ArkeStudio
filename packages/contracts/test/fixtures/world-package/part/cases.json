@@ -62,7 +62,12 @@
       "expect": "notAPackage"
     },
     {
-      "file": "schema-6.json",
+      "file": "part-in-schema-6.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "schema-7.json",
       "reader": "manifest",
       "expect": "newerArke"
     },

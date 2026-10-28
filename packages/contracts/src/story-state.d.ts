@@ -1,8 +1,10 @@
 import type { StoryPredicate, StoryFact, StoryEffect, StoryPresentation, StoryEnding } from "./story-state-schema.js";
 export type StoryState = Record<string, boolean | string>;
+/** A fact as the rules read it. Its label is the author's, and a story document carries none (SPEC-058 R-80). */
+export type StoryFactRule = StoryFact extends infer F ? (F extends StoryFact ? Omit<F, "label"> & { label?: string } : never) : never;
 export interface StoryProgram {
   start: string;
-  facts?: StoryFact[];
+  facts?: ReadonlyArray<StoryFactRule>;
   choices: ReadonlyArray<{ id: string; from: string; to: string; when?: StoryPredicate; effects?: StoryEffect[]; unavailable?: { label?:string; reason:string } }>;
   presentation?: StoryPresentation[];
   endings: ReadonlyArray<{ sceneId: string; title: string; variants?: StoryEnding[] }>;
