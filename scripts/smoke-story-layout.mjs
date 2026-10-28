@@ -28,7 +28,7 @@ import {FIXTURE_STATE} from '../test/fixture-state';
 import {mountInteractivePlayer} from '@arke-studio/contracts';
 ${styles}
 let renderer;
-window.mountStory=async(mode='facts',dark=false)=>{
+window.mountStory=async(mode='facts',dark=false,entry='map')=>{
  renderer?.unmount();document.documentElement.classList.toggle('dark',dark);
  const state=structuredClone(FIXTURE_STATE), world=state.world;
  const labels=['Imani Okoro','Dev Malik','Lin Wei','Ana Lucía Reyes','Elsie Ward','Tomas Vale','Submitted account'];
@@ -42,7 +42,8 @@ window.mountStory=async(mode='facts',dark=false)=>{
  state.world={...world,sheets:[...world.sheets,{...world.sheets[0],id:'qa-imani',name:'Imani Okoro'}],meta:{...world.meta,name:'The Red Quiet'},productions:[production]};
  const bridge={platform:'test',appVersion:'layout-fixture',connect(){},subscribe(){return()=>{}},send(){},coordinatorHttpBase:()=>location.origin};
  __setBridgeForTest(bridge);__setStateForTest(state,{connection:'closed'});
- renderer=createRoot(document.getElementById('root'));flushSync(()=>renderer.render(<MemoryRouter initialEntries={['/w/'+world.meta.worldId+'/p/first-contact/branch-map']}><App/></MemoryRouter>));
+ const path='/w/'+world.meta.worldId+'/p/first-contact/'+(entry==='scene'?'scenes/sc_start':'branch-map');
+ renderer=createRoot(document.getElementById('root'));flushSync(()=>renderer.render(<MemoryRouter initialEntries={[path]}><App/></MemoryRouter>));
  await new Promise(r=>setTimeout(r,350));await document.fonts.ready;
  const button=[...document.querySelectorAll('button')].find(b=>b.textContent.includes(mode==='facts'?'Story facts ·':'Preview'));
  button.click();await new Promise(r=>setTimeout(r,350));
@@ -62,7 +63,7 @@ window.storyMetrics=()=>{
  const inspector=document.querySelector('.story-facts-inspector');
  const body=inspector?.querySelector('.bm-insp__body');
  const choices=document.querySelector('.aip-choices');
- return {copy:document.querySelector(".aip-copy")&&box(document.querySelector(".aip-copy")),dialogue:document.querySelector(".aip-box")&&box(document.querySelector(".aip-box")),viewport:[innerWidth,innerHeight],globalChat:document.body.dataset.globalChatEnabled,inspector:inspector&&box(inspector),body:body&&box(body),facts:[...document.querySelectorAll('.story-fact-row')].map(box),chat:[...document.querySelectorAll('.bm-side .fy-global-chat-slot')].map(e=>({display:getComputedStyle(e).display,...box(e)})),choices:choices&&box(choices),options:[...document.querySelectorAll('.aip-choice')].map(e=>({label:e.querySelector('.l').textContent,labelOverflow:e.querySelector('.l').scrollWidth>e.querySelector('.l').clientWidth+1,...box(e)})),overflow:document.documentElement.scrollWidth>innerWidth};
+ return {player:document.querySelector(".bm-player")&&box(document.querySelector(".bm-player")),playerPosition:document.querySelector(".bm-player")&&getComputedStyle(document.querySelector(".bm-player")).position,copy:document.querySelector(".aip-copy")&&box(document.querySelector(".aip-copy")),dialogue:document.querySelector(".aip-box")&&box(document.querySelector(".aip-box")),viewport:[innerWidth,innerHeight],globalChat:document.body.dataset.globalChatEnabled,inspector:inspector&&box(inspector),body:body&&box(body),facts:[...document.querySelectorAll('.story-fact-row')].map(box),chat:[...document.querySelectorAll('.bm-side .fy-global-chat-slot')].map(e=>({display:getComputedStyle(e).display,...box(e)})),choices:choices&&box(choices),options:[...document.querySelectorAll('.aip-choice')].map(e=>({label:e.querySelector('.l').textContent,labelOverflow:e.querySelector('.l').scrollWidth>e.querySelector('.l').clientWidth+1,...box(e)})),overflow:document.documentElement.scrollWidth>innerWidth};
 };
 ` }, bundle: true, platform: "browser", format: "iife", define: { "import.meta.env": "{}" }, external: ["/*.webp", "/*.png"],
   loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js"),
@@ -107,6 +108,29 @@ try{
      if(count>1){await js('document.querySelector(".bm-player").dispatchEvent(new KeyboardEvent("keydown",{key:"2",bubbles:true}))');assert.ok(await js('document.querySelector(".bm-player").textContent.includes("Outcome 2")'),name+': second option takes its own route');}
     }
    }
+  }
+ }
+ // The scene editor has a query-container ancestor and a dock; its Preview must still take the window.
+ for(const dark of [false,true])for(const [width,height] of [[1360,850],[1200,792],[820,900],[390,844]])for(const mode of ['two','five']){
+  const name='scene-'+width+'-'+mode+(dark?'-dark':'');
+  await cdp('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+  await js('mountStory('+JSON.stringify(mode)+','+dark+',"scene")');
+  const metrics=await js('storyMetrics()');records.push({name,mode:'scene-'+mode,...metrics});
+  await writeFile(join(dir,'measurements.json'),JSON.stringify(records,null,2));
+  const {data}=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await writeFile(join(dir,name+'.png'),Buffer.from(data,'base64'));
+  if(!baseline){
+   assert.equal(metrics.playerPosition,'fixed',name+': scene preview is a window overlay');
+   assert.ok(Math.abs(metrics.player.x)<1&&Math.abs(metrics.player.right-width)<1&&Math.abs(metrics.player.bottom-height)<1,name+': preview escapes the scene centre and assistant dock');
+   assert.ok(Math.abs(metrics.player.y-(width<600?48:44))<1,name+': preview starts below the app header');
+   const visible=metrics.options.filter(option=>option.y>=metrics.choices.y-1&&option.bottom<=metrics.choices.bottom+1);
+   assert.ok(visible.length>=2,name+': two complete choices visible in the scene preview');
+   assert.ok(metrics.options.every(option=>!option.labelOverflow),name+': full choice labels fit');
+   if(mode==='two')assert.ok(metrics.options.every(option=>option.bottom<=metrics.dialogue.y-8),name+': cards remain separate from dialogue');
+   await js('document.querySelector(".aip-choice:last-child").scrollIntoView({block:"nearest"})');
+   const last=await js('storyMetrics()');
+   assert.ok(last.options.at(-1).y>=last.choices.y-1&&last.options.at(-1).bottom<=last.choices.bottom+1,name+': final scene choice accessible');
+   await js('document.querySelector(".bm-player").dispatchEvent(new KeyboardEvent("keydown",{key:"2",bubbles:true}))');
+   assert.ok(await js('document.querySelector(".bm-player").textContent.includes("Outcome 2")'),name+': scene preview selects its own distinct route');
   }
  }
  // Whole script blocks can be long: copy must scroll without displacing every choice.

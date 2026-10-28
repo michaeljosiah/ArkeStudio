@@ -994,5 +994,7 @@ window, tablet and phone sizes. It measures the desktop dialogue/vertical-choice
 dialogue-first stack, visible alternatives, full labels, scroll access and selection of a
 distinct second route. Four short clip-stage checks also verify overflow from the first choice
 through the last; six long-dialogue cases verify readable, scrollable copy and usable choices.
-Its `--baseline` capture supports comparisons against
+Scene-editor Preview has sixteen additional full-App window-bound and choice-access cases.
+The shared window-overlay rules in `branch-map.css` cover both entry points and release the
+scene centre query container while its modal player is open. Its `--baseline` capture supports comparisons against
 turn 240 without reading or writing an author's world; see the testing guide.
