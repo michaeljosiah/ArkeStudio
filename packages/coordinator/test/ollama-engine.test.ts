@@ -162,6 +162,7 @@ it("owns only its portable child, private endpoint and model root; an explicit U
     assert.equal(service.baseUrl(), "http://127.0.0.1:24101");
     assert.equal(workers[0]!.spec.command, join(root, "ollama-runtime", "ollama.exe"));
     assert.equal(workers[0]!.spec.env?.OLLAMA_MODELS, join(root, "models", "ollama"));
+    assert.equal(workers[0]!.spec.env?.OLLAMA_NO_CLOUD, "1");
     assert.equal(workers[0]!.spec.inheritEnv, false);
     assert.equal(workers[0]!.spec.env?.OPENAI_API_KEY, undefined);
     assert.deepEqual(await workers[0]!.spec.validateHealth!(Response.json({ version: "wrong" })),

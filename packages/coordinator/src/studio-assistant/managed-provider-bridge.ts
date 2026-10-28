@@ -31,14 +31,20 @@ export class ManagedStudioProviderBridge {
     return this.opening ??= (async () => {
       this.qualifying = true;
       try {
-        const owner = await this.service.qualifyManagedOrigin(AbortSignal.any([signal, this.admission.signal]));
+        const admission = AbortSignal.any([signal, this.admission.signal]);
+        const owner = await this.service.qualifyManagedOrigin(admission);
         if (!owner || owner.process.identity !== this.owner.process.identity || this.sealed || signal.aborted || !this.owner.current()) throw new Error("The managed private provider content could not be verified.");
+        const response = await this.transport.fetch(this.owner.baseUrl + "/api/status", { signal: admission });
+        const status = await response.json() as { cloud?: { disabled?: unknown; source?: unknown } } | null;
+        if (status?.cloud?.disabled !== true || !["env", "both"].includes(String(status.cloud.source)) || admission.aborted || this.sealed || !this.owner.current()) {
+          throw new Error("The managed private provider could not verify local-only inference.");
+        }
         this.qualified = true;
       } finally { this.qualifying = false; }
       await this.transport.prepareMetadata();
       const route = await this.bridge.start();
       if (this.sealed || signal.aborted || !this.owner.current()) { await this.stop(); throw new Error("The managed private provider changed."); }
-      return Object.freeze({ ...route, identity: createHash("sha256").update(JSON.stringify([this.owner.process.identity, route.identity])).digest("hex") });
+      return Object.freeze({ ...route, identity: createHash("sha256").update(JSON.stringify([this.owner.process.identity, "local-only-env-v1", route.identity])).digest("hex") });
     })();
   }
   approve(): boolean { return this.qualified && this.owner.current() && this.bridge.approve(); }

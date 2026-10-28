@@ -1542,6 +1542,12 @@ process generation; subsequent requests check metadata/identity and the complete
 fences. The bridge retains pending qualification through Stop and cannot publish a late route.
 Only host fixtures can inject a synthetic content pin; normal settings/wire state cannot.
 Managed startup allows sixty seconds for cold GPU discovery while retaining exact version health.
+Managed Ollama launches with `OLLAMA_NO_CLOUD=1`, including its ordinary local routes. After
+content qualification, the private bridge reads bounded `/api/status` over an original verified
+socket and requires cloud disabled by the environment (`env` or `both`), before preparing
+metadata or exposing a private URL. Enabled, config-only, missing and malformed evidence
+refuses admission. The route identity includes this policy; explicit existing services keep
+their own configuration and cannot acquire the managed capability.
 
 The pinned native metadata deadline is one second. Managed startup verifies two unwritten
 one-use sockets before exposing the URL; initial metadata can consume each once, with final

@@ -2043,6 +2043,14 @@ Canonical-path fixtures avoid DOS-short-path aliases in positive checksum cases 
 explicit alias refusal. The authenticated cleanup fixture observes terminal preview outcomes for
 up to twenty seconds (storage admission itself can observe for sixteen), reporting a failed
 outcome directly. Job/CI silence and timeout guards are unchanged.
+The managed-provider bridge tests also refuse enabled, config-only and malformed cloud status
+before metadata or inference. Managed launch tests assert `OLLAMA_NO_CLOUD=1`. Native acceptance
+with the pinned 0.40.11 runtime confirms environment-backed cloud disablement, cloud-shaped
+request refusal and zero mock upstream requests. A separate cloud-enabled control refuses
+private admission while exactly one synthetic inference reaches a loopback mock, confirming
+the request exercises the proxy path. Both cases confirm native cleanup; no real cloud endpoint
+or model inference is used. Repeat this native check when changing the Ollama release or its
+cloud policy; protocol stand-ins alone do not establish the release's proxy behavior.
 
 ## System status (master turn 241; System 240 review)
 

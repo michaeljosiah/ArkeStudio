@@ -181,6 +181,14 @@ hash of every binary or an image/video workflow test.
 
 ## Validation
 
+Arke-managed Ollama runs with `OLLAMA_NO_CLOUD=1`. Its optional private Studio bridge also
+requires an environment-backed disabled state from the pinned runtime's bounded `/api/status`
+response over the captured original process connection. A configuration-file setting alone
+does not qualify this private route. Explicit existing Ollama services retain their own
+configuration and are unavailable to this managed private capability. This prevents a cloud
+model or remote alias from silently turning a managed local request into a cloud inference;
+it does not provide a general operating-system network sandbox.
+
 From `packages/coordinator`:
 
 ```powershell

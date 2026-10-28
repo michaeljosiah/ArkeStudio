@@ -9,6 +9,11 @@ const server = createServer(async (request, response) => {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({ version: process.env.SERVICE_VERSION ?? "fixture" })); return;
   }
+  if (request.url === "/api/status") {
+    const mode = process.env.SERVICE_CLOUD_STATUS, disabled = mode === "config" || mode !== "enabled" && process.env.OLLAMA_NO_CLOUD === "1";
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(mode === "malformed" ? {} : { cloud: { disabled, source: mode === "config" ? "config" : disabled ? "env" : "none" } })); return;
+  }
   const chunks = []; let size = 0;
   for await (const chunk of request) { size += chunk.length; if (size > 1024 ** 2) { request.destroy(); return; } chunks.push(chunk); }
   const body = Buffer.concat(chunks).toString("utf8");

@@ -14,6 +14,21 @@ const CHILD = join(import.meta.dirname, "../fixtures/managed-http-origin.mjs");
 const managed = { engineUrl: null, modelsDir: null };
 const body = JSON.stringify({ model: "fixture", messages: [{ role: "user", content: "private synthetic managed-provider text" }], stream: true });
 
+for (const state of ["enabled", "config", "malformed"]) it(`refuses private routing when original provider locality is ${state}`, { timeout: 40_000 }, async () => {
+  const root = await realpath(await tempDir("arke-provider-locality-refusal-")), marker = join(root, "requests.jsonl"); await mkdir(join(root, "ollama-runtime"));
+  await copyFile(process.execPath, join(root, "ollama-runtime", "ollama.exe"));
+  const service = new OllamaEngineService({ appRoot: root, port: await allocateLoopbackPort(), privateContentPin: await nodeRuntimeContentPin(),
+    supervise: spec => new ChildSupervisor({ ...spec, args: [CHILD], readyTimeoutMs: 20_000,
+      env: { ...spec.env, SERVICE_VERSION: OLLAMA_VERSION, SERVICE_CLOUD_STATUS: state, ORIGIN_MARKER: marker } }) });
+  let bridge: ManagedStudioProviderBridge | undefined;
+  try {
+    await service.applySettings(managed); assert(service.captureManagedOrigin()?.current());
+    bridge = new ManagedStudioProviderBridge(service, { model: "fixture", requestBody: body, ...(process.platform !== "win32" ? { verify: async () => true } : {}) });
+    await assert.rejects(bridge.start(), /local-only inference/); assert.equal(bridge.approve(), false);
+    await assert.rejects(readFile(marker), { code: "ENOENT" }); assert(await bridge.stop());
+  } finally { await bridge?.stop(); await service.dispose(); }
+});
+
 it("a healthy managed protocol stand-in cannot open a private provider route with unqualified runtime files", { timeout: 40_000 }, async () => {
   const root = await realpath(await tempDir("arke-provider-content-refusal-")), marker = join(root, "requests.jsonl"); await mkdir(join(root, "ollama-runtime"));
   await copyFile(process.execPath, join(root, "ollama-runtime", "ollama.exe"));

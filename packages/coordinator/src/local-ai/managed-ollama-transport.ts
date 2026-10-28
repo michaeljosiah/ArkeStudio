@@ -9,8 +9,9 @@ export class ManagedOllamaTransport extends VerifiedLoopbackHttpTransport {
   prepareMetadata(): Promise<void> { return this.prepareMetadataSockets(); }
   protected policy(url: URL, method: string): VerifiedHttpPolicy {
     const metadata = method === "GET" && url.pathname === "/api/tags" || method === "POST" && url.pathname === "/api/show";
+    const locality = method === "GET" && url.pathname === "/api/status";
     const generate = method === "POST" && url.pathname === "/v1/chat/completions";
-    if (this.sealed || url.search || !metadata && !generate) throw new Error("The private provider path is unavailable.");
-    return { requestBytes: generate ? 1024 ** 2 : 4096, responseBytes: 1024 ** 2, responseType: generate ? "text/event-stream" : "application/json", preparedSocket: metadata, beforeWrite: () => !this.sealed };
+    if (this.sealed || url.search || !metadata && !generate && !locality) throw new Error("The private provider path is unavailable.");
+    return { requestBytes: generate ? 1024 ** 2 : 4096, responseBytes: locality ? 16 * 1024 : 1024 ** 2, responseType: generate ? "text/event-stream" : "application/json", preparedSocket: metadata, beforeWrite: () => !this.sealed };
   }
 }

@@ -116,7 +116,7 @@ export class OllamaEngineService {
       const spec = {
         id: "ollama", command: this.executable(), port: this.opts.port, args: ["serve"], inheritEnv: false,
         env: { ...env, HOME: home, USERPROFILE: home, LOCALAPPDATA: join(home, "local"), APPDATA: join(home, "roaming"),
-          OLLAMA_HOST: "127.0.0.1:{port}", OLLAMA_MODELS: this.modelsDir()!, OLLAMA_KEEP_ALIVE: "5m", OLLAMA_MAX_LOADED_MODELS: "1" },
+          OLLAMA_HOST: "127.0.0.1:{port}", OLLAMA_MODELS: this.modelsDir()!, OLLAMA_KEEP_ALIVE: "5m", OLLAMA_MAX_LOADED_MODELS: "1", OLLAMA_NO_CLOUD: "1" },
         // Cold driver/GPU discovery can exceed thirty seconds before the version route serves.
         healthPath: "/api/version", readyTimeoutMs: 60_000, healthIntervalMs: 15_000,
         logFile: join(this.opts.appRoot, "logs", "engines", "ollama.log"),
