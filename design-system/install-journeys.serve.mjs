@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const here=path.dirname(fileURLToPath(import.meta.url)),root=path.resolve(here,'..');
-const names=['install-journeys.review.html','install-journeys.css','install-journeys.prototype.mjs','install-journeys.frames.mjs','install-journeys.icons.mjs','install-journeys.notes.md'];
+const names=['install-journeys.review.html','install-journeys.css','install-journeys.worlds.css','install-journeys.prototype.mjs','install-journeys.frames.mjs','install-journeys.icons.mjs','install-journeys.notes.md'];
 const allowed=new Map(names.map(n=>['/design-system/'+n,path.join(here,n)]));
 allowed.set('/',path.join(here,'install-journeys.review.html'));
 for(const n of ['src/screens/launch.css','src/theme/tokens/launch.css','public/launch-creation.webp'])allowed.set('/packages/client/'+n,path.join(root,'packages/client',n));
