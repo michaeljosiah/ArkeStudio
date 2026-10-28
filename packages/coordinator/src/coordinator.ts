@@ -31,7 +31,9 @@ import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdap
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
 import { DramaEditionService } from "./publications/drama.js";
 import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
-import { changeComicPage, comicPageRecord, comicPageRequest, comicPageTake, saveComicScript, setComicSettings } from "./productions/graphic-novel.js";
+import { acceptComicTake, changeComicPage, comicPageRecord, comicPageRequest, comicPageTake, saveComicScript, setComicSettings, verifyComicTake } from "./productions/graphic-novel.js";
+import { harnessPageReader, type PageReader } from "./productions/graphic-novel-reader.js";
+import { makeImageJsonRunner } from "./harness/review-task.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
@@ -103,6 +105,7 @@ import {
   OPENCODE_AVAILABILITY,
   type Capability,
   type ClientMessage,
+  takePasses,
   type HarnessAvailability,
   type HarnessEngine,
   type ClientState,
@@ -1238,7 +1241,7 @@ function worldOpenFailureKind(err: unknown): string {
  * every other agent's first turn. The prose reviewer reads the chapter from its prompt and
  * returns tags (issue 1952).
  */
-const PROMPT_ONLY_AGENTS: ReadonlySet<string> = new Set(["conversation-summarizer", "conversation-namer", "chapter-prose-reviewer"]);
+const PROMPT_ONLY_AGENTS: ReadonlySet<string> = new Set(["conversation-summarizer", "conversation-namer", "chapter-prose-reviewer", "page-lettering-reader"]);
 
 export class Coordinator {
   private readonly engine: ReturnType<typeof createEngine>;
@@ -11053,8 +11056,27 @@ export class Coordinator {
       case "make-comic-page": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        await this.makeComicPage(store, { productionId: msg.productionId, page: msg.page, requestId: msg.requestId, confirmedMicroUsd: msg.confirmedMicroUsd, ...(msg.mode !== undefined ? { mode: msg.mode } : {}) },
-          (state, extra = {}) => this.emit({ at: new Date().toISOString(), type: "comic.page-made", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, state, ...extra }));
+        await this.makeAndCheckComicPage(store, msg);
+        return;
+      }
+      case "check-comic-take":
+      case "accept-comic-take": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const answer = (disposition: "checked" | "accepted" | "refused", reason?: string) => this.emit({ at: new Date().toISOString(), type: "comic.take-result",
+          requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, take: msg.take, disposition, ...(reason ? { reason } : {}) });
+        try {
+          if (msg.kind === "check-comic-take") {
+            await verifyComicTake(store, msg.productionId, msg.page, msg.take, this.pageReader(store), store.closingSignal, () => this.nowIso());
+            answer("checked");
+          } else {
+            await acceptComicTake(store, msg.productionId, msg.page, msg.take, msg.override, this.nowIso());
+            answer("accepted");
+          }
+        } catch (err) {
+          answer("refused", describeCoordinatorError(err));
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "set-comic-settings": {
@@ -21319,20 +21341,66 @@ export class Coordinator {
    * session opens, and names the session once it does, so a restart files what lands (R-25). The take
    * is added beside any accepted one; nothing here accepts it (R-26).
    */
+  /**
+   * The page reader (SPEC-064 R-29, R-35): the writing harness's own image inspection, under the
+   * same consent as a chapter review's. None is a check that cannot run, never a pass.
+   */
+  private pageReader(store: WorldStore): PageReader | null {
+    const adapter = this.opts.adapter;
+    if (!adapter?.readiness().ready || adapter.imageInput !== true) return null;
+    return harnessPageReader(makeImageJsonRunner({ adapter, beforeDispatch: () => store.assertOwnership(), sessionInput: this.sessionInput, scratch: this.extractScratch(),
+      ...(this.opts.imageRenditionMaker ? { maker: this.opts.imageRenditionMaker } : {}),
+      cloudAllowed: async (provider) => {
+        const settings = this.appSettings ? await this.appSettings.load() : null;
+        return store.getBundle().meta.cloudImageInspection !== false && settings?.imageInspection.cloud === true && settings.imageInspection.providers[provider] !== false;
+      },
+    }));
+  }
+
+  /**
+   * Make a page, then check it; with `untilPasses`, make it again until a take passes, up to the
+   * book's cap of attempts and dollars and the price the press confirmed (D-6, R-27). Each attempt
+   * is its own admission; a failure, a stop or an unavailable check ends the run — trying again
+   * cannot fix a reader that is not there.
+   */
+  private async makeAndCheckComicPage(store: WorldStore, msg: Extract<ClientMessage, { kind: "make-comic-page" }>): Promise<void> {
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId);
+    const cap = production?.comic?.cap ?? { attempts: 3, usd: 5 };
+    const attempts = msg.untilPasses ? cap.attempts : 1;
+    const budget = msg.untilPasses ? Math.min(msg.confirmedMicroUsd, Math.round(cap.usd * 1_000_000)) : msg.confirmedMicroUsd;
+    let spent = 0;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      const emit = (state: "making" | "made" | "failed", extra: { take?: string; reason?: string; sessionId?: string; passed?: boolean } = {}) =>
+        this.emit({ at: new Date().toISOString(), type: "comic.page-made", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, state,
+          ...(msg.untilPasses ? { attempt } : {}), ...extra });
+      const made = await this.makeComicPage(store, { productionId: msg.productionId, page: msg.page, requestId: attempt === 1 ? msg.requestId : ulid(),
+        confirmedMicroUsd: budget - spent, ...(msg.mode !== undefined ? { mode: msg.mode } : {}) }, emit);
+      if (!made.ok) return;
+      spent += made.microUsd;
+      const verification = await verifyComicTake(store, msg.productionId, msg.page, made.take, this.pageReader(store), store.closingSignal, () => this.nowIso())
+        .catch((err: unknown) => ({ status: "unavailable" as const, reason: "reader-failed" as const, detail: describeCoordinatorError(err), at: this.nowIso() }));
+      await this.refreshWorldSnapshot(msg.worldId);
+      const passed = takePasses(verification);
+      emit("made", { take: made.take, sessionId: made.sessionId, passed });
+      if (passed || verification.status !== "compared") return;
+    }
+  }
+
   private async makeComicPage(store: WorldStore, input: { productionId: string; page: string; mode?: ComicMode; requestId: string; confirmedMicroUsd: number },
-    emit: (state: "making" | "made" | "failed", extra?: { take?: string; reason?: string; sessionId?: string }) => void): Promise<void> {
+    emit: (state: "making" | "made" | "failed", extra?: { take?: string; reason?: string; sessionId?: string }) => void): Promise<{ ok: true; take: string; sessionId: string; microUsd: number } | { ok: false }> {
     const key = `${store.worldId}/${input.productionId}/${input.page}`;
-    if (this.makingComicPages.has(key)) return emit("failed", { reason: "making this page already" });
+    const failed = (reason: string, sessionId?: string) => { emit("failed", { reason, ...(sessionId !== undefined ? { sessionId } : {}) }); return { ok: false as const }; };
+    if (this.makingComicPages.has(key)) return failed("making this page already");
     const control = new AbortController();
     this.makingComicPages.set(key, control);
     const onClose = () => control.abort();
     store.closingSignal.addEventListener("abort", onClose, { once: true });
     try {
       const model = await this.pictureModel(store);
-      if (!model) return emit("failed", { reason: "no picture model is on" });
+      if (!model) return failed("no picture model is on");
       const request = comicPageRequest(store, input.productionId, input.page, model, input.mode);
-      if (!request.ok) return emit("failed", { reason: request.reason });
-      if (request.microUsd > input.confirmedMicroUsd) return emit("failed", { reason: `the price moved · ${priceLabel(request.microUsd)}` });
+      if (!request.ok) return failed(request.reason);
+      if (request.microUsd > input.confirmedMicroUsd) return failed(`the price moved · ${priceLabel(request.microUsd)}`);
       const language = request.settings.language;
       await changeComicPage(store, input.productionId, input.page, (record) => ({ ...record,
         making: [...record.making, { requestId: input.requestId, hash: request.hash, mode: request.mode, model: model.id, language, at: this.nowIso() }] }));
@@ -21366,10 +21434,10 @@ export class Coordinator {
         }],
       }));
       await this.refreshWorldSnapshot(store.worldId);
-      if (!made.ok) return emit("failed", { reason: made.reason, ...(made.sessionId !== undefined ? { sessionId: made.sessionId } : {}) });
-      emit("made", { take: take!, sessionId: made.sessionId });
+      if (!made.ok) return failed(made.reason, made.sessionId);
+      return { ok: true, take: take!, sessionId: made.sessionId, microUsd: made.costMicroUsd ?? made.estimatedMicroUsd };
     } catch (err) {
-      emit("failed", { reason: describeCoordinatorError(err) });
+      return failed(describeCoordinatorError(err));
     } finally {
       store.closingSignal.removeEventListener("abort", onClose);
       if (this.makingComicPages.get(key) === control) this.makingComicPages.delete(key);

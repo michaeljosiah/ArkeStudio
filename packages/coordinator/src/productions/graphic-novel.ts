@@ -1,11 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  BLOCKING_FINDINGS, compareLettering, pageReading, takePasses, type LetteringVerification,
   COMIC_LIMITS, COMIC_PROMPT_MAX, ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema, DEFAULT_COMIC_SETTINGS, EMPTY_COMIC_PAGE_RECORD,
   comicPageHash, comicPagePrompt, makesShape, pageAspect, pictureQuote, productionShape,
   type ComicCited, type ComicMode, type ComicPage, type ComicPageRecord, type ComicSettings, type ManifestModel, type PictureWho, type ProductionBundle,
 } from "@arke-studio/contracts";
 import { pictureWho } from "./audiobook-picture-suggest.js";
+import type { PageReader } from "./graphic-novel-reader.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
@@ -164,4 +166,82 @@ export function comicPageRequest(store: WorldStore, productionId: string, pageId
   if (longest.length > bound) return { ok: false, reason: `the page brief is ${longest.length} characters; ${model.displayName} takes ${bound}` };
   const riding = who.filter((entry) => entry.carried && entry.reference !== null).length;
   return { ok: true, page, number: found.number, settings, mode, hash: comicPageHash(page, settings, mode), aspect, who, prompt, microUsd: pictureQuote(model, riding, aspect), missing };
+}
+
+// ---------------------------------------------------------------------------
+// Lettering verification, accept and override (R-29 – R-35)
+// ---------------------------------------------------------------------------
+
+/**
+ * Languages the reader and the normalisation do not cover yet (R-35, D-8): Latin scripts first.
+ * A page in one of these is `unavailable`, never passing (R-32).
+ */
+const UNREAD_LANGUAGES = new Set(["ja", "zh", "ko", "ar", "he", "fa", "ur", "th", "hi", "bn", "ta", "te", "ru", "uk", "bg", "sr", "el", "ka", "hy", "am"]);
+
+/**
+ * Reads a take back and compares it with the script (R-29 – R-32), and writes what was found on
+ * the take. Overlay art is compared with no lettering at all, so any words in it are extra. Every
+ * way the check cannot run is recorded as `unavailable` with its reason, and that is not a pass.
+ */
+export async function verifyComicTake(store: WorldStore, productionId: string, pageId: string, takeId: string, reader: PageReader | null, signal: AbortSignal, at: () => string): Promise<LetteringVerification> {
+  const production = graphicNovel(store, productionId);
+  const found = findComicPage(production, pageId);
+  const take = comicPageRecord(production, pageId).takes.find((candidate) => candidate.id === takeId);
+  if (!found || !take) throw new Error("that take is no longer on the page");
+  const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
+  const page = take.mode === "overlay" ? { ...found.page, panels: found.page.panels.map((panel) => ({ ...panel, lettering: [] })) } : found.page;
+  const unavailable = (reason: "no-reader" | "reader-failed" | "unreadable" | "language", detail?: string): LetteringVerification =>
+    ({ status: "unavailable", reason, ...(detail ? { detail: detail.slice(0, 400) } : {}), at: at() });
+  let verification: LetteringVerification;
+  const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === take.artifact);
+  if (UNREAD_LANGUAGES.has(take.language.split("-")[0]!.toLowerCase())) verification = unavailable("language", `${take.language} is not read yet`);
+  else if (reader === null) verification = unavailable("no-reader", "no harness that inspects images is ready");
+  else if (!artifact) verification = unavailable("unreadable", "the page picture is not in the world");
+  else {
+    const bytes = await readFile(toExtendedLength(join(store.dir, "artifacts", fromPortable(artifact.file)))).catch(() => null);
+    if (bytes === null) verification = unavailable("unreadable", "the page picture could not be read");
+    else {
+      try {
+        const read = await reader.read(bytes, artifact.file.split(".").at(-1) ?? "png", signal);
+        verification = compareLettering({ page, reading: pageReading(found.page, settings), regions: read.regions, thresholds: settings.thresholds,
+          reader: read.reader, at: at(), precise: reader.precise });
+      } catch (err) {
+        if (signal.aborted) throw err;
+        verification = unavailable("reader-failed", err instanceof Error ? err.message : String(err));
+      }
+    }
+  }
+  await changeComicPage(store, productionId, pageId, (record) => ({ ...record,
+    takes: record.takes.map((candidate) => candidate.id === takeId ? { ...candidate, verification } : candidate) }));
+  return verification;
+}
+
+/**
+ * The author's choice of take (R-26, R-33). A take made from words the script no longer says is
+ * out of date and is never accepted. One with a blocking finding, or whose check did not complete,
+ * is accepted only with an override naming every finding it covers, kept on the take.
+ */
+export async function acceptComicTake(store: WorldStore, productionId: string, pageId: string, takeId: string,
+  override: { findings: readonly string[]; reason?: string } | undefined, at: string): Promise<void> {
+  const production = graphicNovel(store, productionId);
+  const found = findComicPage(production, pageId);
+  if (!found) throw new Error("that page is no longer in the script");
+  const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
+  await changeComicPage(store, productionId, pageId, (record) => {
+    const take = record.takes.find((candidate) => candidate.id === takeId);
+    if (!take) throw new Error("that take is no longer on the page");
+    if (take.hash !== comicPageHash(found.page, settings, take.mode)) throw new Error("the script changed since this take was made; make the page again");
+    const blocking = take.verification?.status === "compared" ? take.verification.findings.filter((finding) => BLOCKING_FINDINGS.has(finding.kind)).map((finding) => finding.id) : [];
+    if (!takePasses(take.verification)) {
+      if (override === undefined) throw new Error(take.verification?.status === "compared" ? "this take has findings; accept it anyway to keep it" : "this take's lettering was not checked; accept it anyway to keep it");
+      const uncovered = blocking.filter((id) => !override.findings.includes(id));
+      if (uncovered.length) throw new Error(`the override does not cover ${uncovered.join(", ")}`);
+    }
+    return {
+      ...record,
+      accepted: { ...record.accepted, [take.language]: take.id },
+      takes: record.takes.map((candidate) => candidate.id !== takeId || takePasses(take.verification) ? candidate
+        : { ...candidate, override: { at, findings: blocking, ...(override?.reason ? { reason: override.reason } : {}) } }),
+    };
+  });
 }

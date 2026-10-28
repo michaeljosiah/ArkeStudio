@@ -462,6 +462,8 @@ const CLIENT_COMMAND_METADATA = {
   "set-comic-settings": humanOnly("How a graphic novel reads and is checked is the author's setting."),
   "quote-comic-page": readOnly(QUERY),
   "make-comic-page": humanOnly("A comic page is made on the price its press showed the author."),
+  "check-comic-take": humanOnly("Checking a page sends its picture to the image reader the author allowed."),
+  "accept-comic-take": humanOnly("Which take is the page, and any override of its findings, is the author's decision."),
   "save-chapter": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   // The chapter workspace's own commands (turn 126): a read, and an undo shaped like the bible's.
   "open-chapter": readOnly(QUERY),

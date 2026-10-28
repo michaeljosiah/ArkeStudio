@@ -551,8 +551,26 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       productionId: SlugSchema,
       page: UlidSchema,
       state: z.enum(["making", "made", "failed"]),
+      /** Which try of Try until it passes this is, from 1 (R-27). */
+      attempt: z.number().int().min(1).optional(),
+      /** Whether the take's lettering passed its check, once checked. */
+      passed: z.boolean().optional(),
       take: UlidSchema.optional(),
       sessionId: z.string().min(1).optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+  /** `check-comic-take` and `accept-comic-take` answered (R-29, R-33). */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic.take-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      take: UlidSchema,
+      disposition: z.enum(["checked", "accepted", "refused"]),
       reason: z.string().min(1).optional(),
     })
     .strict(),
