@@ -113,3 +113,25 @@ it("fails closed while runtime checks are missing, even when no download is runn
     assert.equal(element.querySelector<HTMLButtonElement>(".fy-launch__once button")!.disabled, true);
   } finally { await unmount(); }
 });
+
+it("reports the active transfer without counting unselected catalogue sizes as downloaded or completed setup", async () => {
+  const MiB = 1024 ** 2, state = structuredClone(FIXTURE_STATE);
+  state.app.setup = { localAi: { ...localAi, ready: false }, running: false, diskFreeMb: 100000, diskCheckedAt: null, components: [{
+    id: "comfyui-runtime", displayName: "ComfyUI", state: "paused", purpose: "Local AI", sizeMb: 100,
+    installLocation: "runtime", bytesDone: 50 * MiB, bytesTotal: 100 * MiB, bytesPerSecond: null, pauseSupported: true,
+  }] };
+  __setStateForTest(state); const { element, unmount } = await mount();
+  try {
+    await act(async () => { element.querySelector<HTMLButtonElement>(".fy-launch__action")!.click(); await flush(); });
+    const progress = element.querySelector(".fy-launch__pct")!.textContent, transfer = element.querySelector(".fy-launch__meta")!.textContent;
+    assert.match(transfer!, /50 MB of 100 MB/);
+    for (const status of ["available", "skipped", "blocked", "failed", "present", "ready"] as const) {
+      state.app.setup!.components.push({ id: `unselected-${status}`, displayName: "Unrelated model", state: status, purpose: "Optional model", sizeMb: 200000,
+        installLocation: "models", bytesDone: status === "present" ? 200000 * MiB : 0, bytesTotal: 200000 * MiB, bytesPerSecond: null, pauseSupported: false });
+    }
+    await act(async () => { __setStateForTest(state); await flush(); });
+    assert.equal(element.querySelector(".fy-launch__meta")!.textContent, transfer);
+    assert.equal(element.querySelector(".fy-launch__pct")!.textContent, progress);
+    assert.equal(element.querySelector<HTMLButtonElement>(".fy-launch__once button")!.disabled, true);
+  } finally { await unmount(); }
+});

@@ -177,3 +177,20 @@ before payload writes. The initial extraction fixture failed to classify Windows
 its separate-volume mapping was corrected, then the complete affected suite passed. No real volume
 was filled. Final coordinator/desktop types, lint (seven existing warnings), workspace build and
 main-bundle load smoke pass. The new source checkpoint requires its own CI.
+
+## Packaged first-run walkthrough
+
+The Windows x64 packaged executable ran with its own empty app root and Electron profile.
+Managed Ollama reached ready, while ComfyUI downloaded into that root's pinned resumable staging.
+Pause was confirmed in the UI and receipt; the mandatory local-AI gate stayed disabled. Runtime
+settings and Diagnostics remained reachable before a world was created, and managed ComfyUI was
+the default. No personal runtime override or creative record was changed. Normal window close
+exited the test host; both retained Ollama ledger PIDs were independently confirmed absent.
+Dead ledger entries are retained for normal startup reconciliation, not cleared by the qualifier.
+
+The walkthrough exposed a false 245-GB completed-download total: startup added unselected catalogue
+sizes as completed bytes. The meter/ETA now describe the named active transfer, and unrelated
+catalogue entries no longer inflate setup progress. The regression fails before the correction;
+all thirteen launch/lifecycle and remote-label checks pass afterward. Client types and lint pass.
+This is packaged-executable qualification, not an installed upgrade, completed runtime setup or
+matched design-master acceptance. The paused ComfyUI prefix is retained for explicit resumption.

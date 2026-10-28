@@ -230,24 +230,13 @@ export function StartupScreen() {
   const steps = [...setupSteps(connection, state, env !== null), ...runtimeSteps];
   const components = setup?.components ?? [];
 
-  // One bar over the whole job. A check counts 1 once settled; a component counts its own
-  // fraction of bytes — and counts as done when it is skipped, blocked or failed, because
-  // those are settled transfer outcomes. Required runtime health steps remain incomplete.
-  const parts = steps.length + components.length;
+  // Readiness checks plus work still in flight. Unselected/settled catalogue entries are
+  // not setup work and must not make a new installation appear almost complete.
+  const transfers = components.filter(c => ["queued", "downloading", "paused", "installing"].includes(c.state));
+  const parts = steps.length + transfers.length;
   const doneParts =
     steps.filter((s) => s.settled).length +
-    components.reduce(
-      (sum, c) =>
-        sum +
-        (c.state === "downloading" || c.state === "paused" || c.state === "installing"
-          ? c.bytesTotal > 0
-            ? Math.min(1, c.bytesDone / c.bytesTotal)
-            : 0
-          : c.state === "queued"
-            ? 0
-            : 1),
-      0,
-    );
+    transfers.reduce((sum, c) => sum + (c.state === "queued" || c.bytesTotal === 0 ? 0 : Math.min(1, c.bytesDone / c.bytesTotal)), 0);
   const percent = parts === 0 ? 0 : Math.min(localAiPending ? 99 : 100, Math.round((doneParts / parts) * 100));
 
   // What is happening right now, in the product's words — one line, never a list.
@@ -262,8 +251,9 @@ export function StartupScreen() {
       : "everything ready";
 
   // Bytes and time remaining, only while there is something to measure.
-  const totalBytes = components.reduce((sum, c) => sum + c.bytesTotal, 0);
-  const doneBytes = components.reduce((sum, c) => sum + (c.state === "queued" ? 0 : c.state === "downloading" || c.state === "paused" || c.state === "installing" ? c.bytesDone : c.bytesTotal), 0);
+  // This line names the active component, so its meter and ETA describe that transfer only.
+  const totalBytes = active?.bytesTotal ?? 0;
+  const doneBytes = Math.min(active?.bytesDone ?? 0, totalBytes);
   const speed = active?.bytesPerSecond ?? null;
   const remaining = speed !== null && speed > 0 ? Math.round((totalBytes - doneBytes) / speed) : null;
 
