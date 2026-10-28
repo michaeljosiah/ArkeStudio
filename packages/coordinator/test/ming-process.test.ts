@@ -65,8 +65,14 @@ it("settles failed cancellation while retaining the native process and GPU for c
     const batch = gpu.runMingBatch(signal => owner.run({ python: process.execPath, worker, args: [ready], cacheRoot: join(root, "cache"),
       retain: () => { retained++; return async () => { released++; }; } }, signal), abort.signal);
     const rejected = assert.rejects(batch, /not confirmed process exit/);
-    await untilAsync(async () => readFile(ready, "utf8").then(() => true, () => false), "worker ready", 45_000);
+    // Creation precedes the write: an empty PID file would become 0, and kill(0, 0)
+    // probes this test's process group instead of the native worker.
+    await untilAsync(async () => {
+      const pid = Number(await readFile(ready, "utf8"));
+      return Number.isSafeInteger(pid) && pid > 0;
+    }, "worker PID ready", 45_000);
     const pid = Number(await readFile(ready, "utf8"));
+    assert(Number.isSafeInteger(pid) && pid > 0);
     abort.abort(new Error("cancelled"));
     await rejected;
     assert.equal(retained, 1); assert.equal(released, 0, "unconfirmed exit retains the original batch files");
@@ -80,7 +86,7 @@ it("settles failed cancellation while retaining the native process and GPU for c
     refuse = false;
     await gpu.confirmMingCleanup(new AbortController().signal); (await waiting)();
     assert.equal(released, 1, "later confirmed cleanup settles the original batch exactly once");
-    assert.throws(() => process.kill(pid, 0));
+    assert.throws(() => process.kill(pid, 0), `native worker ${pid} must have exited`);
     assert(!owner.running); assert.equal(gpu.isBusy("Ming"), false);
     assert.equal(await readFile(ready + ".starts", "utf8"), "started\n", "cleanup did not replay the old narration");
     await gpu.runMingBatch(signal => owner.run({ python: process.execPath, worker, args: [ready, "once"], cacheRoot: join(root, "cache") }, signal), new AbortController().signal);

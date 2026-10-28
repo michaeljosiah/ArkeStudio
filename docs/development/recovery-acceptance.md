@@ -387,6 +387,24 @@ variable reproduced a successful read; the corrected production probe reported 1
 were retained. This source-level hardware result still requires an updated installed build.
 The broader acceptance gaps above remain open.
 
+The follow-up installer for `753489564` completed on 28 October at 23:13 UTC. Its SHA-256 is
+`1da401265d6de5bc291589e4394573bea914fa30b532649d67a6cb1c0cdbb2fd`.
+Installed executable/archive/client assets and Ming files match the verified package. The owner
+reopened Arke and confirmed **GPU numbers now appear**. Full workspace typecheck, lint, build,
+main-bundle load and bundled-runtime licence checks pass for this code checkpoint.
+
+The preceding build did not finish exiting after its window closed. Its GPU worker was absent,
+but the child record remained and three Electron processes persisted. Only those exact processes
+were ended after checking executable paths and creation times, before installing the update.
+This is a retained shutdown observation, not proof of its root cause or that the update corrects
+every shutdown failure. The installed GPU display is now verified; wider acceptance remains open.
+
+The new Windows CI run failed the Ming cleanup fixture's immediate PID-exit assertion. Its
+readiness check could accept a newly created but empty PID file, which converts to process zero.
+It now waits for a positive integer PID and identifies that PID in an exit-assertion failure.
+Cleanup, GPU retention and no-replay assertions remain unchanged; all four native Ming cases
+pass locally. This test-only correction needs its own Windows/Linux CI confirmation.
+
 ## Current storage work
 
 Studio now distinguishes jobs waiting to submit, completed results awaiting local saving and
