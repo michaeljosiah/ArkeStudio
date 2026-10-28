@@ -15369,6 +15369,7 @@ export class Coordinator {
             sourceFingerprint = productionExportFingerprint(store.getBundle(),production);
             const made = await exportManuscript(store, msg.productionId, msg.format, {
               exportId,
+              fileSpace: this.exportFileSpace,
               language: msg.language ?? "en",
               now: () => this.nowIso(),
               signal: control.signal,
@@ -15868,7 +15869,7 @@ export class Coordinator {
               recorded: found.lines.filter(line => line.recorded).length, awaiting: found.lines.filter(line => line.state !== "made").length });
             return;
           }
-          const made = await exportScript(store, msg.productionId, msg.speaker, { scope: msg.scope, label: msg.label, narrator, exportId: ulid(), now: () => store.now() });
+          const made = await exportScript(store, msg.productionId, msg.speaker, { scope: msg.scope, label: msg.label, narrator, exportId: ulid(), now: () => store.now(), fileSpace: this.exportFileSpace });
           answer({ output: made.output, lines: made.lines, chapters: made.chapters, notCast: made.notCast });
         } catch (err) {
           answer({ refused: err instanceof RecordedTakeRefusal ? err.message : describeCoordinatorError(err) });

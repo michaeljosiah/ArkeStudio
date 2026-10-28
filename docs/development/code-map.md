@@ -50,6 +50,12 @@ sources or insufficient capacity keep the source and any partial export; exclusi
 prevent a retry from overwriting prior output. Linked/special sources and destinations inside the
 source world refuse rather than producing a nonportable or recursively growing copy. Tests:
 `test/takes/export-world-storage.test.ts`, existing takes export, world-schema and exclusion tests.
+Manuscript DOCX/EPUB and recording-script PDF exports in `productions/manuscript.ts` and
+`productions/audiobook-lines.ts` use that same port for their exact encoded payloads, destination
+metadata and replacement script manifest. Admission, staging and publication drain through the
+existing world write gate; closing a world during admission settles late leases without writing.
+Rename reserves no second payload copy. Tests: `test/productions/document-export-storage.test.ts`
+and the existing manuscript/recording-script suites.
 
 Known import payloads use `storage/import-files.ts`. Its closed Node-copy owner joins the same
 durable per-volume registry as setup/results, reports written bytes and settles after original
