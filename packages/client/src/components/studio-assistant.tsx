@@ -22,6 +22,7 @@ import { ModelChip } from "./model-chip.js";
 import { ConversationReply } from "./conversation-reply.js";
 import { ListBullet, X } from "./icons.js";
 import { RecoveryCacheCleanupControls } from "./recovery-cache-cleanup.js";
+import { StudioStorageReadings } from "./studio-storage.js";
 type StudioAssistantMessage = StudioAssistantThread["messages"][number];
 
 const threadTitle = (messages: readonly StudioAssistantMessage[]) => messages.find(message => message.role === "user")?.text.slice(0, 80) || "New conversation";
@@ -102,6 +103,7 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
           <button type="button" className="fy-studio-prompt" onClick={() => draft("Help with Arke")}>Help with Arke</button>
         </div></div>}
       {thread?.messages.map(message => <StudioMessage key={message.id} message={message} appState={appState} close={client.close}
+        connected={view.connected && view.fresh}
         currentDiagnostic={message.id === currentDiagnostic}
         actions={message.role === "arke" && reading.offered ? <TextActions clip={null} onRead={() => reading.listen(message.id)} copyText={message.text} readLabel="Listen to Studio reply"
           note={reading.reading === message.id ? <button type="button" className="fy-studio-button" onClick={reading.stop}>Stop reading</button> : undefined} /> : undefined} />)}
@@ -138,17 +140,18 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
   </>;
 }
 
-function StudioMessage({ message, appState, close, actions, currentDiagnostic = false }: { message: StudioAssistantMessage; appState: ClientState | null; close(): void; actions?: ReactNode; currentDiagnostic?: boolean }) {
+function StudioMessage({ message, appState, close, actions, currentDiagnostic = false, connected = false }: { message: StudioAssistantMessage; appState: ClientState | null; close(): void; actions?: ReactNode; currentDiagnostic?: boolean; connected?: boolean }) {
   return <article className={message.role === "user" ? "fy-studio-user" : "fy-studio-answer"} aria-label={message.role === "user" ? "You" : "Arke"}>
     {message.role === "arke" && <div className="fy-studio-answer-label">Arke</div>}
     <ConversationReply text={message.text} />
     {message.attachments?.map(row => <details className="fy-studio-fact-card" key={row.id}><summary>{row.name}</summary><pre>{row.text}</pre></details>)}
-    {message.diagnostic && <div className="fy-studio-fact-card"><b>Operational findings</b><ConversationReply text={message.diagnostic.answer.explanation} />
+    {message.diagnostic && <div className="fy-studio-fact-card"><div className="fy-studio-fact-head">Operational findings</div><ConversationReply text={message.diagnostic.answer.explanation} />
       <p className="fy-studio-note">Observed {new Date(message.diagnostic.evidence.at).toLocaleString()}. Findings describe that observation.</p>
       {message.diagnostic.answer.hypotheses.length > 0 && <><b>Possible causes</b><ul>{message.diagnostic.answer.hypotheses.map((hypothesis, index) => <li key={index}>{hypothesis}</li>)}</ul></>}
     </div>}
+    {currentDiagnostic && message.diagnostic?.evidence.topic === "storage" && <StudioStorageReadings health={appState?.app.storageHealth} connected={connected} />}
     {currentDiagnostic && message.diagnostic && <div className="fy-studio-fact-card fy-studio-remedies">
-      <b>Current remedies</b>
+      <div className="fy-studio-fact-head">Current remedies</div>
       <p className="fy-studio-note">These controls use the current measured status. Reviewing a plan does not approve it.</p>
       {message.diagnostic.evidence.topic === "storage" && appState?.app.recoveryPolicy?.cleanup?.scope &&
         <RecoveryCacheCleanupControls id={`studio-cleanup-${message.id}`} focusOnScope={false} scope={appState.app.recoveryPolicy.cleanup.scope.revision} />}

@@ -1570,6 +1570,12 @@ steal focus from another control. History is private, cloud consent is scoped
 to one disclosure, and `GlobalChatController.stageDraft` carries only the editable request to
 a named World/Builder destination. Replacement consent matches the exact existing draft;
 later typing requires fresh review. Staging creates/sends no coordinator conversation command.
+`components/studio-storage.tsx` shows the latest host measurements beside the latest storage
+diagnosis, using the same volume grouping and pressure findings as System/Diagnostics. Saved
+diagnostic evidence stays historical; disconnected/stale readings are labelled, future readings
+are withheld and missing capacity is unknown. No operation deficit or fit is inferred from free
+space. The existing scoped cleanup control retains separate review/approval. Tests:
+`test/studio-storage.test.tsx`, `studio-assistant-view.test.tsx`, `recovery-cache-cleanup.test.tsx`.
 `components/studio-dictation.tsx` reuses `ComposerMicControl` with separately owned capture:
 explicit start/stop, one-minute/6 MB limits, cancelled pending microphone permission and
 discard-on-close/disconnect. `StudioConversationClient.dictationTarget` captures the original

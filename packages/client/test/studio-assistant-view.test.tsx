@@ -90,6 +90,7 @@ it("offers current storage review inside Studio, requires separate approval and 
   try {
     await act(async () => root.render(<MemoryRouter><View client={h.client} appState={appState} /></MemoryRouter>));
     assert.equal(container.querySelectorAll('[aria-label="Review local preview cleanup"]').length, 1);
+    assert.equal(container.querySelectorAll('[aria-label="Latest storage readings"]').length, 1, "only the latest diagnosis gets live host measurements");
     assert.equal(container.querySelectorAll('a[href="/settings/diagnostics"]').length, 1);
     assert.equal(sent.length, 0, "opening historical evidence grants no work");
     await act(async () => button("Review previews…").click());
