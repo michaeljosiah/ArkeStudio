@@ -2051,6 +2051,14 @@ private admission while exactly one synthetic inference reaches a loopback mock,
 the request exercises the proxy path. Both cases confirm native cleanup; no real cloud endpoint
 or model inference is used. Repeat this native check when changing the Ollama release or its
 cloud policy; protocol stand-ins alone do not establish the release's proxy behavior.
+The actual pinned managed writer/provider scenarios now use the shared `managedStudioAssistant`
+factory instead of duplicating its composition in the fixture. They cover exact payload,
+withheld approval, metadata exclusion, normal retirement, retained listener/GPU ownership after
+writer exit, and release after both captured native owners confirm cleanup. Runner tests retain
+original cleanup methods before asynchronous route preparation and never read configuration
+after cancelled qualification. The factory refuses a healthy personal endpoint. These checks
+prepare production wiring but do not enable default activation or replace live-model,
+persistence/cross-restart/platform and matched visual acceptance.
 
 ## System status (master turn 241; System 240 review)
 

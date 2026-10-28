@@ -50,6 +50,26 @@ function nativeCapabilities(adapter: HarnessAdapter): void {
   Object.assign(adapter, { privateDestinations: true, privatePayloads: true, privateTransient: true });
   adapter.sendMessageWithFence = async (input, dispatch) => { dispatch(); return adapter.sendMessage(input); };
 }
+it("retains captured cleanup while private route qualification is pending or fails after cancellation", async () => {
+  const h = await fixture(); nativeCapabilities(h.raw); const gate = deferred(), caller = new AbortController();
+  let preparing = false, clean = false, seals = 0, cleanup = 0, configurationReads = 0;
+  const route = {
+    get configuration(): never { configurationReads++; throw Error("Route was never qualified"); },
+    identity: "f".repeat(64), approve: () => false,
+    prepare: async () => { preparing = true; await gate.promise; throw Error("Qualification cancelled"); },
+    seal: () => { seals++; }, stop: async () => { cleanup++; return clean; },
+  };
+  const runner = new HarnessStudioModelRunner({ ...h.deps, privateTransport: async () => route });
+  try {
+    const stopped = assert.rejects(runner.run(input, caller.signal, allow), /stopped/);
+    await until(() => preparing, "the original route is qualifying"); caller.abort(); await stopped;
+    assert(runner.busy()); assert(seals > 0); assert.equal(configurationReads, 0); assert.equal(h.created.length, 0);
+    route.stop = async () => true; // Replacement caller methods cannot confirm original cleanup.
+    gate.resolve(); await until(() => cleanup > 0, "failed qualification reaches original cleanup");
+    assert(runner.busy()); assert.equal(configurationReads, 0); assert.equal(h.sent.length, 0);
+    clean = true; await runner.reconcileRetirement(); assert(!runner.busy()); assert.equal(configurationReads, 0);
+  } finally { clean = true; gate.resolve(); await runner.stop(); await runner.reconcileRetirement(); }
+});
 it("retains the original writer and private files after failed native creation until exact HTTP cleanup", async () => {
   const h = await fixture(); nativeCapabilities(h.raw); let closed = false, seals = 0, bridgeStops = 0;
   const writer: PrivateSessionWriter = { identity: "1".repeat(64), bindDirectory: () => true, bindSession: () => true, current: () => true,

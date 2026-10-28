@@ -1578,6 +1578,17 @@ Production host activation, binary provenance, remaining network/spend/persisten
 cross-restart/platform acceptance and actual matched turn-239 visuals remain open. Default
 production destination attestation stays closed; the bridge adds no model process or agent loop.
 
+`harness/v2-launch.ts` exports the shared `managedStudioAssistant` host composition for the
+qualified bundled Windows writer and managed local-only Ollama owner. It uses the adapter's
+own exported `privateWireBody` mapping, binds destination identity to both original processes
+and the exact selected model, and combines their native cleanup witnesses. The runner captures
+original lifecycle methods before awaiting optional route preparation, retaining failed or
+cancelled qualification through actual cleanup without reading an unready configuration.
+Actual pinned fixtures now exercise this shared factory for completion and held-provider Stop;
+58 focused checks include original-method retention, personal-endpoint refusal and background
+GPU scheduling. Default hosts do not enable it yet: remaining live-model/persistence/restart/
+platform and visual acceptance still applies. No additional daemon or fallback is introduced.
+
 History replacement reads wait for an already admitted same-path write that outlived bounded
 shutdown in this process. This prevents a late old rename from overwriting a successor's history;
 it is not a cross-process/multiple-active-host lock. Private state is not replayed on reconnect

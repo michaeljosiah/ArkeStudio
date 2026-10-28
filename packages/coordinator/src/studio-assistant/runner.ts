@@ -17,6 +17,8 @@ export interface StudioModelPort {
 }
 export interface StudioPrivateTransport {
   configuration: PrivateSessionTransport; identity: string; approve(): boolean;
+  /** Captured lifecycle ownership precedes asynchronous route qualification. */
+  prepare?(signal: AbortSignal): Promise<void>;
   /** Refuse new work without releasing a URL still held by an uncertain native writer. */
   seal(): void;
   /** Final release, only after native retirement and original writer HTTP cleanup. */
@@ -105,9 +107,14 @@ export class HarnessStudioModelRunner implements StudioModelPort {
       const writer = route.writer ? Object.freeze({ identity: route.writer.identity, bindDirectory: route.writer.bindDirectory.bind(route.writer),
         bindSession: route.writer.bindSession.bind(route.writer), current: route.writer.current.bind(route.writer), fetch: route.writer.fetch.bind(route.writer),
         seal: route.writer.seal.bind(route.writer), busy: route.writer.busy.bind(route.writer), close: route.writer.close.bind(route.writer) }) : undefined;
-      entry.transport = Object.freeze({ configuration: Object.freeze({ ...route.configuration }), identity: route.identity,
+      const lifecycle = Object.freeze({
         approve: route.approve.bind(route), seal: route.seal.bind(route), stop: route.stop.bind(route),
         ...(route.ownersStopped ? { ownersStopped: route.ownersStopped.bind(route) } : {}), ...(writer ? { writer } : {}) });
+      // Keep the original cleanup capability even when qualification stops before it can
+      // supply configuration. A rejected startup is not evidence that its I/O has drained.
+      entry.transport = Object.freeze({ ...lifecycle, get configuration() { return route.configuration; }, get identity() { return route.identity; } });
+      await route.prepare?.(signal);
+      entry.transport = Object.freeze({ ...lifecycle, configuration: Object.freeze({ ...route.configuration }), identity: route.identity });
       if (!/^[a-f0-9]{64}$/.test(entry.transport.identity)) throw new Error("The private transport identity is invalid.");
       if (writer && (!/^[a-f0-9]{64}$/.test(writer.identity) || !writer.current())) throw new Error("The private writer identity is unavailable.");
       signal.throwIfAborted();

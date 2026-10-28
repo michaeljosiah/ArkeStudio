@@ -7,11 +7,10 @@ import { copyFile, mkdir, readFile, readdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { agentPromptFor, ROSTER } from "@arke-studio/contracts";
 import { privateWireBody } from "../../../adapter-opencode/src/v2/private-control.js";
-import { assembleHarness, harnessProfileDir, v2ProfileEnv } from "../../src/harness/v2-launch.js";
+import { assembleHarness, managedStudioAssistant, harnessProfileDir, v2ProfileEnv } from "../../src/harness/v2-launch.js";
 import { ChildSupervisor, allocateLoopbackPort } from "../../src/supervisor.js";
 import { HarnessStudioModelRunner } from "../../src/studio-assistant/runner.js";
 import { StudioProviderBridge } from "../../src/studio-assistant/provider-bridge.js";
-import { ManagedStudioProviderBridge } from "../../src/studio-assistant/managed-provider-bridge.js";
 import { OllamaEngineService } from "../../src/local-ai/ollama.js";
 import { OLLAMA_VERSION } from "../../src/setup/catalogue.js";
 import { withLocalGpu } from "../../src/harness/local-gpu.js";
@@ -36,7 +35,7 @@ const scenarios: Array<{ overflow: boolean; managedWriter: boolean; managedProvi
   { overflow: false, managedWriter: true, managedProvider: false }, { overflow: false, managedWriter: true, managedProvider: true },
   { overflow: false, managedWriter: true, managedProvider: true, interrupted: true },
 ];
-for (const { overflow, managedWriter, managedProvider, interrupted } of scenarios) it(`pinned native private generation through the bounded bridge: ${interrupted ? "Stop retains listener and backing owner" : managedProvider ? "verified managed writer and provider" : managedWriter ? "verified managed writer" : overflow ? "upstream overflow" : "complete response"}`, {
+for (const { overflow, managedWriter, managedProvider, interrupted } of scenarios) it(`pinned native private generation through the bounded bridge: ${interrupted ? "production composition Stop retains both original owners" : managedProvider ? "production managed composition" : managedWriter ? "verified managed writer" : overflow ? "upstream overflow" : "complete response"}`, {
   skip: !process.env.ARKE_TEST_OPENCODE2 || managedWriter && process.platform !== "win32", timeout: managedWriter ? 150_000 : 75_000,
 }, async () => {
   const root = await realpath(await tempDir("arke-studio-native-bridge-")), model = "bridge-selected", profile = harnessProfileDir(root);
@@ -73,9 +72,9 @@ for (const { overflow, managedWriter, managedProvider, interrupted } of scenario
   } else {
     provider.listen(0, "127.0.0.1"); await once(provider, "listening"); const address = provider.address(); assert(address && typeof address !== "string"); providerEndpoint = `http://127.0.0.1:${address.port}`;
   }
-  const bridge = service ? new ManagedStudioProviderBridge(service, { requestBody: JSON.stringify(expected), model, timeoutMs: 90_000 })
-    : new StudioProviderBridge({ upstream: providerEndpoint + "/v1", requestBody: JSON.stringify(expected), model });
-  const route = await bridge.start();
+  const bridge = service ? null : new StudioProviderBridge({ upstream: providerEndpoint + "/v1", requestBody: JSON.stringify(expected), model });
+  let route!: { baseURL: string; apiKey: string; identity: string };
+  if (bridge) route = await bridge.start();
   const wiring = await assembleHarness({ appRoot: root, v2: managedWriter ? { bundledPath: process.env.ARKE_TEST_OPENCODE2!,
     runCommand: async (command, args, timeoutMs, env) => {
       if (command === "where" || command === "which") return { status: 1, stdout: "" }; // deterministic bundled discovery
@@ -88,11 +87,13 @@ for (const { overflow, managedWriter, managedProvider, interrupted } of scenario
       ...v2ProfileEnv(profile), APPDATA: join(profile, "roaming"), LOCALAPPDATA: join(profile, "local"),
     } }, deps) });
   assert(wiring.adapter && wiring.supervisor && wiring.recovery); assert.equal(wiring.harnessInfo?.version, "2.0.26");
+  const production = service ? managedStudioAssistant(wiring, service) : undefined;
   const gpu = new LocalGpu(async () => {}), adapter = withModelValidation(withLocalGpu(wiring.adapter, gpu), async () => ({}));
   const runner = new HarnessStudioModelRunner({ adapter: () => adapter, scratch: join(root, "studio", "turns"), sessionInput: async value => value,
-    destination: () => ({ local: true, identity: wiring.recovery!.componentDigest() }), timeoutMs: managedWriter ? 90_000 : 30_000,
+    destination: production?.destination ?? (() => ({ local: true, identity: wiring.recovery!.componentDigest() })), timeoutMs: managedWriter ? 90_000 : 30_000,
     privateTransport: async (request, signal) => { assert.deepEqual(privateWireBody(request), expected);
-      const writer = managedWriter ? await wiring.createPrivateWriter?.(request, signal) : undefined;
+      const transport = await production?.privateTransport?.(request, signal);
+      const writer = transport?.writer ?? (managedWriter ? await wiring.createPrivateWriter?.(request, signal) : undefined);
       if (managedWriter) assert(writer, "the actual bundled supervisor must supply its original writer connection");
       if (writer && managedProvider) {
         const original = writer.fetch.bind(writer);
@@ -102,8 +103,12 @@ for (const { overflow, managedWriter, managedProvider, interrupted } of scenario
           catch (error) { writerReads.push({ method: init?.method ?? "GET", path, ms: Date.now() - at }); throw error; }
         };
       }
+      if (transport) return { ...(writer ? { writer } : {}), get configuration() { return transport.configuration; }, get identity() { return transport.identity; },
+        prepare: async admission => { await transport.prepare!(admission); route = { ...transport.configuration, identity: transport.identity }; },
+        approve: transport.approve.bind(transport), seal: transport.seal.bind(transport), stop: transport.stop.bind(transport), ownersStopped: transport.ownersStopped!.bind(transport) };
+      assert(bridge);
       return { configuration: { baseURL: route.baseURL, apiKey: route.apiKey }, identity: route.identity, approve: () => bridge.approve(), seal: () => bridge.seal(), stop: () => bridge.stop(),
-        ...(writer && bridge instanceof ManagedStudioProviderBridge ? { ownersStopped: () => writer.ownerStopped() && bridge.ownerStopped() } : {}), ...(writer ? { writer } : {}) }; } });
+        ...(writer ? { writer } : {}) }; } });
   try {
     phase = "native readiness";
     await wiring.relaunchHarness({}); await wiring.supervisor.start(); await until(() => wiring.supervisor!.status === "healthy", "the isolated pinned native bridge owner", 35_000);
@@ -148,9 +153,9 @@ for (const { overflow, managedWriter, managedProvider, interrupted } of scenario
     }
     try { await runner.stop(); await adapter.dispose?.(); await wiring.supervisor.stopAndConfirm(); await service?.dispose();
       if (provider.listening) { provider.closeAllConnections(); await new Promise<void>(resolve => provider.close(() => resolve())); }
-      await runner.ownerStopped(); await until(() => !runner.busy(), "original native session/files retired after confirmed owned cleanup"); gpu.stop(); assert(await bridge.stop());
+      await runner.ownerStopped(); await until(() => !runner.busy(), "original native session/files retired after confirmed owned cleanup"); gpu.stop(); if (bridge) assert(await bridge.stop());
       assert.deepEqual(await readdir(join(root, "studio", "turns")).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; }), []);
-      await assertNativeProfileExcludes(profile, [prompt, answer, "PRIVATE_UPSTREAM_OVERFLOW", route.apiKey]); }
+      await assertNativeProfileExcludes(profile, [prompt, answer, "PRIVATE_UPSTREAM_OVERFLOW", route?.apiKey ?? "UNUSED_BRIDGE_KEY"]); }
     finally { await service?.dispose(); if (provider.listening) { provider.closeAllConnections(); await new Promise<void>(resolve => provider.close(() => resolve())); } }
   }
 });

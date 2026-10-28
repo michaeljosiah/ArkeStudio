@@ -8,6 +8,7 @@ import {
   OpenCodeV2Adapter,
   OPENCODE2_PINNED_VERSION,
   v2BasicAuth,
+  privateWireBody,
   type DiscoveredHarness,
   type DiscoveryOptions,
 } from "@arke-studio/adapter-opencode";
@@ -31,6 +32,9 @@ import { HarnessRuntimeChanges, type HarnessRecoveryOwner } from "./runtime-chan
 import { ManagedStudioWriterTransport } from "./managed-writer-transport.js";
 import { executableContentMatches } from "./executable-content.js";
 import privateWriterPin from "./private-writer-pin.json" with { type: "json" };
+import type { OllamaEngineService } from "../local-ai/ollama.js";
+import type { StudioAssistantHostOptions } from "../studio-assistant/host.js";
+import { ManagedStudioProviderBridge } from "../studio-assistant/managed-provider-bridge.js";
 
 // This package owns shared desktop/dev composition, so every adapter is a runtime dependency.
 // Keep concrete adapter imports here; Coordinator itself consumes the HarnessAdapter contract.
@@ -231,6 +235,44 @@ export interface AssembledHarness {
    * stated once here so desktop and dev can never describe the same discovery differently.
    */
   logLines: string[];
+}
+
+/** Shared desktop/dev/Node composition. Only the existing bundled writer and managed,
+ * local-only Ollama owner can enter this route; Settings names never attest ownership. */
+export function managedStudioAssistant(wiring: AssembledHarness, service: OllamaEngineService): StudioAssistantHostOptions {
+  const destination = (model: string, provider: string) => {
+    if (process.platform !== "win32" || provider !== "ollama" || !model.startsWith("ollama/") || model.length <= 7 || model.length > 512 ||
+      !wiring.isV2 || wiring.harness?.discovery.source !== "bundled" || !wiring.createPrivateWriter) return null;
+    const writer = wiring.supervisor?.captureProcessOrigin(), owner = service.captureManagedOrigin();
+    if (!writer?.current() || !owner?.current()) return null;
+    return { local: true, identity: createHash("sha256").update(JSON.stringify(["managed-studio-local-v1", model, writer.identity, owner.process.identity])).digest("hex") };
+  };
+  return { destination, privateTransport: async (request, signal) => {
+    const captured = Object.freeze({ model: request.model, system: request.system, prompt: request.prompt, outputTokenLimit: request.outputTokenLimit });
+    const original = destination(captured.model, "ollama"), body = privateWireBody(captured);
+    if (!original || signal.aborted) throw new Error("The managed Studio destination is unavailable.");
+    const writer = await wiring.createPrivateWriter!(captured, signal);
+    if (!writer) throw new Error("The bundled Studio writer could not be qualified.");
+    let bridge: ManagedStudioProviderBridge;
+    const current = () => !signal.aborted && writer.current() && destination(captured.model, "ollama")?.identity === original.identity;
+    try {
+      if (!current()) throw new Error("The managed Studio destination changed.");
+      bridge = new ManagedStudioProviderBridge(service, { model: body.model, requestBody: JSON.stringify(body) });
+    } catch (error) { writer.seal(); await writer.close(); throw error; }
+    let route: Awaited<ReturnType<ManagedStudioProviderBridge["start"]>> | undefined;
+    return {
+      writer,
+      async prepare(admission) {
+        if (!current()) throw new Error("The managed Studio destination changed.");
+        route = await bridge.start(AbortSignal.any([signal, admission]));
+        if (!current()) throw new Error("The managed Studio destination changed.");
+      },
+      get configuration() { if (!route) throw new Error("The managed Studio route is not ready."); return { baseURL: route.baseURL, apiKey: route.apiKey }; },
+      get identity() { if (!route) throw new Error("The managed Studio route is not ready."); return route.identity; },
+      approve: () => current() && bridge.approve(), seal: () => bridge.seal(), stop: () => bridge.stop(),
+      ownersStopped: () => writer.ownerStopped() && bridge.ownerStopped(),
+    };
+  } };
 }
 
 /**

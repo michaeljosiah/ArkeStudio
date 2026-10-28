@@ -52,6 +52,7 @@ export {
 export { CredentialStore, type Cipher } from "./credentials/store.js";
 export {
   assembleHarness,
+  managedStudioAssistant,
   describeClaudeAvailability,
   describeCodexAvailability,
   HarnessPasswordHolder,
