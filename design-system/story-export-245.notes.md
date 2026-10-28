@@ -1,6 +1,6 @@
 # Turn 245 · Export → Arke Player for an interactive story
 
-Drawn on 28 October 2026. Proposed; nothing is built.
+Drawn on 28 October 2026 and approved by the owner the same day (“Approve, merge both”), with Player P18 (ArkePlayer PR #21). Nothing is built.
 
 ## Asked
 
