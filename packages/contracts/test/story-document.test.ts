@@ -192,6 +192,23 @@ describe("compiling a story for Arke Player (SPEC-058 R-80; SPEC-063 R-27)", () 
     assert.deepEqual(result.document.scenes[0]!.beats![2], { picture: "lr-stall" });
   });
 
+  it("opens an all when it joins a line's and a shot's conditions, and names a pair too large together", () => {
+    const eqs = (count: number) => Array.from({ length: count }, (_, index) => ({ op: "eq" as const, fact: "company", value: index % 2 === 0 ? "mara" : "alone" }));
+    const withRoad = (shot: unknown, line: unknown) => ({
+      ...LANTERN_ROAD,
+      routing: RoutingSchema.parse({ ...LANTERN_ROAD.routing, presentation: [{ sceneId: "sc_road", blocks: [{ blockId: "blk_road-close", when: line }], shots: [{ shotId: "sh_road-3", when: shot }] }, LANTERN_ROAD.routing.presentation![1]!] }),
+    });
+    // A shot's all of 60 beside a line's all of 60: one all of 120, inside the bounds.
+    const opened = compileStoryDocument(withRoad({ op: "all", args: eqs(60) }, { op: "all", args: eqs(60) }));
+    assert.ok(opened.ok, opened.ok ? "" : opened.problems.map((problem) => problem.detail).join("; "));
+    const row = opened.document.presentation.find((candidate) => candidate.scene === "sc_road" && candidate.index === 2)!;
+    assert.equal(row.when.op === "all" && row.when.args.length, 120);
+    // Two of 64 each fit alone and are 129 nodes together, which no document can carry.
+    const large = compileStoryDocument(withRoad({ op: "all", args: eqs(64) }, { op: "all", args: eqs(64) }));
+    assert.equal(large.ok, false);
+    if (!large.ok) assert.deepEqual(large.problems, [{ sceneId: "sc_road", detail: "The road out, beat 3's line and shot conditions are too large together — simplify one of them" }]);
+  });
+
   it("names, by scene, what a document cannot say (R-89; SPEC-063 R-9)", () => {
     const problems = (input: StoryCompileInput) => {
       const result = compileStoryDocument(input);

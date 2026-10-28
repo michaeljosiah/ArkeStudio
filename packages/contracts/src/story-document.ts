@@ -4,6 +4,7 @@ import type { StoryPredicate } from "./story-state-schema.js";
 import { storyEnding, storyIdentity, storyPredicate, storyReplay, storyVisibleBeats, validateStoryProgram, type StoryProgram, type StoryState } from "./story-state.js";
 import {
   STORY_FORMAT,
+  STORY_LIMITS,
   STORY_VERSION,
   storyDocumentProgram,
   storyDocumentRefusal,
@@ -79,6 +80,28 @@ export interface StoryCompileProblem {
 }
 
 export type StoryCompiled = { ok: true; document: StoryDocument } | { ok: false; problems: StoryCompileProblem[] };
+
+/**
+ * A beat's shot and line conditions as one, as `storyVisibleBeats` reads them: both must hold. An
+ * `all` on either side is opened into the new one rather than nested in it, so joining adds a level
+ * and a node only where it must.
+ */
+function bothConditions(shot: StoryPredicate, line: StoryPredicate): StoryPredicate {
+  const terms = (condition: StoryPredicate) => (condition.op === "all" ? condition.args : [condition]);
+  return { op: "all", args: [...terms(shot), ...terms(line)] };
+}
+
+/** Whether a condition is inside SPEC-063 R-4's bounds: depth 8 from its root, 128 nodes. */
+function conditionFits(condition: StoryPredicate): boolean {
+  let nodes = 0;
+  const deepest = (node: StoryPredicate, depth: number): number => {
+    nodes += 1;
+    if (node.op === "eq") return depth;
+    if (node.op === "not") return deepest(node.arg, depth + 1);
+    return Math.max(...node.args.map((arg) => deepest(arg, depth + 1)));
+  };
+  return deepest(condition, 1) <= STORY_LIMITS.conditionDepth && nodes <= STORY_LIMITS.conditionNodes;
+}
 
 /** The document's fingerprint (SPEC-063 R-14): the canonical SHA-256 of all it holds but itself. */
 export function storyFingerprint(document: Omit<StoryDocument, "fingerprint"> & { fingerprint?: string }): string {
@@ -163,7 +186,12 @@ export function compileStoryDocument(input: StoryCompileInput): StoryCompiled {
       }
       const shot = shotWhen(beat.shotId);
       const line = blockWhen(beat.blockId);
-      guard(index, shot !== undefined && line !== undefined ? { op: "all", args: [shot, line] } : (shot ?? line));
+      const when = shot !== undefined && line !== undefined ? bothConditions(shot, line) : (shot ?? line);
+      // One row a beat, so the two conditions travel as one. Joined, two that each fit SPEC-063's
+      // bounds can pass them, and that is named here rather than left to the read-back (codex on
+      // PR 2204).
+      if (when !== undefined && !conditionFits(when)) problems.push({ sceneId, detail: `${title}, beat ${index + 1}'s line and shot conditions are too large together — simplify one of them` });
+      guard(index, when);
     });
     scenes.push({
       id: sceneId,
