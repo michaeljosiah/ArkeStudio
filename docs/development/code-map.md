@@ -41,6 +41,15 @@ story input copies pass the same port. Desktop `PublicationHost` obtains that po
 coordinator, sharing setup/import/result reservations. ZIP output enforces a payload/header bound;
 extraction admits the expanded declared extent after its pinned input closes. Sources and completed
 editions are preserved on holds. Native render peaks and pre-dispatch output planning remain separate.
+Whole-world exports use `takes/export-world.ts` through the same export reservation port. Both
+the direct command and approved World Chat action hold the source's existing read/lifetime gate.
+A yielding metadata walk measures included files and directories before payload copying, retaining
+history and excluding the existing operational/cache set. Copies are bounded by the measured
+source extent, report consumption and settle after file handles close. Cancellation, changed
+sources or insufficient capacity keep the source and any partial export; exclusive destinations
+prevent a retry from overwriting prior output. Linked/special sources and destinations inside the
+source world refuse rather than producing a nonportable or recursively growing copy. Tests:
+`test/takes/export-world-storage.test.ts`, existing takes export, world-schema and exclusion tests.
 
 Known import payloads use `storage/import-files.ts`. Its closed Node-copy owner joins the same
 durable per-volume registry as setup/results, reports written bytes and settles after original

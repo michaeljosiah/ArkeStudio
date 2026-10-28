@@ -13653,13 +13653,14 @@ export class Coordinator {
       }
       case "export-world": {
         const store = this.opts.provider.openStore?.();
-        if (!store || !this.opts.appRoot) return;
+        if (!store || store.worldId !== msg.worldId || !this.opts.appRoot) return;
         const stamp = new Date()
           .toISOString()
           .replace(/[-:TZ.]/g, "")
           .slice(0, 14);
         const target = join(this.opts.appRoot, "exports", `${store.getBundle().meta.slug}-${stamp}`);
-        const exported = await exportWorld(store.dir, target).then(
+        const exported = await store.ownedRead(() => exportWorld(store.dir, target, { fileSpace: this.exportFileSpace,
+          signal: AbortSignal.any([store.closingSignal, this.runtimeStop.signal]) })).then(
           () => true,
           (err) => {
           void this.appLog?.append({
@@ -22906,7 +22907,8 @@ export class Coordinator {
             exportWorld: async (actionId) => {
               const exportId = `${store.getBundle().meta.slug}-${actionId}`;
               const target = join(this.opts.appRoot!, "exports", exportId);
-              await exportWorld(store.dir, target);
+              await store.ownedRead(() => exportWorld(store.dir, target, { fileSpace: this.exportFileSpace,
+                signal: AbortSignal.any([store.closingSignal, this.runtimeStop.signal]) }));
               void this.appLog?.append({ kind: "world-export.done", exportId });
               return { id: exportId };
             },
