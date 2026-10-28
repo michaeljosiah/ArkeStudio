@@ -1,0 +1,55 @@
+/* Turn 245 · Export → Arke Player for an interactive story. The sheet, its kinds, rows, blockers,
+   SHA-256 line and the releases list are 233's and 236's, copied here under .ap245 so the turn's
+   review page stands alone; additions follow. Type through the tokens only (turn 139). */
+.ap245{position:relative;overflow:hidden;background:var(--background);color:var(--foreground);font:var(--type-body);text-align:left}
+.ap245-dim{position:absolute;inset:0;background:color-mix(in srgb,var(--background) 60%,transparent);z-index:2}
+.ap245-page{position:absolute;inset:0;padding:30px 44px;display:flex;flex-direction:column;gap:14px;opacity:.6}
+.ap245-page i{display:block;height:12px;border-radius:6px;background:var(--secondary)}
+.ap245-sheet{position:absolute;z-index:3;left:50%;transform:translateX(-50%);border:1px solid var(--border);border-radius:16px;background:var(--popover,var(--background));box-shadow:0 18px 50px color-mix(in srgb,var(--foreground) 16%,transparent);padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.ap245-sheet h3{margin:0;font:var(--type-ui);font-weight:600;font-size:var(--text-md)}
+.ap245-sheet .sub{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);margin-top:-8px}
+.ap245-kinds{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.ap245-kind{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border:1px solid var(--border);border-radius:12px}
+.ap245-kind.on{border-color:var(--foreground)}
+.ap245-kind .r{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--neutral-400);flex:none;margin-top:1px}
+.ap245-kind.on .r{border-color:var(--foreground);background:radial-gradient(circle,var(--foreground) 0 4px,transparent 4.5px)}
+.ap245-kind b{display:block;font-weight:600;font-size:var(--text-sm)}
+.ap245-kind span{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap245-opts{border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.ap245-opt{display:flex;align-items:center;gap:14px;min-height:44px;padding:6px 14px;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.ap245-opt:first-child{border-top:0}
+.ap245-opt>b{width:112px;flex:none;font-weight:500;color:var(--muted-foreground)}
+.ap245-opt .grow{flex:1}
+.ap245-opt i{font-style:normal;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);white-space:nowrap}
+.ap245-opt img{width:44px;height:25px;object-fit:cover;border-radius:4px;flex:none}
+.ap245-field{height:28px;padding:0 10px;border:1px solid var(--border);border-radius:8px;display:inline-flex;align-items:center;font:var(--type-label);min-width:150px}
+.ap245-seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.ap245-seg span{height:28px;padding:0 12px;display:inline-flex;align-items:center;font:var(--type-label);border-left:1px solid var(--border)}
+.ap245-seg span:first-child{border-left:0}
+.ap245-seg span.on{background:var(--foreground);color:var(--background);font-weight:600}
+.ap245-est{display:flex;align-items:center;gap:12px;font-size:var(--text-sm)}
+.ap245-est .m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap245-btn{height:32px;padding:0 13px;border:1px solid var(--border);border-radius:8px;display:inline-flex;align-items:center;gap:7px;font:var(--type-label);background:var(--background);color:var(--foreground);white-space:nowrap}
+.ap245-btn.pri{background:var(--foreground);color:var(--background);border-color:transparent;font-weight:600}
+.ap245-btn.off{opacity:.42}
+.ap245-btn.sm{height:28px}
+.ap245-btn svg{width:13px;height:13px}
+.ap245-foot{display:flex;align-items:center;gap:8px}
+.ap245-foot .grow,.ap245-est .grow{flex:1}
+.ap245-block{display:flex;align-items:center;gap:10px;min-height:40px;padding:6px 12px;border:1px solid color-mix(in srgb,var(--warning) 45%,var(--border));border-radius:10px;background:color-mix(in srgb,var(--warning) 8%,transparent);font-size:var(--text-sm)}
+.ap245-block svg{width:15px;height:15px;color:var(--warning);flex:none}
+.ap245-block .c{flex:1;min-width:0}
+.ap245-sha{display:flex;align-items:center;gap:10px;font-size:var(--text-sm)}
+.ap245-sha b{font-weight:500;flex:none}
+.ap245-sha code{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);overflow-wrap:anywhere;flex:1}
+.ap245-rel{display:flex;align-items:center;gap:12px;min-height:46px;padding:6px 14px;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.ap245-rel:first-child{border-top:0}
+.ap245-rel .d{width:96px;flex:none;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap245-rel .k{width:64px;flex:none;font-weight:500}
+.ap245-rel .m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap245-rel.now{background:color-mix(in srgb,var(--foreground) 4%,transparent)}
+
+/* Additions: the read-back line, with a tick for routes that replay through the story document. */
+.ap245-back{display:flex;align-items:center;gap:10px;min-height:40px;padding:6px 12px;border:1px solid var(--border);border-radius:10px;font-size:var(--text-sm)}
+.ap245-back svg{width:15px;height:15px;flex:none}
+.ap245-back .m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
