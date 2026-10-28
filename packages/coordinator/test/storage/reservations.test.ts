@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { join } from "node:path";
 import { writeFile, readFile } from "node:fs/promises";
 import type { StorageCapacity } from "@arke-studio/contracts";
-import { StorageReservations, type StorageReservation, type StorageReservationRequest, type StorageReservationStore } from "../../src/storage/reservations.js";
+import { StorageReservations, type StorageCheckObservation, type StorageReservation, type StorageReservationRequest, type StorageReservationStore } from "../../src/storage/reservations.js";
 import { FileStorageReservationStore } from "../../src/storage/reservation-file.js";
 import { AppStorageService } from "../../src/storage/service.js";
 import { tempDir } from "../tmp.js";
@@ -14,6 +14,25 @@ const fact = (availableBytes = 10 * GiB, extra: Partial<StorageCapacity> = {}): 
   volumeId: "volume-a", mappingRevision: "mount-a", measuredAt: 600_000, availableBytes, totalBytes: 500 * GiB, ...extra,
 });
 const request = (id: string, remainingBytes: number | null, rootId = "media"): StorageReservationRequest => ({ id, owner, demands: [{ rootId, remainingBytes }] });
+
+it("reports a whole known multi-drive check without adding free space across drives or granting through a throwing observer", async () => {
+  const observations: StorageCheckObservation[] = [];
+  const registry = new StorageReservations({ now: () => 600_000,
+    probe: async rootId => fact(rootId === "media" ? 6 * GiB : 100 * GiB, { volumeId: rootId, mappingRevision: rootId }),
+    onCheck: check => { observations.push(structuredClone(check)); check.volumes[0]!.admission.deficitBytes = 0; check.owner.id = "changed-by-view"; throw new Error("view unavailable"); },
+    store: { load: async () => ({ version: 2, records: [], consumed: [] }), save: async () => {} },
+  });
+  try {
+    await registry.open(); const result = await registry.reserve({ id: "two-drives", owner,
+      demands: [{ rootId: "media", remainingBytes: 8 * GiB }, { rootId: "scratch", remainingBytes: 2 * GiB }] });
+    assert.equal(result.status, "held"); assert.equal(registry.snapshot().records.length, 0);
+    assert(result.status === "held" && result.admission?.status === "held"); assert.equal(result.admission.deficitBytes, 3 * GiB);
+    assert.equal(observations.length, 1); assert.equal(observations[0]!.volumes.length, 2);
+    assert.deepEqual(observations[0]!.volumes.map(volume => [volume.volumeId, volume.admission.status, volume.admission.deficitBytes]), [["media", "held", 3 * GiB], ["scratch", "fits", 0]]);
+    await registry.assess([{ rootId: "media", remainingBytes: null }]);
+    assert.equal(observations.length, 1, "unknown output does not become a numeric check");
+  } finally { await registry.stop(); }
+});
 
 it("read-only assessment uses shared commitments without granting, consuming or persisting a reservation", async () => {
   let saves = 0;

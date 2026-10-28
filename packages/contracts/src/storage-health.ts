@@ -144,12 +144,35 @@ export const StorageRootHealthSchema = z.object({
   pressure: StoragePressureSchema.nullable(), forecast: StorageForecastSchema.nullable(),
 }).strict();
 export type StorageRootHealth = z.infer<typeof StorageRootHealthSchema>;
+/** Historical admission evidence, not a live job status or permission to write. Each drive
+ * keeps its own arithmetic; purpose and destination roles contain no authored names/paths. */
+export const StorageSpaceCheckSchema = z.object({
+  id: identity, checkedAt: instant,
+  purpose: z.enum(["setup", "job", "import", "export", "publication", "scratch", "preview", "submission"]),
+  volumes: z.array(z.object({
+    volumeId: identity, measuredAt: instant, roles: z.array(StorageRootRoleSchema).min(1).max(5),
+    availableBytes: bytes, reservedBytes: bytes, peakBytes: bytes, reserveBytes: bytes, deficitBytes: bytes,
+    status: z.enum(["fits", "held"]),
+  }).strict()).min(1).max(32),
+}).strict();
+export type StorageSpaceCheck = z.infer<typeof StorageSpaceCheckSchema>;
+export const storageByteLabel = (value: number | null | undefined): string => value === null || value === undefined ? "Unknown"
+  : value < 1024 ? `${value} bytes` : value < 1024 ** 2 ? `${Number((value / 1024).toFixed(1))} KiB`
+    : value < 1024 ** 3 ? `${Number((value / 1024 ** 2).toFixed(1))} MiB` : `${Number((value / 1024 ** 3).toFixed(1))} GiB`;
 export const StorageHealthSnapshotSchema = z.object({ at: instant, writing: z.boolean(), roots: z.array(StorageRootHealthSchema).max(128), limited: z.boolean().optional(),
   admission: z.object({ state: z.enum(["starting", "available", "reconciling", "unavailable"]), reservations: z.number().int().min(0).max(2048), uncertain: z.number().int().min(0).max(2048),
     reason: z.enum(["invalid", "permission", "disk-full", "read-failed", "write-failed"]).optional(),
   }).strict().optional(),
+  spaceChecks: z.array(StorageSpaceCheckSchema).max(16).optional(),
 }).strict();
 export type StorageHealthSnapshot = z.infer<typeof StorageHealthSnapshotSchema>;
+
+/** A fresh failed check describes that attempt only, even if a later volume sample improved. */
+export function recentStorageShortfalls(health: StorageHealthSnapshot | null | undefined, now: number) {
+  return (health?.spaceChecks ?? []).filter(check => check.checkedAt <= now && now - check.checkedAt <= STORAGE_POLICY.forecastMaxAgeMs)
+    .flatMap(check => check.volumes.filter(volume => volume.status === "held" && volume.measuredAt <= now && now - volume.measuredAt <= STORAGE_POLICY.forecastMaxAgeMs)
+      .map(volume => ({ check, volume })));
+}
 
 /** Presentation hysteresis never replaces each operation's fresh admission check (R-14).
  * Null means unknown now; the collector retains the preceding latch rather than declaring recovery. */

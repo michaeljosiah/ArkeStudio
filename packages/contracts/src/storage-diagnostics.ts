@@ -1,5 +1,5 @@
 import type { Finding } from "./diagnostics.js";
-import { STORAGE_POLICY, storageWarningFloor, type StorageHealthSnapshot, type StorageRootHealth } from "./storage-health.js";
+import { STORAGE_POLICY, storageWarningFloor, recentStorageShortfalls, type StorageHealthSnapshot, type StorageRootHealth } from "./storage-health.js";
 import type { RecoveryPolicySnapshot } from "./recovery-settings.js";
 
 type Draft = Omit<Finding, "firstSeen">;
@@ -31,6 +31,11 @@ export function deriveStorageFindings(health: StorageHealthSnapshot | null | und
     remedy: null, consequences: [], note: "Saved work is kept.",
   });
   const volumes = new Map<string, StorageRootHealth[]>();
+  const shortfalls = new Map<string, ReturnType<typeof recentStorageShortfalls>[number]>();
+  for (const item of recentStorageShortfalls(health, at)) {
+    if (!shortfalls.has(item.volume.volumeId) || shortfalls.get(item.volume.volumeId)!.check.checkedAt < item.check.checkedAt) shortfalls.set(item.volume.volumeId, item);
+    volumes.set(item.volume.volumeId, []);
+  }
   for (const root of health.roots) {
     if (!root.capacity) {
       findings.push(unknown(root.rootId, [root], root.state === "unmeasured" ? "the destination has not been measured yet" : root.state === "unsupported" ? "this host does not support measurement of this destination" : "the destination could not be measured", root.state !== "unsupported"));
@@ -39,29 +44,36 @@ export function deriveStorageFindings(health: StorageHealthSnapshot | null | und
     }
   }
   for (const [volumeId, roots] of volumes) {
+    const shortfall = shortfalls.get(volumeId)?.volume;
     const fresh = roots.filter(root => root.state === "measured" && root.capacity!.availableBytes !== null &&
       root.capacity!.measuredAt <= at && at - root.capacity!.measuredAt <= STORAGE_POLICY.forecastMaxAgeMs);
     if (fresh.length !== roots.length) findings.push(unknown(volumeId, roots, "one or more destination measurements are unavailable or stale"));
-    if (!fresh.length) continue;
+    if (!fresh.length && !shortfall) continue;
     fresh.sort((a, b) => a.capacity!.availableBytes! - b.capacity!.availableBytes!);
-    const worst = fresh[0]!, capacity = worst.capacity!, floor = storageWarningFloor(capacity.totalBytes);
+    const capacity = fresh[0]?.capacity ?? { volumeId, measuredAt: shortfall!.measuredAt, availableBytes: shortfall!.availableBytes, totalBytes: null };
+    const floor = storageWarningFloor(capacity.totalBytes);
     const latched = fresh.filter(root => root.pressure?.volumeId === volumeId && root.pressure.mappingRevision === root.capacity!.mappingRevision);
     const critical = capacity.availableBytes! <= STORAGE_POLICY.reserveBytes || latched.some(root => root.pressure!.critical);
     const forecast = fresh.map(root => root.forecast).find(value => value?.warning && value.to <= at && at - value.to <= STORAGE_POLICY.forecastMaxAgeMs);
-    if (!critical && capacity.availableBytes! >= floor && !latched.some(root => root.pressure!.warning) && !forecast) continue;
-    const measuredAt = new Date(capacity.measuredAt).toISOString();
+    if (!shortfall && !critical && capacity.availableBytes! >= floor && !latched.some(root => root.pressure!.warning) && !forecast) continue;
+    const measuredAt = new Date(shortfall?.measuredAt ?? capacity.measuredAt).toISOString();
     const scope = cleanup?.scope;
     const review = cleanup?.available && !cleanup.pending && scope && scope.candidateFiles > 0 && scope.volumeId === volumeId &&
       scope.measuredAt <= at && at - scope.measuredAt <= STORAGE_POLICY.forecastMaxAgeMs && scope.inventoryAt <= at && at - scope.inventoryAt <= STORAGE_POLICY.forecastMaxAgeMs &&
-      fresh.some(root => root.capacity!.mappingRevision === scope.mappingRevision) && capacity.availableBytes! < floor + STORAGE_POLICY.clearMarginBytes
+      fresh.some(root => root.capacity!.mappingRevision === scope.mappingRevision) && (shortfall || capacity.availableBytes! < floor + STORAGE_POLICY.clearMarginBytes)
       ? scope : null;
     findings.push({ kind: "storage-pressure", occurrence: volumeId,
       // Specific work holds require the owning operation's causal evidence; this measured risk
       // alone does not invent an affected job count or claim a paid result failed.
-      severity: critical ? "degraded" : "advisory", title: "Storage is running low",
+      severity: shortfall || critical ? "degraded" : "advisory", title: shortfall ? "A recent storage check could not fit" : "Storage is running low",
       facts: [
-        { name: "available-bytes", value: capacity.availableBytes, source: "app.storageHealth.roots.capacity", measuredAt },
-        { name: "reserve-bytes", value: STORAGE_POLICY.reserveBytes, source: "storage-policy", measuredAt: now },
+        { name: "available-bytes", value: shortfall?.availableBytes ?? capacity.availableBytes, source: shortfall ? "app.storageHealth.spaceChecks" : "app.storageHealth.roots.capacity", measuredAt },
+        { name: "reserve-bytes", value: shortfall?.reserveBytes ?? STORAGE_POLICY.reserveBytes, source: shortfall ? "app.storageHealth.spaceChecks" : "storage-policy", measuredAt: shortfall ? measuredAt : now },
+        ...(shortfall ? [
+          { name: "reserved-bytes", value: shortfall.reservedBytes, source: "app.storageHealth.spaceChecks", measuredAt },
+          { name: "remaining-peak-bytes", value: shortfall.peakBytes, source: "app.storageHealth.spaceChecks", measuredAt },
+          { name: "deficit-bytes", value: shortfall.deficitBytes, source: "app.storageHealth.spaceChecks", measuredAt },
+        ] : []),
         { name: "warning-floor-bytes", value: floor, source: "storage-policy", measuredAt: now },
         { name: "destinations", value: fresh.length, source: "app.storageHealth.roots", measuredAt: now },
         ...(review ? [{ name: "reviewable-previews", value: review.candidateFiles, source: "app.recoveryPolicy.cleanup.scope", measuredAt: new Date(review.inventoryAt).toISOString() }] : []),
@@ -70,7 +82,7 @@ export function deriveStorageFindings(health: StorageHealthSnapshot | null | und
           { name: "estimated-time-to-reserve-ms", value: forecast.timeToReserveMs, source: "app.storageHealth.roots.forecast", measuredAt: new Date(forecast.to).toISOString() },
         ] : []),
       ],
-      cause: { statement: critical ? "available space has reached the operational reserve or is awaiting confirmed recovery" : capacity.availableBytes! < floor ? "available space is below the warning threshold" : forecast ? "recent volume-wide usage estimates reaching the reserve within thirty minutes" : "free space has improved but recovery still needs two separated fresh readings" },
+      cause: { statement: shortfall ? "the recorded operation check could not fit its planned writes, existing commitments and reserve; the operation's current status remains with its own controls" : critical ? "available space has reached the operational reserve or is awaiting confirmed recovery" : capacity.availableBytes! < floor ? "available space is below the warning threshold" : forecast ? "recent volume-wide usage estimates reaching the reserve within thirty minutes" : "free space has improved but recovery still needs two separated fresh readings" },
       remedy: review ? { control: "local-preview-cleanup-review", target: review.revision } : null, consequences: [],
       note: review ? "Needs your approval · Review older local preset previews on this volume. File eligibility is verified before approval; recoverable space is unknown. Creative media is retained."
         : "You need to free space on the affected drive, then refresh. Creative media is retained.",

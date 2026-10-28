@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { FINDING_KIND_IDS, FindingSeveritySchema, FINDING_SEVERITY_RANK, type Finding } from "./diagnostics.js";
 import { RECOVERY_ACTION_HISTORY_LIMITS, RecoveryActionSummarySchema, retainRecoveryActions } from "./recovery-action-history.js";
+import { storageByteLabel } from "./storage-health.js";
 
 export const RECOVERY_HISTORY_LIMITS = Object.freeze({ maxIncidents: 1000, maxBytes: 10 * 1024 ** 2, retentionMs: 30 * 86400_000, advisoryIntervalMs: 86400_000 });
 const instant = z.number().int().nonnegative().safe().max(8_640_000_000_000_000), digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -10,7 +11,7 @@ export const RecoveryEvidenceStateSchema = z.enum(["fresh", "stale", "unavailabl
 /** Closed operational facts only. Free-form causes, paths, titles and worker output are never
  * copied from a diagnostic finding into saved history or an assistant's evidence payload. */
 export const RECOVERY_FACT_NAMES = ["held-jobs", "disabled-recipes", "download-mb", "needs-mb", "volume-free-mb", "fault-count", "waiting",
-  "destinations", "available-bytes", "reserve-bytes", "warning-floor-bytes", "estimated-time-to-reserve-ms", "forecast-window-ms", "uncertain-reservations", "reviewable-previews", "cleanup-checking"] as const;
+  "destinations", "available-bytes", "reserve-bytes", "reserved-bytes", "remaining-peak-bytes", "deficit-bytes", "warning-floor-bytes", "estimated-time-to-reserve-ms", "forecast-window-ms", "uncertain-reservations", "reviewable-previews", "cleanup-checking"] as const;
 export const RecoveryFactSchema = z.object({ name: z.enum(RECOVERY_FACT_NAMES), value: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(), measuredAt: instant }).strict();
 export type RecoveryFact = z.infer<typeof RecoveryFactSchema>;
 export const RecoveryObservationSchema = z.object({
@@ -172,7 +173,9 @@ export function recoveryIncidentSummary(incident: RecoveryIncident): { title: st
     : { title: "Capability is available again", detail: "Service readiness does not establish a completed creative result. Check held work." };
   if (incident.kind === "storage-pressure") {
     const available = incident.facts.find(fact => fact.name === "available-bytes"), estimate = incident.facts.find(fact => fact.name === "estimated-time-to-reserve-ms");
+    const deficit = incident.facts.find(fact => fact.name === "deficit-bytes");
     const review = incident.phase === "action-available" && incident.facts.some(fact => fact.name === "reviewable-previews" && fact.value !== null && fact.value > 0);
+    if (deficit?.value !== null && deficit?.value !== undefined) return { title, detail: `${deficit.value ? `The recorded operation check needed ${storageByteLabel(deficit.value)} more space.` : "The recorded operation check had no headroom above the working reserve."} Review the check and available remedies in Diagnostics. The operation's own controls show its current status. Creative media is kept.` };
     return { title, detail: `${available?.value !== null && available?.value !== undefined ? `${(available.value / 1024 ** 3).toFixed(1)} GiB available. ` : ""}${estimate?.value !== null && estimate?.value !== undefined ? `The reserve may be reached in ${Math.max(1, Math.round(estimate.value / 60000))} min at the recent rate. ` : ""}${review ? "A preview cleanup review is available in Diagnostics. Cleanup needs your approval." : "You need to free space on the affected drive, then refresh."} Creative media is kept.` };
   }
   if (incident.phase === "recovering") return { title: "Local AI recovery is running", detail: "Arke is restoring the service. Submitted work still needs its own reconciliation." };

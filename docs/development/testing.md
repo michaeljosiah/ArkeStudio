@@ -1,5 +1,15 @@
 # Running and validating changes
 
+Known storage shortfalls (SPEC-062 R-13/R-21) use coordinator `test/storage/reservations.test.ts`,
+`storage/service.test.ts`, `storage/application.test.ts` and `recovery/history.test.ts`; contracts
+`test/storage-diagnostics.test.ts` and `recovery-incidents.test.ts`; and client
+`test/studio-storage.test.tsx`, `studio-assistant-view.test.tsx` and `storage-health.test.ts`.
+These cover per-drive arithmetic, anonymous authenticated projection, bounded check retention,
+freshness, grouped warnings and current-status separation. The check is historical evidence:
+it does not prove that an operation is still waiting or authorize a retry. Client tests run from
+their package; coordinator tests need native temporary-file access. Browser component evidence
+uses synthetic capacity and must not be described as an installed/native or matched-master test.
+
 Installation journeys (SPEC-016 R-21–R-28, approved turns 242–244): coordinator
 `test/setup/onboarding.test.ts`, `test/setup/onboarding-wire.test.ts`,
 `test/world/import-world.test.ts`, `test/world/sample-world.test.ts`, and

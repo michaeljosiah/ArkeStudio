@@ -36,6 +36,12 @@ const requestSchema = z.object({
   id: key, owner, demands: z.array(z.object({ rootId: key, remainingBytes: bytes.nullable(), reserveBytes: bytes.optional() }).strict()).min(1).max(32),
 }).strict().refine(value => new Set(value.demands.map(d => d.rootId)).size === value.demands.length, "Repeated storage root");
 export type StorageReservationRequest = z.infer<typeof requestSchema>;
+export interface StorageCheckObservation {
+  owner: StorageReservation["owner"];
+  assessment: boolean;
+  checkedAt: number;
+  volumes: Array<{ rootIds: string[]; volumeId: string; measuredAt: number; admission: Extract<StorageAdmission, { status: "fits" | "held" }> }>;
+}
 const sameOwner = (a: StorageReservation["owner"], b: StorageReservation["owner"]) => a.kind === b.kind && a.id === b.id;
 
 /** One host-local owner for SPEC-062 R-8/R-9/R-24. Callers are operation owners, never renderer paths.
@@ -63,6 +69,7 @@ export class StorageReservations {
     capacityCurrent?(rootId: string, fact: StorageCapacity): boolean;
     now?: () => number;
     onChange?: () => void;
+    onCheck?: (check: StorageCheckObservation) => void;
     stopTimeoutMs?: number;
   }) {}
 
@@ -223,6 +230,8 @@ export class StorageReservations {
         demands.push({ ...d, remainingBytes: d.remainingBytes, volumeId: fact.volumeId, mappingRevision: fact.mappingRevision,
           reserveBytes: Math.max(STORAGE_POLICY.reserveBytes, d.reserveBytes ?? STORAGE_POLICY.reserveBytes) });
       }
+      const checks: StorageCheckObservation["volumes"] = [];
+      let refused: Extract<StorageReservationResult, { status: "held" }> | undefined;
       for (const volumeId of new Set(demands.map(d => d.volumeId))) {
         const pending = [...this.records.values()].filter(r => (!replacing || r.id !== request.id) && r.demands.some(d => d.volumeId === volumeId));
         if (pending.some(r => r.state === "uncertain")) return { status: "held", reason: "reconciliation-required", volumeId };
@@ -242,8 +251,14 @@ export class StorageReservations {
           reservedBytes: bytes.parse(other.reduce((sum, d) => sum + d.remainingBytes, sample.debit)),
           remainingPeakBytes: bytes.parse(own.reduce((sum, d) => sum + d.remainingBytes, 0)),
           reserveBytes: Math.max(...[...own, ...other].map(d => d.reserveBytes)), now });
-        if (admission.status !== "fits") return { status: "held", reason: "capacity", volumeId, admission };
+        if (admission.status === "unknown") return { status: "held", reason: "capacity", volumeId, admission };
+        checks.push({ rootIds: own.map(d => d.rootId), volumeId, measuredAt: capacity.measuredAt, admission });
+        if (admission.status === "held") refused ??= { status: "held", reason: "capacity", volumeId, admission };
       }
+      // A bounded presentation projection only. No owner/path is sent to clients, and the
+      // callback cannot alter this decision, create a reservation or claim a queued operation.
+      try { this.deps.onCheck?.(structuredClone({ owner: request.owner, assessment, checkedAt: this.now(), volumes: checks })); } catch { /* Presentation is not authority. */ }
+      if (refused) return refused;
       if (assessment) return { status: "fits" };
       const reservation: StorageReservation = { id: request.id, owner: request.owner, state: "active", demands };
       const next = new Map(this.records); next.set(reservation.id, reservation);

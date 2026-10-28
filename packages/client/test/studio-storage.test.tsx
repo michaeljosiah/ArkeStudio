@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { parseHTML } from "linkedom";
-import type { StorageHealthSnapshot, StorageRootHealth } from "@arke-studio/contracts";
+import type { StorageHealthSnapshot, StorageRootHealth, StorageSpaceCheck } from "@arke-studio/contracts";
 import { StudioStorageReadingsView } from "../src/components/studio-storage.js";
 
 const now = 120_000, gib = 1024 ** 3;
@@ -47,4 +47,23 @@ it("discloses incomplete aliases, quotas and bounded scope while retaining a rea
   assert.match(document.querySelector("section")!.textContent!, /1 destination has stale or unavailable readings/);
   assert.match(document.toString(), /separate storage quota is unknown/);
   assert.match(document.toString(), /Some destinations are outside this measurement summary/);
+});
+
+it("shows actual per-drive check arithmetic as historical evidence, never as a current waiting job or retry action", () => {
+  const check: StorageSpaceCheck = { id: "private-check", checkedAt: now, purpose: "export", volumes: [
+    { volumeId: "private-drive", measuredAt: now, roles: ["generated-media", "exports"], status: "held", availableBytes: 6 * gib, reservedBytes: gib, peakBytes: 8 * gib, reserveBytes: gib, deficitBytes: 4 * gib },
+    { volumeId: "private-scratch", measuredAt: now, roles: ["working-files"], status: "fits", availableBytes: 60 * gib, reservedBytes: 0, peakBytes: 2 * gib, reserveBytes: gib, deficitBytes: 0 },
+  ] };
+  const render = (connected = true, at = now, purpose = check.purpose) => parseHTML(renderToString(<StudioStorageReadingsView connected={connected} now={at}
+    health={{ at: now, writing: false, roots: [], spaceChecks: [{ ...check, purpose }] }} />)).document;
+  for (const document of [render(), render(false), render(true, now + 60_001)]) {
+    const card = document.querySelector(".fy-studio-fact-card")!;
+    assert.deepEqual(facts(card), [["Available at check", "6 GiB"], ["Already committed", "1 GiB"], ["Estimated remaining writes", "8 GiB"], ["Working reserve", "1 GiB"], ["Additional space needed", "4 GiB"],
+      ["Available at check", "60 GiB"], ["Already committed", "0 bytes"], ["Estimated remaining writes", "2 GiB"], ["Working reserve", "1 GiB"], ["Additional space needed", "0 bytes"]]);
+    assert.match(card.textContent!, /Export space check.*World media · Exports.*Working files/);
+    assert.match(card.textContent!, /Figures describe that check/);
+    assert.doesNotMatch(document.toString(), /Export is waiting|private-|66 GiB/); assert.equal(document.querySelectorAll("button").length, 0);
+  }
+  assert.match(render(true, now, "submission").toString(), /Minimum preparation space.*Generated media may need more space/);
+  for (const at of [now - 1, now + 15 * 60_000 + 1]) assert.doesNotMatch(render(true, at).toString(), /Export space check|Additional space needed/);
 });

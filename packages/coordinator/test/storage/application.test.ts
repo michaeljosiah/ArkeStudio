@@ -34,6 +34,10 @@ it("projects startup/world/wake readings into authenticated reconnect snapshots 
     assert(!JSON.stringify(coordinator.getState().app.storageHealth).includes(root));
     now += 1_000; await coordinator.wakeStorage();
     await until(() => coordinator.getState().app.storageHealth?.roots.every(value => value.state === "measured") === true, "wake refresh");
+    const rootId = storageHealth.snapshot().roots[0]!.rootId;
+    assert.equal((await storageHealth.reservations.reserve({ id: "private-request", owner: { kind: "export", id: "private-export" },
+      demands: [{ rootId, remainingBytes: 24 * 1024 ** 3 }] })).status, "held");
+    await until(() => coordinator.getState().app.storageHealth?.spaceChecks?.length === 1, "known storage shortfall");
     client = new WebSocket(`ws://127.0.0.1:${session.port}`);
     const frames: Frame[] = []; client.on("message", raw => frames.push(FrameSchema.parse(JSON.parse(raw.toString()))));
     await once(client, "open"); client.send(JSON.stringify({ kind: "hello", token: session.token, lastSeq: 0 }));
@@ -41,6 +45,8 @@ it("projects startup/world/wake readings into authenticated reconnect snapshots 
     const snapshot = frames.find(frame => frame.kind === "snapshot"); assert(snapshot?.kind === "snapshot");
     assert.equal(snapshot.state.app.storageHealth!.roots.length, 2);
     assert.equal(snapshot.state.app.storageHealth!.admission!.state, "available");
+    assert.equal(snapshot.state.app.storageHealth!.spaceChecks![0]!.volumes[0]!.deficitBytes, 5 * 1024 ** 3);
+    assert(!JSON.stringify(snapshot.state.app.storageHealth).includes("private-"));
   } finally {
     client?.close(); await coordinator.stop(); await provider.close();
   }

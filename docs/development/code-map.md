@@ -16,6 +16,11 @@ overlapping replacements or late publication. No native child or shell is starte
 writing cadence and desktop wake feed it; `storage.health` reaches authenticated snapshots and both
 state folds without entering the world diagnostic journal. Contracts `storage-diagnostics.ts` derives
 measured storage findings for Settings · Diagnostics; its Refresh requests the host collector.
+Known failed admission checks also publish a bounded, anonymous `spaceChecks` projection through
+the same snapshot. `storage/service.ts` retains 16 recent checks for 15 minutes without retaining
+their paths or inventing pending work. `storage-diagnostics.ts` groups fresh shortfalls by volume;
+client `components/studio-storage.tsx` renders their per-drive arithmetic separately from current
+capacity. These facts never grant a retry or release a reservation (SPEC-062 R-13/R-21/R-23).
 Tests: contracts `test/storage-{health,diagnostics}.test.ts`, coordinator `test/storage/`, client
 `test/storage-health.test.ts`; requirements SPEC-032 R-17/R-33, SPEC-062 R-1–R-14/R-24.
 `storage/setup-files.ts` now connects setup's direct HTTP file owner to the shared registry on

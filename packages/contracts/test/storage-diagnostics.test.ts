@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { FindingSchema } from "../src/diagnostics.js";
 import { deriveStorageFindings } from "../src/storage-diagnostics.js";
+import { recoveryFindingFacts } from "../src/recovery-incidents.js";
 import type { StorageHealthSnapshot, StorageRootHealth } from "../src/storage-health.js";
 import type { RecoveryCacheScope } from "../src/recovery-actions.js";
 
@@ -11,6 +12,30 @@ const root = (rootId = "media", availableBytes = 20 * GiB): StorageRootHealth =>
 const health = (...roots: StorageRootHealth[]): StorageHealthSnapshot => ({ at: epoch, writing: false, roots });
 const scope: RecoveryCacheScope = { revision: "a".repeat(64), volumeId: "volume-a", mappingRevision: "mount-a", measuredAt: epoch,
   inventoryAt: epoch, candidateFiles: 1, recordedBytes: 60 };
+
+it("warns from a known check above the general warning floor without inventing ongoing work, and expires its causal evidence", () => {
+  const input: StorageHealthSnapshot = { ...health(root("media", 20 * GiB)), spaceChecks: [{ id: "check-a", purpose: "export", checkedAt: epoch,
+    volumes: [{ volumeId: "volume-a", measuredAt: epoch, roles: ["exports"], status: "held", availableBytes: 20 * GiB, reservedBytes: 2 * GiB, peakBytes: 24 * GiB, reserveBytes: GiB, deficitBytes: 7 * GiB }] }] };
+  for (const roots of [input.roots, []]) {
+    const findings = deriveStorageFindings({ ...input, roots }, now); assert.equal(findings.length, 1);
+    const finding = FindingSchema.parse({ ...findings[0], firstSeen: now });
+    assert.equal(finding.occurrence, "volume-a"); assert.equal(finding.severity, "degraded");
+    assert.match(finding.title, /recent storage check/); assert.equal(finding.remedy, null);
+    const facts = recoveryFindingFacts(finding);
+    assert.equal(facts.find(fact => fact.name === "deficit-bytes")?.value, 7 * GiB);
+    assert.equal(facts.find(fact => fact.name === "reserved-bytes")?.value, 2 * GiB);
+    assert(!facts.some(fact => fact.name === "held-jobs"));
+    assert.doesNotMatch(JSON.stringify(finding), /Export is waiting|check-a/);
+  }
+  for (const checkedAt of [epoch + 1, epoch - 60_001]) {
+    const findings = deriveStorageFindings({ ...input, spaceChecks: [{ ...input.spaceChecks![0]!, checkedAt }] }, now);
+    assert.equal(findings.length, 0);
+  }
+  const low = { ...input, roots: [root("media", 4 * GiB)] };
+  const findings = deriveStorageFindings(low, now, { available: true, pending: false, scope });
+  assert.equal(findings.length, 1, "one volume cause covers its low-capacity and failed-check evidence");
+  assert.equal(findings[0]!.remedy?.control, "local-preview-cleanup-review");
+});
 
 it("states no storage fault for absent hosts or fresh sufficient capacity", () => {
   assert.deepEqual(deriveStorageFindings(undefined, now), []);

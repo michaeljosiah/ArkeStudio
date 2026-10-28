@@ -33,6 +33,15 @@ it("announces an available preview review without persisting its target or grant
   assert.equal(recoveryNoticeDecision(incident, incident, history, now + 1000, session), null);
 });
 
+it("describes a recorded shortfall without rounding small deficits to zero or inventing a waiting job", () => {
+  for (const [value, expected] of [[65536, /64 KiB more space/], [3 * 1024 ** 3, /3 GiB more space/], [0, /no headroom above the working reserve/]] as const) {
+    const history = observeRecoveryIncident(emptyRecoveryHistory(), observation({ facts: [{ name: "deficit-bytes", value, measuredAt: now }] }), id(1), now);
+    const summary = recoveryIncidentSummary(history.incidents[0]!);
+    assert.match(summary.detail, expected); assert.match(summary.detail, /recorded operation check/);
+    assert.doesNotMatch(summary.detail, /waiting|0.0 GiB/);
+  }
+});
+
 it("refuses missing verification, clock reversal and future measurements without inventing recovery", () => {
   const first = observeRecoveryIncident(emptyRecoveryHistory(), observation(), id(1), now);
   assert(!RecoveryObservationSchema.safeParse(observation({ phase: "recovered" })).success);

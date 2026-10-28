@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { join } from "node:path";
-import type { StorageHealthSnapshot } from "@arke-studio/contracts";
+import { StorageHealthSnapshotSchema, type StorageHealthSnapshot } from "@arke-studio/contracts";
 import { AppStorageService, type StorageNativePort } from "../../src/storage/service.js";
 import { tempDir } from "../tmp.js";
 
@@ -18,10 +18,36 @@ function fixture(root: string) {
     stop: async () => { stopped = true; },
   };
   const service = new AppStorageService({ appRoot: root, native, now: () => now, store: { load: async () => ({ version: 2, records: [], consumed: [] }), save: async () => {} } });
-  return { service, roots: () => registered, stopped: () => stopped };
+  return { service, roots: () => registered, stopped: () => stopped, advance: (ms: number) => { now += ms; } };
 }
 
 describe("application storage ownership", () => {
+  it("publishes bounded anonymous shortfall checks without retaining paths, inventing work status or reserving failed attempts", async () => {
+    const root = await tempDir("arke-storage-checks-"), { service, roots, advance } = fixture(root), gib = 1024 ** 3;
+    await service.start();
+    const media = service.acquireRoot(join(root, "private-world"), "generated-media"), scratch = service.acquireRoot(join(root, "private-scratch"), "working-files");
+    advance(1001); await service.refresh();
+    try {
+      const owner = { kind: "export" as const, id: "private-export-name" };
+      assert.equal((await service.reservations.reserve({ id: "other", owner: { kind: "job", id: "private-job" }, demands: [{ rootId: service.snapshot().roots[0]!.rootId, remainingBytes: 8 * gib }] })).status, "reserved");
+      const request = { id: "refused", owner, demands: [{ rootId: media.rootId, remainingBytes: 16 * gib }, { rootId: scratch.rootId, remainingBytes: 4 * gib }] };
+      assert.equal((await service.reservations.reserve(request)).status, "held");
+      const snapshot = StorageHealthSnapshotSchema.parse(service.snapshot()), check = snapshot.spaceChecks![0]!;
+      assert.equal(snapshot.admission!.reservations, 1); assert.equal(check.purpose, "export");
+      assert.deepEqual(check.volumes, [{ volumeId: "volume-a", measuredAt: 601_001, roles: ["generated-media", "working-files"], status: "held",
+        availableBytes: 20 * gib, reservedBytes: 8 * gib, peakBytes: 20 * gib, reserveBytes: gib, deficitBytes: 9 * gib }]);
+      assert.doesNotMatch(JSON.stringify(snapshot), /private-|arke-storage-checks-|waiting|owner/);
+      assert.equal((await service.reservations.reserve({ ...request, demands: [{ rootId: media.rootId, remainingBytes: gib }] })).status, "reserved");
+      assert.equal(service.snapshot().spaceChecks!.length, 0, "a later fitting check from this owner replaces its failed check without claiming operation completion");
+      await service.reservations.settle("refused", owner);
+      for (let index = 0; index < 18; index++) await service.reservations.reserve({ ...request, owner: { ...owner, id: `private-${index}` } });
+      assert.equal(service.snapshot().spaceChecks!.length, 16);
+      media.release(); scratch.release(); assert(!roots().some(value => value.path.endsWith("private-world")));
+      assert.equal(service.snapshot().spaceChecks!.length, 16, "historical checks do not retain destination roots");
+      advance(15 * 60_000 + 1); assert.equal(service.snapshot().spaceChecks!.length, 0);
+    } finally { media.release(); scratch.release(); await service.stop(); }
+  });
+
   it("starts without a model and publishes opaque facts for the app and active world", async () => {
     const root = await tempDir("arke-storage-service-"), { service, roots, stopped } = fixture(root);
     const received: StorageHealthSnapshot[] = []; const off = service.subscribe(snapshot => received.push(snapshot));

@@ -340,3 +340,25 @@ ended with no worker, no new batch directory and zero reservations. Existing-cac
 upper bounds or new listening judgments. Their private evidence/audio are under the gitignored
 `.dev/ming-integration/storage-{dense,tiny}-*` outputs; no model download or installed-service
 restart occurred.
+
+## Known storage shortfalls
+
+Admission now reports the numbers used for known multi-drive checks. Studio shows measured
+available space, existing commitments, remaining writes, reserve and deficit for each drive.
+The latest failed check is expanded; earlier checks use a disclosure. Checks remain explicitly
+historical and are separate from live capacity and operation status. No waiting export, job
+count, retry button or cleanup permission is inferred from a rejected check.
+
+The host retains at most 16 anonymous checks for 15 minutes, without paths or owner names.
+Only observations within 60 seconds contribute a grouped volume warning; unknown output and
+missing measurements do not produce numeric claims. The queue's bookkeeping-only assessment
+is labelled preparation space rather than an estimate of the eventual generated media.
+
+The focused run passes 62 coordinator, 33 contract and 14 client cases, including authenticated
+reconnect, observer isolation, same-drive aggregation, separate-drive shortfalls, privacy and
+recovery hysteresis. Actual Studio component captures use synthetic values at 1440×900,
+800×1000, 390×844 and 390×480. Desktop/phone light and dark captures and the reduced-height
+scroll check are in the gitignored `.dev/studio-239-check/shortfall-*.png` files. These show
+readable values and retained composer space; they do not establish installed-device acceptance
+or comparison with the approved master. Live pending-work counts/status, other generation
+write plans, broader attachment support and the existing native/design gates remain open.

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { StorageHealthSnapshot, StorageRootRole } from "@arke-studio/contracts";
+import type { StorageHealthSnapshot, StorageRootRole, StorageSpaceCheck } from "@arke-studio/contracts";
 import { FileStorageReservationStore } from "./reservation-file.js";
-import { StorageReservations, type StorageReservationStore } from "./reservations.js";
+import { StorageReservations, type StorageCheckObservation, type StorageReservationStore } from "./reservations.js";
 import { StorageMonitor, type StorageProbeResult } from "./monitor.js";
 import { WindowsVolumeProbe } from "./windows-volume.js";
 import { LinuxVolumeProbe } from "./linux-volume.js";
@@ -40,8 +40,11 @@ export class AppStorageService {
   private admissionReady = false;
   private starting: Promise<void> | null = null;
   private observationsStopped: Promise<unknown> | null = null;
+  private readonly spaceChecks = new Map<string, StorageSpaceCheck>();
+  private readonly now: () => number;
 
   constructor(options: { appRoot: string; native?: StorageNativePort; platform?: string; now?: () => number; store?: StorageReservationStore }) {
+    this.now = options.now ?? Date.now;
     const platform = options.platform ?? process.platform;
     this.supportsAdmission = options.native !== undefined || platform === "win32" || platform === "linux";
     this.native = options.native ?? (platform === "win32" ? new WindowsVolumeProbe({ now: options.now }) : platform === "linux" ? new LinuxVolumeProbe({ now: options.now }) : {
@@ -55,6 +58,7 @@ export class AppStorageService {
       capacityEpoch: () => this.monitor.admissionEpoch(),
       capacityCurrent: (rootId, fact) => this.monitor.currentCapacity(rootId, fact),
       onChange: () => { this.syncRoots(); this.publish(this.monitor.snapshot()); },
+      onCheck: check => this.recordCheck(check),
     });
     this.monitor = new StorageMonitor({ probe: (rootId, signal, after) => this.native.probe(rootId, signal, after), now: options.now,
       onSnapshot: snapshot => this.publish(snapshot) });
@@ -74,7 +78,25 @@ export class AppStorageService {
       state: !this.admissionReady ? "starting" : !control.auditAvailable ? "unavailable" : uncertain ? "reconciling" : "available",
       reservations: control.records.length, uncertain,
       reason: control.auditFailure,
-    } };
+    }, spaceChecks: structuredClone([...this.spaceChecks.values()].filter(check => check.checkedAt <= this.now() && this.now() - check.checkedAt <= 15 * 60_000).reverse()) };
+  }
+  private recordCheck(check: StorageCheckObservation): void {
+    if (this.closing) return;
+    const id = createHash("sha256").update(JSON.stringify(["storage-check", check.owner.kind, check.owner.id, check.assessment])).digest("hex");
+    this.spaceChecks.delete(id);
+    if (check.volumes.some(volume => volume.admission.status === "held")) {
+      const volumes: StorageSpaceCheck["volumes"] = [];
+      for (const volume of check.volumes) {
+        const roles = [...new Set(volume.rootIds.map(rootId => this.roots.get(rootId)?.role).filter((role): role is StorageRootRole => !!role))];
+        if (!roles.length) return;
+        volumes.push({ volumeId: volume.volumeId, measuredAt: volume.measuredAt, roles, ...volume.admission });
+      }
+      this.spaceChecks.set(id, { id, checkedAt: check.checkedAt, purpose: check.assessment ? "submission" : check.owner.kind, volumes });
+      while (this.spaceChecks.size > 16) this.spaceChecks.delete(this.spaceChecks.keys().next().value!);
+    }
+    // Refused requests have no durable reservation and can outlive their root leases. Keep
+    // only these bounded, anonymous check facts; never retain a path or invent live work.
+    this.publish(this.monitor.snapshot());
   }
   snapshot(): StorageHealthSnapshot { return this.decorate(this.monitor.snapshot()); }
   /** Registered host handle only; waits through collector coalescing for a post-fence sample. */

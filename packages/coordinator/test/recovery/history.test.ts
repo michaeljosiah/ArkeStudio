@@ -203,6 +203,25 @@ it("requires separated fresh capacity readings, resets changed mappings, and nev
   assert.equal(h.service.snapshot().resolvedCount, 1); assert.equal(h.service.snapshot().incidents[0]!.resolution, "verified-capacity"); await h.service.stop();
 });
 
+it("a fresh operation shortfall prevents a generic high-capacity reading from announcing recovery", async () => {
+  const h = harness(), key = createHash("sha256").update("storage-pressure:volume-a").digest("hex"), gib = 1024 ** 3;
+  await h.service.open(); h.service.observe([observation({ key })]);
+  const health = (at: number, failed: boolean): StorageHealthSnapshot => ({ at, writing: false,
+    roots: [{ rootId: "media", role: "generated-media", state: "measured", source: "host-provided", limitations: [], pressure: null, forecast: null,
+      capacity: { volumeId: "volume-a", mappingRevision: "mount-a", measuredAt: at, availableBytes: 20 * gib, totalBytes: 500 * gib } }],
+    spaceChecks: failed ? [{ id: "check-a", purpose: "export", checkedAt: at, volumes: [{ volumeId: "volume-a", measuredAt: at, roles: ["exports"], status: "held",
+      availableBytes: 20 * gib, reservedBytes: 0, peakBytes: 24 * gib, reserveBytes: gib, deficitBytes: 5 * gib }] }] : [] });
+  try {
+    h.service.observeAvailability({ storageHealth: health(now, false), comfyui: null });
+    h.advance(30_000); h.service.observeAvailability({ storageHealth: health(now + 30_000, true), comfyui: null });
+    assert.equal(h.service.snapshot().resolvedCount, 0);
+    h.advance(30_000); h.service.observeAvailability({ storageHealth: health(now + 60_000, false), comfyui: null });
+    assert.equal(h.service.snapshot().resolvedCount, 0, "failure restarts separated recovery measurement");
+    h.advance(30_000); h.service.observeAvailability({ storageHealth: health(now + 90_000, false), comfyui: null });
+    assert.equal(h.service.snapshot().resolvedCount, 1);
+  } finally { await h.service.stop(); }
+});
+
 it("a current ready engine resolves only its own incident with fresh readiness evidence", async () => {
   const h = harness(), key = createHash("sha256").update("comfyui-engine-unavailable:engine-a").digest("hex"); await h.service.open();
   h.service.observe([observation({ key, kind: "comfyui-engine-unavailable" })]);

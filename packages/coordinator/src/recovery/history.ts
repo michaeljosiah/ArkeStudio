@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { emptyRecoveryHistory, RecoveryHistorySchema, RecoveryObservationSchema, observeRecoveryIncidents, pruneRecoveryHistory, recoveryFindingFacts, findingRef, primaryFindings,
   recoveryNoticeDecision, recordRecoveryNotice, FINDING_SEVERITY_RANK,
-  STORAGE_POLICY, storageWarningFloor, RecoveryHistoryQuerySchema, type RecoveryHistoryQuery, type RecoveryHistoryPage,
+  STORAGE_POLICY, storageWarningFloor, recentStorageShortfalls, RecoveryHistoryQuerySchema, type RecoveryHistoryQuery, type RecoveryHistoryPage,
   retainRecoveryActions, type RecoveryActionSummary,
   type ClientState, type DiagnosticsSnapshot, type RecoveryHistory, type RecoveryHistorySnapshot, type RecoveryObservation, type RecoveryNotice, type RecoveryIncident } from "@arke-studio/contracts";
 import type { RecoveryHistoryStore } from "./history-file.js";
@@ -201,6 +201,7 @@ export class RecoveryHistoryService {
       resolved(hash("comfyui-engine-unavailable:none"), "verified-readiness", [], [comfy.engine.instanceId, checkedAt]);
     }
     const health = app.storageHealth, groups = new Map<string, NonNullable<typeof health>["roots"]>();
+    const shortfalls = new Set(recentStorageShortfalls(health, now).map(item => item.volume.volumeId));
     for (const root of health?.roots ?? []) if (root.capacity) {
       const roots = groups.get(root.capacity.volumeId) ?? []; roots.push(root); groups.set(root.capacity.volumeId, roots);
     }
@@ -208,7 +209,7 @@ export class RecoveryHistoryService {
     for (const [volume, roots] of groups) {
       const key = hash(`storage-pressure:${volume}`); present.add(key);
       if (!active.has(key)) { this.capacityClears.delete(key); continue; }
-      const high = roots.every(root => root.state === "measured" && root.capacity!.availableBytes !== null && root.capacity!.measuredAt <= now &&
+      const high = !shortfalls.has(volume) && roots.every(root => root.state === "measured" && root.capacity!.availableBytes !== null && root.capacity!.measuredAt <= now &&
         now - root.capacity!.measuredAt <= STORAGE_POLICY.forecastMaxAgeMs && root.capacity!.availableBytes! > storageWarningFloor(root.capacity!.totalBytes) + STORAGE_POLICY.clearMarginBytes && !root.forecast?.warning);
       if (!high) { this.capacityClears.delete(key); continue; }
       const mapping = hash(JSON.stringify(roots.map(root => [root.rootId, root.capacity!.mappingRevision]).sort())), measuredAt = Math.min(...roots.map(root => root.capacity!.measuredAt));
