@@ -154,7 +154,7 @@ function StudioMessage({ message, appState, close, actions, currentDiagnostic = 
       <p className="fy-studio-note">Observed {new Date(message.diagnostic.evidence.at).toLocaleString()}. Findings describe that observation.</p>
       {message.diagnostic.answer.hypotheses.length > 0 && <><b>Possible causes</b><ul>{message.diagnostic.answer.hypotheses.map((hypothesis, index) => <li key={index}>{hypothesis}</li>)}</ul></>}
     </div>}
-    {currentDiagnostic && message.diagnostic?.evidence.topic === "storage" && <StudioStorageReadings health={appState?.app.storageHealth} connected={connected} />}
+    {currentDiagnostic && message.diagnostic?.evidence.topic === "storage" && <StudioStorageReadings health={appState?.app.storageHealth} connected={connected} jobs={appState?.app.jobs} setup={appState?.app.setup} close={close} />}
     {currentDiagnostic && message.diagnostic && <div className="fy-studio-fact-card fy-studio-remedies">
       <div className="fy-studio-fact-head">Current remedies</div>
       <p className="fy-studio-note">These controls use the current measured status. Reviewing a plan does not approve it.</p>

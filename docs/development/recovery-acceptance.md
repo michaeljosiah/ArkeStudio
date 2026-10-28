@@ -377,5 +377,28 @@ All 25 CI checks passed for `b2ce967fc`. The existing main-bundle load and sandb
 file-page transport smokes also passed. These checks establish installation and package identity;
 they do not establish
 normal reopening of the owner's workspace, device interaction or matched design acceptance.
-Native desktop control was unavailable in this session, so the owner was asked to reopen Arke
-and check the workspace and System panel. The broader acceptance gaps above remain open.
+Native desktop control was unavailable in this session. The owner reopened Arke and confirmed
+that the workspace loaded and services looked correct, but GPU numbers were missing.
+
+The NVIDIA tool returned counters directly but failed through Arke's actual owned runner with
+`Failed to initialize NVML: Unknown Error`. Restoring only the standard Windows `ProgramFiles`
+variable reproduced a successful read; the corrected production probe reported 10% use and
+2,239,758,336 of 10,737,418,240 bytes in 4.46 seconds. The worker's native ownership and cleanup
+were retained. This source-level hardware result still requires an updated installed build.
+The broader acceptance gaps above remain open.
+
+## Current storage work
+
+Studio now distinguishes jobs waiting to submit, completed results awaiting local saving and
+downloads blocked by disk. Counts use current typed owner observations, separate from earlier
+space-check arithmetic. Unknown capacity/destination is labelled storage verification. The
+existing Activity and Downloads controls own the next action; the card adds no retry or cleanup.
+The queue observation stays outside the durable job schema, disappears on completion/cancellation
+and is rebuilt by real checks after restart. Disconnected clients show last-reported counts.
+
+Focused checks pass 26 queue storage, five contract, 15 client and 11 owned-process cases.
+The process regression preserves the standard Windows installation location while withholding
+an unrelated synthetic secret. Component captures with synthetic work cover desktop/light and
+reduced phone/dark, including keyboard access to both actions and the 44-pixel phone button.
+The captures are `.dev/studio-239-check/storage-waits-*.png`; they do not establish native
+disk-failure behavior or matched-master parity. Browser testing resumed after owner approval.

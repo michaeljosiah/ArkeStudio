@@ -104,7 +104,9 @@ export class SetupProcessRunner {
     if (this.closing || this.active) throw new SetupProcessCleanupPending(); signal.throwIfAborted();
     const request = JSON.stringify({ command, args }); if (Buffer.byteLength(request) > 64 * 1024) throw new Error("Setup command exceeds its supported bound.");
     this.cleanupAuthorized = false;
-    const allowed = new Set(["SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PATH", "COMSPEC", "PATHEXT", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "HOME", "TMP", "TEMP", "TMPDIR", "LD_LIBRARY_PATH", "OLLAMA_HOST", "OLLAMA_MODELS"]);
+    // NVIDIA's Windows reader needs ProgramFiles to initialise NVML. Preserve that standard
+    // location without inheriting unrelated credentials or changing native ownership.
+    const allowed = new Set(["SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PROGRAMFILES", "PATH", "COMSPEC", "PATHEXT", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "HOME", "TMP", "TEMP", "TMPDIR", "LD_LIBRARY_PATH", "OLLAMA_HOST", "OLLAMA_MODELS"]);
     const env = Object.fromEntries(Object.entries(process.env).filter((row): row is [string, string] => row[1] !== undefined && allowed.has(row[0].toUpperCase())));
     const child = spawn(process.execPath, ["-e", WORKER], { shell: false, windowsHide: true, detached: process.platform !== "win32",
       stdio: ["pipe", "pipe", "pipe", "pipe"], ...(context ? { cwd: context.cwd } : {}),

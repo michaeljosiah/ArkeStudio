@@ -164,10 +164,13 @@ it("a full world holds a completed remote result despite a roomy app drive, then
     await queue.start(); const job = await queue.enqueue(input);
     await until(() => queue.listJobs().find(value => value.id === job.id)?.error?.includes('waiting for storage') === true, 'measured world storage hold');
     const held = queue.listJobs()[0]!; assert.equal(held.status, 'running'); assert(held.providerJobId); assert(held.resultReceiptId);
+    assert.equal(held.storageWait?.phase, 'result'); assert.equal(held.storageWait?.reason, 'space');
+    assert(!JSON.stringify(await new JobJournal(h.journalPath).readHistory()).includes('storageWait'));
     assert.equal(h.fake.submitCount, 1); assert.equal(h.fetches(), 1);
     const files = new ArtifactResultFiles(h.journalPath); assert.deepEqual([...(await files.read(held))!.artifacts[0]!.data], [...pngBytes()]);
     assert.equal((await readdir(join(h.world, '.staging', job.id))).length, 0, 'Admission precedes world payload writes');
     h.freeWorld(); await until(() => queue.listJobs()[0]?.status === 'succeeded', 'local filing after fresh admission');
+    assert.equal(queue.listJobs()[0]!.storageWait, undefined);
     assert.equal(h.fake.submitCount, 1); assert.equal(h.fetches(), 1); assert.equal(h.ledger.length, 1); assert.equal(h.ledger[0]!.actualMicroUsd, 37);
     assert.deepEqual([...await readFile(join(h.world, 'incoming', 'result.png'))], [...pngBytes()]);
     assert.equal(h.storage.reservations.snapshot().records.length, 0);

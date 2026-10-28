@@ -36,6 +36,8 @@ import {
   type ComfyUiRecoveryDecision,
   type DomainEvent,
   type Job,
+  type JobSummary,
+  type JobStorageWait,
   type JobEngineIdentity,
   type JobTarget,
   type LedgerEntry,
@@ -434,6 +436,7 @@ function landedName(job: Job, artifact: DispatchArtifact, index: number): string
 export class JobQueue {
   private readonly journal: JobStateStore;
   private readonly jobs = new Map<string, Job>();
+  private readonly storageWaits = new Map<string, JobStorageWait>();
   private readonly usageWrites = new Map<string, Promise<boolean>>();
   private readonly acceptedSubmissions = new Map<string, Job>();
   private readonly lanes = new Map<string, Lane>();
@@ -555,8 +558,34 @@ export class JobQueue {
     if (this.disposed) return true; // killed mid-write: the journal decides on recovery
     this.jobs.set(job.id, job);
     if (["succeeded", "failed", "cancelled", "needs-reconciliation"].includes(job.status)) this.artifactLimitHeld.delete(job.id);
-    this.opts.emit({ at: this.clock(), type: "job.updated", job });
+    this.publishJob(job);
     return true;
+  }
+
+  /** Typed presentation stays outside the journal, like progress. Never parse error copy. */
+  private jobObservation(job: Job): JobSummary {
+    const wait = this.storageWaits.get(job.id);
+    if (wait && (wait.phase === "submission" ? job.status === "queued" : job.status === "running" || job.status === "submitting")) return { ...job, storageWait: { ...wait } };
+    this.storageWaits.delete(job.id);
+    return job;
+  }
+
+  private publishJob(job: Job): void {
+    this.opts.emit({ at: this.clock(), type: "job.updated", job: this.jobObservation(job) });
+  }
+
+  private storageWaiting(job: Job, phase: JobStorageWait["phase"], error?: unknown): void {
+    if (this.disposed || this.cancelling.has(job.id)) return;
+    const current = this.jobs.get(job.id);
+    if (!current || current.attempt !== job.attempt || current.resultReceiptId !== job.resultReceiptId) return;
+    const before = this.storageWaits.get(job.id);
+    const typed = error instanceof SubmissionStorageHeld || error instanceof ArtifactStorageHeld;
+    if (typed) {
+      const reason = error.result?.admission?.status === "held" ? "space" : "unavailable";
+      if (before?.phase === phase && before.reason === reason) return;
+      this.storageWaits.set(job.id, { phase, reason, observedAt: this.clock() });
+    } else if (!this.storageWaits.delete(job.id)) return;
+    this.publishJob(current);
   }
 
   /** Cancellation must retain a response whose usage is already being made durable. */
@@ -586,7 +615,7 @@ export class JobQueue {
     if (this.disposed) return;
     const updated = { ...job, step };
     this.jobs.set(job.id, updated);
-    this.opts.emit({ at: this.clock(), type: "job.updated", job: updated });
+    this.publishJob(updated);
   }
 
   private emitQueueStatus(provider: string): void {
@@ -643,8 +672,8 @@ export class JobQueue {
     return order;
   }
 
-  listJobs(): Job[] {
-    return [...this.jobs.values()];
+  listJobs(): JobSummary[] {
+    return [...this.jobs.values()].map(job => this.jobObservation(job));
   }
 
   /** A cancelled row can still have a submit unwinding or a GPU reservation in flight. */
@@ -969,7 +998,7 @@ export class JobQueue {
         if (!this.disposed && current?.status === "queued") {
           const updated = { ...current, waitingFor: reason ?? undefined };
           this.jobs.set(job.id, updated);
-          this.opts.emit({ at: this.clock(), type: "job.updated", job: updated });
+          this.publishJob(updated);
         }
       });
       if (release) this.gpuReservations.set(this.engineRunKey(job), release);
@@ -1387,9 +1416,9 @@ export class JobQueue {
   }
 
   private async checkSubmissionStorage(job: Job): Promise<boolean> {
-    if (this.opts.checkStorageBeforeSubmission?.() === false) return true;
+    if (this.opts.checkStorageBeforeSubmission?.() === false) { this.storageWaiting(job, "submission"); return true; }
     const check = this.opts.artifactSpace?.checkSubmission;
-    if (!check) return true;
+    if (!check) { this.storageWaiting(job, "submission"); return true; }
     const checking = new AbortController(); this.submitAborts.set(job.id, checking);
     try {
       const directories = [{ directory: join(dirname(this.opts.journalPath), "inline-artifacts"), role: "working-files" as const }];
@@ -1408,9 +1437,11 @@ export class JobQueue {
         if (failure) throw failure;
         if (!available) throw new SubmissionStorageHeld();
       } else await check.call(this.opts.artifactSpace, directories, checking.signal);
+      this.storageWaiting(job, "submission");
       return !this.disposed && !checking.signal.aborted && this.stillQueued(job) && !this.lane(job.provider).paused;
     } catch (error) {
       if (this.disposed || checking.signal.aborted || !this.stillQueued(job)) return false;
+      this.storageWaiting(job, "submission", error instanceof SubmissionStorageHeld ? error : new SubmissionStorageHeld());
       const message = error instanceof SubmissionStorageHeld ? error.message : new SubmissionStorageHeld().message;
       const current = this.jobs.get(job.id)!;
       if (current.error !== message) {
@@ -1418,7 +1449,7 @@ export class JobQueue {
         // Reporting a full app disk must not require another journal write. Restart rechecks
         // capacity; this presentation neither authorizes I/O nor changes durable job status.
         const waiting = { ...current, error: message, updatedAt: this.clock() };
-        this.jobs.set(job.id, waiting); this.opts.emit({ at: this.clock(), type: "job.updated", job: waiting });
+        this.jobs.set(job.id, waiting); this.publishJob(waiting);
       }
       if (!this.disposed && this.stillQueued(job)) this.lane(job.provider).notBefore.set(job.id, Date.now() + (this.opts.submissionStorageRetryMs ?? 30_000));
       return false;
@@ -1587,7 +1618,7 @@ export class JobQueue {
     if (current?.status !== "queued") return;
     const waiting: Job = { ...current, waitingFor: "Waiting for free memory" };
     this.jobs.set(job.id, waiting);
-    this.opts.emit({ at: this.clock(), type: "job.updated", job: waiting });
+    this.publishJob(waiting);
   }
 
   private async pollToTerminal(job: Job, client: DispatchClient, key: string, reserved = false): Promise<void> {
@@ -1734,9 +1765,10 @@ export class JobQueue {
     // a missing media result on restart (notably inline-only speech and voice creation).
     if (artifacts.length === 0) return !signal.aborted && this.stillActiveRun(job);
     while (!signal.aborted && !this.disposed && this.stillActiveRun(job)) {
-      try { await this.artifactFiles.save(job, artifacts, signal, admittedSettings); return !signal.aborted && this.stillActiveRun(job); }
+      try { await this.artifactFiles.save(job, artifacts, signal, admittedSettings); this.storageWaiting(job, "result"); return !signal.aborted && this.stillActiveRun(job); }
       catch (error) {
         if (signal.aborted || this.disposed || !this.stillActiveRun(job)) return false;
+        this.storageWaiting(job, "result", error);
         const detail = error instanceof ArtifactStorageHeld || error instanceof ArtifactCheckpointInvalid ? error.message
           : "The provider completed; saving its result is waiting for local storage or folder access. No generation was repeated.";
         const current = this.jobs.get(job.id)!;
@@ -1747,7 +1779,7 @@ export class JobQueue {
             catch { this.artifactAuditHeld.add(job.id); }
           }
           if (this.artifactAuditHeld.has(job.id) && !this.disposed && !this.cancelling.has(job.id)) {
-            this.jobs.set(job.id, held); this.opts.emit({ at: this.clock(), type: "job.updated", job: held });
+            this.jobs.set(job.id, held); this.publishJob(held);
           }
         }
         await this.sleep(this.opts.artifactRetryMs ?? 30_000, signal);
@@ -1800,7 +1832,7 @@ export class JobQueue {
           this.releaseGpu(job);
           const current = this.jobs.get(job.id)!;
           const waiting = { ...current, error: ARTIFACT_RETRIEVAL_HELD_MESSAGE, updatedAt: this.clock() };
-          this.jobs.set(job.id, waiting); this.opts.emit({ at: this.clock(), type: "job.updated", job: waiting });
+          this.jobs.set(job.id, waiting); this.publishJob(waiting);
           return;
         }
         // An interrupted download restarts the fetch (R-12); nothing partial exists yet.
@@ -1921,6 +1953,7 @@ export class JobQueue {
             filed = true;
           } catch (error) {
             if (!ownershipLost) lease?.writeFailed();
+            this.storageWaiting(job, "result", ownershipLost ? undefined : error);
             storageHold = ownershipLost ? null : error instanceof ArtifactStorageHeld || error instanceof ArtifactCheckpointInvalid ? error.message : "The provider completed; local filing is waiting for storage or folder access. Its saved result is retained. No generation was repeated.";
             throw error;
           } finally {
@@ -1932,6 +1965,7 @@ export class JobQueue {
         }).catch(() => false);
         if (!available) {
           if (!this.stillActiveRun(job)) return;
+          if (!storageHold) this.storageWaiting(job, "result");
           const waiting: Job = {
             ...job,
             status: "running",
@@ -1943,6 +1977,7 @@ export class JobQueue {
           if (this.disposed || this.cancelling.has(job.id) || !this.stillActiveRun(job)) return;
           job = waiting; continue;
         }
+        this.storageWaiting(job, "result");
         break;
       }
     }
@@ -2236,6 +2271,7 @@ export class JobQueue {
     await this.journal.append(tombstone);
     if (this.disposed) return; // killed mid-write: the journal decides on recovery
     this.jobs.delete(jobId);
+    this.storageWaits.delete(jobId);
     this.opts.emit({ at: this.clock(), type: "job.deleted", jobId: tombstone.id });
   }
 
@@ -2873,6 +2909,7 @@ export class JobQueue {
     if (this.clientDisposal) return this.clientDisposal;
     this.stopAccepting();
     this.disposed = true;
+    this.storageWaits.clear();
     this.artifactReadAbort.abort();
     for (const abort of this.artifactAborts.values()) abort.abort();
     this.artifactAborts.clear(); this.artifactAuditHeld.clear(); this.artifactLimitHeld.clear();

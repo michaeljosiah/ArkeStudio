@@ -13,6 +13,21 @@ import { until } from "../wait.js";
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 const gone = (pid: number) => { try { process.kill(pid, 0); return false; } catch { return true; } };
 
+it("preserves the standard Windows program directory needed by GPU drivers without inheriting unrelated credentials", { timeout: 90_000 }, async () => {
+  const original = process.env.ProgramFiles, secret = process.env.ARKE_GPU_TEST_SECRET;
+  process.env.ProgramFiles = "C:\\Program Files"; process.env.ARKE_GPU_TEST_SECRET = "must-not-inherit";
+  const runner = new SetupProcessRunner();
+  try {
+    const result = await runner.run(process.execPath, ["-e", "console.log(JSON.stringify({programFiles:process.env.ProgramFiles,secret:process.env.ARKE_GPU_TEST_SECRET??null}))"], new AbortController().signal);
+    assert.equal(result.code, 0); assert.deepEqual(JSON.parse(result.output), { programFiles: "C:\\Program Files", secret: null });
+    assert.equal(runner.running, false);
+  } finally {
+    if (original === undefined) delete process.env.ProgramFiles; else process.env.ProgramFiles = original;
+    if (secret === undefined) delete process.env.ARKE_GPU_TEST_SECRET; else process.env.ARKE_GPU_TEST_SECRET = secret;
+    await runner.dispose();
+  }
+});
+
 it("latches original cleanup authority only after its child ledger flush and resets it before a new worker", { timeout: 90_000 }, async () => {
   const root = await tempDir("setup-cleanup-authority-"), marker = join(root, "started"), gate = deferred(), entered = deferred();
   const ledger = new ChildLedger(join(root, "children.json")), record = ledger.record.bind(ledger);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { join } from "node:path";
-import type { Job, LedgerEntry } from "@arke-studio/contracts";
+import { DomainEventSchema, type JobSummary, type LedgerEntry } from "@arke-studio/contracts";
 import { JobQueue, type EnqueueInput, type JobQueueOptions } from "../../src/queue/dispatcher.js";
 import { JobJournal } from "../../src/queue/journal.js";
 import { AppStorageService } from "../../src/storage/service.js";
@@ -24,9 +24,9 @@ async function fixture(custom?: ArtifactWriteSpace, prepareReferences?: JobQueue
     },
   } });
   const client = new FakeProvider({}); client.inlineArtifacts = [{ name: "image.png", contentType: "image/png", data: pngBytes() }];
-  const events: Job[] = [], ledger: LedgerEntry[] = [], space = custom ?? new JobArtifactStorage(storage);
+  const events: JobSummary[] = [], ledger: LedgerEntry[] = [], space = custom ?? new JobArtifactStorage(storage);
   const create = () => new JobQueue({ journalPath: join(root, "jobs.jsonl"), clients: { fal: client }, getKey: async () => "synthetic",
-    emit(event) { if (event.type === "job.updated") events.push(event.job); }, artifactSpace: space, prepareReferences, checkStorageBeforeSubmission,
+    emit(event) { DomainEventSchema.parse(event); if (event.type === "job.updated") events.push(event.job); }, artifactSpace: space, prepareReferences, checkStorageBeforeSubmission,
     submissionStorageRetryMs: 100, artifactRetryMs: 15, baseIntervalMs: 1, pollIntervalMs: 1,
     landInWorld: async (id, work) => { await work(id === WORLD ? world : other); return true; },
     ledger: { async readJobIds() { return new Set(ledger.map(row => row.jobId)); }, async has(id) { return ledger.some(row => row.jobId === id); }, async append(row) { ledger.push(row); } },
@@ -56,9 +56,12 @@ it("an operator can release a preflight hold without bypassing result filing or 
   try {
     await queue.start(); const job = await queue.enqueue(input);
     await until(() => held(queue, job.id), "default preflight hold"); assert.equal(h.client.submitCount, 0);
+    assert.equal(queue.listJobs()[0]!.storageWait?.phase, "submission");
+    assert.equal(queue.listJobs()[0]!.storageWait?.reason, "unavailable");
     check = false; await until(() => h.client.submitCount === 1 && filingChecks > 0, "explicit preference releases submission only");
     assert.notEqual(queue.listJobs()[0]!.status, "succeeded"); allowWrites = true;
     await until(() => queue.listJobs()[0]!.status === "succeeded", "original result files after space returns");
+    assert.equal(queue.listJobs()[0]!.storageWait, undefined);
     assert.equal(h.client.submitCount, 1); assert.equal(h.ledger.length, 1);
   } finally { await queue.dispose(); await queue.waitForIdle(); await h.storage.stop(); }
 });
@@ -67,17 +70,24 @@ it("holds a paid request on its full world volume, survives restart unsent, then
   try {
     await first.start(); const job = await first.enqueue(input);
     await until(() => held(first, job.id), "unsent destination hold");
+    assert.equal(first.listJobs()[0]!.storageWait?.phase, "submission");
+    assert.equal(first.listJobs()[0]!.storageWait?.reason, "space");
+    assert.equal(h.events.at(-1)!.storageWait?.reason, "space");
     assert.equal(h.client.submitCount, 0); assert.equal(first.listJobs()[0]!.attempt, 0); assert.equal(h.ledger.length, 0);
     const history = await new JobJournal(join(h.root, "jobs.jsonl")).readHistory();
     assert.equal(history.length, 1); assert.equal(history[0]!.error, null, "Headroom observation needs no further write to the full disk");
+    assert(!JSON.stringify(history).includes("storageWait"), "Current waits are not durable retry authority");
     assert.equal(h.storage.reservations.snapshot().records.length, 0, "A preflight does not acquire a fake output reservation");
     await first.dispose(); await first.waitForIdle();
+    assert.equal(first.listJobs()[0]!.storageWait, undefined, "A stopped host has no live observation");
     next = h.create(); await next.start(); await until(() => held(next!, job.id), "same unsent identity restored");
+    assert.equal(next.listJobs()[0]!.storageWait?.phase, "submission", "Restart reacquires the observation from an actual check");
     assert.equal(h.client.submitCount, 0); h.roomy();
     await until(() => next!.listJobs()[0]?.status === "succeeded", "fresh capacity releases unsent work", 20_000);
     assert.equal(h.client.submitCount, 1); assert.equal(next.listJobs()[0]!.attempt, 1);
     assert.equal(next.listJobs()[0]!.idempotencyKey, job.idempotencyKey); assert.equal(h.ledger.length, 1);
     assert(h.events.filter(row => row.status === "submitting").every(row => row.error === null));
+    assert(h.events.filter(row => row.status === "submitting" || row.status === "succeeded").every(row => row.storageWait === undefined));
   } finally { await first.dispose(); await next?.dispose(); await first.waitForIdle(); await next?.waitForIdle(); await h.storage.stop(); }
 });
 
@@ -103,6 +113,7 @@ it("a storage-held job yields its provider lane to another destination and cance
     assert.equal(h.client.submitCount, 1); await queue.cancel(blocked.id); h.roomy();
     await queue.waitForIdle();
     assert.equal(queue.listJobs().find(row => row.id === blocked.id)?.status, "cancelled");
+    assert.equal(queue.listJobs().find(row => row.id === blocked.id)?.storageWait, undefined);
     assert.equal(h.client.submitCount, 1); assert.equal(h.client.cancelCount, 0, "The held request never reached the provider");
   } finally { await queue.dispose(); await queue.waitForIdle(); await h.storage.stop(); }
 });

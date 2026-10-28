@@ -10,6 +10,15 @@ it does not prove that an operation is still waiting or authorize a retry. Clien
 their package; coordinator tests need native temporary-file access. Browser component evidence
 uses synthetic capacity and must not be described as an installed/native or matched-master test.
 
+Current storage waits additionally use contracts `test/storage-work.test.ts` and
+`job-summary.test.ts`, coordinator `test/queue/submission-storage.test.ts` and
+`queue/result-storage.test.ts`, and the Studio storage view test above. Check that cancellation,
+successful filing and host restart remove/reacquire observations without persisting them as
+dispatch authority. Unknown capacity must say verification, not a measured shortage.
+Coordinator `test/setup/process.test.ts` checks that the standard Windows `ProgramFiles`
+variable reaches owned workers while unrelated credentials do not. The real NVIDIA probe
+requires separate hardware qualification; a parser fixture cannot establish working counters.
+
 Installation journeys (SPEC-016 R-21–R-28, approved turns 242–244): coordinator
 `test/setup/onboarding.test.ts`, `test/setup/onboarding-wire.test.ts`,
 `test/world/import-world.test.ts`, `test/world/sample-world.test.ts`, and

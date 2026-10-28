@@ -21,6 +21,10 @@ the same snapshot. `storage/service.ts` retains 16 recent checks for 15 minutes 
 their paths or inventing pending work. `storage-diagnostics.ts` groups fresh shortfalls by volume;
 client `components/studio-storage.tsx` renders their per-drive arithmetic separately from current
 capacity. These facts never grant a retry or release a reservation (SPEC-062 R-13/R-21/R-23).
+Current queue waits use the separate wire-only `JobSummary.storageWait`, published by the
+existing dispatcher and cleared on settlement/cancellation. Contracts `storage-work.ts` counts
+those observations and setup's typed disk blocks for Studio's Activity/Downloads handoffs.
+No job journal or error-text parser is added; a historical check is not a pending operation.
 Tests: contracts `test/storage-{health,diagnostics}.test.ts`, coordinator `test/storage/`, client
 `test/storage-health.test.ts`; requirements SPEC-032 R-17/R-33, SPEC-062 R-1–R-14/R-24.
 `storage/setup-files.ts` now connects setup's direct HTTP file owner to the shared registry on

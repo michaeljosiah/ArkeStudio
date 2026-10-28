@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
-import { deriveStorageFindings, storageByteLabel as bytes, systemStorageGroups, type StorageHealthSnapshot, type StorageRootHealth, type StorageSpaceCheck } from "@arke-studio/contracts";
+import { deriveStorageFindings, storageByteLabel as bytes, storageWaitingWork, systemStorageGroups, type JobSummary, type SetupStatus, type StorageHealthSnapshot, type StorageRootHealth, type StorageSpaceCheck } from "@arke-studio/contracts";
+import { Link } from "react-router";
 import { TriangleAlert } from "./icons.js";
+import { openActivityPanel } from "../lib/activity-panel.js";
 
 const labels: Record<StorageRootHealth["role"], string> = { "local-ai": "Local models", "generated-media": "World media", "working-files": "Working files", downloads: "Downloads", exports: "Exports" };
 const purposes: Record<StorageSpaceCheck["purpose"], string> = { setup: "Installation", job: "Generation", import: "Import", export: "Export", publication: "Publication", scratch: "Local processing", preview: "Preview", submission: "Generation preparation" };
 
 /** Live host readings stay separate from the saved diagnosis and never grant write/repair authority. */
-export function StudioStorageReadings({ health, connected }: { health?: StorageHealthSnapshot | null; connected: boolean }) {
+interface StudioStorageProps { health?: StorageHealthSnapshot | null; connected: boolean; jobs?: readonly JobSummary[]; setup?: SetupStatus | null; close?: () => void }
+
+export function StudioStorageReadings({ health, connected, jobs, setup, close }: StudioStorageProps) {
   const [, tick] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => tick(value => value + 1), 1_000);
@@ -14,15 +18,31 @@ export function StudioStorageReadings({ health, connected }: { health?: StorageH
     document.addEventListener("visibilitychange", wake);
     return () => { clearInterval(timer); document.removeEventListener("visibilitychange", wake); };
   }, []);
-  return <StudioStorageReadingsView health={health} connected={connected} now={Date.now()} />;
+  return <StudioStorageReadingsView health={health} connected={connected} jobs={jobs} setup={setup} close={close} now={Date.now()} />;
 }
 
-export function StudioStorageReadingsView({ health, connected, now }: { health?: StorageHealthSnapshot | null; connected: boolean; now: number }) {
+export function StudioStorageReadingsView({ health, connected, now, jobs = [], setup, close }: StudioStorageProps & { now: number }) {
   const groups = systemStorageGroups(health?.roots ?? [], now);
+  const waiting = storageWaitingWork(jobs, setup, now);
   const checks = (health?.spaceChecks ?? []).filter(check => check.checkedAt <= now && now - check.checkedAt <= 15 * 60_000);
   const warnings = connected ? deriveStorageFindings(health ? { ...health, spaceChecks: [] } : health, new Date(now).toISOString()).filter(finding => finding.kind === "storage-pressure") : [];
   return <section aria-label="Latest storage readings">
     {!connected && <p className="fy-studio-note">Connection lost. These are the host’s last reported readings.</p>}
+    {waiting.total > 0 && <div className="fy-studio-fact-card">
+      <div className="fy-studio-fact-head"><TriangleAlert size={16} />{connected ? "Work awaiting storage" : "Last reported storage waits"}</div>
+      <dl className="fy-studio-facts">
+        {waiting.unsubmitted > 0 && <><dt>Waiting to submit</dt><dd>{waiting.unsubmitted} {waiting.unsubmitted === 1 ? "job" : "jobs"}</dd></>}
+        {waiting.completed > 0 && <><dt>Completed results awaiting saving</dt><dd>{waiting.completed}</dd></>}
+        {waiting.downloads > 0 && <><dt>Downloads awaiting space</dt><dd>{waiting.downloads}</dd></>}
+      </dl>
+      {waiting.unverified > 0 && <p className="fy-studio-note">{waiting.unverified} {waiting.unverified === 1 ? "job needs" : "jobs need"} storage verification. Available space or the destination could not be confirmed.</p>}
+      {waiting.completed > 0 && <p className="fy-studio-note">Completed generation is waiting for local saving. Arke has not repeated it.</p>}
+      <p className="fy-studio-note">{connected ? "The operation’s own controls show its next step and any pause." : "Current work status is unknown until the connection returns."}</p>
+      <div className="fy-studio-work-actions">
+        {waiting.unsubmitted + waiting.completed > 0 && <button type="button" className="fy-studio-button" onClick={() => { close?.(); openActivityPanel("inbox"); }}>Open Activity</button>}
+        {waiting.downloads > 0 && <Link className="fy-studio-button" to="/settings/downloads" onClick={close}>Open Downloads</Link>}
+      </div>
+    </div>}
     {checks[0] && <StudioSpaceCheck check={checks[0]} now={now} />}
     {checks.length > 1 && <details className="fy-studio-fact-card"><summary>Earlier space checks ({checks.length - 1})</summary>
       {checks.slice(1).map(check => <StudioSpaceCheck key={check.id} check={check} now={now} />)}
