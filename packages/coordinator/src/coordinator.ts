@@ -21286,7 +21286,10 @@ export class Coordinator {
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
     if (!production) return;
     for (const making of comicPageRecord(production, pageId).making) {
-      const bench = making.session === undefined ? null : await this.benchFor(store.worldId, making.session as SessionId);
+      let bench = making.session === undefined ? null : await this.benchFor(store.worldId, making.session as SessionId);
+      // A reservation the app closed on before it was sent stays `allocating` in the log: the Bench's
+      // own recovery fails it, so this admission is let go rather than waited on forever (codex on PR 2222).
+      if (bench !== null && await recoverBenchSession(bench, this.benchJobFacts(store.worldId), () => this.nowIso())) bench = await this.benchFor(store.worldId, making.session as SessionId);
       // The take this admission reserved, by its request: the author may have made others in the
       // same session since, and the last one need not be the page's (codex on PR 2222).
       const take = comicPageTake(bench, making.requestId);
