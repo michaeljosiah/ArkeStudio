@@ -32,13 +32,13 @@ window.mountStory=async(mode='facts',dark=false)=>{
  const state=structuredClone(FIXTURE_STATE), world=state.world;
  const labels=['Imani Okoro','Dev Malik','Lin Wei','Ana Lucía Reyes','Elsie Ward','Tomas Vale','Submitted account'];
  const facts=labels.map((label,i)=>({id:'fact-'+i,label,type:'enum',values:i===6?['Undecided','Full recording']:['Alive','Lost'],default:i===6?'Undecided':'Alive'}));
- const count=mode==='two'?2:mode==='three'?3:mode==='five'?5:1;
- const labelsByCount={1:['Continue to the next scene'],2:['Return with Ana for Elsie','Seal the shaft and leave Elsie'],3:['Power the clinic bulkhead','Power communications','Use Elsie’s route and Tomas’s rigging to isolate both wings'],5:['Stay at the outside release myself','Accept Dev’s offer to hold the release','Accept Tomas’s offer to hold the release','Accept Ana’s offer to hold the release','Return to help the remaining miners']};
- const scenes=[{id:'sc_start',number:1,slug:'start',title:'The launch collar',status:'draft',version:1,shots:[],script:{version:1,blocks:[{id:'blk_start',kind:'action',text:'The crew waits for your decision.'}]}},...Array.from({length:count},(_,i)=>({id:'sc_end-'+i,number:i+2,slug:'end-'+i,title:'Outcome '+(i+1),status:'draft',version:1,shots:[]}))];
+ const count=mode==='two'?2:mode==='three'?3:mode==='four'?4:mode==='five'?5:1;
+ const labelsByCount={1:['Continue to the next scene'],2:['Return with Ana for Elsie','Seal the shaft and leave Elsie'],3:['Power the clinic bulkhead','Power communications','Use Elsie’s route and Tomas’s rigging to isolate both wings'],4:['Stay at the outside release myself','Accept Dev’s offer to hold the release','Accept Ana’s offer to hold the release','Return to help the remaining miners'],5:['Stay at the outside release myself','Accept Dev’s offer to hold the release','Accept Tomas’s offer to hold the release','Accept Ana’s offer to hold the release','Return to help the remaining miners']};
+ const scenes=[{id:'sc_start',number:1,slug:'start',title:'The launch collar',status:'draft',version:1,shots:[],script:{version:1,blocks:[{id:'blk_start',kind:'dialogue',speaker:'qa-imani',text:'The release is outside. Someone has to hold it until the shuttle clears.'}]}},...Array.from({length:count},(_,i)=>({id:'sc_end-'+i,number:i+2,slug:'end-'+i,title:'Outcome '+(i+1),status:'draft',version:1,shots:[]}))];
  scenes[0].shots=[{id:'sh_start',number:1,title:'Decision',description:'Text-only fixture',covers:[{blockId:'blk_start',textDigest:'sha256:'+'0'.repeat(64)}]}];
  const routing={schemaVersion:2,version:1,start:'sc_start',facts,choices:scenes.slice(1).map((scene,i)=>({id:'ch_'+i,from:'sc_start',to:scene.id,label:labelsByCount[count][i]})),endings:scenes.slice(1).map(scene=>({sceneId:scene.id,title:scene.title})),excluded:[],groups:[]};
  const production={...world.productions[0],meta:{...world.productions[0].meta,id:'first-contact',title:'First Contact',kind:'visual-novel',medium:'video'},scenes,sceneFiles:Object.fromEntries(scenes.map(s=>[s.id,s.slug])),routing,takes:[],selections:{}};
- state.world={...world,meta:{...world.meta,name:'The Red Quiet'},productions:[production]};
+ state.world={...world,sheets:[...world.sheets,{...world.sheets[0],id:'qa-imani',name:'Imani Okoro'}],meta:{...world.meta,name:'The Red Quiet'},productions:[production]};
  const bridge={platform:'test',appVersion:'layout-fixture',connect(){},subscribe(){return()=>{}},send(){},coordinatorHttpBase:()=>location.origin};
  __setBridgeForTest(bridge);__setStateForTest(state,{connection:'closed'});
  renderer=createRoot(document.getElementById('root'));flushSync(()=>renderer.render(<MemoryRouter initialEntries={['/w/'+world.meta.worldId+'/p/first-contact/branch-map']}><App/></MemoryRouter>));
@@ -52,7 +52,7 @@ window.storyMetrics=()=>{
  const inspector=document.querySelector('.story-facts-inspector');
  const body=inspector?.querySelector('.bm-insp__body');
  const choices=document.querySelector('.aip-choices');
- return {viewport:[innerWidth,innerHeight],globalChat:document.body.dataset.globalChatEnabled,inspector:inspector&&box(inspector),body:body&&box(body),facts:[...document.querySelectorAll('.story-fact-row')].map(box),chat:[...document.querySelectorAll('.bm-side .fy-global-chat-slot')].map(e=>({display:getComputedStyle(e).display,...box(e)})),choices:choices&&box(choices),options:[...document.querySelectorAll('.aip-choice')].map(e=>({label:e.querySelector('.l').textContent,labelOverflow:e.querySelector('.l').scrollWidth>e.querySelector('.l').clientWidth+1,...box(e)})),overflow:document.documentElement.scrollWidth>innerWidth};
+ return {dialogue:document.querySelector(".aip-box")&&box(document.querySelector(".aip-box")),viewport:[innerWidth,innerHeight],globalChat:document.body.dataset.globalChatEnabled,inspector:inspector&&box(inspector),body:body&&box(body),facts:[...document.querySelectorAll('.story-fact-row')].map(box),chat:[...document.querySelectorAll('.bm-side .fy-global-chat-slot')].map(e=>({display:getComputedStyle(e).display,...box(e)})),choices:choices&&box(choices),options:[...document.querySelectorAll('.aip-choice')].map(e=>({label:e.querySelector('.l').textContent,labelOverflow:e.querySelector('.l').scrollWidth>e.querySelector('.l').clientWidth+1,...box(e)})),overflow:document.documentElement.scrollWidth>innerWidth};
 };
 ` }, bundle: true, platform: "browser", format: "iife", define: { "import.meta.env": "{}" }, external: ["/*.webp", "/*.png"],
   loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js"),
@@ -78,7 +78,7 @@ try{
  for(const dark of [false,true])for(const [viewport,width,height] of [['desktop',1360,850],['window',1200,792],['tablet',820,900],['phone',390,844]]){
   const name=viewport+(dark?'-dark':'');
   await cdp('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
-  for(const mode of ['facts','one','two','three','five']){
+  for(const mode of ['facts','one','two','three','four','five']){
    await js('mountStory('+JSON.stringify(mode)+','+dark+')');const metrics=await js('storyMetrics()');records.push({name,mode,...metrics});
    const {data}=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await writeFile(join(dir,name+'-'+mode+'.png'),Buffer.from(data,'base64'));
    await writeFile(join(dir,'measurements.json'),JSON.stringify(records,null,2));
@@ -86,9 +86,13 @@ try{
     assert.equal(metrics.globalChat,'true');assert.equal(metrics.facts.length,7);
     if(!baseline){assert.ok(metrics.body.height>(width>=1100?250:120),name+': fact list has usable height');assert.ok(metrics.facts[0].y>=metrics.body.y-1&&metrics.facts[0].bottom<=metrics.body.bottom+1,name+': first fact visible');}
    }else{
-    const count={one:1,two:2,three:3,five:5}[mode];assert.equal(metrics.options.length,count,name+': all authored alternatives rendered');
+    const count={one:1,two:2,three:3,four:4,five:5}[mode];assert.equal(metrics.options.length,count,name+': all authored alternatives rendered');
     if(!baseline){assert.ok(metrics.choices.height>40,name+': choices have usable height');assert.ok(metrics.options.every(option=>option.width>0&&option.height>=44),name+': options have usable targets');assert.ok(metrics.options.every(option=>option.x>=metrics.choices.x-1&&option.right<=metrics.choices.right+1&&!option.labelOverflow),name+': complete labels remain within the choice list');
      assert.ok(metrics.options.filter(option=>option.y>=metrics.choices.y-1&&option.bottom<=metrics.choices.bottom+1).length>=Math.min(count,2),name+': multiple alternatives visible together');
+     if(count>2){
+      assert.ok(metrics.options.every((option,i)=>!i||(Math.abs(option.x-metrics.options[0].x)<1&&option.y>=metrics.options[i-1].bottom)),name+': three or more choices form one ordered vertical list');
+      if(width>800){assert.ok(metrics.choices.x>=metrics.dialogue.right+24&&Math.abs(metrics.choices.y-metrics.dialogue.y)<2,name+': dialogue stays left of the vertical choice list');}else{assert.ok(metrics.choices.y>=metrics.dialogue.bottom+8,name+': dialogue stays above the vertical choices on a narrow screen');}
+     }else if(count===2&&width>=820){assert.ok(Math.abs(metrics.options[0].y-metrics.options[1].y)<1&&metrics.options[1].x>=metrics.options[0].right,name+': two choices remain side by side');}
      await js('document.querySelector(".aip-choice:last-child").scrollIntoView({block:"nearest"})');const scrolled=await js('storyMetrics()');assert.ok(scrolled.options.at(-1).y>=scrolled.choices.y-1&&scrolled.options.at(-1).bottom<=scrolled.choices.bottom+1,name+': final alternative reachable');
      if(count>1){await js('document.querySelector(".bm-player").dispatchEvent(new KeyboardEvent("keydown",{key:"2",bubbles:true}))');assert.ok(await js('document.querySelector(".bm-player").textContent.includes("Outcome 2")'),name+': second option takes its own route');}
     }
