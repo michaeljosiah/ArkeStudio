@@ -194,3 +194,15 @@ catalogue entries no longer inflate setup progress. The regression fails before 
 all thirteen launch/lifecycle and remote-label checks pass afterward. Client types and lint pass.
 This is packaged-executable qualification, not an installed upgrade, completed runtime setup or
 matched design-master acceptance. The paused ComfyUI prefix is retained for explicit resumption.
+
+The corrected package reopened the same isolated root with ComfyUI still paused. An explicit
+Resume reused the retained prefix; the active meter showed the actual 1.9-GB archive. Extraction
+and managed-service startup completed, then the mandatory gate advanced automatically to first-run.
+The System dialog reported both managed ComfyUI and Ollama ready. This establishes the packaged
+download/readiness journey, not an installed upgrade, inference/GPU handover or visual acceptance.
+
+Windows CI on `693aa6bbe` passed twenty of twenty-one jobs; the extraction-capacity fixture missed
+its expected hold. The fake volume mapping now canonicalizes destination paths and exercises an
+explicit directory alias. All twenty-five delivery cases pass on Node 22, preserving the capacity
+loss, original-ZIP and settlement assertions. Coordinator types and lint pass. Production admission
+is unchanged; the corrected fixture still requires its own CI.

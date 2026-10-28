@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ZipFile } from "yazl";
 import { it } from "node:test";
@@ -79,14 +79,18 @@ it("publication copies share destination reservations with jobs and preserve exi
 });
 
 it("ZIP extraction admits its pinned input and expanded extent on the actual scratch volume", { timeout: 30_000 }, async () => {
-  const root = await tempDir("arke-publication-extraction-space-"), scratch = join(root, "scratch"); await mkdir(scratch);
+  const root = await tempDir("arke-publication-extraction-space-"), scratch = join(root, "scratch"), target = join(root, "scratch-target");
+  await mkdir(target); await symlink(target, scratch, process.platform === "win32" ? "junction" : "dir");
+  const scratchPhysical = toExtendedLength(await realpath(scratch));
   const source = await packageDirectory(root), archive = join(root, "edition.zip"); await writePublicationZip(source.directory, archive);
   const original = hash(await readFile(archive)), GiB = 1024 ** 3;
   let now = Date.now(), free = GiB + 3 * 1024 ** 2, roots: readonly { rootId: string; path: string }[] = [];
   const storage = new AppStorageService({ appRoot: root, now: () => now, native: {
     setRoots(value) { roots = value; }, async stop() {}, async probe(rootId) {
-      const path = roots.find(row => row.rootId === rootId)!.path;
-      const extracting = path.startsWith(scratch) || path.startsWith(toExtendedLength(scratch));
+      // CI's TEMP may use RUNNER~1 while extraction resolves the long/extended path.
+      // Classify the real destination, including this explicit alias regression.
+      const path = toExtendedLength(await realpath(roots.find(row => row.rootId === rootId)!.path));
+      const extracting = path === scratchPhysical || path.startsWith(scratchPhysical + sep);
       return { state: "measured", source: "host-provided", limitations: [], capacity: { volumeId: extracting ? "scratch-volume" : "source-volume", mappingRevision: rootId,
         measuredAt: ++now, availableBytes: extracting ? free : 100 * GiB, totalBytes: 200 * GiB } };
     },
