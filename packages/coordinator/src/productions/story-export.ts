@@ -87,6 +87,15 @@ async function fileSha256(file: string): Promise<string> {
   return hash.digest("hex");
 }
 
+/**
+ * A staged file as the inventory names it, measured and hashed as a stream: a clip can be larger
+ * than one read can hold, 2 GiB, and the package's other readers stream it too (codex on PR 2205).
+ */
+export async function packagedAsset(file: string, path: string, mediaType: string): Promise<WorldAsset> {
+  const { size } = await stat(toExtendedLength(file));
+  return { path, mediaType, byteLength: size, sha256: await fileSha256(file) };
+}
+
 /** A reachable scene's footage, resolved to the world's own file and measured. */
 interface PlannedClip {
   sceneId: string;
@@ -442,8 +451,7 @@ export async function exportStoryPlayer(store: WorldStore, productionId: string,
     const sources = new Map<string, string>();
     const originals: Record<string, string> = {};
     const add = async (assetId: string, path: string, mediaType: string) => {
-      const bytes = await readFile(toExtendedLength(at(path)));
-      assets[assetId] = { path, mediaType, byteLength: bytes.byteLength, sha256: sha256(bytes) };
+      assets[assetId] = await packagedAsset(at(path), path, mediaType);
       sources.set(path, at(path));
     };
     const fitPicture = async (rel: string, assetId: string, path: (alpha: boolean) => string, edge: number | undefined, what: string): Promise<ArkePlayerExportResult | null> => {

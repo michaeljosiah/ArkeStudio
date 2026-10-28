@@ -131,6 +131,7 @@ export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow 
     const found = answer.packages.find((entry) => entry.kind === "arke-player" && entry.exportId === making);
     if (found?.file === undefined || found.sha256 === undefined || found.story === undefined) return;
     setMaking(null);
+    setKind("arke");
     setResult({ ok: true, file: found.file, bytes: found.bytes ?? 0, sha256: found.sha256, edition: found.exportedAt.slice(0, 10), chapters: 0, pictures: found.pictures ?? 0, book: false, guide: false, story: found.story });
     setMadeAt(new Date(found.exportedAt));
   }), [worldId, making]);
@@ -140,6 +141,8 @@ export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow 
   useEffect(() => subscribeArkePlayerExported((answer) => {
     if (answer.exportId !== making) return;
     setMaking(null);
+    // The answer is Arke Player's: the sheet shows it there, whichever kind was looked at meanwhile (codex on PR 2205).
+    setKind("arke");
     setResult(answer.result);
     setMadeAt(new Date());
     if (answer.result.ok) listing.current = listWebPackages(worldId);
@@ -360,7 +363,7 @@ export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow 
         {made === null && (
           <div className="fy-abv-kinds" role="radiogroup" aria-label="Export">
             {([["web", "Web package", "player.html · any browser"], ["arke", "Arke Player", "phone · offline · remembers choices"]] as const).map(([value, label, line]) => (
-              <button key={value} type="button" role="radio" aria-checked={kind === value} className={cx("fy-abv-kind", kind === value && "on")} onClick={() => setKind(value)} data-testid={`story-export-${value}`}>
+              <button key={value} type="button" role="radio" aria-checked={kind === value} className={cx("fy-abv-kind", kind === value && "on")} disabled={making !== null || web.busy} onClick={() => setKind(value)} data-testid={`story-export-${value}`}>
                 <span className="r" />
                 <div>
                   <b>{label}</b>

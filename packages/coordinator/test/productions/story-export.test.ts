@@ -6,7 +6,7 @@ import { readStory, readWorldManifest, storyRoutes, type ClientMessage, type Dom
 import { Coordinator } from "../../src/coordinator.js";
 import { clipFit, readMp4Info, readMp4Moov } from "../../src/media/mp4-info.js";
 import { listArkePlayerPackages } from "../../src/productions/arke-player-export.js";
-import { exportStoryPlayer, readStoryExport } from "../../src/productions/story-export.js";
+import { exportStoryPlayer, packagedAsset, readStoryExport } from "../../src/productions/story-export.js";
 import { checkWorldPackageZip } from "../../src/productions/world-package.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -67,6 +67,21 @@ describe("an MP4 read from its own boxes (SPEC-058 R-79)", () => {
     assert.equal((await readMp4Info(join(dir, "b.mp4")))?.durationMs, 2500, "a movie box after the frames is found");
     await writeFile(join(dir, "c.webm"), Buffer.from("\x1aE\xdf\xa3 not an mp4", "latin1"));
     assert.equal(await readMp4Info(join(dir, "c.webm")), null);
+  });
+
+  it("inventories a staged clip by streaming it, never by holding it whole (codex on PR 2205)", async () => {
+    const dir = await tempDir("mp4-");
+    // Larger than one stream chunk, so the digest is folded over several reads.
+    const bytes = Buffer.concat([PHONE_CLIP(), Buffer.alloc(300_000, 7)]);
+    await writeFile(join(dir, "c001.mp4"), bytes);
+    const { readFile: readWhole } = await import("node:fs/promises");
+    const { createHash } = await import("node:crypto");
+    assert.deepEqual(await packagedAsset(join(dir, "c001.mp4"), "clips/c001.mp4", "video/mp4"), {
+      path: "clips/c001.mp4",
+      mediaType: "video/mp4",
+      byteLength: bytes.length,
+      sha256: createHash("sha256").update(await readWhole(join(dir, "c001.mp4"))).digest("hex"),
+    });
   });
 
   it("ships a clip as made only when it is H.264 and AAC in MP4, at most 1080 on its short side", () => {

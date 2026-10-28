@@ -137,6 +137,8 @@ describe("Export on an interactive story (turn 245)", () => {
     await press(q('[data-testid="story-export-start"]'));
     assert.deepEqual(lastAsk(m, "export-arke-player")!.options, { book: false, motion: false });
     assert.match(text(q('[data-testid="story-export-making"]')), /Making package/);
+    // The kind stays put while the package is made, so its answer always lands where it was asked (codex on PR 2205).
+    assert.ok(all('[role="radio"].fy-abv-kind').every((el) => (el as HTMLButtonElement).disabled));
   });
 
   it("245b: a visual novel counts its pictures wide and tall, with Size and its voiced lines", async () => {
