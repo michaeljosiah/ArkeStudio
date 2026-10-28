@@ -86,6 +86,18 @@ describe("lettering check (SPEC-064 R-29 – R-33)", () => {
     const result = check(regions, PAGE, "rtl");
     assert.deepEqual(result.status === "compared" ? result.findings : null, []);
   });
+  it("never lets two balloons claim the same words (codex on PR 2220)", () => {
+    const page: ComicPage = { ...PAGE, panels: [{ id: id(20), description: "x", characters: [], lettering: [
+      { id: id(21), kind: "caption", text: "Hello" }, { id: id(22), kind: "caption", text: "Hello" }] }] };
+    const result = check([{ text: "HELLO" }], page);
+    assert.deepEqual(result.status === "compared" ? result.findings.map((finding) => [finding.kind, finding.item]) : null, [["missing", id(22)]]);
+  });
+  it("finds invented words inside a block that also holds a balloon (codex on PR 2220)", () => {
+    const page: ComicPage = { ...PAGE, panels: [{ id: id(20), description: "x", characters: [], lettering: [{ id: id(21), kind: "caption", text: "Hello" }] }] };
+    const result = check([{ text: "HELLO BUY SOAP" }], page);
+    assert.deepEqual(result.status === "compared" ? result.findings.map((finding) => [finding.kind, finding.found]) : null, [["extra", "buy soap"]]);
+    assert.equal(takePasses(result), false);
+  });
   it("never passes a check that did not run", () => {
     assert.equal(takePasses(undefined), false);
     assert.equal(takePasses({ status: "unavailable", reason: "no-reader", at }), false);

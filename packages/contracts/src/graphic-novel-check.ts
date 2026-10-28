@@ -50,32 +50,36 @@ export function letteringSimilarity(a: string, b: string): number {
   return 1 - previous[b.length]! / Math.max(a.length, b.length);
 }
 
-interface Candidate { text: string; normalized: string; box?: PageBox; regions: number[] }
+/** Words of one region, `from` inclusive to `to` exclusive. */
+interface Span { region: number; from: number; to: number }
+interface Candidate { text: string; normalized: string; box?: PageBox; spans: Span[] }
 
 /**
  * Readers split one balloon over lines and merge two neighbours into one block. A candidate is a
  * region, two adjacent regions joined, or a run of words inside a region about the item's length,
- * so neither habit reads as a missing or extra balloon.
+ * so neither habit reads as a missing or extra balloon. Each names the words it would use, so two
+ * items never claim the same words and what nothing claims is still checked (codex on PR 2220).
  */
-function candidatesFor(item: string, regions: readonly PageTextRegion[]): Candidate[] {
+function candidatesFor(item: string, regions: readonly PageTextRegion[], tokens: readonly string[][]): Candidate[] {
   const out: Candidate[] = [];
   const words = item.split(" ").length;
   regions.forEach((region, index) => {
-    const normalized = normalizeLettering(region.text);
-    out.push({ text: region.text, normalized, ...(region.box ? { box: region.box } : {}), regions: [index] });
-    const tokens = normalized.split(" ");
-    if (tokens.length > words) {
+    const own = tokens[index]!;
+    const box = region.box ? { box: region.box } : {};
+    out.push({ text: region.text, normalized: own.join(" "), ...box, spans: [{ region: index, from: 0, to: own.length }] });
+    if (own.length > words) {
       for (let size = Math.max(1, words - 1); size <= words + 1; size++) {
-        for (let start = 0; start + size <= tokens.length; start++) {
-          const run = tokens.slice(start, start + size).join(" ");
-          out.push({ text: run, normalized: run, ...(region.box ? { box: region.box } : {}), regions: [index] });
+        for (let from = 0; from + size <= own.length; from++) {
+          const run = own.slice(from, from + size).join(" ");
+          out.push({ text: run, normalized: run, ...box, spans: [{ region: index, from, to: from + size }] });
         }
       }
     }
     const next = regions[index + 1];
     if (next) {
-      const box = region.box && next.box ? union(region.box, next.box) : undefined;
-      out.push({ text: `${region.text} ${next.text}`, normalized: normalizeLettering(`${region.text} ${next.text}`), ...(box ? { box } : {}), regions: [index, index + 1] });
+      const joined = region.box && next.box ? { box: union(region.box, next.box) } : {};
+      out.push({ text: `${region.text} ${next.text}`, normalized: [...own, ...tokens[index + 1]!].join(" "), ...joined,
+        spans: [{ region: index, from: 0, to: own.length }, { region: index + 1, from: 0, to: tokens[index + 1]!.length }] });
     }
   });
   return out;
@@ -121,13 +125,16 @@ export function compareLettering(input: LetteringCheckInput): LetteringVerificat
   const { page, reading, regions, thresholds } = input;
   const items = page.panels.flatMap((panel) => panel.lettering);
   const findings: LetteringFinding[] = [];
-  const used = new Set<number>();
+  const tokens = regions.map((region) => normalizeLettering(region.text).split(" ").filter(Boolean));
+  const claimed = tokens.map((own) => own.map(() => false));
+  const free = (candidate: Candidate) => candidate.spans.every((span) => claimed[span.region]!.slice(span.from, span.to).every((taken) => !taken));
   const placed: Array<{ item: string; key: [number, number, number] }> = [];
   let total = 0;
   for (const item of items) {
     const expected = normalizeLettering(item.text);
     let best: { candidate: Candidate; similarity: number } | undefined;
-    for (const candidate of candidatesFor(expected, regions)) {
+    for (const candidate of candidatesFor(expected, regions, tokens)) {
+      if (!free(candidate)) continue;
       const similarity = letteringSimilarity(expected, candidate.normalized);
       if (!best || similarity > best.similarity) best = { candidate, similarity };
     }
@@ -137,7 +144,7 @@ export function compareLettering(input: LetteringCheckInput): LetteringVerificat
       findings.push({ id: `missing:${item.id}`, kind: "missing", item: item.id, expected: item.text });
       continue;
     }
-    best.candidate.regions.forEach((index) => used.add(index));
+    for (const span of best.candidate.spans) for (let i = span.from; i < span.to; i++) claimed[span.region]![i] = true;
     if (similarity < thresholds.exact) {
       findings.push({ id: `altered:${item.id}`, kind: "altered", item: item.id, expected: item.text, found: best.candidate.text,
         similarity: round(similarity), ...(best.candidate.box ? { box: best.candidate.box } : {}) });
@@ -155,13 +162,15 @@ export function compareLettering(input: LetteringCheckInput): LetteringVerificat
       findings.push({ id: `order:${placed[i]!.item}`, kind: "order", item: placed[i]!.item, ...(text ? { expected: text } : {}) });
     }
   }
+  // Words no item claimed are words the script never wrote, wherever the reader put them.
   regions.forEach((region, index) => {
-    if (used.has(index)) return;
-    const normalized = normalizeLettering(region.text);
-    // A stray mark the reader read as one character is noise, not words the model invented.
-    if (normalized.replace(/\s/gu, "").length < 2) return;
-    const near = items.some((item) => letteringSimilarity(normalizeLettering(item.text), normalized) >= thresholds.missing);
-    if (!near) findings.push({ id: `extra:${index}`, kind: "extra", found: region.text, ...(region.box ? { box: region.box } : {}) });
+    const left: string[][] = [[]];
+    tokens[index]!.forEach((token, i) => { if (claimed[index]![i]) left.push([]); else left.at(-1)!.push(token); });
+    left.filter((run) => run.length > 0).forEach((run, n) => {
+      // A stray mark the reader read as one character is noise, not words the model invented.
+      if (run.join("").length < 2) return;
+      findings.push({ id: `extra:${index}${n ? `:${n}` : ""}`, kind: "extra", found: run.length === tokens[index]!.length ? region.text : run.join(" "), ...(region.box ? { box: region.box } : {}) });
+    });
   });
   const extras = findings.filter((finding) => finding.kind === "extra").length;
   const score = items.length || extras ? round(total / Math.max(1, items.length) * (items.length / (items.length + extras))) : 1;

@@ -84,7 +84,8 @@ export const comicPagePath = (productionId: string, pageId: string) => `producti
 
 /** Where a page stands in the book (D-2): its chapter, and its number counted through every chapter. */
 export function findComicPage(production: ProductionBundle, pageId: string): { chapter: string; page: ComicPage; number: number } | null {
-  const order = new Map(production.chapters.map((chapter) => [chapter.id, chapter.order]));
+  // A retired chapter keeps its script on disk; its pages are in no book and count toward no number (codex on PR 2220).
+  const order = new Map(production.chapters.filter((chapter) => !chapter.retired).map((chapter) => [chapter.id, chapter.order]));
   const scripts = [...(production.comicScripts ?? [])].filter((entry) => order.has(entry.chapter))
     .sort((a, b) => order.get(a.chapter)! - order.get(b.chapter)!);
   let number = 0;
