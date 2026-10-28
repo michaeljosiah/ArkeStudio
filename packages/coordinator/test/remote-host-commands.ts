@@ -1,4 +1,4 @@
-import { ClientMessageSchema } from "@arke-studio/contracts";
+import { ClientMessageSchema, NEW_ONBOARDING } from "@arke-studio/contracts";
 /** Valid wire messages, shared by the live-gateway test and the real Chrome pairing check. */
 export function hostOnlyCommandFixtures(sourcePath: string) {
     const worldId = "01ARZ3NDEKTSV4RRFFQ69G5FAV", conversationId = "cv_" + worldId;
@@ -21,6 +21,9 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
     ];
 
     const payloads: Record<string, Record<string, unknown>> = {
+      "check-onboarding": {},
+      "save-onboarding": { plan: { ...NEW_ONBOARDING, persona: "lightweight" }, action: "save" },
+      "import-world": { requestId: worldId },
       "studio-assistant": { requestId: "12345678-1234-4234-8234-123456789abc", command: { action: "watch" } },
       "account-open": { page: "account" }, "set-background-notifications": { preference: "off" },
       "recovery-set-mode": { requestId: worldId, mode: "suggest-only" },

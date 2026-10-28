@@ -8,7 +8,7 @@
 .ij .fy-launch__column{padding:38px 40px 28px;flex:1;min-width:0;overflow:auto;align-items:center}
 .ij .fy-launch__mark{flex:none;align-self:center;width:auto;padding-bottom:14px;margin-bottom:30px}.ij .fy-launch__wordmark{font-size:var(--text-2xl)}
 .ij-content{width:100%;max-width:560px;margin:0 auto}.ij-step{font:var(--type-meta);letter-spacing:var(--tracking-label);color:var(--launch-ink-dim);margin-bottom:12px}
-.ij h2{font:var(--type-title);font-weight:500;line-height:1.25;margin:0 0 10px}.ij h3{font:var(--type-label);font-weight:600;margin:0 0 6px}.ij h2:focus{outline:none}
+.ij h2{font:var(--type-h2);margin:0 0 10px}.ij h3{font:var(--type-label);font-weight:600;margin:0 0 6px}.ij h2:focus{outline:none}
 .ij-lead{font:var(--type-body);line-height:1.6;color:var(--launch-ink-dim);margin-bottom:22px!important}
 .ij-note{font:var(--type-label);line-height:1.65;color:var(--launch-ink-dim);margin:15px 0!important}
 .ij-choices{display:flex;flex-direction:column;gap:12px;margin:22px 0}.ij-choice{display:flex;align-items:center;gap:18px;text-align:left;padding:22px 18px;border:1px solid var(--launch-panel-line);border-radius:12px;background:var(--launch-panel-bg);color:var(--launch-ink);cursor:pointer;width:100%;min-height:100px}

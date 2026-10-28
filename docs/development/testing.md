@@ -20,8 +20,8 @@ access. These fixtures verify no unselected startup downloads, selected-file reu
 queued Skip, active installer ownership and unchanged service health. From `packages/client`, run
 `node --import tsx --test test/launch-lifecycle.test.tsx test/launch-remote.test.tsx
 test/downloads.test.tsx test/engine-panes.test.tsx` for manual entry, background transfers and the
-retained disconnected-core barrier. These are focused behavior checks; the full persona wizard,
-account/model qualification and installed visual acceptance remain separate work.
+retained disconnected-core barrier. Pair these acquisition checks with the onboarding tests above;
+provider account/model qualification and native installed acceptance are distinct checks.
 
 Managed writing recovery (#2194) uses coordinator `test/recovery/harness.test.ts`,
 `test/harness-runtime-change.test.ts` and `test/v2-launch.test.ts`. The native fixture assembles
