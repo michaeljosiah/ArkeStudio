@@ -992,5 +992,6 @@ their originating choice; Test another route opens the reachable-prefix picker t
 Story facts Inspector and one/two/three/four/five-option beat previews in both themes at desktop,
 window, tablet and phone sizes. It measures the desktop dialogue/vertical-choice columns, narrow
 dialogue-first stack, visible alternatives, full labels, scroll access and selection of a
-distinct second route. Its `--baseline` capture supports comparisons against
+distinct second route. Four short clip-stage checks also verify overflow from the first choice
+through the last. Its `--baseline` capture supports comparisons against
 turn 240 without reading or writing an author's world; see the testing guide.

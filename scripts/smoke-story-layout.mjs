@@ -25,6 +25,7 @@ import {MemoryRouter} from 'react-router';
 import {App} from './App';
 import {__setBridgeForTest,__setStateForTest} from './lib/store';
 import {FIXTURE_STATE} from '../test/fixture-state';
+import {mountInteractivePlayer} from '@arke-studio/contracts';
 ${styles}
 let renderer;
 window.mountStory=async(mode='facts',dark=false)=>{
@@ -46,6 +47,15 @@ window.mountStory=async(mode='facts',dark=false)=>{
  const button=[...document.querySelectorAll('button')].find(b=>b.textContent.includes(mode==='facts'?'Story facts ·':'Preview'));
  button.click();await new Promise(r=>setTimeout(r,350));
  if(mode!=='facts'){const player=document.querySelector('.bm-player');for(let i=0;i<2;i++)player.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));await new Promise(r=>setTimeout(r,450));}
+};
+let shortPlayer;
+window.mountShortClip=async(dark)=>{
+ renderer?.unmount();renderer=null;shortPlayer?.destroy();
+ document.documentElement.classList.toggle('dark',dark);
+ document.getElementById('root').innerHTML='<div id="short-clip" style="position:fixed;inset:0"></div>';
+ const choices=Array.from({length:5},(_,i)=>({id:'short-'+i,from:'start',to:'end',label:'Choose route '+(i+1)}));
+ shortPlayer=mountInteractivePlayer(document.getElementById('short-clip'),{title:'Short clip decision',start:'start',scenes:{start:{title:'Launch collar',clips:[]},end:{title:'Outcome',clips:[]}},choices,endings:[{sceneId:'end',title:'Outcome'}],autoplay:true});
+ await new Promise(r=>setTimeout(r,450));
 };
 window.storyMetrics=()=>{
  const box=e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}};
@@ -98,6 +108,26 @@ try{
     }
    }
   }
+ }
+ // A short clip stage must overflow from its start, never hide the first alternatives above it.
+ for(const dark of [false,true])for(const width of [1200,390]){
+  const name='short-clip-'+width+(dark?'-dark':'');
+  await cdp('Emulation.setDeviceMetricsOverride',{width,height:400,deviceScaleFactor:1,mobile:false});
+  await js('mountShortClip('+dark+')');
+  const metrics=await js('storyMetrics()');records.push({name,mode:'five-clips',...metrics});
+  if(!baseline){
+   assert.equal(metrics.options.length,5);
+   assert.ok(metrics.options.at(-1).bottom>metrics.choices.bottom,name+': fixture actually overflows');
+   assert.ok(metrics.options[0].y>=metrics.choices.y-1&&metrics.options[0].bottom<=metrics.choices.bottom+1,name+': first alternative fully reachable at scroll start');
+   await js('document.querySelector(".aip-choice:last-child").scrollIntoView({block:"nearest"})');
+   const last=await js('storyMetrics()');
+   assert.ok(last.options.at(-1).y>=last.choices.y-1&&last.options.at(-1).bottom<=last.choices.bottom+1,name+': last alternative fully reachable');
+   await js('document.querySelector(".aip-choice:first-child").scrollIntoView({block:"nearest"})');
+   const first=await js('storyMetrics()');
+   assert.ok(first.options[0].y>=first.choices.y-1&&first.options[0].bottom<=first.choices.bottom+1,name+': scrolling back restores first alternative');
+  }
+  const {data}=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await writeFile(join(dir,name+'.png'),Buffer.from(data,'base64'));
+  await writeFile(join(dir,'measurements.json'),JSON.stringify(records,null,2));
  }
  console.log(JSON.stringify({output:dir,cases:records.length,baseline:baseline??null}));
 }finally{socket?.close();child.kill();await new Promise(resolve=>server.close(resolve));}
