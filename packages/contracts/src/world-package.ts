@@ -400,7 +400,9 @@ export const STORY_LIMITS = {
   choices: 4000,
   presentation: 20_000,
   endings: 1000,
-  variants: 64,
+  // Routing sets no bound on an ending's variants, and R-80 refuses only what routing cannot hold.
+  // First Contact's ending has 104, so 64 refused the story the format was made for.
+  variants: 1000,
 } as const;
 
 const StorySceneIdSchema = z.string().max(128).regex(/^sc_[a-z0-9-]+$/);

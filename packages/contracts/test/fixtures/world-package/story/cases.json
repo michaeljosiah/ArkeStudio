@@ -11,7 +11,7 @@
     "choices": 4000,
     "presentation": 20000,
     "endings": 1000,
-    "variants": 64,
+    "variants": 1000,
     "text": {
       "sceneId": 128,
       "choiceId": 128,
