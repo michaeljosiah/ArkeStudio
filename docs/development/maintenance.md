@@ -27,6 +27,10 @@ Managed Ollama's private provider additionally pins every runtime file in coordi
 digest and streams its fixed members to compare the committed pin. Add `--write` only when
 intentionally updating that pin. It neither downloads, extracts nor executes runtime code.
 Repeat actual managed readiness/content/cleanup and private bridge checks after changing it.
+`scripts/qualify-studio-local.mjs` repeats live local-model, private-profile and restart checks
+using these pins and independently copied existing weights in an owned test directory. It
+downloads nothing, refuses unowned existing directories and leaves test data for review. See
+the exact invocation and evidence limits in [testing](testing.md#writing-engines-and-model-control).
 OpenCode remains the bundled default while the
 Arke replacement in [issue #1698](https://github.com/michaeljosiah/ArkeStudio/issues/1698) is deferred.
 

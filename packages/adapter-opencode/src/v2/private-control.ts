@@ -74,8 +74,11 @@ const TRANSIENT_RESPONSE_CONTROL = String.raw`
           if (!row.choices.length) { if (!finished || !row.usage) throw 0; continue; }
           const choice = row.choices[0], delta = choice?.delta;
           if (finished || choice.index !== 0 || !delta || typeof delta !== "object" || Array.isArray(delta) ||
-            Object.keys(delta).some(key => key !== "role" && key !== "content") ||
+            Object.keys(delta).some(key => key !== "role" && key !== "content" && key !== "reasoning") ||
+            delta.reasoning !== undefined && typeof delta.reasoning !== "string" ||
             delta.role !== undefined && delta.role !== "assistant" || delta.content !== undefined && delta.content !== null && typeof delta.content !== "string") throw 0;
+          // Pinned Ollama emits bounded reasoning deltas. Reconstruct only answer text;
+          // reasoning never reaches the SDK, transcript or a native retry decision.
           text += delta.content ?? "";
           if (choice.finish_reason !== undefined && choice.finish_reason !== null) { if (choice.finish_reason !== "stop") throw 0; finished = true; }
         }

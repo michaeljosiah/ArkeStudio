@@ -2060,6 +2060,30 @@ after cancelled qualification. The factory refuses a healthy personal endpoint. 
 prepare production wiring but do not enable default activation or replace live-model,
 persistence/cross-restart/platform and matched visual acceptance.
 
+Real local-model qualification is an explicit maintainer operation, outside CI:
+
+```powershell
+node --import tsx scripts/qualify-studio-local.mjs --root "<new-test-directory>" --ollama-archive "<pinned-x64-zip>" --model-store "<existing-Ollama-model-store>" --model "<installed-model-name>" --opencode "<pinned-bundled-executable>"
+```
+
+Use Windows x64 and a separately owned test directory. The command verifies runtime archive,
+all fixed runtime files and writer bytes before execution; copies and hashes at most sixteen
+declared model blobs (under 12 GiB total); and requires model size plus 4 GiB runtime allowance
+and 5 GiB headroom. It downloads nothing and never points an inference service at the personal
+model store. Existing directories need its exact qualification marker; copied files must match
+their original manifest. Reusing a qualified directory may omit the archive argument. Retained
+test files are left for review, with no automatic model or directory deletion.
+
+The shared factory runs one main-assistant turn, then a specialist turn after both native owners
+restart against the same profile. It checks no startup inference replay, one explicit dispatch
+per turn, bounded complete profile/home/log marker scans, a positive scanner control and native
+cleanup, then rehashes the original model blobs. Output reports phases/counts without prompts,
+answers or credentials. Only a complete successful run qualifies this procedure; a healthy
+endpoint, model load or failed partial run does not. This is finite owned-desktop evidence,
+not a general OS sandbox or secure-erasure claim. The private parser discards Ollama's bounded
+string `reasoning` deltas while reconstructing answer text and usage; malformed/unknown fields,
+tools, truncation, bad finish/usage and existing byte/frame limits still refuse.
+
 ## System status (master turn 241; System 240 review)
 
 Run contracts/coordinator/desktop `system-resources.test.ts`, coordinator

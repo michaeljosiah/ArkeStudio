@@ -1588,6 +1588,12 @@ Actual pinned fixtures now exercise this shared factory for completion and held-
 58 focused checks include original-method retention, personal-endpoint refusal and background
 GPU scheduling. Default hosts do not enable it yet: remaining live-model/persistence/restart/
 platform and visual acceptance still applies. No additional daemon or fallback is introduced.
+The transient response control recognizes the pinned Ollama string `reasoning` delta but
+reconstructs only answer text and bounded usage; reasoning never reaches native SDK history.
+`scripts/qualify-studio-local.mjs` provides explicit pinned-runtime/copied-model live and
+restart qualification in a separately owned directory, with complete bounded profile/home/log
+canary scans and a positive detector control. It is a maintainer operation, not a startup model
+download, renderer tool or production activation switch.
 
 History replacement reads wait for an already admitted same-path write that outlived bounded
 shutdown in this process. This prevents a late old rename from overwriting a successor's history;

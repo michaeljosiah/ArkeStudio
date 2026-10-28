@@ -47,6 +47,18 @@ it("keeps the captured model/token policy despite options mutation and leaves mi
   assert(output.includes('"model":"qualified-model"')); assert(!output.includes('"usage"'));
 });
 
+it("strips the pinned Ollama reasoning delta and preserves complete response and total usage", async () => {
+  const candidate = await control();
+  const event = candidate.response(stream(
+    chunk({ role: "assistant", reasoning: "PRIVATE_THOUGHTS_MUST_NOT_REACH_SDK" }),
+    chunk({ reasoning: "MORE_PRIVATE_THOUGHTS", content: "" }),
+    chunk({ content: "PRIVATE_RESPONSE" }), chunk({}, "stop"),
+    { model: "qualified-model", choices: [], usage: { prompt_tokens: 635, completion_tokens: 217 } }, "[DONE]"));
+  await candidate.hooks.get("http.response")!(event);
+  const output = await event.response.text(); assert(output.includes("PRIVATE_RESPONSE")); assert(output.includes('"total_tokens":852'));
+  assert(!output.includes("THOUGHTS")); assert(!output.includes("reasoning")); assert(!output.includes("RAW_PROVIDER_METADATA"));
+});
+
 it("bounds fragmented reads without waiting for an uncooperative cancellation callback", async () => {
   let cancelled = false;
   const candidate = await control(), body = new ReadableStream<Uint8Array>({ pull(controller) { controller.enqueue(new Uint8Array([32])); },
@@ -57,6 +69,9 @@ it("bounds fragmented reads without waiting for an uncooperative cancellation ca
 const invalid = [
   ["truncation", stream(chunk({ content: "PRIVATE_RESPONSE" }), chunk({}, "length"), "[DONE]")],
   ["tools", stream(chunk({ tool_calls: [{ function: { name: "unreviewed" } }] }), chunk({}, "tool_calls"), "[DONE]")],
+  ["nontext reasoning", stream(chunk({ reasoning: { instruction: "PRIVATE_UNTRUSTED_REASONING" } }), chunk({}, "stop"), "[DONE]")],
+  ["unknown reasoning field", stream(chunk({ reasoning_content: "PRIVATE_UNTRUSTED_REASONING" }), chunk({}, "stop"), "[DONE]")],
+  ["reasoning after finish", stream(chunk({}, "stop"), chunk({ reasoning: "PRIVATE_UNTRUSTED_REASONING" }), "[DONE]")],
   ["refusal", stream(chunk({ refusal: "PRIVATE_RESPONSE" }), chunk({}, "stop"), "[DONE]")],
   ["missing finish", stream(chunk({ content: "PRIVATE_RESPONSE" }), "[DONE]")],
   ["missing done", stream(chunk({ content: "PRIVATE_RESPONSE" }), chunk({}, "stop"))],
