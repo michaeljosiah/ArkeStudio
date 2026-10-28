@@ -34,6 +34,14 @@ authority also bounds stalled reads/saves during shutdown, retaining uncertain i
 late write permission. Unsupported host ports retain their existing unknown-capacity policy and
 do not claim shared admission. Runtime-owned pulls, other write owners,
 restart reconciliation, other native ports and broader cleanup remain outstanding.
+Publication capture, directory copies, stored ZIP output and pinned-ZIP/extraction use the finite
+copy implementation in `storage/import-files.ts` with a separate export owner/prefix.
+`publications/capture.ts` and `archive.ts` declare measured payloads and bounded metadata;
+story input copies pass the same port. Desktop `PublicationHost` obtains that port from the
+coordinator, sharing setup/import/result reservations. ZIP output enforces a payload/header bound;
+extraction admits the expanded declared extent after its pinned input closes. Sources and completed
+editions are preserved on holds. Native render peaks and pre-dispatch output planning remain separate.
+
 Known import payloads use `storage/import-files.ts`. Its closed Node-copy owner joins the same
 durable per-volume registry as setup/results, reports written bytes and settles after original
 file/metadata work. `artifacts/filing.ts` admits each new decoded copy after content deduplication,

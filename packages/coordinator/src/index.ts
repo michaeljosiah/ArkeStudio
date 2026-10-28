@@ -9,6 +9,7 @@ export { AppSettingsFile, routingFaults } from "./app-settings.js";
 export { ChangeLog, WriteQueue, type LogRecord } from "./change-log.js";
 export { Coordinator, type CoordinatorOptions } from "./coordinator.js";
 export { createStudioCoordinator, createStudioHost } from "./application/studio-host.js";
+export { ImportStorageHeld, type ImportFileSpace } from "./storage/import-files.js";
 export { StudioServer, type StudioServerApplication, type StudioEventSink } from "./studio-server.js";
 export { createNodeStudioHost, type NodeStudioHostOptions } from "./node-studio-host.js";
 export { createNodeEffectRasterHost, type EffectRasterHost, type EffectAlphaRequest } from "./media/node-effect-renderer.js";

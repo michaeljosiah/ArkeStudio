@@ -3531,6 +3531,9 @@ export class Coordinator {
   private readonly activeMessages = new Set<Promise<void>>();
   private readonly browserMediaImports: BrowserMediaImports;
   private readonly importFileSpace?: ImportFileStorage;
+  private readonly exportFileSpace?: ImportFileStorage;
+  /** Trusted host publication copies share setup/import/result reservations. */
+  get publicationFileSpace(): ImportFileSpace | undefined { return this.exportFileSpace; }
   private cataloguePreviews: CataloguePreviewService | null = null;
   private readonly backgroundWork = new Set<Promise<unknown>>();
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
@@ -3632,9 +3635,10 @@ export class Coordinator {
   private readonly dramaEditions: DramaEditionService;
   constructor(private readonly opts: CoordinatorOptions) {
     this.importFileSpace = opts.storageHealth?.supportsAdmission ? new ImportFileStorage(opts.storageHealth) : undefined;
+    this.exportFileSpace = opts.storageHealth?.supportsAdmission ? new ImportFileStorage(opts.storageHealth, "export") : undefined;
     this.browserMediaImports = new BrowserMediaImports(this.importFileSpace);
     this.dramaEditions = new DramaEditionService(opts.appRoot ? join(opts.appRoot, "drama-editions") : opts.changeLogPath + ".drama-editions", opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {});
-    this.storyPublications = new StoryPublicationService(opts.appRoot ? join(opts.appRoot, "story-publications") : opts.changeLogPath + ".story-publications", { ...(opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {}), ...(opts.mediaProbe ? { probe: opts.mediaProbe } : {}) });
+    this.storyPublications = new StoryPublicationService(opts.appRoot ? join(opts.appRoot, "story-publications") : opts.changeLogPath + ".story-publications", { ...(opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {}), ...(opts.mediaProbe ? { probe: opts.mediaProbe } : {}), fileSpace: this.exportFileSpace });
     this.effectAnalysis = new EditorEffectAnalysisService(opts.effectAudioAnalysisHost, (analysis, scope) => this.emit({
       at: this.nowIso(), type: "editor-effect.analysis", ...scope, analysis,
     }));
@@ -5071,6 +5075,7 @@ export class Coordinator {
       }));
       this.syncStorageObservation();
       this.trackBackground(this.importFileSpace?.reconcileIdleImports() ?? this.opts.storageHealth.start());
+      if (this.exportFileSpace) this.trackBackground(this.exportFileSpace.reconcileIdleImports());
     }
     for (const run of (await this.audiobookActivity.load()).reverse()) this.readModel.apply({ type: "audiobook.activity", at: run.updatedAt, run });
     // The engine must be resolved BEFORE queue recovery, not after (SPEC-021 §2.11). Recovery

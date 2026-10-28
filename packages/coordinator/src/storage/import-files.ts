@@ -4,6 +4,7 @@ import type { AppStorageService } from "./service.js";
 import type { StorageReservationResult } from "./reservations.js";
 import { toExtendedLength } from "../world/paths.js";
 import { resolve } from "node:path";
+import type { StorageRootRole } from "@arke-studio/contracts";
 
 export interface ImportFileLease {
   consumed(bytes: number): Promise<void>;
@@ -12,16 +13,16 @@ export interface ImportFileLease {
   settle(): Promise<void>;
 }
 export interface ImportFileSpace {
-  reserve(directory: string, payloadBytes: number, signal: AbortSignal, role?: "generated-media" | "working-files"): Promise<ImportFileLease>;
+  reserve(directory: string, payloadBytes: number, signal: AbortSignal, role?: StorageRootRole): Promise<ImportFileLease>;
 }
 export interface ImportFileBatch { readonly space: ImportFileSpace; settle(): Promise<void> }
 interface PlannedImportLease extends ImportFileLease { recheck(signal: AbortSignal): Promise<void> }
 export class ImportStorageHeld extends Error {
-  constructor(readonly result?: Extract<StorageReservationResult, { status: "held" }>) {
+  constructor(readonly result?: Extract<StorageReservationResult, { status: "held" }>, operation = "Import") {
     const admission = result?.admission;
     super(admission?.status === "held"
-      ? `Import is waiting for storage: ${admission.availableBytes} bytes available, ${admission.reservedBytes} already committed, ${admission.peakBytes} remaining and ${admission.reserveBytes} reserve.`
-      : "Import is waiting for fresh destination capacity and available storage accounting. No file was discarded.");
+      ? `${operation} is waiting for storage: ${admission.availableBytes} bytes available, ${admission.reservedBytes} already committed, ${admission.peakBytes} remaining and ${admission.reserveBytes} reserve.`
+      : `${operation} is waiting for fresh destination capacity and available storage accounting. No file was discarded.`);
     this.name = "ImportStorageHeld";
   }
 }
@@ -33,17 +34,18 @@ const PREFIX = "artifact_import_", OVERHEAD = 64 * 1024;
 /** Known payload copies, shared with setup/results. No native worker, creative deletion,
  * whole-tree scan or source-file mutation. Small authored records keep normal world durability. */
 export class ImportFileStorage implements ImportFileSpace {
-  constructor(private readonly storage: AppStorageService) {}
+  constructor(private readonly storage: AppStorageService, private readonly purpose: "import" | "export" = "import") {}
+  private get prefix() { return this.purpose === "import" ? PREFIX : "publication_copy_"; }
   /** Under the existing sole app-local control owner, not a multi-host filesystem lock. */
   async reconcileIdleImports(): Promise<void> {
     await this.storage.start();
     for (const record of this.storage.reservations.snapshot().records) {
-      if (record.owner.kind !== "import" || record.owner.id !== record.id ||
-        !/^artifact_import_[a-f0-9-]{36}$/.test(record.id) || active.has(record.id)) continue;
+      if (record.owner.kind !== this.purpose || record.owner.id !== record.id || !record.id.startsWith(this.prefix) ||
+        !/^[a-f0-9-]{36}$/.test(record.id.slice(this.prefix.length)) || active.has(record.id)) continue;
       await this.storage.reservations.settle(record.id, record.owner);
     }
   }
-  reserve(directory: string, payloadBytes: number, signal: AbortSignal, role: "generated-media" | "working-files" = "generated-media"): Promise<ImportFileLease> {
+  reserve(directory: string, payloadBytes: number, signal: AbortSignal, role: StorageRootRole = "generated-media"): Promise<ImportFileLease> {
     return this.reserveKnown(directory, payloadBytes, OVERHEAD, signal, role);
   }
   /** One known batch; child copies spend this budget rather than reserve the same bytes twice. */
@@ -85,10 +87,10 @@ export class ImportFileStorage implements ImportFileSpace {
       return closed;
     } };
   }
-  private async reserveKnown(directory: string, payloadBytes: number, overhead: number, signal: AbortSignal, role: "generated-media" | "working-files"): Promise<PlannedImportLease> {
+  private async reserveKnown(directory: string, payloadBytes: number, overhead: number, signal: AbortSignal, role: StorageRootRole): Promise<PlannedImportLease> {
     signal.throwIfAborted();
     if (!Number.isSafeInteger(payloadBytes) || payloadBytes < 0 || !Number.isSafeInteger(payloadBytes + overhead)) throw new Error("Invalid import storage plan.");
-    const id = PREFIX + randomUUID(), owner = { kind: "import" as const, id };
+    const id = this.prefix + randomUUID(), owner = { kind: this.purpose, id };
     let root: ReturnType<AppStorageService["acquireRoot"]> | undefined, writing: (() => void) | undefined;
     let finished = false, admitted = false, remaining = payloadBytes + overhead;
     active.add(id);
@@ -98,7 +100,7 @@ export class ImportFileStorage implements ImportFileSpace {
       await mkdir(toExtendedLength(directory), { recursive: true });
       root = this.storage.acquireRoot(directory, role, role === "generated-media");
       const result = await this.storage.reservations.reserve({ id, owner, demands: [{ rootId: root.rootId, remainingBytes: remaining }] }, signal);
-      if (result.status !== "reserved") { await this.storage.reservations.settle(id, owner); throw new ImportStorageHeld(result); }
+      if (result.status !== "reserved") { await this.storage.reservations.settle(id, owner); throw new ImportStorageHeld(result, this.purpose === "export" ? "Export" : "Import"); }
       admitted = true; signal.throwIfAborted(); writing = this.storage.beginWrite();
       return {
         consumed: async bytes => {

@@ -160,3 +160,20 @@ observations remain labelled as observations; the repair control uses current ho
 Restore temporary viewport overrides and stop the qualifier's original host when finished.
 Clear the two build environment variables before the normal production build. Retained test
 worlds/private fixture conversations are not automatic cleanup candidates.
+
+## Publication file admission
+
+Publication capture, directory copying, stored ZIP output, pinned archive and expanded extraction
+now use the shared finite-copy registry with a separate export owner. Known payloads and bounded
+metadata are admitted on the actual destination; retained copies are counted by current capacity.
+Story publication's second input copy also joins that registry. Native render peaks, pre-dispatch
+generation planning and other export owners remain open; this is not full storage acceptance.
+
+The final affected capture/delivery/playback/video/story/import pass reports 112 cases: 109 passed,
+three existing skips, zero failures/cancellations. All 21 desktop publication-host cases pass.
+New scenarios preserve sources and previous editions across competing reservations, separate full
+scratch/destination volumes, a capacity loss between pinning and extraction, and a held capture
+before payload writes. The initial extraction fixture failed to classify Windows extended paths;
+its separate-volume mapping was corrected, then the complete affected suite passed. No real volume
+was filled. Final coordinator/desktop types, lint (seven existing warnings), workspace build and
+main-bundle load smoke pass. The new source checkpoint requires its own CI.

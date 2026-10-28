@@ -360,6 +360,7 @@ function registerHostIpc(): void {
     return publicationMedia(createMediaProcessRunner({ ffmpeg: ffmpeg ?? "", ffprobe }));
   };
   publicationHost = new PublicationHost({
+    fileSpace: () => coordinator?.publicationFileSpace,
     root: join(appRoot, "publications"), origins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL),
     providers: () => ({ starting: startupProvider, live: coordinator?.worldProvider ?? null }),
     compiler: signal => media().compiler(signal), probe: (path, type, signal) => media().playback(path, type, signal),
