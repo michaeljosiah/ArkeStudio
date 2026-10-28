@@ -364,7 +364,9 @@ desktop `workspace-location` and client `onboarding`.
 Ming's optional 0.5B and experimental 7.9B readers are declared in contracts `ming.ts` and providers
 `ming-models.ts` / `clients/ming.ts`. Coordinator `local-ai/ming-catalogue.ts` / `ming-assets.json`
 declare the complete setup closure; `ming-speech.ts` verifies it, chunks narration and owns private
-inputs; `ming-worker.py` executes the locked offline source with private dependency overlays.
+inputs; `ming-worker.py` plans the full verified archive set before extraction and executes the
+locked offline source with private dependency overlays. Extracted streams must match their
+declared size; the existing audio byte/duration budget is checked before the WAV writer.
 `voice/service.ts` offers saved library voices with consent and a reference transcript; `voice/library.ts`
 and `local-ai/ming-reference.ts` bind clip bytes and words to queued/cache identity. Dispatcher
 rechecks that identity before submit. Client `clone-voice-dialog.tsx` collects the reference words;

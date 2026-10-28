@@ -294,3 +294,18 @@ nondefault model behavior. Those values have protocol fixture coverage, not live
 Browser component checks at desktop/light and reduced phone/dark verify selection, keyboard
 return to Default, focus and no horizontal overflow. The catalogue is explicitly synthetic;
 these captures do not establish matched master parity or finish the epic's remaining acceptance.
+
+## Ming write planning
+
+The worker now plans the full dependency set before extracting any entry. Extraction verifies
+each stream's declared size. Audio's existing ten-minute and 64-MiB limits are checked before
+the WAV write, with inter-chunk silence included. Standard-library tests cover a bad final
+dependency leaving the first untouched, oversized/truncated streams and generated audio refused
+before its writer is called. Existing cloning/freeform task mapping remains covered.
+
+Native extraction of the already-downloaded, hash-verified dependencies matched the plan exactly:
+35 archives / 139,479,516 bytes for 0.5B and 35 archives / 248,768,939 bytes for 7.9B. Temporary
+extraction had a measured free-space precheck and was removed afterward; it ran no model/GPU.
+These checks establish the known expansion/audio bounds, not complete Ming storage admission.
+Compiler-cache growth, active reservation consumption and original-owner restart reconciliation
+remain outstanding under SPEC-062 R-8/R-9/R-24.

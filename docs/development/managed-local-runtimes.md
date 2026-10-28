@@ -106,6 +106,14 @@ model diagnostics and source passages are not forwarded to the application log. 
 not retain command output in memory; an aggregate 32 MiB limit bounds even a noisy worker while
 the existing rotating log owns its on-disk retention.
 
+The worker verifies and plans every dependency archive before extracting the first file.
+SDK filtering is included in the planned size; each extracted stream must match its declared
+length. The pinned 0.5B and 7.9B dependencies currently expand to 139,479,516 and 248,768,939 bytes
+respectively, verified against actual extraction. Audio, reference bytes and compiler caches are
+additional. The existing ten-minute/64-MiB audio limits are checked before writing the WAV,
+including silence between chunks. This bounds known worker writes; shared storage admission,
+compiler-cache growth and reservation reconciliation still need their native-owner integration.
+
 Desktop, dev and the standalone Node host wire this owner into Coordinator. `generateMingBatch` is a **host-only** API
 accepting a qualified `MingBatchCommand`; paths and commands are never renderer-originated.
 It reserves the same GPU lane before starting the process and drains it after exit. Shutdown
