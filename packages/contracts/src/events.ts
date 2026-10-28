@@ -4,6 +4,7 @@ import { StoryExportBlockerSchema, StoryExportMadeSchema, StoryExportStateSchema
 import { DramaEditionSchema } from "./audio-drama-edition.js";
 import { ChapterReviewSchema } from "./chapter-review.js";
 import { DramaRequestSchema } from "./audio-drama.js";
+import { ComicModeSchema } from "./graphic-novel.js";
 import { StoryEditionSchema, StoryPublishResultSchema } from "./story-publication.js";
 import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { valueSchema } from "./value-schema.js";
@@ -514,6 +515,47 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /** `quote-comic-page` answered: the price, the brief as it is sent, and who rides (SPEC-064 R-19, R-23). */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic.page-quote"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      quote: z.discriminatedUnion("ok", [
+        z.object({
+          ok: z.literal(true),
+          model: z.string().min(1),
+          modelName: z.string().min(1),
+          mode: ComicModeSchema,
+          aspect: z.string().min(1),
+          microUsd: z.number().int().min(0),
+          brief: z.string(),
+          riding: z.array(z.string().min(1)),
+          /** Named on the page with no picture that rides (R-19). */
+          missing: z.array(z.string().min(1)),
+        }).strict(),
+        z.object({ ok: z.literal(false), reason: z.string().min(1) }).strict(),
+      ]),
+    })
+    .strict(),
+  /** A page being made (R-25): making, then made with its take, or failed by name. */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic.page-made"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      state: z.enum(["making", "made", "failed"]),
+      take: UlidSchema.optional(),
+      sessionId: z.string().min(1).optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
   /** `save-comic-script` answered: the new base on success, the reason on refusal (SPEC-064 R-10). */
   z
     .object({

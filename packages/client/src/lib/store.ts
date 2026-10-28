@@ -28,6 +28,7 @@ import {
   type DramaRole,
   type EpisodeScriptBlock,
   type ComicPage,
+  type ComicMode,
   type Delivery,
   type Frame,
   type HarnessEngine,
@@ -1200,6 +1201,15 @@ export function subscribeComicScriptSaveResults(listener: (result: ComicScriptSa
   return () => comicScriptSaveListeners.delete(listener);
 }
 
+/** A page's price and brief (SPEC-064 R-19, R-23), and a page being made (R-25). */
+export type ComicPageQuote = Extract<DomainEvent, { type: "comic.page-quote" }>;
+export type ComicPageMade = Extract<DomainEvent, { type: "comic.page-made" }>;
+const comicPageListeners = new Set<(event: ComicPageQuote | ComicPageMade) => void>();
+export function subscribeComicPages(listener: (event: ComicPageQuote | ComicPageMade) => void): () => void {
+  comicPageListeners.add(listener);
+  return () => comicPageListeners.delete(listener);
+}
+
 /** What became of one episode script save (SPEC-057 R-83): the new base, or a refusal by name. */
 export type EpisodeScriptSaveResult = Extract<DomainEvent, { type: "episode-script.save-result" }>;
 const episodeScriptSaveListeners = new Set<(result: EpisodeScriptSaveResult) => void>();
@@ -1941,6 +1951,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "episode-script.save-result") {
       for (const listener of episodeScriptSaveListeners) listener(event);
+    }
+    if (event.type === "comic.page-quote" || event.type === "comic.page-made") {
+      for (const listener of comicPageListeners) listener(event);
     }
     if (event.type === "comic-script.save-result") {
       for (const listener of comicScriptSaveListeners) listener(event);
@@ -5372,6 +5385,18 @@ export function saveChapter(
 export function saveComicScript(worldId: string, productionId: string, chapter: string, pages: ComicPage[], baseHash: string | null): string | null {
   const requestId = ulid();
   return send({ kind: "save-comic-script", requestId, worldId, productionId, chapter, pages, baseHash }) ? requestId : null;
+}
+
+/** Ask what a page would cost and send; also files a page that landed while the app was closed (SPEC-064 R-25). */
+export function quoteComicPage(worldId: string, productionId: string, page: string, mode?: ComicMode): string | null {
+  const requestId = ulid();
+  return send({ kind: "quote-comic-page", requestId, worldId, productionId, page, ...(mode !== undefined ? { mode } : {}) }) ? requestId : null;
+}
+
+/** Make a page on the price its press showed (SPEC-064 R-27). */
+export function makeComicPage(worldId: string, productionId: string, page: string, confirmedMicroUsd: number, mode?: ComicMode): string | null {
+  const requestId = ulid();
+  return send({ kind: "make-comic-page", requestId, worldId, productionId, page, confirmedMicroUsd, ...(mode !== undefined ? { mode } : {}) }) ? requestId : null;
 }
 
 /** How a graphic novel reads and how its pages are checked (SPEC-064 R-12). */

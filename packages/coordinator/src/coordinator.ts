@@ -31,7 +31,7 @@ import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdap
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
 import { DramaEditionService } from "./publications/drama.js";
 import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
-import { saveComicScript, setComicSettings } from "./productions/graphic-novel.js";
+import { changeComicPage, comicPageRecord, comicPageRequest, saveComicScript, setComicSettings } from "./productions/graphic-novel.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
@@ -108,6 +108,7 @@ import {
   type ClientState,
   type ClonedVoice,
   type DomainEvent,
+  type ComicMode,
   type HarnessAdapter,
   type PermissionRequest,
   type HealthComponent,
@@ -1371,6 +1372,8 @@ export class Coordinator {
   private readonly derivingLooks = new Map<string, AbortController>();
   /** A picture being made for a block (turn 191a): one at a time a block, ended with the world. */
   private readonly makingPictures = new Map<string, AbortController>();
+  /** Comic pages being made in this process, by world/production/page (SPEC-064 R-25). */
+  private readonly makingComicPages = new Map<string, AbortController>();
   /**
    * A book's `Make 290 tall` run (design turn 235a), by world and production: one at a time,
    * stoppable, and its last progress replayed to a window that connects, so a paid run going on
@@ -11020,6 +11023,38 @@ export class Coordinator {
           answer({ disposition: "refused", reason: describeCoordinatorError(err) });
         }
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "quote-comic-page": {
+        // Opening a page asks its price; it also files what landed while the app was closed (R-25).
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const answer = (quote: Extract<DomainEvent, { type: "comic.page-quote" }>["quote"]) =>
+          this.emit({ at: new Date().toISOString(), type: "comic.page-quote", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, quote });
+        try {
+          await this.reconcileComicPage(store, msg.productionId, msg.page);
+          const model = await this.pictureModel(store);
+          if (!model) answer({ ok: false, reason: "no picture model is on" });
+          else {
+            const request = comicPageRequest(store, msg.productionId, msg.page, model, msg.mode);
+            const riding = request.ok ? request.who.filter((entry) => entry.carried && entry.reference !== null) : [];
+            answer(!request.ok ? { ok: false, reason: request.reason } : {
+              ok: true, model: model.id, modelName: model.displayName, mode: request.mode, aspect: request.aspect, microUsd: request.microUsd,
+              brief: request.prompt(riding.map((entry, index) => ({ name: entry.name, kind: entry.kind, token: `ref${index + 1}` }))),
+              riding: riding.map((entry) => entry.name), missing: request.missing,
+            });
+          }
+        } catch (err) {
+          answer({ ok: false, reason: describeCoordinatorError(err) });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "make-comic-page": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await this.makeComicPage(store, { productionId: msg.productionId, page: msg.page, requestId: msg.requestId, confirmedMicroUsd: msg.confirmedMicroUsd, ...(msg.mode !== undefined ? { mode: msg.mode } : {}) },
+          (state, extra = {}) => this.emit({ at: new Date().toISOString(), type: "comic.page-made", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, state, ...extra }));
         return;
       }
       case "set-comic-settings": {
@@ -21241,6 +21276,96 @@ export class Coordinator {
     return { ok: true, record, sessionId: made.sessionId, estimatedMicroUsd: made.estimatedMicroUsd };
   }
 
+  /**
+   * A page that landed with nobody waiting (SPEC-064 R-25): admitted, its session written on the
+   * page record, then the app closed. The Bench kept the job; this files what it made as a take,
+   * once, and drops an entry whose session made nothing. Never asks again — a page is paid once.
+   */
+  private async reconcileComicPage(store: WorldStore, productionId: string, pageId: string): Promise<void> {
+    if (this.makingComicPages.has(`${store.worldId}/${productionId}/${pageId}`)) return;
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+    if (!production) return;
+    for (const making of comicPageRecord(production, pageId).making) {
+      const bench = making.session === undefined ? null : await this.benchFor(store.worldId, making.session as SessionId);
+      const take = bench?.session.takes.at(-1);
+      let landed: { id: string } | null = null;
+      if (bench !== null && take?.media !== undefined) {
+        landed = await this.fileBenchTake(store, bench, take, `comic-keep:${making.requestId}`);
+      } else if (bench !== null && take !== undefined && !["failed", "cancelled", "needs-reconciliation"].includes(take.status)) {
+        continue;
+      } else if (making.session === undefined && Date.now() - Date.parse(making.at) < PICTURE_WAIT_MS) {
+        continue;
+      }
+      const cost = take?.cost?.actualMicroUsd;
+      await changeComicPage(store, productionId, pageId, (record) => ({
+        ...record,
+        making: record.making.filter((entry) => entry.requestId !== making.requestId),
+        takes: landed === null || record.takes.some((existing) => existing.artifact === landed!.id) ? record.takes : [...record.takes, {
+          id: ulid(), artifact: landed.id, hash: making.hash, mode: making.mode, model: making.model, language: making.language,
+          ...(typeof cost === "number" ? { usd: cost / 1_000_000 } : {}), at: this.nowIso(),
+        }],
+      }));
+    }
+  }
+
+  /**
+   * One comic page (SPEC-064 R-22 – R-27): made through the Bench as any picture is, reserved before
+   * a job exists, on the price the press showed. The page record says it is being made before the
+   * session opens, and names the session once it does, so a restart files what lands (R-25). The take
+   * is added beside any accepted one; nothing here accepts it (R-26).
+   */
+  private async makeComicPage(store: WorldStore, input: { productionId: string; page: string; mode?: ComicMode; requestId: string; confirmedMicroUsd: number },
+    emit: (state: "making" | "made" | "failed", extra?: { take?: string; reason?: string; sessionId?: string }) => void): Promise<void> {
+    const key = `${store.worldId}/${input.productionId}/${input.page}`;
+    if (this.makingComicPages.has(key)) return emit("failed", { reason: "making this page already" });
+    const control = new AbortController();
+    this.makingComicPages.set(key, control);
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    try {
+      const model = await this.pictureModel(store);
+      if (!model) return emit("failed", { reason: "no picture model is on" });
+      const request = comicPageRequest(store, input.productionId, input.page, model, input.mode);
+      if (!request.ok) return emit("failed", { reason: request.reason });
+      if (request.microUsd > input.confirmedMicroUsd) return emit("failed", { reason: `the price moved · ${priceLabel(request.microUsd)}` });
+      const language = request.settings.language;
+      await changeComicPage(store, input.productionId, input.page, (record) => ({ ...record,
+        making: [...record.making, { requestId: input.requestId, hash: request.hash, mode: request.mode, model: model.id, language, at: this.nowIso() }] }));
+      emit("making");
+      const made = await this.makeBenchPicture(store, {
+        title: `Page ${request.number}`,
+        prompt: request.prompt([]),
+        brief: request.prompt,
+        model,
+        ...(model.limits.providerSelectedSize !== true ? { aspect: request.aspect } : {}),
+        who: request.who,
+        requestId: input.requestId,
+        ceilingMicroUsd: input.confirmedMicroUsd,
+        signal: control.signal,
+        onSession: async (sessionId) => {
+          await changeComicPage(store, input.productionId, input.page, (record) => ({ ...record,
+            making: record.making.map((entry) => entry.requestId === input.requestId ? { ...entry, session: sessionId } : entry) }));
+        },
+      });
+      const take = made.ok ? ulid() : undefined;
+      await changeComicPage(store, input.productionId, input.page, (record) => ({ ...record,
+        making: record.making.filter((entry) => entry.requestId !== input.requestId),
+        takes: !made.ok ? record.takes : [...record.takes, {
+          id: take!, artifact: made.artifact.id, hash: request.hash, mode: request.mode, model: model.id, language,
+          usd: (made.costMicroUsd ?? made.estimatedMicroUsd) / 1_000_000, at: this.nowIso(),
+        }],
+      }));
+      await this.refreshWorldSnapshot(store.worldId);
+      if (!made.ok) return emit("failed", { reason: made.reason, ...(made.sessionId !== undefined ? { sessionId: made.sessionId } : {}) });
+      emit("made", { take: take!, sessionId: made.sessionId });
+    } catch (err) {
+      emit("failed", { reason: describeCoordinatorError(err) });
+    } finally {
+      store.closingSignal.removeEventListener("abort", onClose);
+      if (this.makingComicPages.get(key) === control) this.makingComicPages.delete(key);
+    }
+  }
+
   private async makeBenchPicture(
     store: WorldStore,
     input: {
@@ -21251,6 +21376,14 @@ export class Coordinator {
        * the picture it recomposes already fixes who is in it.
        */
       recompose?: string;
+      /**
+       * The whole brief, written once the Bench has named the references that ride (SPEC-064
+       * R-23). A comic page is lettered, so the audiobook's closing lines — no added text — must
+       * never wrap it.
+       */
+      brief?: (cited: ReadonlyArray<{ name: string; kind: "character" | "place"; token: string }>) => string;
+      /** Told the session as soon as it is open, so a restart can find what it lands (SPEC-064 R-25). */
+      onSession?: (sessionId: SessionId) => Promise<void>;
     },
   ): Promise<{ ok: true; sessionId: SessionId; artifact: { id: string; file: string }; costMicroUsd: number | null; estimatedMicroUsd: number } | { ok: false; reason: string; sessionId?: SessionId; provider?: true }> {
     if (input.signal?.aborted) return { ok: false, reason: "stopped" };
@@ -21260,6 +21393,9 @@ export class Coordinator {
     const opened = input.saved !== undefined ? await openSavedPicture(store, input.saved, () => this.nowIso(), input.title) : await openBenchSession(store.dir, () => this.nowIso(), { fresh: true, defaultModel: { provider: input.model.provider, model: input.model.id }, initial: { mode, brief: input.prompt, title: input.title } }).catch(() => null);
     if (opened === null) return { ok: false, reason: "the Bench could not open a session" };
     const sessionId = opened.session.id;
+    if (input.onSession !== undefined) {
+      try { await input.onSession(sessionId); } catch (err) { return { ok: false, reason: describeCoordinatorError(err), sessionId }; }
+    }
     const fail = async (reason: string) => {
       this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
       this.transport.broadcastSnapshot();
@@ -21296,7 +21432,7 @@ export class Coordinator {
       else cited.push({ name: entry.name, kind: entry.kind, token: outcome.token });
     }
     if (input.signal?.aborted) return fail("stopped");
-    const brief = input.saved?.brief ?? (input.recompose !== undefined || input.motion !== undefined ? input.prompt : pictureBench(input.prompt, cited, input.mood, input.detailed ?? []));
+    const brief = input.saved?.brief ?? (input.brief !== undefined ? input.brief(cited) : input.recompose !== undefined || input.motion !== undefined ? input.prompt : pictureBench(input.prompt, cited, input.mood, input.detailed ?? []));
     const composed = await this.benchFor(worldId, sessionId);
     if (composed === null) return fail("the Bench session is gone");
     if (input.saved === undefined) await composed.store.append({ type: "composer-set", mode, provider: input.model.provider, model: input.model.id, params, brief }, { at: this.nowIso(), requestId: `pic-brief:${input.requestId}` });
