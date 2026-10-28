@@ -1,6 +1,6 @@
 # Installation journeys · turns 242–244
 
-28 October 2026 · **Revision 4 · Draft for owner review. Not implemented.**
+28 October 2026 · **Revision 5 · Draft for owner review. Not implemented.**
 
 Owner feedback: keep specific voice providers/models out of onboarding; confirm OpenCode is
 included in all paths; offer explicitly selected existing Claude Code and Codex installations.
@@ -11,6 +11,8 @@ choice, including the provider connection handoff and an illustrative checked-mo
 Revision 4 restores the sample as the second empty-state card, simplifies Guided/Lightweight
 language, adds computer-aware Guided choices and detected-assistant selection, and draws the
 actual ChatGPT/GitHub Copilot account picker with future Arke disabled.
+Revision 5 replaces the straight world tiles with the actual first-run card treatment and
+renames the account-entry action to “Set up an AI writing agent”, with a matching picker heading.
 
 The owner requested journeys for people who want setup handled for them, technical users who
 want control, and people who want minimal downloads. These turns build on the **current**
@@ -178,9 +180,19 @@ is available. `WorldPickerScreen` has Create plus existing world cards, and a sa
 empty state. The revised Worlds empty state keeps **two cards**, Create and Explore sample world
 (The Undersong), and adds Import beside Open publication. It avoids an extra onboarding page.
 
-Worlds derives its layout from current `WorldPickerScreen` in `shell.tsx`, `chrome.tsx`,
-`fidelity.css` and `home.css`. The generator copies the current base rules under a new drawing-only
-scope and uses the native icons; current source hashes are recorded. The new empty-state heading
+Worlds derives its header/layout from current `WorldPickerScreen` and the empty-state card pair
+from `FirstRunScreen` in `shell.tsx`. Revision 4 did not exactly match the first-run cards: it used
+straight world-thumbnail tiles. The current first-run pair is 290px wide and at least 380px high,
+with a dashed Create border at −1.5° and a solid sample border at +1.5°. Both straighten and lift
+8px on desktop hover, with the existing drift, ring icons, card radius, type and button styles.
+The regular existing-world grid has its own varying tilts; its Create tile defaults to upright.
+These are different card treatments, not a missing tilt on every card in the app.
+
+The generator now copies the actual card and button rule bodies from `fidelity.css`, `home.css`
+and `ui.css` under a new drawing-only scope, with native Plus/Sparkle icons at the current 22px.
+Narrow card rules preserve the current stacked layout and ±1° tilt; viewport queries become
+container queries for the review frame. Placement remains the proposed Worlds layout, not an
+exact copy of the old first-run page. Current source hashes are recorded. The new empty-state heading
 applies only when there are no worlds; existing worlds retain their greeting, cards and archive
 behaviour. Import uses the supported import flow. Sample availability/download/already-installed
 states follow the existing sample flow; this drawing illustrates a bundled sample. The small
@@ -247,3 +259,13 @@ downloads. Guided/Lightweight summary text contained none of the dependency name
 The two-card Worlds empty state and account picker were visually inspected and captured. The
 559px account preview had no horizontal overflow and its choices exceeded 44px. These are fixture
 checks only; there was no hardware scan, real sign-in, download or native provider qualification.
+
+Revision 5 browser checks: both desktop cards measured 290 × 380px with a 14px radius, native
+22px icons and computed rotations of −1.5°/+1.5°. Dashed/solid borders and existing button styles
+were verified in light and dark. The narrow frame stacks full-width cards at −1°/+1° with no
+horizontal overflow; a drawing layout override found during this check was corrected. The
+desktop hover rule is copied from current source, not a claim of pointer-hover automation.
+Create/sample buttons reach their existing-flow handoff descriptions. The new “Set up an AI
+writing agent” action opens the explicitly labelled provider picker, and Back returns to
+Lightweight. Updated Worlds, Lightweight and account-picker screenshots were saved for review.
+This checks the proposed drawing; no installed application or installer was changed.

@@ -90,7 +90,7 @@ function render(key,focus=true){
  if(key==='244b'){
    const summary=stage.querySelector('[data-world-status]');
    if(entryState==='downloading')summary.textContent='Some tools are still setting up. See progress in Activity; you can write now.';
-   if(entryState==='ready')summary.textContent='Your writing assistant is ready. Add other tools in Settings when you need them.';
+   if(entryState==='ready')summary.textContent='Your AI writing agent is ready. Add other tools in Settings when you need them.';
  }
  document.querySelector('#ij-auth-success').hidden=key!=='242l';
  document.querySelector('#ij-auth-failure').hidden=key!=='242l';

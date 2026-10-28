@@ -125,7 +125,7 @@ export const screens = {
   },
   '242g': {
     id: '242g', title: 'Writing provider · ChatGPT, GitHub Copilot and future Arke', persona: 'Shared account choice',
-    body: () => `${head('WRITING HELP · SIGN IN', 'Which account would you like to use?', 'Connect an account you already have. Arke will check what it can use.')}
+    body: () => `${head('AI WRITING AGENT · SIGN IN', 'Set up your AI writing agent.', 'Choose the account your agent will use to help you plan and write.')}
       <div class="ij-choices">
       <button class="ij-choice" data-provider="chatgpt">${icon('chat')}<span><strong>ChatGPT</strong><span>Sign in with your ChatGPT account.</span><em>Requires an eligible plan · uses your plan’s allowance</em></span>${icon('next')}</button>
       <button class="ij-choice" data-provider="copilot">${icon('cloud')}<span><strong>GitHub Copilot</strong><span>Sign in with your GitHub account.</span><em>Requires Copilot access · uses your plan’s allowance</em></span>${icon('next')}</button>
@@ -135,7 +135,7 @@ export const screens = {
   },
   '242h': {
     id: '242h', title: 'Cloud writing · connected account and selected model checked', persona: 'Shared writing connection',
-    body: () => `${head('WRITING HELP', 'Your writing assistant is ready.', 'Your account is connected and ready for writing.')}
+    body: () => `${head('AI WRITING AGENT', 'Your AI writing agent is ready.', 'Your account is connected and ready for writing.')}
       <div data-connected-account>${row('ChatGPT', 'Signed in. An available writing model has been checked.', 'Ready', 'check')}</div>
       ${block('Ready to write', '<p data-connected-detail>Arke has chosen writing support available with your account. You can change it in Settings.</p>')}
       ${note('No large writing download is needed. Your account’s allowance applies.')}
@@ -184,16 +184,16 @@ export const screens = {
       ${row('Sample world', 'Explore the sample included with this build.')}
       <div class="ij-facts"><div><span>Extra downloads</span><strong>None</strong></div><div><span>Account needed</span><strong>No</strong></div></div>
       ${note('Write and organise without an account or internet connection. Add AI help whenever you want it.')}
-      ${actions(btn('Connect a writing account', '242g'), '<button class="ij-button" data-existing-choice data-go="242k" hidden>Use an existing assistant</button>')}
+      ${actions(btn('Set up an AI writing agent', '242g'), '<button class="ij-button" data-existing-choice data-go="242k" hidden>Use an existing assistant</button>')}
       ${actions(btn('Back', 'choose'), btn('Start using Arke', '244b', true))}`,
   },
   '244b': {
     id: '244b', title: 'All paths · enhance the existing Worlds landing page', persona: 'Shared destination', worlds: true,
     body: () => `<div class="fy-app" data-screen="world-picker"><div class="fy-titlebar"><div class="fy-titlebar__side"></div><button class="fy-titlebar__brand" data-go="244b"><span class="fy-brand__arke">Arke</span><span class="fy-brand__studio">Studio</span></button><div class="fy-titlebar__side fy-titlebar__side--right">${[['chat','Chat'],['cpu','System'],['bell','Activity'],['cog','Settings'],['user','Account']].map(([glyph,label])=>`<button class="fy-iconbtn" aria-label="${label}" data-message="The existing ${label} control opens its usual surface.">${icon(glyph)}</button>`).join('')}</div></div>
-      <main class="fy-content"><div class="fy-home-hero"><div class="fy-hero__eyebrow">WELCOME TO YOUR STUDIO</div><h1 tabindex="-1" class="fy-hero__title fy-hero__title--home">Your first world starts here.</h1><div class="fy-home-count"><p class="fy-hero__lede">Nothing here yet.</p><button class="ij-home-action" data-message="The existing publication-opening flow opens.">${icon('book')}Open publication</button></div>
+      <main class="fy-content fy-firstrun"><div class="fy-home-hero"><div class="fy-hero__eyebrow">WELCOME TO YOUR STUDIO</div><h1 tabindex="-1" class="fy-hero__title fy-hero__title--home">Your first world starts here.</h1><div class="fy-home-count"><p class="fy-hero__lede">Nothing here yet.</p><button class="ij-home-action" data-message="The existing publication-opening flow opens.">${icon('book')}Open publication</button></div>
       <div class="ij-world-actions"><button class="ij-home-action" data-message="Open the supported world-folder import flow, with destination and validation before import.">${icon('upload')}Import a world</button></div></div>
-      <div class="fy-home-cards"><button class="fy-worldcard fy-newworldcard" data-message="The existing New world form opens. No model is required."><span class="fy-worldcard__frame fy-worldcard__empty">${icon('plus')}</span><span class="fy-worldcard__name">Create a world</span></button>
-      <button class="fy-worldcard fy-newworldcard ij-samplecard" data-message="Explore The Undersong through the current sample-world flow. Reuse its existing copy if installed; show size before any required download."><span class="fy-worldcard__frame fy-worldcard__empty"><span class="ij-sample-copy">${icon('book')}<strong>The Undersong</strong><span>A world to explore and make your own.</span></span></span><span class="fy-worldcard__name">Explore sample world</span></button></div>
+      <div class="fy-firstrun__doors"><div class="fy-fan__drift"><div class="fy-createcard" data-message="The existing New world form opens. No model is required."><div class="fy-createcard__ring">${icon('plus')}</div><div class="fy-createcard__title">Your first world</div><div style="margin-top:4px"><button type="button" class="ui-btn ui-btn--primary ui-btn--default">Create a world</button></div></div></div>
+      <div class="fy-fan__drift" style="animation-delay:0.6s"><div class="fy-createcard fy-createcard--filled" data-message="Explore The Undersong through the current sample-world flow. Reuse its existing copy if installed; show size before any required download."><div class="fy-createcard__ring">${icon('sparkle')}</div><div class="fy-createcard__title">Or start from ours</div><div class="fy-createcard__sub">The Undersong: a cast, its canon, and a production part-way through. Yours to take apart.</div><div style="margin-top:4px"><button type="button" class="ui-btn ui-btn--secondary ui-btn--default">Explore sample world</button></div></div></div></div>
       <div class="ij-world-status"><span data-world-status>Write and organise now. Add AI whenever you need it.</span><button class="ij-home-action" data-message="Open Settings to add or change capabilities.">Settings ${icon('next')}</button></div></main></div>`,
   },
   '244c': {
@@ -262,6 +262,6 @@ export const TURNS = [
     ['Quiet states', 'Not set up is normal. Do not repeatedly nag, open dialogs or show fault badges for declined optional features. Actual failed accepted downloads can offer a contextual next step. Model-free diagnostics remain useful without a diagnostic model.'],
     ['Device scope', 'The compact frame is a narrow desktop window. Phones/tablets connecting to an existing host use the existing pairing journey; this design does not download desktop services onto a phone or bypass host approval.'],
     ['Approval boundary', 'Approval of these drawings would authorize the journey direction only. SPEC-016 R-1–R-5 and the later mandatory-runtime policy must be reconciled explicitly before implementation. Existing users keep their configuration; no migration or new startup downloads are performed by this review.'],
-    ['One Worlds landing', 'All setup paths enter /worlds. Retain both first-run doors: Create a world and the sample-world card, alongside Import a world and the existing Open publication action. This folds FirstRunScreen into the Worlds empty state instead of adding another onboarding destination. Existing worlds retain their grid/archive behaviour; an installed sample becomes its existing world card, not a duplicate offer. Sample availability/download size follow the current source.'],
+    ['One Worlds landing', 'All setup paths enter /worlds. Reuse the current FirstRunScreen card treatment: 290px by at least 380px, dashed Create card at -1.5 degrees and solid sample card at +1.5 degrees, native Plus/Sparkle rings, buttons and hover lift. Retain Import a world and the existing Open publication action in the Worlds header. This folds FirstRunScreen into the Worlds empty state instead of adding another onboarding destination. Existing worlds retain their grid/archive behaviour; an installed sample becomes its existing world card, not a duplicate offer. Sample availability/download size follow the current source.'],
   ]},
 ];
