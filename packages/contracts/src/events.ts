@@ -1779,6 +1779,11 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
         /** A story's package (SPEC-058 R-89): its scenes, the routes read back and its endings. */
         story: StoryExportMadeSchema.optional(),
       }).strict()),
+      /**
+       * The exports still being made on this machine, by id: a window that lost an export's answer
+       * in a reconnect, and finds no package, knows from this whether to wait or say it ended.
+       */
+      running: z.array(z.string().min(1)).max(1000).optional(),
     })
     .strict(),
   /** The book as a listener hears it (design turn 186), answered to the window that asked; or none, and why. */

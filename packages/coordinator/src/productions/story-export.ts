@@ -13,9 +13,11 @@ import {
   STORY_MEDIA_TYPE,
   STORY_SHAPES,
   storyDefaults,
+  storyDocumentProgram,
+  storyEnding,
   storyPredicate,
   storyReplay,
-  storyRoutes,
+  storyStepAt,
   WORLD_PACKAGE_FORMAT,
   type ArkePlayerPictureSize,
   type ArkePlayerRelease,
@@ -85,6 +87,73 @@ async function fileSha256(file: string): Promise<string> {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(toExtendedLength(file))) hash.update(chunk as Buffer);
   return hash.digest("hex");
+}
+
+/**
+ * Every route through the compiled document, replayed through the document the package holds (R-81,
+ * R-89): depth first in authored order, as `storyRoutes` walks, each step and each ending through
+ * the contracts evaluator for both documents. A route agrees when every step on it does — the same
+ * scene, open and closed choices, projection and facts — and so does its ending.
+ *
+ * It walks as `storyRoutes` does and to the same kind of bound, but a story with loops can take
+ * minutes to walk, so it keeps no list of routes, gives the event loop back every few hundred steps
+ * and stops on the export's signal: a Cancel, or the world closing, is heard mid-walk rather than
+ * after it (codex on PR 2205).
+ */
+export async function replayEveryRoute(
+  expected: StoryDocument,
+  read: StoryDocument,
+  signal: AbortSignal,
+  limits: { choices: number; routes: number } = ROUTE_LIMITS,
+): Promise<{ routes: number; agree: number; complete: boolean }> {
+  const programs = [storyDocumentProgram(expected), storyDocumentProgram(read)] as const;
+  const endings = new Set(expected.endings.map((ending) => ending.scene));
+  const at = (choices: readonly string[], document: StoryDocument, program: (typeof programs)[number]) => {
+    const step = storyStepAt(document, choices, program);
+    if (!endings.has(step.scene)) return { step, ending: null };
+    const point = storyReplay(program, choices);
+    return { step, ending: storyEnding(program, point.sceneId, point.state) ?? null };
+  };
+  let routes = 0;
+  let agree = 0;
+  let complete = true;
+  let steps = 0;
+  // Last in, first out, children pushed in reverse: the first open choice is walked first.
+  const stack: Array<{ choices: string[]; same: boolean }> = [{ choices: [], same: true }];
+  while (stack.length > 0) {
+    signal.throwIfAborted();
+    if (++steps % 250 === 0) await new Promise<void>((resolve) => setImmediate(resolve));
+    if (routes >= limits.routes) {
+      complete = false;
+      break;
+    }
+    const { choices, same: before } = stack.pop()!;
+    const mine = at(choices, expected, programs[0]);
+    let theirs: ReturnType<typeof at> | null = null;
+    // Once a route has parted, the package's document may not even offer its next choice.
+    if (before) {
+      try {
+        theirs = at(choices, read, programs[1]);
+      } catch {
+        theirs = null;
+      }
+    }
+    const same = before && theirs !== null && JSON.stringify(theirs) === JSON.stringify(mine);
+    if (mine.ending !== null || endings.has(mine.step.scene)) {
+      routes++;
+      if (same) agree++;
+      continue;
+    }
+    if (mine.step.open.length === 0) throw new Error(`Route ${choices.join(" → ") || "start"} stops at ${mine.step.scene}, which is no ending and offers no choice`);
+    if (choices.length >= limits.choices) {
+      complete = false;
+      routes++;
+      if (same) agree++;
+      continue;
+    }
+    for (const id of [...mine.step.open].reverse()) stack.push({ choices: [...choices, id], same });
+  }
+  return { routes, agree, complete };
 }
 
 /**
@@ -596,16 +665,11 @@ export async function exportStoryPlayer(store: WorldStore, productionId: string,
     step("Replaying every route", 94);
     let made: StoryExportMade;
     try {
-      const expected = storyRoutes(document, ROUTE_LIMITS);
-      const replayed = storyRoutes(read, ROUTE_LIMITS);
-      // Route by route, the package's document must play exactly as the compiled one: the same scene,
-      // choices, projection, facts and ending at every step (R-81).
-      const agree = expected.routes.filter((route, index) => replayed.routes[index] !== undefined && JSON.stringify(replayed.routes[index]) === JSON.stringify(route)).length;
-      if (agree !== expected.routes.length || replayed.routes.length !== expected.routes.length || replayed.complete !== expected.complete) {
-        return refused([{ detail: `Read back · ${agree} of ${expected.routes.length} routes · make it again`, row: "story" }]);
-      }
-      made = { kind: plan.kind, scenes: document.scenes.length, routes: agree, complete: expected.complete, endings: document.endings.length };
+      const replayed = await replayEveryRoute(document, read, signal);
+      if (replayed.agree !== replayed.routes) return refused([{ detail: `Read back · ${replayed.agree} of ${replayed.routes} routes · make it again`, row: "story" }]);
+      made = { kind: plan.kind, scenes: document.scenes.length, routes: replayed.routes, complete: replayed.complete, endings: document.endings.length };
     } catch (error) {
+      if (signal.aborted) return cancelled();
       return refused([{ detail: `Read back · ${error instanceof Error ? error.message : String(error)}`, row: "story" }]);
     }
     const pictures = Object.values(assets).filter((asset) => asset.mediaType.startsWith("image/")).length;

@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { readStory, readWorldManifest, storyRoutes, type ClientMessage, type DomainEvent, type Routing } from "@arke-studio/contracts";
+import { compileStoryDocument, readStory, readWorldManifest, storyRoutes, type ClientMessage, type DomainEvent, type Routing } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { clipFit, readMp4Info, readMp4Moov } from "../../src/media/mp4-info.js";
 import { listArkePlayerPackages } from "../../src/productions/arke-player-export.js";
-import { exportStoryPlayer, packagedAsset, readStoryExport } from "../../src/productions/story-export.js";
+import { exportStoryPlayer, packagedAsset, readStoryExport, replayEveryRoute } from "../../src/productions/story-export.js";
 import { checkWorldPackageZip } from "../../src/productions/world-package.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -99,6 +99,50 @@ describe("an MP4 read from its own boxes (SPEC-058 R-79)", () => {
     assert.equal(fit({ durationMs: 1, video: { codec: "avc1", width: 1920, height: 1080 }, audio: { objectType: 0x6b } }), "remux", "MP3 sound in an MP4 is made AAC, the picture copied");
     assert.equal(fit({ durationMs: 1, video: { codec: "avc1", width: 1920, height: 1080 }, brand: "qt  " }), "remux", "a QuickTime movie is copied into an MP4");
     assert.equal(clipFit(null), "encode");
+  });
+});
+
+describe("the read-back's route replay (SPEC-058 R-81, R-89)", () => {
+  // A loop a listener may take as often as they like: the routes never all end.
+  const looping = () => {
+    const compiled = compileStoryDocument({
+      routing: { start: "sc_quay", choices: [{ id: "ch_wait", from: "sc_quay", to: "sc_tide", label: "Wait" }, { id: "ch_again", from: "sc_tide", to: "sc_quay", label: "Again" }, { id: "ch_go", from: "sc_tide", to: "sc_home", label: "Go home" }], endings: [{ sceneId: "sc_home", title: "Home" }] } as unknown as Routing,
+      kind: "movie",
+      shape: "16:9",
+      scenes: { sc_quay: { title: "The quay", clips: [{ asset: "c001", from: 0, to: 1000 }] }, sc_tide: { title: "The tide", clips: [{ asset: "c002", from: 0, to: 1000 }] }, sc_home: { title: "Home", clips: [{ asset: "c003", from: 0, to: 1000 }] } },
+    });
+    assert.ok(compiled.ok, compiled.ok ? "" : compiled.problems.map((problem) => problem.detail).join("; "));
+    return compiled.document;
+  };
+
+  it("walks as storyRoutes does, to its bound, and agrees route by route with the package's own document", async () => {
+    const document = looping();
+    const replayed = await replayEveryRoute(document, structuredClone(document), new AbortController().signal, { choices: 9, routes: 1000 });
+    const walked = storyRoutes(document, { choices: 9, routes: 1000 });
+    assert.deepEqual(replayed, { routes: walked.routes.length, agree: walked.routes.length, complete: walked.complete });
+    assert.equal(replayed.complete, false, "a loop stops at the bound");
+    // A package whose document sends one choice elsewhere parts from the compiled one on every route
+    // through that choice; only the route that never takes it still agrees.
+    const tampered = structuredClone(document);
+    tampered.choices.find((choice) => choice.id === "ch_again")!.to = "sc_home";
+    const parted = await replayEveryRoute(document, tampered, new AbortController().signal, { choices: 9, routes: 1000 });
+    assert.deepEqual([parted.routes, parted.agree], [replayed.routes, 1]);
+  });
+
+  it("gives the event loop back as it walks, and stops on the export's signal (codex on PR 2205)", async () => {
+    const document = looping();
+    const control = new AbortController();
+    let ticks = 0;
+    const timer = setInterval(() => {
+      ticks++;
+      if (ticks === 2) control.abort();
+    }, 1);
+    try {
+      await assert.rejects(replayEveryRoute(document, document, control.signal, { choices: 4000, routes: 1_000_000 }), { name: "AbortError" });
+    } finally {
+      clearInterval(timer);
+    }
+    assert.ok(ticks >= 2, "timers ran while the walk was under way");
   });
 });
 
@@ -330,6 +374,10 @@ describe("Export → Arke Player through the coordinator (245c, 245d)", () => {
       const story = listed?.packages.find((entry) => entry.kind === "arke-player" && entry.story !== undefined);
       assert.equal(story?.file, "exports/low-water-story-2026-10-28.zip");
       assert.deepEqual(story?.story, { kind: "movie", scenes: 4, routes: 4, complete: true, endings: 2 });
+      assert.deepEqual(listed?.running, [], "nothing is still being made, so a window that lost an answer knows it ended");
+      // A paired phone downloads it through the media route (233f), as it does the world's edition (codex on PR 2205).
+      assert.equal((await provider.serveMedia("the-undersong", "exports/low-water-story-2026-10-28.zip"))?.contentType, "application/zip");
+      assert.equal(await provider.serveMedia("the-undersong", "exports/low-water-story-2026-10-28.zip.json"), null, "its record is not served");
     } finally {
       await provider.close();
     }

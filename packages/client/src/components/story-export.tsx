@@ -25,6 +25,7 @@ import {
   subscribeInteractiveExports,
   subscribeStoryExportState,
   subscribeWebPackages,
+  useExports,
   useStore,
   useWorld,
   type ArkePlayerExported,
@@ -96,6 +97,7 @@ export interface StoryExportPresses {
 export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow }: { worldId: string; production: ProductionBundle; onClose: () => void } & StoryExportPresses) {
   const connection = useStore().connection;
   const world = useWorld();
+  const exportsState = useExports();
   const phone = useMediaQuery("(max-width: 599px)");
   const remote = isRemoteSession();
   const [kind, setKind] = useState<Kind>("arke");
@@ -129,7 +131,15 @@ export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow 
     // A reconnect can lose the export's one answer (codex on PR 1498): its package, listed, is the answer.
     if (answer.requestId !== listing.current || making === null) return;
     const found = answer.packages.find((entry) => entry.kind === "arke-player" && entry.exportId === making);
-    if (found?.file === undefined || found.sha256 === undefined || found.story === undefined) return;
+    if (found?.file === undefined || found.sha256 === undefined || found.story === undefined) {
+      // No package, and the desktop is no longer making it: it failed or was cancelled while this
+      // window was away, and that answer is gone with the connection (codex on PR 2205).
+      if (answer.running !== undefined && !answer.running.includes(making)) {
+        setMaking(null);
+        setResult({ ok: false, blockers: ["the export ended while this window was away · make it again"] });
+      }
+      return;
+    }
     setMaking(null);
     setKind("arke");
     setResult({ ok: true, file: found.file, bytes: found.bytes ?? 0, sha256: found.sha256, edition: found.exportedAt.slice(0, 10), chapters: 0, pictures: found.pictures ?? 0, book: false, guide: false, story: found.story });
@@ -138,6 +148,14 @@ export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow 
   useEffect(() => {
     if (connection === "open" && making !== null) listing.current = listWebPackages(worldId);
   }, [connection, worldId]);
+  // A failure or a Cancel Activity heard about, though the answer itself was not: the same answer.
+  const held = making === null ? undefined : exportsState[making];
+  useEffect(() => {
+    if (making === null || held === undefined || (held.status !== "failed" && held.status !== "cancelled")) return;
+    setMaking(null);
+    setKind("arke");
+    setResult({ ok: false, blockers: [held.status === "cancelled" ? "the export was cancelled" : (held.error ?? "the export failed")] });
+  }, [making, held?.status]);
   useEffect(() => subscribeArkePlayerExported((answer) => {
     if (answer.exportId !== making) return;
     setMaking(null);

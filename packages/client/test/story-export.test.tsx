@@ -226,6 +226,28 @@ describe("Export on an interactive story (turn 245)", () => {
     assert.equal((q('[data-testid="story-export-start"]') as HTMLButtonElement).disabled, false, "it can be made again");
   });
 
+  it("after a reconnect, an export that ended with no package says so rather than waiting for good (codex on PR 2205)", async () => {
+    const m = await mount("movie");
+    await answer(m, MOVIE);
+    await press(q('[data-testid="story-export-start"]'));
+    const exportId = lastAsk(m, "export-arke-player")!.exportId;
+    const { state } = withStory("movie");
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    await act(async () => __setStateForTest(state, { connection: "open" }));
+    const listing = lastAsk(m, "list-web-packages");
+    assert.ok(listing, "the packages are listed again on the way back");
+    // Still being made: the sheet keeps waiting.
+    await act(async () => __applyEventForTest({ at: AT, type: "web-packages.listed", requestId: listing.requestId, worldId: FIXTURE_WORLD_ID, packages: [], running: [exportId] }));
+    assert.ok(q('[data-testid="story-export-making"]'));
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    await act(async () => __setStateForTest(state, { connection: "open" }));
+    const again = lastAsk(m, "list-web-packages")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "web-packages.listed", requestId: again.requestId, worldId: FIXTURE_WORLD_ID, packages: [], running: [] }));
+    assert.equal(q('[data-testid="story-export-making"]'), null);
+    assert.deepEqual(all('[data-testid="story-export-blocker"]').map(text), ["the export ended while this window was away · make it again"]);
+    assert.equal((q('[data-testid="story-export-start"]') as HTMLButtonElement).disabled, false, "it can be made again");
+  });
+
   it("Web package is the folder the Branch Map wrote, unchanged", async () => {
     const m = await mount("movie");
     await answer(m, MOVIE);
