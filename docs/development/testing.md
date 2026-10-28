@@ -1,5 +1,16 @@
 # Running and validating changes
 
+Install journeys 242–244 begin with optional acquisition and manual startup. From
+`packages/coordinator`, run `node --import tsx --test --test-concurrency=1
+test/setup/local-setup.test.ts test/setup/local-ai-readiness.test.ts
+test/setup/catalogue-invariants.test.ts test/setup/comfyui-setup.test.ts` with native temporary-file
+access. These fixtures verify no unselected startup downloads, selected-file reuse after restart,
+queued Skip, active installer ownership and unchanged service health. From `packages/client`, run
+`node --import tsx --test test/launch-lifecycle.test.tsx test/launch-remote.test.tsx
+test/downloads.test.tsx test/engine-panes.test.tsx` for manual entry, background transfers and the
+retained disconnected-core barrier. These are focused behavior checks; the full persona wizard,
+account/model qualification and installed visual acceptance remain separate work.
+
 Managed writing recovery (#2194) uses coordinator `test/recovery/harness.test.ts`,
 `test/harness-runtime-change.test.ts` and `test/v2-launch.test.ts`. The native fixture assembles
 the actual launcher with a protocol stand-in, starts the production host, crashes its child,

@@ -2,6 +2,13 @@
 
 28 October 2026 · **Revision 5 · Approved by the owner. Implementation in progress.**
 
+Implementation increment 1: missing managed runtimes, preset voice and dictation files now
+remain offered until selected. Manual entry no longer waits for the full local AI stack;
+selected transfers can continue in the background. Health reporting and active process ownership
+remain separate. This increment does not add removal of previously retained runtime/voice files.
+The persona screens, saved plan, computer-aware recommendations, account setup integration and
+Worlds landing/import changes remain to be implemented and compared against these approved frames.
+
 Owner feedback: keep specific voice providers/models out of onboarding; confirm OpenCode is
 included in all paths; offer explicitly selected existing Claude Code and Codex installations.
 Revision 2 implemented those changes in the drawings and walkthrough only. Revision 3 removes

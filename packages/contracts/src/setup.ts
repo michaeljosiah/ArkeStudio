@@ -4,9 +4,8 @@ import { EngineIdSchema } from "./local-ai.js";
 import { ProviderIdSchema } from "./provider.js";
 
 /**
- * Local runtimes and model downloads. ComfyUI and Ollama must be installed and healthy before
- * local AI setup completes; optional components can be skipped. Transfers run behind the
- * interactive core, with runtime health reported separately from file presence.
+ * Local runtimes and model downloads are offered until selected. Runtime health is reported
+ * separately from file presence and from access to manual authoring (SPEC-016, turns 242–244).
  *
  * A component is a *thing that must be on this machine*, not a thing we generate. Presence is
  * detected before anything is fetched, so a second launch downloads nothing.
@@ -159,9 +158,6 @@ export const SetupComponentSchema = z
 export type SetupComponent = z.infer<typeof SetupComponentSchema>;
 
 export const LOCAL_AI_RUNTIMES = { comfyui: "comfyui-runtime", ollama: "ollama-runtime" } as const;
-export function isRequiredLocalRuntime(componentId: string): boolean {
-  return Object.values(LOCAL_AI_RUNTIMES).some(id => id === componentId);
-}
 
 const LocalAiEngineCheckSchema = z.object({
   installed: z.boolean(),
@@ -174,7 +170,7 @@ export const LocalAiSetupReadinessSchema = z.object({
 }).strict();
 export type LocalAiSetupReadiness = z.infer<typeof LocalAiSetupReadinessSchema>;
 
-/** SPEC-033: installation and a healthy selected service are separate, mandatory checks. */
+/** SPEC-033: report the full local stack honestly; this is not a gate on entering the app. */
 export function localAiSetupReadiness(
   components: readonly SetupComponent[],
   comfyui?: { state: string; source: string; detail: string | null },
@@ -296,7 +292,7 @@ export const SetupStatusSchema = z
     components: z.array(SetupComponentSchema),
     /** True while any component is downloading or installing. */
     running: z.boolean(),
-    /** Coordinator-owned runtime health gate; absent on hosts without local setup support. */
+    /** Coordinator-owned runtime health status; absent on hosts without local setup support. */
     localAi: LocalAiSetupReadinessSchema.optional(),
     /** Free disk at the last check — the guard's evidence, shown rather than assumed. */
     diskFreeMb: z.number().int().min(0).nullable(),

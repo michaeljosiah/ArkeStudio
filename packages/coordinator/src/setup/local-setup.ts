@@ -5,7 +5,6 @@ import { homedir } from "node:os";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import {
   componentIsSettled,
-  isRequiredLocalRuntime,
   setupClosure,
   type DomainEvent,
   type SetupClosure,
@@ -23,11 +22,11 @@ type TreeSpec = Extract<CatalogueEntry["spec"], { kind: "tree" }>;
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
- * Fetching the local runtimes at setup (Ollama and its default model, the voice models).
+ * Acquiring selected local runtimes and models through their existing install owners.
  *
  * Three promises hold this together. Nothing is fetched twice — presence is detected first.
- * Transfers leave the core interactive; required runtimes cannot be skipped and engine health
- * owns local-AI completion. Nothing fails silently — a bad status code, a truncated file or an installer that
+ * Transfers leave manual authoring available; queued runtimes can be skipped and engine health
+ * remains separate from file presence. Nothing fails silently — a bad status code, a truncated file or an installer that
  * refuses its own silent flags becomes a stated reason on the row.
  */
 
@@ -1602,9 +1601,12 @@ export class LocalSetupService {
 
   /** Leave this one out. A skipped component is never attempted again this session. */
   skip(componentId: string): void {
-    if (isRequiredLocalRuntime(componentId)) return;
     const c = this.components.get(componentId);
     if (!c || c.state === "ready" || c.state === "present") return;
+    // Runtime Skip cancels waiting work only. A stale button cannot mark an active installer
+    // abandoned while its native owner is still changing files; Pause/Stop owns that lifecycle.
+    if ((componentId === "comfyui-runtime" || componentId === "ollama-runtime") &&
+      !["available", "queued", "failed", "blocked"].includes(c.state)) return;
     this.set(componentId, { state: "skipped", bytesPerSecond: null, detail: "you skipped this" });
     this.publish();
   }
@@ -1805,7 +1807,7 @@ export class LocalSetupService {
    * Arke does not own, with no confirmation and no undo.
    */
   private removable(entry: CatalogueEntry): boolean {
-    if (entry.optional !== true) return false;
+    if (entry.optional !== true || entry.removable === false) return false;
     const spec = entry.spec;
     if (spec.kind === "files") return spec.externalRoot === undefined;
     return spec.kind === "pull" || spec.kind === "archive" || spec.kind === "tree";

@@ -20,6 +20,48 @@ import {
 
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const;
 
+it("a late runtime Skip does not abandon an installer that already started", { timeout: 10000 }, async () => {
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const finish = new Promise<void>(resolve => { release = resolve; });
+  const ports = deps();
+  const service = new LocalSetupService({ ...ports, run: async (...args) => {
+    entered(); await finish; return ports.run(...args);
+  } }, () => {}, { appRoot: await root(), catalogue: [{ ...catalogue()[0]!, id: "ollama-runtime", optional: true }] });
+  try {
+    service.installClosure("ollama-runtime");
+    await started;
+    service.skip("ollama-runtime");
+    assert.equal(service.status().components[0]!.state, "installing");
+    release(); await service.run();
+    assert.equal(service.status().components[0]!.state, "ready");
+  } finally { release(); await service.dispose(); }
+});
+
+it("fresh and reopened setup makes no downloads until selected, and reuses the selected voice files", async () => {
+  const appRoot = await root();
+  for (const selected of [false, true, false]) {
+    const ports = deps();
+    const service = new LocalSetupService(ports, () => {}, { appRoot, catalogue: SETUP_CATALOGUE, throttleMs: 0 });
+    try {
+      await service.run();
+      assert.equal(ports.calls.filter(call => call.startsWith("fetch ")).length, 0, "startup only detects files");
+      assert.ok(ports.calls.filter(call => call.startsWith("run ")).every(call => call.endsWith(" list")), "detection cannot install or pull");
+      assert.ok(service.status().components.every(c => c.state === "available" || c.state === "present"));
+      for (const id of ["comfyui-runtime", "ollama-runtime", ...Object.values(VOXA_SETUP_COMPONENT_IDS)]) {
+        assert.notEqual(service.status().components.find(c => c.id === id)!.removable, true,
+          "optional acquisition must not introduce removal of live runtime/voice files");
+      }
+      if (selected) {
+        service.installClosure(VOXA_SETUP_COMPONENT_IDS.whisper);
+        await service.run();
+        assert.equal(ports.calls.filter(call => call.startsWith("fetch ")).length, 1, "only the chosen voice component is fetched");
+        assert.equal(service.status().components.find(c => c.id === VOXA_SETUP_COMPONENT_IDS.whisper)!.state, "ready");
+      }
+    } finally { await service.dispose(); }
+  }
+});
+
 it("unconfirmed installer cleanup retains its installation lease and staging bytes, blocking later work without replay", async () => {
   for (const interactive of [false, true]) {
     const appRoot = await root(), entries = [catalogue()[0]!, catalogue()[2]!];

@@ -218,10 +218,14 @@ export function StartupScreen() {
   }, [connection]);
 
   const ready = connection === "open" && state !== null;
-  // Only the coordinator's installation + health verdict can complete local setup.
+  // AI readiness remains visible while selected tools download, but manual authoring needs
+  // only the core. Missing/unhealthy AI must not turn Lightweight into a compulsory install.
   const localAiPending = setup !== null && setup.localAi?.ready !== true;
-  const settled = ready && !fetching && !localAiPending;
-  const runtimeSteps = setup === null ? [] : Object.entries(LOCAL_AI_RUNTIMES).map(([id]) => {
+  const settled = ready && !fetching;
+  const runtimeSteps = setup === null ? [] : Object.entries(LOCAL_AI_RUNTIMES).filter(([, componentId]) => {
+    const component = setup.components.find(c => c.id === componentId);
+    return component !== undefined && !["available", "skipped"].includes(component.state);
+  }).map(([id]) => {
     const check = setup.localAi?.engines[id as keyof typeof LOCAL_AI_RUNTIMES];
     return { label: id === "comfyui" ? "ComfyUI" : "Ollama",
       state: check?.installed && check.healthy ? "ready" : check?.detail ?? "Waiting for runtime checks.",
@@ -237,7 +241,7 @@ export function StartupScreen() {
   const doneParts =
     steps.filter((s) => s.settled).length +
     transfers.reduce((sum, c) => sum + (c.state === "queued" || c.bytesTotal === 0 ? 0 : Math.min(1, c.bytesDone / c.bytesTotal)), 0);
-  const percent = parts === 0 ? 0 : Math.min(localAiPending ? 99 : 100, Math.round((doneParts / parts) * 100));
+  const percent = parts === 0 ? 0 : Math.min(99, Math.round((doneParts / parts) * 100));
 
   // What is happening right now, in the product's words — one line, never a list.
   const active =
@@ -257,9 +261,8 @@ export function StartupScreen() {
   const speed = active?.bytesPerSecond ?? null;
   const remaining = speed !== null && speed > 0 ? Math.round((totalBytes - doneBytes) / speed) : null;
 
-  // Detection reuses installed files. Hold setup while a transfer or required health check
-  // remains outstanding, including a failed engine with no download left running.
-  const setupRun = fetching || localAiPending;
+  // Only requested acquisition occupies this surface; its failure does not trap the author.
+  const setupRun = fetching;
 
   const destination = (): string | null => {
     if (!state) return null;
@@ -383,6 +386,7 @@ export function StartupScreen() {
               {localAiPending && <div className="fy-launch__runtime-actions">
                 {!isRemoteSession() && Object.entries(LOCAL_AI_RUNTIMES).map(([id, componentId]) => {
                   const component = components.find(c => c.id === componentId);
+                  if (!component || ["available", "skipped"].includes(component.state)) return null;
                   const check = setup?.localAi?.engines[id as keyof typeof LOCAL_AI_RUNTIMES];
                   const engineState = id === "comfyui" ? state?.app.comfyui?.engine.state : state?.app.ollama?.state;
                   const retryInstall = component && ["failed", "blocked", "skipped", "available"].includes(component.state);
@@ -403,15 +407,15 @@ export function StartupScreen() {
               </div>}
             </section>
             <div className="fy-launch__once">
-              <span>One-time setup.</span>
+              <span>You can write while your tools are setting up.</span>
               <button
                 type="button"
                 className="fy-launch__action fy-launch__action--line"
-                disabled={!ready || localAiPending}
-                title={localAiPending ? "ComfyUI and Ollama must be installed, running and healthy" : ready ? undefined : "Waiting for the studio core"}
+                disabled={!ready}
+                title={ready ? undefined : "Waiting for the studio core"}
                 onClick={background}
               >
-                {localAiPending ? "Waiting for local AI" : "Continue in the background"}
+                Continue in the background
                 <ArrowRight size={16} />
               </button>
             </div>

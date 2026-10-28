@@ -5182,8 +5182,8 @@ export class Coordinator {
       this.emit({ at: new Date().toISOString(), type: "env.check", ...envCheck });
     }
 
-    // Downloads run behind the interactive core. The launch gate separately requires both
-    // runtimes healthy; optional components can be skipped. Detection avoids repeat downloads.
+    // Detect existing files and retained downloads. The catalogue offers missing AI components
+    // until selected; model/service health never gates manual authoring (SPEC-016, turns 242–244).
     void this.setup?.run();
 
     // An external image login restores itself without holding the transport behind a slow

@@ -330,11 +330,14 @@ folds and client `screens/engine-panes.tsx` expose runtime ownership. Tests: coo
 client `engine-panes`; contracts `ollama`; providers `clients`. See
 [managed runtime policy and delivery boundary](managed-local-runtimes.md).
 
-The mandatory local-AI launch gate is projected by contracts `setup.ts` and Coordinator onto
-`setup.localAi`, seeded before detection and refreshed by both engine subscriptions. Client
-`screens/launch.tsx` holds continuation until both installation and health checks pass;
-Downloads reports the same verdict. Runtime Skip is refused in `setup/local-setup.ts`.
-Tests: contracts `local-ai-setup`, coordinator `setup/local-ai-readiness`, client `launch-lifecycle`.
+Contracts `setup.ts` and Coordinator project installation/health into `setup.localAi`, seeded
+before detection and refreshed by both engine subscriptions. This full-stack status no longer
+gates manual app entry (approved turns 242–244, SPEC-016 R-21–R-28). Setup's catalogue offers
+missing runtimes and voice/dictation files until selected; `screens/launch.tsx` allows background
+continuation after the core connects. Downloads reports selected transfers; queued runtime work
+can be skipped while active native owners retain Pause/Stop. Tests: contracts `local-ai-setup`,
+coordinator `setup/local-setup` and `setup/local-ai-readiness`, client `launch-lifecycle`/
+`downloads`. The persona wizard and accepted-plan persistence remain separate implementation.
 
 Ming's optional 0.5B and experimental 7.9B readers are declared in contracts `ming.ts` and providers
 `ming-models.ts` / `clients/ming.ts`. Coordinator `local-ai/ming-catalogue.ts` / `ming-assets.json`

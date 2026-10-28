@@ -1,23 +1,23 @@
 # Managed local runtimes
 
-Local setup queues Arke's managed ComfyUI and Ollama runtimes by default. Model weights remain
-optional downloads. Discovery never adopts an existing engine. In Settings → Providers,
-ComfyUI offers an explicitly selected install folder or URL; Ollama offers an explicitly
-selected loopback HTTP URL. **Use Arke-managed** clears the override. Existing overrides remain
-selected across upgrades; there is no silent migration of a personal model store.
+Local setup offers Arke's managed ComfyUI and Ollama runtimes, preset voice and dictation files
+until explicitly selected. Opening or reopening Studio does not download missing AI components.
+Discovery never adopts an existing engine. In Settings → Providers, ComfyUI offers an explicitly
+selected install folder or URL; Ollama offers an explicitly selected loopback HTTP URL.
+**Use Arke-managed** clears the override. Existing files and overrides remain across upgrades.
 
-Launch holds local AI setup until **both selected runtimes are installed, running and healthy**.
-Coordinator seeds `setup.localAi` before detection or transport startup and republishes it on
-installation and engine health changes. `running: false`, a finished transfer, Stop all, or a
-failed/skipped component cannot complete this gate. Runtime Skip is refused by the service.
-Pause/resume, retry, Downloads and Runtime settings remain reachable; explicit existing sources
-must pass the same checks. The setup surface opens only after Continue. Once the runtime gate
-passes, optional model downloads can continue in the background. Each launch rechecks health;
-there is no saved completion flag that can mask an unhealthy service. Health loss revokes
-readiness without ejecting an already open world. Managed engines and external ComfyUI retain
-their health loops; selected external Ollama is also rechecked every 15 seconds. Overlapping
-checks cannot publish an older result over a newer one, and disposal stops the polling timer.
-Hosts that do not configure both engine services cannot report local AI setup as complete.
+Manual authoring is available once the core connects, even while selected downloads continue or
+an AI service is unavailable. Continue in the background leaves those transfers and their health
+state intact. This implements the acquisition/entry foundation of approved design turns 242–244
+(SPEC-016 R-21–R-28); the new persona wizard and plan are still being implemented.
+
+Coordinator seeds and republishes `setup.localAi` independently: it reports the full local stack
+as ready only when both services are installed and healthy. File presence, Stop all or a skipped
+component cannot manufacture health. Downloads states selected transfers; Providers owns service
+readiness. Queued runtime downloads may be skipped. Active native installers still require the
+existing Pause/Stop and confirmed-cleanup path. Existing managed engines and external ComfyUI
+retain their health loops; external Ollama is rechecked every 15 seconds. Unknown or failed AI
+stays unavailable for use without trapping manual writing or ejecting an open world.
 Shutdown refuses late installation activation and quiesces an admitted Ollama startup before
 waiting for setup to drain. Healthy inference retains its owned child until normal job draining
 and confirmed process cleanup; quiescing does not discard the child or its exit backstop.
@@ -216,7 +216,7 @@ separate. CI shard 1 also runs the standard-library checks on Windows and Linux.
 lock with `node scripts/update-ming-assets.mjs` only after deliberate
 pin/version edits and repeat native qualification; it fetches publisher metadata and archives.
 
-The first-run gate also uses contracts `test/local-ai-setup.test.ts`, coordinator
+Acquisition and service readiness use contracts `test/local-ai-setup.test.ts`, coordinator
 `test/setup/local-ai-readiness.test.ts`, and client `test/launch-lifecycle.test.tsx` /
 `test/downloads.test.tsx`. They cover missing detection, failed/paused/skipped installation,
 one healthy engine, recovery, health loss, explicit existing services and optional downloads.
