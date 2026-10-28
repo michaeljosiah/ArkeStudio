@@ -131,7 +131,7 @@ for (const failureStatus of [undefined, 503, 429, 400, "socket-drop", "manifest-
     await new Promise(resolve => setTimeout(resolve, 500));
     assert.equal(approvals, 1); assert.equal(requests.length, failureStatus === "wire-refusal" ? 0 : 1);
     if (requests.length) assert.deepEqual(requests[0], { model, messages: [{ role: "system", content: approvedSystem }, { role: "user", content: "PRIVATE_PINNED_QUESTION" }],
-      stream: true, stream_options: { include_usage: true }, max_completion_tokens: 4096, store: false });
+      stream: true, stream_options: { include_usage: true }, max_tokens: 4096, reasoning_effort: "none", store: false });
     assert(!JSON.stringify(requests).includes(root));
     assert(headerNames.every(names => !names.some(name => name.startsWith("x-opencode-") || ["x-session-id", "x-session-affinity", "x-parent-session-id"].includes(name))));
     assert(requests.every(input => input.model === model && (input.tools?.length ?? 0) === 0));

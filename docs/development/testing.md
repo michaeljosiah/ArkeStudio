@@ -1967,8 +1967,8 @@ the real supervisor, version gate, private bridge approval, installation/replace
 personal override. It downloads no model, uses no personal profile and allocates no GPU. On
 non-Windows hosts, composition/protocol tests explicitly inject proof; the default native port
 still refuses and Windows native cases skip. These tests are not actual OpenCode-plus-managed-
-provider, binary integrity, live Ollama, physical GPU or cross-restart qualification. Default native
-activation and actual turn-239 matched visual acceptance remain separate gates. Run coordinator
+provider, binary integrity, live Ollama, physical GPU or cross-restart qualification. The real
+managed qualification below and actual turn-239 matched visual acceptance remain separate. Run coordinator
 typecheck after the final test edit.
 
 
@@ -1992,8 +1992,8 @@ sixty seconds; scoped metadata and retirement at thirty seconds. Its independent
 observation defaults to five minutes (at most fifteen), separate from requester Stop; provider
 HTTP retains its three-minute ceiling. Ordinary/unqualified ports keep their prior bounds.
 These fixtures do not qualify live model/GPU output or release, binary provenance or
-cross-restart cleanup. Default Studio activation and actual master parity remain
-open. Run affected workspace typechecks after the final test edit.
+cross-restart cleanup. Real-model/normal-host qualification below is separate, and actual
+master parity remains open. Run affected workspace typechecks after the final test edit.
 
 Private bridge Stop/retirement checks additionally exercise a real bound HTTP address: seal
 refuses new work while a competing listener cannot bind that port, retains an already-sent
@@ -2057,8 +2057,8 @@ withheld approval, metadata exclusion, normal retirement, retained listener/GPU 
 writer exit, and release after both captured native owners confirm cleanup. Runner tests retain
 original cleanup methods before asynchronous route preparation and never read configuration
 after cancelled qualification. The factory refuses a healthy personal endpoint. These checks
-prepare production wiring but do not enable default activation or replace live-model,
-persistence/cross-restart/platform and matched visual acceptance.
+exercise the same factory now supplied by normal hosts. They do not replace real-model,
+application/persistence/restart/platform and matched visual acceptance.
 
 Real local-model qualification is an explicit maintainer operation, outside CI:
 
@@ -2083,6 +2083,25 @@ endpoint, model load or failed partial run does not. This is finite owned-deskto
 not a general OS sandbox or secure-erasure claim. The private parser discards Ollama's bounded
 string `reasoning` deltas while reconstructing answer text and usage; malformed/unknown fields,
 tools, truncation, bad finish/usage and existing byte/frame limits still refuse.
+
+After preparing that owned directory, verify the normal application path:
+
+```powershell
+node --import tsx scripts/qualify-studio-host.mjs --root "<owned-test-directory>" --model "<copied-installed-model-name>" --opencode "<pinned-bundled-executable>"
+```
+
+This command verifies runtime/writer content before startup and keeps the same exclusive
+qualification lock. It uses normal Coordinator services, provider readiness/model validation,
+published picker inventory, authenticated requester-only RPC, native launcher controls and
+the shared factory. A real request delegates main → storage specialist → main, with exactly
+three provider completions. The specialist receives no user-message or author-note canary.
+Canonical private history persists across normal host restart; shared state, the other socket
+and operational logs exclude the user marker, and restart issues no inference. Existing setup
+and model-admission guards remain in force. The command does not complete local-AI setup,
+install ComfyUI, execute a repair, prove diagnostic accuracy or replace broader fault/platform/
+visual acceptance. Tests leave their private fixture history for review rather than replaying
+or deleting it. Ollama operational requests use its supported `max_tokens` cap and non-thinking
+default; truncated or unsupported responses still fail without an automatic resend.
 
 ## System status (master turn 241; System 240 review)
 

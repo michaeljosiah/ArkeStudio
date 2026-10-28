@@ -31,6 +31,9 @@ Repeat actual managed readiness/content/cleanup and private bridge checks after 
 using these pins and independently copied existing weights in an owned test directory. It
 downloads nothing, refuses unowned existing directories and leaves test data for review. See
 the exact invocation and evidence limits in [testing](testing.md#writing-engines-and-model-control).
+`scripts/qualify-studio-host.mjs` reuses that owned directory to verify the full authenticated
+conversation/delegation/history/restart path through normal Coordinator services and launcher
+controls. Both commands require explicit input paths and perform no downloads or repairs.
 OpenCode remains the bundled default while the
 Arke replacement in [issue #1698](https://github.com/michaeljosiah/ArkeStudio/issues/1698) is deferred.
 

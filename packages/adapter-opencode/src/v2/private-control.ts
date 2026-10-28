@@ -31,8 +31,12 @@ export function privateWireBody(request: PrivateSessionRequest) {
   const slash = request.model.indexOf("/");
   if (slash < 1 || slash === request.model.length - 1 || request.model.length > 512 || typeof request.system !== "string" || Buffer.byteLength(request.system) > 32 * 1024 ||
     typeof request.prompt !== "string" || Buffer.byteLength(request.prompt) > 192 * 1024 || !Number.isSafeInteger(request.outputTokenLimit) || request.outputTokenLimit < 1 || request.outputTokenLimit > 4096) throw new Error("Invalid private provider request manifest.");
+  // The pinned Ollama OpenAI route reads max_tokens. Its operational default avoids spending
+  // the bounded context on hidden reasoning; ordinary writing and hosted payloads keep theirs.
+  const limit = request.model.slice(0, slash) === "ollama" ? { max_tokens: request.outputTokenLimit, reasoning_effort: "none" }
+    : { max_completion_tokens: request.outputTokenLimit };
   return { model: request.model.slice(slash + 1), messages: [{ role: "system", content: request.system }, { role: "user", content: request.prompt }],
-    stream: true, stream_options: { include_usage: true }, max_completion_tokens: request.outputTokenLimit, store: false };
+    stream: true, stream_options: { include_usage: true }, ...limit, store: false };
 }
 
 function requestDigest(request: PrivateSessionRequest): string { return createHash("sha256").update(JSON.stringify(privateWireBody(request))).digest("hex"); }
@@ -67,7 +71,7 @@ const TRANSIENT_RESPONSE_CONTROL = String.raw`
           if (row.usage !== undefined && row.usage !== null) {
             if (usage) throw 0;
             const input = row.usage.prompt_tokens, output = row.usage.completion_tokens;
-            if (!Number.isSafeInteger(input) || input < 0 || !Number.isSafeInteger(output) || output < 0 || output > reviewed.max_completion_tokens) throw 0;
+            if (!Number.isSafeInteger(input) || input < 0 || !Number.isSafeInteger(output) || output < 0 || output > (reviewed.max_tokens ?? reviewed.max_completion_tokens)) throw 0;
             usage = { prompt_tokens: input, completion_tokens: output, total_tokens: input + output };
             if (!Number.isSafeInteger(usage.total_tokens)) throw 0;
           }

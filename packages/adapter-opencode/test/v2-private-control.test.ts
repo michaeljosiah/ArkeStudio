@@ -4,6 +4,14 @@ import { OpenCodeV2Adapter } from "../src/v2/opencode-v2-adapter.js";
 import { buildSessionConfigV2 } from "../src/v2/config.js";
 import { privateControlDirectory, privateWireBody, privateBridgeTransport } from "../src/v2/private-control.js";
 
+it("uses the pinned Ollama token cap and bounded non-thinking policy only for local operational bodies", () => {
+  const request = { model: "ollama/model", system: "Reviewed system", prompt: "Reviewed question", outputTokenLimit: 128 };
+  const local = privateWireBody(request);
+  assert.equal(local.max_tokens, 128); assert.equal(local.reasoning_effort, "none"); assert.equal(local.max_completion_tokens, undefined);
+  const hosted = privateWireBody({ ...request, model: "openai/model" });
+  assert.equal(hosted.max_completion_tokens, 128); assert.equal(hosted.max_tokens, undefined); assert.equal(hosted.reasoning_effort, undefined);
+});
+
 it("keeps an ephemeral native bridge capability separate from the reviewed provider body and ordinary sessions", () => {
   const adapter = new OpenCodeV2Adapter({ baseUrl: () => "http://127.0.0.1:0", password: () => null });
   const request = { model: "ollama/model", system: "Reviewed system", prompt: "Reviewed question", outputTokenLimit: 4096 };

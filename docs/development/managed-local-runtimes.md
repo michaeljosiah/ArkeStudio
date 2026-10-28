@@ -27,7 +27,13 @@ The optional private Studio provider route additionally verifies the pinned exec
 tree before opening metadata/inference sockets. Same-process reuse checks current file identity,
 metadata and the fixed tree; an install, selection or owner change invalidates qualification.
 Missing/modified/unexpected code holds that private route without deleting files or reinstalling.
-Production Studio destination/model activation remains separately gated.
+Desktop, development and Node hosts supply the shared private Studio factory by default.
+Inference requires the qualified bundled Windows writer and Arke-managed local-only Ollama;
+configured/PATH writers, personal Ollama URLs, other providers and unsupported native ports
+remain unavailable to this private route. Explicit existing-service settings are unchanged.
+Private operational Ollama requests use its supported `max_tokens` cap and non-thinking
+default. Ordinary writing retains its own model/effort settings. Missing inference does not
+disable the model-free diagnostics, notifications or reviewed recovery controls.
 
 Setup commands also have an owned lifetime. An internal anchor starts the catalogue program only
 after native ownership is established; completion waits for its ordinary helpers as well as the

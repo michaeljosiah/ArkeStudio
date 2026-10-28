@@ -41,7 +41,7 @@ it("isolates the transient control identity and only admits a complete canonical
 });
 
 it("keeps the captured model/token policy despite options mutation and leaves missing usage unknown", async () => {
-  const candidate = await control(); candidate.options.body.model = "changed"; candidate.options.body.max_completion_tokens = 0;
+  const candidate = await control(); candidate.options.body.model = "changed"; candidate.options.body.max_tokens = 0; candidate.options.body.reasoning_effort = "high";
   const event = candidate.response(stream(chunk({ content: "PRIVATE_RESPONSE" }), chunk({}, "stop"), "[DONE]"));
   await candidate.hooks.get("http.response")!(event); const output = await event.response.text();
   assert(output.includes('"model":"qualified-model"')); assert(!output.includes('"usage"'));

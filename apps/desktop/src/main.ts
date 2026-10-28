@@ -26,6 +26,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nati
 import electronUpdater from "electron-updater";
 import {
   assembleHarness,
+  managedStudioAssistant,
   describeClaudeAvailability,
   describeCodexAvailability,
   ChildLedger,
@@ -1421,6 +1422,7 @@ async function initialize(): Promise<{ port: number }> {
       },
     },
     ollama: { service: ollamaEngine, reconfigureHarness: wiring.reconfigureOllama },
+    studioAssistant: managedStudioAssistant(wiring, ollamaEngine),
     ming: mingProcess,
     ...(app.isPackaged ? { mingWorkerPath: join(process.resourcesPath, "ming", "ming-worker.py") } : {}),
     comfyui: {

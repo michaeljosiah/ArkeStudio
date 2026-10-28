@@ -20,7 +20,7 @@ import { nodeSetupDeps } from "./setup/node-deps.js";
 import { FsWorldProvider } from "./world/provider.js";
 import { UNDERSONG_RELEASE } from "./world/undersong-release.js";
 import { harnessTrace } from "./harness/trace.js";
-import { assembleHarness, describeClaudeAvailability, describeCodexAvailability, lazyCodexImageRunner } from "./harness/v2-launch.js";
+import { assembleHarness, managedStudioAssistant, describeClaudeAvailability, describeCodexAvailability, lazyCodexImageRunner } from "./harness/v2-launch.js";
 import { createNodeMediaHost } from "./media/node-media-host.js";
 
 /**
@@ -189,6 +189,7 @@ const { coordinator, server } = createStudioHost({
   setupExtraEntries: comfy.weights,
   comfyui: { service: comfy.service },
   ollama: { service: ollamaEngine, reconfigureHarness: wiring.reconfigureOllama },
+  studioAssistant: managedStudioAssistant(wiring, ollamaEngine),
   ming: new MingProcess(ledger),
   authoring: { agentForPurpose, roster: ROSTER, skillFor },
   ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),

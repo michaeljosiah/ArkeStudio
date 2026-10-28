@@ -8,7 +8,7 @@ import { createStudioHost } from "./application/studio-host.js";
 import { AppSettingsFile } from "./app-settings.js";
 import { ChildLedger } from "./child-ledger.js";
 import type { Cipher } from "./credentials/store.js";
-import { assembleHarness, lazyCodexImageRunner, type AssembledHarness } from "./harness/v2-launch.js";
+import { assembleHarness, managedStudioAssistant, lazyCodexImageRunner, type AssembledHarness } from "./harness/v2-launch.js";
 import { harnessTrace } from "./harness/trace.js";
 import { ProviderCallStore } from "./providers/call-store.js";
 import { SecretRegistry } from "./redact.js";
@@ -89,6 +89,7 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
       setupExtraEntries: comfy.weights,
       comfyui: { service: comfy.service },
       ollama: { service: ollama, reconfigureHarness: wiring?.reconfigureOllama }, ming,
+      ...(wiring ? { studioAssistant: managedStudioAssistant(wiring, ollama) } : {}),
       authoring: { agentForPurpose, roster: ROSTER, skillFor },
       harnessLaunchEngine: chosen, relaunchHarness: wiring?.relaunchHarness,
       harnessRecovery: wiring?.recovery,

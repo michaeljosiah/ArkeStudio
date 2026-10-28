@@ -1367,8 +1367,9 @@ system instructions and answer cap in its existing contents review. Nondefault n
 payloads remain unqualified and refuse rather than silently changing their semantics.
 Pinned fixtures compare the complete received body to approval and reject changed manifests
 before approval/network; an injected HTTP-hook refusal proves zero provider calls while keeping
-the native owner unknown. Native transport still adds tracing headers after this hook; complete
-metadata/persistence/spend and managed-origin qualification remain production activation gates.
+the native owner unknown. Native transport still adds tracing headers after this hook; the
+qualified managed bridge below strips them and verifies the original local-only route.
+This native control alone does not qualify arbitrary provider persistence or paid spend.
 
 `SessionRef.privateRetire` retires only its exact ephemeral native session, never canonical
 Studio/World history. V2 captures the original server/authentication before creation and refuses
@@ -1383,7 +1384,8 @@ owner/config and blocks new Studio inference while the confirmed GPU/runtime lea
 Host-only `reconcileRetirement` retries known-complete/unsent retirement without regenerating
 an answer. Native protocol/service fixtures verify canonical history/creative bytes survive.
 This qualifies logical native API retirement, not secure erasure of database/WAL/log bytes,
-restart reconciliation or full financial-record retention; production activation remains closed.
+restart reconciliation or full financial-record retention; this logical retirement alone
+cannot qualify a production provider route.
 
 Native qualification now measures the retained copy: retired prompt-path markers remain in
 SQLite WAL, while direct `/generate` leaves message history unchanged. The separately identified
@@ -1419,8 +1421,9 @@ Private unsupported/malformed events also stay out of the common dead-letter buf
 an observed private error or Stop, cached assistant rows on reconnect cannot settle its unknown
 inference; a late positive native execution event may still retire the exact original owner.
 Adapter `test/sse.test.ts`/`test/v2-private-payload.test.ts` plus the coordinator native-route
-composition cover these refusal/ownership boundaries. Complete native network-payload,
-subprocess persistence, spend and production activation qualification remain required.
+composition cover these refusal/ownership boundaries. Real managed-payload, profile, application
+and restart evidence is described below; arbitrary native profiles and paid spend remain
+unqualified by these isolated cases.
 
 Private inference ownership uses `SessionRef.privateTurnSettled`: native v2 completion or the
 exact host-only `privateOwnerStopped` cleanup capability can settle one turn. A send error,
@@ -1568,15 +1571,15 @@ transport may bind their conjunction into its runner entry; reconciliation snaps
 method and retains unknown/incomplete proof. Production coordinator shutdown calls retirement
 reconciliation after supervised writer and managed provider cleanup. A retirement failure joins
 the existing cleanup error report after durable world closure, rather than skipping that closure.
-This wires shutdown housekeeping, not default Studio destination/model activation.
+This wires shutdown housekeeping independently of destination/model admission.
 
 Actual bundled Windows fixtures qualify normal completion, upstream overflow, verified writer/
 provider composition and Stop with a held synthetic provider. They retain address/GPU planning
 ownership after writer exit, then verify release and exact file retirement after original
 provider process cleanup. These are finite protocol/process tests, not live GPU/model evidence.
-Production host activation, binary provenance, remaining network/spend/persistence/live-model/
-cross-restart/platform acceptance and actual matched turn-239 visuals remain open. Default
-production destination attestation stays closed; the bridge adds no model process or agent loop.
+Real local-model and normal-host qualification is described below. These synthetic cases do
+not qualify arbitrary models/profiles or replace remaining full application/fault/platform
+acceptance and actual matched turn-239 visuals. The bridge adds no model process or agent loop.
 
 `harness/v2-launch.ts` exports the shared `managedStudioAssistant` host composition for the
 qualified bundled Windows writer and managed local-only Ollama owner. It uses the adapter's
@@ -1586,14 +1589,26 @@ original lifecycle methods before awaiting optional route preparation, retaining
 cancelled qualification through actual cleanup without reading an unready configuration.
 Actual pinned fixtures now exercise this shared factory for completion and held-provider Stop;
 58 focused checks include original-method retention, personal-endpoint refusal and background
-GPU scheduling. Default hosts do not enable it yet: remaining live-model/persistence/restart/
-platform and visual acceptance still applies. No additional daemon or fallback is introduced.
+GPU scheduling. Desktop, development and Node startup now supply this factory by default.
+It admits only the qualified bundled Windows writer plus managed local-only Ollama; absent,
+configured/PATH, personal-service, nonlocal and unsupported profiles still refuse. Bare/custom
+Coordinator construction retains its explicit host options and closed default. No additional
+daemon, model download, paid fallback or new repair authority is introduced.
 The transient response control recognizes the pinned Ollama string `reasoning` delta but
 reconstructs only answer text and bounded usage; reasoning never reaches native SDK history.
 `scripts/qualify-studio-local.mjs` provides explicit pinned-runtime/copied-model live and
 restart qualification in a separately owned directory, with complete bounded profile/home/log
 canary scans and a positive detector control. It is a maintainer operation, not a startup model
 download, renderer tool or production activation switch.
+Local operational bodies use the pinned Ollama API's `max_tokens` and `reasoning_effort: none`,
+preserving the 4,096-token cap without letting hidden reasoning consume its bounded context.
+Hosted private bodies retain `max_completion_tokens`; ordinary writing is unchanged.
+`scripts/qualify-studio-host.mjs` then exercises normal authenticated Studio RPC, published model
+admission, real main/specialist/final delegation, canonical private history, exclusion from the
+other socket/shared state/logs and author notes, and host restart without inference replay.
+It uses the existing native launcher controls and original shutdown owners, not a model-port
+substitute. This is finite Windows application evidence, not universal model quality or the
+remaining full platform/fault/storage/visual acceptance.
 
 History replacement reads wait for an already admitted same-path write that outlived bounded
 shutdown in this process. This prevents a late old rename from overwriting a successor's history;
