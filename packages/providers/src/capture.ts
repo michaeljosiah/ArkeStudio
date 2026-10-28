@@ -505,8 +505,8 @@ export function captureProviderClient(
       );
     },
     poll: (key, remoteId, context) => run("poll", context, () => client.poll(key, remoteId, context)),
-    fetchArtifacts: (key, remoteId, context) =>
-      run("fetch-artifacts", context, () => client.fetchArtifacts(key, remoteId, context)),
+    fetchArtifacts: (key, remoteId, context, options) =>
+      run("fetch-artifacts", context, () => client.fetchArtifacts(key, remoteId, context, options)),
     cancel: (key, remoteId, context) => run("cancel", context, () => client.cancel(key, remoteId, context)),
     ...(client.resetTransport ? { resetTransport: () => client.resetTransport!() } : {}),
     ...(client.unload ? { unload: (signal?: AbortSignal, only?: ReadonlySet<string>) => client.unload!(signal, only) } : {}),

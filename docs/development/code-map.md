@@ -68,6 +68,21 @@ or fit claim for generated media or scratch: complete provider output/scratch pl
 batch/import/export owners and remaining storage/platform acceptance are still open. Tests:
 `test/queue/submission-storage.test.ts`, `test/queue/result-storage.test.ts` and
 `test/storage/reservations.test.ts`; SPEC-062 R-7/R-10/R-11/R-14.
+FAL result retrieval now uses providers `clients/artifact-body.ts` and contracts
+`artifact-result-limits.ts`. Remote metadata is capped at 1 MiB and each response at 128K read
+steps; decoded media shares receipt ceilings (64 files, 1 GiB/file, 4 GiB aggregate). Header
+limits reject before body reads; actual chunks enforce unknown/encoded lengths, and identity
+length mismatches refuse incomplete output. Queue cancellation reaches metadata/media through
+ephemeral `ArtifactFetchOptions`, kept separate from recorded provider context by `capture.ts`.
+HTTP error bodies never become media. A transfer-limit refusal leaves the accepted job and
+reported cost durable, yields inference ownership and stops repeated downloads in that session;
+restart may recheck the same remote result, never submit it again. The hold reason is observed
+without another journal append. Original stalled readers retain their stream lock through
+settlement; their late bytes cannot file. These are supported transfer ceilings, not output
+estimates, disk reservations, resumable partial downloads or provider-retention guarantees.
+Other providers and complete pre-dispatch output/scratch planning remain unfinished. Tests:
+contracts `test/artifact-result-limits.test.ts`, providers `test/artifact-transfer.test.ts` /
+`test/capture.test.ts`, coordinator `test/queue/result-storage.test.ts`; SPEC-062 R-9/R-10/R-11.
 Media-reader protection: `transport.ts` accepts an optional host-only `ResolvedMediaFile.release`
 lease from a resolver. It opens one descriptor for size/range and streaming, retains ownership
 through pending resolution/open/close, and releases only after confirmed descriptor closure.

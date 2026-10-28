@@ -1,5 +1,6 @@
 import type { ProviderId } from "@arke-studio/contracts";
 import { ProviderAuthError, type FetchLike } from "../types.js";
+import { readArtifactBody } from "./artifact-body.js";
 
 export function responseReason(body: unknown): string | null {
   if (typeof body === "string") return body.trim() || null;
@@ -31,11 +32,12 @@ export async function jsonRequest(
   provider: ProviderId,
   url: string,
   init: RequestInit,
+  maximumBytes?: number,
 ): Promise<{ status: number; body: unknown }> {
   const res = await fetchImpl(url, init);
   // A 403 can be a valid credential behind a billing lockout; its body is what distinguishes it.
   let body: unknown = null;
-  const text = await res.text();
+  const text = maximumBytes === undefined ? await res.text() : new TextDecoder().decode(await readArtifactBody(res, maximumBytes, init.signal ?? undefined));
   if (text.length > 0) {
     try {
       body = JSON.parse(text);

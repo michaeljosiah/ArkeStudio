@@ -3,7 +3,8 @@ import { it } from "node:test";
 import { join } from "node:path";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import type { Job, LedgerEntry } from "@arke-studio/contracts";
-import { JobQueue, type EnqueueInput, type JobQueueOptions } from "../../src/queue/dispatcher.js";
+import { JobQueue, type DispatchClient, type EnqueueInput, type JobQueueOptions } from "../../src/queue/dispatcher.js";
+import { ProviderArtifactLimitError } from "@arke-studio/providers";
 import { LocalGpu } from "../../src/local-ai/gpu.js";
 import { JobJournal, type JobStateStore } from "../../src/queue/journal.js";
 import { ArtifactResultFiles } from "../../src/queue/artifact-files.js";
@@ -41,6 +42,38 @@ async function fixture(inline = false, custom?: ArtifactWriteSpace, acquireLocal
   const freeWorld = () => { free = 10 * GiB; clock += 5001; for (const value of roots) if (value.path.startsWith(world)) storage.writeFailed(value.rootId); };
   return { root, world, journalPath, storage, fake, artifacts, ledger, events, create, freeWorld, fullWorld, fetches: () => fetches };
 }
+
+it("a transfer-limit hold retains the accepted identity across restart without repeated downloads or generation", { timeout: 30_000 }, async () => {
+  const h = await fixture(), first = h.create(); let next: JobQueue | undefined, reads = 0;
+  (h.fake as DispatchClient).fetchArtifacts = async () => { reads++; throw new ProviderArtifactLimitError(); };
+  try {
+    await first.start(); const job = await first.enqueue(input);
+    await until(() => first.listJobs()[0]?.error?.includes("supported transfer") === true, "accepted result held for local limits");
+    await first.waitForIdle(); const original = first.listJobs()[0]!;
+    assert.equal(original.status, "running"); assert(original.providerJobId); assert.equal(original.attempt, 1); assert.equal(original.providerCostMicroUsd, 37);
+    assert.equal(reads, 1); assert.equal(h.fake.submitCount, 1); assert.equal(h.ledger.length, 0);
+    await first.dispose(); await first.waitForIdle(); next = h.create(); await next.start();
+    await until(() => next!.listJobs()[0]?.error?.includes("supported transfer") === true, "restart rechecks only the same remote result");
+    await next.waitForIdle(); assert.equal(next.listJobs()[0]!.providerJobId, original.providerJobId);
+    assert.equal(next.listJobs()[0]!.idempotencyKey, job.idempotencyKey); assert.equal(next.listJobs()[0]!.attempt, 1); assert.equal(next.listJobs()[0]!.providerCostMicroUsd, 37);
+    assert.equal(reads, 2); assert.equal(h.fake.submitCount, 1); assert.equal(h.ledger.length, 0);
+  } finally { await first.dispose(); await next?.dispose(); await first.waitForIdle(); await next?.waitForIdle(); await h.storage.stop(); }
+});
+
+for (const ending of ["cancel", "stop"] as const) it(`a result fetch finishing after ${ending} receives cancellation and cannot file late bytes`, { timeout: 30_000 }, async () => {
+  let writes = 0, finish!: () => void, signal: AbortSignal | undefined;
+  const h = await fixture(false, { async reserve() { writes++; return { async consumed() {}, async settle() {}, writeFailed() {} }; } }), queue = h.create();
+  (h.fake as DispatchClient).fetchArtifacts = async (_key, _remote, _context, options) => {
+    signal = options?.signal; await new Promise<void>(resolve => { finish = resolve; }); return h.artifacts;
+  };
+  try {
+    await queue.start(); const job = await queue.enqueue(input);
+    await until(() => signal !== undefined, "original result fetch entered");
+    if (ending === "cancel") await queue.cancel(job.id); else await queue.dispose();
+    assert.equal(signal!.aborted, true); finish(); await queue.waitForIdle();
+    assert.equal(writes, 0); assert.equal(h.fake.submitCount, 1);
+  } finally { finish?.(); await queue.dispose(); await queue.waitForIdle(); await h.storage.stop(); }
+});
 
 for (const mode of ['remote-checkpoint', 'inline-checkpoint', 'remote-world'] as const) {
   it(`completed ${mode} storage retries release inference ownership without replay or bypassing handover`, { timeout: 15_000 }, async () => {

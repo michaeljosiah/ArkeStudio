@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { mingReferenceHash } from "../local-ai/ming-reference.js";
 import { dirname, extname, join } from "node:path";
 import {
+  ARTIFACT_RETRIEVAL_HELD_MESSAGE,
   canDeleteJob,
   freeLimitReason,
   GOOGLE_BILLED,
@@ -133,7 +134,7 @@ export interface DispatchClient {
     /** What the engine is counting, where it counts anything (SPEC-021 D16). */
     step?: { stage: string; done: number; total: number };
   }>;
-  fetchArtifacts(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<DispatchArtifact[]>;
+  fetchArtifacts(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }, options?: { signal?: AbortSignal }): Promise<DispatchArtifact[]>;
   cancel(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<void>;
   /** The lane has drained after `model`'s job settled: a local engine may put down what it loaded (issue 846). */
   release?(model: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<void>;
@@ -1780,9 +1781,18 @@ export class JobQueue {
     if (job.landing) {
       let artifacts: DispatchArtifact[];
       try {
-        artifacts = suppliedArtifacts ?? (await client.fetchArtifacts(key, job.providerJobId!, { jobId: job.id, attempt: job.attempt, model: job.model }));
+        artifacts = suppliedArtifacts ?? (await client.fetchArtifacts(key, job.providerJobId!, { jobId: job.id, attempt: job.attempt, model: job.model }, { signal: this.artifactSignal(job) }));
       } catch (err) {
-        if (this.disposed) return;
+        if (this.disposed || !this.stillActiveRun(job)) return;
+        if (err && typeof err === "object" && "artifactRetrievalHeld" in err && err.artifactRetrievalHeld === true) {
+          // A supported-receipt ceiling cannot be repaired by repeatedly downloading the
+          // same oversized result. Keep its durable remote identity; no poll/submit replay.
+          this.releaseGpu(job);
+          const current = this.jobs.get(job.id)!;
+          const waiting = { ...current, error: ARTIFACT_RETRIEVAL_HELD_MESSAGE, updatedAt: this.clock() };
+          this.jobs.set(job.id, waiting); this.opts.emit({ at: this.clock(), type: "job.updated", job: waiting });
+          return;
+        }
         // An interrupted download restarts the fetch (R-12); nothing partial exists yet.
         const klass = classifyError(err);
         if (klass === "terminal") {
