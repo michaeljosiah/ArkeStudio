@@ -28,6 +28,22 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN INSTALL JOURNEYS
+  { group: "Install journeys · turns 242–244", screen: "One installer, three ways to begin", frame: "242a", route: "Proposed first-run setup", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Draft for owner review. Not approved or implemented. Shared entry journey; measurements are illustrative."] },
+  { group: "Install journeys · turns 242–244", screen: "Guided · see the starter package before downloading", frame: "242b", route: "Proposed first-run setup", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Draft for owner review. Not approved or implemented. Guided journey; measurements are illustrative."] },
+  { group: "Install journeys · turns 242–244", screen: "Guided · useful before the downloads finish", frame: "242c", route: "Proposed first-run setup", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Draft for owner review. Not approved or implemented. Guided journey; measurements are illustrative."] },
+  { group: "Install journeys · turns 242–244", screen: "Guided · a local component fails without blocking writing", frame: "242d", route: "Proposed first-run setup", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Draft for owner review. Not approved or implemented. Guided journey; measurements are illustrative."] },
+  { group: "Install journeys · turns 242–244", screen: "Guided · name what is actually ready", frame: "242e", route: "Proposed first-run setup", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Draft for owner review. Not approved or implemented. Guided journey; measurements are illustrative."] },
+  { group: "Install journeys · turns 242–244", screen: "Advanced · choose capabilities, not a wall of dependencies", frame: "243a", route: "Proposed first-run setup", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Draft for owner review. Not approved or implemented. Advanced journey; measurements are illustrative."] },
+  { group: "Install journeys · turns 242–244", screen: "Advanced · managed by default, existing installs by explicit choice", frame: "243b", route: "Proposed first-run setup", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Draft for owner review. Not approved or implemented. Advanced journey; measurements are illustrative."] },
+  { group: "Install journeys · turns 242–244", screen: "Advanced · one failed feature, three clear next steps", frame: "243c", route: "Proposed first-run setup", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Draft for owner review. Not approved or implemented. Advanced journey; measurements are illustrative."] },
+  { group: "Install journeys · turns 242–244", screen: "Advanced · approve only the selected dependencies", frame: "243d", route: "Proposed first-run setup", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Draft for owner review. Not approved or implemented. Advanced journey; measurements are illustrative."] },
+  { group: "Install journeys · turns 242–244", screen: "Lightweight · no additional AI downloads", frame: "244a", route: "Proposed first-run setup", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Draft for owner review. Not approved or implemented. Lightweight journey; measurements are illustrative."] },
+  { group: "Install journeys · turns 242–244", screen: "All paths · the same first world, with an honest capability summary", frame: "244b", route: "Proposed first-run setup", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Draft for owner review. Not approved or implemented. Shared destination journey; measurements are illustrative."] },
+  { group: "Install journeys · turns 242–244", screen: "Lightweight · add one capability with its complete dependency cost", frame: "244c", route: "Proposed first-run setup", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Draft for owner review. Not approved or implemented. Lightweight journey; measurements are illustrative."] },
+  { group: "Install journeys · turns 242–244", screen: "Lightweight · offline or incompatible hardware is a usable start", frame: "244d", route: "Proposed first-run setup", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Draft for owner review. Not approved or implemented. Lightweight journey; measurements are illustrative."] },
+  // END INSTALL JOURNEYS
+
   // BEGIN SYSTEM STATUS 241
   { group: "System · turn 241", screen: "System replaces the proposal shortcut", frame: "241a", route: "App chrome / System", status: "drifted", checked: "2026-10-26", controls: [], notes: ["Approved 26 October 2026; implemented component under qualification. Actual evidence/service copy differs from illustrative drawings; packaged Electron and physical-device acceptance remain separate. Current native Cpu glyph takes the former Inbox slot: Chat, System, Activity, Settings, Account. Page content and underlying proposal workflows remain unchanged."] },
   { group: "System · turn 241", screen: "A glance at this desktop", frame: "241b", route: "App chrome / System", status: "drifted", checked: "2026-10-26", controls: [], notes: ["Approved 26 October 2026; implemented component under qualification. Actual evidence/service copy differs from illustrative drawings; packaged Electron and physical-device acceptance remain separate. CPU, RAM, GPU and GPU memory are distinct values, with storage by destination. Every value in this design is illustrative; production shows qualified host observations or explicit unavailable states."] },
@@ -939,6 +955,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "install-journeys.review.html", what: "Turns 242–244: Guided, Advanced and Lightweight install journeys.", state: "draft; not approved or implemented" },
   { file: "system-status-240.review.html", what: "Turn 241: System shortcut, host performance/storage/service overview, measured warning, unavailable data and compact layouts.", state: "approved 26 October 2026; component implemented, under qualification" },
   { file: "branch-map-state-240.review.html", what: "Turn 240: remembered values, conditional choices and dialogue in First Contact, plus the click-connector creation flow; local interactive prototype.", state: "proposed 27 October 2026; not built" },
   { file: "global-chat-239.review.html", what: "Turn 239: the Studio assistant in a notification-style rounded dialog, diagnosis, reviewed repair, world handoff, phone, tablet and keyboard viewport.", state: "approved 26 October 2026; not built" },
@@ -1126,6 +1143,9 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="global-chat-239.reference.css">
 <link rel="stylesheet" href="system-status-240.css">
 <link rel="stylesheet" href="branch-map-state-240.css">
+<link rel="stylesheet" href="../packages/client/src/theme/tokens/launch.css">
+<link rel="stylesheet" href="../packages/client/src/screens/launch.css">
+<link rel="stylesheet" href="install-journeys.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">
