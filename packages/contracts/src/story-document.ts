@@ -156,7 +156,9 @@ export function compileStoryDocument(input: StoryCompileInput): StoryCompiled {
     }
     beats.forEach((beat, index) => {
       if (beat.picture === undefined) problems.push({ sceneId, detail: `${title}, beat ${index + 1} needs a picture` });
-      if (beat.pictureShotId !== undefined && beat.pictureShotId !== beat.shotId && shotWhen(beat.pictureShotId) !== undefined) {
+      // Kept under the same condition as its own shot, the picture is there whenever the beat is.
+      const kept = beat.pictureShotId === undefined || beat.pictureShotId === beat.shotId ? undefined : shotWhen(beat.pictureShotId);
+      if (kept !== undefined && storyIdentity(kept) !== storyIdentity(shotWhen(beat.shotId) ?? null)) {
         problems.push({ sceneId, detail: `${title}, beat ${index + 1} keeps the picture of a shot shown only in some states — give it a picture of its own` });
       }
       const shot = shotWhen(beat.shotId);

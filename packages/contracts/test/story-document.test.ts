@@ -207,6 +207,9 @@ describe("compiling a story for Arke Player (SPEC-058 R-80; SPEC-063 R-27)", () 
     // A beat keeping the picture of a shot shown only sometimes would be shown with none.
     const kept = { ...LANTERN_ROAD, scenes: { ...LANTERN_ROAD.scenes, sc_home: { title: "Home", beats: [...LANTERN_ROAD.scenes["sc_home"]!.beats!, { shotId: "sh_home-3", pictureShotId: "sh_home-2", picture: "lr-home-mara", text: "The lamp stays lit." }] } } };
     assert.match(problems(kept)[0]!.detail, /keeps the picture of a shot shown only in some states/);
+    // Under the same condition as the shot it keeps, it always has that picture.
+    const keptAlike = { ...kept, routing: { ...LANTERN_ROAD.routing, presentation: LANTERN_ROAD.routing.presentation!.map((entry) => (entry.sceneId === "sc_home" ? { ...entry, shots: [...entry.shots, { shotId: "sh_home-3", when: { op: "eq" as const, fact: "company", value: "mara" } }] } : entry)) } };
+    assert.deepEqual(problems(keptAlike), []);
     const blank = { ...LANTERN_ROAD, scenes: { ...LANTERN_ROAD.scenes, sc_bridge: { title: "The old bridge", beats: [{ shotId: "sh_bridge-1", pictureShotId: "sh_bridge-1", text: "Half the boards are gone." }] } } };
     assert.deepEqual(problems(blank), [{ sceneId: "sc_bridge", detail: "The old bridge, beat 1 needs a picture" }]);
     // Whatever the reader would refuse is refused here first.
