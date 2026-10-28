@@ -1,6 +1,10 @@
 # Installation journeys · turns 242–244
 
-28 October 2026 · **Draft for owner review. Not approved or implemented.**
+28 October 2026 · **Revision 2 · Draft for owner review. Not implemented.**
+
+Owner feedback: keep specific voice providers/models out of onboarding; confirm OpenCode is
+included in all paths; offer explicitly selected existing Claude Code and Codex installations.
+Revision 2 implements those changes in the drawings and walkthrough only.
 
 The owner requested journeys for people who want setup handled for them, technical users who
 want control, and people who want minimal downloads. These turns build on the **current**
@@ -31,7 +35,7 @@ reduction of those bundled files. A separate slim installer is outside these tur
 |---|---|---|---|
 | Promise | Arke chooses and manages a sensible starter setup | Choose capabilities and the sources that provide them | Start writing with minimal download |
 | Default additions | Managed Ollama, one compatible starter text model, Kokoro, Whisper, managed ComfyUI on supported hardware | Only selected capabilities and dependencies; managed engine sources preselected | None |
-| Optional | Image/video recipe weights, Ming variants, larger text models, providers, remote access | Each local capability/model, cloud provider and supported source override | All AI capabilities and remote access |
+| Optional | Image/video recipe weights, voice cloning from supported providers, larger text models, remote access | Existing Claude Code/Codex harness, local capabilities/models, cloud providers and supported overrides | All AI capabilities, existing supported assistant connections and remote access |
 | Enter the app | Core connected; valid writable workspace; create/save path available | Same core checks | Same core checks, including offline |
 | Claim local AI ready | Verified selected files; running healthy engines; model/capability checks | Only the chosen capability's checks; report independent results | Only after the user later selects and prepares a capability |
 | Continue during failure | Write manually; resume or adjust accepted download | Fix source, review managed alternative, or continue with ready capabilities | Unconfigured AI stays quiet; manual work remains available |
@@ -52,16 +56,37 @@ manual/hosted/existing-service choice. There is no automatic cloud or paid fallb
 
 ComfyUI is included in Guided to preserve the requested managed-local foundation where supported.
 Its engine alone cannot generate pictures or videos: recipe weights remain optional and are named
-as such. Ming reuses that compatible local Python/PyTorch/CUDA installation, with its isolated
-support overlay and selected 0.5B or 7.9B weights. A remote ComfyUI endpoint does not provide a
-local Python environment. Existing installations require explicit selection and compatibility
+as such. Voice cloning is set up later by selecting from supported providers; no named voice
+model or provider is promoted in first run. A selected local provider's actual dependencies
+are then shown, with compatible existing runtimes reused. Hosted providers show their own
+account and usage costs. Existing installations require explicit selection and compatibility
 checks; their packages and lifecycle stay under their owner's control.
+
+OpenCode v2 is already part of the base installer in **all three paths**. Guided uses it by
+default and names it only as included context; nobody needs to make a technical harness choice
+to begin. OpenCode is the harness; Ollama is its local model service, and is a separate optional
+download when the chosen writing route needs it.
+
+Advanced now starts with **Writing harness**: included OpenCode, or detected Claude Code/Codex.
+The drawing's Detected labels are illustrative, not a scan of this computer. Reuse existing
+`HarnessAvailability`, executable discovery/explicit paths, adapter qualification, account flows
+and selection persistence (SPEC-005, draft). Detection is not authentication or capability proof.
+Show absent/unsupported choices with the applicable next step; never silently select a found
+binary. A website login to ChatGPT or Claude alone is not an installed supported harness.
+
+Selecting Claude Code or Codex removes Ollama and local-writing-model downloads from that
+writing plan. Each uses the account/model route supported by its own adapter; do not promise
+Ollama routing or identical capabilities for all harnesses. OpenCode remains bundled without
+becoming a silent fallback or a second mandatory running authoring process. A Lightweight user
+can choose an existing assistant without preselecting local media downloads. Verification must
+make any chargeable probe explicit; opening the selection screen cannot trigger paid inference.
 
 The 8 GB additional download, 17 GB retained files, 24 GB peak space, 180 GB available, locations, timing, progress and
 all health outcomes in the drawings are **illustrative**. Production must distinguish download,
 retained disk and temporary peak on each real destination, count only missing selected files,
 and label unknown estimates. Catalogue size metadata is not a proven installed-footprint quote.
-The Ming offer deliberately keeps its download button unavailable while its full quote is missing.
+Changed local download plans require a complete quote before installation. Reusing an existing
+assistant alone needs no additional AI download, but still requires compatibility/account checks.
 
 Provider choice is optional and provider-neutral. Connection flows are not redesigned here and
 the prototype never accepts real credentials. Checking a connection is not permission for a paid
@@ -71,7 +96,8 @@ available. Model-free Diagnostics remains available in every path.
 
 ## Current implementation and specification boundary
 
-Read: SPEC-016 (draft) R-1–R-8 and its later managed-runtime/readiness amendments; ADR-004
+Read: SPEC-005 (draft), existing harness availability/settings/discovery/assembly; SPEC-016
+(draft) R-1–R-8 and its later managed-runtime/readiness amendments; ADR-004
 (proposed); current `launch.tsx`, setup catalogue, desktop packaging and managed runtime guide.
 The original SPEC-016 manual/offline onboarding intent and the later mandatory ComfyUI/Ollama
 entry gate now need explicit reconciliation. These drawings propose that reconciliation; they do
@@ -88,9 +114,10 @@ download a new starter model. Separate readiness of a feature from presence of i
 
 - **242a–e:** shared choice, Guided package review, in-progress start, interrupted download,
   completed capability checks.
-- **243a–d:** capabilities, managed/existing source controls, selected download review and
-  partial-ready service failure.
-- **244a–d:** Lightweight summary, shared world entry, later Ming offer, offline/narrow window.
+- **243e then 243a–d:** included/existing harness choice, capabilities, managed/existing source
+  controls, selected download review and partial-ready service failure.
+- **244a–d:** Lightweight summary, shared world entry, later supported voice-provider choice,
+  offline/narrow window.
 
 The interactive walkthrough is a bounded design fixture. Navigation, capability selections,
 source controls, Pause/Resume, narrow-window and review-theme controls operate locally. Static
@@ -121,3 +148,11 @@ not change the selected option, so that interaction is not claimed as verified. 
 the shared entry and three persona screens were delivered in the conversation. Master anchor/
 token/history checks and consolidated review generation/check passed; no application tests or
 installer execution are implied by this design-only verification.
+
+Revision 2 browser checks: selecting Codex in the new harness radio group updates the writing
+capability, removes Ollama/local-text-model fields and retains the selected harness in the plan.
+Entering that flow from Lightweight leaves media, voice and separate provider setup unselected;
+the resulting plan shows zero additional AI download and a compatibility/account-check action.
+Returning to the harness screen and selecting OpenCode updates the choice correctly. The new
+243e screen was visually inspected and captured for the owner. These checks exercise the design
+fixture, not installed harness discovery, authentication or inference.
