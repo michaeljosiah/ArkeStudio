@@ -5,7 +5,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { openPromise, type Entry } from "yauzl";
 import { ZipFile } from "yazl";
-import { guideAssetIds, listeningAssetIds, musicAssetIds, readGuide, readListening, readMusic, readStory, readWorldManifest, storyAssetIds, WORLD_MANIFEST_FILE, type WorldManifest } from "@arke-studio/contracts";
+import { guideAssetIds, listeningAssetIds, musicAssetIds, readGuide, readListening, readMusic, readStory, readWorldManifest, storyAssetIds, WORLD_MANIFEST_FILE, type StoryDocument, type WorldManifest } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
 
 /**
@@ -91,7 +91,8 @@ export async function readWorldPackageRelease(file: string): Promise<{ manifest:
   }
 }
 
-export type WorldPackageCheck = { ok: true; manifest: WorldManifest; sha256: string; bytes: number } | { ok: false; problems: string[] };
+/** `stories`: each story document the reader read, by production, so the export can replay its routes (SPEC-058 R-89). */
+export type WorldPackageCheck = { ok: true; manifest: WorldManifest; sha256: string; bytes: number; stories: Record<string, StoryDocument> } | { ok: false; problems: string[] };
 
 /**
  * Reads a written package back as Arke Player will (SPEC-058 R-5, R-13, R-70, R-80; SPEC-059 R-14): world.json,
@@ -101,6 +102,7 @@ export type WorldPackageCheck = { ok: true; manifest: WorldManifest; sha256: str
 export async function checkWorldPackageZip(file: string, signal?: AbortSignal): Promise<WorldPackageCheck> {
   const zip = await openPromise(toExtendedLength(file), { autoClose: false, strictFileNames: true, validateEntrySizes: true });
   const problems: string[] = [];
+  const stories: Record<string, StoryDocument> = {};
   let checked: WorldManifest;
   try {
     const entries = new Map<string, Entry>();
@@ -137,7 +139,10 @@ export async function checkWorldPackageZip(file: string, signal?: AbortSignal): 
         if (entry === undefined) continue;
         const story = readStory((await bytesOf(entry)).toString("utf8"), manifest.assets);
         if (!story.ok) problems.push(`${production.id} story: ${story.reason}`);
-        else for (const assetId of storyAssetIds(story.document)) used.add(assetId);
+        else {
+          stories[production.id] = story.document;
+          for (const assetId of storyAssetIds(story.document)) used.add(assetId);
+        }
         continue;
       }
       if (production.music !== undefined) {
@@ -177,5 +182,5 @@ export async function checkWorldPackageZip(file: string, signal?: AbortSignal): 
     hash.update(chunk as Buffer);
     bytes += (chunk as Buffer).length;
   }
-  return { ok: true, manifest: checked, sha256: hash.digest("hex"), bytes };
+  return { ok: true, manifest: checked, sha256: hash.digest("hex"), bytes, stories };
 }

@@ -16,6 +16,17 @@ export function pngHasAlpha(bytes: Uint8Array): boolean {
   return false;
 }
 
+/** Whether a WebP carries alpha: the VP8X alpha flag, or a lossless image's alpha bit (SPEC-058 R-6). */
+export function webpHasAlpha(bytes: Uint8Array): boolean {
+  if (bytes.length < 30) return false;
+  const view = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.toString("latin1", 0, 4) !== "RIFF" || view.toString("latin1", 8, 12) !== "WEBP") return false;
+  const chunk = view.toString("latin1", 12, 16);
+  if (chunk === "VP8X") return (view[20]! & 0x10) !== 0;
+  if (chunk === "VP8L") return ((view.readUInt32LE(21) >>> 28) & 1) === 1;
+  return false;
+}
+
 /** The existing Arke Player fit, shared with the explicitly chosen EPUB reading profile. */
 export async function fitReadingImage(source: string, destination: string, keepsAlpha: boolean, ffmpeg: FfmpegRunner, signal: AbortSignal, maxEdge: number = STORY_EPUB_READING_PROFILE.maxEdge): Promise<void> {
   const { jpegQuality } = STORY_EPUB_READING_PROFILE;
