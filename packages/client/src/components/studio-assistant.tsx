@@ -20,7 +20,7 @@ import { TextActions } from "./player.js";
 import type { DictationPhase } from "./dictation.js";
 import { ModelChip } from "./model-chip.js";
 import { ConversationReply } from "./conversation-reply.js";
-import { Cpu, Folder, Help, ListBullet, X } from "./icons.js";
+import { ListBullet, X } from "./icons.js";
 import { RecoveryCacheCleanupControls } from "./recovery-cache-cleanup.js";
 type StudioAssistantMessage = StudioAssistantThread["messages"][number];
 
@@ -83,7 +83,7 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
       <button type="button" className="fy-studio-icon" aria-label="Studio conversations" aria-expanded={history} onClick={() => { reading.stop(); setHistory(value => !value); }}><ListBullet size={16} /></button>
       <button type="button" className="fy-studio-icon" aria-label="Close Studio assistant" onClick={client.close}><X size={16} /></button>
     </header>
-    <div className="fy-studio-scope"><b>Studio</b><span>Setup, local AI &amp; help</span></div>
+    <div className="fy-studio-scope">Studio <span>Setup, local AI &amp; help</span></div>
     {history ? <nav className="fy-studio-history" aria-label="Studio conversations">
       <button type="button" className="fy-studio-button" onClick={() => { client.select(null); setHistory(false); }}>New conversation</button>
       {view.state?.threads.map(row => <div key={row.id}>
@@ -97,9 +97,9 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
       {!thread?.messages.length && <div className="fy-studio-welcome"><div className="fy-studio-mark" aria-hidden="true">a</div><h3>How can I help?</h3>
         <p>Ask about Arke, your setup or what needs attention.</p>
         <div className="fy-studio-prompts">
-          <button type="button" className="fy-studio-prompt" onClick={() => draft("Check local AI")}><Cpu size={14} />Check local AI</button>
-          <button type="button" className="fy-studio-prompt" onClick={() => draft("Review storage")}><Folder size={14} />Review storage</button>
-          <button type="button" className="fy-studio-prompt" onClick={() => draft("Help with Arke")}><Help size={14} />Help with Arke</button>
+          <button type="button" className="fy-studio-prompt" onClick={() => draft("Check local AI")}>Check local AI</button>
+          <button type="button" className="fy-studio-prompt" onClick={() => draft("Review storage")}>Review storage</button>
+          <button type="button" className="fy-studio-prompt" onClick={() => draft("Help with Arke")}>Help with Arke</button>
         </div></div>}
       {thread?.messages.map(message => <StudioMessage key={message.id} message={message} appState={appState} close={client.close}
         currentDiagnostic={message.id === currentDiagnostic}
@@ -118,7 +118,7 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
     </div>}
     {view.trouble && <p className="fy-studio-trouble" role="status">{view.trouble}</p>}
     <footer className="fy-studio-compose"><Composer value={view.draft} onChange={client.draft} onSubmit={() => { if (model && dictationPhase === "idle") void client.send(model); }}
-      placeholder="Ask Arke…" agentLabel="Arke" focusRequest={focus} busy={view.attaching || view.submitting || !!working || !!view.state?.busy || dictationPhase !== "idle"} disabledReason={unavailable}
+      placeholder="Ask Arke about your studio…" agentLabel="Arke" focusRequest={focus} busy={view.attaching || view.submitting || !!working || !!view.state?.busy || dictationPhase !== "idle"} disabledReason={unavailable}
       busyLabel={view.attaching ? "Reading documents…" : dictationPhase === "requesting" ? "Microphone permission…" : dictationPhase === "listening" ? "Dictating…" : dictationPhase === "transcribing" ? "Transcribing…" : "Working…"}
       attachmentLabel="Attach text documents" removeAttachmentTitle="Remove this unsent document"
       onAttach={() => { pickerTarget.current = client.documentPickerTarget(); picker.current?.click(); }} onAttachFiles={client.attachFiles} onAttachText={client.attachText}
