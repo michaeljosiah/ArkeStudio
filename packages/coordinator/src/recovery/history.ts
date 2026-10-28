@@ -155,7 +155,10 @@ export class RecoveryHistoryService {
   observeDiagnostics(snapshot: DiagnosticsSnapshot): void {
     try {
     const observedAt = Date.parse(snapshot.derivedAt);
-    const observations: RecoveryObservation[] = primaryFindings(snapshot).filter(finding => finding.severity !== "unmeasured").slice(0, 1000).map(finding => {
+    // This finding describes weights still offered for download (available/skipped), not a
+    // failed installation. Keep that catalogue guidance in Diagnostics without making every
+    // optional model an incident on a fresh install. Its subsumed recipe row stays there too.
+    const observations: RecoveryObservation[] = primaryFindings(snapshot).filter(finding => finding.severity !== "unmeasured" && finding.kind !== "comfyui-recipe-weights-missing").slice(0, 1000).map(finding => {
       const key = createHash("sha256").update(findingRef(finding)).digest("hex"), facts = recoveryFindingFacts(finding);
       const evidence = finding.stale ? "stale" as const : ["unknown", "unmeasured"].includes(finding.severity) ? "unavailable" as const : "fresh" as const;
       const phase = evidence !== "fresh" ? "observing" as const : finding.kind === "ming-cleanup-unconfirmed" && facts.some(fact => fact.name === "cleanup-checking" && fact.value === 1)

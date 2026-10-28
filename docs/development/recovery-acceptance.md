@@ -206,3 +206,18 @@ its expected hold. The fake volume mapping now canonicalizes destination paths a
 explicit directory alias. All twenty-five delivery cases pass on Node 22, preserving the capacity
 loss, original-ZIP and settlement assertions. Coordinator types and lint pass. Production admission
 is unchanged; the corrected fixture still requires its own CI.
+
+On the next normal launch, the same root reused its installed runtimes and reached first-run
+without another runtime download. A new disposable world was created through Form → Decide later;
+Studio and System opened without sending a model request. A controlled exit targeted only the
+candidate's idle managed ComfyUI Python child, after checking its executable, parent and creation
+time. Arke started a new owned process and recorded Automatic restart → Readiness verified. The
+world remained usable. The previous host's eight original child PIDs were independently confirmed
+absent after normal close; the personal installed host was not stopped or replaced.
+
+The fresh-root walkthrough also exposed optional model offers becoming recovery incidents. The
+existing Diagnostics catalogue still lists missing optional weights and their download controls,
+but those available/skipped offers no longer create proactive incidents or alerts. Actual setup
+holds and failures keep their existing behavior. The regression failed before this correction;
+all 23 recovery-history cases pass on Node 22 afterward. Previously retained observations are kept,
+not silently cleared or reported recovered. This does not complete the remaining epic acceptance.

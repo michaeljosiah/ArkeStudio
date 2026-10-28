@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { join } from "node:path";
 import { writeFile, readFile } from "node:fs/promises";
-import { emptyRecoveryHistory, RecoveryHistorySchema, RecoveryHistoryPageSchema, type RecoveryHistoryQuery, type RecoveryHistory, type RecoveryObservation, type RecoveryNotice, type DiagnosticsSnapshot } from "@arke-studio/contracts";
+import { comfyUiWeightsComponentId, emptyRecoveryHistory, RecoveryHistorySchema, RecoveryHistoryPageSchema, type RecoveryHistoryQuery, type RecoveryHistory, type RecoveryObservation, type RecoveryNotice, type DiagnosticsSnapshot } from "@arke-studio/contracts";
 import { RecoveryHistoryService } from "../../src/recovery/history.js";
 import { FileRecoveryHistoryStore } from "../../src/recovery/history-file.js";
 import { FileRecoveryControlStore } from "../../src/recovery/control-file.js";
@@ -87,6 +87,33 @@ it("missing diagnostics cannot report recovery and free text never enters the sa
   h.advance(1000); h.service.observeDiagnostics({ ...snapshot, derivedAt: new Date(now + 1000).toISOString(), findings: [] }); await h.service.flush();
   assert.equal(h.service.snapshot().incidents[0]!.phase, "unresolved"); assert.equal(h.service.snapshot().incidents[0]!.evidence, "unavailable"); assert.equal(h.notices.length, 1);
   await h.service.stop();
+});
+
+it("keeps optional download offers in Diagnostics without creating recovery incidents", async () => {
+  const h = harness(); await h.service.open();
+  const at = new Date(now).toISOString(), recipe = "comfyui-draft-image";
+  const snapshot: DiagnosticsSnapshot = { derivedAt: at, checked: ["comfyui"], sources: [], findings: [{
+    kind: "comfyui-recipe-weights-missing", occurrence: recipe, severity: "degraded", title: "Optional model files missing",
+    cause: { statement: "Model files have not been downloaded." }, remedy: { control: "component-download", target: comfyUiWeightsComponentId(recipe) },
+    firstSeen: at, consequences: [`comfyui-recipe-disabled:${recipe}`], facts: [],
+  }, {
+    kind: "comfyui-recipe-disabled", occurrence: recipe, severity: "degraded", title: "Optional recipe disabled",
+    cause: { statement: "Model files have not been downloaded." }, remedy: null, firstSeen: at, consequences: [], facts: [],
+  }] };
+  try {
+    h.service.observeDiagnostics(snapshot); await h.service.flush();
+    assert.equal(snapshot.findings.length, 2, "the existing Diagnostics catalogue stays available");
+    assert.equal(h.service.snapshot().activeCount, 0, "an offered optional download is not a failed operation");
+    assert.equal(h.notices.length, 0);
+    h.advance(1000);
+    h.service.observeDiagnostics({ ...snapshot, derivedAt: new Date(now + 1000).toISOString(), findings: [{
+      ...snapshot.findings[0]!, kind: "component-disk-short", occurrence: "comfyui-runtime", severity: "blocking",
+      title: "Authorized runtime install needs storage", remedy: { control: "component-retry", target: "comfyui-runtime" }, consequences: [],
+    }] });
+    await h.service.flush();
+    assert.equal(h.service.snapshot().activeCount, 1, "an actual installation hold still creates an incident");
+    assert.equal(h.notices.length, 1);
+  } finally { await h.service.stop(); }
 });
 
 it("mute, acknowledgement and advisory snooze preserve the fault and persist without a repair grant", async () => {
