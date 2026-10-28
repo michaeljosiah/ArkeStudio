@@ -1,6 +1,6 @@
 # Turn 246 · A story plays itself
 
-Drawn on 28 October 2026. Proposed; nothing is built.
+Drawn on 28 October 2026 and approved by the owner the same day (“Approve all”), with Player P19 (ArkePlayer PR #29). Nothing is built.
 
 ## Asked
 
@@ -91,7 +91,7 @@ So a route now stops 6 times (scenes 5, 7, 9, 12, 13 and 14), not 14. Its beats 
    voice before a first press. Rule 1's "opens playing" cannot hold there as written.
 6. A lone link has no row in Check.
 7. A link is drawn plainly only when it is alone in every state. A choice alone on some routes keeps
-   its pill and says `Sometimes plays through`. This is proposed and not drawn. It refines the
+   its pill and says `Sometimes plays through`. This is approved and not drawn. It refines the
    Studio-only rule, which says "in some state".
 8. 174c's Advance loses On tap, and After the voice becomes After the line.
 9. The current beat's tick fills as it plays.
