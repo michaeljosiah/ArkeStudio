@@ -989,7 +989,12 @@ their originating choice; Test another route opens the reachable-prefix picker t
 `InteractivePlayerAuthor.onTestRoute`, rather than inventing audience state.
 
 `scripts/smoke-story-layout.mjs` qualifies the complete App/global-chat layout, including the
-Story facts Inspector and one/two/three/five-option beat previews in both themes at desktop,
-window, tablet and phone sizes. It measures visible alternatives, full labels, scroll access
-and selection of a distinct second route. Its `--baseline` capture supports comparisons against
+Story facts Inspector and one/two/three/four/five-option beat previews in both themes at desktop,
+window, tablet and phone sizes. It measures the desktop dialogue/vertical-choice columns, narrow
+dialogue-first stack, visible alternatives, full labels, scroll access and selection of a
+distinct second route. Four short clip-stage checks also verify overflow from the first choice
+through the last; six long-dialogue cases verify readable, scrollable copy and usable choices.
+Scene-editor Preview has sixteen additional full-App window-bound and choice-access cases.
+The shared window-overlay rules in `branch-map.css` cover both entry points and release the
+scene centre query container while its modal player is open. Its `--baseline` capture supports comparisons against
 turn 240 without reading or writing an author's world; see the testing guide.

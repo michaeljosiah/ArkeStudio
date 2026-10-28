@@ -204,6 +204,20 @@ export function mountInteractivePlayer(root, options) {
 .aip-choices{position:absolute;left:0;right:0;bottom:96px;display:flex;justify-content:center;flex-wrap:wrap;gap:16px;padding:14px 32px 8px;max-height:calc(100% - 176px);overflow-y:auto;overscroll-behavior:contain}
 .aip-choice{position:relative;width:344px;max-width:100%;min-height:72px;flex:none;display:flex!important;align-items:center;gap:14px;padding:12px 20px!important;border-radius:16px;background:color-mix(in srgb,var(--aip-bg) 46%,transparent)!important;backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);border:1px solid color-mix(in srgb,var(--aip-fg) 22%,transparent)!important;box-shadow:0 10px 30px color-mix(in srgb,var(--aip-bg) 40%,transparent);font-size:18px!important;font-weight:600!important;letter-spacing:-.01em;text-align:left;animation:aip-rise .4s ease both}
 .aip-choice:focus-visible,.aip-choice:hover{background:var(--aip-fg)!important;color:var(--aip-bg)!important;border-color:transparent!important;outline:2px solid color-mix(in srgb,var(--aip-fg) 55%,transparent);outline-offset:4px}
+/* Three or more displayed alternatives use the approved cinematic reading layout (SPEC-063 R-26). */
+.aip-choices[data-layout="list"]{justify-content:flex-start;flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:0;border-top:1px solid color-mix(in srgb,var(--aip-fg) 22%,transparent)}
+.aip-choices[data-layout="list"] .aip-choice{width:100%;min-height:55px;padding:11px 12px!important;font-size:14px!important;font-weight:500!important;border-radius:0;border:0!important;border-bottom:1px solid color-mix(in srgb,var(--aip-fg) 22%,transparent)!important;box-shadow:none;background:color-mix(in srgb,var(--aip-bg) 92%,transparent)!important;backdrop-filter:none;-webkit-backdrop-filter:none}
+.aip-choices[data-layout="list"] .aip-choice:hover,.aip-choices[data-layout="list"] .aip-choice:focus-visible{background:var(--aip-fg)!important}
+.aip-choices[data-layout="list"] .aip-chip{position:static;height:20px;padding:0 6px;margin-left:auto;font-size:10px;flex:none}
+.aip[data-kind="clips"] .aip-choices[data-layout="list"]{left:calc(50% + 16px);right:28px;bottom:96px;padding:0;max-height:calc(100% - 196px)}
+.aip-decision,.aip-copy{display:contents}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-decision{position:absolute;left:28px;right:28px;bottom:26px;max-height:calc(100% - 126px);display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:32px;align-items:start}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-copy{grid-column:1;grid-row:1;display:flex;flex-direction:column;align-items:flex-start;gap:16px;min-width:0;min-height:0;max-height:100%;overflow-y:auto;overscroll-behavior:contain}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-choices{position:relative;left:auto;right:auto;bottom:auto;grid-column:2;grid-row:1;padding:0;max-height:100%;min-height:0}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-box{position:relative;left:auto;right:auto;bottom:auto;transform:none;flex-shrink:0;width:100%;max-width:410px;min-height:0;padding:0;background:none;border:0;border-radius:0;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-who{position:static;display:block;height:auto;padding:0;margin-bottom:12px;background:none;color:color-mix(in srgb,var(--aip-fg) 72%,transparent);border-radius:0;font-size:11px}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-more{display:none}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-under{position:relative;left:auto;right:auto;bottom:auto;justify-content:flex-start;flex-shrink:0}
 .aip-choice>.k{width:26px;height:26px;flex:none;border-radius:7px;border:1px solid currentColor;opacity:.6;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:500}
 .aip-choice>.l{flex:1;min-width:0;white-space:normal;overflow-wrap:anywhere}
 .aip-chip{position:absolute;top:-11px;right:16px;height:22px;padding:0 9px;border-radius:99px;display:inline-flex;align-items:center;font-size:11px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;background:var(--aip-bg);color:var(--aip-fg);border:1px solid color-mix(in srgb,var(--aip-fg) 30%,transparent)}
@@ -287,6 +301,17 @@ export function mountInteractivePlayer(root, options) {
 .aip[data-held] .aip-chrome{animation:none!important;opacity:1!important}
 }
 @media (prefers-reduced-motion:reduce){.aip-pic>img{animation:none!important}.aip-line>span{animation:none}}
+@media (max-width:800px){
+.aip[data-kind="clips"] .aip-choices[data-layout="list"]{left:16px;right:16px;bottom:74px;max-height:calc(100% - 174px)}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-decision{left:16px;right:16px;bottom:42px;max-height:calc(100% - 172px);display:flex;flex-direction:column;gap:22px;align-items:stretch}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-copy{flex-shrink:1}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-choices{flex-shrink:1;min-height:124px;max-height:none}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-box{max-width:none}
+.aip-choices[data-layout="list"] .aip-chip{display:none}
+}
+@media (max-width:800px) and (max-height:500px){
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-decision{bottom:16px;max-height:calc(100% - 96px);gap:12px}
+}
 @media (max-width:640px){
 .aip-top{left:20px;right:14px;top:20px}
 .aip-bar{left:16px;right:16px}
@@ -341,10 +366,10 @@ export function mountInteractivePlayer(root, options) {
     '<button type="button" class="aip-ib" data-act="route" data-ref="routeBtn" aria-label="Route"></button>' +
     '<button type="button" class="aip-ib" data-act="full" aria-label="Full screen">' + icon(I.full) + "</button>" +
     "</div></div>" +
-    '<div class="aip-box" data-ref="box" hidden><span class="aip-who" data-ref="who" hidden></span><div class="aip-line" data-ref="line" aria-live="polite"></div><span class="aip-more" data-ref="more"></span></div>' +
+    '<div class="aip-decision"><div class="aip-copy"><div class="aip-box" data-ref="box" hidden><span class="aip-who" data-ref="who" hidden></span><div class="aip-line" data-ref="line" aria-live="polite"></div><span class="aip-more" data-ref="more"></span></div>' +
+    '<div class="aip-under" data-ref="under"></div></div>' +
+    '<div class="aip-choices" data-ref="choices" role="group" aria-label="Choices"></div></div>' +
     '<div class="aip-ticks" data-ref="ticks"></div><div class="aip-hold" data-ref="hold"></div>' +
-    '<div class="aip-choices" data-ref="choices" role="group" aria-label="Choices"></div>' +
-    '<div class="aip-under" data-ref="under"></div>' +
     '<div data-ref="hero"></div>' +
     '<div class="aip-panel" data-ref="panel" role="dialog" aria-label="Route" hidden></div>' +
     '<div class="aip-panel" data-ref="log" role="dialog" aria-label="Log" hidden></div>' +
@@ -739,6 +764,10 @@ export function mountInteractivePlayer(root, options) {
   function renderChoices() {
     const available = outOf(state.sceneId);
     const options = mode === "choice" ? choices.filter(c => c.from === state.sceneId && (available.some(a => a.id === c.id) || story && c.unavailable)) : [];
+    // Count the projected cards, including any explicitly authored unavailable reason.
+    const layout = options.length > 2 ? "list" : "cards";
+    choicesEl.setAttribute("data-layout", layout);
+    root.setAttribute("data-choice-layout", layout);
     choicesEl.innerHTML = options
       .map(c => {
         const index = available.findIndex(a => a.id === c.id), disabled = index < 0;
