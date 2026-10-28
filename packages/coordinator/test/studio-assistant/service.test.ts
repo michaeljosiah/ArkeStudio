@@ -109,10 +109,31 @@ it("rejects unsafe evidence before delegation and invented evidence references b
     try {
       const id = (await service.createThread())!; await service.send({ threadId: id, text: "Diagnose", model: local }); await until(() => !service.snapshot().busy, "invalid evidence refused");
       assert.equal(h.calls.length, unsafe ? 1 : 2); assert.equal(service.snapshot().threads[0]!.pending?.state, "interrupted");
+      assert.equal(service.snapshot().threads[0]!.pending?.reason, "evidence-invalid");
       assert(!JSON.stringify(h.prepared).includes("PRIVATE_CREDENTIAL"));
       assert.deepEqual(await service.send({ threadId: id, text: "Do it again", model: local }), { status: "refused", reason: "interrupted" });
     } finally { await service.stop(); }
   }
+});
+it("retains a closed response failure over restart and acknowledgement without storing or replaying the rejected answer", async () => {
+  const rejected = "PRIVATE_MALFORMED_MODEL_RESPONSE", h = fixture([rejected]);
+  let next: StudioAssistantService | undefined;
+  try {
+    const id = (await h.service.createThread())!;
+    await h.service.send({ threadId: id, text: "Explain storage", model: local });
+    await until(() => !h.service.snapshot().busy, "malformed response settled");
+    const pending = h.disk().threads[0]!.pending!;
+    assert.equal(pending.reason, "response-invalid"); assert.equal(h.calls.length, 1);
+    assert(!JSON.stringify(h.disk()).includes(rejected));
+    await h.service.stop();
+    next = new StudioAssistantService({ store: h.store, model: h.model, evidence: h.evidence }); await next.open();
+    assert.equal(next.snapshot().threads[0]!.pending?.reason, "response-invalid"); assert.equal(h.calls.length, 1);
+    assert(await next.acknowledgeInterruption(id, pending.id));
+    const acknowledged = next.snapshot().threads[0]!.messages.at(-1)!;
+    assert.equal(acknowledged.interrupted?.reason, "response-invalid");
+    assert.match(acknowledged.text, /could not read/); assert.equal(h.calls.length, 1);
+    assert(!JSON.stringify(next.snapshot()).includes(rejected));
+  } finally { await h.service.stop(); await next?.stop(); }
 });
 it("a failed dispatch-intent flush sends nothing and cannot be retried as an absent call", async () => {
   const h = fixture([reply("not authorized")]); h.save(async value => { if (value.threads[0]?.pending?.state === "intended") throw Object.assign(new Error("disk full"), { code: "ENOSPC" }); });

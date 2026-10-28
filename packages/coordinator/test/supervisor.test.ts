@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ChildProcess } from "node:child_process";
 import { tempDir } from "./tmp.js";
 import { until, untilAsync } from "./wait.js";
 import { ChildLedger, killTree, type ChildRecord } from "../src/child-ledger.js";
@@ -17,6 +18,23 @@ const CHILD = join(here, "fixtures", "child.mjs");
 const SHIM = join(here, "fixtures", "shim.cmd");
 const SHIM_DETACH = join(here, "fixtures", "shim-detach.cmd");
 const isWin = process.platform === "win32";
+
+it("confirms the original child exit when Windows tree kill returns without terminating it", { skip: !isWin, timeout: 30000 }, async () => {
+  let attempted = 0;
+  const supervisor = new ChildSupervisor({ id: "tree-kill-noop", command: process.execPath, args: [CHILD],
+    readyTimeoutMs: 10000, probeIntervalMs: 1000, maxRestarts: 0, backoffMs: 1 }, {
+    kill: async () => { attempted++; }, listDescendants: async () => [],
+  });
+  try {
+    await supervisor.start(); assert.equal(supervisor.status, "healthy"); assert(supervisor.pid);
+    await supervisor.stopAndConfirm();
+    assert.equal(attempted, 1); assert.equal(supervisor.pid, null);
+  } finally {
+    // If the assertion fails on the old implementation, terminate only this captured child.
+    const pid = supervisor.pid; if (pid) await killTree(pid);
+    await supervisor.stopAndConfirm();
+  }
+});
 
 function collect(sup: ChildSupervisor): SupervisorStatusEvent[] {
   const events: SupervisorStatusEvent[] = [];
@@ -87,7 +105,13 @@ describe("ChildSupervisor", () => {
     let refuse = true;
     const sup = new ChildSupervisor({ id: "failed-start", command: process.execPath, args: [CHILD],
       env: { MODE: "ignore-stop" }, readyTimeoutMs: 10_000, validateHealth: async () => ({ ok: false, reason: "incompatible test runtime" }),
-    }, { kill: async pid => { if (!refuse) await killTree(pid); } });
+    }, { kill: async pid => {
+      if (!refuse) { await killTree(pid); return; }
+      // Simulate failure of both native termination routes, including the captured-handle
+      // fallback. The later real tree kill still confirms exit of this original child.
+      const child = (sup as unknown as { child: ChildProcess | null }).child;
+      if (child) child.kill = () => false;
+    } });
     try {
       await sup.start();
       assert.equal(sup.status, "failed");

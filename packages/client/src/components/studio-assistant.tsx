@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import type { ClientState, StudioAssistantThread, StudioCloudShare } from "@arke-studio/contracts";
-import { STUDIO_ASSISTANT_LIMITS } from "@arke-studio/contracts";
+import { STUDIO_ASSISTANT_LIMITS, studioInterruptionMessage } from "@arke-studio/contracts";
 import { StudioConversationClient, type StudioConversationView } from "../lib/studio-assistant.js";
 import { STUDIO_DOCUMENT_ACCEPT, studioDocumentsFit } from "../lib/studio-documents.js";
 import { onStudioAssistantReply, send, useStore } from "../lib/store.js";
@@ -106,7 +106,7 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
       </div>}
       {share && <CloudApproval key={`${share.id}:${share.digest}`} share={share} approve={() => void client.request({ action: "approve-cloud", threadId: share.threadId, runId: share.runId, shareId: share.id, digest: share.digest })} />}
       {pending?.state === "interrupted" && <div className="fy-studio-fact-card" role="status"><b>Request interrupted</b>
-        <p>Arke cannot confirm that this request finished. It will not be sent again automatically.</p>
+        <p>{studioInterruptionMessage(pending.reason)} It will not be sent again automatically.</p>
         <p className="fy-studio-note">Model: {pending.model}</p><button type="button" className="fy-studio-button" disabled={!view.fresh || view.state?.busy}
           onClick={() => void client.request({ action: "acknowledge", threadId: thread!.id, runId: pending.id })}>Acknowledge interruption</button></div>}
       {working && <div className="fy-studio-working" role="status"><span>{share ? "Waiting for your approval" : pending.phase === "diagnostic" ? "Checking operational evidence…" : "Arke is working…"}</span>

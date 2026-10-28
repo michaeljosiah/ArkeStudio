@@ -288,7 +288,11 @@ export function remedyAbsenceStatement(
   finding: Finding,
 ): string | null {
   if (finding.remedy !== null) return null;
-  return suppressedRefs(snapshot).has(findingRef(finding)) ? null : REMEDY_ABSENT_STATEMENT;
+  if (suppressedRefs(snapshot).has(findingRef(finding))) return null;
+  if (finding.kind === "comfyui-engine-unavailable" && finding.facts.some(fact => fact.name === "source" && fact.value === "user-url")) {
+    return "Start your selected ComfyUI installation and check its URL in Settings · Providers · ComfyUI, then refresh. Arke cannot restart an external installation.";
+  }
+  return REMEDY_ABSENT_STATEMENT;
 }
 
 export const FindingSchema = z

@@ -68,15 +68,50 @@ execution/ownership checks intact. A successful rerun does not resolve the earli
 - **Live Studio reliability:** explain the first diagnostic interruption and establish a
   useful, recoverable user-facing failure path. Do not call this route reliably accepted based
   on the successful rerun or automatically replay its interrupted request.
-- **Diagnostics clarity:** the walkthrough still shows dense repeated consequences and a generic
-  absence-of-remedy line for an unreachable explicitly selected external service. Review clear
-  user-directed next steps without claiming Arke owns that service.
 - Actual mandatory managed-runtime downloads/installation and packaged Electron startup,
   desktop notifications, microphone/speaker interaction and physical GPU handover need their
   own application/device checks. This isolated browser fixture does not establish them.
 - Complete output/scratch/export admission, remaining repair owners and Studio controls,
   other-platform/fault coverage and the approved turn-239 matched visual comparison remain
   open under SPEC-061/062. This journey is not a substitute for the design-master comparison.
+
+## Final pass: failures found and corrected
+
+The later real-client run starts with both selected fixture services unhealthy: first-run
+completion remains disabled. Making both healthy advances to the library. A later health
+failure leaves the current workspace usable and presents actionable Diagnostics/Activity status.
+Capacity remains synthetic; no installer or model runs in this browser fixture.
+
+The phone walkthrough exposed diagnostic text squeezed to a few characters per line. Evidence,
+notes and manual guidance now wrap independently; affected recipes start in a collapsed disclosure.
+Expanded consequences were checked at 390×844, with dark/reduced-height and tablet navigation also
+inspected. An external ComfyUI failure now names the user's next step and the actual Settings path,
+without offering to restart that installation. These are actual implementation captures, not
+the still-required turn-239 design comparison.
+
+Studio now retains a closed private interruption reason for malformed responses, unverifiable
+evidence, model failure, cancellation, delegation limits and host shutdown. Existing history
+remains readable. The card explains a next step; acknowledgement retains that explanation without
+resubmission. Raw errors/rejected replies are not added to history, diagnostics or shared state.
+The specialist prompt enumerates the allowed evidence IDs explicitly; verification still refuses
+invented references. This improves the failure path and is not proof that the earlier failure is fixed.
+
+A further real-model run completed the main and diagnostic responses with valid references, then
+failed during the final native call. Shutdown also failed to confirm the original OpenCode exit.
+The qualification lock remains; it was not deleted to force another run. A later read-only native
+query found neither that writer port nor the qualification's Ollama executable still running.
+
+A focused native regression reproduced a related cleanup gap: the tree-kill dependency can
+return without terminating the captured child. Forced termination now waits briefly, then tries
+the captured child handle. Descendants still require confirmed reaping and failed cleanup still
+retains ownership. The regression failed before the change; both fallback and all-termination-
+routes-fail checks pass afterward. This mechanism alone does not explain the final model failure.
+
+The first broad fault pass recorded 297 passes, one timeout and one platform skip. Its combined
+root/reparse case passed alone; those independent native scenarios now have separate existing
+deadlines, with every refusal and protected-byte assertion retained. Subsequent native runs and
+the real-model rerun remain qualification work; do not describe an earlier green checkpoint as
+acceptance of these later changes.
 
 Restore temporary viewport overrides and stop the qualifier's original host when finished.
 Clear the two build environment variables before the normal production build. Retained test

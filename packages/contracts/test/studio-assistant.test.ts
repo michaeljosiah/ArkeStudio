@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { ClientMessageSchema, FrameSchema, isRemoteHostCommand, RemoteCommandRefusalSchema, StudioAssistantCommandSchema, StudioAssistantSnapshotSchema, StudioCloudShareSchema, StudioAssistantMessageSchema, StudioTextAttachmentsSchema } from "../src/index.js";
+import { ClientMessageSchema, FrameSchema, isRemoteHostCommand, RemoteCommandRefusalSchema, StudioAssistantCommandSchema, StudioAssistantSnapshotSchema, StudioCloudShareSchema, StudioAssistantMessageSchema, StudioTextAttachmentsSchema, StudioAssistantThreadSchema } from "../src/index.js";
 const request = { kind: "studio-assistant", requestId: "12345678-1234-4234-8234-123456789abc", command: { action: "watch" } };
+it("reads legacy interrupted history and admits only closed failure reasons", () => {
+  const id = "01J8F3K2QW9VZX4N7M0RTYB6HC";
+  const pending = { id, phase: "diagnostic", state: "interrupted", startedAt: 1, model: "ollama/local", destination: null, disclosure: null };
+  const thread = { id, createdAt: 1, updatedAt: 1, archived: false, messages: [], pending };
+  assert(StudioAssistantThreadSchema.safeParse(thread).success);
+  assert(StudioAssistantThreadSchema.safeParse({ ...thread, pending: { ...pending, reason: "evidence-invalid" } }).success);
+  assert(!StudioAssistantThreadSchema.safeParse({ ...thread, pending: { ...pending, reason: "PRIVATE_RAW_ERROR" } }).success);
+});
 it("bounds text documents by aggregate encoded bytes and keeps paths and model attachments out of the protocol", () => {
   const attachment = { id: request.requestId, name: "notes.md", text: "Untrusted user document" };
   const command = { action: "send", threadId: "01J8F3K2QW9VZX4N7M0RTYB6HC", model: "provider/model", text: "Explain these notes", attachments: [attachment] };

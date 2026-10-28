@@ -146,25 +146,26 @@ it("reports deletion as unknown while a metadata-only handle keeps it pending", 
   assert.equal((await windowsCacheFiles({ root: h.root, mode: "reconcile", items: [{ key, expected: h.proof }] }, signal()))[0]?.state, "absent");
 });
 
-it("refuses a replaced root, root junction and leaf directory reparse point", native, async () => {
+it("refuses a replaced root while retaining both original and replacement bytes", native, async () => {
   const h = await fixture(); const retained = h.root + "-retained";
   // Both targets are disposable fixture directories under the known temporary parent.
   const parent = await realpath(join(h.root, ".."));
   assert.equal((await realpath(join(retained, ".."))).toLowerCase(), parent.toLowerCase());
   await rename(h.root, retained); await mkdir(h.root); await writeFile(h.path, h.bytes);
-  let row = (await windowsCacheFiles({ root: h.root, mode: "remove", items: [{ key, expected: h.proof }] }, signal()))[0]!;
+  const row = (await windowsCacheFiles({ root: h.root, mode: "remove", items: [{ key, expected: h.proof }] }, signal()))[0]!;
   assert.equal(row.state, "refused"); assert.deepEqual(await readFile(h.path), h.bytes);
   assert.deepEqual(await readFile(join(retained, `${key}.wav`)), h.bytes);
-  // Junction fixtures stay inside their own tracked temporary parents too.
+});
+
+// Independent native scenarios each keep the existing per-case deadline. Combining four
+// helper starts under one deadline hid the individual result on a loaded Windows host.
+for (const location of ["root", "leaf"] as const) it(`refuses a ${location} directory reparse point without touching its target`, native, async () => {
   const outside = await tempDir("arke-cache-outside-");
   const root = await tempDir("arke-cache-reparse-");
-  const junction = join(root, "root-junction"); await symlink(outside, junction, "junction");
-  await writeFile(join(outside, `${key}.wav`), h.bytes);
-  row = (await windowsCacheFiles({ root: junction, mode: "inspect", items: [{ key }] }, signal()))[0]!;
-  assert.equal(row.state, "refused");
-  await symlink(outside, join(root, `${key}.wav`), "junction");
-  row = (await windowsCacheFiles({ root, mode: "inspect", items: [{ key }] }, signal()))[0]!;
-  assert.equal(row.state, "refused"); assert.deepEqual(await readFile(join(outside, `${key}.wav`)), h.bytes);
+  const bytes = Buffer.from("protected junction fixture"), junction = join(root, location === "root" ? "root-junction" : `${key}.wav`);
+  await writeFile(join(outside, `${key}.wav`), bytes); await symlink(outside, junction, "junction");
+  const row = (await windowsCacheFiles({ root: location === "root" ? junction : root, mode: "inspect", items: [{ key }] }, signal()))[0]!;
+  assert.equal(row.state, "refused"); assert.deepEqual(await readFile(join(outside, `${key}.wav`)), bytes);
 });
 
 it("keeps path punctuation as stdin data and returns no host path in its proof", native, async () => {

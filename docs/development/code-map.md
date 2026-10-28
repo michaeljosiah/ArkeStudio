@@ -1668,6 +1668,13 @@ settings/history over controlled runtime/capacity faults. It is not an alternate
 or runtime installer. Read [the acceptance record](recovery-acceptance.md) for its boundaries.
 `recovery/refresh-health.test.ts` covers metadata-only Ollama refresh during creative GPU work;
 `settings-providers.tsx` presents runtime state independently of model availability.
+Studio's closed private interruption vocabulary and user guidance live in contracts
+`studio-assistant.ts`; the conversation service preserves the reason through restart and
+acknowledgement without retaining raw errors or replaying the turn. Diagnostics uses independently
+wrapping evidence/manual guidance and collapsed consequence disclosures. Native supervisor forced
+termination falls back to its captured child handle when a returned tree-kill command leaves it
+alive; `stopAndConfirm` still requires child/descendant exit. Focused regressions live in
+`studio-assistant/service.test.ts`, `supervisor.test.ts` and the corresponding client suites.
 
 Approved System design (master turn 241, originally reviewed as 240): contracts
 `src/system-resources.ts` owns readings, freshness and conservative

@@ -35,6 +35,22 @@ function View({ client }: { client: StudioConversationClient }) {
   const view = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot);
   return <StudioAssistantView view={view} client={client} appState={FIXTURE_STATE} model="provider/model" pickModel={client.pickModel} />;
 }
+it("explains an invalid diagnostic answer and acknowledges it without resending", async () => {
+  const h = fixture(), container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  const state = initial();
+  state.threads = [{ id: threadId, createdAt: 1, updatedAt: 1, archived: false, messages: [], pending: {
+    id: runId, phase: "diagnostic", state: "interrupted", reason: "evidence-invalid", startedAt: 1, model: "ollama/local", destination: null, disclosure: null } }];
+  h.deliver(state);
+  try {
+    await act(async () => root.render(<MemoryRouter><View client={h.client} /></MemoryRouter>));
+    assert.match(container.textContent!, /could not be verified against the supplied facts/);
+    assert.match(container.textContent!, /Open Diagnostics/);
+    assert.match(container.textContent!, /not be sent again automatically/);
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Acknowledge interruption")!.click());
+    assert.equal(h.sent.at(-1)!.command.action, "acknowledge");
+    assert.equal(h.sent.some(message => message.command.action === "send"), false);
+  } finally { await act(async () => root.unmount()); h.client.dispose(); container.remove(); }
+});
 it("uses the shared attachment controls, previews escaped text and removes unsent documents without filing them", async () => {
   const h = fixture(), container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
   try {

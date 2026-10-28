@@ -1009,6 +1009,20 @@ export class ChildSupervisor extends EventEmitter {
       if (child.exitCode === null && child.signalCode === null) {
         try { child.kill("SIGKILL"); } catch { /* ledger and Job Object remain the backstops */ }
       }
+      return;
+    }
+    if (process.platform === "win32" && child.exitCode === null && child.signalCode === null) {
+      // taskkill also tolerates nonzero statuses, so returning does not prove termination.
+      // Keep all forced termination in this owner; only the captured child handle is used
+      // for fallback, and surviving descendants still require separate confirmed reaping.
+      let onExit!: () => void;
+      const exited = new Promise<boolean>(resolve => { onExit = () => resolve(true); child.once("exit", onExit); });
+      try {
+        const stopped = await Promise.race([exited, this.sleep(2_000).then(() => false)]);
+        if (!stopped && child.exitCode === null && child.signalCode === null) {
+          try { child.kill("SIGKILL"); } catch { /* Keep the original owner for a later stop. */ }
+        }
+      } finally { child.removeListener("exit", onExit); }
     }
   }
 }

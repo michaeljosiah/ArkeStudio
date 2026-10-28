@@ -82,18 +82,35 @@ export const StudioDiagnosticAnswerSchema = z.object({
 }).strict();
 export type StudioDiagnosticAnswer = z.infer<typeof StudioDiagnosticAnswerSchema>;
 
+/** Closed private failure vocabulary; never persist raw provider errors or rejected replies. */
+export const StudioInterruptionReasonSchema = z.enum(["host-stopped", "cancelled", "model-failed", "response-invalid", "evidence-invalid", "delegation-limit"]);
+export type StudioInterruptionReason = z.infer<typeof StudioInterruptionReasonSchema>;
+export function studioInterruptionMessage(reason?: StudioInterruptionReason): string {
+  switch (reason) {
+    case "host-stopped": return "Arke closed before this request finished. Review the conversation before starting a new request.";
+    case "cancelled": return "This request was stopped. You can continue with a new message after acknowledging it.";
+    case "model-failed": return "The model could not complete this request. Check its availability in Settings, then start a new request when ready.";
+    case "response-invalid": return "The model returned an answer Arke could not read. You can choose another available model for a new request.";
+    case "evidence-invalid": return "The diagnostic answer could not be verified against the supplied facts. Open Diagnostics for the measured status.";
+    case "delegation-limit": return "The model requested another diagnosis instead of answering. Open Diagnostics or start a new request.";
+    default: return "Arke cannot confirm that this request finished. Review the conversation before starting a new request.";
+  }
+}
+
 export const StudioAssistantMessageSchema = z.object({
   id: UlidSchema, role: z.enum(["user", "arke"]), text: z.string().max(STUDIO_ASSISTANT_LIMITS.replyChars), at: instant,
   attachments: StudioTextAttachmentsSchema.optional(),
   diagnostic: z.object({ evidence: StudioDiagnosticEvidenceSchema, answer: StudioDiagnosticAnswerSchema }).strict().optional(),
   handoff: z.object({ destination: z.enum(["world", "builder"]), draft: z.string().max(STUDIO_ASSISTANT_LIMITS.requestChars) }).strict().optional(),
   interrupted: z.object({ runId: UlidSchema, phase: z.enum(["main", "diagnostic", "answer"]), at: instant,
+    reason: StudioInterruptionReasonSchema.optional(),
     model: z.string().min(1).max(512), destination: digest.nullable(), disclosure: digest.nullable() }).strict().optional(),
 }).strict().refine(value => value.attachments === undefined || value.role === "user" && studioRequestFits(value), "Only bounded user requests may contain text documents.");
 export const StudioAssistantThreadSchema = z.object({
   id: UlidSchema, createdAt: instant, updatedAt: instant, archived: z.boolean(),
   messages: z.array(StudioAssistantMessageSchema).max(STUDIO_ASSISTANT_LIMITS.messages),
   pending: z.object({ id: UlidSchema, phase: z.enum(["main", "diagnostic", "answer"]),
+    reason: StudioInterruptionReasonSchema.optional(),
     state: z.enum(["preparing", "intended", "interrupted"]), startedAt: instant,
     model: z.string().min(1).max(512), destination: digest.nullable(), disclosure: digest.nullable(),
   }).strict().nullable(),

@@ -96,12 +96,9 @@ function followRemedy(navigate: ReturnType<typeof useNavigate>, remedy: NonNulla
 }
 
 /** The remedy as the registry states it: the control's label, with its place beside it. */
-function Remedy({ finding, snapshot }: { finding: Finding; snapshot: DiagnosticsSnapshot }) {
+function Remedy({ finding }: { finding: Finding }) {
   const navigate = useNavigate();
-  if (finding.remedy === null) {
-    const absence = remedyAbsenceStatement(snapshot, finding);
-    return absence === null ? null : <span className="fy-diag__place">{absence}</span>;
-  }
+  if (finding.remedy === null) return null;
   const control = CONTROL_REGISTRY[finding.remedy.control];
   const remedy = finding.remedy;
   return (
@@ -117,6 +114,7 @@ function Remedy({ finding, snapshot }: { finding: Finding; snapshot: Diagnostics
 
 function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: DiagnosticsSnapshot; now: number }) {
   const explains = consequencesOf(snapshot, finding);
+  const absence = remedyAbsenceStatement(snapshot, finding);
   const stale = finding.stale;
   return (
     <div className="fy-set__row fy-set__row--stack" id={`diag-${findingRef(finding)}`} tabIndex={-1} data-testid="diag-finding" data-kind={finding.kind}>
@@ -125,12 +123,13 @@ function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: Di
         <span className="fy-diag__title">{finding.title}</span>
         <span style={{ flex: 1 }} />
         <span className="fy-diag__meta">since {timeOf(finding.firstSeen)}</span>
-        <Remedy finding={finding} snapshot={snapshot} />
+        <Remedy finding={finding} />
       </div>
+      {absence !== null && <p className="fy-diag__manual">{absence}</p>}
       <div className="fy-set__why">
         <span className={cx("fy-set__dot", dotClass(finding.severity))} style={{ width: 5, height: 5 }} />
         <span className="fy-diag__cause">{finding.cause.statement}</span>
-        {finding.note !== undefined && <span className="fy-diag__meta"> · {finding.note}</span>}
+        {finding.note !== undefined && <span className="fy-diag__meta">{finding.note}</span>}
         {finding.cause.redacted === true && <span className="fy-diag__chip">redacted</span>}
       </div>
       {stale !== undefined && (
@@ -141,10 +140,10 @@ function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: Di
         </div>
       )}
       {explains.length > 0 && (
-        <div className="fy-diag__explains">
-          <div className="fy-diag__meta" style={{ letterSpacing: "0.14em" }}>
-            ▾ EXPLAINS {explains.length}
-          </div>
+        <details className="fy-diag__explains">
+          <summary className="fy-diag__meta" style={{ letterSpacing: "0.14em", cursor: "pointer" }}>
+            EXPLAINS {explains.length}
+          </summary>
           {explains.map((consequence) => (
             <div key={findingRef(consequence)} className="fy-diag__sub" data-testid="diag-consequence">
               <span className={cx("fy-set__dot", dotClass(consequence.severity))} style={{ width: 5, height: 5 }} />
@@ -152,7 +151,7 @@ function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: Di
               <span className="fy-diag__meta">{consequence.cause.statement}</span>
             </div>
           ))}
-        </div>
+        </details>
       )}
     </div>
   );

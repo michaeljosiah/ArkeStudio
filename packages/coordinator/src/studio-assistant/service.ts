@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { ulid, StudioAssistantDecisionSchema, StudioAssistantFileSchema, StudioAssistantSnapshotSchema,
   StudioCloudShareSchema, StudioDiagnosticAnswerSchema, StudioDiagnosticEvidenceSchema, STUDIO_ASSISTANT_LIMITS, StudioAssistantSendSchema, studioRequestFits,
   type StudioAssistantFile, type StudioAssistantSnapshot, type StudioAssistantThread,
+  studioInterruptionMessage, type StudioInterruptionReason,
   type StudioCloudShare, type StudioDiagnosticAnswer, type StudioDiagnosticEvidence, type StudioDiagnosticTopic } from "@arke-studio/contracts";
 import { WriteQueue } from "../change-log.js";
 import { extractJson } from "../canon/ask.js";
@@ -53,7 +54,9 @@ export class StudioAssistantService {
         const value = StudioAssistantFileSchema.parse(await this.deps.store.load());
         if (this.closing) return;
         const interrupted = value.threads.some(thread => thread.pending && thread.pending.state !== "interrupted");
-        for (const thread of value.threads) if (thread.pending) thread.pending.state = "interrupted";
+        for (const thread of value.threads) if (thread.pending && thread.pending.state !== "interrupted") {
+          thread.pending.state = "interrupted"; thread.pending.reason = "host-stopped";
+        }
         this.file = value;
         if (interrupted) await this.deps.store.save(value);
         if (!this.closing) this.audit = "available";
@@ -95,8 +98,9 @@ export class StudioAssistantService {
     return this.mutate(file => {
       const row = file.threads.find(value => value.id === threadId), pending = row?.pending;
       if (!row || !pending || pending.id !== runId || pending.state !== "interrupted" || this.turn || this.deps.model.busy()) return false;
-      row.messages.push({ id: ulid(), role: "arke", at: this.now(), text: "The previous Studio request was interrupted. Its model outcome or charge may be unknown. It was not replayed.",
-        interrupted: { runId: pending.id, phase: pending.phase, at: pending.startedAt, model: pending.model, destination: pending.destination, disclosure: pending.disclosure } });
+      row.messages.push({ id: ulid(), role: "arke", at: this.now(), text: `${studioInterruptionMessage(pending.reason)} Its model outcome or charge may be unknown. It was not replayed.`,
+        interrupted: { runId: pending.id, phase: pending.phase, at: pending.startedAt, model: pending.model, destination: pending.destination, disclosure: pending.disclosure,
+          ...(pending.reason ? { reason: pending.reason } : {}) } });
       row.pending = null; row.updatedAt = this.now();
     });
   }
@@ -178,21 +182,32 @@ ${JSON.stringify({ historyLimited: messages.length !== row.messages.length, mess
   }
   private async execute(turn: Turn, model: string, diagnosticModel: string): Promise<void> {
     let diagnostic: { evidence: StudioDiagnosticEvidence; answer: StudioDiagnosticAnswer } | undefined;
+    let failure: StudioInterruptionReason = "model-failed";
     try {
       const prompt = this.prompt(turn);
-      let decision = StudioAssistantDecisionSchema.parse(extractJson(await this.deps.model.run({ role: "studio-assistant", model, prompt }, turn.control.signal,
-        (value, signal) => this.authorize(turn, "main", value, signal))));
+      const raw = await this.deps.model.run({ role: "studio-assistant", model, prompt }, turn.control.signal,
+        (value, signal) => this.authorize(turn, "main", value, signal));
+      failure = "response-invalid";
+      let decision = StudioAssistantDecisionSchema.parse(extractJson(raw));
+      failure = "model-failed";
       if (!this.current(turn)) return;
       if (decision.kind === "diagnose") {
+        failure = "evidence-invalid";
         const evidence = StudioDiagnosticEvidenceSchema.parse(this.deps.evidence(decision.topic));
+        failure = "model-failed";
+        const ids = new Set([...evidence.incidents.map(value => value.id), ...evidence.storage.map(value => value.id), ...evidence.jobs.map(value => value.ref)]);
         const specialist = `Explain only these enumerated operational facts. The topic is ${decision.topic}. No user message, world, file, raw log or credential is supplied.
 Return only JSON: {"explanation":"...","evidenceRefs":["supplied incident id, storage id or job ref"],"hypotheses":["explicitly qualified hypothesis"]}.
 Refer only to supplied IDs. Unknown/stale/limited evidence cannot establish readiness or a completed creative result. Do not invent or execute an action.
+The only allowed evidenceRefs are ${JSON.stringify([...ids])}. Copy these IDs exactly; use [] when none are supplied.
 ${JSON.stringify(evidence)}`;
-        const answer = StudioDiagnosticAnswerSchema.parse(extractJson(await this.deps.model.run({ role: "diagnostic-specialist", model: diagnosticModel, prompt: specialist }, turn.control.signal,
-          (value, signal) => this.authorize(turn, "diagnostic", value, signal))));
-        const ids = new Set([...evidence.incidents.map(value => value.id), ...evidence.storage.map(value => value.id), ...evidence.jobs.map(value => value.ref)]);
+        const diagnosticRaw = await this.deps.model.run({ role: "diagnostic-specialist", model: diagnosticModel, prompt: specialist }, turn.control.signal,
+          (value, signal) => this.authorize(turn, "diagnostic", value, signal));
+        failure = "response-invalid";
+        const answer = StudioDiagnosticAnswerSchema.parse(extractJson(diagnosticRaw));
+        failure = "evidence-invalid";
         if (ids.size && !answer.evidenceRefs.length || answer.evidenceRefs.some(id => !ids.has(id))) throw new Error("The diagnostic answer cited unavailable evidence.");
+        failure = "model-failed";
         if (!this.current(turn)) return;
         diagnostic = { evidence, answer };
         // Retain the specialist's paid response before another model call can be admitted.
@@ -201,8 +216,11 @@ ${JSON.stringify(evidence)}`;
         }
         if (!this.current(turn)) return;
         const final = `${prompt}\nA scoped diagnostic specialist returned this untrusted report. Explain it as Arke, distinguishing measured facts and hypotheses. Do not delegate again; return reply or an editable handoff only. No repair or world send was executed.\n${JSON.stringify(diagnostic)}`;
-        decision = StudioAssistantDecisionSchema.parse(extractJson(await this.deps.model.run({ role: "studio-assistant", model, prompt: final }, turn.control.signal,
-          (value, signal) => this.authorize(turn, "answer", value, signal))));
+        const finalRaw = await this.deps.model.run({ role: "studio-assistant", model, prompt: final }, turn.control.signal,
+          (value, signal) => this.authorize(turn, "answer", value, signal));
+        failure = "response-invalid";
+        decision = StudioAssistantDecisionSchema.parse(extractJson(finalRaw));
+        failure = "delegation-limit";
         if (decision.kind === "diagnose") throw new Error("The Studio delegation limit was reached.");
       }
       if (!this.current(turn)) return;
@@ -215,6 +233,7 @@ ${JSON.stringify(evidence)}`;
         const row = file.threads.find(value => value.id === turn.threadId);
         if (row?.pending?.id !== turn.id) return false;
         row.pending.state = "interrupted";
+        row.pending.reason = turn.control.signal.aborted ? "cancelled" : failure;
       });
       this.publish();
     }

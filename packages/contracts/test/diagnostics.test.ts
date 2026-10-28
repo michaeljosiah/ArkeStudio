@@ -11,6 +11,7 @@ import {
   diagnosticsSources,
   findingRef,
   primaryFindings,
+  remedyAbsenceStatement,
   suppressedRefs,
   type ComfyUiStatus,
   type DiagnosticsSources,
@@ -493,6 +494,8 @@ describe("an engine that is down (R-20.7)", () => {
     });
     const engine = snapshot.findings.find((f) => f.kind === "comfyui-engine-unavailable")!;
     assert.equal(engine.remedy, null);
+    assert.match(remedyAbsenceStatement(snapshot, engine)!, /Start your selected ComfyUI installation/);
+    assert.match(remedyAbsenceStatement(snapshot, engine)!, /cannot restart an external installation/);
     const held = snapshot.findings.find((f) => f.kind === "work-held-by-engine")!;
     assert.equal(held.remedy, null);
     // A spawned engine keeps its acting control.
