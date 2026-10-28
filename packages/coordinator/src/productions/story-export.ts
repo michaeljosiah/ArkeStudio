@@ -486,7 +486,9 @@ export async function exportStoryPlayer(store: WorldStore, productionId: string,
       const edge = arkePlayerPictureEdge(options.pictureSize);
       let pictures = 0;
       let voices = 0;
-      for (const [index, [name, rel]] of [...plan.beats.copies].sort(([a], [b]) => (a < b ? -1 : 1)).entries()) {
+      // Numbered as the story first shows them, so p001 is the opening picture.
+      const shown = [...new Set(plan.beats.scenes.flatMap((scene) => scene.beats.flatMap((beat) => [beat.picture, beat.audio].filter((name): name is string => name !== undefined))))];
+      for (const [index, [name, rel]] of shown.flatMap((name) => (plan.beats!.copies.has(name) ? [[name, plan.beats!.copies.get(name)!] as const] : [])).entries()) {
         if (signal.aborted) return cancelled();
         if (name.startsWith("media/voice-")) {
           step(`Fitting voices · ${index + 1} of ${plan.beats.copies.size}`, ((plan.clips.length + index) / fitting) * 80);
