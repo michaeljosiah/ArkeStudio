@@ -1,0 +1,16 @@
+/* Turn 245: Export on an interactive movie or a visual novel. The sheet, its kinds, rows, SHA-256
+   line and releases are 233's and 236's (audiobook-video.css); these are 245's additions, size for
+   size: row labels 112 wide for Closed choices, the world's key art in its row, a blocker with the
+   press that clears it, and the read-back line. Content-box, as the sheet around them is. */
+.fy-story-export .fy-abv-opt > b { width: 112px; }
+.fy-story-export .fy-abv-opt img { width: 44px; height: 25px; object-fit: cover; border-radius: 4px; flex: none; }
+.fy-story-export .fy-abv-btn.sm { height: 28px; min-height: 28px; }
+.fy-abv-block { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 12px; border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--warning) 8%, transparent); font-size: var(--text-sm); }
+.fy-abv-block svg { width: 15px; height: 15px; color: var(--warning); flex: none; }
+.fy-abv-block .c { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fy-abv-back { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: var(--text-sm); }
+.fy-abv-back svg { width: 15px; height: 15px; flex: none; }
+.fy-abv-back b { font-weight: 500; }
+.fy-abv-back .grow { flex: 1; }
+.fy-abv-back .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abv-modal--phone .fy-abv-block .fy-abv-btn { min-height: 44px; }

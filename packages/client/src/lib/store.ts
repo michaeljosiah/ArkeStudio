@@ -808,6 +808,13 @@ export function subscribeArkePlayerExported(listener: (answer: ArkePlayerExporte
   arkePlayerExportedListeners.add(listener);
   return () => arkePlayerExportedListeners.delete(listener);
 }
+/** What Export → Arke Player would make of a story (design turn 245a – 245c), answered to the read that asked. */
+export type StoryExportStateAnswer = Extract<DomainEvent, { type: "story.export-state" }>;
+const storyExportStateListeners = new Set<(answer: StoryExportStateAnswer) => void>();
+export function subscribeStoryExportState(listener: (answer: StoryExportStateAnswer) => void): () => void {
+  storyExportStateListeners.add(listener);
+  return () => storyExportStateListeners.delete(listener);
+}
 /** `Make 290 tall` (design turn 235a): how many, how many landed, what was refused. */
 export type AudiobookTallProgress = Extract<DomainEvent, { type: "audiobook.tall-progress" }>;
 const audiobookTallProgressListeners = new Set<(progress: AudiobookTallProgress) => void>();
@@ -2006,6 +2013,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "arke-player.exported") {
       for (const listener of arkePlayerExportedListeners) listener(event);
+    }
+    if (event.type === "story.export-state") {
+      for (const listener of storyExportStateListeners) listener(event);
     }
     if (event.type === "audiobook.tall-progress") {
       lastTallProgress.set(`${event.worldId}/${event.productionId}`, event);
@@ -6673,6 +6683,12 @@ export function setAudiobookPictureFocus(worldId: string, productionId: string, 
 export function exportAudiobookPlayer(worldId: string, productionId: string, exportId?: string, scope?: import("@arke-studio/contracts").AudiobookScope): string | null {
   const requestId = ulid();
   return send({ kind: "export-audiobook-player", worldId, productionId, requestId, ...(exportId !== undefined ? { exportId } : {}), ...(scope !== undefined ? { scope } : {}) }) ? requestId : null;
+}
+
+/** What Export → Arke Player would make of a story (design turn 245a – 245c): answered as `story.export-state` under the id returned. */
+export function readStoryExport(worldId: string, productionId: string, size?: ArkePlayerPictureSize): string | null {
+  const requestId = ulid();
+  return send({ kind: "read-story-export", worldId, productionId, requestId, ...(size !== undefined ? { size } : {}) }) ? requestId : null;
 }
 
 /** The world package for Arke Player (design turn 233): answered as `arke-player.exported` for the export id given. */

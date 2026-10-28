@@ -49,8 +49,8 @@ import {
 } from "../lib/branch-map.js";
 import { mediaUrl } from "../lib/media.js";
 import { mediaTakeFor, useProduction } from "../lib/selectors.js";
+import { StoryExportSheet } from "../components/story-export.js";
 import {
-  exportInteractive,
   listRoutingFindings,
   recordTraversal,
   sendRoutingCommand,
@@ -251,6 +251,8 @@ export function BranchMapScreen() {
   const routing = production?.routing ?? null;
   const [served, setServed] = useState<RoutingFinding[] | null>(null);
   const [exportNote, setExportNote] = useState<string | null>(null);
+  /** The Export sheet (turn 245): Web package and Arke Player. */
+  const [exporting, setExporting] = useState(false);
   /** The preview running over the window (turn 156g), from the scene it started at. */
   const [preview, setPreview] = useState<{ from: string; at: number; prefix?: string[] } | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
@@ -314,6 +316,7 @@ export function BranchMapScreen() {
     // export note and preview showed A's state gating B until B's first event arrived.
     setServed(null);
     setExportNote(null);
+    setExporting(false);
     setPreview(null);
     setSelection(null);
     setConnector(null);
@@ -494,12 +497,13 @@ export function BranchMapScreen() {
         <Play size={12} />
         Preview
       </Button>
+      {/* Export opens the sheet (turn 245 rule 2): Web package or Arke Player, each blocker with what clears it. */}
       <Button
         className="bm-export" variant={compact ? "secondary" : "primary"}
-        disabled={!routing || blockers.length > 0}
-        onClick={() => worldId && prodId && exportInteractive(worldId, prodId)}
+        disabled={!routing}
+        onClick={() => setExporting(true)}
       >
-        {compact ? `Export${blockers.length ? " · " + blockers.length : ""}` : routing && blockers.length > 0 ? `Export blocked · ${blockers.length}` : "Export web package"}
+        {compact ? `Export${blockers.length ? " · " + blockers.length : ""}` : routing && blockers.length > 0 ? `Export blocked · ${blockers.length}` : "Export"}
       </Button>
     </header>
   );
@@ -1419,6 +1423,21 @@ export function BranchMapScreen() {
           />
         )}
       </div>
+      {exporting && worldId && (
+        <StoryExportSheet
+          worldId={worldId}
+          production={production}
+          onClose={() => setExporting(false)}
+          // Show plays the route that reaches the state at fault (245c), as a finding's witness does.
+          onShow={(route) => {
+            try {
+              setPreview({ from: storyReplay(routing, route).sceneId, prefix: route, at: Date.now() });
+            } catch {
+              // A route the rules no longer replay cannot start a different one.
+            }
+          }}
+        />
+      )}
       {routing && endingRules && <StoryEndingDialog routing={routing} sceneId={endingRules} onClose={() => setEndingRules(null)} onSave={(variants, baseVersion) => command({ operation: "set-ending-variants", sceneId: endingRules, title: routing.endings.find(e => e.sceneId === endingRules)!.title, variants, baseVersion })} />}
       {routing && connector && <ConnectorDialog key={connector.id} editing={connectorEditing} routing={routing} initial={connector} onDraft={setConnector} scenes={scenes} picking={mapPick} destination={mapDestination} onPick={from => { setConnector(current => current ? { ...current, from } : null); setMapPick(true); }} onClose={() => { setConnector(null); setConnectorSave(null); setMapPick(false); setFocused(connectorEditing ? `c:${connector.id}` : `s:${connector.from}`); setSelection(connectorEditing ? {kind:"choice",id:connector.id} : null); }} onSave={(choice, baseVersion) => {
         const editing = connectorEditing;
