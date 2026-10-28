@@ -7,55 +7,55 @@ const note = text => `<p class="ij-note">${text}</p>`;
 const actions = (...buttons) => `<div class="ij-actions">${buttons.join('')}</div>`;
 const head = (step, title, body) => `<div class="ij-step">${step}</div><h2 tabindex="-1">${title}</h2><p class="ij-lead">${body}</p>`;
 const block = (title, body) => `<section class="ij-block"><h3>${title}</h3>${body}</section>`;
-const location = `<div class="ij-location">${icon('folder')}<div><strong>Arke data &amp; local models</strong><span>D:\\Arke Studio · 180 GB free</span></div>${btn('Change folder', '243b')}</div>`;
-const ready = `${row('Your workspace', 'Create, open and save worlds.', 'Ready')}${row('Local writing assistant', 'Starter model responds through Ollama.', 'Ready')}${row('Voice & dictation', 'Preset narration and English dictation.', 'Ready')}${row('Local media engine', 'ComfyUI is running. Add models when you need them.', 'Ready')}`;
+const location = `<div class="ij-location">${icon('folder')}<div><strong>Your Arke folder</strong><span>D:\\Arke Studio · 180 GB free</span></div>${btn('Change folder', '243b')}</div>`;
+const ready = `${row('Your workspace', 'Create, open and save worlds.', 'Ready')}${row('Writing help', 'Your writing assistant is ready to use.', 'Ready')}${row('Read aloud & dictation', 'Hear your words or speak instead of typing.', 'Ready')}${row('Picture & video tools', 'Add the downloads for the things you want to make.', 'Ready')}`;
 
 export const screens = {
   choose: {
     id: '242a', title: 'One installer, three ways to begin', persona: 'Shared entry',
     body: () => `${head('WELCOME · SET UP YOUR STUDIO', 'Make Arke yours.', 'Choose how much to set up now. You can change this later in Settings.')}
       <div class="ij-choices">
-      <button class="ij-choice" data-go="242f">${icon('laptop')}<span><strong>Set it up for me <small>Recommended</small></strong><span>Choose cloud or local writing. Arke handles the setup.</span><em>Review connections and downloads before starting</em></span>${icon('next')}</button>
+      <button class="ij-choice" data-go="242i">${icon('laptop')}<span><strong>Set it up for me <small>Recommended</small></strong><span>Arke checks your computer and suggests a setup that fits.</span><em>You’ll see any downloads before they start</em></span>${icon('next')}</button>
       <button class="ij-choice" data-go="243e">${icon('settings')}<span><strong>Choose my setup</strong><span>Use your existing assistant, choose capabilities and folders.</span><em>OpenCode included · detected Claude Code or Codex optional</em></span>${icon('next')}</button>
       <button class="ij-choice" data-go="244a">${icon('folder')}<span><strong>Start lightweight</strong><span>Write, organise and use your own media. Add AI later.</span><em>No additional AI downloads</em></span>${icon('next')}</button>
       </div>${note('No Arke account is required. Your worlds stay on your computer.')}`,
   },
   '242b': {
     id: '242b', title: 'Guided · see the starter package before downloading', persona: 'Guided',
-    body: () => `${head('GUIDED · REVIEW YOUR PLAN', 'A good place to start.', 'Arke will prepare your chosen writing connection and look after the local components below.')}
-      <div data-guided-writing>${row('Writing assistant', 'Included OpenCode connects to Ollama + a starter text model.', 'Install', 'laptop')}</div>
-      ${row('Voice & dictation', 'Kokoro preset voices + Whisper English dictation.', 'Default', 'mic')}
-      ${row('Local media engine', 'ComfyUI, with its shared Python / GPU runtime.', 'Default', 'cpu')}
-      ${note('Image and video models, voice cloning and larger text models can be added later from supported providers.')}
+    body: () => `${head('GUIDED · REVIEW YOUR PLAN', 'A good place to start.', 'Arke will get your writing help and these tools ready for you.')}
+      <div data-guided-writing>${row('Writing help on this computer', 'A writing assistant selected to suit your computer.', 'Set up', 'laptop')}</div>
+      <div data-guided-voice>${row('Read aloud & dictation', 'Hear your words or speak instead of typing.', 'Set up', 'mic')}</div>
+      <div data-guided-media>${row('Picture & video tools', 'Prepare the tools. Choose what you want to make later.', 'Set up', 'cpu')}</div>
+      ${note('Extra creative tools and voices can be added later. We’ll show any download before you start.')}
       ${location}<div class="ij-facts" data-guided-cost><div><span>Download</span><strong>About 8 GB</strong></div><div><span>Kept on disk</span><strong>About 17 GB</strong></div><div><span>Space during setup</span><strong>24 GB</strong></div></div>
-      ${note('Example estimates for this drawing. Your plan will show the selected writing model, device compatibility and measured space before download.')}
-      ${actions(btn('Writing connection', '242f'), btn('Install starter package', '242c', true))}`,
+      ${note('This plan includes only what this computer can use. You can change your choices later.')}
+      ${actions(btn('Change writing help', '242f'), btn('Set up these tools', '242c', true))}`,
   },
   '242c': {
     id: '242c', title: 'Guided · useful before the downloads finish', persona: 'Guided',
-    body: () => `${head('GUIDED · 2 OF 3', 'Your studio is taking shape.', 'You can start writing while local AI finishes setting up.')}
+    body: () => `${head('SETTING THINGS UP', 'Your studio is taking shape.', 'You can start writing while local AI finishes setting up.')}
       ${row('Arke & your data folder', 'Workspace checked. You can create and save worlds.', 'Ready')}
-      <div data-progress-writing>${row('Writing assistant', 'Ollama ready · downloading the starter model.', 'Downloading', 'download')}</div>
+      <div data-progress-writing>${row('Writing help', 'Downloading the writing support chosen for this computer.', 'Downloading', 'download')}</div>
       <div class="ij-progress" data-local-progress><progress value="1.8" max="4.3" aria-label="Starter model download"></progress><span>1.8 of 4.3 GB · about 6 minutes left</span><button type="button" data-pause>Pause</button></div>
-      ${row('Voice & dictation', 'Preset voices and English dictation.', 'Ready')}
-      ${row('Local media engine', 'ComfyUI · verified download, unpacking files.', 'Installing', 'cpu')}
+      <div data-guided-voice>${row('Read aloud & dictation', 'Ready when you want to listen or speak.', 'Ready')}</div>
+      <div data-guided-media>${row('Picture & video tools', 'Finishing the setup.', 'Setting up', 'cpu')}</div>
       ${note('Downloads and any next steps stay in Activity. Closing Arke pauses unfinished transfers; the next launch offers Resume.')}
       ${actions(btn('View download plan', '242b'), btn('Start writing', '244b', true))}`,
   },
   '242d': {
     id: '242d', title: 'Guided · a local component fails without blocking writing', persona: 'Guided',
-    body: () => `${head('GUIDED · NEEDS ATTENTION', 'Keep going. We’ll keep your place.', 'The connection dropped while downloading the writing model. Your worlds are ready to use.')}
+    body: () => `${head('GUIDED · NEEDS ATTENTION', 'Keep going. We’ll keep your place.', 'The connection dropped while downloading writing support. Your worlds are ready to use.')}
       ${row('Workspace', 'Create, save and import existing media.', 'Ready')}
       ${row('Writing assistant', '1.8 GB downloaded. Resume from the saved download.', 'Paused', 'warning')}
-      ${row('Voice & local media engine', 'Installed components are kept.', 'Ready')}
+      ${row('Your other tools', 'Completed downloads are kept.', 'Ready')}
       ${actions(btn('Resume download', '242c', true), btn('Start writing', '244b'))}
       ${block('Running low on space?', '<p>Choose another model folder or remove a component from this plan. Arke shows the revised download and space needed before continuing.</p>')}
-      ${actions(btn('Change download plan', '243a'))}${note('No automatic paid fallback. An unavailable local feature explains what it needs when you use it.')}`,
+      ${actions(btn('Change download plan', '243a'))}${note('Your other tools keep working. You can finish this download later.')}`,
   },
   '242e': {
     id: '242e', title: 'Guided · name what is actually ready', persona: 'Guided',
-    body: () => `${head('GUIDED · 3 OF 3', 'Ready for your first world.', 'Your starter setup has passed its checks.')}${ready}
-      ${note('Local images, video and voice cloning each need an additional model. The app shows the download before you add one.')}
+    body: () => `${head('SETUP CHECKED', 'Ready for your first world.', 'Your starter setup has passed its checks.')}${ready}
+      ${note('Add more creative tools when you need them. You’ll see any extra downloads first.')}
       ${actions(btn('Open Arke', '244b', true))}`,
   },
   '243a': {
@@ -115,32 +115,66 @@ export const screens = {
   },
   '242f': {
     id: '242f', title: 'Guided & Advanced · choose cloud or local writing', persona: 'Shared writing connection',
-    body: () => `${head('WRITING ASSISTANCE · OPENCODE INCLUDED', 'Where should your writing AI run?', 'Choose the connection for your assistant. Arke uses OpenCode to work with the model you choose.')}
-      <fieldset class="ij-options ij-harness"><legend>Writing connection</legend>
-      <label><input type="radio" name="writing-route" value="local" checked><span><strong>On this computer</strong><span>Arke sets up Ollama and a compatible local model. Several GB to download; no provider account needed.</span></span></label>
-      <label><input type="radio" name="writing-route" value="cloud"><span><strong>Use a cloud provider</strong><span>Connect a supported provider and choose a model. No Ollama or local writing-model download.</span></span></label></fieldset>
-      <section class="ij-block"><h3 data-route-title>Local writing, ready to use</h3><p data-route-detail>Arke checks your computer, prepares Ollama and a suitable model, then checks that the model responds.</p></section>
-      ${note('Cloud writing sends prompts to your selected provider. Internet access and a valid account or API key are required; usage charges may apply.')}
+    body: () => `${head('WRITING HELP · COMPUTER CHECKED', 'How would you like writing help?', 'We found writing support that fits this computer. You can also use an online account.')}
+      <fieldset class="ij-options ij-harness"><legend>Choose where it runs</legend>
+      <label><input type="radio" name="writing-route" value="local" checked><span><strong>On this computer</strong><span>Works offline after setup. A suitable download is available for this computer.</span></span></label>
+      <label><input type="radio" name="writing-route" value="cloud"><span><strong>Use an online account</strong><span>Sign in with ChatGPT or GitHub Copilot. No large writing download.</span></span></label></fieldset>
+      <section class="ij-block"><h3 data-route-title>A setup that fits</h3><p data-route-detail>Arke has checked the requirements for a supported writing model. We’ll show its download and space needed next.</p></section>
+      ${note('Online writing needs internet access and uses your account’s allowance. Your requests are sent to the service you choose.')}
       ${actions(btn('Back', 'choose'), btn('Continue', '242b', true))}`,
   },
   '242g': {
-    id: '242g', title: 'Guided & Advanced · connect the chosen cloud provider', persona: 'Shared writing connection',
-    body: () => `${head('WRITING ASSISTANCE · CLOUD', 'Connect your writing provider.', 'Choose from the writing providers supported by OpenCode in Arke.')}
-      ${block('Provider & model', '<p>Choose a supported provider, then sign in or add its API key using the connection method offered. Select a model available to that account.</p>')}
-      ${row('Provider connection', 'An existing connection can be reused after checking it.', 'Required', 'cloud')}
-      ${row('Writing model', 'Check access to the selected model before enabling AI writing.', 'Required', 'laptop')}
-      ${note('Only supported sign-in methods are offered. A ChatGPT or Claude website login does not automatically connect OpenCode. Any chargeable test is shown before it runs.')}
-      ${actions(btn('Use local writing', '242f'), btn('Choose provider & connect', '242h', true))}
-      ${actions(btn('Set up writing later', '244b'))}`,
+    id: '242g', title: 'Writing provider · ChatGPT, GitHub Copilot and future Arke', persona: 'Shared account choice',
+    body: () => `${head('WRITING HELP · SIGN IN', 'Which account would you like to use?', 'Connect an account you already have. Arke will check what it can use.')}
+      <div class="ij-choices">
+      <button class="ij-choice" data-provider="chatgpt">${icon('chat')}<span><strong>ChatGPT</strong><span>Sign in with your ChatGPT account.</span><em>Requires an eligible plan · uses your plan’s allowance</em></span>${icon('next')}</button>
+      <button class="ij-choice" data-provider="copilot">${icon('cloud')}<span><strong>GitHub Copilot</strong><span>Sign in with your GitHub account.</span><em>Requires Copilot access · uses your plan’s allowance</em></span>${icon('next')}</button>
+      <button class="ij-choice" disabled aria-describedby="ij-arke-soon">${icon('laptop')}<span><strong>Arke <small>Coming later</small></strong><span id="ij-arke-soon">Not available yet.</span></span></button></div>
+      ${note('Your writing requests go to the service you choose. You can change this later in Settings.')}
+      ${actions(btn('Back', '242f'), btn('Set up writing later', '244b'))}`,
   },
   '242h': {
     id: '242h', title: 'Cloud writing · connected account and selected model checked', persona: 'Shared writing connection',
-    body: () => `${head('WRITING ASSISTANCE · CLOUD', 'Your writing connection is ready.', 'OpenCode will use the provider and model you selected.')}
-      ${row('Provider account', 'Selected connection authenticated.', 'Connected', 'cloud')}
-      ${row('Writing model', 'Selected model access and writing capability checked.', 'Ready', 'check')}
-      ${row('Local writing downloads', 'Ollama and local writing weights are not needed for this route.', 'None', 'laptop')}
-      ${note('Prompts go to your selected provider. Internet access and the provider’s usage terms apply. You can change this connection in Settings.')}
+    body: () => `${head('WRITING HELP', 'Your writing assistant is ready.', 'Your account is connected and ready for writing.')}
+      <div data-connected-account>${row('ChatGPT', 'Signed in. An available writing model has been checked.', 'Ready', 'check')}</div>
+      ${block('Ready to write', '<p data-connected-detail>Arke has chosen writing support available with your account. You can change it in Settings.</p>')}
+      ${note('No large writing download is needed. Your account’s allowance applies.')}
       ${actions(btn('Change connection', '242g'), btn('Continue setup', '242b', true))}`,
+  },
+  '242i': {
+    id:'242i', title:'Guided · automatically check what this computer can use', persona:'Guided',
+    body:()=>`${head('SET IT UP FOR ME', 'Finding the right setup for you.', 'Arke is checking your computer and any writing assistants you already use.')}
+      ${row('Your computer', 'Finding writing and creative tools that will work here.', 'Checking', 'laptop')}
+      ${row('Space for your work', 'Checking where your files and downloads will fit.', 'Checking', 'folder')}
+      ${row('Existing assistants', 'Looking for supported installations you can choose to use.', 'Checking', 'chat')}
+      ${note('Nothing is being downloaded. We’ll only offer options this computer can use.')}
+      ${actions(btn('Start without AI for now', '244b'))}`,
+  },
+  '242j': {
+    id:'242j', title:'Guided · no suitable local writing model', persona:'Guided',
+    body:()=>`${head('COMPUTER CHECKED', 'Online writing is a better fit here.', 'We couldn’t find suitable writing support for this computer. You can still write and organise your worlds.')}
+      ${block('Use an account you already have', '<p>Connect ChatGPT or GitHub Copilot for writing help without a large download.</p>')}
+      ${actions(btn('Choose an account', '242g', true), btn('Start without AI', '244b'))}
+      ${note('You can change your setup later. Nothing has been downloaded.')}
+      ${actions(btn('Back', 'choose'))}`,
+  },
+  '242k': {
+    id:'242k', title:'Guided · offer compatible assistants found on this computer', persona:'Guided',
+    body:()=>`${head('WE FOUND YOUR ASSISTANTS', 'Use what you already have?', 'These supported assistants are installed on this computer. Choose the one you’d like Arke to use.')}
+      <fieldset class="ij-options ij-harness"><legend>Your writing assistant</legend>
+      <label><input type="radio" name="harness" value="opencode" checked><span><strong>Let Arke set it up</strong><span>We’ll help you connect an account or use writing support that fits this computer.</span></span></label>
+      <label data-detected="claude"><input type="radio" name="harness" value="claude"><span><strong>Claude Code <small>Found on this computer</small></strong><span>Use this installed assistant and its account.</span></span></label>
+      <label data-detected="codex"><input type="radio" name="harness" value="codex"><span><strong>Codex <small>Found on this computer</small></strong><span>Use this installed assistant and its account.</span></span></label></fieldset>
+      ${note('We’ll check the account before writing help is ready. You can change your assistant later.')}
+      ${actions(btn('Back', 'choose'), btn('Continue', '242f', true))}`,
+  },
+  '242l': {
+    id:'242l', title:'Writing provider · browser sign-in and waiting state', persona:'Shared account sign-in',
+    body:()=>`${head('SIGN IN', 'Finish signing in with ChatGPT.', 'Your browser opens the account’s sign-in page. Return here when you’ve finished.')}
+      <div data-signin-instructions>${block('Waiting for you to sign in…', '<p>Follow the steps in your browser. This page will update when the connection is ready.</p>')}</div>
+      ${actions('<button class="ij-button" data-message="Reopen the current provider sign-in page supplied by the writing assistant. No real page opens in this preview.">Open sign-in page again</button>')}
+      ${note('Arke checks that writing help is available with your account before continuing.')}
+      ${actions(btn('Choose another account', '242g'), btn('Set up writing later', '244b'))}`,
   },
   '244a': {
     id: '244a', title: 'Lightweight · no additional AI downloads', persona: 'Lightweight',
@@ -148,34 +182,35 @@ export const screens = {
       ${row('Worlds & writing', 'Create worlds, edit by form and write your stories.')}
       ${row('Your existing media', 'Import, organise and preview your own files.')}
       ${row('Sample world', 'Explore the sample included with this build.')}
-      <div class="ij-facts"><div><span>Additional AI download</span><strong>0 GB</strong></div><div><span>Local AI services</span><strong>Not started</strong></div></div>
-      ${note('OpenCode is already included. AI features become available when you choose an assistant connection, a supported provider or local models. No account or internet is required for manual authoring.')}
-      ${actions(btn('Use an existing assistant', '243e'))}
+      <div class="ij-facts"><div><span>Extra downloads</span><strong>None</strong></div><div><span>Account needed</span><strong>No</strong></div></div>
+      ${note('Write and organise without an account or internet connection. Add AI help whenever you want it.')}
+      ${actions(btn('Connect a writing account', '242g'), '<button class="ij-button" data-existing-choice data-go="242k" hidden>Use an existing assistant</button>')}
       ${actions(btn('Back', 'choose'), btn('Start using Arke', '244b', true))}`,
   },
   '244b': {
     id: '244b', title: 'All paths · enhance the existing Worlds landing page', persona: 'Shared destination', worlds: true,
     body: () => `<div class="fy-app" data-screen="world-picker"><div class="fy-titlebar"><div class="fy-titlebar__side"></div><button class="fy-titlebar__brand" data-go="244b"><span class="fy-brand__arke">Arke</span><span class="fy-brand__studio">Studio</span></button><div class="fy-titlebar__side fy-titlebar__side--right">${[['chat','Chat'],['cpu','System'],['bell','Activity'],['cog','Settings'],['user','Account']].map(([glyph,label])=>`<button class="fy-iconbtn" aria-label="${label}" data-message="The existing ${label} control opens its usual surface.">${icon(glyph)}</button>`).join('')}</div></div>
       <main class="fy-content"><div class="fy-home-hero"><div class="fy-hero__eyebrow">WELCOME TO YOUR STUDIO</div><h1 tabindex="-1" class="fy-hero__title fy-hero__title--home">Your first world starts here.</h1><div class="fy-home-count"><p class="fy-hero__lede">Nothing here yet.</p><button class="ij-home-action" data-message="The existing publication-opening flow opens.">${icon('book')}Open publication</button></div>
-      <div class="ij-world-actions"><button class="ij-home-action" data-message="Open the supported world-folder import flow, with destination and validation before import.">${icon('upload')}Import a world</button><button class="ij-home-action" data-message="Explore the bundled sample through the current sample-world flow. Reuse its existing copy if already installed.">${icon('book')}Explore sample world</button></div></div>
-      <div class="fy-home-cards"><button class="fy-worldcard fy-newworldcard" data-message="The existing New world form opens. No model is required."><span class="fy-worldcard__frame fy-worldcard__empty">${icon('plus')}</span><span class="fy-worldcard__name">Create a world</span></button></div>
+      <div class="ij-world-actions"><button class="ij-home-action" data-message="Open the supported world-folder import flow, with destination and validation before import.">${icon('upload')}Import a world</button></div></div>
+      <div class="fy-home-cards"><button class="fy-worldcard fy-newworldcard" data-message="The existing New world form opens. No model is required."><span class="fy-worldcard__frame fy-worldcard__empty">${icon('plus')}</span><span class="fy-worldcard__name">Create a world</span></button>
+      <button class="fy-worldcard fy-newworldcard ij-samplecard" data-message="Explore The Undersong through the current sample-world flow. Reuse its existing copy if installed; show size before any required download."><span class="fy-worldcard__frame fy-worldcard__empty"><span class="ij-sample-copy">${icon('book')}<strong>The Undersong</strong><span>A world to explore and make your own.</span></span></span><span class="fy-worldcard__name">Explore sample world</span></button></div>
       <div class="ij-world-status"><span data-world-status>Write and organise now. Add AI whenever you need it.</span><button class="ij-home-action" data-message="Open Settings to add or change capabilities.">Settings ${icon('next')}</button></div></main></div>`,
   },
   '244c': {
     id: '244c', title: 'Later · choose a supported voice provider when you need one', persona: 'Lightweight',
     body: () => `${head('LATER · ADD A CAPABILITY', 'Choose how to create voices.', 'When you need narration or voice cloning, choose from the providers Arke supports.')}
-      ${row('Run on this computer', 'Choose a supported local provider and model.', 'Optional', 'cpu')}
-      ${row('Use a hosted provider', 'Connect your account; review any usage costs.', 'Optional', 'cloud')}
-      ${block('See what your choice needs', '<p>A local option shows its missing runtime, support files, model download and disk space. A hosted option shows its account requirements and pricing. Available choices reflect supported capabilities.</p>')}
+      ${row('On this computer', 'Choose a voice tool that works on your computer.', 'Optional', 'cpu')}
+      ${row('Use an online service', 'Connect your account; see any costs first.', 'Optional', 'cloud')}
+      ${block('See what your choice needs', '<p>We’ll show any downloads and space needed, or the account and costs for an online service.</p>')}
       ${note('Voice cloning is optional and can be set up later in Settings. No provider or model is preselected here.')}
       ${actions(btn('Not now', '244b'), '<button class="ij-button ij-primary" data-message="Settings opens the supported voice-provider catalogue. This proposal does not choose or install a provider.">Browse supported providers</button>')}`,
   },
   '244d': {
     id: '244d', title: 'Lightweight · offline or incompatible hardware is a usable start', persona: 'Lightweight', compact: true,
-    body: () => `${head('START WITH THE ESSENTIALS', 'Your ideas can start here.', 'This computer can run the editor. Local media generation is not available with this setup.')}
+    body: () => `${head('START WITH THE ESSENTIALS', 'Your ideas can start here.', 'You can write and organise here. Making pictures and videos on this computer isn’t available with this setup.')}
       ${row('Write & organise', 'Create and save worlds offline.', 'Ready')}
-      ${row('Local AI', 'No download has started.', 'Not set up', 'cpu')}
-      ${note('Connect a supported provider later, or configure a compatible local service in Settings. Arke will explain each feature’s requirements.')}
+      ${row('AI help', 'No download has started.', 'Not set up', 'cpu')}
+      ${note('Connect an online account or add tools later in Settings. Arke will explain what each choice needs.')}
       ${actions(btn('Start using Arke', '244b', true), btn('Choose another setup', 'choose'))}`,
   },
 };
@@ -188,18 +223,21 @@ export function screen(key, compact = false) {
 }
 export const FRAMES = Object.entries(screens).map(([key, s]) => ({...s, key, width:s.compact ? 560 : 1280, height:s.compact ? 760 : 850, markup:screen(key)}));
 export const TURNS = [
-  {id:242, title:'Install · guided setup and the shared entry', keys:['choose','242f','242g','242h','242b','242c','242d','242e'], rules:[
+  {id:242, title:'Install · guided setup and the shared entry', keys:['choose','242i','242k','242f','242j','242g','242l','242h','242b','242c','242d','242e'], rules:[
     ['Proposal', '28 October 2026. Draft for owner review. These are new journeys, not implemented installer behaviour. Current mandatory local-runtime startup is still in force until a separate approved implementation.'],
     ['One installer', 'Use the existing Windows desktop installer and bundled core. Preserve its destination choice and Launch Arke action. Do not add a second installer, persona-specific binary or website wizard in this turn. The persona choice happens on first app launch, before any optional AI acquisition.'],
     ['Current visual language', 'Use the current launch-creation poster, split/stacked launch shell, Jost wordmark, Geist typography, launch tokens and current native icons. Launch remains dark in both application themes. New controls use neutral surfaces and 44px minimum targets.'],
-    ['Guided defaults', 'OpenCode is included. Offer local or cloud writing before the package review. Local chooses managed Ollama and one device-compatible starter writing model; cloud chooses a supported provider/account/model instead, excluding Ollama and local writing weights. Kokoro, Whisper and managed ComfyUI remain in the Guided package on supported hardware. Review the complete selected package before download.'],
+    ['Guided defaults', 'Check the computer and qualified model catalogue first. Offer local writing only when a supported model fits that device and destination; offer cloud accounts otherwise. If compatible installed assistants are found, let the user explicitly select one before preparing writing. Add Kokoro/Whisper and managed ComfyUI only when their own support checks pass. Review the resulting package before download. OpenCode stays included but its name is not essential in Guided copy.'],
     ['Optional', 'Voice cloning, image/video recipe weights, larger text models, cloud provider connections and remote-device access remain opt-in. Voice providers/models are selected later from the supported catalogue; no Ming-specific first-run choice. The media engine alone does not enable generation.'],
     ['Readiness', 'Core entry requires a connected coordinator, valid writable data location and working create/save path. The starter package is ready only after selected files are verified, selected engines are healthy and capability-specific checks pass. A small local model response can qualify the selected writing path; runtime health alone cannot.'],
     ['Useful while preparing', 'Start writing is available once the core is ready; selected local AI may finish in Activity. Pending or failed AI remains explicitly unavailable for the affected feature. Setup-complete and app-usable are distinct facts. No automatic provider or paid fallback.'],
     ['Estimates', 'The 8 GB download, 24 GB peak-space requirement, 180 GB free and timing in these frames are illustrative. Real review uses missing selected files, per-destination measured free space and verified expansion requirements. Show download size, disk retained and temporary peak separately; never total the entire optional catalogue. Unknown figures are labelled rather than invented.'],
     ['Recovery', 'Keep completed components and resumable download receipts. Offer Resume, change folder, edit plan and continue manually. Closing pauses unfinished transfers; restart makes their status explicit. Unselected components do not raise incidents.'],
     ['Hardware and permissions', 'Run non-mutating device/location checks before showing a local starter package. Unsupported hardware gets an explained manual/cloud/existing-service choice, not an incompatible mandatory download. A read-only or full core data folder still needs a valid destination before worlds can be saved.'],
-    ['Writing connection', 'Use the same cloud/local connection step in Guided and Advanced when OpenCode writing is selected. Cloud requires a supported authenticated connection and selected usable model; local requires healthy Ollama plus a downloaded and responding compatible model. Show sign-in or API-key entry only as supported by the selected provider. No silent switch of route; unconfigured writing can be deferred without blocking manual authoring. The connected drawing is an illustrative result, not a real login.'],
+    ['Writing connection', 'First-run OpenCode accounts are ChatGPT and GitHub Copilot. Arke is visible but disabled, with no sign-in action or availability date. Use the harness-reported supported account method; no API-key path is in this first-run shortlist. A connected account plus an accessible supported writing model is required before Ready. Local writing requires healthy Ollama and a responding model after download. Existing Claude Code/Codex keep their own adapter/account route.'],
+    ['Smart eligibility', 'Local suitability uses a qualified model and its supported device profile, available RAM/VRAM where required, OS/CPU/backend compatibility, working context and disk/download peak. A missing GPU alone is not disqualifying if a supported CPU model fits. Ollama being installable is not proof of a suitable writing model. Unknown checks cannot be shown as suitable: explain the incomplete check, offer retry/online/manual, and do not download automatically. No invented universal RAM threshold or fixed model for every PC.'],
+    ['Simple wording', 'Guided and Lightweight explain outcomes: writing help, on this computer, online account, read aloud and picture/video tools. Keep OpenCode, Ollama, ComfyUI, Python/CUDA, harness and API-key terminology in Advanced/technical details. Product names remain when needed to choose a recognised installed assistant or account.'],
+    ['Existing assistant choice', 'Only compatible found installations are offered in Guided. Skip the choice when none exist. Keep installation discovery distinct from account/model readiness; selection checks the chosen assistant and offers its supported sign-in steps if needed. Do not copy personal sign-ins or change the selected assistant on failure. The example-computer controls are outside the product and do not scan this PC.'],
   ]},
   {id:243, title:'Install · advanced setup with explicit choices', keys:['243e','243a','243b','243d','243c'], rules:[
     ['Proposal', 'Draft for owner review. Reuse the same installer, core and destination as Guided and Lightweight. No second settings system or new daemon.'],
@@ -207,7 +245,7 @@ export const TURNS = [
     ['Managed default', 'Arke-managed Ollama and ComfyUI are the default sources for selected local capabilities. Mere detection never adopts an existing install. Reuse requires an explicit source selection and compatibility check.'],
     ['Existing services', 'Use only source types already supported by the selected engine. A personal service stays under the user’s lifecycle; Arke does not silently install packages into it, upgrade it or promise to restart it. A URL-only ComfyUI connection cannot supply a local Python interpreter for Ming.'],
     ['Selected readiness', 'Check the capabilities selected for preparation. A failed service holds only its dependent features. The user can correct the connection, review a managed alternative or enter with the working capabilities. Never label an omitted capability broken.'],
-    ['Providers', 'Cloud writing requires a connected supported provider and a selected usable model. Reuse existing connection and model-selection flows; these drawings neither collect nor store real credentials. Selecting cloud removes Ollama and local writing weights from the plan. Other selected local capabilities keep their own dependencies. Connection checks do not invoke an undisclosed paid generation.'],
+    ['Providers', 'The initial account picker offers ChatGPT and GitHub Copilot, plus disabled future Arke. Reuse the existing harness-owned sign-in and model flows behind this scoped onboarding shortlist (proposed amendment to SPEC-030 R-7); do not replace the general provider catalogue. Enable a row only when the shipped harness reports a supported sign-in method. Confirm account and model access; no undisclosed paid generation. Cloud excludes local writing downloads.'],
     ['Advanced controls', 'Folders, supported addresses and transfer controls sit behind Advanced or the relevant source field. Keep normal users out of service details. Avoid a new arbitrary limit, universal model-size assumption or forced migration of existing model stores.'],
     ['Returning users', 'A saved plan and explicit overrides survive restart and app update. Start only selected managed owners needed by enabled features. Recheck capability readiness without rerunning onboarding or ejecting an open world. A changed package is offered with its cost before additional downloads.'],
     ['Included harness', 'OpenCode v2 remains bundled in every path. It is the default authoring harness and connects to Ollama for local writing. Bundled does not mean selected or always running; a selected alternative is not silently replaced by OpenCode on failure. Do not make nontechnical users choose a harness.'],
@@ -224,6 +262,6 @@ export const TURNS = [
     ['Quiet states', 'Not set up is normal. Do not repeatedly nag, open dialogs or show fault badges for declined optional features. Actual failed accepted downloads can offer a contextual next step. Model-free diagnostics remain useful without a diagnostic model.'],
     ['Device scope', 'The compact frame is a narrow desktop window. Phones/tablets connecting to an existing host use the existing pairing journey; this design does not download desktop services onto a phone or bypass host approval.'],
     ['Approval boundary', 'Approval of these drawings would authorize the journey direction only. SPEC-016 R-1–R-5 and the later mandatory-runtime policy must be reconciled explicitly before implementation. Existing users keep their configuration; no migration or new startup downloads are performed by this review.'],
-    ['One Worlds landing', 'All setup paths enter the existing /worlds page. Enhance WorldPickerScreen with Import a world and Explore sample world beside its current Create a world card and Open publication action; do not add a duplicate What will you create step. Existing worlds retain their current greeting, grid and archive behaviour. The sample follows availability and existing-copy state. Setup progress belongs in Activity, with only a small contextual status on Worlds.'],
+    ['One Worlds landing', 'All setup paths enter /worlds. Retain both first-run doors: Create a world and the sample-world card, alongside Import a world and the existing Open publication action. This folds FirstRunScreen into the Worlds empty state instead of adding another onboarding destination. Existing worlds retain their grid/archive behaviour; an installed sample becomes its existing world card, not a duplicate offer. Sample availability/download size follow the current source.'],
   ]},
 ];

@@ -1,6 +1,6 @@
 # Installation journeys · turns 242–244
 
-28 October 2026 · **Revision 3 · Draft for owner review. Not implemented.**
+28 October 2026 · **Revision 4 · Draft for owner review. Not implemented.**
 
 Owner feedback: keep specific voice providers/models out of onboarding; confirm OpenCode is
 included in all paths; offer explicitly selected existing Claude Code and Codex installations.
@@ -8,6 +8,9 @@ Revision 2 implemented those changes in the drawings and walkthrough only. Revis
 the duplicate world-entry step and enhances the current Worlds landing page with Import a world
 and Explore sample world. Guided and Advanced now share an explicit OpenCode cloud/local writing
 choice, including the provider connection handoff and an illustrative checked-model result.
+Revision 4 restores the sample as the second empty-state card, simplifies Guided/Lightweight
+language, adds computer-aware Guided choices and detected-assistant selection, and draws the
+actual ChatGPT/GitHub Copilot account picker with future Arke disabled.
 
 The owner requested journeys for people who want setup handled for them, technical users who
 want control, and people who want minimal downloads. These turns build on the **current**
@@ -38,7 +41,7 @@ reduction of those bundled files. A separate slim installer is outside these tur
 | | Guided · turn 242 | Advanced · turn 243 | Lightweight · turn 244 |
 |---|---|---|---|
 | Promise | Arke chooses and manages a sensible starter setup | Choose capabilities and the sources that provide them | Start writing with minimal download |
-| Default additions | Included OpenCode with a chosen cloud provider or managed Ollama + compatible local model; Kokoro, Whisper and managed ComfyUI on supported hardware | Only selected capabilities and dependencies; OpenCode offers the same cloud/local choice; managed local sources preselected | None |
+| Default additions | Check the computer first; offer a suitable local writing model, an online account or explicitly chosen compatible installed assistant. Include only supported voice/media tools | Only selected capabilities and dependencies; OpenCode offers the online/local choice; managed local sources preselected | None |
 | Optional | Image/video recipe weights, voice cloning from supported providers, larger text models, remote access | Existing Claude Code/Codex harness, local capabilities/models, cloud providers and supported overrides | All AI capabilities, existing supported assistant connections and remote access |
 | Enter the app | Core connected; valid writable workspace; create/save path available | Same core checks | Same core checks, including offline |
 | Claim AI ready | Cloud: authenticated provider and selected usable model. Local: verified files, healthy Ollama and a responding compatible model. Other selected tools pass their own checks | Same writing checks; qualify existing harness/account where selected; report independent capability results | Only after the user later selects and prepares a capability |
@@ -52,12 +55,37 @@ does need repair or a valid new destination before saving a world.
 
 ## Defaults needing review
 
-Guided offers **cloud or local writing** through bundled OpenCode before reviewing downloads.
-Cloud uses a supported provider's sign-in or API-key method, followed by model selection and
-connection/model checks. Reuse the current provider and model flows; do not assume every provider
-supports browser login, or that a ChatGPT/Claude website session authorizes OpenCode. A selected
-cloud route adds no Ollama or local writing weights, while separately selected ComfyUI/voice tools
-keep their own downloads. Both paths can defer AI writing and enter Worlds for manual work.
+Guided is a **smart setup**: check the machine, qualified model catalogue, destinations and
+compatible installed assistants before showing choices. A local writing offer needs at least
+one supported model with a fitting device profile, usable context, memory and disk/temporary
+space requirements. Check OS, CPU/backend and GPU/VRAM only where that model requires them;
+absence of a GPU is not a universal rejection of CPU models. Installing Ollama alone does not
+qualify this option. An unknown result must not appear as suitable: explain the incomplete check
+and allow retry, an online account or manual writing. Do not start a download during discovery.
+Picture/video and voice preparation each have their own supported profile checks, so an
+unsuitable media engine is not included simply because the writing choice works.
+
+When compatible Claude Code/Codex installations are found, Guided offers an explicit choice
+between those assistants and “Let Arke set it up”. Skip that extra choice when none are found.
+Installation discovery is not authentication: check the selected assistant's account/model
+readiness separately, using its own supported sign-in flow. Do not read/copy personal credentials.
+OpenCode remains the included default behind the nontechnical “Let Arke set it up” choice.
+
+For OpenCode, the initial account UI offers **ChatGPT** and **GitHub Copilot**. **Arke** is visible
+but disabled with “Coming later”; no endpoint, login or promised date exists. This shortlist is
+for onboarding, not a removal of other providers from the general Settings catalogue. Only
+enable a supported sign-in method reported by the actual bundled harness. This is a proposed
+onboarding exception to SPEC-030 R-7's general catalogue rule, to amend with implementation.
+The browser/account flow is then followed by account and available-model checks. Guided chooses
+a supported recommended writing model from the connected account; Advanced retains model control.
+No accessible model means no Ready state. Existing connections can be reused when actually
+available, but a website login alone does not authorize Arke's isolated harness.
+
+ChatGPT uses its account sign-in method. GitHub Copilot uses the supplied GitHub sign-in
+instructions/device code, including any required deployment questions returned by that method.
+No API-key entry is in this initial two-account picker. A selected online route excludes Ollama
+and local writing weights; separately supported media/voice tools retain their own downloads.
+Writing can be deferred without blocking manual authoring.
 
 Local proposes a **usable writing model**, not just an empty Ollama service. The concrete model
 must come from the existing qualified catalogue and device checks, with the selected model and
@@ -73,10 +101,12 @@ are then shown, with compatible existing runtimes reused. Hosted providers show 
 account and usage costs. Existing installations require explicit selection and compatibility
 checks; their packages and lifecycle stay under their owner's control.
 
-OpenCode v2 is already part of the base installer in **all three paths**. Guided uses it by
-default and names it only as included context; nobody needs to make a technical harness choice
-to begin. OpenCode is the harness; Ollama is its local model service, and is a separate optional
-download when the chosen writing route needs it.
+OpenCode v2 is already part of the base installer in **all three paths**. Guided and Lightweight
+do not name it, Ollama, ComfyUI, Python/CUDA, Kokoro or Whisper in their normal product copy.
+They say writing help, on this computer, online account, read aloud and picture/video tools.
+Names remain where essential to choose an account or recognised existing assistant; Advanced and
+technical details retain the actual dependency names. Ollama is downloaded only for a chosen
+local writing route that can use a suitable model.
 
 Advanced now starts with **Writing harness**: included OpenCode, or detected Claude Code/Codex.
 The drawing's Detected labels are illustrative, not a scan of this computer. Reuse existing
@@ -94,22 +124,26 @@ make any chargeable probe explicit; opening the selection screen cannot trigger 
 
 The local 8 GB additional download / 17 GB retained / 24 GB peak and cloud-writing package
 3.7 GB / 12 GB / 18 GB (3.5 GB download without voice), 180 GB available, locations, timing, progress and
-all health outcomes in the drawings are **illustrative**. Production must distinguish download,
+all health outcomes in the drawings are **illustrative**. The small-computer example retains
+only voice support (0.2 GB / 1 GB / 2 GB), with online writing; these are not measured package
+quotes or a hardware recommendation. Production must distinguish download,
 retained disk and temporary peak on each real destination, count only missing selected files,
 and label unknown estimates. Catalogue size metadata is not a proven installed-footprint quote.
 Changed local download plans require a complete quote before installation. Reusing an existing
 assistant alone needs no additional AI download, but still requires compatibility/account checks.
 
-Provider choice is provider-neutral. It is required to enable a selected cloud writing route;
-AI writing itself can be deferred. Connection flows are not redesigned here and
-the prototype never accepts real credentials. Checking a connection is not permission for a paid
+The first-run account shortlist follows the owner's requested ChatGPT/Copilot scope. Other
+capability catalogues remain provider-neutral. The picker and waiting/result states are drawn
+here, with existing sign-in services behind them; the prototype never accepts real credentials.
+Checking a connection is not permission for a paid
 generation. The current private Studio diagnostic conversation has a narrower qualified managed
 Ollama route than ordinary writing; a hosted writing setup must not imply that private route is
 available. Model-free Diagnostics remains available in every path.
 
 ## Current implementation and specification boundary
 
-Read: SPEC-005 (draft), existing harness availability/settings/discovery/assembly; SPEC-016
+Read: SPEC-005 and SPEC-030 (draft), existing harness availability/settings/discovery/assembly,
+`VendorAuthService`, client `SettingsSignInScreen` and adapter vendor-auth fixtures; SPEC-016
 (draft) R-1–R-8 and its later managed-runtime/readiness amendments; ADR-004
 (proposed); current `launch.tsx`, setup catalogue, desktop packaging and managed runtime guide.
 The original SPEC-016 manual/offline onboarding intent and the later mandatory ComfyUI/Ollama
@@ -125,8 +159,9 @@ download a new starter model. Separate readiness of a feature from presence of i
 
 ## Frames and review
 
-- **242a, 242f–h, then 242b–e:** shared choice, cloud/local writing, provider-connection handoff,
-  illustrative connected result, Guided package review, progress, interruption and ready states.
+- **242a, 242i–k, 242f–h/242l, then 242b–e:** shared choice, automatic computer check, conditional
+  existing-assistant choice, suitable local/online or online/manual choices, actual account
+  picker, browser sign-in waiting state, checked result and Guided package/progress/ready states.
 - **243e then 243a–d:** included/existing harness choice, capabilities, managed/existing source
   controls, selected download review and partial-ready service failure. OpenCode writing routes
   through the same 242f–h connection step before source configuration.
@@ -138,6 +173,11 @@ source controls, Pause/Resume, narrow-window and review-theme controls operate l
 drawings retain representative example states. No downloads, service requests, paid calls,
 world creation, credential handling or filesystem mutation is attached to product controls.
 
+The old `FirstRunScreen` has two doors: “Your first world” and “Or start from ours” when a sample
+is available. `WorldPickerScreen` has Create plus existing world cards, and a sample link in its
+empty state. The revised Worlds empty state keeps **two cards**, Create and Explore sample world
+(The Undersong), and adds Import beside Open publication. It avoids an extra onboarding page.
+
 Worlds derives its layout from current `WorldPickerScreen` in `shell.tsx`, `chrome.tsx`,
 `fidelity.css` and `home.css`. The generator copies the current base rules under a new drawing-only
 scope and uses the native icons; current source hashes are recorded. The new empty-state heading
@@ -145,6 +185,12 @@ applies only when there are no worlds; existing worlds retain their greeting, ca
 behaviour. Import uses the supported import flow. Sample availability/download/already-installed
 states follow the existing sample flow; this drawing illustrates a bundled sample. The small
 readiness line points to Activity/Settings rather than adding another onboarding destination.
+
+Provider references checked 28 October 2026: [OpenCode v2 provider documentation](https://opencode.ai/v2/docs/providers/)
+describes ChatGPT account sign-in and subsequent model selection. [OpenCode's Copilot instructions](https://opencode.ai/docs/providers/#github-copilot)
+describe the GitHub device-code flow. The latter is general documentation, not qualification of
+Arke's exact bundled version. Local adapter/client fixtures cover both method shapes; shipping
+implementation must use the live supported method catalogue and repeat native qualification.
 
 Build/validate from repository root:
 
@@ -188,3 +234,16 @@ reach their described handoffs. Worlds was visually checked in light and dark, a
 content width with no horizontal overflow; both new actions measured 44px high. Screenshots of
 Worlds and the writing choice were saved for review. No real connection, import, installation
 or inference was performed by these design-fixture checks.
+
+Revision 4 browser checks: the no-suitable-model example contains no local-writing radio and
+offers online/manual routes; its accepted account plan omits both local writing and incompatible
+media setup. The suitable-model example offers a local plan. The existing-assistants example
+shows Claude Code/Codex and honours an explicit Codex selection before account checks. With no
+detected assistants, Lightweight hides that extra choice. ChatGPT and Copilot open their distinct
+waiting states; the review-only failure control leaves writing unready and success advances the
+simulated account/model check. Arke is disabled. Advanced uses the same account picker and keeps
+Copilot in the reviewed plan. Lightweight account setup returns directly to Worlds with no local
+downloads. Guided/Lightweight summary text contained none of the dependency names listed above.
+The two-card Worlds empty state and account picker were visually inspected and captured. The
+559px account preview had no horizontal overflow and its choices exceeded 44px. These are fixture
+checks only; there was no hardware scan, real sign-in, download or native provider qualification.
