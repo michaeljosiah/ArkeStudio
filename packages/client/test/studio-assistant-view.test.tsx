@@ -35,6 +35,43 @@ function View({ client, appState = FIXTURE_STATE }: { client: StudioConversation
   const view = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot);
   return <StudioAssistantView view={view} client={client} appState={appState} model="provider/model" pickModel={client.pickModel} />;
 }
+it("focuses the Studio composer once on entry without stealing focus after a busy period", async () => {
+  const h = fixture(), container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  try {
+    await act(async () => root.render(<View client={h.client} />));
+    assert.equal(container.querySelector(".fy-studio-compose-scope")?.textContent, "Studio");
+    assert.equal(document.activeElement, container.querySelector(".fy-cx__editor"));
+    await act(async () => h.deliver({ ...initial(), busy: true }));
+    const history = container.querySelector<HTMLButtonElement>('[aria-label="Studio conversations"]')!; history.focus();
+    await act(async () => h.deliver(initial()));
+    assert.equal(document.activeElement, history);
+    assert(h.sent.every(message => message.command.action === "watch"));
+  } finally { await act(async () => root.unmount()); h.client.dispose(); container.remove(); }
+});
+it("uses the approved 1100px boundary for native Studio modal behavior", async () => {
+  const dialogs = dom.HTMLElement.prototype as HTMLElement & Pick<HTMLDialogElement, "showModal" | "show">;
+  const originalMedia = window.matchMedia, originalModal = dialogs.showModal, originalShow = dialogs.show;
+  let shown: "modal" | "modeless" | undefined;
+  dialogs.showModal = function () { this.setAttribute("open", ""); shown = "modal"; };
+  dialogs.show = function () { this.setAttribute("open", ""); shown = "modeless"; };
+  try {
+    for (const width of [1100, 1099.5, 1099, 1024, 599]) {
+      window.matchMedia = ((query: string) => {
+        const below = /width < (\d+)px/.exec(query), maximum = /max-width:\s*(\d+)px/.exec(query);
+        return { matches: below ? width < Number(below[1]) : maximum ? width <= Number(maximum[1]) : false };
+      }) as typeof window.matchMedia;
+      shown = undefined;
+      const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+      __setStateForTest({ ...FIXTURE_STATE, world: null }, { connection: "open" });
+      __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send() {} });
+      try {
+        await act(async () => root.render(<MemoryRouter><GlobalChatContext.Provider value={new GlobalChatController()}><StudioAssistantProvider><AppChrome /></StudioAssistantProvider></GlobalChatContext.Provider></MemoryRouter>));
+        await act(async () => container.querySelector<HTMLButtonElement>('[data-studio-chat-trigger]')!.click());
+        assert.equal(shown, width < 1100 ? "modal" : "modeless", `Studio at ${width}px`);
+      } finally { await act(async () => root.unmount()); container.remove(); __setBridgeForTest(null); }
+    }
+  } finally { window.matchMedia = originalMedia; dialogs.showModal = originalModal; dialogs.show = originalShow; }
+});
 it("offers current storage review inside Studio, requires separate approval and never invokes a model to repair", async () => {
   const h = fixture(), container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
   const appState = structuredClone(FIXTURE_STATE), scope = "d".repeat(64), sent: ClientMessage[] = [];

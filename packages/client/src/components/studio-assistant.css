@@ -43,13 +43,14 @@
 .fy-studio-target { display: flex; flex-direction: column; gap: 8px; font: var(--type-label); }
 .fy-studio-target select { min-height: 34px; background: var(--background); color: inherit; border: 1px solid var(--border); border-radius: 7px; }
 .fy-studio-compose { flex: none; max-height: 48%; overflow-y: auto; padding: 12px 14px 14px; margin: 0; border-top: 1px solid var(--border); }
+.fy-studio-compose-scope { font: var(--type-meta); color: var(--muted-foreground); margin: 0 0 8px; }
 .fy-studio-compose .fy-cx { border-radius: 10px; background: var(--background); }
 .fy-studio-compose .fy-cx__editor { font: var(--type-ui); font-weight: var(--weight-regular); line-height: 1.6; min-height: 70px; }
 .fy-studio-assistant::backdrop { background: linear-gradient(to bottom, transparent 44px, color-mix(in srgb, var(--foreground) 18%, transparent) 44px); }
-@media (max-width: 1023px) {
+@media (width < 1100px) {
   .fy-page-sheet.fy-studio-assistant { inset: 60px 16px calc(16px + var(--studio-keyboard, 0px)) auto; width: min(520px, calc(100% - 32px)); }
 }
-@media (max-width: 599px) {
+@media (width < 600px) {
   .fy-page-sheet.fy-studio-assistant { inset: 60px 12px calc(max(12px, env(safe-area-inset-bottom)) + var(--studio-keyboard, 0px)) auto; width: calc(100% - 24px); max-width: none; border-radius: 12px; }
   .fy-studio-head { padding: 12px; }
   .fy-studio-scope { padding: 10px 14px; gap: 10px; }
@@ -60,6 +61,7 @@
   .fy-studio-compose { padding: 10px; }
   .fy-studio-fact-card { padding: 12px; }
 }
-@media (pointer: coarse) {
+@media (width < 600px), (pointer: coarse) {
   .fy-studio-assistant .fy-studio-icon, .fy-studio-button, .fy-studio-prompt { min-width: 44px; min-height: 44px; }
+  .fy-studio-compose :is(.fy-cx__attach, .fy-cx__mic, .fy-cx__send, .fy-cx__tool, .fy-mchip__btn, .fy-cx__chipx, .fy-cx__chipaction) { min-width: 44px; min-height: 44px; }
 }

@@ -1564,7 +1564,9 @@ World/Builder/shot conversation, preserving its captured scope and draft. Its le
 selector. Native touch sizing prevents the contextual control shrinking beside a long title.
 Existing World/Builder page entries keep their contextual controller and layout. The new dialog uses
 the native PageSheet, composer, ModelChip, reply renderer and icons; its CSS affects only Studio,
-including compact modal focus and keyboard inset. History is private, cloud consent is scoped
+including modal behavior below 1100px, 44px phone/coarse-pointer controls, an explicit composer
+scope and keyboard inset. Entry requests composer focus once; a later busy/unlock cycle does not
+steal focus from another control. History is private, cloud consent is scoped
 to one disclosure, and `GlobalChatController.stageDraft` carries only the editable request to
 a named World/Builder destination. Replacement consent matches the exact existing draft;
 later typing requires fresh review. Staging creates/sends no coordinator conversation command.

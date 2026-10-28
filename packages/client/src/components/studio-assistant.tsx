@@ -33,7 +33,7 @@ export function StudioAssistantProvider({ children }: { children: ReactNode }) {
   const [client] = useState(() => new StudioConversationClient({ send, id: () => crypto.randomUUID() }));
   const view = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot);
   const contextualView = useSyncExternalStore(contextual?.subscribe ?? (() => () => {}), contextual?.getSnapshot ?? (() => null), () => null);
-  const compact = useMediaQuery("(max-width: 1023px)"), keyboard = useKeyboardInset();
+  const compact = useMediaQuery("(width < 1100px)"), keyboard = useKeyboardInset();
   const configured = state?.app.agents.find(agent => agent.name === "studio-assistant")?.model;
   const model = view.model ?? configured;
   // Subscriptions mount before restoring observation. StrictMode may reattach them without
@@ -58,7 +58,7 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
   view: StudioConversationView; client: StudioConversationClient; appState: ClientState | null;
   model?: string; modelSet?: boolean; pickModel(value: string | undefined): void;
 }) {
-  const [history, setHistory] = useState(false), [focus, requestFocus] = useState(0);
+  const [history, setHistory] = useState(false), [focus, requestFocus] = useState(1);
   const [dictationPhase, setDictationPhase] = useState<DictationPhase>("idle");
   const [attachmentTrouble, setAttachmentTrouble] = useState<string | null>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -117,8 +117,8 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
         <button type="button" className="fy-studio-button" disabled={!view.fresh} onClick={() => void client.request({ action: "cancel", threadId: thread!.id, runId: pending.id })}>Stop request</button></div>}
     </div>}
     {view.trouble && <p className="fy-studio-trouble" role="status">{view.trouble}</p>}
-    <footer className="fy-studio-compose"><Composer value={view.draft} onChange={client.draft} onSubmit={() => { if (model && dictationPhase === "idle") void client.send(model); }}
-      placeholder="Ask Arke about your studio…" agentLabel="Arke" focusRequest={focus} busy={view.attaching || view.submitting || !!working || !!view.state?.busy || dictationPhase !== "idle"} disabledReason={unavailable}
+    <footer className="fy-studio-compose"><div className="fy-studio-compose-scope">Studio</div><Composer value={view.draft} onChange={client.draft} onSubmit={() => { if (model && dictationPhase === "idle") void client.send(model); }}
+      placeholder="Ask Arke about your studio…" focusRequest={focus} busy={view.attaching || view.submitting || !!working || !!view.state?.busy || dictationPhase !== "idle"} disabledReason={unavailable}
       busyLabel={view.attaching ? "Reading documents…" : dictationPhase === "requesting" ? "Microphone permission…" : dictationPhase === "listening" ? "Dictating…" : dictationPhase === "transcribing" ? "Transcribing…" : "Working…"}
       attachmentLabel="Attach text documents" removeAttachmentTitle="Remove this unsent document"
       onAttach={() => { pickerTarget.current = client.documentPickerTarget(); picker.current?.click(); }} onAttachFiles={client.attachFiles} onAttachText={client.attachText}

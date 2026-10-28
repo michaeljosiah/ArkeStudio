@@ -231,5 +231,24 @@ compatibility tests pass, including world close during admission and full-destin
 CI on `a6cb708d4` passed 24 of 25 jobs. Windows shard 8 found a test comparing its short temporary
 path (`RUNNER~1`) with the exporter's canonical path. The assertion now compares canonical paths
 and the fixture explicitly uses a directory alias; all eight world-export cases pass locally.
-Production path handling is unchanged. The correction needs fresh CI; native render/scratch
-planning and matched design-master acceptance remain open.
+Production path handling is unchanged. The corrected checkpoint `a9eef5b9a` passed all 25 CI
+checks. Native render/scratch planning and matched design-master acceptance remain open.
+
+## Studio dialog sizing and entry focus
+
+Source comparison with approved turn 239 found the tablet boundary at 1024px rather than 1100px,
+a missing composer scope label and an extra repeated agent label. The implementation now follows
+the approved boundary and labels. Browser measurement also exposed fractional viewport widths
+falling between integer media-query boundaries; exact `width < 1100px` / `width < 600px` queries
+keep layout and modality aligned. Phone composer controls now measure at least 44px.
+
+The real client was checked at 1360×820, 834×900, 390×844 and 390×550 in light and dark, using
+the existing isolated onboarding host with no model configured. Desktop remains nonmodal;
+tablet/phone use the native modal dialog. Measured shell widths are 440/520/366px respectively,
+with 12px corners and no horizontal overflow. Close returns focus to Chat. Eight Studio interaction
+tests plus ten existing composer/overlay tests pass, including entry focus that does not repeat
+after a busy period. Temporary viewport and theme choices were restored.
+
+These are implementation captures and source comparisons, not matched master captures or actual
+microphone/keyboard-device qualification. The approved master browser preview remains inaccessible;
+diagnostic/repair cards, supported model effort and the remaining epic acceptance stay open.
