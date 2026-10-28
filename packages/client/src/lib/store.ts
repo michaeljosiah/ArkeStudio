@@ -1106,6 +1106,13 @@ export type ProductionCreateResult = Extract<DomainEvent, { type: "production.cr
 /** Refused direct scene writes (review 2026-08-22), delivered to the storyboard that sent them. */
 type CommandFailure = Extract<DomainEvent, { type: "command.failed" }>;
 const commandFailureListeners = new Set<(event: CommandFailure) => void>();
+const worldImportListeners = new Set<(event: Extract<DomainEvent, { type: "world.import-result" }>) => void>();
+export function subscribeWorldImport(listener: (event: Extract<DomainEvent, { type: "world.import-result" }>) => void): () => void {
+  worldImportListeners.add(listener); return () => { worldImportListeners.delete(listener); };
+}
+export function importWorld(): string | null {
+  const requestId = ulid(); return send({ kind: "import-world", requestId }) ? requestId : null;
+}
 export function subscribeCommandFailures(listener: (event: CommandFailure) => void): () => void {
   commandFailureListeners.add(listener);
   return () => commandFailureListeners.delete(listener);
@@ -1495,6 +1502,8 @@ export function __applyForTest(state: ClientState, event: DomainEvent): ClientSt
 
 function fold(state: ClientState, event: DomainEvent): ClientState {
   switch (event.type) {
+    case "onboarding.changed":
+      return { ...state, app: { ...state.app, onboarding: event.onboarding } };
     case "health.changed":
       return {
         ...state,
@@ -1882,6 +1891,7 @@ function handleFrame(json: string): void {
     let setupStatus = current.setupStatus;
     let permissions = current.permissions;
     const event = frame.event;
+    if (event.type === "world.import-result") for (const listener of worldImportListeners) listener(event);
     let frameRunQuotes = current.frameRunQuotes;
     let frameRunStartResults = current.frameRunStartResults;
     if (event.type === "command.failed") {
@@ -4221,6 +4231,11 @@ export function setSpendThreshold(thresholdMicroUsd: number, periodDays: number,
 
 export function detectRuntimes(): void {
   send({ kind: "detect-runtimes" });
+}
+
+export function checkOnboarding(): void { send({ kind: "check-onboarding" }); }
+export function saveOnboarding(plan: import("@arke-studio/contracts").OnboardingPlan, action: "save" | "install" | "finish" = "save"): void {
+  send({ kind: "save-onboarding", plan, action });
 }
 
 /** Look for the harnesses this machine has. Cheap — discovery only, never a live turn. */

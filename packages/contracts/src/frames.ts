@@ -1,4 +1,5 @@
 import { TraversalEvidenceSchema } from "./routing.js";
+import { OnboardingPlanSchema } from "./onboarding.js";
 import { GuideVoiceLinesRequestSchema, SetGuideEntrySchema, SetGuideTeasersSchema } from "./world-guide.js";
 import { ARKE_PLAYER_PICTURE_SIZES } from "./world-package.js";
 import { ArkePlayerPartRequestSchema } from "./arke-player-release.js";
@@ -139,6 +140,10 @@ export const MusicImportSchema = z.object({ productionId: SlugSchema, makeAlbum:
 export type MusicImport = z.infer<typeof MusicImportSchema>;
 
 export const ClientMessageSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("import-world"), requestId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("check-onboarding") }).strict(),
+  z.object({ kind: z.literal("save-onboarding"), plan: OnboardingPlanSchema,
+    action: z.enum(["save", "install", "finish"]).default("save") }).strict(),
   StudioAssistantCommandSchema,
   ProductionSetupCommandSchema,
   z.object({ kind: z.literal("save-production-narrative"), worldId: UlidSchema, productionId: SlugSchema,

@@ -1,5 +1,17 @@
 # Running and validating changes
 
+Installation journeys (SPEC-016 R-21–R-28, approved turns 242–244): coordinator
+`test/setup/onboarding.test.ts`, `test/setup/onboarding-wire.test.ts`,
+`test/world/import-world.test.ts`, `test/world/sample-world.test.ts`, and
+`test/ollama-engine.test.ts`; desktop `test/workspace-location.test.ts`; client
+`test/onboarding.test.tsx`, `test/launch-lifecycle.test.tsx`, and `test/launch-remote.test.tsx`.
+Run client tests from `packages/client`. The wire test exercises the authenticated coordinator
+and filesystem across restart, including manual entry without any AI service. The response
+test uses a protocol fixture; it makes no paid request or download. Browser acceptance compares
+the actual `/setup` and empty Worlds screens with approved turns 242–244, including narrow
+widths and unavailable choices. Desktop folder selection/relaunch and provider sign-in remain
+distinct native acceptance checks.
+
 Install journeys 242–244 begin with optional acquisition and manual startup. From
 `packages/coordinator`, run `node --import tsx --test --test-concurrency=1
 test/setup/local-setup.test.ts test/setup/local-ai-readiness.test.ts

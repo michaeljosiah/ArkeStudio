@@ -206,6 +206,9 @@ const COMPLETE_TIMELINE_READ = AVAILABLE;
  * honest answer is that it is read-only, global, or reserved for the person at the controls.
  */
 const CLIENT_COMMAND_METADATA = {
+  "check-onboarding": globalOnly(GLOBAL_OPERATION),
+  "import-world": globalOnly(GLOBAL_OPERATION),
+  "save-onboarding": globalOnly(GLOBAL_OPERATION),
   "chapter-review-start": action("production", "command", "production-store", "external-network-action", ["chapters"]),
   "chapter-review-read": readOnly("Reads retained chapter review findings."),
   "chapter-review-cancel": humanOnly("Stopping specialist work belongs to the person."),

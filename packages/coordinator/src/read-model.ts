@@ -81,6 +81,7 @@ export class ReadModel {
       Pick<
         ClientState["app"],
         | "manifest"
+        | "onboarding"
         | "providers"
         | "providerTools"
         | "routing"
@@ -252,6 +253,10 @@ export class ReadModel {
   /** Fold one domain event. Unknown-to-this-fold events are deliberate no-ops. */
   apply(event: DomainEvent): void {
     switch (event.type) {
+      case "onboarding.changed": {
+        this.state = { ...this.state, app: { ...this.state.app, onboarding: event.onboarding } };
+        break;
+      }
       case "editor-effect.analysis": {
         const previous = (this.state.effectAnalyses ?? []).filter(row => row.worldId !== event.worldId || row.productionId !== event.productionId);
         this.state = { ...this.state, effectAnalyses: event.analysis ? [...previous, event.analysis] : previous };

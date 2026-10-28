@@ -283,6 +283,7 @@ function AppRoutes() {
       <Routes location={inSettings ? settingsReturnPath() : location}>
         <Route path="/" element={<StartupScreen />} />
         <Route path="/starting" element={<StartupScreen />} />
+        <Route path="/setup" element={<OnboardingScreen />} />
         {/* The founding build's watch surface (SPEC-031 §1.8): full-bleed, no world chrome —
             the run needs its world open, and this screen is what keeps it that way. */}
         <Route path="/building/:worldId" element={<BuildingScreen />} />
@@ -398,3 +399,4 @@ function AppRoutes() {
   );
 }
 import { SettingsAdaptersScreen } from "./screens/settings-adapters.js";
+import { OnboardingScreen } from "./screens/onboarding.js";

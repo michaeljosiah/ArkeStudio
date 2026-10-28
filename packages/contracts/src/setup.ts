@@ -62,6 +62,8 @@ export const SetupComponentSchema = z
     detail: z.string().optional(),
     /** Persistent catalogue requirements, visible before install and independent of progress. */
     caveat: z.string().optional(),
+    /** Not a starter recommendation; requires a deliberate model choice in Settings. */
+    explicitChoiceOnly: z.boolean().optional(),
     /**
      * Which guard blocked it (SPEC-032 R-20.3, R-20.4). The detail sentence carries the figures
      * for a person; a correlation that needs to know *disk* from *waiting on a dependency* must

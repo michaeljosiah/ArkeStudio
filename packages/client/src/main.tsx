@@ -31,6 +31,7 @@ import "./domain/domain.css";
 import "./screens/screens.css";
 import "./screens/fidelity.css";
 import "./screens/launch.css";
+import "./screens/onboarding.css";
 import "./screens/home.css";
 import "./screens/world.css";
 import "./screens/character-pages.css";

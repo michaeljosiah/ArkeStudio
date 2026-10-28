@@ -10,6 +10,27 @@ import { tempDir } from "./tmp.js";
 const signal = () => new AbortController().signal;
 const managed = { engineUrl: null, modelsDir: null };
 
+it("first-run model check requires a response, refuses cloud-backed models and releases residency", async () => {
+  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+  let cloud = false, responds = true;
+  const service = new OllamaEngineService({ appRoot: await tempDir("ollama-model-check-"), port: 24119,
+    fetch: async (url, init) => {
+      const path = new URL(String(url)).pathname;
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
+      calls.push({ path, body });
+      return Response.json(path === "/api/version" ? { version: "test" } : path === "/api/show" ? cloud ? { remote_model: "cloud-writer" } : {} : { done: true, response: responds ? "OK" : "" });
+    } });
+  try {
+    await service.applySettings({ ...managed, engineUrl: "http://127.0.0.1:11434" });
+    await service.checkLocalModel("writer:small", signal());
+    assert.equal(calls.at(-1)?.path, "/api/generate"); assert.equal(calls.at(-1)?.body.keep_alive, 0);
+    responds = false; await assert.rejects(service.checkLocalModel("writer:small", signal()), /did not return a response/);
+    const generated = calls.filter(c => c.path === "/api/generate").length;
+    cloud = true; await assert.rejects(service.checkLocalModel("writer:small", signal()), /runs on this computer/);
+    assert.equal(calls.filter(c => c.path === "/api/generate").length, generated);
+  } finally { await service.dispose(); }
+});
+
 it("holds activation throughout managed-file installation, then allows verified publication to start it", async () => {
   const workers: Worker[] = [];
   const service = new OllamaEngineService({ appRoot: await tempDir("ollama-file-fence-"), port: 24113, exists: () => true, registerBackstop: () => () => {},

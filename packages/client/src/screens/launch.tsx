@@ -270,7 +270,8 @@ export function StartupScreen() {
     // R-33) — before the library, because the author left mid-build and is coming back to it.
     const midBuild = state.app.builds.find((build) => build.status === "running");
     if (midBuild) return `/building/${midBuild.worldId}`;
-    return state.worlds.length === 0 ? "/first-run" : "/worlds";
+    if (!isRemoteSession() && state.app.onboarding && state.app.onboarding.plan.step !== "done") return "/setup";
+    return "/worlds";
   };
 
   // After the press, the surface goes on by itself the moment the studio is ready. A failed

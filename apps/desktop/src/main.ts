@@ -1,6 +1,7 @@
 import { createWindowsCommitProbe } from "./windows-commit.js";
 import { createDesktopGpuProbe } from "./system-resources.js";
 import { StartupRuntimeOwners } from "./startup-runtime-owners.js";
+import { workspaceRoot, prepareWorkspace, rememberWorkspace } from "./workspace-location.js";
 import { pathToFileURL } from "node:url";
 import { webWindowOpenHandler } from "./external-links.js";
 import { storyPublicationFileFilter } from "./story-publication-file.js";
@@ -150,7 +151,8 @@ const clientIndex = isDev
 const appIcon = join(__dirname, "../assets/arke-studio.ico");
 
 /** The real on-disk app root (SPEC-002 §2.2): %USERPROFILE%\ArkeStudio, env-overridable. */
-const appRoot = defaultAppRoot();
+const workspacePreference = join(app.getPath("userData"), "workspace-location.json");
+const appRoot = workspaceRoot(workspacePreference, defaultAppRoot(), process.env.ARKE_STUDIO_ROOT);
 const desktopLog = join(appRoot, "logs", "desktop.jsonl");
 
 function traceDesktop(kind: string, detail: Record<string, unknown> = {}): void {
@@ -560,6 +562,25 @@ function registerHostIpc(): void {
   ipcMain.on("arke:open-data-folder", (event) => {
     if (!window || event.sender !== window.webContents) return;
     void shell.openPath(appRoot);
+  });
+  ipcMain.handle("arke:restart-for-setup", async (event) => {
+    if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) return { reason: "Open setup in the main Arke window." };
+    return restartForSetup();
+  });
+  ipcMain.handle("arke:choose-workspace-folder", async (event) => {
+    if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || shuttingDown) return { reason: "Arke is not ready to change folders." };
+    if (process.env.ARKE_STUDIO_ROOT) return { reason: "This installation’s folder is set by ARKE_STUDIO_ROOT. Change that launch setting to use another folder." };
+    const result = await dialog.showOpenDialog(window, { title: "Choose your Arke folder", properties: ["openDirectory", "createDirectory"], defaultPath: appRoot });
+    const path = result.filePaths[0];
+    if (result.canceled || !path || resolve(path) === resolve(appRoot)) return {};
+    const confirmed = await dialog.showMessageBox(window, { type: "question", title: "Use another Arke folder?",
+      message: "Arke will restart using this folder.", detail: `${path}\n\nYour current worlds stay where they are. No files are moved. Account connections and downloads belong to each folder.`, buttons: ["Use this folder", "Cancel"], defaultId: 0, cancelId: 1 });
+    if (confirmed.response !== 0) return {};
+    try {
+      const current = await new AppSettingsFile(join(appRoot, "settings.json")).load();
+      await prepareWorkspace(path, current.onboarding ?? { version: 1, persona: null, step: "choose", writing: "none", harness: "opencode", account: null, modelId: null, media: false, voice: false });
+      return await restartForSetup(() => rememberWorkspace(workspacePreference, path));
+    } catch (error) { return { reason: `Could not use that folder: ${error instanceof Error ? error.message : String(error)}` }; }
   });
   ipcMain.on("arke:quit", (event) => {
     if (!window || event.sender !== window.webContents) return;
@@ -1284,6 +1305,13 @@ async function initialize(): Promise<{ port: number }> {
       });
       return result.canceled ? null : (result.filePaths[0] ?? null);
     },
+    chooseWorldFolder: async () => {
+      if (!window) return null;
+      const result = await dialog.showOpenDialog(window, {
+        title: "Import an Arke world folder", buttonLabel: "Copy world into Arke", properties: ["openDirectory"],
+      });
+      return result.canceled ? null : result.filePaths[0] ?? null;
+    },
     // Only the harnesses that can be absent — OpenCode is in the installer beside this process.
     chooseCodexExecutable: async () => {
       const parent = window;
@@ -1583,6 +1611,22 @@ async function shutdownConfirmed(): Promise<void> {
     });
   } finally {
     shuttingDown = false;
+  }
+}
+
+async function restartForSetup(beforeRestart?: () => Promise<void>): Promise<{ reason?: string }> {
+  if (shuttingDown || normalShutdown || closeForUpdate || updateController?.isInstallOnCloseArmed()) return { reason: "Finish the current shutdown or update before restarting setup." };
+  updateController?.beginShutdown();
+  try {
+    normalShutdown = shutdownConfirmed();
+    await normalShutdown;
+    await beforeRestart?.();
+    allowQuit = true;
+    app.relaunch(); app.quit();
+    return {};
+  } catch (error) {
+    normalShutdown = null; updateController?.failShutdown();
+    return { reason: `Arke could not restart safely. Try again after local work stops. ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 

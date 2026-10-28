@@ -261,6 +261,7 @@ export class LocalSetupService {
         bytesPerSecond: null,
         pauseSupported: false,
         ...(entry.caveat !== undefined ? { caveat: entry.caveat, detail: entry.caveat } : {}),
+        ...(entry.explicitChoiceOnly !== undefined ? { explicitChoiceOnly: entry.explicitChoiceOnly } : {}),
         // Carried onto the wire so a capability row can ask what a component makes available
         // without a second copy of the catalogue in the renderer (SPEC-033 R-39).
         ...(entry.provides !== undefined ? { provides: [...entry.provides] } : {}),

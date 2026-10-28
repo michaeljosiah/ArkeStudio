@@ -19,6 +19,7 @@ import { ProductionNarrativeSchema } from "./production-narrative.js";
 import { AudiobookBookSchema } from "./audiobook.js";
 import { HarnessStatusSchema } from "./harness.js";
 import { ModelInfoSchema } from "./adapter.js";
+import { OnboardingStatusSchema } from "./onboarding.js";
 import { HarnessModelStatusSchema } from "./harness-models.js";
 import { ProductionSpineSchema } from "./spine.js";
 import { TakeMediaInfoRecordSchema } from "./media.js";
@@ -437,6 +438,7 @@ export const ClientStateSchema = valueSchema(z
     app: z
       .object({
         version: z.string(),
+        onboarding: OnboardingStatusSchema.nullable().optional(),
         health: AppHealthSchema,
         jobs: z.array(JobSummarySchema),
         audiobookActivity: z.array(AudiobookActivitySchema).optional(),

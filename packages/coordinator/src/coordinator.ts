@@ -1,4 +1,7 @@
 import { savedPicture, openSavedPicture, type SavedPicture } from "./productions/audiobook-picture-reuse.js";
+import { NEW_ONBOARDING, onboardingComponents, onboardingWritingReadiness, onboardingWritingModels, type OnboardingPlan } from "@arke-studio/contracts";
+import { checkOnboardingWorkspace, validateOnboardingPlan } from "./setup/onboarding.js";
+import { checkWorldImport } from "./world/import-world.js";
 import { createStudioAssistantHost, type StudioAssistantHost, type StudioAssistantHostOptions } from "./studio-assistant/host.js";
 import { RecoveryActionRegistry } from "./recovery/actions.js";
 import { restartActionHistory, reviewedActionHistory } from "./recovery/action-history.js";
@@ -1043,6 +1046,7 @@ export interface CoordinatorOptions {
   detectHarnesses?: (configuredPath: string | null, codexPath: string | null) => Promise<HarnessAvailability[]>;
   /** The host's native file dialog for pointing at a Claude Code PATH does not carry. */
   chooseClaudeExecutable?: () => Promise<string | null>;
+  chooseWorldFolder?: () => Promise<string | null>;
   chooseCodexExecutable?: () => Promise<string | null>;
   /**
    * The ComfyUI engine (SPEC-021): the service that discovers, supervises and verifies it,
@@ -3507,6 +3511,7 @@ export class Coordinator {
   private started = false;
   private stopping = false;
   private sampleInstallAbort: AbortController | null = null;
+  private worldImportAbort: AbortController | null = null;
   private engineClosed = false;
   /** Page reads told to stop (codex, PR 879): the narration loop checks between blocks. */
   private readonly stoppedReads = new Set<string>();
@@ -5106,6 +5111,12 @@ export class Coordinator {
     }
     this.readModel.setWorlds(await this.opts.provider.listWorlds());
 
+    // Existing libraries never acquire a first-run wizard just because their old settings
+    // file was absent. An explicitly started/saved journey still resumes normally.
+    if (this.readModel.getState().worlds.length && this.readModel.getState().app.onboarding?.plan.persona === null) {
+      this.readModel.seedAppConfig({ onboarding: null });
+    }
+
     // Founding builds survive the process (SPEC-031 R-32, R-33): every world's build record
     // is peeked at startup — files only, never a store open — so a run cut off mid-wave is
     // known before any screen asks, and its notice is still standing (R-45). The run itself
@@ -6127,6 +6138,7 @@ export class Coordinator {
     if (seededSpend && !seededSpend.ledgerUnavailable) this.spendAlerted = seededSpend.alerted;
     this.readModel.seedAppConfig({
       manifest,
+      onboarding: settings?.onboarding ? { plan: settings.onboarding, workspace: null, localModel: null } : null,
       providers: this.providerService.list(),
       providerTools: [...this.providerTools.values()].map((tool) => tool.current()),
       ...(settings && manifest
@@ -7576,6 +7588,30 @@ export class Coordinator {
           await this.refreshStoryDownload();
           if (!this.stopping) this.transport.broadcastSnapshot();
         }
+        return;
+      }
+      case "import-world": {
+        const answer = (result: { worldId?: string; reason?: string; cancelled?: boolean }) => {
+          if (!this.stopping) this.emit({ at: this.nowIso(), type: "world.import-result", requestId: msg.requestId, ...result });
+        };
+        if (!this.opts.chooseWorldFolder || !this.opts.provider.installSampleWorld || !this.opts.appRoot) { answer({ reason: "Import a world from the desktop app on your computer." }); return; }
+        if (this.worldImportAbort || this.stopping) { answer({ reason: "A world import is already in progress." }); return; }
+        const control = new AbortController(); this.worldImportAbort = control;
+        const work = (async () => {
+          try {
+            const source = await this.opts.chooseWorldFolder!();
+            if (source === null) { answer({ cancelled: true }); return; }
+            const checked = await checkWorldImport(source, this.opts.appRoot!, control.signal);
+            const result = await this.opts.provider.installSampleWorld!(checked, control.signal);
+            if (this.stopping) return;
+            this.readModel.setWorlds(await this.opts.provider.listWorlds());
+            this.transport.broadcastSnapshot();
+            answer({ worldId: result.worldId });
+          } catch (error) { answer({ reason: describeCoordinatorError(error) }); }
+          finally { this.worldImportAbort = null; }
+        })();
+        this.backgroundWork.add(work);
+        try { await work; } finally { this.backgroundWork.delete(work); }
         return;
       }
       case "install-sample-world": {
@@ -20831,6 +20867,91 @@ export class Coordinator {
         await this.emitHarnessStatus();
         return;
       }
+      case "check-onboarding": {
+        if (!this.appSettings || !this.opts.appRoot) return;
+        await this.emitHarnessStatus();
+        await this.measureRuntime();
+        await this.setup?.detect();
+        const workspace = await checkOnboardingWorkspace(this.opts.appRoot);
+        const settings = await this.appSettings.load();
+        if (this.stopping) return;
+        const plan = settings.onboarding ?? NEW_ONBOARDING;
+        let localModel: import("@arke-studio/contracts").OnboardingStatus["localModel"] = null;
+        if (plan.writing === "local" && plan.modelId && this.opts.ollama?.service.status().state === "ready") {
+          const model = this.opts.manifest?.models.find(m => m.id === plan.modelId);
+          const installed = onboardingComponents(plan, this.setup?.status().components ?? []).filter(c => c.engine === "ollama");
+          if (model && installed.length && installed.every(c => c.state === "ready" || c.state === "present")) {
+            const endpoint = this.opts.ollama.service.baseUrl();
+            localModel = { modelId: plan.modelId, endpoint, ready: false, detail: "Checking the downloaded writing model…" };
+            this.emit({ at: this.nowIso(), type: "onboarding.changed", onboarding: { plan, workspace, localModel } });
+            const check = (async () => {
+              const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
+              try { await this.opts.ollama!.service.checkLocalModel(model.providerModelId ?? model.id, this.runtimeStop.signal); }
+              finally { release(); }
+            })();
+            this.backgroundWork.add(check);
+            try { await check; localModel = { modelId: plan.modelId, endpoint, ready: true, detail: "The writing model responded successfully." }; }
+            catch (error) { localModel = { modelId: plan.modelId, endpoint, ready: false, detail: describeCoordinatorError(error) }; }
+            finally { this.backgroundWork.delete(check); }
+          }
+        }
+        if (this.stopping) return;
+        // A long model check must never move a newer choice back to an older step.
+        const current = (await this.appSettings.load()).onboarding ?? NEW_ONBOARDING;
+        if (current.modelId !== plan.modelId || current.writing !== plan.writing || current.harness !== plan.harness) return;
+        this.emit({ at: this.nowIso(), type: "onboarding.changed", onboarding: { plan: current, workspace, localModel } });
+        if (localModel?.ready && current.modelId) {
+          const model = this.opts.manifest?.models.find(m => m.id === current.modelId);
+          const selected = model && await this.validateLanguageModel(harnessModelReference({ provider: model.provider, id: model.providerModelId ?? model.id }));
+          if (selected?.sessionModel && !selected.reason) {
+            const updated = await this.appSettings.setOnboarding(current, selected.sessionModel);
+            this.agentOverrides = updated.agents; this.refreshAgents(updated.agents); this.transport.broadcastSnapshot();
+          }
+        }
+        return;
+      }
+      case "save-onboarding": {
+        if (!this.appSettings || !this.opts.appRoot || this.stopping) return;
+        const refuse = (reason: string) => this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason });
+        const plan: OnboardingPlan = { ...msg.plan, step: msg.action === "finish" ? "done" : msg.action === "install" ? "progress" : msg.plan.step };
+        if (msg.action !== "save" && plan.persona === null) return refuse("Choose how you want to set up Arke.");
+        if (msg.action === "save" && plan.step === "done") return refuse("Use Start using Arke to finish setup.");
+        const workspace = msg.action === "save" ? this.readModel.getState().app.onboarding?.workspace ?? null
+          : await checkOnboardingWorkspace(this.opts.appRoot);
+        if (msg.action !== "save" && !workspace?.ready) return refuse(workspace?.detail ?? "Check your Arke folder before continuing.");
+        if (msg.action === "install") {
+          const reason = validateOnboardingPlan(plan, this.readModel.getState().app);
+          if (reason) return refuse(reason);
+        }
+        if (plan.writing !== "none") {
+          const available = await this.harnessAvailability();
+          if (!available.some(h => h.id === plan.harness && h.installed)) return refuse("That assistant is no longer available. Choose another or set up writing later.");
+        }
+        if (this.stopping) return;
+        const app = this.readModel.getState().app;
+        let writingModel: string | undefined;
+        if (onboardingWritingReadiness(app, plan).ready && plan.modelId) {
+          const model = onboardingWritingModels(app, plan).find(m => harnessModelReference(m) === plan.modelId ||
+            this.opts.manifest?.models.some(entry => entry.id === plan.modelId && (entry.providerModelId ?? entry.id) === m.id));
+          if (model) {
+            const selected = await this.validateLanguageModel(harnessModelReference(model));
+            if (!selected.reason) writingModel = selected.sessionModel;
+          }
+        }
+        const settings = await this.appSettings.setOnboarding(plan, writingModel);
+        this.agentOverrides = settings.agents;
+        this.refreshAgents(settings.agents);
+        await this.emitHarnessStatus();
+        const localModel = app.onboarding?.localModel?.modelId === plan.modelId ? app.onboarding.localModel : null;
+        this.emit({ at: this.nowIso(), type: "onboarding.changed", onboarding: { plan, workspace, localModel } });
+        this.transport.broadcastSnapshot();
+        if (msg.action === "install" && this.setup) {
+          for (const component of onboardingComponents(plan, this.setup.status().components)) this.setup.installClosure(component.id);
+          await this.setup.run();
+          if (!this.stopping) await this.setup.run();
+        }
+        return;
+      }
       case "set-harness-engine": {
         if (!this.appSettings) return;
         const harnesses = await this.harnessAvailability();
@@ -23399,6 +23520,7 @@ export class Coordinator {
     const historyStopped = this.opts.recoveryHistory?.stop();
     const studioStopped = this.studioAssistantHost?.stop();
     this.sampleInstallAbort?.abort();
+    this.worldImportAbort?.abort();
     const audioStudioStopped = this.audioStudioPreviews.stop();
     this.cataloguePreviews?.close();
     // A keyless command waiting on the catalogue would otherwise hold shutdown open: the

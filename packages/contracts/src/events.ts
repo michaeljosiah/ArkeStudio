@@ -1,4 +1,5 @@
 import { GuideVoiceLineSchema } from "./world-guide.js";
+import { OnboardingStatusSchema } from "./onboarding.js";
 import { ArkePlayerReleaseSchema } from "./arke-player-release.js";
 import { DramaEditionSchema } from "./audio-drama-edition.js";
 import { ChapterReviewSchema } from "./chapter-review.js";
@@ -176,6 +177,8 @@ export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 // (SPEC-031 §1.3); the domain event below is what still ties them to this file.
 
 export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
+  z.object({ ...base, type: z.literal("world.import-result"), requestId: z.string(), worldId: z.string().optional(), reason: z.string().optional(), cancelled: z.boolean().optional() }).strict(),
+  z.object({ ...base, type: z.literal("onboarding.changed"), onboarding: OnboardingStatusSchema }).strict(),
   z.object({ ...base, type: z.literal("reference.look-renamed"), worldId: UlidSchema, sheetId: SlugSchema,
     lookId: z.string().min(1), requestId: UlidSchema, error: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal("production-narrative.saved"), worldId: UlidSchema,

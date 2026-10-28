@@ -332,12 +332,19 @@ client `engine-panes`; contracts `ollama`; providers `clients`. See
 
 Contracts `setup.ts` and Coordinator project installation/health into `setup.localAi`, seeded
 before detection and refreshed by both engine subscriptions. This full-stack status no longer
-gates manual app entry (approved turns 242–244, SPEC-016 R-21–R-28). Setup's catalogue offers
+gates manual app entry (approved turns 242–244, SPEC-016 R-21–R-28). `contracts/src/onboarding.ts`
+owns the saved journey and readiness decisions; client `screens/onboarding.tsx` implements the
+three paths at `/setup`. Coordinator `setup/onboarding.ts` checks workspace writability; existing
+settings, discovery, vendor sign-in and setup services persist and execute choices. Desktop
+`workspace-location.ts` remembers a library selection without moving worlds or copying credentials;
+main/preload restart after confirmed shutdown. `world/import-world.ts` checks a chosen closed world
+before the existing copy/identity-publication path imports it. Setup's catalogue offers
 missing runtimes and voice/dictation files until selected; `screens/launch.tsx` allows background
 continuation after the core connects. Downloads reports selected transfers; queued runtime work
 can be skipped while active native owners retain Pause/Stop. Tests: contracts `local-ai-setup`,
 coordinator `setup/local-setup` and `setup/local-ai-readiness`, client `launch-lifecycle`/
-`downloads`. The persona wizard and accepted-plan persistence remain separate implementation.
+`downloads`, plus `setup/onboarding`, `setup/onboarding-wire`, `world/import-world`,
+desktop `workspace-location` and client `onboarding`.
 
 Ming's optional 0.5B and experimental 7.9B readers are declared in contracts `ming.ts` and providers
 `ming-models.ts` / `clients/ming.ts`. Coordinator `local-ai/ming-catalogue.ts` / `ming-assets.json`

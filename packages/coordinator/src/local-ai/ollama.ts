@@ -183,6 +183,22 @@ export class OllamaEngineService {
     return value.models.flatMap(row => typeof row.name === "string" ? [row.name] : []);
   }
 
+  /** A bounded, content-free first-run check. Never asks a cloud-backed Ollama model to run. */
+  async checkLocalModel(model: string, signal: AbortSignal): Promise<void> {
+    const generation = this.generation;
+    const bounded = AbortSignal.any([signal, AbortSignal.timeout(90_000)]);
+    const info = await this.request("/api/show", { method: "POST", signal: bounded,
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }) });
+    const metadata = await info.json() as { remote_model?: unknown; remote_host?: unknown };
+    if (metadata.remote_model || metadata.remote_host || /(?:^|[-:])cloud(?:$|[-:])/i.test(model)) throw new Error("Choose a model that runs on this computer.");
+    const response = await this.request("/api/generate", { method: "POST", signal: bounded,
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, prompt: "Reply with OK.",
+        stream: false, think: false, keep_alive: 0, options: { num_predict: 8, num_ctx: 2048, temperature: 0 } }) });
+    const answer = await response.json() as { done?: unknown; response?: unknown; error?: unknown };
+    if (answer.error || answer.done !== true || typeof answer.response !== "string" || !answer.response.trim()) throw new Error("The writing model did not return a response. Try again or choose another model.");
+    if (generation !== this.generation || this.closing) throw new Error("The local service changed during the check. Check again.");
+  }
+
   async pull(model: string, signal: AbortSignal, progress: (done: number, total: number) => void): Promise<void> {
     const generation = this.generation;
     const response = await this.request("/api/pull", { method: "POST", signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, stream: true }) });
