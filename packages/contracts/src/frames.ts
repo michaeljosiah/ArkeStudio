@@ -4055,6 +4055,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * What Export → Arke Player would make of an interactive movie or a visual novel (design turn
+   * 245a – 245c, SPEC-058 R-89): its rows, its estimate and what stands in the way, at the picture
+   * Size chosen, answered as `story.export-state`. Nothing is made.
+   */
+  z.object({ kind: z.literal("read-story-export"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, size: z.enum(ARKE_PLAYER_PICTURE_SIZES).optional() }).strict(),
+  /**
    * The audiobook as a video (design turn 197, SPEC-047): the chapters read whole rendered to MP4
    * on this machine, one a chapter or one for the book, answered as `audiobook.video-exported`
    * and followed in Activity through `export.progress`.
