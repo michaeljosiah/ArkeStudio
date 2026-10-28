@@ -89,9 +89,10 @@ describe("a comic page made (SPEC-064 R-22 – R-27)", () => {
       const made = store.getBundle().productions.find((p) => p.meta.id === production)!.comicPages![0]!.record.takes[0]!;
       // As if the app had closed after the session opened: the take is gone from the record and the
       // admission is still written, naming its session.
-      const session = (last(h.events, "comic.page-made") as Made).sessionId!;
+      const done = last(h.events, "comic.page-made") as Made;
+      const session = done.sessionId!;
       await changeComicPage(store, production, page.id, (record) => ({ ...record, takes: [],
-        making: [{ requestId: rid(), hash: made.hash, mode: made.mode, model: made.model, language: made.language, at: made.at, session }] }));
+        making: [{ requestId: done.requestId, hash: made.hash, mode: made.mode, model: made.model, language: made.language, at: made.at, session }] }));
       await h.send({ kind: "quote-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id });
       await h.send({ kind: "quote-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id });
       const record = store.getBundle().productions.find((p) => p.meta.id === production)!.comicPages![0]!.record;

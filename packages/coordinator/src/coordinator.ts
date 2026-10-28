@@ -31,7 +31,7 @@ import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdap
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
 import { DramaEditionService } from "./publications/drama.js";
 import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
-import { changeComicPage, comicPageRecord, comicPageRequest, saveComicScript, setComicSettings } from "./productions/graphic-novel.js";
+import { changeComicPage, comicPageRecord, comicPageRequest, comicPageTake, saveComicScript, setComicSettings } from "./productions/graphic-novel.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
@@ -21287,7 +21287,9 @@ export class Coordinator {
     if (!production) return;
     for (const making of comicPageRecord(production, pageId).making) {
       const bench = making.session === undefined ? null : await this.benchFor(store.worldId, making.session as SessionId);
-      const take = bench?.session.takes.at(-1);
+      // The take this admission reserved, by its request: the author may have made others in the
+      // same session since, and the last one need not be the page's (codex on PR 2222).
+      const take = comicPageTake(bench, making.requestId);
       let landed: { id: string } | null = null;
       if (bench !== null && take?.media !== undefined) {
         landed = await this.fileBenchTake(store, bench, take, `comic-keep:${making.requestId}`);
@@ -21348,8 +21350,13 @@ export class Coordinator {
         },
       });
       const take = made.ok ? ulid() : undefined;
+      // A picture still running when the wait ran out, or one that landed and could not be filed, may
+      // still be paid for: its admission stays for the next quote to file (codex on PR 2222). Only a
+      // made take, or a take the Bench says ended, lets it go.
+      const reserved = !made.ok && made.sessionId !== undefined ? comicPageTake(await this.benchFor(store.worldId, made.sessionId), input.requestId) : undefined;
+      const unresolved = reserved !== undefined && (reserved.media !== undefined || !["failed", "cancelled", "needs-reconciliation"].includes(reserved.status));
       await changeComicPage(store, input.productionId, input.page, (record) => ({ ...record,
-        making: record.making.filter((entry) => entry.requestId !== input.requestId),
+        making: unresolved ? record.making : record.making.filter((entry) => entry.requestId !== input.requestId),
         takes: !made.ok ? record.takes : [...record.takes, {
           id: take!, artifact: made.artifact.id, hash: request.hash, mode: request.mode, model: model.id, language,
           usd: (made.costMicroUsd ?? made.estimatedMicroUsd) / 1_000_000, at: this.nowIso(),
@@ -23317,6 +23324,8 @@ export class Coordinator {
       for (const run of this.groupingChapters.values()) run.control.abort();
       for (const control of this.derivingLooks.values()) control.abort();
       for (const control of this.makingPictures.values()) control.abort();
+      // A page waiting on its picture would hold the drain below for the picture's whole wait (codex on PR 2222).
+      for (const control of this.makingComicPages.values()) control.abort();
       for (const control of this.makingMotion.values()) control.abort();
       for (const control of this.preparingWordTiming.values()) control.abort();
       for (const run of this.checkingAudiobookWords.values()) run.control.abort();
