@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { PUBLICATION_MANIFEST_FILE, PublicationAssetPathSchema } from "./publication.js";
+import { StoryEffectSchema, StoryPredicateSchema, type StoryPredicate } from "./story-state-schema.js";
+import { validateStoryProgram, type StoryProgram } from "./story-state.js";
 
 /**
  * Arke Player's world package (Player ADR 0005; SPEC-058 R-9 – R-16): `world.json` at a ZIP's root,
@@ -10,7 +12,8 @@ import { PUBLICATION_MANIFEST_FILE, PublicationAssetPathSchema } from "./publica
  * before it is installed. Schema 4 (SPEC-058 R-46) is a part: the chapters released since an
  * edition, naming that edition, so a serial's listener never downloads the world again. Schema 5
  * (R-68 – R-70) is a production package: one production published alone, beside the world's
- * edition, which may be a music production with its music document.
+ * edition, which may be a music production with its music document. Schema 6 (R-79, R-80) is a
+ * story package: an interactive movie or a visual novel published alone, with its story document.
  *
  * One reader in two languages (R-16): this one and Arke Player's `arke_world` (Dart) read the same
  * shared fixtures to the same verdicts. Both are strict as SPEC-048 R-17 asks: a key, schema or
@@ -23,7 +26,7 @@ import { PUBLICATION_MANIFEST_FILE, PublicationAssetPathSchema } from "./publica
 
 export const WORLD_MANIFEST_FILE = "world.json";
 export const WORLD_PACKAGE_FORMAT = "arke-world-package";
-export const WORLD_SCHEMA_VERSION = 5;
+export const WORLD_SCHEMA_VERSION = 6;
 export const LISTENING_MEDIA_TYPE = "application/vnd.arke.listening+json";
 export const LISTENING_FORMAT = "arke-listening";
 export const LISTENING_VERSION = 1;
@@ -37,6 +40,9 @@ export const MUSIC_AUDIO_MEDIA_TYPES: readonly string[] = ["audio/mp4"];
 export const MAX_MUSIC_TRACKS = 64;
 /** A track is a song, not an hour (R-70). */
 export const MAX_MUSIC_TRACK_MS = 15 * 60_000;
+export const STORY_MEDIA_TYPE = "application/vnd.arke.story+json";
+export const STORY_FORMAT = "arke-story";
+export const STORY_VERSION = 1;
 
 /** A world's media, by the role it plays. */
 export const WORLD_BOOK_MEDIA_TYPES: readonly string[] = ["application/epub+zip"];
@@ -95,7 +101,10 @@ const ProductionV1Schema = z.object(productionShape).strict();
 const ProductionV2Schema = z.object({ ...productionShape, listening: z.string().optional() }).strict();
 // Schema 5 lets a production be music: its music document in place of a book or a narration (R-69).
 const ProductionV5Schema = z.object({ ...productionShape, listening: z.string().optional(), music: z.string().optional() }).strict();
-export type WorldProduction = z.infer<typeof ProductionV5Schema>;
+// Schema 6 lets a production be an interactive story: its story document in place of the others,
+// and its Tall cover beside its wide one (R-79).
+const ProductionV6Schema = ProductionV5Schema.extend({ story: z.string().optional(), tall: z.string().optional() }).strict();
+export type WorldProduction = z.infer<typeof ProductionV6Schema>;
 
 const manifestFields = {
   format: z.literal(WORLD_PACKAGE_FORMAT),
@@ -149,6 +158,7 @@ const ManifestV5Schema = z.object({
   part: WorldPartSchema.optional(),
   alone: z.boolean().optional(),
 }).strict();
+const ManifestV6Schema = ManifestV5Schema.extend({ productions: z.array(ProductionV6Schema).max(64) }).strict();
 
 export interface WorldManifest {
   schemaVersion: number;
@@ -162,7 +172,7 @@ export interface WorldManifest {
   guide?: string;
   /** Present on a part, schema 4 (SPEC-058 R-46). */
   part?: WorldPart;
-  /** True on a production package, schema 5: one production published alone (SPEC-058 R-68). */
+  /** True on a production package, schema 5, and a story package, schema 6: one production published alone (SPEC-058 R-68, R-79). */
   alone?: boolean;
   assets: Record<string, WorldAsset>;
 }
@@ -197,10 +207,10 @@ export function readWorldManifest(source: string): WorldManifestRead {
   if (!Array.isArray(requires)) return notAPackage("requires is not a list");
   if (requires.length > 0) return newer(`requires ${requires.join(", ")}`);
 
-  const parsed = (version >= 5 ? ManifestV5Schema : version === 4 ? ManifestV4Schema : version === 3 ? ManifestV3Schema : version === 2 ? ManifestV2Schema : ManifestV1Schema).safeParse(raw);
+  const parsed = (version >= 6 ? ManifestV6Schema : version === 5 ? ManifestV5Schema : version === 4 ? ManifestV4Schema : version === 3 ? ManifestV3Schema : version === 2 ? ManifestV2Schema : ManifestV1Schema).safeParse(raw);
   if (!parsed.success) return refusedBy(parsed.error, "world.json");
-  // Every older manifest is a schema 5 one with less in it.
-  const manifest: z.infer<typeof ManifestV5Schema> = parsed.data;
+  // Every older manifest is a schema 6 one with less in it.
+  const manifest: z.infer<typeof ManifestV6Schema> = parsed.data;
   const guide = manifest.guide;
   if (manifest.productions.length === 0 && guide === undefined) return notAPackage("productions");
   if (version === 4) {
@@ -214,12 +224,15 @@ export function readWorldManifest(source: string): WorldManifestRead {
   if (version >= 5) {
     // Schema 5 exists for production packages (R-68): one production published alone, beside the
     // world's edition, which carries the world's guide and key art; a part is still made at 4.
-    if (manifest.alone !== true) return notAPackage("a schema 5 package is a production published alone");
+    if (manifest.alone !== true) return notAPackage(`a schema ${version} package is a production published alone`);
     if (manifest.part !== undefined) return notAPackage("a production package is not a part");
     if (guide !== undefined) return notAPackage("a production package carries no guide");
     if (manifest.keyArt !== undefined) return notAPackage("a production package carries no key art");
     if (manifest.productions.length !== 1) return notAPackage("a production package holds one production");
   }
+  // Schema 6 exists for stories (R-79), as 5 does for production packages: music is still made at 5,
+  // so a Player that reads 5 and not 6 is never kept from a package it could play.
+  if (version >= 6 && manifest.productions[0]!.story === undefined) return notAPackage("a schema 6 package is a story published alone");
 
   const assetIds = Object.keys(manifest.assets);
   if (assetIds.length === 0 || assetIds.length > MAX_WORLD_ASSETS) return notAPackage("assets");
@@ -245,25 +258,29 @@ export function readWorldManifest(source: string): WorldManifestRead {
   for (const production of manifest.productions) {
     if (productionIds.has(production.id)) return notAPackage("production id or title");
     productionIds.add(production.id);
-    const listening = "listening" in production ? production.listening : undefined;
-    const music = "music" in production ? production.music : undefined;
+    const { listening, music, story, tall } = production;
     if (
       !role(production.picture, WORLD_PICTURE_MEDIA_TYPES) ||
+      !role(tall, WORLD_PICTURE_MEDIA_TYPES) ||
       !role(production.book, WORLD_BOOK_MEDIA_TYPES) ||
       !role(production.narration, WORLD_NARRATION_MEDIA_TYPES) ||
       !role(listening, [LISTENING_MEDIA_TYPE]) ||
-      !role(music, [MUSIC_MEDIA_TYPE])
+      !role(music, [MUSIC_MEDIA_TYPE]) ||
+      !role(story, [STORY_MEDIA_TYPE])
     ) {
       return notAPackage(`production ${production.id} names an asset it cannot use`);
     }
     if (production.narration !== undefined && listening !== undefined) return notAPackage(`production ${production.id} names a narration and a listening document`);
     // Music is heard on its own terms (R-69): its document in place of a book and a narration.
     if (music !== undefined && (production.book !== undefined || production.narration !== undefined || listening !== undefined)) return notAPackage(`production ${production.id} names music beside a book or a narration`);
-    if (production.book === undefined && production.narration === undefined && listening === undefined && music === undefined) return notAPackage(`production ${production.id} has nothing to play`);
+    // And a story is played on its own (R-79): its document in place of all of them.
+    if (story !== undefined && (production.book !== undefined || production.narration !== undefined || listening !== undefined || music !== undefined)) return notAPackage(`production ${production.id} names a story beside a book, a narration or music`);
+    if (production.book === undefined && production.narration === undefined && listening === undefined && music === undefined && story === undefined) return notAPackage(`production ${production.id} has nothing to play`);
   }
-  // Every file is one the world uses (SPEC-048 R-13). A listening document's, a music document's or a
-  // guide's files are known only once it is read, so with one the package check makes this check instead.
-  if (guide === undefined && manifest.productions.every((production) => production.listening === undefined && production.music === undefined)) {
+  // Every file is one the world uses (SPEC-048 R-13). A listening document's, a music document's, a
+  // story's or a guide's files are known only once it is read, so with one the package check makes
+  // this check instead.
+  if (guide === undefined && manifest.productions.every((production) => production.listening === undefined && production.music === undefined && production.story === undefined)) {
     const unused = assetIds.filter((assetId) => !used.has(assetId));
     if (unused.length > 0) return notAPackage(`unused assets ${unused.join(", ")}`);
   }
@@ -355,6 +372,257 @@ export function readMusic(source: string, assets: Readonly<Record<string, WorldA
 /** Every asset a music document names, so a package can be checked for files nothing uses. */
 export function musicAssetIds(document: MusicDocument): Set<string> {
   return new Set(document.tracks.map((track) => track.audio));
+}
+
+// ---- The story document (SPEC-058 R-80) -----------------------------------------------------------
+
+/** An interactive movie plays clips; a visual novel reads beats (SPEC-023, SPEC-063). */
+export const STORY_KINDS = ["movie", "novel"] as const;
+export type StoryKind = (typeof STORY_KINDS)[number];
+/** The production's aspect (SPEC-019 R-36): the Player plays a story at its own shape (R-84). */
+export const STORY_SHAPES = ["16:9", "9:16"] as const;
+export type StoryShape = (typeof STORY_SHAPES)[number];
+export const STORY_CLIP_MEDIA_TYPES: readonly string[] = ["video/mp4"];
+export const STORY_VOICE_MEDIA_TYPES: readonly string[] = ["audio/mp4"];
+/**
+ * The document's bounds. Facts, values, effects and a condition's size are SPEC-063 R-3 and R-4's,
+ * as routing has them, so whatever routing can hold compiles; the rest bound a document as the
+ * other readers bound theirs. The shared fixtures' cases.json repeats them for arke_world.
+ */
+export const STORY_LIMITS = {
+  facts: 32,
+  values: 16,
+  effects: 32,
+  conditionDepth: 8,
+  conditionNodes: 128,
+  scenes: 1000,
+  items: 2000,
+  choices: 4000,
+  presentation: 20_000,
+  endings: 1000,
+  variants: 64,
+} as const;
+
+const StorySceneIdSchema = z.string().max(128).regex(/^sc_[a-z0-9-]+$/);
+const StoryFactIdSchema = z.string().max(64).regex(/^[a-z][a-z0-9-]*$/);
+const StoryValueSchema = z.string().min(1).max(64);
+// No label: a listener never sees a fact (P18 call 23), so the document does not carry one. A fact
+// that names one is a key this reader does not know, which is newer, as any such key is.
+const StoryDocumentFactSchema = z.discriminatedUnion("type", [
+  z.object({ id: StoryFactIdSchema, type: z.literal("boolean"), default: z.boolean(), metadata: Ignorable }).strict(),
+  z.object({ id: StoryFactIdSchema, type: z.literal("enum"), values: z.array(StoryValueSchema).min(1).max(STORY_LIMITS.values), default: StoryValueSchema, metadata: Ignorable }).strict(),
+]);
+/** A window into an MP4, in ms of that file: the part of it the scene plays (SPEC-063 R-23's windows). */
+const StoryClipSchema = z.object({ asset: z.string(), from: TicksSchema, to: TicksSchema, metadata: Ignorable }).strict();
+const StoryBeatSchema = z.object({
+  picture: z.string(),
+  /** The same moment made Tall (R-37): upright, it fills the phone (R-87). */
+  tall: z.string().optional(),
+  /** Absent for narration, and for a picture held without a line. */
+  speaker: text(200).optional(),
+  line: text(20_000).optional(),
+  voice: z.string().optional(),
+  metadata: Ignorable,
+}).strict();
+const StorySceneSchema = z.object({
+  id: StorySceneIdSchema,
+  title: text(500),
+  clips: z.array(StoryClipSchema).min(1).max(STORY_LIMITS.items).optional(),
+  beats: z.array(StoryBeatSchema).min(1).max(STORY_LIMITS.items).optional(),
+  metadata: Ignorable,
+}).strict();
+/**
+ * A clip or beat that plays only while its condition holds (SPEC-063 R-7), named by its index in
+ * its scene rather than copied, so one scene's items are written once whatever the state.
+ */
+const StoryPresentationRowSchema = z.object({ scene: StorySceneIdSchema, index: z.number().int().min(0).max(STORY_LIMITS.items - 1), when: StoryPredicateSchema, metadata: Ignorable }).strict();
+const StoryChoiceSchema = z.object({
+  id: z.string().max(128).regex(/^ch_[a-z0-9-]+$/),
+  from: StorySceneIdSchema,
+  to: StorySceneIdSchema,
+  label: text(600),
+  /** Absent, the choice is always open (SPEC-063 R-4). */
+  when: StoryPredicateSchema.optional(),
+  effects: z.array(StoryEffectSchema).max(STORY_LIMITS.effects),
+  /** Only where the author wrote one; without it a closed choice is hidden (SPEC-063 R-11, R-85). */
+  unavailable: z.object({ label: text(256).optional(), reason: text(600), metadata: Ignorable }).strict().optional(),
+  metadata: Ignorable,
+}).strict();
+// One shape for both kinds of variant, so a variant that is both, or neither, is wrong rather than
+// a key this reader does not know.
+const StoryVariantSchema = z.object({
+  id: z.string().min(1).max(64),
+  title: text(256),
+  text: z.string().max(20_000),
+  when: StoryPredicateSchema.optional(),
+  fallback: z.literal(true).optional(),
+  metadata: Ignorable,
+}).strict();
+const StoryEndingSchema = z.object({ scene: StorySceneIdSchema, title: text(256), variants: z.array(StoryVariantSchema).min(1).max(STORY_LIMITS.variants).optional(), metadata: Ignorable }).strict();
+const StoryDocumentSchema = z.object({
+  format: z.literal(STORY_FORMAT),
+  version: z.literal(STORY_VERSION),
+  requires: z.array(z.unknown()).max(0).optional(),
+  kind: z.enum(STORY_KINDS),
+  shape: z.enum(STORY_SHAPES),
+  start: StorySceneIdSchema,
+  /** SPEC-063 R-14's content fingerprint: what a save is checked against (R-88). Not checked here. */
+  fingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  facts: z.array(StoryDocumentFactSchema).max(STORY_LIMITS.facts),
+  scenes: z.array(StorySceneSchema).min(1).max(STORY_LIMITS.scenes),
+  presentation: z.array(StoryPresentationRowSchema).max(STORY_LIMITS.presentation),
+  choices: z.array(StoryChoiceSchema).max(STORY_LIMITS.choices),
+  endings: z.array(StoryEndingSchema).max(STORY_LIMITS.endings),
+  metadata: Ignorable,
+}).strict();
+
+/** The story document as written: clip windows in ms of their files, everything else by id. */
+export type StoryDocument = z.infer<typeof StoryDocumentSchema>;
+export type StoryDocumentScene = StoryDocument["scenes"][number];
+export type StoryDocumentClip = NonNullable<StoryDocumentScene["clips"]>[number];
+export type StoryDocumentBeat = NonNullable<StoryDocumentScene["beats"]>[number];
+export type StoryDocumentChoice = StoryDocument["choices"][number];
+export type StoryDocumentEnding = StoryDocument["endings"][number];
+export type StoryRead = { ok: true; document: StoryDocument } | { ok: false; refusal: WorldRefusal; reason: string };
+
+/** A scene's clips or beats, which the presentation rows count into. */
+export const storySceneItems = (scene: StoryDocumentScene): ReadonlyArray<StoryDocumentClip | StoryDocumentBeat> => scene.clips ?? scene.beats ?? [];
+
+/**
+ * The document as SPEC-063's rules read it, so the reader and the route walk use the one evaluator
+ * (R-23) rather than a second. The rules key presentation by shot and a document by index, so each
+ * guarded item stands as a shot of its own, `sh_<index>`, that no other item shares.
+ */
+export function storyDocumentProgram(document: Pick<StoryDocument, "start" | "facts" | "choices" | "presentation" | "endings">): StoryProgram {
+  const shots = new Map<string, Array<{ shotId: string; when: StoryPredicate }>>();
+  for (const row of document.presentation) shots.set(row.scene, [...(shots.get(row.scene) ?? []), { shotId: storyItemShot(row.index), when: row.when }]);
+  return {
+    start: document.start,
+    facts: document.facts.map(({ metadata: _metadata, ...fact }) => fact),
+    choices: document.choices.map(({ id, from, to, label, when, effects, unavailable }) => ({ id, from, to, label, ...(when === undefined ? {} : { when }), effects, ...(unavailable === undefined ? {} : { unavailable }) })),
+    presentation: [...shots].map(([sceneId, rules]) => ({ sceneId, blocks: [], shots: rules })),
+    endings: document.endings.map((ending) => ({
+      sceneId: ending.scene,
+      title: ending.title,
+      ...(ending.variants === undefined
+        ? {}
+        : { variants: ending.variants.map(({ id, title, text, when, fallback }) => (fallback === true || when === undefined ? { id, title, text, fallback: true as const } : { id, title, text, when })) }),
+    })),
+  };
+}
+
+/** The shot a document's item stands as for the rules (see storyDocumentProgram). */
+export const storyItemShot = (index: number) => `sh_${index}`;
+
+/**
+ * What is wrong with a parsed document, if anything: the checks of R-80 that a schema cannot make.
+ * Without an inventory the assets go unchecked, which is how the compiler checks what it wrote.
+ */
+export function storyDocumentProblem(document: StoryDocument, assets: Readonly<Record<string, WorldAsset>> | null): string | null {
+  const asset = (assetId: string | undefined, mediaTypes: readonly string[]) => assets === null || assetId === undefined || (assets[assetId] !== undefined && mediaTypes.includes(assets[assetId]!.mediaType));
+  const counts = new Map<string, number>();
+  for (const scene of document.scenes) {
+    const where = `scene ${scene.id}`;
+    if (counts.has(scene.id)) return `${where} repeats`;
+    // A movie's scene is footage and a novel's is beats: one player per story (R-84, R-87).
+    if (document.kind === "movie" ? scene.clips === undefined || scene.beats !== undefined : scene.beats === undefined || scene.clips !== undefined) return `${where}: a ${document.kind} scene ${document.kind === "movie" ? "plays clips" : "reads beats"}`;
+    for (const [index, clip] of (scene.clips ?? []).entries()) {
+      if (clip.to <= clip.from) return `${where}: clip ${index + 1} ends before it starts`;
+      if (!asset(clip.asset, STORY_CLIP_MEDIA_TYPES)) return `${where}: clip ${index + 1}`;
+    }
+    for (const [index, beat] of (scene.beats ?? []).entries()) {
+      if (!asset(beat.picture, WORLD_PICTURE_MEDIA_TYPES)) return `${where}: beat ${index + 1}'s picture`;
+      if (!asset(beat.tall, WORLD_PICTURE_MEDIA_TYPES)) return `${where}: beat ${index + 1}'s tall picture`;
+      if (!asset(beat.voice, STORY_VOICE_MEDIA_TYPES)) return `${where}: beat ${index + 1}'s voice`;
+    }
+    counts.set(scene.id, storySceneItems(scene).length);
+  }
+  if (!counts.has(document.start)) return `the start, ${document.start}, is not a scene`;
+  const choices = new Set<string>();
+  for (const choice of document.choices) {
+    if (choices.has(choice.id)) return `choice ${choice.id} repeats`;
+    choices.add(choice.id);
+    if (!counts.has(choice.from) || !counts.has(choice.to)) return `choice ${choice.id} names a scene that is not there`;
+  }
+  const guarded = new Set<string>();
+  for (const row of document.presentation) {
+    const count = counts.get(row.scene);
+    if (count === undefined) return `a presentation row names ${row.scene}, which is not there`;
+    if (row.index >= count) return `a presentation row names item ${row.index} of ${row.scene}, which has ${count}`;
+    if (guarded.has(`${row.scene} ${row.index}`)) return `item ${row.index} of ${row.scene} has two presentation rows`;
+    guarded.add(`${row.scene} ${row.index}`);
+  }
+  const endings = new Set<string>();
+  for (const ending of document.endings) {
+    const where = `ending ${ending.scene}`;
+    if (!counts.has(ending.scene)) return `${where} is not a scene`;
+    if (endings.has(ending.scene)) return `${where} repeats`;
+    endings.add(ending.scene);
+    if (document.choices.some((choice) => choice.from === ending.scene)) return `${where} offers a choice`;
+    for (const variant of ending.variants ?? []) if ((variant.when === undefined) === (variant.fallback === undefined)) return `${where}: variant ${variant.id} has a condition or is the fallback, one or the other`;
+  }
+  // The rest is the rules' own check (SPEC-063 R-3 – R-5, R-10): a fact or value declared twice, a
+  // condition or effect naming one that is not declared, a fact assigned twice by one choice, a
+  // condition past its bounds, a variant id repeated, more than one fallback.
+  try {
+    validateStoryProgram(storyDocumentProgram(document));
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  return null;
+}
+
+/**
+ * Reads a story document against its package's inventory (SPEC-058 R-80), as strictly as the music
+ * document: an id that repeats; a choice, presentation row or ending naming a scene or item that is
+ * not there; a condition or effect naming a fact or value that is not declared; an asset missing or
+ * not of its kind; an ending with an outgoing choice; or a document past STORY_LIMITS is not an Arke
+ * package. The fingerprint is not recomputed: it is the identity a save is checked against, not a
+ * checksum, and the package's own hashes cover the bytes.
+ */
+export function readStory(source: string, assets: Readonly<Record<string, WorldAsset>>): StoryRead {
+  const notAPackage = (reason: string) => ({ ok: false as const, refusal: "not-a-package" as const, reason });
+  let json: unknown;
+  try {
+    json = JSON.parse(source);
+  } catch {
+    return notAPackage("the story document is not JSON");
+  }
+  if (typeof json !== "object" || json === null || Array.isArray(json) || (json as Record<string, unknown>)["format"] !== STORY_FORMAT) return notAPackage(`not an ${STORY_FORMAT}`);
+  const raw = json as Record<string, unknown>;
+  const version = raw["version"];
+  if (typeof version !== "number" || !Number.isInteger(version)) return notAPackage("no version");
+  if (version > STORY_VERSION) return { ok: false, refusal: "newer-arke", reason: `story version ${version}` };
+  if (version !== STORY_VERSION) return notAPackage(`story version ${version}`);
+  const requires = raw["requires"] ?? [];
+  if (!Array.isArray(requires)) return notAPackage("requires is not a list");
+  if (requires.length > 0) return { ok: false, refusal: "newer-arke", reason: `requires ${requires.join(", ")}` };
+
+  const parsed = StoryDocumentSchema.safeParse(raw);
+  if (!parsed.success) return refusedBy(parsed.error, "the story document");
+  const problem = storyDocumentProblem(parsed.data, assets);
+  return problem === null ? { ok: true, document: parsed.data } : notAPackage(problem);
+}
+
+/** Checks a document the compiler made against the reader's shape: the reason it would be refused, or null. */
+export function storyDocumentRefusal(document: unknown): string | null {
+  const parsed = StoryDocumentSchema.safeParse(document);
+  if (!parsed.success) return refusedBy(parsed.error, "the story document").reason;
+  return storyDocumentProblem(parsed.data, null);
+}
+
+/** Every asset a story document names, so a package can be checked for files nothing uses. */
+export function storyAssetIds(document: StoryDocument): Set<string> {
+  const ids = new Set<string>();
+  for (const scene of document.scenes) {
+    for (const clip of scene.clips ?? []) ids.add(clip.asset);
+    for (const beat of scene.beats ?? []) {
+      ids.add(beat.picture);
+      if (beat.tall !== undefined) ids.add(beat.tall);
+      if (beat.voice !== undefined) ids.add(beat.voice);
+    }
+  }
+  return ids;
 }
 
 /** The point Slow push keeps still, 0 to 1 across and down. */

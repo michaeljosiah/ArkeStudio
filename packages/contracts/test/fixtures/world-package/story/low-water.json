@@ -1,0 +1,144 @@
+{
+  "format": "arke-story",
+  "version": 1,
+  "kind": "movie",
+  "shape": "16:9",
+  "start": "sc_quarter",
+  "fingerprint": "sha256:300d7032cf826b8ad7dbcb035e30c6064e7fb9108c16596a3d93d237aa92cf11",
+  "facts": [],
+  "scenes": [
+    {
+      "id": "sc_quarter",
+      "title": "The drowned quarter",
+      "clips": [
+        {
+          "asset": "lw-quarter",
+          "from": 0,
+          "to": 72000
+        }
+      ]
+    },
+    {
+      "id": "sc_causeway",
+      "title": "The causeway",
+      "clips": [
+        {
+          "asset": "lw-causeway",
+          "from": 0,
+          "to": 48000
+        }
+      ]
+    },
+    {
+      "id": "sc_towers",
+      "title": "The bell towers",
+      "clips": [
+        {
+          "asset": "lw-towers",
+          "from": 1200,
+          "to": 31200
+        },
+        {
+          "asset": "lw-towers",
+          "from": 31200,
+          "to": 64000
+        }
+      ]
+    },
+    {
+      "id": "sc_vigil",
+      "title": "The Vigil",
+      "clips": [
+        {
+          "asset": "lw-vigil",
+          "from": 0,
+          "to": 55000
+        }
+      ]
+    },
+    {
+      "id": "sc_pier",
+      "title": "The pier at dusk",
+      "clips": [
+        {
+          "asset": "lw-pier",
+          "from": 0,
+          "to": 90000
+        }
+      ]
+    },
+    {
+      "id": "sc_bell",
+      "title": "The bell",
+      "clips": [
+        {
+          "asset": "lw-bell",
+          "from": 0,
+          "to": 41000
+        }
+      ]
+    }
+  ],
+  "presentation": [],
+  "choices": [
+    {
+      "id": "ch_follow",
+      "from": "sc_quarter",
+      "to": "sc_causeway",
+      "label": "Follow the lantern",
+      "effects": []
+    },
+    {
+      "id": "ch_stay",
+      "from": "sc_quarter",
+      "to": "sc_towers",
+      "label": "Stay with the boat",
+      "effects": []
+    },
+    {
+      "id": "ch_cross",
+      "from": "sc_causeway",
+      "to": "sc_towers",
+      "label": "Cross before the tide",
+      "effects": []
+    },
+    {
+      "id": "ch_wait",
+      "from": "sc_causeway",
+      "to": "sc_vigil",
+      "label": "Wait for low water",
+      "effects": []
+    },
+    {
+      "id": "ch_sleep",
+      "from": "sc_towers",
+      "to": "sc_pier",
+      "label": "Let it sleep",
+      "effects": []
+    },
+    {
+      "id": "ch_ring",
+      "from": "sc_towers",
+      "to": "sc_bell",
+      "label": "Ring the bell",
+      "effects": []
+    },
+    {
+      "id": "ch_climb",
+      "from": "sc_vigil",
+      "to": "sc_pier",
+      "label": "Climb to the lamp",
+      "effects": []
+    }
+  ],
+  "endings": [
+    {
+      "scene": "sc_pier",
+      "title": "The harbour, level"
+    },
+    {
+      "scene": "sc_bell",
+      "title": "The Bell Rings Twice"
+    }
+  ]
+}
