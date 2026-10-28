@@ -1,6 +1,6 @@
 # Installation journeys · turns 242–244
 
-28 October 2026 · **Revision 5 · Draft for owner review. Not implemented.**
+28 October 2026 · **Revision 5 · Approved by the owner. Implementation in progress.**
 
 Owner feedback: keep specific voice providers/models out of onboarding; confirm OpenCode is
 included in all paths; offer explicitly selected existing Claude Code and Codex installations.
@@ -149,9 +149,9 @@ Read: SPEC-005 and SPEC-030 (draft), existing harness availability/settings/disc
 (draft) R-1–R-8 and its later managed-runtime/readiness amendments; ADR-004
 (proposed); current `launch.tsx`, setup catalogue, desktop packaging and managed runtime guide.
 The original SPEC-016 manual/offline onboarding intent and the later mandatory ComfyUI/Ollama
-entry gate now need explicit reconciliation. These drawings propose that reconciliation; they do
-not silently change either policy or the running app. SPEC-016 and runtime setup requirements
-must be amended after approval, alongside implementation. No unrelated recovery epic scope is
+entry gate now need explicit reconciliation. The owner approved this reconciliation and implementation on 28 October 2026. SPEC-016 and
+runtime setup requirements must be amended alongside implementation. The drawings remain a
+simulated reference, not evidence of completed product behaviour. No unrelated recovery epic scope is
 added by this design-only work.
 
 Keep onboarding selections persisted without duplicate settings authorities. Stop optional
