@@ -1379,7 +1379,9 @@ shortcut, and do not change the shortcut numbers of legal choices.
 Run `node scripts/smoke-story-layout.mjs` for the complete App/global-chat composition in a
 headless Chrome browser (`ARKE_CHROME` may name the browser executable). It captures light/dark
 facts and one/two/three/four/five-option beat previews at desktop, window, tablet and phone
-sizes (48 App cases), plus four overflowing five-option clip decisions at 400px height.
+sizes (48 App cases), plus six long-dialogue decisions and four overflowing five-option clip
+decisions at 400px height (58 cases total). Long dialogue must remain scrollable while at
+least two complete choices retain usable targets.
 Three or more displayed alternatives form one vertical list. On desktop the
 plain dialogue sits to its left; below 800px the dialogue sits above it. Two choices retain
 their side-by-side cards where the viewport permits. Assertions measure usable fact-list

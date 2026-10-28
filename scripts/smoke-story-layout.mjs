@@ -33,9 +33,9 @@ window.mountStory=async(mode='facts',dark=false)=>{
  const state=structuredClone(FIXTURE_STATE), world=state.world;
  const labels=['Imani Okoro','Dev Malik','Lin Wei','Ana Lucía Reyes','Elsie Ward','Tomas Vale','Submitted account'];
  const facts=labels.map((label,i)=>({id:'fact-'+i,label,type:'enum',values:i===6?['Undecided','Full recording']:['Alive','Lost'],default:i===6?'Undecided':'Alive'}));
- const count=mode==='two'?2:mode==='three'?3:mode==='four'?4:mode==='five'?5:1;
+ const count=mode==='two'?2:mode==='three'?3:mode==='four'?4:mode==='five'||mode==='long'?5:1;
  const labelsByCount={1:['Continue to the next scene'],2:['Return with Ana for Elsie','Seal the shaft and leave Elsie'],3:['Power the clinic bulkhead','Power communications','Use Elsie’s route and Tomas’s rigging to isolate both wings'],4:['Stay at the outside release myself','Accept Dev’s offer to hold the release','Accept Ana’s offer to hold the release','Return to help the remaining miners'],5:['Stay at the outside release myself','Accept Dev’s offer to hold the release','Accept Tomas’s offer to hold the release','Accept Ana’s offer to hold the release','Return to help the remaining miners']};
- const scenes=[{id:'sc_start',number:1,slug:'start',title:'The launch collar',status:'draft',version:1,shots:[],script:{version:1,blocks:[{id:'blk_start',kind:'dialogue',speaker:'qa-imani',text:'The release is outside. Someone has to hold it until the shuttle clears.'}]}},...Array.from({length:count},(_,i)=>({id:'sc_end-'+i,number:i+2,slug:'end-'+i,title:'Outcome '+(i+1),status:'draft',version:1,shots:[]}))];
+ const scenes=[{id:'sc_start',number:1,slug:'start',title:'The launch collar',status:'draft',version:1,shots:[],script:{version:1,blocks:[{id:'blk_start',kind:'dialogue',speaker:'qa-imani',text:('The release is outside. Someone has to hold it until the shuttle clears. ').repeat(mode==='long'?16:1)}]}},...Array.from({length:count},(_,i)=>({id:'sc_end-'+i,number:i+2,slug:'end-'+i,title:'Outcome '+(i+1),status:'draft',version:1,shots:[]}))];
  scenes[0].shots=[{id:'sh_start',number:1,title:'Decision',description:'Text-only fixture',covers:[{blockId:'blk_start',textDigest:'sha256:'+'0'.repeat(64)}]}];
  const routing={schemaVersion:2,version:1,start:'sc_start',facts,choices:scenes.slice(1).map((scene,i)=>({id:'ch_'+i,from:'sc_start',to:scene.id,label:labelsByCount[count][i]})),endings:scenes.slice(1).map(scene=>({sceneId:scene.id,title:scene.title})),excluded:[],groups:[]};
  const production={...world.productions[0],meta:{...world.productions[0].meta,id:'first-contact',title:'First Contact',kind:'visual-novel',medium:'video'},scenes,sceneFiles:Object.fromEntries(scenes.map(s=>[s.id,s.slug])),routing,takes:[],selections:{}};
@@ -62,7 +62,7 @@ window.storyMetrics=()=>{
  const inspector=document.querySelector('.story-facts-inspector');
  const body=inspector?.querySelector('.bm-insp__body');
  const choices=document.querySelector('.aip-choices');
- return {dialogue:document.querySelector(".aip-box")&&box(document.querySelector(".aip-box")),viewport:[innerWidth,innerHeight],globalChat:document.body.dataset.globalChatEnabled,inspector:inspector&&box(inspector),body:body&&box(body),facts:[...document.querySelectorAll('.story-fact-row')].map(box),chat:[...document.querySelectorAll('.bm-side .fy-global-chat-slot')].map(e=>({display:getComputedStyle(e).display,...box(e)})),choices:choices&&box(choices),options:[...document.querySelectorAll('.aip-choice')].map(e=>({label:e.querySelector('.l').textContent,labelOverflow:e.querySelector('.l').scrollWidth>e.querySelector('.l').clientWidth+1,...box(e)})),overflow:document.documentElement.scrollWidth>innerWidth};
+ return {copy:document.querySelector(".aip-copy")&&box(document.querySelector(".aip-copy")),dialogue:document.querySelector(".aip-box")&&box(document.querySelector(".aip-box")),viewport:[innerWidth,innerHeight],globalChat:document.body.dataset.globalChatEnabled,inspector:inspector&&box(inspector),body:body&&box(body),facts:[...document.querySelectorAll('.story-fact-row')].map(box),chat:[...document.querySelectorAll('.bm-side .fy-global-chat-slot')].map(e=>({display:getComputedStyle(e).display,...box(e)})),choices:choices&&box(choices),options:[...document.querySelectorAll('.aip-choice')].map(e=>({label:e.querySelector('.l').textContent,labelOverflow:e.querySelector('.l').scrollWidth>e.querySelector('.l').clientWidth+1,...box(e)})),overflow:document.documentElement.scrollWidth>innerWidth};
 };
 ` }, bundle: true, platform: "browser", format: "iife", define: { "import.meta.env": "{}" }, external: ["/*.webp", "/*.png"],
   loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js"),
@@ -108,6 +108,28 @@ try{
     }
    }
   }
+ }
+ // Whole script blocks can be long: copy must scroll without displacing every choice.
+ for(const dark of [false,true])for(const [width,height] of [[390,844],[390,400],[1200,400]]){
+  const name='long-copy-'+width+'x'+height+(dark?'-dark':'');
+  await cdp('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+  await js('mountStory("long",'+dark+')');
+  const metrics=await js('storyMetrics()');records.push({name,mode:'long-copy',...metrics});
+  if(!baseline){
+   assert.ok(metrics.copy.height>=44,name+': dialogue retains readable space');
+   assert.ok(metrics.options.filter(option=>option.y>=metrics.choices.y-1&&option.bottom<=metrics.choices.bottom+1).length>=2,name+': long dialogue leaves two complete choice targets visible');
+   assert.ok(await js('(()=>{const copy=document.querySelector(".aip-copy");copy.scrollTop=copy.scrollHeight;return copy.scrollTop>0})()'),name+': the remaining dialogue can be scrolled into view');
+   await js('document.querySelector(".aip-choice:last-child").scrollIntoView({block:"nearest"})');
+   const last=await js('storyMetrics()');
+   assert.ok(last.options.at(-1).y>=last.choices.y-1&&last.options.at(-1).bottom<=last.choices.bottom+1,name+': last choice remains accessible beside long dialogue');
+   await js('document.querySelector(".aip-choice:first-child").scrollIntoView({block:"nearest"})');
+   const first=await js('storyMetrics()');
+   assert.ok(first.options[0].y>=first.choices.y-1&&first.options[0].bottom<=first.choices.bottom+1,name+': first choice remains accessible beside long dialogue');
+   await js('document.querySelector(".bm-player").dispatchEvent(new KeyboardEvent("keydown",{key:"2",bubbles:true}))');
+   assert.ok(await js('document.querySelector(".bm-player").textContent.includes("Outcome 2")'),name+': long dialogue does not block taking a route');
+  }
+  const {data}=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await writeFile(join(dir,name+'.png'),Buffer.from(data,'base64'));
+  await writeFile(join(dir,'measurements.json'),JSON.stringify(records,null,2));
  }
  // A short clip stage must overflow from its start, never hide the first alternatives above it.
  for(const dark of [false,true])for(const width of [1200,390]){
