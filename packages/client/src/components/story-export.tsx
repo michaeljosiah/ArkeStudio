@@ -81,7 +81,9 @@ export function storyReleases(packages: readonly Listed[], worldName: string): A
     .sort((a, b) => classOf(a) - classOf(b) || (a.exportedAt < b.exportedAt ? -1 : 1))
     .map((entry) => {
       const name = entry.title.startsWith(prefix) ? entry.title.slice(prefix.length) : entry.title;
-      return { ...entry, label: ["Edition", "Album", "Story"][classOf(entry)]!, what: [name, entry.holds].filter((part) => part !== undefined && part !== "").join(" · ") };
+      // A story says its scenes (245d: `Low Water · 14 scenes`); the read-back line above says its routes.
+      const holds = entry.story !== undefined ? `${entry.story.scenes} scene${entry.story.scenes === 1 ? "" : "s"}` : entry.holds;
+      return { ...entry, label: ["Edition", "Album", "Story"][classOf(entry)]!, what: [name, holds].filter((part) => part !== undefined && part !== "").join(" · ") };
     });
 }
 

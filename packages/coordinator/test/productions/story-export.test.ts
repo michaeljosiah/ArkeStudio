@@ -155,6 +155,11 @@ describe("Export → Arke Player for an interactive movie (turn 245a, 245d)", ()
     assert.deepEqual(result.blockers, ["Under the pier · no clip"]);
     assert.deepEqual(result.problems, [{ detail: "Under the pier · no clip", row: "media", sceneId: "sc_pier" }]);
     assert.deepEqual((await readdir(join(dir, "exports")).catch(() => [] as string[])).filter((name) => name.includes("story")), []);
+    // Ahead of the story's own findings, as 245c lists them: unwalked, every choice is one to clear.
+    await writeFile(join(dir, "productions", "low-water", "routing-evidence.jsonl"), "");
+    const unwalked = await readStoryExport(store, "low-water", { ffmpeg: true });
+    assert.equal(unwalked.blockers[0]!.detail, "Under the pier · no clip");
+    assert.ok(unwalked.blockers.length > 1 && unwalked.blockers.slice(1).every((blocker) => blocker.row === "story" && blocker.detail.includes("not walked") && blocker.route !== undefined), JSON.stringify(unwalked.blockers));
   });
 
   it("is blocked by a dead end that a remembered value causes, with Show and the route that reaches it", async () => {
@@ -164,7 +169,7 @@ describe("Export → Arke Player for an interactive movie (turn 245a, 245d)", ()
     const state = await readStoryExport(store, "low-water", { ffmpeg: true });
     const dead = state.blockers.find((blocker) => blocker.detail.startsWith("The bell · a dead end"));
     assert.deepEqual(dead, { detail: "The bell · a dead end when Key is Left", row: "story", sceneId: "sc_bell", route: ["ch_leave"] });
-  });
+    assert.equal(state.blockers.filter((blocker) => blocker.sceneId === "sc_bell" && JSON.stringify(blocker.route) === '["ch_leave"]').length, 1, "a dead end is not also said as a state with no ending");  });
 
   it("says Needs ffmpeg before anything is made, and refuses a shape the Player does not play", async () => {
     const dir = await makeTempWorld();

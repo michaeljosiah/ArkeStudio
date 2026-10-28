@@ -14,3 +14,11 @@
 .fy-abv-back .grow { flex: 1; }
 .fy-abv-back .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-abv-modal--phone .fy-abv-block .fy-abv-btn { min-height: 44px; }
+/* 245b's Size is 235d's segmented control, the chosen size filled; 245d's SHA-256 a plain line. */
+.fy-story-export .fy-seg { display: inline-flex; gap: 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: none; }
+.fy-story-export .fy-seg__item { height: 28px; min-height: 0; padding: 0 12px; display: inline-flex; align-items: center; border: 0; border-left: 1px solid var(--border); border-radius: 0; background: none; box-shadow: none; font: var(--type-label); color: var(--foreground); cursor: pointer; }
+.fy-story-export .fy-seg__item:first-child { border-left: 0; }
+.fy-story-export .fy-seg__item--active { background: var(--foreground); color: var(--background); font-weight: 600; }
+.fy-story-export .fy-abv-sha { padding: 0; border: 0; background: none; }
+.fy-story-export .fy-abv-sha b { color: var(--foreground); }
+.fy-story-export .fy-abv-sha code { color: var(--muted-foreground); }

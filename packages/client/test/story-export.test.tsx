@@ -209,7 +209,7 @@ describe("Export on an interactive story (turn 245)", () => {
     assert.deepEqual(all('[data-testid="story-export-releases"] .fy-abv-rel').map(text), [
       "26 Oct 2026 Edition The Undersong · 3 chapters · the book 412 MB",
       "25 Oct 2026 Album Songs of the Drowned Quarter · 9 tracks 66 MB",
-      "28 Oct 2026 Story Low Water · 14 scenes · 37 routes · 2 endings 1.1 GB",
+      "28 Oct 2026 Story Low Water · 14 scenes 1.1 GB",
     ]);
     assert.ok(q('[data-testid="story-export-releases"] .fy-abv-rel.now')?.textContent?.includes("Story"), "the story just made is marked");
   });

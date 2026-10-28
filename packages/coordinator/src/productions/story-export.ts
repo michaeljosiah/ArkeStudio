@@ -279,8 +279,17 @@ async function planStory(
   const titleOf = (id: string) => production.scenes.find((scene) => scene.id === id)?.title || id;
   const titles = new Map(production.scenes.map((scene) => [scene.id, scene.title || scene.id]));
 
-  // The web package's own blocking findings (SPEC-063 R-16, R-23): the same gate on both kinds.
-  for (const finding of publicationBlockers(await interactiveFindings(store, production))) blockers.push(findingBlocker(finding, routing, titleOf));
+  // The web package's own blocking findings (SPEC-063 R-16, R-23): the same gate on both kinds. A
+  // state with no way on is also a state that cannot reach an ending; it is one thing to clear, said once.
+  const states = new Set<string>();
+  for (const finding of publicationBlockers(await interactiveFindings(store, production))) {
+    if (finding.kind === "state-route" && finding.witnessPrefix !== undefined) {
+      const state = JSON.stringify([finding.sceneIds[0], finding.witnessPrefix]);
+      if (states.has(state)) continue;
+      states.add(state);
+    }
+    blockers.push(findingBlocker(finding, routing, titleOf));
+  }
 
   const order = reachableOrder(routing);
   const reached = new Set(order);
@@ -380,6 +389,10 @@ async function planStory(
     bytes += pictures.size * pictureBytes + voiced * VOICE_BYTES;
     seconds += pictures.size * SECONDS_PER_PICTURE + voiced * SECONDS_PER_VOICE;
   }
+  // In 245c's order: what stands in front of everything (ffmpeg, the shape), then each scene's
+  // missing media, then the story's own findings.
+  const rank = (blocker: StoryExportBlocker) => (blocker.sceneId === undefined && blocker.route === undefined ? 0 : blocker.row === "media" ? 1 : 2);
+  state.blockers = blockers.map((blocker, index) => ({ blocker, index })).sort((a, b) => rank(a.blocker) - rank(b.blocker) || a.index - b.index).map(({ blocker }) => blocker);
   state.bytes = Math.round(bytes);
   // Packing and the read-back each read every byte once more.
   state.seconds = Math.max(1, Math.ceil(seconds + (2 * bytes) / COPY_BYTES_PER_SECOND));
