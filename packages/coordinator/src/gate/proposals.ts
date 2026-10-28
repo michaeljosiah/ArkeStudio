@@ -40,6 +40,7 @@ import {
   countWords,
   passageDiff,
   EpisodeScriptSchema,
+  ComicScriptSchema,
   unusableSound,
 } from "@arke-studio/contracts";
 import { ripplesForCanonEntry, ripplesForSheet } from "../index-db/queries.js";
@@ -92,6 +93,7 @@ const JSON_TRACK_SCHEMAS: Partial<Record<ReturnType<typeof classify>["track"], {
   "prose-style": ProseStyleSchema,
   // An episode script's blocks and relations, refused before acceptance as the scanner would (codex on PR 1870).
   "episode-script": EpisodeScriptSchema,
+  "comic-script": ComicScriptSchema,
   routing: RoutingSchema,
   season: SeasonSchema,
   episode: EpisodeSchema,
@@ -1629,6 +1631,7 @@ export class ProposalManager {
           track === "season" ||
           track === "episode" ||
           track === "episode-script" ||
+          track === "comic-script" ||
           track === "series";
         const merge = jsonTrack
           ? mergeJson(target.path, base, mine, live)
@@ -1729,6 +1732,7 @@ export class ProposalManager {
           track === "season" ||
           track === "episode" ||
           track === "episode-script" ||
+          track === "comic-script" ||
           track === "series"
             ? applyJsonResolution(current, conflict, choice)
             : applyResolution(path, current, conflict, choice);
@@ -2029,6 +2033,7 @@ function readVersion(path: string, raw: string): number | null {
       kind.track === "season" ||
       kind.track === "episode" ||
       kind.track === "episode-script" ||
+      kind.track === "comic-script" ||
       kind.track === "series"
     ) {
       return ((JSON.parse(raw) as { version?: number }).version ?? 1);

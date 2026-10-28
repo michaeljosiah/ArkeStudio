@@ -31,6 +31,7 @@ import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdap
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
 import { DramaEditionService } from "./publications/drama.js";
 import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
+import { saveComicScript, setComicSettings } from "./productions/graphic-novel.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
@@ -10997,6 +10998,37 @@ export class Coordinator {
           answer({ disposition: "saved", ...saved });
         } catch (err) {
           answer({ disposition: "refused", reason: describeCoordinatorError(err) });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "save-comic-script": {
+        // A graphic novel chapter's comic script (SPEC-064 R-10), answered by name either way so
+        // the editor knows its new base.
+        const store = this.opts.provider.openStore?.();
+        const answer = (result: { disposition: "saved"; version: number; hash: string } | { disposition: "refused"; reason: string }) =>
+          this.emit({ at: new Date().toISOString(), type: "comic-script.save-result", requestId: msg.requestId,
+            worldId: msg.worldId, productionId: msg.productionId, chapter: msg.chapter, ...result });
+        if (!store || store.worldId !== msg.worldId) {
+          answer({ disposition: "refused", reason: "that world is not open" });
+          return;
+        }
+        try {
+          answer({ disposition: "saved", ...await saveComicScript(store, msg.productionId,
+            { chapter: msg.chapter, pages: msg.pages, baseHash: msg.baseHash }, { requestId: msg.requestId }) });
+        } catch (err) {
+          answer({ disposition: "refused", reason: describeCoordinatorError(err) });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "set-comic-settings": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        try {
+          await setComicSettings(store, msg.productionId, msg.settings);
+        } catch (err) {
+          this.emit({ at: new Date().toISOString(), type: "command.failed", command: msg.kind, requestId: null, reason: describeCoordinatorError(err) });
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
