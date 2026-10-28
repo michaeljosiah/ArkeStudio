@@ -362,3 +362,20 @@ scroll check are in the gitignored `.dev/studio-239-check/shortfall-*.png` files
 readable values and retained composer space; they do not establish installed-device acceptance
 or comparison with the approved master. Live pending-work counts/status, other generation
 write plans, broader attachment support and the existing native/design gates remain open.
+
+## Installed Windows update — 28 October 2026
+
+The installer for production checkpoint `b2ce967fc` was built with publishing disabled and
+installed into the existing per-user Arke Studio location after the owner closed the app.
+The installer exited successfully. SHA-256 comparisons matched the installed executable,
+complete application archive, client entry and referenced JavaScript/CSS, and loose Ming
+worker/licence files against the verified package. Arke remained closed after installation.
+The installer SHA-256 is
+`7a144887a1c35a5b01b8de55f246f8f64ce8fe71e83005375a00ca6882d0fe87`.
+
+All 25 CI checks passed for `b2ce967fc`. The existing main-bundle load and sandboxed Electron
+file-page transport smokes also passed. These checks establish installation and package identity;
+they do not establish
+normal reopening of the owner's workspace, device interaction or matched design acceptance.
+Native desktop control was unavailable in this session, so the owner was asked to reopen Arke
+and check the workspace and System panel. The broader acceptance gaps above remain open.
