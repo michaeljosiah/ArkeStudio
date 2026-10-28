@@ -1,0 +1,51 @@
+# Turn 247 · The graphic novel
+
+Proposed 28 October 2026. Awaiting the owner.
+
+## Why this turn
+
+SPEC-064 adds the graphic novel: a Story kind whose pages are generated from a comic script, with
+every page's lettering read back and checked against the script. Slices 1 – 3 of epic 2219 built
+the data and the engine (the kind, the comic script on its own versioned track, page generation
+through the Bench, the lettering check, accept and override). The owner asked that no UX be built
+before a design turn is approved. This is that turn.
+
+Slice 1 shipped two small surfaces ahead of it: step two's Graphic novel card (with no plate) and
+the rail without Audiobook. 247a puts them in front of the owner now; if the call changes them,
+slice 4 changes them.
+
+## The frames
+
+| Frame | What it decides |
+|---|---|
+| 247a | Graphic novel under Tell a story, with Adapt from |
+| 247b | Pages: the strip, the page editor (layout, panels, lines), Make page priced with Until it passes |
+| 247c | A take with findings, drawn where they are on the page; Make again first, Accept anyway second |
+| 247d | A take that passes: one press |
+| 247e | A check that could not run: Not checked, only Accept anyway |
+| 247f | Read: the accepted pages, left to right, right to left or one scroll |
+| 247g | Over the art: Arke's lettering placed on clean art |
+| 247h | Export: CBZ, PDF, EPUB and Arke Player, held by a page with no accepted take |
+
+## Samples
+
+The book is The Undersong's Low Water, drawn: chapter 1, The tide, page 3 in the Feature layout.
+The comic pages are composed from the master's own pictures with lettering laid over them in
+HTML; they stand for generated pages. Prices, counts, the reader's model and every finding are
+samples.
+
+## Calls for the owner
+
+1. Graphic novel is a kind under Tell a story with Adapt from (247a).
+2. Pages replaces Audiobook on the rail; Chapters keeps the prose.
+3. The page editor is the script: no separate Script page.
+4. Until it passes is on by default, capped at 3 attempts.
+5. Accept anyway covers every blocking finding at once; no per-finding override.
+6. Lettering is a book setting, In the picture or Over the art, not chosen page by page.
+7. Read is a dark reader with three modes.
+8. Export offers the four kinds in one sheet and is held by any page with no accepted take.
+
+## Not drawn
+
+Phone and Fold layouts; Arke turning a chapter's prose into pages in Chat; a webtoon chapter's
+editor; the Arke Player reader (a Player P-turn of its own).

@@ -1,0 +1,181 @@
+/* Turn 247 · The graphic novel (SPEC-064). Step two's card, the Pages screen and its page
+   editor, a take's lettering check, the reader, lettering over the art, and Export. The sheet,
+   rows and buttons follow 233/245, copied under .gn247 so the review page stands alone. Type
+   through the tokens only (turn 139). */
+.gn247{position:relative;overflow:hidden;background:var(--background);color:var(--foreground);font:var(--type-body);text-align:left}
+.gn247 *{box-sizing:border-box}
+.gn247 .grow{flex:1}
+.gn247 .m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+
+/* Chrome: the production rail and the page head (one line, labels only). */
+.gn247-rail{position:absolute;left:0;top:0;bottom:0;width:208px;border-right:1px solid var(--border);padding:18px 12px;display:flex;flex-direction:column;gap:2px;background:var(--background)}
+.gn247-rail .t{font:var(--type-ui);font-weight:600;font-size:var(--text-sm);padding:0 8px 2px}
+.gn247-rail .k{font:var(--type-meta);color:var(--muted-foreground);padding:0 8px 12px}
+.gn247-rail a{display:flex;align-items:center;gap:8px;min-height:32px;padding:0 8px;border-radius:8px;font:var(--type-ui);font-size:var(--text-sm);color:var(--foreground);text-decoration:none}
+.gn247-rail a.on{background:var(--secondary);font-weight:600}
+.gn247-rail a span{margin-left:auto;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.gn247-rail hr{border:0;border-top:1px solid var(--border);margin:8px 0;width:100%}
+.gn247-main{position:absolute;left:208px;right:0;top:0;bottom:0;display:flex;flex-direction:column}
+.gn247-head{display:flex;align-items:center;gap:10px;height:56px;padding:0 20px;border-bottom:1px solid var(--border);flex:none}
+.gn247-head h2{margin:0;font:var(--type-ui);font-weight:600;font-size:var(--text-md)}
+.gn247-tabs{display:inline-flex;padding:3px;border-radius:10px;background:var(--muted);gap:2px}
+.gn247-tabs span{height:26px;padding:0 11px;border-radius:7px;display:inline-flex;align-items:center;font:var(--type-label);color:var(--muted-foreground)}
+.gn247-tabs span.on{background:var(--background);color:var(--foreground);box-shadow:0 1px 2px color-mix(in srgb,var(--foreground) 18%,transparent)}
+.gn247-sel{height:30px;padding:0 10px;border:1px solid var(--border);border-radius:8px;display:inline-flex;align-items:center;gap:8px;font:var(--type-label);white-space:nowrap}
+.gn247-sel b{font-weight:500;color:var(--muted-foreground)}
+.gn247-sel svg{width:12px;height:12px;color:var(--muted-foreground)}
+.gn247-btn{height:32px;padding:0 13px;border:1px solid var(--border);border-radius:8px;display:inline-flex;align-items:center;gap:7px;font:var(--type-label);background:var(--background);color:var(--foreground);white-space:nowrap}
+.gn247-btn.pri{background:var(--foreground);color:var(--background);border-color:transparent;font-weight:600}
+.gn247-btn.off{opacity:.42}
+.gn247-btn.sm{height:28px;padding:0 10px}
+.gn247-btn.ghost{border-color:transparent}
+.gn247-btn svg{width:13px;height:13px}
+
+/* The body: strip, editor, page. */
+.gn247-body{flex:1;min-height:0;display:grid;grid-template-columns:136px minmax(0,1fr) 420px}
+.gn247-strip{border-right:1px solid var(--border);padding:14px 12px;display:flex;flex-direction:column;gap:10px;overflow:hidden}
+.gn247-thumb{position:relative;width:100%;aspect-ratio:2/3;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--secondary)}
+.gn247-thumb.on{outline:2px solid var(--foreground);outline-offset:1px}
+.gn247-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.gn247-thumb .n{position:absolute;left:5px;bottom:4px;font:var(--type-mono);font-size:var(--text-2xs);color:var(--foreground);background:var(--background);border-radius:4px;padding:0 4px}
+.gn247-thumb .s{position:absolute;right:5px;top:4px;width:14px;height:14px;border-radius:50%;display:grid;place-items:center;background:var(--background);color:var(--success)}
+.gn247-thumb .s.w{color:var(--warning)}
+.gn247-thumb .s svg{width:10px;height:10px}
+.gn247-thumb.empty{display:grid;place-items:center;color:var(--muted-foreground)}
+.gn247-add{height:30px;border:1px dashed var(--border);border-radius:6px;display:grid;place-items:center;font:var(--type-label);color:var(--muted-foreground)}
+
+.gn247-edit{padding:16px 20px;display:flex;flex-direction:column;gap:12px;overflow:hidden}
+.gn247-edit h3{margin:0;font:var(--type-ui);font-weight:600;font-size:var(--text-sm)}
+.gn247-layouts{display:flex;gap:8px}
+.gn247-lay{width:54px;display:flex;flex-direction:column;align-items:center;gap:4px;font:var(--type-meta);color:var(--muted-foreground)}
+.gn247-lay i{position:relative;display:block;width:36px;height:54px;border:1px solid var(--border);border-radius:4px;background:var(--background)}
+.gn247-lay i u{position:absolute;border:1.5px solid var(--neutral-400);border-radius:2px}
+.gn247-lay.on{color:var(--foreground);font-weight:600}
+.gn247-lay.on i{border-color:var(--foreground)}
+.gn247-panel{border:1px solid var(--border);border-radius:12px;overflow:hidden;flex:none}
+.gn247-ph{display:flex;align-items:center;gap:10px;min-height:38px;padding:0 12px;background:var(--secondary);font:var(--type-label)}
+.gn247-ph b{font-weight:600}
+.gn247-desc{padding:10px 12px;font-size:var(--text-sm);border-top:1px solid var(--border)}
+.gn247-row{display:flex;align-items:center;gap:8px;min-height:38px;padding:4px 12px;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.gn247-row>b{width:62px;flex:none;font-weight:500;color:var(--muted-foreground);font-size:var(--text-xs)}
+.gn247-chip{height:24px;padding:0 9px 0 4px;border:1px solid var(--border);border-radius:999px;display:inline-flex;align-items:center;gap:6px;font:var(--type-label);font-size:var(--text-xs)}
+.gn247-chip img{width:16px;height:16px;border-radius:50%;object-fit:cover}
+.gn247-chip.plain{padding-left:9px}
+.gn247-kind{width:78px;flex:none;height:26px;padding:0 8px;border:1px solid var(--border);border-radius:6px;display:inline-flex;align-items:center;font:var(--type-label);font-size:var(--text-xs)}
+.gn247-kind svg{width:12px;height:12px;margin-left:auto;color:var(--muted-foreground)}
+.gn247-who{width:70px;flex:none;font:var(--type-label);font-size:var(--text-xs);color:var(--muted-foreground)}
+.gn247-words{flex:1;min-width:0;height:28px;padding:0 9px;border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;white-space:nowrap;overflow:hidden}
+.gn247-words.bad{border-color:color-mix(in srgb,var(--destructive) 60%,var(--border))}
+.gn247-more{font:var(--type-label);color:var(--muted-foreground);padding:6px 12px;border-top:1px solid var(--border)}
+
+/* The page side: the picture, its press and its takes. */
+.gn247-side{border-left:1px solid var(--border);padding:16px 18px;display:flex;flex-direction:column;gap:12px;overflow:hidden}
+.gn247-make{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.gn247-make .m{flex-basis:100%}
+.gn247-check{display:inline-flex;align-items:center;gap:6px;font:var(--type-label)}
+.gn247-check i{width:15px;height:15px;border-radius:4px;border:1.5px solid var(--neutral-400);display:grid;place-items:center}
+.gn247-check i.on{background:var(--foreground);border-color:var(--foreground);color:var(--background)}
+.gn247-check i svg{width:10px;height:10px}
+.gn247-takes{display:flex;gap:8px;align-items:center}
+.gn247-take{position:relative;width:46px;aspect-ratio:2/3;border:1px solid var(--border);border-radius:5px;overflow:hidden}
+.gn247-take img{width:100%;height:100%;object-fit:cover;display:block}
+.gn247-take.on{outline:2px solid var(--foreground);outline-offset:1px}
+.gn247-take .k{position:absolute;inset:auto 0 0 0;height:4px;background:var(--success)}
+.gn247-take .k.w{background:var(--warning)}
+
+/* A drawn comic page: panels on a page, balloons over them. Samples, not generated pictures. */
+.gn247-comic{position:relative;width:100%;aspect-ratio:2/3;background:#f6f3ec;border-radius:6px;overflow:hidden;box-shadow:0 0 0 1px var(--border)}
+.gn247-comic .p{position:absolute;overflow:hidden;border:2px solid #111;background:#ddd}
+.gn247-comic .p img{width:100%;height:100%;object-fit:cover;display:block;filter:saturate(.85) contrast(1.05)}
+.gn247-comic .p.clean img{filter:saturate(.85) contrast(1.05)}
+.gn247-bal{position:absolute;z-index:2;padding:4px 7px;background:#fff;color:#111;border:1.5px solid #111;border-radius:50%;font:var(--type-label);font-size:var(--text-2xs);font-weight:700;text-transform:uppercase;letter-spacing:.02em;text-align:center;line-height:1.2}
+.gn247-bal.cap{border-radius:2px;background:#f4e7b4}
+.gn247-bal.sfx{border:0;background:none;color:#c2410c;font-size:var(--text-md);font-weight:800;transform:rotate(-8deg);text-shadow:1.5px 1.5px 0 #111}
+.gn247-hit{position:absolute;z-index:3;border:2px solid var(--destructive);border-radius:6px;background:color-mix(in srgb,var(--destructive) 10%,transparent)}
+.gn247-hit.w{border-color:var(--warning);background:color-mix(in srgb,var(--warning) 12%,transparent)}
+.gn247-hit .t{position:absolute;left:-2px;top:-20px;height:18px;padding:0 6px;border-radius:4px;background:var(--destructive);color:var(--background);font:var(--type-mono);font-size:var(--text-2xs);display:flex;align-items:center;white-space:nowrap}
+.gn247-hit.w .t{background:var(--warning);color:var(--foreground)}
+.gn247-ghost{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted-foreground);font:var(--type-label)}
+.gn247-wire{position:absolute;border:1.5px dashed var(--neutral-400);border-radius:3px;display:grid;place-items:center;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+
+/* The check: one verdict line and the findings. */
+.gn247-verdict{display:flex;align-items:center;gap:8px;min-height:38px;padding:6px 12px;border:1px solid var(--border);border-radius:10px;font-size:var(--text-sm)}
+.gn247-verdict svg{width:15px;height:15px;flex:none}
+.gn247-verdict.ok svg{color:var(--success)}
+.gn247-verdict.bad{border-color:color-mix(in srgb,var(--destructive) 45%,var(--border));background:color-mix(in srgb,var(--destructive) 6%,transparent)}
+.gn247-verdict.bad svg{color:var(--destructive)}
+.gn247-verdict.warn{border-color:color-mix(in srgb,var(--warning) 45%,var(--border));background:color-mix(in srgb,var(--warning) 8%,transparent)}
+.gn247-verdict.warn svg{color:var(--warning)}
+.gn247-finds{border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.gn247-find{display:flex;align-items:center;gap:10px;min-height:36px;padding:5px 12px;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.gn247-find:first-child{border-top:0}
+.gn247-find .k{width:58px;flex:none;font:var(--type-label);font-size:var(--text-xs);font-weight:600;color:var(--destructive)}
+.gn247-find .k.w{color:var(--warning)}
+.gn247-find s{color:var(--muted-foreground)}
+.gn247-acts{display:flex;align-items:center;gap:8px}
+
+/* The reader (247f). */
+.gn247-read{position:absolute;inset:0;background:#141414;display:flex;flex-direction:column}
+.gn247-read .bar{height:52px;display:flex;align-items:center;gap:10px;padding:0 20px;color:#ededed;font:var(--type-ui);font-size:var(--text-sm)}
+.gn247-read .bar .m{color:#9a9a9a}
+.gn247-read .gn247-tabs{background:#262626}
+.gn247-read .gn247-tabs span{color:#9a9a9a}
+.gn247-read .gn247-tabs span.on{background:#3a3a3a;color:#fff;box-shadow:none}
+.gn247-read .stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;gap:4px;padding:10px 0 22px}
+.gn247-read .stage .gn247-comic{width:auto;height:100%;border-radius:0;box-shadow:none}
+.gn247-read .arrow{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;color:#ededed;background:#262626;margin:0 18px}
+.gn247-read .arrow svg{width:16px;height:16px}
+.gn247-read .scrub{height:4px;margin:0 20px 18px;border-radius:2px;background:#333;position:relative}
+.gn247-read .scrub i{position:absolute;left:0;top:0;bottom:0;width:13%;background:#ededed;border-radius:2px}
+.gn247-scroll{flex:1;min-height:0;display:flex;justify-content:center;overflow:hidden}
+.gn247-scroll .col{width:300px;display:flex;flex-direction:column;gap:22px;padding-top:8px}
+.gn247-scroll .col .p{position:relative;width:100%;height:240px;overflow:hidden;border:0}
+.gn247-scroll .col .p img{width:100%;height:100%;object-fit:cover;display:block}
+
+/* Lettering over the art (247g): the layer's list and handles. */
+.gn247-handle{position:absolute;z-index:4;outline:1.5px dashed var(--foreground);outline-offset:2px}
+.gn247-handle::after{content:"";position:absolute;right:-6px;bottom:-6px;width:9px;height:9px;background:var(--background);border:1.5px solid var(--foreground);border-radius:2px}
+.gn247-place{display:flex;align-items:center;gap:8px;min-height:36px;padding:4px 12px;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.gn247-place:first-child{border-top:0}
+.gn247-place .k{width:62px;flex:none;font:var(--type-label);font-size:var(--text-xs);color:var(--muted-foreground)}
+.gn247-place.on{background:color-mix(in srgb,var(--foreground) 5%,transparent)}
+
+/* Export (247h): 245's sheet. */
+.gn247-dim{position:absolute;inset:0;background:color-mix(in srgb,var(--background) 60%,transparent);z-index:5}
+.gn247-sheet{position:absolute;z-index:6;left:50%;transform:translateX(-50%);border:1px solid var(--border);border-radius:16px;background:var(--popover,var(--background));box-shadow:0 18px 50px color-mix(in srgb,var(--foreground) 16%,transparent);padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.gn247-sheet h3{margin:0;font:var(--type-ui);font-weight:600;font-size:var(--text-md)}
+.gn247-sheet .sub{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);margin-top:-8px}
+.gn247-kinds{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.gn247-kindc{display:flex;gap:10px;align-items:flex-start;padding:11px 12px;border:1px solid var(--border);border-radius:12px}
+.gn247-kindc.on{border-color:var(--foreground)}
+.gn247-kindc .r{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--neutral-400);flex:none;margin-top:1px}
+.gn247-kindc.on .r{border-color:var(--foreground);background:var(--foreground)}
+.gn247-kindc b{display:block;font-weight:600;font-size:var(--text-sm)}
+.gn247-kindc span{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.gn247-opts{border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.gn247-opt{display:flex;align-items:center;gap:14px;min-height:42px;padding:6px 14px;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.gn247-opt:first-child{border-top:0}
+.gn247-opt>b{width:104px;flex:none;font-weight:500;color:var(--muted-foreground)}
+.gn247-opt i{font-style:normal;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);white-space:nowrap}
+.gn247-block{display:flex;align-items:center;gap:10px;min-height:40px;padding:6px 12px;border:1px solid color-mix(in srgb,var(--warning) 45%,var(--border));border-radius:10px;background:color-mix(in srgb,var(--warning) 8%,transparent);font-size:var(--text-sm)}
+.gn247-block svg{width:15px;height:15px;color:var(--warning);flex:none}
+.gn247-block .c{flex:1;min-width:0}
+.gn247-foot{display:flex;align-items:center;gap:8px}
+
+/* Step two (247a): the kind cards. */
+.gn247-door{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;padding-top:56px;gap:18px}
+.gn247-door h2{margin:0;font:var(--type-title)}
+.gn247-door .q{font:var(--type-ui);font-weight:600;font-size:var(--text-sm);width:880px}
+.gn247-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;width:880px}
+.gn247-card{border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--background)}
+.gn247-card.on{border-color:var(--foreground);box-shadow:0 0 0 1px var(--foreground)}
+.gn247-card .pl{height:128px;background:var(--secondary);overflow:hidden;position:relative}
+.gn247-card .pl img{width:100%;height:100%;object-fit:cover;display:block}
+.gn247-card .tx{padding:10px 12px}
+.gn247-card b{display:block;font:var(--type-ui);font-weight:600;font-size:var(--text-sm)}
+.gn247-card span{font:var(--type-meta);color:var(--muted-foreground)}
+.gn247-field{width:880px;display:flex;flex-direction:column;gap:6px}
+.gn247-field label{font:var(--type-label);color:var(--muted-foreground)}
+.gn247-field .in{height:38px;border:1px solid var(--border);border-radius:10px;padding:0 12px;display:flex;align-items:center;font-size:var(--text-sm)}
+.gn247-door .foot{width:880px;display:flex;gap:8px;justify-content:flex-end}
+.gn247-field .in svg{width:14px;height:14px;color:var(--muted-foreground)}

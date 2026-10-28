@@ -28,6 +28,17 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN GRAPHIC NOVEL 247
+  { group: "Graphic novel · turn 247", screen: "Tell a story: Graphic novel, a kind of its own", frame: "247a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Proposed 28 October 2026."] },
+  { group: "Graphic novel · turn 247", screen: "Pages: a page’s panels and lines, priced before it is made", frame: "247b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Proposed 28 October 2026."] },
+  { group: "Graphic novel · turn 247", screen: "A take checked: words that are not the script’s", frame: "247c", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Proposed 28 October 2026."] },
+  { group: "Graphic novel · turn 247", screen: "A take that passes, accepted", frame: "247d", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Proposed 28 October 2026."] },
+  { group: "Graphic novel · turn 247", screen: "Not checked: never a pass", frame: "247e", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Proposed 28 October 2026."] },
+  { group: "Graphic novel · turn 247", screen: "Read: the book as it will be read", frame: "247f", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Proposed 28 October 2026."] },
+  { group: "Graphic novel · turn 247", screen: "Over the art: lettering Arke places on clean art", frame: "247g", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Proposed 28 October 2026."] },
+  { group: "Graphic novel · turn 247", screen: "Export: a book of pages, and what holds it", frame: "247h", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Proposed 28 October 2026."] },
+  // END GRAPHIC NOVEL 247
+
   // BEGIN STORY EXPORT 245
   { group: "Story export · turn 245", screen: "Export → Arke Player: an interactive movie", frame: "245a", route: "Interactive / Export", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 28 October 2026 with Player P18."] },
   { group: "Story export · turn 245", screen: "Export → Arke Player: a visual novel", frame: "245b", route: "Interactive / Export", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 28 October 2026 with Player P18."] },
@@ -936,6 +947,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "graphic-novel-247.review.html", what: "Turn 247: the graphic novel — Graphic novel under Tell a story, the Pages screen and its page editor, a take’s lettering check drawn on the page, a take that passes, a check that could not run, the reader, lettering over the art, and Export.", state: "proposed 28 October 2026; not built" },
   { file: "story-export-245.review.html", what: "Turn 245: Export → Arke Player for an interactive story — the Export sheet with Web package and Arke Player for an interactive movie and a visual novel, its blockers, and the package made and read back beside the world’s releases.", state: "approved 28 October 2026; not built" },
   { file: "branch-map-state-240.review.html", what: "Turn 240: remembered values, conditional choices and dialogue in First Contact, plus the click-connector creation flow; local interactive prototype.", state: "proposed 27 October 2026; not built" },
   { file: "global-chat-239.review.html", what: "Turn 239: the Studio assistant in a notification-style rounded dialog, diagnosis, reviewed repair, world handoff, phone, tablet and keyboard viewport.", state: "approved 26 October 2026; not built" },
@@ -1123,6 +1135,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="global-chat-239.reference.css">
 <link rel="stylesheet" href="branch-map-state-240.css">
 <link rel="stylesheet" href="story-export-245.css">
+<link rel="stylesheet" href="graphic-novel-247.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">

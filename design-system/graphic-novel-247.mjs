@@ -1,0 +1,69 @@
+// Turn 247 · The graphic novel (SPEC-064). Writes the review page and, unless --preview, places the
+// turn in the design master and registers its frames with build-review.
+//   node design-system/graphic-novel-247.mjs [--preview]
+// Then: node design-system/check-master.mjs --record && node design-system/build-review.mjs
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { FRAMES } from './graphic-novel-247.frames.mjs';
+const here = path.dirname(fileURLToPath(import.meta.url));
+const read = name => fs.readFileSync(path.join(here, name), 'utf8');
+const write = (name, content) => fs.writeFileSync(path.join(here, name), content);
+const esc = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
+const tokens = '_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens';
+const STYLE = '<link rel="stylesheet" href="graphic-novel-247.css">';
+const STATUS = 'proposed';
+const frames = FRAMES.map(([letter, title, width, height, , draw]) => ({ id: '247' + letter, title, width, height, markup: draw() }));
+for (const f of frames) if (!f.markup.startsWith('<div class="gn247"')) throw new Error(`${f.id}: frame root is not .gn247`);
+
+write('graphic-novel-247.review.html', `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Graphic novel · Turn 247</title>${['fonts', 'colors', 'typography', 'spacing', 'effects'].map(n => `<link rel="stylesheet" href="${tokens}/${n}.css">`).join('')}${STYLE}
+<style>body{margin:0;background:#EFEEEB;color:#1a1a1a;font-family:var(--font-sans)}html.dark body{background:#131313;color:#ededed}.rv{padding:32px;display:flex;flex-direction:column;gap:40px}.rv h2{font:var(--type-ui);margin:0 0 10px}.rv h2 a{color:inherit}.rv .fr{border-radius:12px;overflow:hidden;box-shadow:0 0 0 1px rgba(0,0,0,.1);width:max-content}.rv header{display:flex;gap:12px;align-items:center;font:var(--type-ui)}.rv header button{font:var(--type-ui);padding:6px 12px;border-radius:8px;border:1px solid #888;background:none;color:inherit;cursor:pointer}</style></head>
+<body><div class="rv"><header><b>Turn 247 · ${STATUS} · The graphic novel</b><button type="button" onclick="document.documentElement.classList.toggle('dark')">Light / dark</button><a href="Arke%20Studio.dc.html#t247" style="color:inherit">Design master</a><a href="graphic-novel-247.notes.md" style="color:inherit">Notes</a></header>
+${frames.map(f => `<section id="${f.id}"><h2><a href="#${f.id}">${f.id}</a> ${f.title}</h2><div class="fr">${f.markup}</div></section>`).join('\n')}</div></body></html>`);
+
+if (process.argv.includes('--preview')) { console.log(`Wrote graphic-novel-247.review.html: ${frames.length} frames.`); process.exit(0); }
+
+export const rules = [
+  ['Review status', '28 October 2026. Proposed; awaiting the owner. Asked by the owner after SPEC-064 was written: “before doing any ux we need to go through a design turn for approval.” Slices 1 to 3 of the epic (the kind, the comic script and its storage, page generation, the lettering check) are built and carry no screen of their own, except step two’s Graphic novel card and the rail without Audiobook, which slice 1 shipped ahead of this turn and which 247a puts in front of the owner now. Nothing else here is built.'],
+  ['A kind of its own', 'Tell a story’s step two offers Graphic novel beside Novel, Audio drama and Other, with Adapt from as an audio drama has it (247a). The card needs a plate; until one is made it shows the empty box, as Other does.'],
+  ['Pages, beside Chapters', 'A graphic novel’s rail is a book’s, with Pages in place of Audiobook (247b). Chapters keep their prose, which Arke may turn into pages. Pages opens on the chapter in view, with the chapter tabs across the head, the book’s Reading and Lettering beside them, then Read and Export.'],
+  ['The page editor is the script', 'There is no separate Script page. The strip is the chapter’s pages in order; a page’s editor is its layout, picked from six drawn tiles (Grid, Feature, Wide, Splash, Manga, Webtoon), then its panels, each with what it shows, who and where it shows, and its lines (247b). A line is its kind, its speaker and its exact words. Edits save as the chapter’s script, versioned.'],
+  ['Make page', 'The page side shows the layout empty until a take exists, then the take. Make page carries the model, shape, who rides and the price, and Until it passes, which is on by default and says the cap it runs to: up to 3, with its total (247b). Brief opens the words exactly as sent. A person named with no picture that rides is listed on that line by name.'],
+  ['Findings are drawn where they are', 'A take is read back once it lands. A take with findings shows each one boxed on the page and listed, the script’s words beside what was read (247c). The verdict is one line: 2 to fix, with the count of lines that passed and who read it. Make again is the first press; Accept anyway keeps the take with every blocking finding on the record.'],
+  ['A take that passes is one press', 'Lettering 3 of 3, then Accept (247d). The strip marks each page: a tick when its accepted take passed, a warning when it was accepted anyway or is waiting.'],
+  ['Not checked is never a pass', 'When the check cannot run, the take says Not checked and why in one clause, with Settings where the reason is a setting (247e). It is never accepted with one press: only Accept anyway keeps it.'],
+  ['Read', 'Read shows the accepted pages as they will be read, on a dark ground: Left to right and Right to left turn a page at a time, Scroll runs them as one column (247f). A page with no accepted take reads as missing.'],
+  ['Over the art', 'Lettering Over the art makes the page without words and lays each line over it as Arke’s balloon, caption or sound (247g). The art is checked for words, which should be none. Each placed line is dragged and sized on the page; its words stay the script’s, so a translation never remakes the art.'],
+  ['Export', 'Export is 245’s sheet with four kinds, any of them together: CBZ, PDF, EPUB (fixed layout) and Arke Player (247h). Its rows count the accepted pages, the lettering checked and accepted anyway, the reading direction and the credits. A page with no accepted take holds the export, one clause with Go to.'],
+  ['Calls for the owner', '1 · Graphic novel is a kind under Tell a story with Adapt from (247a). 2 · Pages replaces Audiobook on the rail; Chapters keeps the prose. 3 · The page editor is the script: no separate Script page. 4 · Until it passes is on by default, capped at 3 attempts. 5 · Accept anyway covers every blocking finding at once; there is no per-finding override. 6 · Lettering is a book setting, In the picture or Over the art, not chosen page by page. 7 · Read is a dark reader with three modes. 8 · Export offers the four kinds in one sheet and is held by any page with no accepted take.'],
+  ['Sizes and copy', 'The strip is 136 wide with 2:3 tiles; the page side is 420 wide; panel rows are 38 high and a line’s kind 78 wide. Labels only: Pages, Reading, Lettering, In the picture, Over the art, Read, Export, Page, Panel, Line, Shows, Caption, Speech, Thought, Shout, Whisper, Sound, Make page, Until it passes, Brief, Make again, Accept, Accept anyway, Check again, Not checked, Settings, Altered, Missing, Extra, Cut off, Order, Placed, Place all, Clean art, Left to right, Right to left, Scroll, Close, CBZ, PDF, EPUB, Arke Player. Counts, prices, models, shapes and words read are data.'],
+  ['Implementation boundary', 'Spec: SPEC-064 R-3, R-4, R-13, R-17, R-21, R-27, R-30 – R-33, R-36 – R-49, R-53. Built and reused: the comic script and its save, quote-comic-page, make-comic-page with Until it passes, check-comic-take and accept-comic-take (slices 1 – 3); 245’s Export sheet; the Bench for a take. New with approval: the Pages screen and page editor, the findings overlay, the reader, the lettering layer’s placement, and the Export kinds.'],
+];
+
+const turn = `<section class="dv-turn" id="t247"><div class="dv-thd"><a class="dv-tid" href="#t247">247</a><span class="dv-tname">The graphic novel &#183; a kind of the story, its pages made from a comic script, every page&#8217;s lettering checked against the script, read and exported as a book (SPEC-064; extends <a class="dv-oid" href="#t230">230</a>, <a class="dv-oid" href="#t235">235</a>, <a class="dv-oid" href="#t245">245</a>)</span></div><p class="dv-next">28 October 2026 · Proposed · ${frames.length} HTML drawings. <a href="graphic-novel-247.review.html">Review page</a> · <a href="graphic-novel-247.notes.md">Notes</a></p><div class="dv-opts">${frames.map(f => `<div class="dv-opt" id="${f.id}"><div class="dv-olabel"><a class="dv-oid" href="#${f.id}">${f.id}</a>${f.title}</div><div class="dv-card" style="width:${f.width}px;max-width:none">${f.markup}</div></div>`).join('\n')}</div>${rules.map(([title, body], i) => `<p class="dv-rule"><b>${i + 1} · ${esc(title)}.</b> ${esc(body)}</p>`).join('\n')}<p class="dv-next">Try next: “Pages on a phone” · “Arke turning a chapter’s prose into pages” · “a webtoon chapter”</p></section>\n`;
+
+let master = read('Arke Studio.dc.html');
+const start = master.indexOf('<section class="dv-turn" id="t247">');
+if (start >= 0) {
+  const next = master.indexOf('<section class="dv-turn"', start + 1);
+  if (next < 0) throw new Error('Cannot safely replace final turn');
+  master = master.slice(0, start) + turn + master.slice(next);
+} else {
+  // Newest first: place above the first turn numbered below 247, never above a newer one.
+  const below = [...master.matchAll(/<section class="dv-turn" id="t(\d+)"/g)].find(m => Number(m[1]) > 0 && Number(m[1]) < 247);
+  if (!below) throw new Error('No turn below 247 to place against');
+  master = master.slice(0, below.index) + turn + master.slice(below.index);
+}
+if (!master.includes(STYLE)) master = master.replace('<helmet>', '<helmet>\n' + STYLE);
+write('Arke Studio.dc.html', master);
+
+let build = read('build-review.mjs').replace(/\r?\n  \/\/ BEGIN GRAPHIC NOVEL 247[\s\S]*?  \/\/ END GRAPHIC NOVEL 247(?:\r?\n)*/g, '\n');
+const plain = title => title.replaceAll('&#8217;', '’').replaceAll('&#8594;', '→').replaceAll('&#183;', '·');
+const entries = frames.map(f => `  { group: "Graphic novel · turn 247", screen: ${JSON.stringify(plain(f.title))}, frame: "${f.id}", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Proposed 28 October 2026."] },`);
+build = build.replace('const SCREENS = [', 'const SCREENS = [\n  // BEGIN GRAPHIC NOVEL 247\n' + entries.join('\n') + '\n  // END GRAPHIC NOVEL 247\n');
+const pageEntry = '{ file: "graphic-novel-247.review.html", what: "Turn 247: the graphic novel — Graphic novel under Tell a story, the Pages screen and its page editor, a take’s lettering check drawn on the page, a take that passes, a check that could not run, the reader, lettering over the art, and Export.", state: "proposed 28 October 2026; not built" }';
+if (build.includes('file: "graphic-novel-247.review.html"')) build = build.replace(/\{ file: "graphic-novel-247\.review\.html",[^\n]+?\}/, pageEntry);
+else build = build.replace('const PAGES = [', 'const PAGES = [\n  ' + pageEntry + ',');
+if (!build.includes(STYLE)) build = build.replace('<link rel="stylesheet" href="${TOKENS}/fonts.css">', STYLE + '\n<link rel="stylesheet" href="${TOKENS}/fonts.css">');
+write('build-review.mjs', build);
+console.log(`Registered turn 247: ${frames.length} frames, ${rules.length} rules. Run check-master --record and build-review next.`);
