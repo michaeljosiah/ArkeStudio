@@ -56,6 +56,15 @@ the ZIP back, `world-guide.ts` keeps the Guide and its teasers and packs the gui
 the Export sheet's Arke Player kind with Release; `screens/world-guide.tsx` and
 `world-guide-teasers.tsx` are the Guide page. See [publications](publications.md).
 
+Stories for Arke Player (SPEC-058 R-79 – R-81): contracts `world-package.ts` also reads schema 6, an
+interactive story published alone, and its `arke-story` document (`readStory`). `story-document.ts`
+compiles a production's routing and the clips or beats the export resolved into that document
+(`compileStoryDocument`), and walks every route through it with SPEC-063's evaluator
+(`storyRoutes`). These fixtures are the Studio's, not the Player's:
+`packages/contracts/scripts/story-fixtures.ts` writes `test/fixtures/world-package/story/`, which
+arke_world copies, and the contracts test fails until they are regenerated after a change to
+`story-state.js`.
+
 Audio Studio (approved turn 226): client
 `screens/chapter-audio-studio.tsx` composes the Cut layout, shared `EditorPanelTabs`,
 `EditorSheetSlot` and `useCutLayout` around the chapter script. `audio-studio-workspace.tsx`

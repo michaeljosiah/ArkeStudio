@@ -270,8 +270,8 @@ const CASES_NOTE =
   "SPEC-058 R-79 – R-81: the story cases both readers run, ArkeStudio contracts (TypeScript), which writes this folder with packages/contracts/scripts/story-fixtures.ts, and Arke Player arke_world (Dart), which copies it. " +
   "A \"story\" case is a story document read against assets.json: \"kind\", \"shape\", \"start\", \"facts\", \"scenes\" and \"choices\" are what an ok case reads, by id, and \"routes\" names its route fixture. " +
   "A \"manifest\" case is a world.json: \"alone\", \"story\" and \"tall\" are what an ok one names. " +
-  "\"limits\" are the bounds every reader keeps: a condition's depth counts its root as 1 and its nodes count every op; text bounds are characters. " +
-  "A key a reader does not know is newerArke, anywhere but a condition or an effect, whose shapes are SPEC-063's; the fingerprint is read, never recomputed, so a refused copy keeps its base's.";
+  "\"limits\" are the bounds every reader keeps: a condition's depth counts its root as 1 and its nodes count every op; text bounds count UTF-16 code units, as both languages measure a string, and every text but a variant's text must be more than blanks. " +
+  "A key a reader does not know is newerArke, wherever it is; an op it does not know is notAPackage. The fingerprint is read, never recomputed, so a refused copy keeps its base's.";
 
 const pretty = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -416,6 +416,8 @@ export function storyFixtures(): Map<string, string> {
   derived("requires.json", synthetic, "newerArke", (document) => void (document["requires"] = ["story-v2"]));
   derived("unknown-key.json", synthetic, "newerArke", (document) => void (scene(document, "sc_harbour")["loop"] = true));
   derived("fact-label.json", synthetic, "newerArke", (document) => void (fact(document, "key")["label"] = "The tenth key"));
+  derived("condition-unknown-key.json", synthetic, "newerArke", (document) => void (choice(document, "ch_key")["when"] = { ...eq("key", "held"), weight: 2 }));
+  derived("effect-unknown-key.json", synthetic, "newerArke", (document) => void (choice(document, "ch_light")["effects"] = [{ fact: "lamp", value: true, once: true }]));
 
   // world.json, schema 6 (R-79): Ring Once as a story package, and what such a package may not be.
   const ringAssets = Object.fromEntries(Object.entries(ASSETS).filter(([id]) => ["story", "cover", "cover-tall"].includes(id) || id.startsWith("ro-")));

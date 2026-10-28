@@ -1,5 +1,5 @@
 {
-  "note": "SPEC-058 R-79 – R-81: the story cases both readers run, ArkeStudio contracts (TypeScript), which writes this folder with packages/contracts/scripts/story-fixtures.ts, and Arke Player arke_world (Dart), which copies it. A \"story\" case is a story document read against assets.json: \"kind\", \"shape\", \"start\", \"facts\", \"scenes\" and \"choices\" are what an ok case reads, by id, and \"routes\" names its route fixture. A \"manifest\" case is a world.json: \"alone\", \"story\" and \"tall\" are what an ok one names. \"limits\" are the bounds every reader keeps: a condition's depth counts its root as 1 and its nodes count every op; text bounds are characters. A key a reader does not know is newerArke, anywhere but a condition or an effect, whose shapes are SPEC-063's; the fingerprint is read, never recomputed, so a refused copy keeps its base's.",
+  "note": "SPEC-058 R-79 – R-81: the story cases both readers run, ArkeStudio contracts (TypeScript), which writes this folder with packages/contracts/scripts/story-fixtures.ts, and Arke Player arke_world (Dart), which copies it. A \"story\" case is a story document read against assets.json: \"kind\", \"shape\", \"start\", \"facts\", \"scenes\" and \"choices\" are what an ok case reads, by id, and \"routes\" names its route fixture. A \"manifest\" case is a world.json: \"alone\", \"story\" and \"tall\" are what an ok one names. \"limits\" are the bounds every reader keeps: a condition's depth counts its root as 1 and its nodes count every op; text bounds count UTF-16 code units, as both languages measure a string, and every text but a variant's text must be more than blanks. A key a reader does not know is newerArke, wherever it is; an op it does not know is notAPackage. The fingerprint is read, never recomputed, so a refused copy keeps its base's.",
   "limits": {
     "facts": 32,
     "values": 16,
@@ -368,6 +368,16 @@
     },
     {
       "file": "fact-label.json",
+      "reader": "story",
+      "expect": "newerArke"
+    },
+    {
+      "file": "condition-unknown-key.json",
+      "reader": "story",
+      "expect": "newerArke"
+    },
+    {
+      "file": "effect-unknown-key.json",
       "reader": "story",
       "expect": "newerArke"
     },
