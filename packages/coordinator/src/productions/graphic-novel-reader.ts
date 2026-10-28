@@ -24,11 +24,16 @@ export const PAGE_READ_PROMPT = [
 
 const ReadSchema = z.object({ regions: z.array(z.unknown()).max(200) }).passthrough();
 
-/** Box numbers a model rounds outside the page are clamped, not refused: they are estimates. */
+/**
+ * Box numbers a model rounds outside the page are clamped, not refused: they are estimates. An
+ * entry with no text is a read that failed, never a region with nothing in it: dropped, it would
+ * make an incomplete read look like a page with no words (codex on PR 2223).
+ */
 function region(raw: unknown): PageTextRegion | null {
-  if (typeof raw !== "object" || raw === null) return null;
+  if (typeof raw !== "object" || raw === null) throw new Error("the reader answered a region that is not one");
   const entry = raw as { text?: unknown; box?: { x?: unknown; y?: unknown; w?: unknown; h?: unknown }; cut?: unknown };
-  if (typeof entry.text !== "string" || entry.text.trim() === "") return null;
+  if (typeof entry.text !== "string") throw new Error("the reader answered a region with no text");
+  if (entry.text.trim() === "") return null;
   const unit = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : null);
   const box = entry.box && [entry.box.x, entry.box.y, entry.box.w, entry.box.h].every((value) => unit(value) !== null)
     ? { x: unit(entry.box.x)!, y: unit(entry.box.y)!, w: unit(entry.box.w)!, h: unit(entry.box.h)! } : undefined;

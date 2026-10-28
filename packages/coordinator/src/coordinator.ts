@@ -1377,6 +1377,8 @@ export class Coordinator {
   private readonly makingPictures = new Map<string, AbortController>();
   /** Comic pages being made in this process, by world/production/page (SPEC-064 R-25). */
   private readonly makingComicPages = new Map<string, AbortController>();
+  /** Page reads in flight, stopped with the app as a review is (codex on PR 2223). */
+  private readonly readingComicPages = new Set<AbortController>();
   /**
    * A book's `Make 290 tall` run (design turn 235a), by world and production: one at a time,
    * stoppable, and its last progress replayed to a window that connects, so a paid run going on
@@ -11067,7 +11069,7 @@ export class Coordinator {
           requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, take: msg.take, disposition, ...(reason ? { reason } : {}) });
         try {
           if (msg.kind === "check-comic-take") {
-            await verifyComicTake(store, msg.productionId, msg.page, msg.take, this.pageReader(store), store.closingSignal, () => this.nowIso());
+            await this.readComicTake(store, msg.productionId, msg.page, msg.take);
             answer("checked");
           } else {
             await acceptComicTake(store, msg.productionId, msg.page, msg.take, msg.override, this.nowIso());
@@ -21377,12 +21379,26 @@ export class Coordinator {
         confirmedMicroUsd: budget - spent, ...(msg.mode !== undefined ? { mode: msg.mode } : {}) }, emit);
       if (!made.ok) return;
       spent += made.microUsd;
-      const verification = await verifyComicTake(store, msg.productionId, msg.page, made.take, this.pageReader(store), store.closingSignal, () => this.nowIso())
+      const verification = await this.readComicTake(store, msg.productionId, msg.page, made.take)
         .catch((err: unknown) => ({ status: "unavailable" as const, reason: "reader-failed" as const, detail: describeCoordinatorError(err), at: this.nowIso() }));
       await this.refreshWorldSnapshot(msg.worldId);
       const passed = takePasses(verification);
       emit("made", { take: made.take, sessionId: made.sessionId, passed });
       if (passed || verification.status !== "compared") return;
+    }
+  }
+
+  /** A take read back under a control the app's stop aborts, and the world's close too. */
+  private async readComicTake(store: WorldStore, productionId: string, page: string, take: string) {
+    const control = new AbortController();
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    this.readingComicPages.add(control);
+    try {
+      return await verifyComicTake(store, productionId, page, take, this.pageReader(store), control.signal, () => this.nowIso());
+    } finally {
+      this.readingComicPages.delete(control);
+      store.closingSignal.removeEventListener("abort", onClose);
     }
   }
 
@@ -23397,6 +23413,7 @@ export class Coordinator {
       for (const control of this.makingPictures.values()) control.abort();
       // A page waiting on its picture would hold the drain below for the picture's whole wait (codex on PR 2222).
       for (const control of this.makingComicPages.values()) control.abort();
+      for (const control of this.readingComicPages) control.abort();
       for (const control of this.makingMotion.values()) control.abort();
       for (const control of this.preparingWordTiming.values()) control.abort();
       for (const run of this.checkingAudiobookWords.values()) run.control.abort();
