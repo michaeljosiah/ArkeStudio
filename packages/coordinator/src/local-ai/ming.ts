@@ -11,6 +11,9 @@ export interface MingBatchCommand {
   worker: string;
   args: readonly string[];
   cacheRoot: string;
+  /** Host-only ownership of this batch's inputs/scratch. Release only after the original
+   * native command, ordinary helpers and log writes have all settled. */
+  retain?: () => () => Promise<void>;
 }
 
 export class MingProcessCleanupPending extends Error {
@@ -21,11 +24,15 @@ export class MingProcessCleanupPending extends Error {
  * The existing native command owner gates execution and retains ordinary helpers; one
  * completed Python parent cannot release its descendants' CUDA context or batch files. */
 export class MingProcess {
-  get running(): boolean { return this.programs.running || this.launching; }
+  get running(): boolean { return this.programs.running || this.launching || this.runFinished !== undefined || this.releaseBatch !== undefined; }
   get cleanupAuthorized(): boolean { return !this.launching && this.programs.durableCleanupAuthorized; }
   private launching = false;
   private disposed = false;
   private readonly programs: SetupProcessRunner;
+  private releaseBatch: (() => Promise<void>) | undefined;
+  private releasing: Promise<void> | undefined;
+  private runFinished: Promise<void> | undefined;
+  private runStop: AbortController | undefined;
 
   constructor(ledger?: ChildLedger, private readonly options: {
     job?: SetupProcessJob; cleanupTimeoutMs?: number;
@@ -39,7 +46,12 @@ export class MingProcess {
     if (this.disposed || this.running) throw new Error("Ming is stopped or already running a batch.");
     if (![command.python, command.worker, command.cacheRoot].every(isAbsolute)) throw new Error("Ming paths must be resolved by the host.");
     signal.throwIfAborted(); this.launching = true;
+    const stop = new AbortController(); this.runStop = stop;
+    signal = AbortSignal.any([signal, stop.signal]);
+    let finished!: () => void;
+    this.runFinished = new Promise<void>(resolve => { finished = resolve; });
     try {
+      this.releaseBatch = command.retain?.();
       const cache = (name: string) => join(command.cacheRoot, name);
       for (const name of ["temp", "hub", "triton", "inductor", "torch", "extensions"]) await mkdir(cache(name), { recursive: true });
       signal.throwIfAborted(); if (this.disposed) throw new Error("Ming is stopped.");
@@ -62,7 +74,31 @@ export class MingProcess {
         signal.throwIfAborted();
         throw new Error("Ming generation failed. Check the batch's private diagnostics.");
       } finally { await log.close(); }
-    } finally { this.launching = false; }
+    } finally {
+      this.launching = false; this.runStop = undefined;
+      try { await this.settleBatch(); }
+      finally { finished(); this.runFinished = undefined; }
+    }
+  }
+
+  private async settleBatch(): Promise<void> {
+    if (this.launching || this.programs.running || !this.releaseBatch) return;
+    if (this.releasing) return this.releasing;
+    const release = this.releaseBatch;
+    const task = (async () => {
+      await release();
+      if (this.releaseBatch === release) this.releaseBatch = undefined;
+    })();
+    this.releasing = task;
+    try { await task; } finally { if (this.releasing === task) this.releasing = undefined; }
+  }
+
+  private async cleanupBatch(): Promise<void> {
+    this.runStop?.abort();
+    await this.programs.confirmCleanup();
+    await this.runFinished;
+    await this.programs.confirmCleanup();
+    await this.settleBatch();
   }
 
   async unload(signal: AbortSignal): Promise<void> {
@@ -70,7 +106,7 @@ export class MingProcess {
     try {
       // Cleanup has its own deadline and continues if this caller stops waiting. A rejected
       // wait grants no release; a later owner confirmation can settle the retained GPU lane.
-      await Promise.race([this.programs.confirmCleanup(), new Promise<never>((_, reject) => {
+      await Promise.race([this.cleanupBatch(), new Promise<never>((_, reject) => {
         abort = () => reject(new MingProcessCleanupPending());
         signal.addEventListener("abort", abort, { once: true }); if (signal.aborted) abort();
       })]);
@@ -80,6 +116,8 @@ export class MingProcess {
 
   async dispose(): Promise<void> {
     this.disposed = true;
-    try { await this.programs.dispose(); } catch { throw new MingProcessCleanupPending(); }
+    this.runStop?.abort();
+    try { await this.programs.dispose(); await this.runFinished; await this.settleBatch(); }
+    catch { throw new MingProcessCleanupPending(); }
   }
 }

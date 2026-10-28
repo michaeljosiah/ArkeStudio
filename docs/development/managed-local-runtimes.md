@@ -99,6 +99,11 @@ held. Its exact lease remains reachable for a later cleanup confirmation; a new 
 reading first confirms the old settled batch's cleanup without replaying it. Shutdown confirms
 that retained lease after native disposal. The ledger/private native job provide orphan cleanup.
 POSIX qualifies ordinary helpers inside the still-live anchor, not deliberate daemon escape.
+The speech service retains each batch's temporary input/output directory through that exact
+native owner. Cleanup after a failed cancellation removes its temporary copies once both
+native/log work and host file access finish. A queued batch cancelled before native admission
+can remove its own inputs while another batch runs. Failed settlement remains retryable and
+fences replacement. This is current-session ownership; restart storage reconciliation is separate.
 The worker gets runtime environment variables, offline flags and
 private caches, without inherited provider credentials. It never installs into shared Python.
 The worker's working directory and bounded `worker.log` stay inside its private cache root;

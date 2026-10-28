@@ -309,3 +309,10 @@ extraction had a measured free-space precheck and was removed afterward; it ran 
 These checks establish the known expansion/audio bounds, not complete Ming storage admission.
 Compiler-cache growth, active reservation consumption and original-owner restart reconciliation
 remain outstanding under SPEC-062 R-8/R-9/R-24.
+
+Current-session batch settlement now follows the exact original native owner, including later
+cleanup after an unconfirmed exit. The 13 speech/process checks include real native failure and
+retry: inputs remain while the worker can run, then disappear only after confirmed native/log
+and host-file settlement. A cancelled GPU waiter removes only its own unlaunched batch, and a
+failed settlement prevents replacement until retry. These checks do not establish restart
+reconciliation, storage admission or a new narration-quality result.

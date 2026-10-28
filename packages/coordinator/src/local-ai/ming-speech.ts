@@ -98,6 +98,14 @@ export class MingSpeechService implements MingSynthesis {
     const staging = join(this.deps.appRoot, ".staging", "ming");
     await mkdir(staging, {recursive: true});
     const batch = await mkdtemp(join(staging, "batch-"));
+    let nativeHeld = false, nativeClaimed = false, hostSettled = false, cleanup: Promise<void> | undefined;
+    const settle = async () => {
+      if (nativeHeld || !hostSettled) return;
+      // Only this batch's original owners can release it. Another queued/running batch
+      // must neither strand these inputs nor authorize deleting its neighbour's files.
+      cleanup ??= rm(batch, {recursive: true, force: true});
+      try { await cleanup; } catch (error) { cleanup = undefined; throw error; }
+    };
     try {
       const reference = join(batch, input.reference.contentType === "audio/wav" ? "reference.wav" : "reference.mp3");
       await writeFile(reference, input.reference.data, {flag: "wx"});
@@ -109,11 +117,16 @@ export class MingSpeechService implements MingSynthesis {
       try {
         await this.deps.run({ python, worker: this.deps.worker ?? join(dirname(fileURLToPath(import.meta.url)), "ming-worker.py"),
           args: ["--request", join(batch, "request.json"), "--assets", join(batch, "assets.json")],
-          cacheRoot: join(this.deps.appRoot, "runtime-cache", "ming") }, signal);
+          cacheRoot: join(this.deps.appRoot, "runtime-cache", "ming"),
+          retain: () => {
+            if (nativeClaimed || hostSettled) throw new Error("Ming batch ownership changed before launch.");
+            nativeClaimed = true; nativeHeld = true;
+            return async () => { nativeHeld = false; await settle(); };
+          } }, signal);
       } catch (error) {
         const failure = join(batch, "failure.json");
         const info = await stat(failure).catch(() => null);
-        if (!signal.aborted && !this.deps.processRunning() && info?.isFile() && info.size <= 2048) {
+        if (!signal.aborted && !nativeHeld && info?.isFile() && info.size <= 2048) {
           const detail = JSON.parse(await readFile(failure, "utf8")) as {reason?: unknown};
           if (typeof detail.reason === "string" && detail.reason.length <= 500) throw new ProviderRequestRejectedError(detail.reason);
         }
@@ -126,8 +139,9 @@ export class MingSpeechService implements MingSynthesis {
       if (!output.isFile() || output.size < 44 || output.size > 64 * 1024 * 1024) throw new Error("Ming produced an invalid or oversized audio file.");
       return new Uint8Array(await readFile(request.output));
     } finally {
-      // An unconfirmed exit retains both the GPU reservation and its in-use batch files.
-      if (!this.deps.processRunning()) await rm(batch, {recursive: true, force: true});
+      // Native cleanup may finish after the caller stopped waiting. Its retained release
+      // closes this exact batch once host reads/writes have also finished, without replay.
+      hostSettled = true; await settle();
     }
   }
 }

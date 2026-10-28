@@ -332,6 +332,10 @@ owned OpenCode profile. `local-ai/gpu.ts` serializes writing, ComfyUI and Ming; 
 uses the existing gated `setup/process.ts` native executor for Python batches and ordinary
 helper exit. Its cancellation retains native ownership; `LocalGpu.confirmMingCleanup` retains
 the exact failed-cleanup lease and releases it only after later confirmation, without replay.
+`ming-speech.ts` gives the original native owner a batch-specific input/scratch lease. Later
+confirmed cleanup removes those temporary copies only after host reads/writes also settle;
+a cancelled GPU waiter does not borrow another batch's process state. Failed settlement retains
+the callback for retry, and native disposal drains the original run and log writes.
 Batch generation is exposed through Coordinator's host-only
 `generateMingBatch`. Desktop/dev/`node-studio-host.ts` compose these services; desktop
 `startup-runtime-owners.ts` retains them across initialization failure until transfer to

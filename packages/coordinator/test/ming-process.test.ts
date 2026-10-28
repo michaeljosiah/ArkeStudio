@@ -60,13 +60,16 @@ it("settles failed cancellation while retaining the native process and GPU for c
   } });
   const gpu = new LocalGpu((engine, signal) => engine === "Ming" ? owner.unload(signal) : Promise.resolve(), ["Ollama", "ComfyUI", "Ming"]);
   const abort = new AbortController();
+  let retained = 0, released = 0;
   try {
-    const batch = gpu.runMingBatch(signal => owner.run({ python: process.execPath, worker, args: [ready], cacheRoot: join(root, "cache") }, signal), abort.signal);
+    const batch = gpu.runMingBatch(signal => owner.run({ python: process.execPath, worker, args: [ready], cacheRoot: join(root, "cache"),
+      retain: () => { retained++; return async () => { released++; }; } }, signal), abort.signal);
     const rejected = assert.rejects(batch, /not confirmed process exit/);
     await untilAsync(async () => readFile(ready, "utf8").then(() => true, () => false), "worker ready", 45_000);
     const pid = Number(await readFile(ready, "utf8"));
     abort.abort(new Error("cancelled"));
     await rejected;
+    assert.equal(retained, 1); assert.equal(released, 0, "unconfirmed exit retains the original batch files");
     assert.equal(gpu.isBusy("Ming"), true);
     assert.equal(owner.cleanupAuthorized, false, "an unledgered native fixture cannot advertise reviewed cleanup");
     assert.doesNotThrow(() => process.kill(pid, 0));
@@ -76,6 +79,7 @@ it("settles failed cancellation while retaining the native process and GPU for c
     assert(!admitted); assert(owner.running); assert.equal(gpu.isBusy("Ming"), true);
     refuse = false;
     await gpu.confirmMingCleanup(new AbortController().signal); (await waiting)();
+    assert.equal(released, 1, "later confirmed cleanup settles the original batch exactly once");
     assert.throws(() => process.kill(pid, 0));
     assert(!owner.running); assert.equal(gpu.isBusy("Ming"), false);
     assert.equal(await readFile(ready + ".starts", "utf8"), "started\n", "cleanup did not replay the old narration");
@@ -91,15 +95,36 @@ it("a completed Ming parent retains its ordinary helper and the GPU until the he
   const owner = new MingProcess(undefined, { prepareCommand: (command, args) => ({ command, args: args.slice(1) }) });
   const gpu = new LocalGpu((engine, signal) => engine === "Ming" ? owner.unload(signal) : Promise.resolve(), ["Ollama", "ComfyUI", "Ming"]);
   let completed = false;
-  const batch = gpu.runMingBatch(signal => owner.run({ python: process.execPath, worker, args: [], cacheRoot: join(root, "cache") }, signal), new AbortController().signal)
+  let released = false;
+  const batch = gpu.runMingBatch(signal => owner.run({ python: process.execPath, worker, args: [], cacheRoot: join(root, "cache"),
+    retain: () => async () => { released = true; } }, signal), new AbortController().signal)
     .then(() => { completed = true; });
   try {
     await untilAsync(async () => readFile(ready, "utf8").then(() => true, () => false), "Ming's ordinary helper", 45_000);
     const pid = JSON.parse(await readFile(ready, "utf8")).pid as number;
-    assert(owner.running); assert(gpu.isBusy("Ming")); assert(!completed); process.kill(pid, 0);
+    assert(owner.running); assert(gpu.isBusy("Ming")); assert(!completed); assert(!released); process.kill(pid, 0);
     let admitted = false;
     const next = gpu.acquire("ComfyUI", new AbortController().signal).then(release => { admitted = true; return release; });
     assert(!admitted); await writeFile(finish, "finish"); await batch; (await next)();
-    assert(completed); assert(!owner.running); assert(!gpu.isBusy("Ming"));
+    assert(completed); assert(released); assert(!owner.running); assert(!gpu.isBusy("Ming"));
   } finally { await writeFile(finish, "finish"); gpu.stop(); await owner.dispose(); await batch.catch(() => {}); }
+});
+
+it("retries failed batch settlement after native exit and refuses replacement until it settles", { timeout: 120_000 }, async () => {
+  const root = await tempDir("ming-settlement-"), worker = join(root, "worker.mjs");
+  await writeFile(worker, "console.log('complete');");
+  const owner = new MingProcess(undefined, { prepareCommand: (command, args) => ({command, args: args.slice(1)}) });
+  let releaseAttempts = 0, refuse = true;
+  const command = {python: process.execPath, worker, args: [], cacheRoot: join(root, "cache"), retain: () => async () => {
+    releaseAttempts++; if (refuse) throw new Error("batch cleanup unavailable");
+    assert.match(await readFile(join(root, "cache", "worker.log"), "utf8"), /complete/);
+  }};
+  try {
+    await assert.rejects(owner.run(command, new AbortController().signal), /batch cleanup unavailable/);
+    assert(owner.running); assert.equal(releaseAttempts, 1);
+    await assert.rejects(owner.run(command, new AbortController().signal), /already running/);
+    refuse = false; await owner.unload(new AbortController().signal);
+    assert.equal(releaseAttempts, 2); assert(!owner.running);
+    await owner.unload(new AbortController().signal); assert.equal(releaseAttempts, 2);
+  } finally { refuse = false; await owner.dispose(); }
 });

@@ -353,6 +353,10 @@ exit and GPU-lane release; a returned WAV alone does not prove a complete readin
 `test/ming-process.test.ts` uses the real gated native executor with a lightweight Node fixture:
 the same Python command preparation, stripped environment, private working directory and log,
 ordinary helper surviving parent exit, failed cleanup retention and later GPU confirmation.
+It also checks failed batch settlement refuses replacement until an owner retry succeeds.
+`test/ming-speech.test.ts` checks exact batch retention, cancellation before native admission,
+host access after native exit, and a real worker whose failed termination leaves its private
+inputs intact until later confirmed cleanup. Original voice files and model files are not targets.
 `test/local-gpu.test.ts` also proves a newly authorized reading confirms retained cleanup before
 submission, never replays the old reading, and stays held after another failed confirmation.
 These fixtures require no model download and do not establish narration/inference quality.
