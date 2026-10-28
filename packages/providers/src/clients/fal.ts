@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { ARTIFACT_RESULT_LIMITS, artifactResultReadLimit, ReferenceMediaBindingsSchema, CharacterAudioPlanSchema, characterAudioRoute, referenceAudioAsset } from "@arke-studio/contracts";
+import { ARTIFACT_RESULT_LIMITS, artifactResultReadLimit, artifactTransferLimits, ReferenceMediaBindingsSchema, CharacterAudioPlanSchema, characterAudioRoute, referenceAudioAsset } from "@arke-studio/contracts";
 import {
   PROVIDERS,
   durationLimitsFor,
@@ -465,13 +465,14 @@ export class FalClient implements ProviderClient {
   }
 
   async fetchArtifacts(key: string, remoteId: string, _context?: ProviderCallContext, options?: ArtifactFetchOptions): Promise<FetchedArtifact[]> {
+    const limits = artifactTransferLimits(options?.transferSettings);
     const abort = new AbortController();
-    const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(30 * 60_000), ...(options?.signal ? [options.signal] : [])]);
-    try { return await this.fetchResult(key, remoteId, signal); }
+    const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(limits.timeoutMs), ...(options?.signal ? [options.signal] : [])]);
+    try { return await this.fetchResult(key, remoteId, signal, limits); }
     catch (error) { abort.abort(error); throw error; }
   }
 
-  private async fetchResult(key: string, remoteId: string, signal: AbortSignal): Promise<FetchedArtifact[]> {
+  private async fetchResult(key: string, remoteId: string, signal: AbortSignal, limits: ReturnType<typeof artifactTransferLimits>): Promise<FetchedArtifact[]> {
     signal.throwIfAborted();
     const { endpoint, requestId } = this.split(remoteId);
     const { status, body } = await jsonRequest(
@@ -489,7 +490,7 @@ export class FalClient implements ProviderClient {
       audio?: { url?: string; content_type?: string };
     } | null;
     const urls: Array<{ url: string; contentType: string }> = [];
-    if (Array.isArray(payload?.images) && payload.images.length > ARTIFACT_RESULT_LIMITS.maxFiles) throw new ProviderArtifactLimitError();
+    if (Array.isArray(payload?.images) && payload.images.length > limits.maxFiles) throw new ProviderArtifactLimitError();
     for (const img of payload?.images ?? []) {
       if (img.url) urls.push({ url: img.url, contentType: img.content_type ?? "application/octet-stream" });
     }
@@ -501,7 +502,7 @@ export class FalClient implements ProviderClient {
     if (payload?.audio?.url) {
       urls.push({ url: payload.audio.url, contentType: payload.audio.content_type ?? "audio/wav" });
     }
-    if (urls.length > ARTIFACT_RESULT_LIMITS.maxFiles) throw new ProviderArtifactLimitError();
+    if (urls.length > limits.maxFiles) throw new ProviderArtifactLimitError();
     let received = 0;
     for (const [i, item] of urls.entries()) {
       signal.throwIfAborted();
@@ -510,7 +511,7 @@ export class FalClient implements ProviderClient {
         void res.body?.cancel().catch(() => {});
         throw new Error(`fal: artifact retrieval failed (HTTP ${res.status})`);
       }
-      const data = await readArtifactBody(res, artifactResultReadLimit(received), signal);
+      const data = await readArtifactBody(res, artifactResultReadLimit(received, limits), signal);
       received += data.byteLength;
       const ext = extensionFor(item.contentType);
       out.push({ name: `output-${i + 1}.${ext}`, contentType: item.contentType, data });

@@ -705,6 +705,7 @@ const CLIENT_COMMAND_METADATA = {
   "acknowledge-update": globalOnly(GLOBAL_OPERATION),
   "generate-diagnostics": globalOnly(GLOBAL_OPERATION),
   "recovery-set-mode": humanOnly(HUMAN_DECISION),
+  "recovery-set-advanced": humanOnly(HUMAN_DECISION),
   "recovery-set-preferences": humanOnly(HUMAN_DECISION),
   "recovery-history-control": humanOnly(HUMAN_DECISION),
   "recovery-action": humanOnly("A host owner reviews the exact service retry before approving it."),

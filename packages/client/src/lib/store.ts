@@ -6858,6 +6858,9 @@ export function generateDiagnostics(): void {
 export function setRecoveryMode(mode: import("@arke-studio/contracts").RecoveryMode): string | null {
   const requestId = ulid(); return send({ kind: "recovery-set-mode", requestId, mode }) ? requestId : null;
 }
+export function setRecoveryAdvanced(settings: import("@arke-studio/contracts").RecoveryAdvancedSettings): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-set-advanced", requestId, settings }) ? requestId : null;
+}
 export function reviewRecoveryAction(command: import("@arke-studio/contracts").RecoveryActionCommand["command"]): string | null {
   const requestId = ulid(); return send({ kind: "recovery-action", requestId, command }) ? requestId : null;
 }

@@ -5,7 +5,7 @@ import type { Job, LedgerEntry } from "@arke-studio/contracts";
 import { JobQueue, type EnqueueInput, type JobQueueOptions } from "../../src/queue/dispatcher.js";
 import { JobJournal } from "../../src/queue/journal.js";
 import { AppStorageService } from "../../src/storage/service.js";
-import { JobArtifactStorage, SubmissionStorageHeld, type ArtifactWriteSpace } from "../../src/storage/job-artifacts.js";
+import { ArtifactStorageHeld, JobArtifactStorage, SubmissionStorageHeld, type ArtifactWriteSpace } from "../../src/storage/job-artifacts.js";
 import { FakeProvider, pngBytes } from "./fake-provider.js";
 import { tempDir } from "../tmp.js";
 import { until } from "../wait.js";
@@ -13,7 +13,7 @@ import { until } from "../wait.js";
 const GiB = 1024 ** 3, WORLD = "01J8F3K2QW9VZX4N7M0RTYB6HC", OTHER = "01J8F3K2QW9VZX4N7M0RTYB6HD";
 const input: EnqueueInput = { worldId: WORLD, provider: "fal", model: "synthetic-image", capability: "image",
   target: { kind: "shot", id: "shot_one" }, params: {}, estimatedMicroUsd: 100, landing: { dir: "incoming" } };
-async function fixture(custom?: ArtifactWriteSpace, prepareReferences?: JobQueueOptions["prepareReferences"]) {
+async function fixture(custom?: ArtifactWriteSpace, prepareReferences?: JobQueueOptions["prepareReferences"], checkStorageBeforeSubmission?: () => boolean) {
   const root = await tempDir("arke-submission-space-"), world = join(root, "world"), other = join(root, "other");
   let now = Date.now(), free = 0, appFree = 100 * GiB, roots: readonly { rootId: string; path: string }[] = [];
   const storage = new AppStorageService({ appRoot: root, now: () => now, native: {
@@ -26,7 +26,7 @@ async function fixture(custom?: ArtifactWriteSpace, prepareReferences?: JobQueue
   const client = new FakeProvider({}); client.inlineArtifacts = [{ name: "image.png", contentType: "image/png", data: pngBytes() }];
   const events: Job[] = [], ledger: LedgerEntry[] = [], space = custom ?? new JobArtifactStorage(storage);
   const create = () => new JobQueue({ journalPath: join(root, "jobs.jsonl"), clients: { fal: client }, getKey: async () => "synthetic",
-    emit(event) { if (event.type === "job.updated") events.push(event.job); }, artifactSpace: space, prepareReferences,
+    emit(event) { if (event.type === "job.updated") events.push(event.job); }, artifactSpace: space, prepareReferences, checkStorageBeforeSubmission,
     submissionStorageRetryMs: 100, artifactRetryMs: 15, baseIntervalMs: 1, pollIntervalMs: 1,
     landInWorld: async (id, work) => { await work(id === WORLD ? world : other); return true; },
     ledger: { async readJobIds() { return new Set(ledger.map(row => row.jobId)); }, async has(id) { return ledger.some(row => row.jobId === id); }, async append(row) { ledger.push(row); } },
@@ -37,6 +37,31 @@ async function fixture(custom?: ArtifactWriteSpace, prepareReferences?: JobQueue
   return { root, storage, client, create, events, ledger, roomy, fullApp };
 }
 const held = (queue: JobQueue, id: string) => queue.listJobs().find(row => row.id === id)?.error?.startsWith("Not submitted:") === true;
+it("disabling the preflight cannot race a deliberate cancellation into provider submission", { timeout: 30_000 }, async () => {
+  let queue!: JobQueue;
+  const h = await fixture(undefined, undefined, () => { void queue.cancel(queue.listJobs()[0]!.id); return false; });
+  queue = h.create();
+  try {
+    await queue.start(); await queue.enqueue(input);
+    await until(() => queue.listJobs()[0]?.status === "cancelled", "cancellation during disabled preflight");
+    await queue.waitForIdle(); assert.equal(h.client.submitCount, 0);
+  } finally { await queue.dispose(); await queue.waitForIdle(); await h.storage.stop(); }
+});
+it("an operator can release a preflight hold without bypassing result filing or resubmitting accepted work", { timeout: 30_000 }, async () => {
+  let check = true, allowWrites = false, filingChecks = 0;
+  const h = await fixture({ async checkSubmission() { throw new SubmissionStorageHeld(); }, async reserve() {
+    filingChecks++; if (!allowWrites) throw new ArtifactStorageHeld();
+    return { async consumed() {}, writeFailed() {}, async settle() {} };
+  } }, undefined, () => check), queue = h.create();
+  try {
+    await queue.start(); const job = await queue.enqueue(input);
+    await until(() => held(queue, job.id), "default preflight hold"); assert.equal(h.client.submitCount, 0);
+    check = false; await until(() => h.client.submitCount === 1 && filingChecks > 0, "explicit preference releases submission only");
+    assert.notEqual(queue.listJobs()[0]!.status, "succeeded"); allowWrites = true;
+    await until(() => queue.listJobs()[0]!.status === "succeeded", "original result files after space returns");
+    assert.equal(h.client.submitCount, 1); assert.equal(h.ledger.length, 1);
+  } finally { await queue.dispose(); await queue.waitForIdle(); await h.storage.stop(); }
+});
 it("holds a paid request on its full world volume, survives restart unsent, then submits once after fresh capacity", { timeout: 30_000 }, async () => {
   const h = await fixture(), first = h.create(); let next: JobQueue | undefined;
   try {

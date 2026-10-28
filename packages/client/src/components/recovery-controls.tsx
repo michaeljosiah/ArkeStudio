@@ -6,7 +6,7 @@ import { isRemoteSession } from "../lib/remote-session.js";
 import { RecoveryRetryControls } from "./recovery-retry.js";
 import { RecoveryCacheCleanupControls } from "./recovery-cache-cleanup.js";
 import { RecoveryMingCleanupControls } from "./recovery-ming-cleanup.js";
-import { RecoveryCacheMaintenanceControls } from "./recovery-cache-maintenance.js";
+import { RecoveryAdvancedControls } from "./recovery-advanced.js";
 
 /** Policy controls stay on the host; repairs have their own explicit review and approval. */
 export function RecoveryControls({ cleanupScope, mingCleanupScope }: { cleanupScope?: string; mingCleanupScope?: string } = {}) {
@@ -59,7 +59,7 @@ export function RecoveryControls({ cleanupScope, mingCleanupScope }: { cleanupSc
     <RecoveryRetryControls />
     <RecoveryCacheCleanupControls scope={cleanupScope} />
     <RecoveryMingCleanupControls scope={mingCleanupScope} />
-    <RecoveryCacheMaintenanceControls />
+    <RecoveryAdvancedControls />
     {policy?.targets.some(target => target.lastOutcome) && <section aria-label="Latest recovery outcomes">
       <div className="fy-set__eyebrow">LATEST RECOVERY OUTCOMES</div>
       <p className="fy-diag__meta">One latest attempt per service target. These receipts describe that attempt, not current health or completed creative work.</p>

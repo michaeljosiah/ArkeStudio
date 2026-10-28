@@ -3817,6 +3817,8 @@ export class Coordinator {
               append: (entry) => this.recordLedger(entry),
             },
             artifactSpace: opts.storageHealth?.supportsAdmission ? new JobArtifactStorage(opts.storageHealth) : undefined,
+            checkStorageBeforeSubmission: () => opts.recoveryControl?.advancedSettings().checkStorageBeforeSubmission ?? true,
+            artifactTransferSettings: () => opts.recoveryControl?.advancedSettings().artifactTransfer,
             landInWorld: async (worldId, fn) => {
               try {
                 if (worldId === VOICE_PREVIEW_SCOPE && opts.appRoot) {
@@ -14629,9 +14631,12 @@ export class Coordinator {
         return;
       }
       case "recovery-set-mode":
+      case "recovery-set-advanced":
       case "recovery-set-preferences":
       case "recovery-history-control": {
+        const oldTransfer = this.opts.recoveryControl?.advancedSettings().artifactTransfer;
         const result = await recoveryCommand(msg, { control: this.opts.recoveryControl, history: this.opts.recoveryHistory });
+        if (msg.kind === "recovery-set-advanced" && result.status === "saved" && !this.stopping && JSON.stringify(oldTransfer) !== JSON.stringify(msg.settings.artifactTransfer)) this.jobQueue?.retryHeldArtifactTransfers();
         if (!this.stopping) this.emit({ type: "recovery.command-result", at: this.nowIso(), result });
         return;
       }

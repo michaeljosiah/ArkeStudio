@@ -1,4 +1,12 @@
 import { z } from "zod";
+import { ArtifactTransferSettingsSchema } from "./artifact-result-limits.js";
+
+/** Operator preferences cannot grant repair, replay, file deletion or transport credentials. */
+export const RecoveryAdvancedSettingsSchema = z.object({
+  checkStorageBeforeSubmission: z.boolean().default(true),
+  artifactTransfer: ArtifactTransferSettingsSchema.default({}),
+}).strict();
+export type RecoveryAdvancedSettings = z.infer<typeof RecoveryAdvancedSettingsSchema>;
 
 /** SPEC-061 R-7/R-11/R-25. This control state is separate from removable incident history.
  * None of its outcomes establish a job result, a ledger entry or world-write authority. */
@@ -38,6 +46,7 @@ export const RecoveryTargetSchema = z.object({
 }).strict();
 export type RecoveryTarget = z.infer<typeof RecoveryTargetSchema>;
 export const RecoveryControlSchema = z.object({ version: z.literal(1), policyRevision: z.literal(1),
+  advanced: z.preprocess(value => RecoveryAdvancedSettingsSchema.safeParse(value).success ? value : undefined, RecoveryAdvancedSettingsSchema.optional()),
   mode: RecoveryModeSchema, targets: z.array(RecoveryTargetSchema).max(RECOVERY_POLICY.maxTargets),
 }).strict().refine(value => new Set(value.targets.map(target => target.key)).size === value.targets.length, "Repeated recovery target");
 export type RecoveryControl = z.infer<typeof RecoveryControlSchema>;

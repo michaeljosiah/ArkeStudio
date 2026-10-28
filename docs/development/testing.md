@@ -2017,6 +2017,17 @@ These fixtures do not qualify live model/GPU output or release, binary provenanc
 cross-restart cleanup. Real-model/normal-host qualification below is separate, and actual
 master parity remains open. Run affected workspace typechecks after the final test edit.
 
+Advanced recovery settings add contracts `test/recovery-advanced.test.ts`, providers
+`test/artifact-transfer-preferences.test.ts`, coordinator `test/recovery/advanced.test.ts` and
+`test/queue/artifact-preferences.test.ts`, and client `test/recovery-advanced.test.tsx`.
+Run the existing recovery controls, remote host-command, submission/result-storage and receipt
+suites alongside them. They cover default and raised limits, actual aggregate bytes, failed
+settings writes, retained stop/retry holds, same-identity retrieval after a policy change,
+unchanged result filing checks, requester correlation and receipts after lowering a preference.
+The Windows connected-process reader now allows thirty seconds including parent-leash startup;
+the original native identity, cancellation and cleanup checks remain required. Run client tests
+from the client package and typecheck consumers after the final test edit.
+
 Private bridge Stop/retirement checks additionally exercise a real bound HTTP address: seal
 refuses new work while a competing listener cannot bind that port, retains an already-sent
 completion, and prevents a partially received body or proof-waiting provider request from

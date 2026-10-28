@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { join } from "node:path";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import type { Job, LedgerEntry } from "@arke-studio/contracts";
+import { ArtifactTransferSettingsSchema, type ArtifactTransferSettings, type Job, type LedgerEntry } from "@arke-studio/contracts";
 import { JobQueue, type DispatchClient, type EnqueueInput, type JobQueueOptions } from "../../src/queue/dispatcher.js";
 import { ProviderArtifactLimitError } from "@arke-studio/providers";
 import { LocalGpu } from "../../src/local-ai/gpu.js";
@@ -35,7 +35,7 @@ async function fixture(inline = false, custom?: ArtifactWriteSpace, acquireLocal
   if (inline) fake.inlineArtifacts = artifacts; else fake.artifacts = artifacts;
   fake.onFetch = () => { fetches++; };
   const ledger: LedgerEntry[] = [], events: Job[] = [], space = custom ?? new JobArtifactStorage(storage);
-  const create = (journal?: JobStateStore, verify?: () => Promise<void>) => new JobQueue({ journalPath, ...(journal ? { journal } : {}), clients: { fake }, getKey: async () => 'synthetic',
+  const create = (journal?: JobStateStore, verify?: () => Promise<void>, artifactTransferSettings?: () => ArtifactTransferSettings) => new JobQueue({ journalPath, ...(journal ? { journal } : {}), clients: { fake }, getKey: async () => 'synthetic', artifactTransferSettings,
     emit(event) { if (event.type === 'job.updated') events.push(event.job); }, artifactSpace: space, artifactRetryMs: 15, acquireLocalGpu,
     landInWorld: async (_worldId, work) => { await work(world, verify); return true; }, baseIntervalMs: 1, pollIntervalMs: 5,
     ledger: { async readJobIds() { return new Set(ledger.map(value => value.jobId)); }, async has(id) { return ledger.some(value => value.jobId === id); }, async append(value) { ledger.push(value); } } });
@@ -43,17 +43,49 @@ async function fixture(inline = false, custom?: ArtifactWriteSpace, acquireLocal
   return { root, world, journalPath, storage, fake, artifacts, ledger, events, create, freeWorld, fullWorld, fetches: () => fetches };
 }
 
+it("an active transfer keeps its admitted limits when the operator lowers new-result preferences", { timeout: 30_000 }, async () => {
+  const h = await fixture(); let settings = ArtifactTransferSettingsSchema.parse({}), finish!: () => void, entered = false;
+  const queue = h.create(undefined, undefined, () => settings);
+  (h.fake as DispatchClient).fetchArtifacts = async () => { entered = true; await new Promise<void>(resolve => { finish = resolve; });
+    return [h.artifacts[0]!, { ...h.artifacts[0]!, name: "second.png" }]; };
+  try {
+    await queue.start(); await queue.enqueue(input); await until(() => entered, "original admitted retrieval");
+    settings = { ...settings, maxFiles: 1 }; h.freeWorld(); finish();
+    await until(() => queue.listJobs()[0]?.status === "succeeded", "original result saves despite lower future admission");
+    assert.equal(h.fake.submitCount, 1); assert.equal(h.ledger.length, 1);
+  } finally { finish?.(); await queue.dispose(); await queue.waitForIdle(); await h.storage.stop(); }
+});
+
+it("changed operator limits retry the completed remote result once without a restart or another generation", { timeout: 30_000 }, async () => {
+  const h = await fixture(); let settings = ArtifactTransferSettingsSchema.parse({}), reads = 0;
+  const queue = h.create(undefined, undefined, () => settings);
+  (h.fake as DispatchClient).fetchArtifacts = async (_key, _remote, _context, options) => {
+    reads++; if ((options?.transferSettings?.maxFiles ?? 64) < 65) throw new ProviderArtifactLimitError();
+    return h.artifacts;
+  };
+  try {
+    await queue.start(); await queue.enqueue(input);
+    await until(() => queue.listJobs()[0]?.error?.includes("result transfer limits") === true, "completed result limit hold");
+    await queue.waitForIdle(); const original = queue.listJobs()[0]!;
+    assert.equal(reads, 1); settings = { ...settings, maxFiles: 65 }; h.freeWorld();
+    queue.retryHeldArtifactTransfers(); queue.retryHeldArtifactTransfers();
+    await until(() => queue.listJobs()[0]?.status === "succeeded", "same accepted result resumes under the saved limit");
+    assert.equal(reads, 2); assert.equal(h.fake.submitCount, 1); assert.equal(h.ledger.length, 1);
+    assert.equal(queue.listJobs()[0]!.providerJobId, original.providerJobId); assert.equal(queue.listJobs()[0]!.attempt, original.attempt);
+  } finally { await queue.dispose(); await queue.waitForIdle(); await h.storage.stop(); }
+});
+
 it("a transfer-limit hold retains the accepted identity across restart without repeated downloads or generation", { timeout: 30_000 }, async () => {
   const h = await fixture(), first = h.create(); let next: JobQueue | undefined, reads = 0;
   (h.fake as DispatchClient).fetchArtifacts = async () => { reads++; throw new ProviderArtifactLimitError(); };
   try {
     await first.start(); const job = await first.enqueue(input);
-    await until(() => first.listJobs()[0]?.error?.includes("supported transfer") === true, "accepted result held for local limits");
+    await until(() => first.listJobs()[0]?.error?.includes("result transfer limits") === true, "accepted result held for local limits");
     await first.waitForIdle(); const original = first.listJobs()[0]!;
     assert.equal(original.status, "running"); assert(original.providerJobId); assert.equal(original.attempt, 1); assert.equal(original.providerCostMicroUsd, 37);
     assert.equal(reads, 1); assert.equal(h.fake.submitCount, 1); assert.equal(h.ledger.length, 0);
     await first.dispose(); await first.waitForIdle(); next = h.create(); await next.start();
-    await until(() => next!.listJobs()[0]?.error?.includes("supported transfer") === true, "restart rechecks only the same remote result");
+    await until(() => next!.listJobs()[0]?.error?.includes("result transfer limits") === true, "restart rechecks only the same remote result");
     await next.waitForIdle(); assert.equal(next.listJobs()[0]!.providerJobId, original.providerJobId);
     assert.equal(next.listJobs()[0]!.idempotencyKey, job.idempotencyKey); assert.equal(next.listJobs()[0]!.attempt, 1); assert.equal(next.listJobs()[0]!.providerCostMicroUsd, 37);
     assert.equal(reads, 2); assert.equal(h.fake.submitCount, 1); assert.equal(h.ledger.length, 0);

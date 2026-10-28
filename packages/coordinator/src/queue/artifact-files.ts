@@ -3,14 +3,14 @@ import { lstat, open, rmdir, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setImmediate as yieldTurn } from "node:timers/promises";
 import { z } from "zod";
-import { ARTIFACT_RESULT_LIMITS, SpeechUsageSchema, type Job, type SpeechUsage } from "@arke-studio/contracts";
+import { ARTIFACT_RESULT_HARD_LIMITS, artifactTransferLimits, SpeechUsageSchema, type ArtifactTransferSettings, type Job, type SpeechUsage } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { ArtifactWriteSpace } from "../storage/job-artifacts.js";
 import type { DispatchArtifact } from "./dispatcher.js";
 
 export const ARTIFACT_FILE_OVERHEAD = 64 * 1024;
-const { maxFileBytes: MAX_FILE, maxTotalBytes: MAX_TOTAL, maxManifestBytes: MAX_MANIFEST, maxFiles: MAX_FILES } = ARTIFACT_RESULT_LIMITS;
+const { maxFileBytes: MAX_FILE, maxTotalBytes: MAX_TOTAL, maxManifestBytes: MAX_MANIFEST, maxFiles: MAX_FILES } = ARTIFACT_RESULT_HARD_LIMITS;
 async function hash(data: Uint8Array, signal?: AbortSignal): Promise<string> {
   const digest = createHash("sha256");
   for (let offset = 0; offset < data.length; offset += 1024 * 1024) {
@@ -71,16 +71,18 @@ export async function artifactFileMatches(path: string, expected: Uint8Array, si
 export class ArtifactResultFiles {
   private readonly root: string;
   constructor(journalPath: string, private readonly space?: ArtifactWriteSpace,
-    private readonly write: typeof atomicWriteFile = atomicWriteFile) { this.root = join(dirname(journalPath), "inline-artifacts"); }
+    private readonly write: typeof atomicWriteFile = atomicWriteFile,
+    private readonly transferSettings?: () => ArtifactTransferSettings | undefined) { this.root = join(dirname(journalPath), "inline-artifacts"); }
   directory(job: Identity): string {
     if (!job.resultReceiptId) throw new ArtifactCheckpointInvalid();
     return join(this.root, job.id, `result-${job.resultReceiptId}`);
   }
   private blob(directory: string, index: number, digest: string): string { return join(directory, `${index}-${digest}.bin`); }
 
-  async save(job: Identity, artifacts: readonly DispatchArtifact[], signal: AbortSignal): Promise<void> {
+  async save(job: Identity, artifacts: readonly DispatchArtifact[], signal: AbortSignal, admittedSettings?: ArtifactTransferSettings): Promise<void> {
     signal.throwIfAborted();
-    if (artifacts.length > MAX_FILES || artifacts.some(value => value.data.length > MAX_FILE) || artifacts.reduce((sum, value) => sum + value.data.length, 0) > MAX_TOTAL) throw new ArtifactCheckpointInvalid("limit");
+    const limits = artifactTransferLimits(admittedSettings ?? this.transferSettings?.());
+    if (artifacts.length > limits.maxFiles || artifacts.some(value => value.data.length > limits.maxFileBytes) || artifacts.reduce((sum, value) => sum + value.data.length, 0) > limits.maxTotalBytes) throw new ArtifactCheckpointInvalid("limit");
     const entries = [];
     for (const value of artifacts) entries.push({ name: value.name, contentType: value.contentType, bytes: value.data.length, digest: await hash(value.data, signal) });
     const parsed = receiptSchema.safeParse({ version: 2, jobId: job.id, receiptId: job.resultReceiptId, attempt: job.attempt, provider: job.provider,

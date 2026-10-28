@@ -166,7 +166,7 @@ export class ProviderArtifactLimitError extends Error {
 }
 
 /** Ephemeral host controls, separate from serializable transport/diagnostic context. */
-export interface ArtifactFetchOptions { signal?: AbortSignal }
+export interface ArtifactFetchOptions { signal?: AbortSignal; transferSettings?: import("@arke-studio/contracts").ArtifactTransferSettings }
 
 /** A credential failure is a provider fault, never a work failure (R-4). */
 export class ProviderAuthError extends Error {

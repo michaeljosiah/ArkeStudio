@@ -1,11 +1,12 @@
 import { z } from "zod";
 import { RecoveryActionSummarySchema } from "./recovery-action-history.js";
-import { RecoveryModeSchema, RecoveryOutcomeSummarySchema, RECOVERY_POLICY } from "./recovery-policy.js";
+import { RecoveryModeSchema, RecoveryOutcomeSummarySchema, RecoveryAdvancedSettingsSchema, RECOVERY_POLICY } from "./recovery-policy.js";
 import { RecoveryHistorySnapshotSchema, RecoveryIncidentSchema, RECOVERY_HISTORY_LIMITS } from "./recovery-incidents.js";
 import { RecoveryCacheMaintenanceSchema, RecoveryCacheScopeSchema, MingCleanupSnapshotSchema } from "./recovery-actions.js";
 
 /** SPEC-061 R-7/R-18/R-25. Presentation of policy carries no intent/capability or repair grant. */
 export const RecoveryPolicySnapshotSchema = z.object({
+  advanced: RecoveryAdvancedSettingsSchema.optional(),
   mingCleanup: MingCleanupSnapshotSchema.optional(),
   cleanup: z.object({ available: z.boolean(), pending: z.boolean(), audit: z.enum(["starting", "available", "unavailable"]).optional(),
     maintenance: RecoveryCacheMaintenanceSchema.optional(),
@@ -28,7 +29,7 @@ export const RecoveryHistoryCommandSchema = z.discriminatedUnion("action", [
 ]);
 export const RecoveryCommandResultSchema = z.object({
   requestId: z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/),
-  operation: z.enum(["recovery-set-mode", "recovery-set-preferences", "recovery-history-control"]),
+  operation: z.enum(["recovery-set-mode", "recovery-set-advanced", "recovery-set-preferences", "recovery-history-control"]),
   status: z.enum(["saved", "refused"]), reason: z.enum(["unavailable", "not-applicable"]).optional(),
   historyAction: z.enum(["acknowledge", "snooze-hour", "snooze-session", "clear-resolved"]).optional(),
 }).strict();

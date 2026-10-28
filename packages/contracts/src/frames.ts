@@ -38,7 +38,7 @@ import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX, CadencePlanSchema } from "./cad
 import { PerformanceIdSchema } from "./performance.js";
 import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
-import { RecoveryModeSchema } from "./recovery-policy.js";
+import { RecoveryModeSchema, RecoveryAdvancedSettingsSchema } from "./recovery-policy.js";
 import { RecoveryHistoryCommandSchema, RecoveryHistoryQuerySchema } from "./recovery-settings.js";
 import { RecoveryActionCommandSchema } from "./recovery-actions.js";
 import { CharacterAliasesInputSchema } from "./world.js";
@@ -4187,6 +4187,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("refresh-system-resources") }).strict(),
   /** Host presentation/policy controls; opening an incident never invokes these. */
   z.object({ kind: z.literal("recovery-set-mode"), requestId: UlidSchema, mode: RecoveryModeSchema }).strict(),
+  z.object({ kind: z.literal("recovery-set-advanced"), requestId: UlidSchema, settings: RecoveryAdvancedSettingsSchema }).strict(),
   z.object({ kind: z.literal("recovery-set-preferences"), requestId: UlidSchema,
     preferences: z.object({ transientMuted: z.boolean().optional(), desktopOptIn: z.boolean().optional() }).strict() }).strict(),
   z.object({ kind: z.literal("recovery-history-control"), requestId: UlidSchema, command: RecoveryHistoryCommandSchema }).strict(),

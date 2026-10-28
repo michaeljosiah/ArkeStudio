@@ -24,6 +24,7 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
       "studio-assistant": { requestId: "12345678-1234-4234-8234-123456789abc", command: { action: "watch" } },
       "account-open": { page: "account" }, "set-background-notifications": { preference: "off" },
       "recovery-set-mode": { requestId: worldId, mode: "suggest-only" },
+      "recovery-set-advanced": { requestId: worldId, settings: {} },
       "recovery-action": { requestId: worldId, command: { action: "preview-retry", resourceKey: "a".repeat(64) } },
       "recovery-set-preferences": { requestId: worldId, preferences: { desktopOptIn: true } },
       "recovery-history-control": { requestId: worldId, command: { action: "clear-resolved" } },

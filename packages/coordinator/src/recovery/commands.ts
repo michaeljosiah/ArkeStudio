@@ -10,9 +10,9 @@ export async function recoveryCommand(message: Command, deps: { control?: Recove
     ...(message.kind === "recovery-history-control" ? { historyAction: message.command.action } : {}) };
   try {
     let saved = false, available = false;
-    if (message.kind === "recovery-set-mode") {
+    if (message.kind === "recovery-set-mode" || message.kind === "recovery-set-advanced") {
       available = deps.control?.policySnapshot().accepting === true;
-      if (available) saved = await deps.control!.setMode(message.mode);
+      if (available) saved = message.kind === "recovery-set-mode" ? await deps.control!.setMode(message.mode) : await deps.control!.setAdvanced(message.settings);
       available = deps.control?.policySnapshot().accepting === true;
     } else {
       available = deps.history?.snapshot().audit === "available";

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { RecoveryControlSchema, RecoveryRestartContextSchema, RECOVERY_POLICY, decideRecoveryRestart, emptyRecoveryTarget, recentRecoveryAttempts,
+import { RecoveryControlSchema, RecoveryRestartContextSchema, RecoveryAdvancedSettingsSchema, type RecoveryAdvancedSettings, RECOVERY_POLICY, decideRecoveryRestart, emptyRecoveryTarget, recentRecoveryAttempts,
   type RecoveryControl, type RecoveryMode, type RecoveryTarget, type RecoveryRestartContext, type RecoveryHoldReason, type RecoveryPolicySnapshot } from "@arke-studio/contracts";
 import { WriteQueue } from "../change-log.js";
 import type { RecoveryControlStore } from "./control-file.js";
@@ -61,7 +61,7 @@ export class RecoveryControlService {
   }
   policySnapshot(): RecoveryPolicySnapshot {
     const state = this.snapshot();
-    return { audit: state.audit, accepting: state.accepting, mode: state.control.mode, ...(state.reason ? { reason: state.reason } : {}),
+    return { audit: state.audit, accepting: state.accepting, mode: state.control.mode, advanced: this.advancedSettings(), ...(state.reason ? { reason: state.reason } : {}),
       targets: state.control.targets.map(target => ({ key: target.key, service: target.service, stoppedByUser: target.stoppedByUser,
         circuitOpen: target.circuitOpen, pendingOutcome: target.intent !== null,
         ...(target.lastOutcome ? { lastOutcome: { action: target.lastOutcome.action, automatic: target.lastOutcome.automatic,
@@ -69,6 +69,14 @@ export class RecoveryControlService {
   }
   snapshot(): { audit: "starting" | "available" | "unavailable"; accepting: boolean; reason?: AuditFailure; control: RecoveryControl } {
     return { audit: !this.auditAvailable ? "unavailable" : !this.opened ? "starting" : "available", accepting: this.opened && this.auditAvailable && !this.closing && !this.closed, reason: this.auditFailure, control: structuredClone(this.control) };
+  }
+  advancedSettings(): RecoveryAdvancedSettings { return RecoveryAdvancedSettingsSchema.parse(this.opened && this.auditAvailable ? this.control.advanced ?? {} : {}); }
+  setAdvanced(settings: RecoveryAdvancedSettings): Promise<boolean> {
+    const parsed = RecoveryAdvancedSettingsSchema.parse(settings);
+    return this.duringShutdown(this.serial(async () => {
+      if (this.ready()) return false;
+      return this.persist({ ...structuredClone(this.control), advanced: parsed });
+    }), false, this.deps.stopTimeoutMs ?? 2_000, "write-failed");
   }
   private failure(error: unknown, fallback: "read-failed" | "write-failed"): AuditFailure {
     if (error instanceof z.ZodError || error instanceof SyntaxError) return "invalid";

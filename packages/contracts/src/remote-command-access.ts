@@ -33,7 +33,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "stage-audiobook-lines": "host", "open-exports-folder": "host", "pick-manuscript": "host",
   "download-update": "host", "install-update-and-restart": "host", "install-update-on-close": "host",
   "generate-diagnostics": "host", "probe-grouped-read": "host", "open-data-folder": "host", "bench-upload-references": "host",
-  "recovery-set-mode": "host", "recovery-set-preferences": "host", "recovery-history-control": "host",
+  "recovery-set-mode": "host", "recovery-set-advanced": "host", "recovery-set-preferences": "host", "recovery-history-control": "host",
   "recovery-action": "host",
   "recovery-history-read": "studio",
   "attach-files-correlated": "host", "install-sample-world": "host",

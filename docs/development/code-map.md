@@ -1643,6 +1643,18 @@ until the owner explicitly watches again, and no user/model operation is automat
 
 ## System status overview
 
+Advanced recovery preferences live in contracts `recovery-policy.ts` and
+`artifact-result-limits.ts`, persisted by coordinator `recovery/control.ts` through host-only,
+human-only `recovery-set-advanced`. Client `components/recovery-advanced.tsx` renders the closed
+Advanced section and retains optional cache maintenance there. Queue preflight reads the saved
+preference; FAL captures transfer limits and timeout once per retrieval. `ArtifactResultFiles`
+reads existing receipts against support ceilings, preserving accepted results after a lower
+admission preference. A saved changed transfer policy retries only the queue's witnessed remote
+result holds, sequentially through `retryHeldArtifactTransfers`, without dispatch or poll replay.
+See [recovery preferences](recovery-settings.md); focused tests are named `recovery-advanced`,
+`recovery/advanced`, `artifact-transfer-preferences`, `queue/artifact-preferences` and the existing
+submission/result-storage suites.
+
 Approved System design (master turn 241, originally reviewed as 240): contracts
 `src/system-resources.ts` owns readings, freshness and conservative
 per-volume grouping. Coordinator `src/system-resources.ts` owns bounded/coalesced observations;

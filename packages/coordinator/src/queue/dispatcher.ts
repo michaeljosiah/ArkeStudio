@@ -4,6 +4,8 @@ import { mingReferenceHash } from "../local-ai/ming-reference.js";
 import { dirname, extname, join } from "node:path";
 import {
   ARTIFACT_RETRIEVAL_HELD_MESSAGE,
+  ArtifactTransferSettingsSchema,
+  type ArtifactTransferSettings,
   canDeleteJob,
   freeLimitReason,
   GOOGLE_BILLED,
@@ -134,7 +136,7 @@ export interface DispatchClient {
     /** What the engine is counting, where it counts anything (SPEC-021 D16). */
     step?: { stage: string; done: number; total: number };
   }>;
-  fetchArtifacts(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }, options?: { signal?: AbortSignal }): Promise<DispatchArtifact[]>;
+  fetchArtifacts(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }, options?: { signal?: AbortSignal; transferSettings?: ArtifactTransferSettings }): Promise<DispatchArtifact[]>;
   cancel(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<void>;
   /** The lane has drained after `model`'s job settled: a local engine may put down what it loaded (issue 846). */
   release?(model: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<void>;
@@ -172,6 +174,8 @@ export interface EnqueueInput {
 }
 
 export interface JobQueueOptions {
+  checkStorageBeforeSubmission?: () => boolean;
+  artifactTransferSettings?: () => ArtifactTransferSettings | undefined;
   /** Host-resolved result writes and optional unsent headroom checks; no renderer path or replay authority. */
   artifactSpace?: ArtifactWriteSpace;
   /** Local result persistence retries never call submit/poll/fetch again. */
@@ -452,6 +456,8 @@ export class JobQueue {
   private readonly activeRuns = new Set<Promise<void>>();
   private readonly artifactAborts = new Map<string, AbortController>();
   private readonly artifactFiles: ArtifactResultFiles;
+  private readonly artifactLimitHeld = new Set<string>();
+  private artifactLimitRetry: Promise<void> | null = null;
   private readonly artifactAuditHeld = new Set<string>();
   private readonly artifactReadAbort = new AbortController();
   private readonly sleepTimers = new Map<NodeJS.Timeout, () => void>();
@@ -490,7 +496,7 @@ export class JobQueue {
 
   constructor(private readonly opts: JobQueueOptions) {
     this.journal = opts.journal ?? new JobJournal(opts.journalPath);
-    this.artifactFiles = new ArtifactResultFiles(opts.journalPath, opts.artifactSpace);
+    this.artifactFiles = new ArtifactResultFiles(opts.journalPath, opts.artifactSpace, undefined, opts.artifactTransferSettings);
     this.clock = opts.clock ?? (() => new Date().toISOString());
     this.now = opts.now ?? Date.now;
     this.rng = opts.rng ?? Math.random;
@@ -548,6 +554,7 @@ export class JobQueue {
     await this.journal.append(job);
     if (this.disposed) return true; // killed mid-write: the journal decides on recovery
     this.jobs.set(job.id, job);
+    if (["succeeded", "failed", "cancelled", "needs-reconciliation"].includes(job.status)) this.artifactLimitHeld.delete(job.id);
     this.opts.emit({ at: this.clock(), type: "job.updated", job });
     return true;
   }
@@ -997,7 +1004,7 @@ export class JobQueue {
     }
     if (!this.stillQueued(job)) return;
 
-    if (!await this.checkSubmissionStorage(job)) return;
+    if (!await this.checkSubmissionStorage(job) || this.disposed || !this.stillQueued(job) || this.lane(job.provider).paused) return;
 
     let audioInputs: PreparedAudioInput[] | undefined;
     let audioReferences: DispatchVoiceReference[] | undefined;
@@ -1258,7 +1265,7 @@ export class JobQueue {
     }
     // Preparation and authorization may have taken time or written media. Recheck before the
     // outbox flush; an earlier headroom observation is not a lasting grant.
-    if (!await this.checkSubmissionStorage(job)) return;
+    if (!await this.checkSubmissionStorage(job) || this.disposed || !this.stillQueued(job) || this.lane(job.provider).paused) return;
     // Persist the physical call before I/O. A crash may overcount one authorized call, but the
     // journal can never undercount requests that may have reached a paid provider.
     const submitting: Job = {
@@ -1380,6 +1387,7 @@ export class JobQueue {
   }
 
   private async checkSubmissionStorage(job: Job): Promise<boolean> {
+    if (this.opts.checkStorageBeforeSubmission?.() === false) return true;
     const check = this.opts.artifactSpace?.checkSubmission;
     if (!check) return true;
     const checking = new AbortController(); this.submitAborts.set(job.id, checking);
@@ -1715,7 +1723,7 @@ export class JobQueue {
 
   /** Accepted facts are already durable. Retry only these exact bytes, never provider work.
    * A rejected disk append is not evidence that the result or a charge did not exist. */
-  private async retainCompletedResult(job: Job, artifacts: DispatchArtifact[]): Promise<boolean> {
+  private async retainCompletedResult(job: Job, artifacts: DispatchArtifact[], admittedSettings?: ArtifactTransferSettings): Promise<boolean> {
     const signal = this.artifactSignal(job);
     // Callers have witnessed a complete inline response or terminal success plus retrieval
     // of every result byte. Only local storage remains: holding inference here would block
@@ -1726,7 +1734,7 @@ export class JobQueue {
     // a missing media result on restart (notably inline-only speech and voice creation).
     if (artifacts.length === 0) return !signal.aborted && this.stillActiveRun(job);
     while (!signal.aborted && !this.disposed && this.stillActiveRun(job)) {
-      try { await this.artifactFiles.save(job, artifacts, signal); return !signal.aborted && this.stillActiveRun(job); }
+      try { await this.artifactFiles.save(job, artifacts, signal, admittedSettings); return !signal.aborted && this.stillActiveRun(job); }
       catch (error) {
         if (signal.aborted || this.disposed || !this.stillActiveRun(job)) return false;
         const detail = error instanceof ArtifactStorageHeld || error instanceof ArtifactCheckpointInvalid ? error.message
@@ -1780,11 +1788,13 @@ export class JobQueue {
     let landed: string[] = [];
     if (job.landing) {
       let artifacts: DispatchArtifact[];
+      const transferSettings = ArtifactTransferSettingsSchema.parse(this.opts.artifactTransferSettings?.() ?? {});
       try {
-        artifacts = suppliedArtifacts ?? (await client.fetchArtifacts(key, job.providerJobId!, { jobId: job.id, attempt: job.attempt, model: job.model }, { signal: this.artifactSignal(job) }));
+        artifacts = suppliedArtifacts ?? (await client.fetchArtifacts(key, job.providerJobId!, { jobId: job.id, attempt: job.attempt, model: job.model }, { signal: this.artifactSignal(job), transferSettings }));
       } catch (err) {
         if (this.disposed || !this.stillActiveRun(job)) return;
         if (err && typeof err === "object" && "artifactRetrievalHeld" in err && err.artifactRetrievalHeld === true) {
+          this.artifactLimitHeld.add(job.id);
           // A supported-receipt ceiling cannot be repaired by repeatedly downloading the
           // same oversized result. Keep its durable remote identity; no poll/submit replay.
           this.releaseGpu(job);
@@ -1809,7 +1819,7 @@ export class JobQueue {
       }
       if (this.disposed) return;
       if (!this.stillActiveRun(job)) return; // cancelled or retired while bytes were in flight
-      if (suppliedArtifacts === undefined && !await this.retainCompletedResult(job, artifacts)) return;
+      if (suppliedArtifacts === undefined && !await this.retainCompletedResult(job, artifacts, transferSettings)) return;
       // Sanitisation before verification (SPEC-021 §2.10): an engine that embeds workflow
       // metadata has it stripped here, and a container the sanitiser cannot process fails the
       // job with the reason — never landed as-is.
@@ -2449,6 +2459,26 @@ export class JobQueue {
     await work();
   }
 
+  /** A saved human preference retries only witnessed completed remote results, sequentially.
+   * It never submits/polls a generation or adopts an uncertain job. */
+  retryHeldArtifactTransfers(): void {
+    if (this.disposed || this.artifactLimitRetry) return;
+    const ids = [...this.artifactLimitHeld];
+    const task = (async () => {
+      for (const id of ids) {
+        if (this.disposed) return;
+        const job = this.jobs.get(id), client = job && this.opts.clients[job.provider];
+        if (!job || !client || !this.stillActiveRun(job) || !job.providerJobId || job.status !== "running" || this.lane(job.provider).paused) continue;
+        this.artifactLimitHeld.delete(id);
+        const key = await this.opts.getKey(job.provider, job).catch(() => null);
+        if (!key) { this.artifactLimitHeld.add(id); continue; }
+        if (!this.disposed && this.stillActiveRun(job) && !this.lane(job.provider).paused) await this.landAndSucceed(job, client, key, job.providerCostMicroUsd);
+      }
+    })();
+    this.artifactLimitRetry = task;
+    this.trackRun(task.finally(() => { if (this.artifactLimitRetry === task) this.artifactLimitRetry = null; }));
+  }
+
   /** A runtime that became ready after a failed startup releases its recovered work. */
   releaseRecovery(provider: string): void {
     const lane = this.lane(provider);
@@ -2845,7 +2875,7 @@ export class JobQueue {
     this.disposed = true;
     this.artifactReadAbort.abort();
     for (const abort of this.artifactAborts.values()) abort.abort();
-    this.artifactAborts.clear(); this.artifactAuditHeld.clear();
+    this.artifactAborts.clear(); this.artifactAuditHeld.clear(); this.artifactLimitHeld.clear();
     this.clientDisposal = Promise.allSettled([...new Set(Object.values(this.opts.clients))]
       .map(client => Promise.resolve().then(() => client.dispose?.()))).then(() => {});
     for (const controller of this.submitAborts.values()) controller.abort();

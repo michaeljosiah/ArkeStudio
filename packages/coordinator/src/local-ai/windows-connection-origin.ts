@@ -86,7 +86,9 @@ export async function windowsConnectionOrigin(origin: SupervisedProcessOrigin, c
       let failed = false, output = "";
       const child = execFile(join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
         ["-NoProfile", "-NonInteractive", "-EncodedCommand", ENCODED],
-        { windowsHide: true, timeout: 12_000, maxBuffer: 4096, signal, encoding: "utf8" },
+        // Includes the second helper establishing its parent leash. CI repeatedly exhausted
+        // the twelve-second total while the same native check passed locally.
+        { windowsHide: true, timeout: 30_000, maxBuffer: 4096, signal, encoding: "utf8" },
         (error, stdout) => { failed = !!error; output = stdout; });
       child.stdin?.on("error", () => {});
       leashed = (async () => {
