@@ -1576,6 +1576,14 @@ diagnostic evidence stays historical; disconnected/stale readings are labelled, 
 are withheld and missing capacity is unknown. No operation deficit or fit is inferred from free
 space. The existing scoped cleanup control retains separate review/approval. Tests:
 `test/studio-storage.test.tsx`, `studio-assistant-view.test.tsx`, `recovery-cache-cleanup.test.tsx`.
+
+Studio effort selection uses the existing `ModelChip` and a conversation/model-bound draft choice
+in `lib/studio-assistant.ts`. Contracts `privateSessionVariants` filters catalogue choices to the
+private request grammar. The coordinator runner validates the current model before preparation;
+service delegation keeps the choice only for the same model. The request manifest, managed writer
+and provider payload bind that value. Studio labels Default and Off explicitly without changing
+World/Builder labels. Runner/service, private-control, managed-writer and Studio UI tests cover
+this path; the optional pinned native bridge test covers explicit default and unsupported refusal.
 `components/studio-dictation.tsx` reuses `ComposerMicControl` with separately owned capture:
 explicit start/stop, one-minute/6 MB limits, cancelled pending microphone permission and
 discard-on-close/disconnect. `StudioConversationClient.dictationTarget` captures the original

@@ -30,18 +30,19 @@ async function assertBridgeAddress(baseURL: string, retained: boolean): Promise<
     if (retained) await assert.rejects(listening, { code: "EADDRINUSE" }); else await listening;
   } finally { if (replacement.listening) await new Promise<void>(resolve => replacement.close(() => resolve())); }
 }
-const scenarios: Array<{ overflow: boolean; managedWriter: boolean; managedProvider: boolean; interrupted?: boolean }> = [
+const scenarios: Array<{ overflow: boolean; managedWriter: boolean; managedProvider: boolean; interrupted?: boolean; variant?: "default" }> = [
   { overflow: false, managedWriter: false, managedProvider: false }, { overflow: true, managedWriter: false, managedProvider: false },
   { overflow: false, managedWriter: true, managedProvider: false }, { overflow: false, managedWriter: true, managedProvider: true },
   { overflow: false, managedWriter: true, managedProvider: true, interrupted: true },
+  { overflow: false, managedWriter: true, managedProvider: true, variant: "default" },
 ];
-for (const { overflow, managedWriter, managedProvider, interrupted } of scenarios) it(`pinned native private generation through the bounded bridge: ${interrupted ? "production composition Stop retains both original owners" : managedProvider ? "production managed composition" : managedWriter ? "verified managed writer" : overflow ? "upstream overflow" : "complete response"}`, {
+for (const { overflow, managedWriter, managedProvider, interrupted, variant } of scenarios) it(`pinned native private generation through the bounded bridge: ${variant ? "production managed effort selection" : interrupted ? "production composition Stop retains both original owners" : managedProvider ? "production managed composition" : managedWriter ? "verified managed writer" : overflow ? "upstream overflow" : "complete response"}`, {
   skip: !process.env.ARKE_TEST_OPENCODE2 || managedWriter && process.platform !== "win32", timeout: managedWriter ? 150_000 : 75_000,
 }, async () => {
   const root = await realpath(await tempDir("arke-studio-native-bridge-")), model = "bridge-selected", profile = harnessProfileDir(root);
   const prompt = "PRIVATE_BRIDGE_QUESTION", answer = '{"kind":"reply","text":"PRIVATE_BRIDGE_REPLY"}';
   const system = agentPromptFor({ ...ROSTER.find(row => row.name === "studio-assistant")!, researchWeb: false });
-  const expected = privateWireBody({ model: `ollama/${model}`, prompt, system, outputTokenLimit: 4096 });
+  const expected = privateWireBody({ model: `ollama/${model}`, prompt, system, outputTokenLimit: 4096, ...(variant ? { variant } : {}) });
   const calls: Array<{ body: unknown; headers: Record<string, unknown> }> = [], traces: unknown[] = [];
   let phase = "provider startup";
   const writerReads: Array<{ method: string; path: string; status?: number; ms: number }> = [];
@@ -116,10 +117,16 @@ for (const { overflow, managedWriter, managedProvider, interrupted } of scenario
     phase = "global catalogue";
     await untilAsync(async () => (await adapter.listModels?.())?.some(row => row.provider === "ollama" && row.id === model) === true, "original native catalogue");
     let approvals = 0;
+    if (variant) {
+      await assert.rejects(runner.run({ role: "studio-assistant", model: `ollama/${model}`, prompt, variant: "high" }, new AbortController().signal,
+        async () => { approvals++; return { cloudApproved: false }; }), /does not offer this effort/);
+      assert.equal(approvals, 0); assert.equal(runner.busy(), false);
+    }
     phase = "private run";
     const caller = new AbortController();
-    const operation = runner.run({ role: "studio-assistant", model: `ollama/${model}`, prompt }, caller.signal, async disclosure => {
+    const operation = runner.run({ role: "studio-assistant", model: `ollama/${model}`, prompt, ...(variant ? { variant } : {}) }, caller.signal, async disclosure => {
       approvals++; assert(disclosure.local); assert.equal(disclosure.prompt, prompt); assert.equal(calls.length, 0);
+      assert.equal(disclosure.variant, variant);
       phase = "approved private run";
       if (marker) assert.equal((await readFile(marker, "utf8")).trim().split("\n").map(line => JSON.parse(line) as { path: string }).filter(row => row.path === "/v1/chat/completions").length, 0);
       return { cloudApproved: false };

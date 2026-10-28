@@ -276,3 +276,21 @@ a delayed send-timeout callback starts the separate close deadline later, so a 4
 does not prove that both callbacks ran. The tests now advance a controlled clock through each
 deadline and verify both the pre-deadline and post-deadline behavior, including disposal.
 Production socket behavior is unchanged.
+
+## Studio effort selection
+
+The existing model chip now accepts a per-conversation effort choice when the model catalogue
+declares a supported value. The choice follows the explicit send through preparation, disclosure,
+the private manifest, native session and provider body. Changing models clears it; delegation to
+a different diagnostic model retains that model's default. Reconnect does not resend. A removed
+or unsupported choice is refused before inference. Default keeps the existing operational policy;
+the Studio labels do not describe it as Medium or describe Off as Minimal.
+
+The focused contract, client, runner, service and managed transport tests pass. OpenCode 2.0.26
+with the production managed composition and an isolated synthetic provider verifies unsupported
+High sends nothing, followed by exactly one explicit-default request and confirmed retirement.
+The native fixture's catalogue does not offer nondefault efforts; its result does not qualify
+nondefault model behavior. Those values have protocol fixture coverage, not live-model evidence.
+Browser component checks at desktop/light and reduced phone/dark verify selection, keyboard
+return to Default, focus and no horizontal overflow. The catalogue is explicitly synthetic;
+these captures do not establish matched master parity or finish the epic's remaining acceptance.

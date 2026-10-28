@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router";
 import type { ClientState, StudioAssistantThread, StudioCloudShare } from "@arke-studio/contracts";
-import { STUDIO_ASSISTANT_LIMITS, studioInterruptionMessage } from "@arke-studio/contracts";
+import { STUDIO_ASSISTANT_LIMITS, studioInterruptionMessage, privateSessionVariants } from "@arke-studio/contracts";
 import { StudioConversationClient, type StudioConversationView } from "../lib/studio-assistant.js";
 import { STUDIO_DOCUMENT_ACCEPT, studioDocumentsFit } from "../lib/studio-documents.js";
 import { onStudioAssistantReply, send, useStore } from "../lib/store.js";
@@ -70,6 +70,8 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
   const share = view.state?.share && view.state.share.threadId === thread?.id ? view.state.share : null;
   const working = pending && pending.state !== "interrupted";
   const currentDiagnostic = thread?.messages.findLast(message => message.diagnostic)?.id;
+  const pickerState = appState ? { ...appState, app: { ...appState.app,
+    harnessModels: (appState.app.harnessModels ?? []).map(value => ({ ...value, variants: privateSessionVariants(value) })) } } : null;
   const unavailable = !view.connected ? "Reconnect to use Studio. Your draft is retained."
     : !view.fresh ? "Waiting for Studio history. Your draft is retained."
     : view.state?.audit !== "available" ? "Studio history is unavailable. Your draft is retained."
@@ -127,7 +129,10 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
       attachments={view.attachments.map(row => ({ id: row.id, file: row.name, kind: "document" }))} onRemoveAttachment={client.removeDocument}
       dictationControl={<StudioDictation client={client} onPhase={setDictationPhase} enabled={view.open && view.connected && view.fresh && !view.attaching && !view.submitting && !working && !view.state?.busy && !thread?.archived && pending?.state !== "interrupted"} />}
       readReplies={reading.composer}
-      modelControl={<ModelChip state={appState} value={model} set={modelSet} onPick={pickModel} unsetLabel="Use Studio’s configured model" disabled={view.submitting || !!view.state?.busy} />} />
+      modelControl={<ModelChip state={pickerState} value={model} set={modelSet} onPick={pickModel} unsetLabel="Use Studio’s configured model"
+        variant={view.effort && view.effort.model === model ? view.effort.variant : "default"} onVariant={model ? variant => client.pickEffort(model, variant) : undefined}
+        variantLabels={{ default: "Default", none: "Off" }}
+        disabled={view.submitting || !!view.state?.busy} />} />
       <input ref={picker} type="file" hidden multiple accept={STUDIO_DOCUMENT_ACCEPT} aria-label="Choose Studio text documents" onChange={event => {
         const files = Array.from(event.target.files ?? []); event.target.value = "";
         const take = pickerTarget.current; pickerTarget.current = null;

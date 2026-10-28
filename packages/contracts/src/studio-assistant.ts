@@ -6,6 +6,7 @@ import { FINDING_KIND_IDS, FindingSeveritySchema } from "./diagnostics.js";
 import { RecoveryEvidenceStateSchema, RecoveryFactSchema, RecoveryIncidentPhaseSchema } from "./recovery-incidents.js";
 import { StorageLimitationSchema, StorageProbeSourceSchema, StorageRootRoleSchema } from "./storage-health.js";
 import { DEFAULT_NARRATOR, KOKORO_VOICE_MODEL } from "./voice.js";
+import { PrivateSessionVariantSchema } from "./adapter.js";
 
 export const STUDIO_ASSISTANT_LIMITS = Object.freeze({ storeBytes: 2 * 1024 ** 2, evidenceBytes: 32 * 1024,
   threads: 20, messages: 100, requestChars: 8000, replyChars: 16000, responseBytes: 192 * 1024, modelCalls: 3,
@@ -35,7 +36,7 @@ export function studioRequestFits(value: { text: string; attachments?: readonly 
 }
 export const StudioAssistantSendSchema = z.object({ action: z.literal("send"), threadId: UlidSchema,
   text: z.string().trim().min(1).max(STUDIO_ASSISTANT_LIMITS.requestChars), attachments: StudioTextAttachmentsSchema.optional(),
-  model: z.string().min(1).max(512), diagnosticModel: z.string().min(1).max(512).optional() }).strict();
+  model: z.string().min(1).max(512), variant: PrivateSessionVariantSchema.optional(), diagnosticModel: z.string().min(1).max(512).optional() }).strict();
 /** Studio has no world narrator or implicit cloud/fallback permission. */
 export function studioLocalNarrator(stored: { provider: string; model?: string; voiceId: string; worldId?: string } | null | undefined): string | null {
   if (!stored) return DEFAULT_NARRATOR.voiceId;

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
-import type { PrivateSessionRequest, PrivateSessionWriter } from "@arke-studio/contracts";
+import { PrivateSessionVariantSchema, type PrivateSessionRequest, type PrivateSessionWriter } from "@arke-studio/contracts";
 import { isSupervisedProcessCleanupConfirmed, type SupervisedProcessOrigin } from "../supervisor.js";
 import { VerifiedLoopbackHttpTransport, type VerifiedHttpOptions, type VerifiedHttpPolicy } from "../local-ai/verified-loopback-http.js";
 
@@ -23,11 +23,12 @@ export class ManagedStudioWriterTransport extends VerifiedLoopbackHttpTransport 
   constructor(options: VerifiedHttpOptions & { authorization: string; request: PrivateSessionRequest }) {
     super({ ...options, timeoutMs: options.timeoutMs ?? 300_000 }, 900_000);
     this.originalOwner = options.origin;
-    const { model, system, prompt, outputTokenLimit } = options.request;
+    const { model, system, prompt, outputTokenLimit, variant } = options.request;
     if (!model || model.length > 512 || model.indexOf("/") < 1 || typeof system !== "string" || typeof prompt !== "string" ||
       Buffer.byteLength(system) + Buffer.byteLength(prompt) > 1024 ** 2 || !Number.isSafeInteger(outputTokenLimit) || outputTokenLimit < 1 || outputTokenLimit > 4096 ||
+      variant !== undefined && !PrivateSessionVariantSchema.safeParse(variant).success ||
       !/^Basic [A-Za-z0-9+/]+=*$/.test(options.authorization) || options.authorization.length > 16_384) throw refused();
-    this.authorization = options.authorization; this.requestInput = Object.freeze({ model, system, prompt, outputTokenLimit });
+    this.authorization = options.authorization; this.requestInput = Object.freeze({ model, system, prompt, outputTokenLimit, ...(variant !== undefined ? { variant } : {}) });
     this.identity = createHash("sha256").update(JSON.stringify([options.origin.identity, this.authorization, this.requestInput])).digest("hex");
   }
   current(): boolean { return this.available(); }
@@ -56,7 +57,8 @@ export class ManagedStudioWriterTransport extends VerifiedLoopbackHttpTransport 
     if (url.search) throw refused();
     if (method === "POST" && url.pathname === "/api/session") {
       const slash = this.requestInput.model.indexOf("/");
-      const expected = { location: { directory: this.directory }, model: { providerID: this.requestInput.model.slice(0, slash), id: this.requestInput.model.slice(slash + 1) } };
+      const expected = { location: { directory: this.directory }, model: { providerID: this.requestInput.model.slice(0, slash), id: this.requestInput.model.slice(slash + 1),
+        ...(this.requestInput.variant !== undefined ? { variant: this.requestInput.variant } : {}) } };
       if (this.sealed || this.creating || body !== JSON.stringify(expected)) throw refused();
       this.creating = true; return { ...policy, beforeWrite: () => !this.sealed };
     }

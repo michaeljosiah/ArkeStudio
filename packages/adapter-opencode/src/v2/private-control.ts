@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
-import type { SessionFile, PrivateSessionRequest, PrivateSessionTransport } from "@arke-studio/contracts";
+import { PrivateSessionVariantSchema, type SessionFile, type PrivateSessionRequest, type PrivateSessionTransport } from "@arke-studio/contracts";
 import { sameDirectory, type OpenCodeV2Http, type V2Envelope } from "./http.js";
 
 const DIRECTORY = ".arke-private-control";
@@ -27,7 +27,8 @@ export const PRIVATE_CONTROL_FILES: readonly SessionFile[] = Object.freeze([
 ]);
 
 export function privateWireBody(request: PrivateSessionRequest) {
-  if (!request || typeof request.model !== "string" || Object.keys(request).some(key => !["model", "system", "prompt", "outputTokenLimit"].includes(key))) throw new Error("Invalid private provider request manifest.");
+  if (!request || typeof request.model !== "string" || Object.keys(request).some(key => !["model", "system", "prompt", "outputTokenLimit", "variant"].includes(key)) ||
+    request.variant !== undefined && !PrivateSessionVariantSchema.safeParse(request.variant).success) throw new Error("Invalid private provider request manifest.");
   const slash = request.model.indexOf("/");
   if (slash < 1 || slash === request.model.length - 1 || request.model.length > 512 || typeof request.system !== "string" || Buffer.byteLength(request.system) > 32 * 1024 ||
     typeof request.prompt !== "string" || Buffer.byteLength(request.prompt) > 192 * 1024 || !Number.isSafeInteger(request.outputTokenLimit) || request.outputTokenLimit < 1 || request.outputTokenLimit > 4096) throw new Error("Invalid private provider request manifest.");
@@ -36,7 +37,8 @@ export function privateWireBody(request: PrivateSessionRequest) {
   const limit = request.model.slice(0, slash) === "ollama" ? { max_tokens: request.outputTokenLimit, reasoning_effort: "none" }
     : { max_completion_tokens: request.outputTokenLimit };
   return { model: request.model.slice(slash + 1), messages: [{ role: "system", content: request.system }, { role: "user", content: request.prompt }],
-    stream: true, stream_options: { include_usage: true }, ...limit, store: false };
+    stream: true, stream_options: { include_usage: true }, ...limit,
+    ...(request.variant && request.variant !== "default" ? { reasoning_effort: request.variant } : {}), store: false };
 }
 
 function requestDigest(request: PrivateSessionRequest): string { return createHash("sha256").update(JSON.stringify(privateWireBody(request))).digest("hex"); }

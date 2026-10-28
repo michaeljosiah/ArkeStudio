@@ -12,6 +12,21 @@ it("uses the pinned Ollama token cap and bounded non-thinking policy only for lo
   assert.equal(hosted.max_completion_tokens, 128); assert.equal(hosted.max_tokens, undefined); assert.equal(hosted.reasoning_effort, undefined);
 });
 
+it("seals explicit effort into the provider body and refuses a different prepared effort", () => {
+  const adapter = new OpenCodeV2Adapter({ baseUrl: () => "http://127.0.0.1:0", password: () => null });
+  const request = { model: "ollama/model", system: "Reviewed system", prompt: "Reviewed question", outputTokenLimit: 4096, variant: "high" as const };
+  assert.equal(privateWireBody(request).reasoning_effort, "high");
+  assert.equal(privateWireBody({ ...request, model: "openai/model" }).reasoning_effort, "high");
+  assert.equal(privateWireBody({ ...request, variant: "default" }).reasoning_effort, "none");
+  const files = adapter.sessionFiles({ agent: "studio-assistant", model: request.model, modelVariant: "high" }, "/private/effort", request);
+  const options = JSON.parse(files.at(-1)!.contents).plugins[0].options;
+  assert.equal(options.body.reasoning_effort, "high");
+  const low = adapter.sessionFiles({ agent: "studio-assistant", model: request.model, modelVariant: "low" }, "/private/effort", { ...request, variant: "low" });
+  assert.notEqual(files[1]!.contents, low[1]!.contents, "the reviewed payload digest includes effort");
+  assert.throws(() => adapter.sessionFiles({ agent: "studio-assistant", model: request.model, modelVariant: "low" }, "/private/effort", request), /does not match/);
+  assert.throws(() => privateWireBody({ ...request, variant: "custom-preset" } as unknown as typeof request), /Invalid private/);
+});
+
 it("keeps an ephemeral native bridge capability separate from the reviewed provider body and ordinary sessions", () => {
   const adapter = new OpenCodeV2Adapter({ baseUrl: () => "http://127.0.0.1:0", password: () => null });
   const request = { model: "ollama/model", system: "Reviewed system", prompt: "Reviewed question", outputTokenLimit: 4096 };

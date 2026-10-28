@@ -16,6 +16,26 @@ function fixture(documentReadMs = 30_000) {
     response: { type: "result", status, reason: null, threadId, runId: status === "accepted" ? other : null } });
   return { client, sent, deliver, reply };
 }
+it("keeps effort with its conversation and model, sends it explicitly and does not carry it to a new model", async () => {
+  const h = fixture(); h.deliver(state([id, other])); h.client.select(id); h.client.pickModel("provider/model"); h.client.pickEffort("provider/model", "high");
+  h.client.select(other); assert.equal(h.client.getSnapshot().effort, undefined); h.client.select(id);
+  assert.deepEqual(h.client.getSnapshot().effort, { model: "provider/model", variant: "high" });
+  h.client.draft("Explain the findings"); const sending = h.client.send("provider/model"), request = h.sent.at(-1)!;
+  assert(request.command.action === "send"); assert.equal(request.command.variant, "high");
+  h.reply(request, "accepted", id); assert(await sending);
+  h.client.setConnected(false); h.client.setConnected(true); h.deliver(state([id, other]));
+  assert.equal(h.client.getSnapshot().effort?.variant, "high"); assert.equal(h.sent.filter(row => row.command.action === "send").length, 1);
+  h.client.pickModel("provider/other"); assert.equal(h.client.getSnapshot().effort, undefined);
+  h.client.pickEffort("provider/model", "high"); h.client.draft("Use the other model");
+  const changed = h.client.send("provider/other"), next = h.sent.at(-1)!; assert(next.command.action === "send"); assert.equal(next.command.variant, undefined);
+  h.reply(next, "accepted", id); assert(await changed); h.client.dispose();
+});
+it("does not submit a changed effort after new-conversation creation was already sent", async () => {
+  const h = fixture(); h.deliver(state()); h.client.draft("Review storage"); h.client.pickEffort("provider/model", "low");
+  const sending = h.client.send("provider/model"), create = h.sent.at(-1)!; assert.equal(create.command.action, "create");
+  h.client.pickEffort("provider/model", "high"); h.reply(create, "ok", id);
+  assert.equal(await sending, false); assert.equal(h.sent.some(row => row.command.action === "send"), false); assert.equal(h.client.getSnapshot().draft, "Review storage"); h.client.dispose();
+});
 it("keeps selected documents in their original draft and sends only the captured bytes on an explicit request", async () => {
   const h = fixture(); h.deliver(state([id, other])); h.client.select(id); h.client.draft("Review these notes");
   let finish!: (bytes: ArrayBuffer) => void;

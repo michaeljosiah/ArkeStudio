@@ -248,7 +248,7 @@ export function managedStudioAssistant(wiring: AssembledHarness, service: Ollama
     return { local: true, identity: createHash("sha256").update(JSON.stringify(["managed-studio-local-v1", model, writer.identity, owner.process.identity])).digest("hex") };
   };
   return { destination, privateTransport: async (request, signal) => {
-    const captured = Object.freeze({ model: request.model, system: request.system, prompt: request.prompt, outputTokenLimit: request.outputTokenLimit });
+    const captured = Object.freeze({ model: request.model, system: request.system, prompt: request.prompt, outputTokenLimit: request.outputTokenLimit, ...(request.variant !== undefined ? { variant: request.variant } : {}) });
     const original = destination(captured.model, "ollama"), body = privateWireBody(captured);
     if (!original || signal.aborted) throw new Error("The managed Studio destination is unavailable.");
     const writer = await wiring.createPrivateWriter!(captured, signal);
@@ -423,7 +423,7 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     adapter,
     createPrivateWriter: async (request, signal = AbortSignal.timeout(10_000)) => {
       if (process.platform !== "win32" || !harness || harness.discovery.source !== "bundled") return null;
-      const captured = Object.freeze({ model: request.model, system: request.system, prompt: request.prompt, outputTokenLimit: request.outputTokenLimit });
+      const captured = Object.freeze({ model: request.model, system: request.system, prompt: request.prompt, outputTokenLimit: request.outputTokenLimit, ...(request.variant !== undefined ? { variant: request.variant } : {}) });
       const origin = supervisor.captureProcessOrigin(), secret = password.current();
       if (!origin || !secret || origin.executable !== harness.discovery.command || baseUrl() !== `http://127.0.0.1:${origin.port}`) return null;
       const current = () => origin.current() && password.current() === secret && baseUrl() === `http://127.0.0.1:${origin.port}`;

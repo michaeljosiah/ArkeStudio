@@ -6,7 +6,7 @@ import { STUDIO_ASSISTANT_LIMITS, StudioAssistantFileSchema, type StudioAssistan
 import { StudioAssistantService } from "../../src/studio-assistant/service.js";
 import { studioDiagnosticEvidence } from "../../src/studio-assistant/evidence.js";
 import { FileStudioConversationStore } from "../../src/studio-assistant/store.js";
-import type { StudioModelPort, StudioModelDisclosure, StudioRole } from "../../src/studio-assistant/runner.js";
+import type { StudioModelPort, StudioModelDisclosure, StudioModelInput } from "../../src/studio-assistant/runner.js";
 import { tempDir } from "../tmp.js";
 import { until, untilAsync } from "../wait.js";
 
@@ -14,7 +14,7 @@ const destination = "b".repeat(64), local = "ollama/local", reply = (text: strin
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 function fixture(script: string[]) {
   let disk: StudioAssistantFile = { version: 1, threads: [] }, cloud = false, active = false, saveHook: ((value: StudioAssistantFile) => Promise<void>) | undefined;
-  const calls: Array<{ role: StudioRole; model: string; prompt: string }> = [], prepared: typeof calls = [], states: StudioAssistantFile[] = [];
+  const calls: StudioModelInput[] = [], prepared: typeof calls = [], states: StudioAssistantFile[] = [];
   const model: StudioModelPort = { busy: () => active, async stop() {}, async run(input, signal, authorize) {
     assert.equal(active, false); active = true; prepared.push(input);
     try {
@@ -54,6 +54,27 @@ it("retains text documents only in the private main conversation and discloses t
     const restored = new StudioAssistantService({ store: h.store, model: h.model, evidence: h.evidence });
     await restored.open(); assert.deepEqual(restored.snapshot().threads[0]!.messages[0]?.attachments, attachments); assert.equal(h.calls.length, 3); await restored.stop();
   } finally { await h.service.stop(); }
+});
+it("keeps effort in each disclosed request and does not carry it to a different specialist model", async () => {
+  for (const diagnosticModel of [local, "ollama/specialist"]) {
+    const h = fixture([JSON.stringify({ kind: "diagnose", topic: "storage" }), JSON.stringify({ explanation: "No measured storage facts.", evidenceRefs: [], hypotheses: [] }), reply("Review Diagnostics.")]); h.cloud();
+    try {
+      const id = (await h.service.createThread())!;
+      assert.equal((await h.service.send({ threadId: id, text: "Review storage", model: local, diagnosticModel, variant: "high" })).status, "accepted");
+      for (const phase of ["main", "diagnostic", "answer"] as const) {
+        await until(() => h.service.snapshot().share?.phase === phase, `effort disclosure ${phase}`);
+        const share = h.service.snapshot().share!, previous = h.calls.length;
+        const expected = phase === "diagnostic" && diagnosticModel !== local ? undefined : "high";
+        assert.equal(share.variant, expected);
+        assert(h.service.approveCloud(id, share.runId, share.id, share.digest));
+        await until(() => h.calls.length > previous, `effort dispatch ${phase}`);
+        assert.equal(h.calls[previous]!.variant, expected);
+        assert(h.states.some(value => value.threads[0]!.pending?.disclosure === share.digest));
+      }
+      await until(() => !h.service.snapshot().busy, "effort turn settled");
+      assert.equal(h.calls.length, 3);
+    } finally { await h.service.stop(); }
+  }
 });
 it("delegates only closed operational evidence, retains the specialist answer, and returns the conversation to Arke", async () => {
   const h = fixture([JSON.stringify({ kind: "diagnose", topic: "storage" }), JSON.stringify({ explanation: "No current capacity facts were supplied.", evidenceRefs: [], hypotheses: [] }), reply("Check Diagnostics for current measurements.")]);

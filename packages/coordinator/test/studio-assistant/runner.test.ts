@@ -4,7 +4,7 @@ import { it } from "node:test";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { STUDIO_ASSISTANT_LIMITS, type CreateSessionInput, type HarnessAdapter, type HarnessEvent, type SendMessageInput, type SessionConfigInput, type PrivateSessionWriter } from "@arke-studio/contracts";
-import { HarnessStudioModelRunner } from "../../src/studio-assistant/runner.js";
+import { HarnessStudioModelRunner, type StudioModelDisclosure } from "../../src/studio-assistant/runner.js";
 import { StudioAssistantService } from "../../src/studio-assistant/service.js";
 import { FileStudioConversationStore } from "../../src/studio-assistant/store.js";
 import { studioDiagnosticEvidence } from "../../src/studio-assistant/evidence.js";
@@ -46,6 +46,23 @@ async function fixture() {
     send: (gate: Promise<void>) => { sendGate = gate; }, fail: () => { failure = true; }, keep: () => { retained = true; } };
 }
 const input = { role: "studio-assistant" as const, model: "ollama/test", prompt: "A bounded Studio question." }, allow = async () => ({ cloudApproved: false });
+it("pins a declared effort in preparation, the private manifest and the exact approval disclosure", async () => {
+  const h = await fixture(); let disclosure: StudioModelDisclosure | undefined;
+  h.raw.listModels = async () => [{ id: "test", provider: "ollama", variants: { names: ["low", "high"] } }]; h.cloud();
+  try {
+    assert.equal(await h.runner.run({ ...input, variant: "high" }, new AbortController().signal, async value => { disclosure = value; return { cloudApproved: true }; }), '{"kind":"reply","text":"A reply."}');
+    assert.equal(h.prepared[0]?.modelVariant, "high"); assert.equal(h.created[0]?.privateRequest?.variant, "high");
+    assert.equal(disclosure?.variant, "high"); assert.equal(h.sent.length, 1);
+  } finally { await h.runner.stop(); }
+});
+it("refuses an effort the selected model no longer declares before preparation or inference", async () => {
+  const h = await fixture(); let approvals = 0;
+  h.raw.listModels = async () => [{ id: "test", provider: "ollama", variants: { names: ["low"] } }];
+  try {
+    await assert.rejects(h.runner.run({ ...input, variant: "high" }, new AbortController().signal, async () => { approvals++; return { cloudApproved: false }; }), /does not offer this effort/);
+    assert.equal(approvals, 0); assert.equal(h.prepared.length, 0); assert.equal(h.created.length, 0); assert.equal(h.sent.length, 0);
+  } finally { await h.runner.stop(); }
+});
 function nativeCapabilities(adapter: HarnessAdapter): void {
   Object.assign(adapter, { privateDestinations: true, privatePayloads: true, privateTransient: true });
   adapter.sendMessageWithFence = async (input, dispatch) => { dispatch(); return adapter.sendMessage(input); };

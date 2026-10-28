@@ -61,7 +61,14 @@ export type SessionPurpose = z.infer<typeof SessionPurpose>;
 
 /** Host-reviewed single private inference input. Never a renderer/tool authority or a
  * credential container; concrete adapters render their measured provider grammar. */
-export interface PrivateSessionRequest { model: string; system: string; prompt: string; outputTokenLimit: number }
+export const PrivateSessionVariantSchema = z.enum(["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+export type PrivateSessionVariant = z.infer<typeof PrivateSessionVariantSchema>;
+export interface PrivateSessionRequest { model: string; system: string; prompt: string; outputTokenLimit: number; variant?: PrivateSessionVariant }
+/** The private completion protocol carries named reasoning effort, not arbitrary model presets. */
+export function privateSessionVariants(model: Pick<ModelInfo, "variants">): ModelInfo["variants"] {
+  const names = model.variants?.names.filter(name => name !== "default" && PrivateSessionVariantSchema.safeParse(name).success);
+  return names?.length ? { names: ["default", ...names], default: "default" } : undefined;
+}
 /** Host-only ephemeral loopback bridge capability. Separate from the reviewed model input;
  * never a provider credential, renderer/model argument or ordinary session setting. */
 export interface PrivateSessionTransport { baseURL: string; apiKey: string }

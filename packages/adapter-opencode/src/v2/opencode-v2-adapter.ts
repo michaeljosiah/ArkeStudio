@@ -287,7 +287,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   sessionFiles(input: SessionConfigInput, directory?: string, request?: PrivateSessionRequest, transport?: PrivateSessionTransport): ReadonlyArray<SessionFile> {
     const operational = ROSTER.some(member => member.name === input.agent && member.operationalOnly);
     if (operational && !directory) throw new Error("Private native control requires its session directory.");
-    if (request && (!operational || request.model !== input.model)) throw new Error("The private request does not match its prepared model.");
+    if (request && (!operational || request.model !== input.model || (request.variant ?? "default") !== (input.modelVariant ?? "default"))) throw new Error("The private request does not match its prepared model or effort.");
     return [...(operational ? privateControlFiles(request, request ? "generate" : "primary") : []), { name: "opencode.json", contents: `${JSON.stringify(buildSessionConfigV2(input, operational ? privateControlDirectory(directory!) : undefined, request ? privateWireBody(request) : undefined, transport), null, 2)}
 ` }];
   }
@@ -322,7 +322,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     if (privateTransport && (!privateSession || !privateRequest)) throw new Error("A private bridge requires a sealed private request.");
     if (privateRequest) {
       privateWireBody(privateRequest);
-      if (!privateSession || !model || privateRequest.model !== `${model.providerID}/${model.id}` || model.variant && model.variant !== "default") throw new Error("The private request does not match its prepared model or qualified variant.");
+      if (!privateSession || !model || privateRequest.model !== `${model.providerID}/${model.id}` || (model.variant ?? "default") !== (privateRequest.variant ?? "default")) throw new Error("The private request does not match its prepared model or qualified variant.");
     }
     if (privateSession && (!permissionPolicy || !ROSTER.some(member => member.name === input.agent && member.operationalOnly))) {
       throw new Error("Private events require a prepared operational role.");

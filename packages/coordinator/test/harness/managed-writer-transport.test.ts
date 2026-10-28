@@ -26,6 +26,20 @@ async function create(h: Awaited<ReturnType<typeof fixture>>, writer: ManagedStu
   const value = await response.json() as { data: { id: string } }; assert.equal(value.data.id, "writer-session"); assert(writer.bindSession(value.data.id));
 }
 
+it("captures the selected effort and refuses a changed native model reference before sending", { timeout: 60_000 }, async () => {
+  const h = await fixture(), input = { ...request(), variant: "high" as "high" | "low" };
+  let proofs = 0;
+  const writer = new ManagedStudioWriterTransport({ origin: h.origin, current: () => true, request: input, authorization, verify: async () => { proofs++; return true; } });
+  try {
+    assert(writer.bindDirectory(h.root, "studio-assistant")); input.variant = "low";
+    const body = (variant?: string) => JSON.stringify({ location: { directory: h.directory }, model: { providerID: "ollama", id: "test", ...(variant ? { variant } : {}) } });
+    for (const variant of [undefined, "default", "low"]) await assert.rejects(writer.fetch(h.base + "/api/session", { method: "POST", body: body(variant), headers: { authorization } }));
+    assert.equal(proofs, 0);
+    const accepted = await writer.fetch(h.base + "/api/session", { method: "POST", body: body("high"), headers: { authorization } }); await accepted.arrayBuffer();
+    assert.equal((await h.rows())[0]?.body, body("high")); assert.equal(proofs, 1);
+  } finally { await writer.close(); await h.supervisor.stopAndConfirm(); }
+});
+
 it("pins one private directory/session and preserves closed native 204/404 status without raw errors", { timeout: 60_000 }, async () => {
   const h = await fixture(), writer = new ManagedStudioWriterTransport({ origin: h.origin, current: () => true, request: request(), authorization, verify: async () => true });
   try {

@@ -1,16 +1,17 @@
 import { mkdir, mkdtemp, rmdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { agentPromptFor, ROSTER, findHarnessModel, harnessModelReference, STUDIO_ASSISTANT_LIMITS, type HarnessAdapter, type PrivateSessionRequest, type PrivateSessionTransport, type PrivateSessionWriter } from "@arke-studio/contracts";
+import { agentPromptFor, ROSTER, findHarnessModel, harnessModelReference, STUDIO_ASSISTANT_LIMITS, PrivateSessionVariantSchema, privateSessionVariants, type PrivateSessionVariant, type HarnessAdapter, type PrivateSessionRequest, type PrivateSessionTransport, type PrivateSessionWriter } from "@arke-studio/contracts";
 import { createPreparedSession, scopeSessionInput, sessionTurnTimeoutMs, type SessionInput } from "../harness/session-files.js";
 import { toExtendedLength } from "../world/paths.js";
 
 export type StudioRole = "studio-assistant" | "diagnostic-specialist";
+export interface StudioModelInput { role: StudioRole; model: string; prompt: string; variant?: PrivateSessionVariant }
 export interface StudioModelDisclosure { role: StudioRole; model: string; provider: string; local: boolean; destination: string; prompt: string; system?: string; outputTokenLimit?: number; customBrief?: string; variant?: string }
 export interface StudioModelPort {
   busy(): boolean;
   subscribe?(listener: () => void): () => void;
-  run(input: { role: StudioRole; model: string; prompt: string }, signal: AbortSignal,
+  run(input: StudioModelInput, signal: AbortSignal,
     authorize: (disclosure: StudioModelDisclosure, signal: AbortSignal) => Promise<{ cloudApproved: boolean }>): Promise<string>;
   stop(): Promise<void>;
   reconcileRetirement?(): Promise<void>;
@@ -50,9 +51,9 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     try { entry.transport?.seal(); } catch { /* A failed refusal never confirms retirement. */ }
   }
 
-  async run(input: { role: StudioRole; model: string; prompt: string }, signal: AbortSignal,
+  async run(input: StudioModelInput, signal: AbortSignal,
     authorize: (disclosure: StudioModelDisclosure, signal: AbortSignal) => Promise<{ cloudApproved: boolean }>): Promise<string> {
-    input = Object.freeze({ role: input.role, model: input.model, prompt: input.prompt });
+    input = Object.freeze({ role: input.role, model: input.model, prompt: input.prompt, ...(input.variant !== undefined ? { variant: input.variant } : {}) });
     if (this.lifetime.signal.aborted || signal.aborted || this.busy()) throw new Error("Studio inference is stopped or still awaiting its previous owner.");
     if (!["studio-assistant", "diagnostic-specialist"].includes(input.role) || !input.model || input.model.length > 512 || Buffer.byteLength(input.prompt) > 192 * 1024) throw new Error("The Studio request exceeds its model input bound.");
     const entry: Active = { control: new AbortController(), confirmed: false, started: false, workFinished: false }; this.active.add(entry); this.changed();
@@ -71,7 +72,7 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     finally { clearTimeout(timer); combined.removeEventListener("abort", stop); }
   }
 
-  private async execute(entry: Active, input: { role: StudioRole; model: string; prompt: string }, signal: AbortSignal,
+  private async execute(entry: Active, input: StudioModelInput, signal: AbortSignal,
     authorize: (disclosure: StudioModelDisclosure, signal: AbortSignal) => Promise<{ cloudApproved: boolean }>): Promise<string> {
     const adapter = this.deps.adapter();
     if (!adapter?.readiness().ready || !adapter.capabilities().has("events")) throw new Error("The Studio model is unavailable.");
@@ -91,16 +92,18 @@ export class HarnessStudioModelRunner implements StudioModelPort {
     const destination = this.deps.destination(reference, model.provider);
     if (!destination || typeof destination.local !== "boolean" || !/^[a-f0-9]{64}$/.test(destination.identity)) throw new Error("The Studio model destination could not be verified.");
     const sameDestination = () => { const current = this.deps.destination(reference, model.provider); return current?.identity === destination.identity && current.local === destination.local; };
-    const config = scopeSessionInput({ ...await this.deps.sessionInput({ agent: input.role, model: reference }), agent: input.role, model: reference });
+    const config = scopeSessionInput({ ...await this.deps.sessionInput({ agent: input.role, model: reference,
+      ...(input.variant !== undefined ? { modelVariant: input.variant } : {}) }), agent: input.role, model: reference,
+      ...(input.variant !== undefined ? { modelVariant: input.variant } : {}) });
     signal.throwIfAborted();
     const customBrief = config.agents?.[input.role]?.brief;
     if (customBrief && customBrief.length > 16_000) throw new Error("The Studio role instructions exceed their bound.");
-    if (config.modelVariant && config.modelVariant.length > 512) throw new Error("The Studio model variant exceeds its bound.");
-    if (config.modelVariant && config.modelVariant !== "default") throw new Error("The Studio provider payload for this effort has not been qualified.");
+    const variant = config.modelVariant === undefined ? undefined : PrivateSessionVariantSchema.parse(config.modelVariant);
+    if (variant !== undefined && variant !== "default" && !privateSessionVariants(model)?.names.includes(variant)) throw new Error("The selected Studio model does not offer this effort. Choose a supported effort; no fallback was used.");
     const member = ROSTER.find(value => value.name === input.role)!;
     const system = agentPromptFor({ ...member, researchWeb: false, ...(customBrief !== undefined ? { brief: customBrief } : {}) });
     if (Buffer.byteLength(system) > 32 * 1024) throw new Error("The Studio system instructions exceed their bound.");
-    const privateRequest = Object.freeze({ model: reference, system, prompt: input.prompt, outputTokenLimit: 4096 });
+    const privateRequest = Object.freeze({ model: reference, system, prompt: input.prompt, outputTokenLimit: 4096, ...(variant !== undefined ? { variant } : {}) });
     if (this.deps.privateTransport) {
       if (adapter.privateDestinations !== true) throw new Error("The native owner cannot verify a private bridge route.");
       const route = await this.deps.privateTransport(privateRequest, signal);

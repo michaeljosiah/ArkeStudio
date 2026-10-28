@@ -1,5 +1,5 @@
-import type { StudioAssistantCommand, StudioAssistantResponse, StudioAssistantSnapshot, StudioTextAttachment } from "@arke-studio/contracts";
-import { STUDIO_ASSISTANT_LIMITS, StudioAssistantCommandSchema } from "@arke-studio/contracts";
+import type { StudioAssistantCommand, StudioAssistantResponse, StudioAssistantSnapshot, StudioTextAttachment, PrivateSessionVariant } from "@arke-studio/contracts";
+import { STUDIO_ASSISTANT_LIMITS, StudioAssistantCommandSchema, PrivateSessionVariantSchema } from "@arke-studio/contracts";
 import { loadStudioDocuments, studioDocumentsFit, studioPastedDocument, type StudioDocumentTrouble } from "./studio-documents.js";
 
 type Command = Exclude<StudioAssistantCommand["command"], { action: "dictate" | "read-reply" }>;
@@ -7,6 +7,7 @@ type Reply = Extract<StudioAssistantResponse, { type: "result" }>;
 export interface StudioConversationView {
   open: boolean; connected: boolean; fresh: boolean; submitting: boolean; state: StudioAssistantSnapshot | null;
   selected: string | null; draft: string; model: string | undefined; trouble: string | null;
+  effort?: { model: string; variant: PrivateSessionVariant };
   attachments: readonly StudioTextAttachment[]; attaching: boolean;
 }
 const uncertain = (): Reply => ({ type: "result", status: "unconfirmed", reason: "unavailable", threadId: null, runId: null });
@@ -18,6 +19,7 @@ export class StudioConversationClient {
   private readonly listeners = new Set<() => void>();
   private readonly drafts = new Map<string, string>();
   private readonly models = new Map<string, string>();
+  private readonly efforts = new Map<string, NonNullable<StudioConversationView["effort"]>>();
   private readonly documents = new Map<string, readonly StudioTextAttachment[]>();
   private loadingDocuments = false;
   private watchId: string | null = null;
@@ -67,7 +69,7 @@ export class StudioConversationClient {
           : this.selectingNew || this.view.draft.length > 0 || this.view.attachments.length > 0 ? null : state.threads.findLast(thread => !thread.archived)?.id ?? null;
         // A close/navigation never retargets the draft. Restored history has no implicit send.
         if (selected !== this.view.selected) this.drafts.set(this.view.selected ?? "new", this.view.draft);
-        this.change({ state, fresh: true, selected, model: this.models.get(selected ?? "new"), draft: selected === this.view.selected ? this.view.draft : this.drafts.get(selected ?? "new") ?? "", attachments: this.documents.get(selected ?? "new") ?? [], trouble: null });
+        this.change({ state, fresh: true, selected, model: this.models.get(selected ?? "new"), effort: this.efforts.get(selected ?? "new"), draft: selected === this.view.selected ? this.view.draft : this.drafts.get(selected ?? "new") ?? "", attachments: this.documents.get(selected ?? "new") ?? [], trouble: null });
       } else this.change({ fresh: false, trouble: "Studio history is unavailable. Your draft is retained." });
       return;
     }
@@ -76,13 +78,22 @@ export class StudioConversationClient {
     clearTimeout(request.timer); this.pending.delete(frame.requestId); request.resolve(frame.response);
   }
   draft = (value: string): void => { if (!this.view.selected) this.selectingNew = true; this.drafts.set(this.view.selected ?? "new", value); this.change({ draft: value }); };
-  pickModel = (model: string | undefined): void => { if (model) this.models.set(this.view.selected ?? "new", model); else this.models.delete(this.view.selected ?? "new"); this.change({ model }); };
+  pickModel = (model: string | undefined): void => {
+    const key = this.view.selected ?? "new";
+    if (model) this.models.set(key, model); else this.models.delete(key);
+    if (model !== this.view.model) this.efforts.delete(key);
+    this.change({ model, effort: this.efforts.get(key) });
+  };
+  pickEffort = (model: string, variant: string): void => {
+    const parsed = PrivateSessionVariantSchema.safeParse(variant); if (!parsed.success) return;
+    const effort = { model, variant: parsed.data }; this.efforts.set(this.view.selected ?? "new", effort); this.change({ effort });
+  };
   select = (id: string | null): void => {
     if (id && !this.view.state?.threads.some(thread => thread.id === id && !thread.archived)) return;
     this.stopSpeech();
     this.selectingNew = id === null;
     this.drafts.set(this.view.selected ?? "new", this.view.draft);
-    this.change({ selected: id, model: this.models.get(id ?? "new"), draft: this.drafts.get(id ?? "new") ?? "", attachments: this.documents.get(id ?? "new") ?? [], trouble: null });
+    this.change({ selected: id, model: this.models.get(id ?? "new"), effort: this.efforts.get(id ?? "new"), draft: this.drafts.get(id ?? "new") ?? "", attachments: this.documents.get(id ?? "new") ?? [], trouble: null });
   };
   removeDocument = (id: string): void => {
     const key = this.view.selected ?? "new", next = this.view.attachments.filter(row => row.id !== id);
@@ -198,6 +209,7 @@ export class StudioConversationClient {
   }
   async send(model: string): Promise<boolean> {
     const text = this.view.draft, before = this.view.selected, epoch = this.connectionEpoch, attachments = this.view.attachments.map(row => ({ ...row })), signature = JSON.stringify(attachments);
+    const effort = this.view.effort, modelChoice = this.view.model, variant = effort?.model === model ? effort.variant : undefined;
     if (!text.trim() || !studioDocumentsFit(text, attachments) || !model || this.view.submitting || this.dictation || this.loadingDocuments) return false;
     this.stopSpeech(); this.change({ submitting: true });
     try {
@@ -205,13 +217,14 @@ export class StudioConversationClient {
     if (!threadId) {
       const created = await this.request({ action: "create" }); if (created.status !== "ok" || !created.threadId) return false;
       threadId = created.threadId;
-      if (this.connectionEpoch !== epoch || !this.view.open || this.view.selected !== before || this.view.draft !== text || JSON.stringify(this.view.attachments) !== signature) return false;
+      if (this.connectionEpoch !== epoch || !this.view.open || this.view.selected !== before || this.view.draft !== text || this.view.model !== modelChoice || this.view.effort !== effort || JSON.stringify(this.view.attachments) !== signature) return false;
       this.selectingNew = false; this.drafts.set(threadId, text);
       this.documents.set(threadId, attachments);
       if (this.view.model) this.models.set(threadId, this.view.model);
+      if (effort) this.efforts.set(threadId, effort);
       this.change({ selected: threadId });
     }
-    const sent = await this.request({ action: "send", threadId, model, text, ...(attachments.length ? { attachments } : {}) });
+    const sent = await this.request({ action: "send", threadId, model, text, ...(variant !== undefined ? { variant } : {}), ...(attachments.length ? { attachments } : {}) });
     if (sent.status !== "accepted") return false;
     if (before === null && this.drafts.get("new") === text) this.drafts.set("new", "");
     if (before === null && JSON.stringify(this.documents.get("new") ?? []) === signature) this.documents.delete("new");

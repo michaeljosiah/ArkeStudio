@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { ClientMessageSchema, FrameSchema, isRemoteHostCommand, RemoteCommandRefusalSchema, StudioAssistantCommandSchema, StudioAssistantSnapshotSchema, StudioCloudShareSchema, StudioAssistantMessageSchema, StudioTextAttachmentsSchema, StudioAssistantThreadSchema } from "../src/index.js";
+import { privateSessionVariants } from "../src/adapter.js";
 const request = { kind: "studio-assistant", requestId: "12345678-1234-4234-8234-123456789abc", command: { action: "watch" } };
+it("offers only declared reasoning efforts supported by the private protocol and bounds selected values", () => {
+  assert.equal(privateSessionVariants({}), undefined);
+  assert.equal(privateSessionVariants({ variants: { names: ["long-context"] } }), undefined);
+  assert.deepEqual(privateSessionVariants({ variants: { names: ["low", "high", "long-context"], default: "high" } }), { names: ["default", "low", "high"], default: "default" });
+  const command = { action: "send", threadId: "01J8F3K2QW9VZX4N7M0RTYB6HC", model: "provider/model", text: "Review storage" };
+  for (const variant of [undefined, "default", "none", "low", "high", "max"]) assert(ClientMessageSchema.safeParse({ ...request, command: { ...command, variant } }).success);
+  for (const variant of ["arbitrary", { reasoning_effort: "high" }, "high\n"]) assert(!ClientMessageSchema.safeParse({ ...request, command: { ...command, variant } }).success);
+});
 it("reads legacy interrupted history and admits only closed failure reasons", () => {
   const id = "01J8F3K2QW9VZX4N7M0RTYB6HC";
   const pending = { id, phase: "diagnostic", state: "interrupted", startedAt: 1, model: "ollama/local", destination: null, disclosure: null };

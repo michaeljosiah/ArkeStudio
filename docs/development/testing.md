@@ -2095,12 +2095,17 @@ stand-ins do not establish binary provenance, live model/GPU or remaining activa
 size, metadata/identity, owner, cancellation and path-alias checks, including a healthy bundled
 protocol stand-in refused by the private writer factory. Desktop `runtime-sources.test.mjs`
 checks the private executable pin against the bundled version/archive; `runtime-support.test.mjs`
-retains the packaging regression checks. With `ARKE_TEST_OPENCODE2`, the five real bundled bridge
+retains the packaging regression checks. With `ARKE_TEST_OPENCODE2`, the six real bundled bridge
 scenarios now await executable byte qualification before creating a private writer. No build
 manifest, generic protocol reply or test stand-in can replace the committed expected digest.
 This qualifies the pinned writer content within Arke's existing owned local desktop trust model.
 Managed provider dependencies and remaining activation/native acceptance are separate requirements;
 no protection against compromise of the local user/OS is claimed.
+The `production managed effort selection` case first refuses a choice absent from the native
+catalogue, then verifies one explicitly defaulted request and session retirement. Nondefault
+efforts use synthetic catalogue/provider coverage in runner, service, private-control and
+managed-writer tests; this native fixture does not qualify their model behavior. Client Studio
+and model-chip tests cover offered choices, accurate Default/Off labels and draft ownership.
 `test/local-ai/runtime-content.test.ts` covers fixed runtime/library pins, changed and unexpected
 code, missing files, bounded metadata exceptions, path escapes/aliases, owner/cancellation and
 single verification ownership. `managed-provider-bridge.test.ts` refuses a healthy unqualified

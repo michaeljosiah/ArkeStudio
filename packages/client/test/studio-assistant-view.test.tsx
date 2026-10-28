@@ -48,6 +48,25 @@ it("focuses the Studio composer once on entry without stealing focus after a bus
     assert(h.sent.every(message => message.command.action === "watch"));
   } finally { await act(async () => root.unmount()); h.client.dispose(); container.remove(); }
 });
+it("uses the existing effort picker for supported choices without sending a request", async () => {
+  const h = fixture(), container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  const appState = structuredClone(FIXTURE_STATE);
+  appState.app.harnessModelStatus = { status: "ready" };
+  appState.app.harnessModels = [{ id: "model", provider: "provider", variants: { names: ["low", "high", "custom-preset"], default: "low" } }];
+  dom.HTMLElement.prototype.scrollIntoView = () => {};
+  try {
+    await act(async () => root.render(<View client={h.client} appState={appState} />));
+    const chip = container.querySelector<HTMLButtonElement>('.fy-mchip__btn--effort')!;
+    assert(chip); assert.equal(chip.textContent, "Default");
+    await act(async () => chip.click());
+    const options = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+    assert.deepEqual(options.map(button => button.textContent), ["Default", "Low", "High"]);
+    await act(async () => options[2]!.click());
+    assert.deepEqual(h.client.getSnapshot().effort, { model: "provider/model", variant: "high" });
+    assert.equal(chip.textContent, "High");
+    assert(h.sent.every(message => message.command.action === "watch"));
+  } finally { await act(async () => root.unmount()); h.client.dispose(); container.remove(); }
+});
 it("uses the approved 1100px boundary for native Studio modal behavior", async () => {
   const dialogs = dom.HTMLElement.prototype as HTMLElement & Pick<HTMLDialogElement, "showModal" | "show">;
   const originalMedia = window.matchMedia, originalModal = dialogs.showModal, originalShow = dialogs.show;
