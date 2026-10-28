@@ -113,6 +113,22 @@ deadlines, with every refusal and protected-byte assertion retained. Subsequent 
 the real-model rerun remain qualification work; do not describe an earlier green checkpoint as
 acceptance of these later changes.
 
+The completed final serial matrix on public `352e97392` reports **301 cases: 300 passed, one
+platform-specific skip, zero failures or cancellations**. The fresh actual-model run completed
+all three calls, requester-only privacy, canonical history restoration without replay and both
+native shutdowns. Full workspace typecheck, lint (seven existing warnings), production build and
+main-bundle load smoke pass. Separate actual sandboxed Electron transport and startup-presentation
+checks also pass. These results overlap focused runs and must not be added together.
+
+The checkpoint's Windows CI shard 4 exposed one additional test seam: original-cleanup failure
+must refuse the complete forced-stop owner, including its new captured-handle fallback. Both
+native failure fixtures now do so and still require the exact original cleanup proof after a
+successful retry. This changes fault injection, not production cleanup or its acceptance rules.
+Both complete supervisor/original-cleanup suites pass all twenty cases under CI's Node 22 after
+this correction; coordinator typecheck and lint also pass.
+The fix requires its own CI. Remaining implementation, packaged-install/device and matched
+design-master acceptance listed above are unchanged; the full epic is not closed by this pass.
+
 Restore temporary viewport overrides and stop the qualifier's original host when finished.
 Clear the two build environment variables before the normal production build. Retained test
 worlds/private fixture conversations are not automatic cleanup candidates.

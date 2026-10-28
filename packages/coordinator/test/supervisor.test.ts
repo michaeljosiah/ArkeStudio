@@ -3,7 +3,6 @@ import { describe, it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ChildProcess } from "node:child_process";
 import { tempDir } from "./tmp.js";
 import { until, untilAsync } from "./wait.js";
 import { ChildLedger, killTree, type ChildRecord } from "../src/child-ledger.js";
@@ -105,13 +104,10 @@ describe("ChildSupervisor", () => {
     let refuse = true;
     const sup = new ChildSupervisor({ id: "failed-start", command: process.execPath, args: [CHILD],
       env: { MODE: "ignore-stop" }, readyTimeoutMs: 10_000, validateHealth: async () => ({ ok: false, reason: "incompatible test runtime" }),
-    }, { kill: async pid => {
-      if (!refuse) { await killTree(pid); return; }
-      // Simulate failure of both native termination routes, including the captured-handle
-      // fallback. The later real tree kill still confirms exit of this original child.
-      const child = (sup as unknown as { child: ChildProcess | null }).child;
-      if (child) child.kill = () => false;
-    } });
+    });
+    // Refuse the complete native termination owner, including its direct-handle fallback.
+    const owner = sup as unknown as { forceStop(child: unknown): Promise<void> }, forceStop = owner.forceStop.bind(sup);
+    owner.forceStop = async child => { if (!refuse) await forceStop(child); };
     try {
       await sup.start();
       assert.equal(sup.status, "failed");
