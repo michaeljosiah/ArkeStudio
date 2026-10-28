@@ -379,6 +379,25 @@ the ZIP back, `world-guide.ts` keeps the Guide and its teasers and packs the gui
 the Export sheet's Arke Player kind with Release; `screens/world-guide.tsx` and
 `world-guide-teasers.tsx` are the Guide page. See [publications](publications.md).
 
+Stories for Arke Player (SPEC-058 R-79 – R-81): contracts `world-package.ts` also reads schema 6, an
+interactive story published alone, and its `arke-story` document (`readStory`). `story-document.ts`
+compiles a production's routing and the clips or beats the export resolved into that document
+(`compileStoryDocument`), and walks every route through it with SPEC-063's evaluator
+(`storyRoutes`). These fixtures are the Studio's, not the Player's:
+`packages/contracts/scripts/story-fixtures.ts` writes `test/fixtures/world-package/story/`, which
+arke_world copies, and the contracts test fails until they are regenerated after a change to
+`story-state.js`.
+
+Export → Arke Player for a story (SPEC-058 R-89; turn 245): coordinator
+`productions/story-export.ts` reads an interactive movie or a visual novel through the web
+package's own resolvers (`resolveMovieScenes`, `resolveBeatScenes` in `interactive.ts`), counts and
+blocks it for the sheet (`readStoryExport`, answering `read-story-export`), and makes the schema 6
+package (`exportStoryPlayer`, reached through `export-arke-player`), each clip measured by
+`media/mp4-info.ts` and shipped as made or re-encoded. Contracts `story-export.ts` holds the sheet's
+state, its blockers and the read-back line. Client `components/story-export.tsx` is the Export sheet
+on the Branch Map: Web package and Arke Player. `scripts/export-arke-player.mts --story` makes the
+same package from a copy of a world.
+
 Audio Studio (approved turn 226): client
 `screens/chapter-audio-studio.tsx` composes the Cut layout, shared `EditorPanelTabs`,
 `EditorSheetSlot` and `useCutLayout` around the chapter script. `audio-studio-workspace.tsx`
@@ -1726,3 +1745,14 @@ means hidden. Stateful findings carry `witnessPrefix`, so the map can display na
 preview that exact state without parsing diagnostic text. Preview facts link values back to
 their originating choice; Test another route opens the reachable-prefix picker through
 `InteractivePlayerAuthor.onTestRoute`, rather than inventing audience state.
+
+`scripts/smoke-story-layout.mjs` qualifies the complete App/global-chat layout, including the
+Story facts Inspector and one/two/three/four/five-option beat previews in both themes at desktop,
+window, tablet and phone sizes. It measures the desktop dialogue/vertical-choice columns, narrow
+dialogue-first stack, visible alternatives, full labels, scroll access and selection of a
+distinct second route. Four short clip-stage checks also verify overflow from the first choice
+through the last; six long-dialogue cases verify readable, scrollable copy and usable choices.
+Scene-editor Preview has sixteen additional full-App window-bound and choice-access cases.
+The shared window-overlay rules in `branch-map.css` cover both entry points and release the
+scene centre query container while its modal player is open. Its `--baseline` capture supports comparisons against
+turn 240 without reading or writing an author's world; see the testing guide.

@@ -28,6 +28,12 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN STORY EXPORT 245
+  { group: "Story export · turn 245", screen: "Export → Arke Player: an interactive movie", frame: "245a", route: "Interactive / Export", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 28 October 2026 with Player P18."] },
+  { group: "Story export · turn 245", screen: "Export → Arke Player: a visual novel", frame: "245b", route: "Interactive / Export", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 28 October 2026 with Player P18."] },
+  { group: "Story export · turn 245", screen: "Not made: each blocker in one clause", frame: "245c", route: "Interactive / Export", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 28 October 2026 with Player P18."] },
+  { group: "Story export · turn 245", screen: "The package made, read back, beside the world’s releases", frame: "245d", route: "Interactive / Export", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 28 October 2026 with Player P18."] },
+  // END STORY EXPORT 245
   // BEGIN INSTALL JOURNEYS
   { group: "Install journeys · turns 242–244", screen: "One installer, three ways to begin", frame: "242a", route: "Proposed first-run setup", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved by owner on 28 October 2026; implementation in progress. Shared entry journey; measurements are illustrative."] },
   { group: "Install journeys · turns 242–244", screen: "Guided · see the starter package before downloading", frame: "242b", route: "Proposed first-run setup", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved by owner on 28 October 2026; implementation in progress. Guided journey; measurements are illustrative."] },
@@ -963,6 +969,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "story-export-245.review.html", what: "Turn 245: Export → Arke Player for an interactive story — the Export sheet with Web package and Arke Player for an interactive movie and a visual novel, its blockers, and the package made and read back beside the world’s releases.", state: "approved 28 October 2026; not built" },
   { file: "install-journeys.review.html", what: "Turns 242–244: Guided, Advanced and Lightweight install journeys.", state: "approved; implementation in progress" },
   { file: "system-status-240.review.html", what: "Turn 241: System shortcut, host performance/storage/service overview, measured warning, unavailable data and compact layouts.", state: "approved 26 October 2026; component implemented, under qualification" },
   { file: "branch-map-state-240.review.html", what: "Turn 240: remembered values, conditional choices and dialogue in First Contact, plus the click-connector creation flow; local interactive prototype.", state: "proposed 27 October 2026; not built" },
@@ -1151,6 +1158,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="global-chat-239.reference.css">
 <link rel="stylesheet" href="system-status-240.css">
 <link rel="stylesheet" href="branch-map-state-240.css">
+<link rel="stylesheet" href="story-export-245.css">
 <link rel="stylesheet" href="../packages/client/src/theme/tokens/launch.css">
 <link rel="stylesheet" href="../packages/client/src/screens/launch.css">
 <link rel="stylesheet" href="install-journeys.css">

@@ -309,7 +309,14 @@
 .bm-confirm__line { display: flex; align-items: center; gap: 8px; font: var(--type-ui); }
 
 /* The preview (turn 156g): the shared player over the whole window, above the app's chrome. */
-.bm-player { position: fixed; inset: 0; z-index: 60; }
+/* The shared player's stylesheet is mounted after the app's. Its one-class position/size
+   defaults must not turn the window preview into another shrinking child of the map or scene. */
+.bm .bm-player, .fy-sw .bm-player { position: fixed; inset: 44px 0 0; z-index: 60; width: auto; height: auto; }
+@media (max-width: 599px) { .bm .bm-player, .fy-sw .bm-player { top: 48px; } }
+
+/* The scene centre normally establishes a query container. While its modal player is open,
+   let fixed positioning reach the window rather than trapping the preview inside that centre. */
+.fy-sw .fy-sw__centre:has(.bm-player) { container-type: normal; }
 
 /* The narrow map (157i): a list in the canvas's order, the Arke dock folded under it. */
 .bm[data-narrow="true"] { flex-direction: column; }

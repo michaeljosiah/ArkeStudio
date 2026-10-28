@@ -1,0 +1,372 @@
+{
+  "format": "arke-story",
+  "version": 1,
+  "kind": "movie",
+  "shape": "9:16",
+  "start": "sc_harbour",
+  "fingerprint": "sha256:27f11b0707d6d4da514354f34e40bb4897202fbb18e77f6f34e4d539fd2282c6",
+  "facts": [
+    {
+      "id": "key",
+      "type": "enum",
+      "values": [
+        "held",
+        "left",
+        "lost"
+      ],
+      "default": "held"
+    },
+    {
+      "id": "lamp",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "id": "ledger",
+      "type": "boolean",
+      "default": false
+    }
+  ],
+  "scenes": [
+    {
+      "id": "sc_harbour",
+      "title": "The harbour at dusk",
+      "clips": [
+        {
+          "asset": "ro-harbour",
+          "from": 0,
+          "to": 18000
+        },
+        {
+          "asset": "ro-harbour",
+          "from": 18000,
+          "to": 30000
+        }
+      ]
+    },
+    {
+      "id": "sc_weigh",
+      "title": "The weigh house",
+      "clips": [
+        {
+          "asset": "ro-weigh",
+          "from": 0,
+          "to": 22000
+        },
+        {
+          "asset": "ro-weigh",
+          "from": 22000,
+          "to": 31000
+        }
+      ]
+    },
+    {
+      "id": "sc_bell",
+      "title": "The bell tower",
+      "clips": [
+        {
+          "asset": "ro-bell",
+          "from": 0,
+          "to": 15000
+        },
+        {
+          "asset": "ro-bell",
+          "from": 15000,
+          "to": 24000
+        },
+        {
+          "asset": "ro-bell",
+          "from": 24000,
+          "to": 33000
+        }
+      ]
+    },
+    {
+      "id": "sc_end",
+      "title": "The bell",
+      "clips": [
+        {
+          "asset": "ro-end",
+          "from": 0,
+          "to": 20000
+        },
+        {
+          "asset": "ro-end",
+          "from": 20000,
+          "to": 36000
+        }
+      ]
+    },
+    {
+      "id": "sc_vault",
+      "title": "The vault under the tower",
+      "clips": [
+        {
+          "asset": "cover",
+          "from": 0,
+          "to": 40000
+        }
+      ]
+    },
+    {
+      "id": "sc_drowned",
+      "title": "Under the harbour",
+      "clips": [
+        {
+          "asset": "ro-drowned",
+          "from": 0,
+          "to": 25000
+        }
+      ]
+    }
+  ],
+  "presentation": [
+    {
+      "scene": "sc_weigh",
+      "index": 1,
+      "when": {
+        "op": "eq",
+        "fact": "lamp",
+        "value": true
+      }
+    },
+    {
+      "scene": "sc_bell",
+      "index": 1,
+      "when": {
+        "op": "eq",
+        "fact": "key",
+        "value": "held"
+      }
+    },
+    {
+      "scene": "sc_bell",
+      "index": 2,
+      "when": {
+        "op": "all",
+        "args": [
+          {
+            "op": "eq",
+            "fact": "lamp",
+            "value": true
+          },
+          {
+            "op": "not",
+            "arg": {
+              "op": "eq",
+              "fact": "key",
+              "value": "lost"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "scene": "sc_end",
+      "index": 1,
+      "when": {
+        "op": "eq",
+        "fact": "ledger",
+        "value": true
+      }
+    }
+  ],
+  "choices": [
+    {
+      "id": "ch_light",
+      "from": "sc_harbour",
+      "to": "sc_weigh",
+      "label": "Light the lamp",
+      "effects": [
+        {
+          "fact": "lamp",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "ch_dark",
+      "from": "sc_harbour",
+      "to": "sc_weigh",
+      "label": "Go on in the dark",
+      "effects": []
+    },
+    {
+      "id": "ch_leave",
+      "from": "sc_weigh",
+      "to": "sc_bell",
+      "label": "Leave the key",
+      "effects": [
+        {
+          "fact": "key",
+          "value": "left"
+        }
+      ]
+    },
+    {
+      "id": "ch_keep",
+      "from": "sc_weigh",
+      "to": "sc_bell",
+      "label": "Keep the key",
+      "effects": []
+    },
+    {
+      "id": "ch_drop",
+      "from": "sc_weigh",
+      "to": "sc_bell",
+      "label": "Drop it in the water",
+      "when": {
+        "op": "eq",
+        "fact": "lamp",
+        "value": false
+      },
+      "effects": [
+        {
+          "fact": "key",
+          "value": "lost"
+        }
+      ]
+    },
+    {
+      "id": "ch_ring",
+      "from": "sc_bell",
+      "to": "sc_end",
+      "label": "Ring once",
+      "effects": []
+    },
+    {
+      "id": "ch_key",
+      "from": "sc_bell",
+      "to": "sc_vault",
+      "label": "Use the tenth key",
+      "when": {
+        "op": "eq",
+        "fact": "key",
+        "value": "held"
+      },
+      "effects": [],
+      "unavailable": {
+        "reason": "Left at the weigh house"
+      }
+    },
+    {
+      "id": "ch_signal",
+      "from": "sc_bell",
+      "to": "sc_end",
+      "label": "Signal with the lamp",
+      "when": {
+        "op": "eq",
+        "fact": "lamp",
+        "value": true
+      },
+      "effects": [],
+      "unavailable": {
+        "label": "Signal the boats",
+        "reason": "No light to signal with"
+      }
+    },
+    {
+      "id": "ch_wait",
+      "from": "sc_bell",
+      "to": "sc_end",
+      "label": "Wait for the tide",
+      "effects": []
+    },
+    {
+      "id": "ch_swim",
+      "from": "sc_bell",
+      "to": "sc_drowned",
+      "label": "Swim for the vault",
+      "when": {
+        "op": "any",
+        "args": [
+          {
+            "op": "eq",
+            "fact": "key",
+            "value": "lost"
+          },
+          {
+            "op": "not",
+            "arg": {
+              "op": "eq",
+              "fact": "lamp",
+              "value": true
+            }
+          }
+        ]
+      },
+      "effects": []
+    },
+    {
+      "id": "ch_take",
+      "from": "sc_vault",
+      "to": "sc_end",
+      "label": "Take the ledger",
+      "effects": [
+        {
+          "fact": "ledger",
+          "value": true
+        },
+        {
+          "fact": "key",
+          "value": "lost"
+        }
+      ]
+    },
+    {
+      "id": "ch_seal",
+      "from": "sc_vault",
+      "to": "sc_end",
+      "label": "Leave it sealed",
+      "effects": []
+    }
+  ],
+  "endings": [
+    {
+      "scene": "sc_end",
+      "title": "The bell",
+      "variants": [
+        {
+          "id": "ev_ledger",
+          "title": "The ledger, saved",
+          "text": "The weigh house keeps its count.",
+          "when": {
+            "op": "eq",
+            "fact": "ledger",
+            "value": true
+          }
+        },
+        {
+          "id": "ev_boats",
+          "title": "The boats come in",
+          "text": "The lamp brings them home.",
+          "when": {
+            "op": "all",
+            "args": [
+              {
+                "op": "eq",
+                "fact": "lamp",
+                "value": true
+              },
+              {
+                "op": "eq",
+                "fact": "ledger",
+                "value": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "ev_twice",
+          "title": "The Bell Rings Twice",
+          "text": "Someone below answers.",
+          "fallback": true
+        }
+      ]
+    },
+    {
+      "scene": "sc_drowned",
+      "title": "Under the harbour"
+    }
+  ]
+}

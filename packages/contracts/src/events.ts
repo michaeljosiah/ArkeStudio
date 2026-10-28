@@ -1,6 +1,7 @@
 import { GuideVoiceLineSchema } from "./world-guide.js";
 import { OnboardingStatusSchema } from "./onboarding.js";
 import { ArkePlayerReleaseSchema } from "./arke-player-release.js";
+import { StoryExportBlockerSchema, StoryExportMadeSchema, StoryExportStateSchema } from "./story-export.js";
 import { DramaEditionSchema } from "./audio-drama-edition.js";
 import { ChapterReviewSchema } from "./chapter-review.js";
 import { DramaRequestSchema } from "./audio-drama.js";
@@ -1716,11 +1717,23 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
           part: z.number().int().min(1).optional(),
           /** A music production's tracks (SPEC-060 R-15). */
           tracks: z.number().int().min(0).optional(),
+          /** An interactive movie's or a visual novel's package, read back route by route (245d, SPEC-058 R-89). */
+          story: StoryExportMadeSchema.optional(),
         }).strict(),
-        z.object({ ok: z.literal(false), blockers: z.array(z.string().min(1)).min(1) }).strict(),
+        z.object({
+          ok: z.literal(false),
+          blockers: z.array(z.string().min(1)).min(1),
+          /** A story's blockers with what clears each (245c); `blockers` says the same in words. */
+          problems: z.array(StoryExportBlockerSchema).optional(),
+        }).strict(),
       ]),
     })
     .strict(),
+  /**
+   * What Export → Arke Player would make of an interactive movie or a visual novel (design turn
+   * 245a – 245c, SPEC-058 R-89), read the way the export reads it; or none, and why.
+   */
+  z.object({ ...base, type: z.literal("story.export-state"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, state: StoryExportStateSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
   /** The audiobook's video (design turn 197e): the files made and how many chapters were encoded, or what stood in the way. */
   z
     .object({
@@ -1771,7 +1784,14 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
         /** A music production's package (SPEC-060 R-15): its tracks and how long they play. */
         tracks: z.number().int().min(0).optional(),
         durationMs: z.number().int().min(0).optional(),
+        /** A story's package (SPEC-058 R-89): its scenes, the routes read back and its endings. */
+        story: StoryExportMadeSchema.optional(),
       }).strict()),
+      /**
+       * The exports still being made on this machine, by id: a window that lost an export's answer
+       * in a reconnect, and finds no package, knows from this whether to wait or say it ended.
+       */
+      running: z.array(z.string().min(1)).max(1000).optional(),
     })
     .strict(),
   /** The book as a listener hears it (design turn 186), answered to the window that asked; or none, and why. */

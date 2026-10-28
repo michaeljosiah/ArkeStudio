@@ -288,6 +288,18 @@ parts and empties the entry's `parts`. A Guide with teasers exports guide versio
 from before ArkePlayer PR #11 refuse, with the package carrying it: publish one only once phones
 have that Player.
 
+**A story as a package of its own** (SPEC-058 R-79 – R-90, turn 245): an interactive movie or a
+visual novel goes out by the same four steps with `--story <production id>` in place of the
+production id (`npx tsx scripts/export-arke-player.mts <copy> --story <production id> <ffmpeg>`,
+`--size` for a novel's pictures, `--cover`/`--tall` for its covers), or from the Branch Map's
+Export → Arke Player. It makes `exports/<production-id>-story-<UTC date>.zip`, schema 6 and alone,
+read back with every route replayed, and is blocked as the sheet is — every choice walked in
+preview, a clip or picture for each reachable scene. The script carries only the character voices
+already prepared for the table read, so make a voiced novel from the app. Upload it under that name
+to the world's story release, pin it with ArkePlayer's `pin_world`, paste the pin on the production
+as `story` — never `package`: a Player of revision 11 installs every production `package` and would
+fetch a story it cannot read — raise the `serial`, and publish the list.
+
 **A picture comes with the list** (SPEC-058 R-63 – R-67): a world's key art, a story's wide cover
 (16:9) or its upright cover (2:3), new or changed, needs no app release.
 1. Upload it under a name of its own, `<world id>-<keyArt|picture|tall>-<yyyymmdd>.<ext>`, to the

@@ -5,7 +5,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { openPromise, type Entry } from "yauzl";
 import { ZipFile } from "yazl";
-import { guideAssetIds, listeningAssetIds, musicAssetIds, readGuide, readListening, readMusic, readWorldManifest, WORLD_MANIFEST_FILE, type WorldManifest } from "@arke-studio/contracts";
+import { guideAssetIds, listeningAssetIds, musicAssetIds, readGuide, readListening, readMusic, readStory, readWorldManifest, storyAssetIds, WORLD_MANIFEST_FILE, type StoryDocument, type WorldManifest } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
 
 /**
@@ -91,16 +91,18 @@ export async function readWorldPackageRelease(file: string): Promise<{ manifest:
   }
 }
 
-export type WorldPackageCheck = { ok: true; manifest: WorldManifest; sha256: string; bytes: number } | { ok: false; problems: string[] };
+/** `stories`: each story document the reader read, by production, so the export can replay its routes (SPEC-058 R-89). */
+export type WorldPackageCheck = { ok: true; manifest: WorldManifest; sha256: string; bytes: number; stories: Record<string, StoryDocument> } | { ok: false; problems: string[] };
 
 /**
- * Reads a written package back as Arke Player will (SPEC-058 R-5, R-13, R-70; SPEC-059 R-14): world.json,
- * each listening or music document and the guide through the shared readers, nothing in the ZIP the manifest does not name,
+ * Reads a written package back as Arke Player will (SPEC-058 R-5, R-13, R-70, R-80; SPEC-059 R-14): world.json,
+ * each listening, music or story document and the guide through the shared readers, nothing in the ZIP the manifest does not name,
  * nothing compressed, every file at its declared length and digest, and every file used.
  */
 export async function checkWorldPackageZip(file: string, signal?: AbortSignal): Promise<WorldPackageCheck> {
   const zip = await openPromise(toExtendedLength(file), { autoClose: false, strictFileNames: true, validateEntrySizes: true });
   const problems: string[] = [];
+  const stories: Record<string, StoryDocument> = {};
   let checked: WorldManifest;
   try {
     const entries = new Map<string, Entry>();
@@ -131,7 +133,18 @@ export async function checkWorldPackageZip(file: string, signal?: AbortSignal): 
       else for (const assetId of guideAssetIds(guide.guide)) used.add(assetId);
     }
     for (const production of manifest.productions) {
-      for (const assetId of [production.picture, production.book, production.narration, production.listening, production.music]) if (assetId !== undefined) used.add(assetId);
+      for (const assetId of [production.picture, production.tall, production.book, production.narration, production.listening, production.music, production.story]) if (assetId !== undefined) used.add(assetId);
+      if (production.story !== undefined) {
+        const entry = entries.get(manifest.assets[production.story]!.path.toLowerCase());
+        if (entry === undefined) continue;
+        const story = readStory((await bytesOf(entry)).toString("utf8"), manifest.assets);
+        if (!story.ok) problems.push(`${production.id} story: ${story.reason}`);
+        else {
+          stories[production.id] = story.document;
+          for (const assetId of storyAssetIds(story.document)) used.add(assetId);
+        }
+        continue;
+      }
       if (production.music !== undefined) {
         const entry = entries.get(manifest.assets[production.music]!.path.toLowerCase());
         if (entry === undefined) continue;
@@ -169,5 +182,5 @@ export async function checkWorldPackageZip(file: string, signal?: AbortSignal): 
     hash.update(chunk as Buffer);
     bytes += (chunk as Buffer).length;
   }
-  return { ok: true, manifest: checked, sha256: hash.digest("hex"), bytes };
+  return { ok: true, manifest: checked, sha256: hash.digest("hex"), bytes, stories };
 }

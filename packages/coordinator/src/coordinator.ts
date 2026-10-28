@@ -414,6 +414,7 @@ import { AudioStudioPreviews } from "./productions/audio-studio-preview.js";
 import { renderAudioStudioMix } from "./productions/audio-studio-mix.js";
 import { audiobookPlayerFile, exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
 import { exportArkePlayer, listArkePlayerPackages } from "./productions/arke-player-export.js";
+import { readStoryExport } from "./productions/story-export.js";
 import { guideVoiceLines, setGuideEntry, setGuideTeasers } from "./productions/world-guide.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
@@ -15443,6 +15444,29 @@ export class Coordinator {
         }
         return;
       }
+      case "read-story-export": {
+        // What Export → Arke Player would make of an interactive movie or a visual novel (design
+        // turn 245a – 245c, SPEC-058 R-89): read the way the export reads it, so the sheet's rows
+        // and blockers are the export's own. Nothing is made.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId };
+        try {
+          const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+          const voices = production !== undefined && productionShape(production.meta).playsAsBeats ? this.interactiveExportVoices(store, msg.productionId) : undefined;
+          const publish = await this.storyPublications.settings(msg.worldId, msg.productionId).catch(() => undefined);
+          const state = await readStoryExport(store, msg.productionId, {
+            ffmpeg: this.opts.ffmpeg !== undefined,
+            ...(voices !== undefined ? { voices } : {}),
+            ...(msg.size !== undefined ? { pictureSize: msg.size } : {}),
+            ...(publish !== undefined ? { publish: { title: publish.title, author: publish.author, cover: publish.cover } } : {}),
+          });
+          this.emit({ at: this.nowIso(), type: "story.export-state", ...ids, state });
+        } catch (err) {
+          this.emit({ at: this.nowIso(), type: "story.export-state", ...ids, state: null, refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
       case "set-audiobook-picture-focus": {
         // Where a picture's subject stands (design turn 197b): kept on the picture, answered as the record.
         const store = this.opts.provider.openStore?.();
@@ -15502,7 +15526,11 @@ export class Coordinator {
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         // A part says so in Activity (236d): Release · New chapters is a different thing to make.
-        const label = `Arke Player · ${msg.options.part !== undefined ? "part · " : ""}${production.meta.title}`.slice(0, 200);
+        // So does a story (245): its package is not the world's.
+        const story = productionShape(production.meta).isBranching;
+        const label = `Arke Player · ${msg.options.part !== undefined ? "part · " : story ? "story · " : ""}${production.meta.title}`.slice(0, 200);
+        // A visual novel's lines in their prepared voices, as the web package reads them (turn 174).
+        const voices = story && productionShape(production.meta).playsAsBeats ? this.interactiveExportVoices(store, msg.productionId) : undefined;
         let last = 0;
         const progress = (status: "running" | "done" | "cancelled" | "failed", percent: number, step?: string, output: string | null = null, error: string | null = null) =>
           this.emit({ at: new Date().toISOString(), type: "export.progress", worldId: msg.worldId, productionId: msg.productionId, exportId: msg.exportId, status, percent: Math.max(0, Math.min(100, Math.round(percent))), label, ...(step !== undefined ? { step: step.slice(0, 200) } : {}), output, error });
@@ -15517,6 +15545,7 @@ export class Coordinator {
           include: { book: msg.options.book, motion: msg.options.motion },
           ...(msg.options.size !== undefined ? { pictureSize: msg.options.size } : {}),
           ...(msg.options.part !== undefined ? { part: msg.options.part } : {}),
+          ...(voices !== undefined ? { voices } : {}),
           ...(publish !== undefined ? { publish: { title: publish.title, author: publish.author, language: publish.language, cover: publish.cover } } : {}),
           studioVersion: this.opts.appVersion,
           // Each step said at once, the percent within it at most twice a second.
@@ -15547,7 +15576,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         const packages = [...(await listWebPackages(store).catch(() => [])), ...(await listVideoExports(store).catch(() => [])), ...(await listArkePlayerPackages(store).catch(() => []))].sort((a, b) => (a.exportedAt < b.exportedAt ? 1 : -1));
-        this.emit({ at: new Date().toISOString(), type: "web-packages.listed", requestId: msg.requestId, worldId: msg.worldId, packages });
+        this.emit({ at: new Date().toISOString(), type: "web-packages.listed", requestId: msg.requestId, worldId: msg.worldId, packages, running: [...this.exports.keys()].slice(0, 1000) });
         return;
       }
       case "pick-manuscript": {
