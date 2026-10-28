@@ -24,6 +24,7 @@ it("keeps advanced controls collapsed and saves explicit changes only after a ma
     assert(container.querySelector('[aria-label="Result download timeout (minutes)"]'));
     assert.doesNotMatch(container.textContent!, /FAL/);
     await act(async () => button("Use default values").click()); assert.equal(sent.length, 0);
+    assert.match(container.textContent!, /Unsaved changes/);
     await act(async () => button("Save advanced settings").click());
     const command = sent[0]!; assert.equal(command.kind, "recovery-set-advanced");
     assert(command.kind === "recovery-set-advanced"); assert.deepEqual(command.settings, RecoveryAdvancedSettingsSchema.parse({}));
@@ -32,6 +33,14 @@ it("keeps advanced controls collapsed and saves explicit changes only after a ma
     assert.match(container.textContent!, /Saving/);
     await act(async () => __applyEventForTest({ type: "recovery.command-result", at: new Date().toISOString(), result: { requestId: command.requestId, operation: "recovery-set-advanced", status: "saved" } }));
     assert.match(container.textContent!, /Saved on this PC/);
+    const field = container.querySelector('[aria-label="Files per result"]') as HTMLInputElement;
+    const propsKey = Object.keys(field).find(key => key.startsWith("__reactProps$"))!;
+    const change = (value: string) => (field as unknown as Record<string, { onChange(event: { target: { value: string } }): void }>)[propsKey]!.onChange({ target: { value } });
+    await act(async () => change(""));
+    assert.equal(field.value, ""); assert(button("Save advanced settings").hasAttribute("disabled"));
+    assert.doesNotMatch(container.textContent!, /Saved on this PC/);
+    await act(async () => change("75")); assert.equal(field.value, "75"); assert.match(container.textContent!, /Unsaved changes/);
+    assert(!button("Save advanced settings").hasAttribute("disabled"));
     const meta = document.createElement("meta"); meta.name = "arke-remote"; meta.content = "true"; document.head.append(meta);
     await act(async () => root.render(<RecoveryAdvancedControls />));
     assert([...container.querySelectorAll("input,button")].every(row => row.hasAttribute("disabled")));

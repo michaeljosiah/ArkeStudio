@@ -2033,6 +2033,15 @@ The Windows connected-process reader now allows thirty seconds including parent-
 the original native identity, cancellation and cleanup checks remain required. Run client tests
 from the client package and typecheck consumers after the final test edit.
 
+Recovery end-to-end/user experience checks: follow [the user-journey acceptance record](recovery-acceptance.md)
+and `scripts/qualify-recovery-ui.mjs`. Use actual UI actions against its authenticated coordinator,
+then inspect the saved control and restart with a fresh session. Do not substitute an injected
+client snapshot or an in-memory command recorder. Coordinator `test/recovery/refresh-health.test.ts`
+checks that external-service health observation does not wait for or evict creative inference;
+client `providers.test.tsx` and `recovery-advanced.test.tsx` retain empty-catalogue readiness,
+clear/retype and unsaved-default regressions. The record distinguishes native model results,
+synthetic faults, browser/device limits and still-open acceptance.
+
 Private bridge Stop/retirement checks additionally exercise a real bound HTTP address: seal
 refuses new work while a competing listener cannot bind that port, retains an already-sent
 completion, and prevents a partially received body or proof-waiting provider request from

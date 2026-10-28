@@ -32,7 +32,9 @@ the common file/aggregate limits when those results are checkpointed; there is n
 download to time out.
 
 Editing a value does nothing until Save. Use default values changes the draft, then Save applies
-it. Saved transfer-limit changes retry witnessed completed remote results held by those limits,
+it. Numeric fields can be cleared and retyped; visible ranges and validation govern Save. Editing
+a saved value or restoring defaults replaces the previous Saved message with Unsaved changes.
+Saved transfer-limit changes retry witnessed completed remote results held by those limits,
 once each and sequentially, without another generation or application restart. Paused providers
 and cancelled/uncertain jobs stay under their existing controls. Active transfers keep the
 limits captured when they started. Previously saved receipts remain readable after lowering a
@@ -49,7 +51,9 @@ admission/readback, held-result retries and recovery notices contain no FAL-spec
 The two inconsistent boundaries were the downloader implementations and the desktop's older
 overall timeout; both now receive the shared policy. Recipe output selection and managed-service
 restart eligibility remain specific to their actual protocol/ownership. This audit covers these
-recovery/result paths, not every provider feature or full epic acceptance.
+recovery/result paths, not every provider feature or full epic acceptance. See the
+[application/user-journey acceptance record](recovery-acceptance.md) for observed UX fixes and
+the remaining native-model and application/device checks.
 
 Implementation: contracts `recovery-policy.ts` and `artifact-result-limits.ts`; coordinator
 `recovery/control.ts`, `recovery/commands.ts` and `queue/`; client

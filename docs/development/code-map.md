@@ -1662,6 +1662,13 @@ See [recovery preferences](recovery-settings.md); focused tests are named `recov
 `recovery/advanced`, `artifact-transfer-preferences`, `queue/artifact-preferences` and the existing
 submission/result-storage suites.
 
+Recovery user-journey qualification uses `scripts/qualify-recovery-ui.mjs`: the actual built
+client, production coordinator composition, authenticated transport and isolated persistent
+settings/history over controlled runtime/capacity faults. It is not an alternate product host
+or runtime installer. Read [the acceptance record](recovery-acceptance.md) for its boundaries.
+`recovery/refresh-health.test.ts` covers metadata-only Ollama refresh during creative GPU work;
+`settings-providers.tsx` presents runtime state independently of model availability.
+
 Approved System design (master turn 241, originally reviewed as 240): contracts
 `src/system-resources.ts` owns readings, freshness and conservative
 per-volume grouping. Coordinator `src/system-resources.ts` owns bounded/coalesced observations;

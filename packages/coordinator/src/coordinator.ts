@@ -10636,9 +10636,14 @@ export class Coordinator {
         return;
       }
       case "ollama-refresh": {
+        const service = this.opts.ollama?.service;
+        if (!service) return;
+        // A health check loads no model. Opening Settings must not evict ComfyUI/Ming or
+        // wait behind creative work merely to read the selected service's version.
+        if (service.externallySelected() || service.status().state === "ready") { await service.refresh(); return; }
         if (this.localGpu.isBusy("Ollama")) return;
         const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
-        try { await this.opts.ollama?.service.refresh(); }
+        try { await service.refresh(); }
         finally { release(); }
         return;
       }

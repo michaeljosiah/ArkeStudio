@@ -76,6 +76,17 @@ const at = (path: string) =>
   );
 
 const providers = (path = "/settings/providers") => at(path);
+
+it("shows a healthy Ollama runtime as ready even when no language model is installed", () => {
+  const state = stateWith({});
+  state.app.ollama = { source: "user-url", state: "ready", url: "http://127.0.0.1:11434", version: "test", detail: null };
+  state.app.providers = [{ id: "ollama", configured: true, validation: "invalid", probes: [{ capability: "llm", available: false, reason: "Ollama is running but has no models pulled" }], fault: null }];
+  __setStateForTest(state);
+  const html = providers("/settings/providers?provider=ollama");
+  const column = html.slice(0, html.indexOf('data-testid="provider-pane"'));
+  assert.match(column, /Ollama<\/span><span class="fy-src__note">ready/);
+  assert.doesNotMatch(column, /Ollama<\/span><span class="fy-src__note">not answering/);
+});
 const models = (path = "/settings/models?half=cloud&kind=image") => at(path);
 
 const cloudAi = () =>
