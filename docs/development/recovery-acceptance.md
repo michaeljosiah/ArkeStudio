@@ -221,3 +221,15 @@ but those available/skipped offers no longer create proactive incidents or alert
 holds and failures keep their existing behavior. The regression failed before this correction;
 all 23 recovery-history cases pass on Node 22 afterward. Previously retained observations are kept,
 not silently cleared or reported recovered. This does not complete the remaining epic acceptance.
+
+## Finite document exports and Windows path aliases
+
+DOCX/EPUB manuscripts and recording-script PDFs now admit measured payloads, destination metadata
+and replacement manifests through the shared export owner. All twenty affected export and
+compatibility tests pass, including world close during admission and full-destination holds.
+
+CI on `a6cb708d4` passed 24 of 25 jobs. Windows shard 8 found a test comparing its short temporary
+path (`RUNNER~1`) with the exporter's canonical path. The assertion now compares canonical paths
+and the fixture explicitly uses a directory alias; all eight world-export cases pass locally.
+Production path handling is unchanged. The correction needs fresh CI; native render/scratch
+planning and matched design-master acceptance remain open.

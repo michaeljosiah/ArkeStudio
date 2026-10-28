@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
 import { exportWorld } from "../../src/takes/export.js";
@@ -20,10 +20,13 @@ async function fixture() {
 }
 
 it("plans the whole export before payload writes, keeps history and settles after copies close", async () => {
-  const { source, target } = await fixture(), consumed: number[] = [];
+  const { root, source } = await fixture(), consumed: number[] = [], alias = join(root, "destination-alias");
+  await mkdir(join(root, "exports"));
+  await symlink(join(root, "exports"), alias, process.platform === "win32" ? "junction" : "dir");
+  const target = join(alias, "world");
   let settled = false;
   const fileSpace: ImportFileSpace = { async reserve(directory, bytes, signal, role) {
-    assert.equal(directory, target); assert.equal(role, "exports"); assert(!signal.aborted);
+    assert.equal(directory, await realpath(target)); assert.equal(role, "exports"); assert(!signal.aborted);
     assert.equal(bytes, Buffer.byteLength("CREATIVE_WORLDHISTORY") + 4 * 64 * 1024);
     assert.deepEqual(await readdir(target), []);
     return { async consumed(bytes) { consumed.push(bytes); }, writeFailed() { assert.fail("No write failed"); }, async settle() {
