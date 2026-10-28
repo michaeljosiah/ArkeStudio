@@ -60,6 +60,7 @@ import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from
 import { DomainEventSchema } from "./events.js";
 import { DramaDeliverySchema } from "./audio-drama-edition.js";
 import { DramaChapterDecisionSchema, DramaReviewDecisionSchema, DramaRoleKeySchema, DramaRoleSchema, EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
+import { COMIC_LIMITS, ComicAttemptCapSchema, ComicModeSchema, ComicPageSchema, ComicReadingSchema, LetteringThresholdsSchema } from "./graphic-novel.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema, PropStateSelectionSchema } from "./prop.js";
 import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
@@ -2454,6 +2455,33 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("restore-chapter-retired"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  /** A graphic novel chapter's comic script, saved whole and fenced on the file the editor read (SPEC-064 R-10). */
+  z
+    .object({
+      kind: z.literal("save-comic-script"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapter: SlugSchema,
+      pages: z.array(ComicPageSchema).max(COMIC_LIMITS.pagesPerChapter),
+      baseHash: z.string().min(1).nullable(),
+    })
+    .strict(),
+  /** How a graphic novel reads and how its pages are checked (SPEC-064 R-12, R-31). */
+  z
+    .object({
+      kind: z.literal("set-comic-settings"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      settings: z.object({
+        reading: ComicReadingSchema.optional(),
+        aspect: z.string().min(3).max(12).optional(),
+        mode: ComicModeSchema.optional(),
+        thresholds: LetteringThresholdsSchema.optional(),
+        cap: ComicAttemptCapSchema.optional(),
+      }).strict(),
+    })
+    .strict(),
   /**
    * The plan on the chapter (turn 127): title, synopsis, point of view, story-time and the facts
    * it implies, saved in place as the prose is — no proposal, no version cut. `null` clears a

@@ -752,7 +752,7 @@ export function ProductionLayout() {
                   {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0), undefined, undefined, undefined, undefined, audioStudioRoute ? false : undefined)}
                   {compact && chapterRoute && <div className="fy-prodrail__chapters">{production?.chapters.filter(chapter => !chapter.retired).map(chapter => <NavLink key={chapter.id} to={`${base}/story/chapters/${encodeURIComponent(chapter.id)}`} className="fy-prodrail__chapter">{String(chapter.order).padStart(2,"0")} · {chapter.title}</NavLink>)}</div>}
                   {/* The reading (turn 146, SPEC-047 R-29): chapters read of those with prose, from the door's last answer. */}
-                  {item("story/audiobook", "Audiobook", audiobookCount, undefined, audioStudioRoute)}
+                  {shape?.hasPages ? null : item("story/audiobook", "Audiobook", audiobookCount, undefined, audioStudioRoute)}
                   <span className="fy-prodrail__section-divider" aria-hidden="true" />
                   {item("artifacts", "Artifacts", String(artifactCount))}
                 </>

@@ -36,6 +36,17 @@ function withSamples<T extends { id: string }>(models: T[]): T[] {
   return models.map((model) => (MODEL_SAMPLES.has(model.id) ? { ...model, sample: { poster: `${model.id}.webp` } } : model));
 }
 
+/**
+ * The image models whose vendors document legible text rendering (SPEC-064 R-24): OpenAI for GPT
+ * Image 2, on its own endpoint and behind fal, and Google for Nano Banana Pro. Kept beside the rows
+ * for the same reason as the samples: the fal rows are regenerated and would drop a field.
+ */
+const LETTERING_MODELS: ReadonlySet<string> = new Set(["gpt-image-2", "gpt-image-2-fal", "nano-banana-pro"]);
+
+function withLettering<T extends { id: string; limits?: object }>(models: T[]): T[] {
+  return models.map((model) => (LETTERING_MODELS.has(model.id) ? { ...model, limits: { ...model.limits, lettering: true } } : model));
+}
+
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
   manifestVersion: 31,
   dialogueGuidance: [],
@@ -63,7 +74,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     // images and holds a 256K context, and reference images are half the work.
     llm: ["gemma4-26b", "gemma4-12b", "llama3.3-70b", "llama3.1-8b", "gemma4-e2b-it-qat"],
   },
-  models: withSamples([
+  models: withLettering(withSamples([
     // ---- fal: generated from the live catalogue ---------------------------
     ...FAL_MODELS.map((model) => ({
       ...model,
@@ -422,7 +433,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       pricing: { kind: "unmetered" },
       requires: { memMb: 1000, diskMb: 141 },
     },
-  ]),
+  ])),
 });
 
 /** Manifest lookup that refuses the unknown (R-12, D4): a reason, never an attempt. */

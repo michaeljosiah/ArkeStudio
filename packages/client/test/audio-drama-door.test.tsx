@@ -108,11 +108,13 @@ describe("Tell a story asks what kind of story (design turn 230b)", () => {
     assert.deepEqual(STORY_KIND_CHOICES.map(k => [k.id, k.label, k.body]), [
       ["book", "Novel", "Chapters, to read."],
       ["audio-drama", "Audio drama", "Episodes, for the ear."],
+      ["graphic-novel", "Graphic novel", "Pages, to look at."],
       ["other", "Other", "Nothing assumed."],
     ]);
     assert.equal(KINDS_BY_DOOR.write, STORY_KIND_CHOICES);
     const write = DOOR_CHOICES.find(d => d.id === "write")!;
     assert.match(write.body, /audio drama/);
+    assert.match(write.body, /graphic novel/, "SPEC-064 R-3");
     assert.match(write.body, /audiobook/, "the audiobook still rides under WRITE");
     // Music is the fourth door (design turn 238a); the drama is still a story, never a door (revision 2).
     assert.deepEqual(DOOR_CHOICES.map(d => d.label), ["Tell a story", "Make a film", "Make it interactive", "Make music"]);
@@ -185,6 +187,20 @@ describe("Tell a story asks what kind of story (design turn 230b)", () => {
     const create = m.sent.find((message): message is Extract<ClientMessage, { kind: "create-production" }> => message.kind === "create-production")!;
     assert.equal(create.medium, "story");
     assert.equal("productionKind" in create, false);
+  });
+
+  it("a graphic novel writes its kind (SPEC-064 R-3)", async () => {
+    const m = await mount(withStories(), NEW);
+    const write = [...m.container.querySelectorAll("button")].find(b => b.textContent?.includes("Tell a story"))!;
+    await act(async () => write.dispatchEvent(new dom.Event("click", { bubbles: true })));
+    const card = [...m.container.querySelectorAll<HTMLElement>(".fy-radio")].find(b => b.textContent?.includes("Graphic novel"))!;
+    await act(async () => card.dispatchEvent(new dom.Event("click", { bubbles: true })));
+    await fire(m.container.querySelector<HTMLInputElement>("#production-name")!, "onChange", "Low Water, drawn");
+    const create = [...m.container.querySelectorAll("button")].find(b => (b.textContent ?? "").startsWith("Create"))!;
+    await act(async () => create.dispatchEvent(new dom.Event("click", { bubbles: true })));
+    const sent = m.sent.find((message): message is Extract<ClientMessage, { kind: "create-production" }> => message.kind === "create-production")!;
+    assert.equal(sent.medium, "story");
+    assert.equal(sent.productionKind, "graphic-novel");
   });
 });
 

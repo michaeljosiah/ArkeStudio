@@ -227,6 +227,7 @@ type Classified =
   | { track: "narrative"; production: string }
   | { track: "episode"; production: string; file: string }
   | { track: "episode-script"; production: string; file: string }
+  | { track: "comic-script"; production: string; file: string }
   | { track: "series"; id: string }
   | { track: "production-meta"; production: string }
   | { track: "art-direction" }
@@ -261,6 +262,9 @@ export function classify(path: string): Classified {
   // An audio drama's episode script (SPEC-057 R-83): versioned and snapshotted like an episode.
   m = /^productions\/([a-z0-9-]+)\/scripts\/([^/]+)\.json$/.exec(path);
   if (m) return { track: "episode-script", production: m[1]!, file: m[2]! };
+  // A graphic novel chapter's comic script (SPEC-064 R-10): versioned and snapshotted the same way.
+  m = /^productions\/([a-z0-9-]+)\/comic\/([^/]+)\.json$/.exec(path);
+  if (m) return { track: "comic-script", production: m[1]!, file: m[2]! };
   m = /^series\/([a-z0-9-]+)\.json$/.exec(path);
   if (m) return { track: "series", id: m[1]! };
   m = /^productions\/([a-z0-9-]+)\/production\.json$/.exec(path);
@@ -572,6 +576,12 @@ export const AUDIO_DRAMA_SCHEMA_VERSION = 90;
  */
 export const EPISODE_SCRIPT_SCHEMA_VERSION = 91;
 /**
+ * A graphic novel (SPEC-064): the kind, `comic.json`, its chapters' comic scripts and its pages'
+ * takes. An older scanner would open the production as a plain book and drop the comic files.
+ */
+export const GRAPHIC_NOVEL_SCHEMA_VERSION = 114;
+const GRAPHIC_NOVEL_FILE = /^productions\/[^/]+\/(comic\.json$|comic\/|comic-pages\/)/;
+/**
  * An audio drama's takes (SPEC-057 R-29, codex on PR 1871): `drama-takes/` and the `episode` on a
  * take's strict audiobook sidecar. A build before them drops each such artifact as unreadable.
  */
@@ -718,6 +728,7 @@ export function changesAnything(path: string, live: string, proposed: string): b
       track === "narrative" ||
       track === "episode" ||
       track === "episode-script" ||
+      track === "comic-script" ||
       track === "series" ||
       track === "guide"
     ) {
@@ -894,6 +905,7 @@ export class Committer {
         kind.track === "narrative" ||
         kind.track === "episode" ||
         kind.track === "episode-script" ||
+        kind.track === "comic-script" ||
         kind.track === "series" ||
         kind.track === "guide"
       ) {
@@ -911,7 +923,9 @@ export class Committer {
                     ? `episodes/${kind.file}`
                     : kind.track === "episode-script"
                       ? `scripts/${kind.file}`
-                      : kind.track
+                      : kind.track === "comic-script"
+                        ? `comic/${kind.file}`
+                        : kind.track
               }`;
         const baseDoc = base !== null ? JsonFile.parse(base) : null;
         fromVersion = baseDoc ? ((baseDoc.value["version"] as number) ?? 1) : null;
@@ -1071,6 +1085,7 @@ export class Committer {
     const raiseSchemaVersion = Math.max(
       input.raiseSchemaVersion ?? 0,
       files.some((f) => classify(f.path).track === "episode-script" && f.newContent != null) ? EPISODE_SCRIPT_SCHEMA_VERSION : 0,
+      files.some((f) => GRAPHIC_NOVEL_FILE.test(f.path) && f.newContent != null) ? GRAPHIC_NOVEL_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/drama-takes\//.test(f.path) && f.newContent != null) ? DRAMA_TAKE_SCHEMA_VERSION : 0,
       files.some((f) => {
         if (!f.newContent) return false;
