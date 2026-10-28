@@ -51,6 +51,7 @@ import { referenceInputProblem, ollamaLlmAvailable } from "@arke-studio/contract
 import { LocalGpu } from "./local-ai/gpu.js";
 import type { MingBatchCommand } from "./local-ai/ming.js";
 import { MingSpeechService } from "./local-ai/ming-speech.js";
+import { MingBatchStorage } from "./storage/ming-batches.js";
 import type { MingSynthesis } from "@arke-studio/providers";
 import { withLocalGpu } from "./harness/local-gpu.js";
 import { withModelValidation } from "./harness/model-validation.js";
@@ -1064,7 +1065,7 @@ export interface CoordinatorOptions {
     reconfigureHarness?: (apply?: () => Promise<void>) => Promise<void>;
   };
   /** Ming owns a separate process even when its interpreter belongs to ComfyUI. */
-  ming?: { readonly running?: boolean; readonly cleanupAuthorized?: boolean; run(command: MingBatchCommand, signal: AbortSignal): Promise<void>; unload(signal: AbortSignal): Promise<void>; dispose(): Promise<void> };
+  ming?: { readonly running?: boolean; readonly cleanupAuthorized?: boolean; readonly storageOwner?: string; run(command: MingBatchCommand, signal: AbortSignal): Promise<void>; unload(signal: AbortSignal): Promise<void>; dispose(): Promise<void> };
   /** Real filesystem worker path for a packaged host; never supplied by renderer commands. */
   mingWorkerPath?: string;
   /**
@@ -3606,6 +3607,7 @@ export class Coordinator {
 
   private readonly localGpu: LocalGpu;
   private readonly mingSpeech: MingSpeechService | null;
+  private readonly mingBatchSpace: MingBatchStorage | undefined;
   mingSpeechStatus(model: string): Promise<{ready: boolean; reason?: string}> {
     return this.mingSpeech?.status(model) ?? Promise.resolve({ready: false, reason: "Ming is not configured on this host."});
   }
@@ -3716,7 +3718,9 @@ export class Coordinator {
         });
       });
     }
-    this.mingSpeech = opts.appRoot && opts.ming && opts.comfyui ? new MingSpeechService({ appRoot: opts.appRoot,
+    this.mingBatchSpace = opts.storageHealth?.supportsAdmission && opts.ming?.storageOwner
+      ? new MingBatchStorage(opts.storageHealth, opts.ming.storageOwner) : undefined;
+    this.mingSpeech = opts.appRoot && opts.ming && opts.comfyui ? new MingSpeechService({ appRoot: opts.appRoot, space: this.mingBatchSpace,
       python: () => opts.comfyui!.service.sharedMingPython(), run: (command, signal) => this.generateMingBatch(command, signal),
       processRunning: () => opts.ming!.running === true, ...(opts.mingWorkerPath ? {worker: opts.mingWorkerPath} : {}) }) : null;
     if (opts.adapter) opts.adapter = withModelValidation(
@@ -5082,6 +5086,7 @@ export class Coordinator {
       this.syncStorageObservation();
       this.trackBackground(this.importFileSpace?.reconcileIdleImports() ?? this.opts.storageHealth.start());
       if (this.exportFileSpace) this.trackBackground(this.exportFileSpace.reconcileIdleImports());
+      if (this.mingBatchSpace) this.trackBackground(this.mingBatchSpace.reconcile(this.runtimeStop.signal));
     }
     for (const run of (await this.audiobookActivity.load()).reverse()) this.readModel.apply({ type: "audiobook.activity", at: run.updatedAt, run });
     // The engine must be resolved BEFORE queue recovery, not after (SPEC-021 §2.11). Recovery

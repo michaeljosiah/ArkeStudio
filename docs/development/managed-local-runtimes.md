@@ -103,7 +103,10 @@ The speech service retains each batch's temporary input/output directory through
 native owner. Cleanup after a failed cancellation removes its temporary copies once both
 native/log work and host file access finish. A queued batch cancelled before native admission
 can remove its own inputs while another batch runs. Failed settlement remains retryable and
-fences replacement. This is current-session ownership; restart storage reconciliation is separate.
+fences replacement. Restart reconciliation checks the old host's recorded process identity and
+the exact private global Windows job. A live/unknown host, live job or failed query keeps the
+reservation uncertain. A proven absent/empty job after the old host exits settles planning only;
+it does not delete old files or claim their bytes were reclaimed.
 The worker gets runtime environment variables, offline flags and
 private caches, without inherited provider credentials. It never installs into shared Python.
 The worker's working directory and bounded `worker.log` stay inside its private cache root;
@@ -116,8 +119,21 @@ SDK filtering is included in the planned size; each extracted stream must match 
 length. The pinned 0.5B and 7.9B dependencies currently expand to 139,479,516 and 248,768,939 bytes
 respectively, verified against actual extraction. Audio, reference bytes and compiler caches are
 additional. The existing ten-minute/64-MiB audio limits are checked before writing the WAV,
-including silence between chunks. This bounds known worker writes; shared storage admission,
-compiler-cache growth and reservation reconciliation still need their native-owner integration.
+including silence between chunks. The lock records expansion bytes and entry count, and the
+worker checks both before extraction. `storage/ming-batches.ts` reserves the known input,
+expansion, per-entry allowance and maximum audio on staging's measured volume, plus a separate
+2-GiB additional compiler-cache growth estimate and bounded log allowance on the cache volume.
+Shared-volume demands join other write owners; existing cache bytes are already used space.
+Host input writes and closed worker expansion/audio receipts reduce remaining need. Capacity is checked again after GPU admission, before
+native launch. Uncertain native exit keeps affected disk admission held until original cleanup.
+
+Only the private cache is monitored, using bounded/yielding metadata reads every two seconds.
+CUDA and XDG cache locations join the existing private Torch/Triton/temp paths. Unavailable
+measurement or growth beyond the estimate cancels the original batch and retains its reservation
+until confirmed settlement. This is an estimate with polling, not a filesystem quota: a fast
+writer or external writer can overrun between observations. The cache estimate remains reserved
+until settlement because a changing directory scan is not a trustworthy consumption receipt.
+Model downloads, voice settings and ComfyUI dependencies are unchanged.
 
 Desktop, dev and the standalone Node host wire this owner into Coordinator. `generateMingBatch` is a **host-only** API
 accepting a qualified `MingBatchCommand`; paths and commands are never renderer-originated.

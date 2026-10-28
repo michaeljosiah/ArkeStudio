@@ -77,7 +77,7 @@ def extract_planned(source, entries, target):
                 raise MingWorkerRefusal("Ming archive entry did not match its planned size")
 
 
-def extract_dependencies(dependencies):
+def extract_dependencies(dependencies, byte_limit=None, entry_limit=None):
     """All dependencies coexist with the audio. Validate the whole set before extraction starts."""
     with ExitStack() as stack:
         plans = []
@@ -89,6 +89,10 @@ def extract_dependencies(dependencies):
             entries, size = archive_entries(source, prefix, sdk)
             plans.append((source, entries, target))
             total += size
+        if byte_limit is not None and total > byte_limit:
+            raise MingWorkerRefusal("Ming dependencies exceed their admitted expansion")
+        if entry_limit is not None and sum(len(entries) for _, entries, _ in plans) > entry_limit:
+            raise MingWorkerRefusal("Ming dependencies exceed their admitted entry count")
         for source, entries, target in plans:
             extract_planned(source, entries, target)
         return total
@@ -194,7 +198,8 @@ def main(request, assets):
     sdk = batch / "sdk"
     if variant == "tiny":
         dependencies.append((runtime / assets["sdk"]["file"], assets["sdk"], sdk, "", True))
-    extract_dependencies(dependencies)
+    lock = assets["variants"][variant]
+    expanded_bytes = extract_dependencies(dependencies, lock["expandedBytes"], lock["expandedEntries"])
     sys.path.insert(0, str(source))
     sys.path.insert(0, str(overlay))
     if variant == "tiny":
@@ -248,7 +253,8 @@ def main(request, assets):
         sample_count += samples.size + gap
         print(f"Ming chunk {index + 1}/{len(chunks)} complete", flush=True)
     sf.write(request["output"], np.concatenate(audio), model.sample_rate, subtype="PCM_16")
-    (batch / "result.json").write_text(json.dumps({"completedChunks": len(chunks), "sampleRate": model.sample_rate}), encoding="utf8")
+    (batch / "result.json").write_text(json.dumps({"completedChunks": len(chunks), "sampleRate": model.sample_rate,
+                                                "expandedBytes": expanded_bytes}), encoding="utf8")
 
 
 if __name__ == "__main__":

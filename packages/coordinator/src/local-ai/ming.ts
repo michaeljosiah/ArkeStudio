@@ -3,7 +3,9 @@ import { isAbsolute, join } from "node:path";
 import type { ChildLedger } from "../child-ledger.js";
 import { EngineLog } from "../supervisor.js";
 import { SetupProcessRunner, SetupProcessCleanupPending } from "../setup/process.js";
-import type { SetupProcessJob } from "../setup/process-job.js";
+import { NativeSetupProcessJob, type SetupProcessJob } from "../setup/process-job.js";
+import { mingStorageOwner } from "./ming-owner.js";
+import type { MingBatchSpaceLease } from "../storage/ming-batches.js";
 
 export interface MingBatchCommand {
   /** Host-resolved ComfyUI interpreter and qualified Ming worker, never renderer input. */
@@ -14,6 +16,7 @@ export interface MingBatchCommand {
   /** Host-only ownership of this batch's inputs/scratch. Release only after the original
    * native command, ordinary helpers and log writes have all settled. */
   retain?: () => () => Promise<void>;
+  storage?: Pick<MingBatchSpaceLease, "start">;
 }
 
 export class MingProcessCleanupPending extends Error {
@@ -24,6 +27,7 @@ export class MingProcessCleanupPending extends Error {
  * The existing native command owner gates execution and retains ordinary helpers; one
  * completed Python parent cannot release its descendants' CUDA context or batch files. */
 export class MingProcess {
+  readonly storageOwner: string | undefined;
   get running(): boolean { return this.programs.running || this.launching || this.runFinished !== undefined || this.releaseBatch !== undefined; }
   get cleanupAuthorized(): boolean { return !this.launching && this.programs.durableCleanupAuthorized; }
   private launching = false;
@@ -39,7 +43,9 @@ export class MingProcess {
     /** Native fixtures use Node in place of Python, preserving the real gate/job/cleanup. */
     prepareCommand?: (command: string, args: readonly string[]) => { command: string; args: readonly string[] };
   } = {}) {
-    this.programs = new SetupProcessRunner({ ledger, job: options.job, cleanupTimeoutMs: options.cleanupTimeoutMs, ledgerId: "ming" });
+    const job = options.job ?? new NativeSetupProcessJob("global");
+    this.storageOwner = !options.job && process.platform === "win32" ? mingStorageOwner((job as NativeSetupProcessJob).identity) : undefined;
+    this.programs = new SetupProcessRunner({ ledger, job, cleanupTimeoutMs: options.cleanupTimeoutMs, ledgerId: "ming" });
   }
 
   async run(command: MingBatchCommand, signal: AbortSignal): Promise<void> {
@@ -53,8 +59,10 @@ export class MingProcess {
     try {
       this.releaseBatch = command.retain?.();
       const cache = (name: string) => join(command.cacheRoot, name);
-      for (const name of ["temp", "hub", "triton", "inductor", "torch", "extensions"]) await mkdir(cache(name), { recursive: true });
+      for (const name of ["temp", "hub", "triton", "inductor", "torch", "extensions", "cuda", "other"]) await mkdir(cache(name), { recursive: true });
       signal.throwIfAborted(); if (this.disposed) throw new Error("Ming is stopped.");
+      if (command.storage) signal = AbortSignal.any([signal, await command.storage.start(signal)]);
+      signal.throwIfAborted();
       const allowed = new Set(["SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PATH", "COMSPEC", "PATHEXT", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "HOME", "LD_LIBRARY_PATH"]);
       const env = Object.fromEntries(Object.entries(process.env).filter((row): row is [string, string] => row[1] !== undefined && allowed.has(row[0].toUpperCase())));
       const log = new EngineLog(join(command.cacheRoot, "worker.log"));
@@ -65,7 +73,7 @@ export class MingProcess {
         const result = await this.programs.run(program.command, program.args, signal, text => log.write(Buffer.from(text)), "stream", {
           cwd: command.cacheRoot,
           env: { ...env, HF_HUB_OFFLINE: "1", TRANSFORMERS_OFFLINE: "1", HF_HUB_DISABLE_TELEMETRY: "1", PYTHONUTF8: "1", PYTHONNOUSERSITE: "1", PYTHONDONTWRITEBYTECODE: "1", TOKENIZERS_PARALLELISM: "false",
-            TEMP: cache("temp"), TMP: cache("temp"), TMPDIR: cache("temp"), HF_HOME: cache("hub"), TRITON_CACHE_DIR: cache("triton"), TORCHINDUCTOR_CACHE_DIR: cache("inductor"), TORCH_HOME: cache("torch"), TORCH_EXTENSIONS_DIR: cache("extensions"), USER: "arke-ming" },
+            TEMP: cache("temp"), TMP: cache("temp"), TMPDIR: cache("temp"), HF_HOME: cache("hub"), TRITON_CACHE_DIR: cache("triton"), TORCHINDUCTOR_CACHE_DIR: cache("inductor"), TORCH_HOME: cache("torch"), TORCH_EXTENSIONS_DIR: cache("extensions"), CUDA_CACHE_PATH: cache("cuda"), XDG_CACHE_HOME: cache("other"), USER: "arke-ming" },
         });
         signal.throwIfAborted();
         if (result.code !== 0) throw new Error("Ming generation failed. Check the batch's private diagnostics.");

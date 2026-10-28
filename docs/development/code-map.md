@@ -336,6 +336,14 @@ the exact failed-cleanup lease and releases it only after later confirmation, wi
 confirmed cleanup removes those temporary copies only after host reads/writes also settle;
 a cancelled GPU waiter does not borrow another batch's process state. Failed settlement retains
 the callback for retry, and native disposal drains the original run and log writes.
+`storage/ming-batches.ts` joins input/expansion/audio and monitored private-cache growth to shared
+per-volume admission. The pinned asset lock supplies expansion/entry bounds checked by the
+worker before writes. `local-ai/ming-owner.ts` reconciles only an exited original host plus its
+exact global Windows job; `setup/process-job.ts` exposes read-only inspection without creating
+or terminating a missing job. Unknown original writes retain uncertain reservations, and no
+restart scan/deletion of old scratch or creative files is authorized. Native cache growth and
+abandoned metadata reads retain original ownership through cancellation. Tests: `ming-owner`,
+`storage/ming-batches`, `ming-speech`, `ming-process` and `setup/process`.
 Batch generation is exposed through Coordinator's host-only
 `generateMingBatch`. Desktop/dev/`node-studio-host.ts` compose these services; desktop
 `startup-runtime-owners.ts` retains them across initialization failure until transfer to

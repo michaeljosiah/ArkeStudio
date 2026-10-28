@@ -284,7 +284,7 @@ export async function leashStorageReaderToParent(childPid: number, ownerPid: num
 /** A trusted owner retains one private named job across sequential native commands. The
  * child must still be gated: it may launch helpers only after this binding succeeds. */
 export async function leashOwnedCommandToParent(childPid: number, jobName: string, signal?: AbortSignal): Promise<LeashResult> {
-  if (!/^Local\\ArkeOwnedCommand-[a-f0-9]{64}$/.test(jobName)) return { ok: false, reason: "invalid owned command job" };
+  if (!/^(Local|Global)\\ArkeOwnedCommand-[a-f0-9]{64}$/.test(jobName)) return { ok: false, reason: "invalid owned command job" };
   return takeLeash(childPid, process.pid, jobName, signal);
 }
 

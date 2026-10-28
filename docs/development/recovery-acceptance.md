@@ -306,9 +306,8 @@ before its writer is called. Existing cloning/freeform task mapping remains cove
 Native extraction of the already-downloaded, hash-verified dependencies matched the plan exactly:
 35 archives / 139,479,516 bytes for 0.5B and 35 archives / 248,768,939 bytes for 7.9B. Temporary
 extraction had a measured free-space precheck and was removed afterward; it ran no model/GPU.
-These checks establish the known expansion/audio bounds, not complete Ming storage admission.
-Compiler-cache growth, active reservation consumption and original-owner restart reconciliation
-remain outstanding under SPEC-062 R-8/R-9/R-24.
+These checks establish known expansion/audio bounds; the shared admission evidence below is
+separate from extraction and narration quality.
 
 Current-session batch settlement now follows the exact original native owner, including later
 cleanup after an unconfirmed exit. The 13 speech/process checks include real native failure and
@@ -316,3 +315,28 @@ retry: inputs remain while the worker can run, then disappear only after confirm
 and host-file settlement. A cancelled GPU waiter removes only its own unlaunched batch, and a
 failed settlement prevents replacement until retry. These checks do not establish restart
 reconciliation, storage admission or a new narration-quality result.
+
+The subsequent storage integration reserves known batch inputs/expansion/audio and a monitored
+2-GiB additional cache-growth estimate on the actual staging/cache volumes, sharing other owners'
+reservations. Low-space/unknown checks occur before reference copying and again before native
+launch after the GPU wait. Confirmed host writes reduce remaining need; uncertain native exit
+holds affected new admissions. Cache metadata monitoring cancels only its original worker on
+unavailable measurement or excess growth, retaining the lease through original native/file exit.
+The growth estimate is conservative polling, not a quota or a guarantee against fast/external writes.
+
+Synthetic-capacity checks cover shared/separate volumes, competition, post-wait recheck and
+uncertain/confirmed settlement. Real bounded worker fixtures verify growth cancellation and
+later cleanup. A force-closed native Windows host proves reconciliation uses its exited process
+identity plus its original global job, not merely a new host's empty worker list. Missing/empty
+job proof releases planning only; retained files are not deleted. An abandoned metadata call
+keeps the lease until its original read closes. Broader native owners and installed/design
+acceptance remain open; this is not completion of SPEC-062 or the epic.
+
+Offline model checks on 2026-10-28 used the actual managed Python, unchanged downloaded models,
+native capacity collection and shared reservation service. 0.5B returned 732,104 audio bytes in
+52.6 seconds; 7.9B returned 726,812 bytes in 266.5 seconds. Both observed a live reservation and
+ended with no worker, no new batch directory and zero reservations. Existing-cache growth was
+221,250 and 5,186 bytes respectively. These are warm-cache compatibility checks, not cold-cache
+upper bounds or new listening judgments. Their private evidence/audio are under the gitignored
+`.dev/ming-integration/storage-{dense,tiny}-*` outputs; no model download or installed-service
+restart occurred.

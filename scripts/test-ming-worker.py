@@ -16,6 +16,22 @@ spec.loader.exec_module(worker)
 
 
 class WorkerTests(unittest.TestCase):
+    def test_admitted_expansion_and_entry_bounds_apply_before_any_extraction(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            archive = root / "dependency.zip"
+            with zipfile.ZipFile(archive, "w") as target:
+                target.writestr("one.py", "12345")
+                target.writestr("two.py", "67890")
+            expected = {"bytes": archive.stat().st_size, "sha256": hashlib.sha256(archive.read_bytes()).hexdigest()}
+            dependencies = [(archive, expected, root / "output", "", False)]
+            for byte_limit, entry_limit in ((9, 2), (10, 1)):
+                with self.assertRaisesRegex(ValueError, "admitted"):
+                    worker.extract_dependencies(dependencies, byte_limit, entry_limit)
+                self.assertFalse((root / "output").exists())
+            self.assertEqual(worker.extract_dependencies(dependencies, 10, 2), 10)
+            self.assertEqual((root / "output/one.py").read_text(), "12345")
+
     def test_audio_budget_checks_the_actual_pcm_size_and_silence_before_writing(self):
         worker.validate_audio_budget(44100 * 600, 44100)
         with self.assertRaisesRegex(ValueError, "ten minutes"):
@@ -69,7 +85,7 @@ class WorkerTests(unittest.TestCase):
             request = {"schemaVersion": 1, "variant": "dense", "chunks": ["One sentence."], "output": str(root / "speech.wav"),
                        "runtime": str(root), "weights": str(root), "reference": "reference.wav", "seed": 1,
                        "language": "en", "transcript": "Reference words."}
-            assets = {"source": {"file": "source.zip"}, "sourceRevision": "fixture", "variants": {"dense": {"wheels": []}}}
+            assets = {"source": {"file": "source.zip"}, "sourceRevision": "fixture", "variants": {"dense": {"wheels": [], "expandedBytes": 1, "expandedEntries": 1}}}
             with patch.dict(worker.sys.modules, {"torch": torch, "numpy": np, "soundfile": sf,
                                                 "ming_tts": SimpleNamespace(MingTTS=lambda *args, **kwargs: model)}), \
                     patch.object(worker.sys, "version_info", (3, 13)), \

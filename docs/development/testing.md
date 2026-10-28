@@ -361,6 +361,19 @@ inputs intact until later confirmed cleanup. Original voice files and model file
 submission, never replays the old reading, and stays held after another failed confirmation.
 These fixtures require no model download and do not establish narration/inference quality.
 
+Ming storage admission adds `test/storage/ming-batches.test.ts` and `test/ming-owner.test.ts`.
+Run with native filesystem/process access. Tests cover shared/separate destination volumes,
+fresh admission after the GPU wait, known input consumption, uncertain native writes, cache
+growth cancellation of a real bounded worker, an abandoned metadata read retaining its lease,
+and original-host/job reconciliation after force-closing a disposable Windows host. Inspection
+must not create a missing job, accept a session-local alias or clear a live/unknown owner.
+`test/ming-speech.test.ts` checks low-space rejection before input copying and an actual worker
+whose failed cleanup retains its disk reservation until confirmed exit. Python worker tests
+also reject an expanded byte/entry count beyond the admitted lock before any extraction.
+Windows job reconciliation tests skip elsewhere; the managed Ming reader remains Windows x64.
+These tests do not qualify every native generation owner or guarantee a polling estimate cannot
+be overrun. Actual-model checks must separately verify reservations, cache growth and cleanup.
+
 Baseline regression checks (#2079) use client `test/art-direction-step.test.tsx` and
 `test/one-register.test.tsx`, contracts `test/world-chat-shape.test.ts`, and coordinator
 `test/productions/audiobook-video.test.ts` / `test/world/store.test.ts`. Keep empty and accepted

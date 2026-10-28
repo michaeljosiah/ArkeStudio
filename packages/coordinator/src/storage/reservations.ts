@@ -278,6 +278,19 @@ export class StorageReservations {
     }), false);
   }
 
+  /** Original owner lost confirmation of its remaining writes. Only settlement can clear it. */
+  retainUncertain(id: string, confirmedOwner: StorageReservation["owner"]): Promise<boolean> {
+    return this.duringShutdown(this.serial(async () => {
+      const record = this.records.get(id);
+      if (this.closed || !record || !sameOwner(record.owner, confirmedOwner)) return false;
+      // Unknown native writes cannot keep advertising a finite remaining plan as dependable.
+      // Even a failed audit retains the uncertainty in memory; it never releases capacity.
+      record.state = "uncertain"; this.changed();
+      if (!this.auditAvailable) return false;
+      return this.persist(new Map(this.records), this.recent(this.consumed));
+    }), false);
+  }
+
   /** Written bytes reduce future need; increasing a plan uses replan's fresh admission instead. */
   reduce(id: string, confirmedOwner: StorageReservation["owner"], remaining: Readonly<Record<string, number>>): Promise<boolean> {
     return this.duringShutdown(this.serial(async () => {

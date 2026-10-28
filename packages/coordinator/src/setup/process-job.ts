@@ -29,8 +29,13 @@ foreach ($sig in @(
 }
 $k = $type.CreateType(); $job = [IntPtr]::Zero; $info = [IntPtr]::Zero
 try {
-  $job = $k::OpenJobObjectW(12, $false, $env:ARKE_COMMAND_JOB)
-  if ($job -eq [IntPtr]::Zero) { throw 'job unavailable' }
+  $access = if ($env:ARKE_COMMAND_OPERATION -eq 'terminate') { 12 } else { 4 }
+  $job = $k::OpenJobObjectW($access, $false, $env:ARKE_COMMAND_JOB)
+  if ($job -eq [IntPtr]::Zero) {
+    $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+    if ($env:ARKE_COMMAND_OPERATION -eq 'inspect' -and $code -eq 2) { [Console]::Out.WriteLine('missing'); return }
+    throw 'job unavailable'
+  }
   if ($env:ARKE_COMMAND_OPERATION -eq 'terminate' -and -not $k::TerminateJobObject($job, 1)) { throw 'termination unavailable' }
   $info = [Runtime.InteropServices.Marshal]::AllocHGlobal(48)
   if (-not $k::QueryInformationJobObject($job, 1, $info, 48, [IntPtr]::Zero)) { throw 'query unavailable' }
@@ -58,22 +63,42 @@ async function collect(command: string, args: readonly string[], signal: AbortSi
 }
 const live = (child: { exitCode: number | null; signalCode: NodeJS.Signals | null }) => child.exitCode === null && child.signalCode === null;
 
+async function windowsJob(name: string, operation: "query" | "terminate" | "inspect", signal: AbortSignal): Promise<number | null> {
+  if (!/^(Local|Global)\\ArkeOwnedCommand-[a-f0-9]{64}$/.test(name)) throw new Error("Invalid native command identity.");
+  const output = (await collect(join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+    ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], signal,
+    { ...process.env, ARKE_COMMAND_JOB: name, ARKE_COMMAND_OPERATION: operation })).trim();
+  if (operation === "inspect" && output === "missing") return null;
+  const count = Number(output);
+  if (!/^\d+$/.test(output) || !Number.isSafeInteger(count) || count < 0) throw new Error("Setup process ownership is unavailable.");
+  return count;
+}
+
+/** Read only: never create a missing job or terminate a process. Global identity is required
+ * so a different Windows login session cannot misread a live session-local job as absent.
+ * Windows destroys a job only after its handles close and associated processes terminate:
+ * https://learn.microsoft.com/windows/win32/procthread/job-objects#managing-job-objects */
+export async function inspectOwnedCommandJob(name: string, signal: AbortSignal): Promise<number | null> {
+  if (process.platform !== "win32" || !/^Global\\ArkeOwnedCommand-[a-f0-9]{64}$/.test(name)) throw new Error("Native command reconciliation is unavailable.");
+  return windowsJob(name, "inspect", signal);
+}
+
 /** The anchor stays alive while an ordinary POSIX helper can run. On Windows, the private
  * kernel job remains a stable identity even if that anchor unexpectedly exits. */
 export class NativeSetupProcessJob implements SetupProcessJob {
-  private readonly name = `Local\\ArkeOwnedCommand-${randomBytes(32).toString("hex")}`;
+  readonly identity: string;
+  constructor(scope: "local" | "global" = "local") {
+    this.identity = `${scope === "global" ? "Global" : "Local"}\\ArkeOwnedCommand-${randomBytes(32).toString("hex")}`;
+  }
   async bind(pid: number, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted();
     if (process.platform === "win32") {
-      if (!(await leashOwnedCommandToParent(pid, this.name, signal)).ok) throw new Error("Setup could not establish native process ownership.");
+      if (!(await leashOwnedCommandToParent(pid, this.identity, signal)).ok) throw new Error("Setup could not establish native process ownership.");
     }
   }
   private async windows(operation: "query" | "terminate", signal: AbortSignal): Promise<number> {
-    const output = await collect(join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
-      ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], signal,
-      { ...process.env, ARKE_COMMAND_JOB: this.name, ARKE_COMMAND_OPERATION: operation });
-    const count = Number(output.trim());
-    if (!/^\d+$/.test(output.trim()) || !Number.isSafeInteger(count) || count < 0) throw new Error("Setup process ownership is unavailable.");
+    const count = await windowsJob(this.identity, operation, signal);
+    if (count === null) throw new Error("Setup process ownership is unavailable.");
     return count;
   }
   async active(pid: number, signal: AbortSignal): Promise<number> {

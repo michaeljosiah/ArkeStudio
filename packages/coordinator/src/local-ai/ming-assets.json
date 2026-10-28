@@ -15,6 +15,8 @@
   },
   "variants": {
     "dense": {
+      "expandedBytes": 139479516,
+      "expandedEntries": 3869,
       "revision": "8d66b70a00f05ad183fa8a863b4ce609fc83cbc0",
       "repo": "inclusionAI/Ming-3.0-tts-0.5b",
       "wheels": [
@@ -355,6 +357,8 @@
       ]
     },
     "tiny": {
+      "expandedBytes": 248768939,
+      "expandedEntries": 4451,
       "revision": "7bd9446a8d47e462362261a0150258da6d458318",
       "repo": "inclusionAI/Ming-3.0-tts-tiny",
       "wheels": [
