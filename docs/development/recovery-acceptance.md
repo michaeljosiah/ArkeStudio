@@ -252,3 +252,27 @@ after a busy period. Temporary viewport and theme choices were restored.
 These are implementation captures and source comparisons, not matched master captures or actual
 microphone/keyboard-device qualification. The approved master browser preview remains inaccessible;
 diagnostic/repair cards, supported model effort and the remaining epic acceptance stay open.
+
+## Studio measured storage cards
+
+The latest storage diagnosis now includes host-measured available space, drive capacity and the
+warning reserve in the turn-239 fact-card layout. System and Studio share volume grouping and
+pressure derivation; aliases do not add capacity. Historical diagnostic text stays separate from
+these updating readings. Stale/disconnected values are labelled as earlier measurements, future
+values are withheld, zero remains a real measurement and unknown quotas/scope remain disclosed.
+The cards do not infer an export hold, required peak, shortfall or completion guarantee from free
+space. Existing cleanup review and approval still use their original host controls.
+
+All fourteen focused storage-card, Studio and cleanup interaction tests pass; client typecheck,
+build and lint pass. Browser checks used the real components with explicitly synthetic readings
+at desktop, phone and reduced phone sizes, in light and dark. They exposed and corrected a heading
+running into its explanation. The fact grid has no horizontal overflow and the reduced viewport
+keeps the composer and scrolling remedies reachable. These component captures are not a live
+storage fault journey or matched master evidence. Operation-specific plan cards and the remaining
+epic acceptance are still open.
+
+CI on `b53d9c071` exposed an existing Windows timing assumption in the socket-writer test:
+a delayed send-timeout callback starts the separate close deadline later, so a 40-ms sleep
+does not prove that both callbacks ran. The tests now advance a controlled clock through each
+deadline and verify both the pre-deadline and post-deadline behavior, including disposal.
+Production socket behavior is unchanged.
