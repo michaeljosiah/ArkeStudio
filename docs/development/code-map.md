@@ -65,6 +65,16 @@ compiles a production's routing and the clips or beats the export resolved into 
 arke_world copies, and the contracts test fails until they are regenerated after a change to
 `story-state.js`.
 
+Export → Arke Player for a story (SPEC-058 R-89; turn 245): coordinator
+`productions/story-export.ts` reads an interactive movie or a visual novel through the web
+package's own resolvers (`resolveMovieScenes`, `resolveBeatScenes` in `interactive.ts`), counts and
+blocks it for the sheet (`readStoryExport`, answering `read-story-export`), and makes the schema 6
+package (`exportStoryPlayer`, reached through `export-arke-player`), each clip measured by
+`media/mp4-info.ts` and shipped as made or re-encoded. Contracts `story-export.ts` holds the sheet's
+state, its blockers and the read-back line. Client `components/story-export.tsx` is the Export sheet
+on the Branch Map: Web package and Arke Player. `scripts/export-arke-player.mts --story` makes the
+same package from a copy of a world.
+
 Audio Studio (approved turn 226): client
 `screens/chapter-audio-studio.tsx` composes the Cut layout, shared `EditorPanelTabs`,
 `EditorSheetSlot` and `useCutLayout` around the chapter script. `audio-studio-workspace.tsx`
