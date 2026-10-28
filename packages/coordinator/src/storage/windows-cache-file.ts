@@ -4,6 +4,11 @@ import { join, win32 } from "node:path";
 import { z } from "zod";
 import { leashStorageReaderToParent } from "../job-leash.js";
 
+const EXECUTION_TIMEOUT_MS = 14_000;
+const STARTUP_TIMEOUT_MS = 30_000;
+/** Includes up to thirty seconds for lifetime binding and original durable admission. */
+export const WINDOWS_CACHE_OPERATION_TIMEOUT_MS = STARTUP_TIMEOUT_MS + EXECUTION_TIMEOUT_MS;
+
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const amount = z.number().int().nonnegative().safe();
 export const WindowsCacheProofSchema = z.object({ rootIdentity: hash, fileIdentity: hash, contentHash: hash,
@@ -178,20 +183,28 @@ async function run(input: Input, signal: AbortSignal, admitWorker?: (pid: number
   const text = JSON.stringify(input); if (Buffer.byteLength(text) > 64 * 1024) throw new Error("Native cache input exceeds its bound.");
   const closed = new AbortController(); let leashed: Promise<unknown> = Promise.resolve();
   const work = new Promise<string>((resolve, reject) => {
-    let failure: Error | null = null, output = "";
+    let failure: Error | null = null, output = "", executionTimer: ReturnType<typeof setTimeout> | undefined;
+    const startedAt = performance.now();
     const child = execFile(join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
       ["-NoProfile", "-NonInteractive", "-EncodedCommand", ENCODED],
-      { windowsHide: true, timeout: 14_000, maxBuffer: 64 * 1024, signal, encoding: "utf8" },
+      { windowsHide: true, timeout: WINDOWS_CACHE_OPERATION_TIMEOUT_MS, maxBuffer: 64 * 1024, signal, encoding: "utf8" },
       (error, stdout) => { failure = error; output = stdout; });
     child.stdin?.on("error", () => {});
+    const startupTimer = setTimeout(() => child.kill("SIGKILL"), STARTUP_TIMEOUT_MS);
     leashed = (async () => {
       const leash = child.pid ? await leashStorageReaderToParent(child.pid, process.pid, AbortSignal.any([signal, closed.signal])) : { ok: false };
       const admitted = leash.ok && !signal.aborted && child.pid !== undefined &&
         (input.mode !== "remove" || !admitWorker || await admitWorker(child.pid));
-      if (admitted && !signal.aborted && child.exitCode === null && child.signalCode === null) child.stdin?.end(text);
+      if (admitted && performance.now() - startedAt < STARTUP_TIMEOUT_MS && !signal.aborted && child.exitCode === null && child.signalCode === null) {
+        // Waiting for the original grant cannot spend the native execution allowance. No
+        // input reaches the worker before admission, and the overall deadline still bounds
+        // startup/admission. Cancellation retains the original task until its close settles.
+        clearTimeout(startupTimer); executionTimer = setTimeout(() => child.kill("SIGKILL"), EXECUTION_TIMEOUT_MS);
+        child.stdin?.end(text);
+      }
       else child.kill("SIGKILL");
     })().catch(() => { child.kill("SIGKILL"); });
-    child.once("close", () => { closed.abort(); if (failure) reject(new Error("Native cache operation outcome unavailable.")); else resolve(output); });
+    child.once("close", () => { clearTimeout(startupTimer); clearTimeout(executionTimer); closed.abort(); if (failure) reject(new Error("Native cache operation outcome unavailable.")); else resolve(output); });
   });
   try { return await work; } finally { await leashed; }
 }

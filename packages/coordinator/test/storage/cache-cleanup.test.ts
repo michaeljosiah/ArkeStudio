@@ -6,7 +6,7 @@ import { it } from "node:test";
 import { CACHE_CLEANUP_POLICY } from "@arke-studio/contracts";
 import { CacheCleanupControl, type CacheCleanupStore } from "../../src/storage/cache-cleanup-control.js";
 import { LocalPreviewCache } from "../../src/storage/local-preview-cache.js";
-import { windowsCacheFiles, type WindowsCacheFileResult, type WindowsCacheProof } from "../../src/storage/windows-cache-file.js";
+import { WINDOWS_CACHE_OPERATION_TIMEOUT_MS, windowsCacheFiles, type WindowsCacheFileResult, type WindowsCacheProof } from "../../src/storage/windows-cache-file.js";
 import { tempDir } from "../tmp.js";
 import { AppStorageService } from "../../src/storage/service.js";
 import type { ProcessProbe } from "../../src/child-ledger.js";
@@ -17,6 +17,7 @@ const signal = () => new AbortController().signal;
 async function fixture(options: { real?: boolean; store?: CacheCleanupStore; capacity?: { available: number } } = {}) {
   const root = await tempDir("arke-reviewed-cleanup-"), controlPath = join(root, "control.json"), started = Date.now(); let clock = started, deletes = 0;
   const now = () => clock + Date.now() - started;
+  const nativeObservations: Array<{ mode: string; state: string; reason?: string }> = [];
   let unknown = false, unknownRemoved = false, afterDelete: (() => void | Promise<void>) | undefined;
   const control = new CacheCleanupControl(controlPath, { now, store: options.store });
   const native: typeof windowsCacheFiles = async (input, abort, admitWorker) => {
@@ -31,6 +32,7 @@ async function fixture(options: { real?: boolean; store?: CacheCleanupStore; cap
     }
     if (options.real) {
       const result = await windowsCacheFiles(input, abort, admitWorker);
+      nativeObservations.push(...result.map(row => ({ mode: input.mode, state: row.state, ...("reason" in row ? { reason: row.reason } : {}) })));
       return result.map(row => row.state === "measured" || row.state === "removed" ? { ...row, proof: { ...row.proof, observedAt: now() } } : row.state === "absent" ? { ...row, observedAt: now() } : row);
     }
     const result: WindowsCacheFileResult[] = [];
@@ -67,7 +69,7 @@ async function fixture(options: { real?: boolean; store?: CacheCleanupStore; cap
   await control.open(); await cache.generate(key, async () => bytes, signal());
   return { root, controlPath, control, cache, storage, path: join(root, "local-presets-v1", `${key}.wav`),
     age: () => { clock += CACHE_CLEANUP_POLICY.minAgeMs + 60_000; }, deletes: () => deletes,
-    native, now, unknown: () => { unknown = true; }, unknownRemoved: () => { unknownRemoved = true; },
+    native, now, nativeObservations, unknown: () => { unknown = true; }, unknownRemoved: () => { unknownRemoved = true; },
     afterDelete: (fn: () => void | Promise<void>) => { afterDelete = fn; } };
 }
 
@@ -240,8 +242,8 @@ it("failed intent persistence prevents native deletion and retains uncertain aud
   assert.deepEqual(await readFile(h.path), bytes); h.cache.close(); h.control.closeAdmission();
 });
 
-it("real Windows deletion runs only after its flushed cleanup intent and removes the generated file", { skip: process.platform !== "win32", timeout: 30_000 }, async () => {
-  const h = await fixture({ real: true }); h.age(); const prepared = await h.cache.prepareCleanup(new Set([key]), signal()); assert(prepared);
+it("real Windows deletion runs only after its flushed cleanup intent and removes the generated file", { skip: process.platform !== "win32", timeout: WINDOWS_CACHE_OPERATION_TIMEOUT_MS * 4 }, async () => {
+  const h = await fixture({ real: true }); h.age(); const prepared = await h.cache.prepareCleanup(new Set([key]), signal()); assert(prepared, JSON.stringify(h.nativeObservations));
   const result = await prepared.run(planId, signal(), () => true);
   assert.equal(result.status, "verified"); assert.equal(result.cleanup.removedFiles, 1); assert.equal(h.deletes(), 1);
   assert.equal(h.control.snapshot().outcomes.at(-1)?.status, "removed"); await assert.rejects(readFile(h.path), { code: "ENOENT" });

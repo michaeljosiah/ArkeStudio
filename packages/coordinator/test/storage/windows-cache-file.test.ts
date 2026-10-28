@@ -4,13 +4,23 @@ import { execFile } from "node:child_process";
 import { link, lstat, mkdir, open, readFile, realpath, rename, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
-import { windowsCacheFiles, type WindowsCacheProof } from "../../src/storage/windows-cache-file.js";
+import { WINDOWS_CACHE_OPERATION_TIMEOUT_MS, windowsCacheFiles, type WindowsCacheProof } from "../../src/storage/windows-cache-file.js";
 import { leashStorageReaderToParent } from "../../src/job-leash.js";
 import { tempDir } from "../tmp.js";
 
 const key = "a".repeat(64), hash = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
-const native = { skip: process.platform !== "win32", timeout: 30_000 };
+const native = { skip: process.platform !== "win32", timeout: WINDOWS_CACHE_OPERATION_TIMEOUT_MS * 8 };
 const signal = () => new AbortController().signal;
+it("does not spend native execution time while awaiting the original durable worker admission", native, async () => {
+  const h = await fixture(); let granted = false;
+  const rows = await windowsCacheFiles({ root: h.root, mode: "remove", items: [{ key, expected: h.proof }] }, signal(), async () => {
+    await new Promise(resolve => setTimeout(resolve, 15_000));
+    assert.deepEqual(await readFile(h.path), h.bytes, "native deletion is withheld until the grant");
+    granted = true; return true;
+  });
+  assert(granted); assert.equal(rows[0]?.state, "removed", JSON.stringify(rows));
+  await assert.rejects(readFile(h.path), { code: "ENOENT" });
+});
 async function metadataReader(path: string): Promise<() => Promise<void>> {
   const program = String.raw`
 $ErrorActionPreference='Stop'

@@ -129,6 +129,20 @@ this correction; coordinator typecheck and lint also pass.
 The fix requires its own CI. Remaining implementation, packaged-install/device and matched
 design-master acceptance listed above are unchanged; the full epic is not closed by this pass.
 
+That follow-up passed twenty of twenty-one CI jobs; Windows shard 5 refused native cleanup
+preparation. Investigation reproduced a deadline mismatch: the worker's old fourteen-second
+timer included lifetime binding and a delayed durable worker grant. A fifteen-second grant
+returned an unknown outcome before any deletion. Native cache commands now allow thirty seconds
+for startup/admission, then the existing fourteen seconds for execution, with a forty-four-second
+native-worker ceiling. Original admission/close work remains retained until settlement. Input
+remains withheld until the original grant; expiry/cancellation still
+preserves unknown outcomes and original owners. Test deadlines derive from the supported native
+operation budget rather than an unrelated thirty-second total for several commands. A failed
+real preparation now prints only closed native mode/state/reason facts for diagnosis.
+The regression fails before the change; all twenty-nine native cache cases pass afterward on
+Node 22. Three actual authenticated cleanup/maintenance host cases, coordinator typecheck, lint,
+desktop build and main-bundle load smoke also pass. The new checkpoint still requires its own CI.
+
 Restore temporary viewport overrides and stop the qualifier's original host when finished.
 Clear the two build environment variables before the normal production build. Retained test
 worlds/private fixture conversations are not automatic cleanup candidates.

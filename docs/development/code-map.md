@@ -1675,6 +1675,11 @@ wrapping evidence/manual guidance and collapsed consequence disclosures. Native 
 termination falls back to its captured child handle when a returned tree-kill command leaves it
 alive; `stopAndConfirm` still requires child/descendant exit. Focused regressions live in
 `studio-assistant/service.test.ts`, `supervisor.test.ts` and the corresponding client suites.
+Native fixed-preview operations in `storage/windows-cache-file.ts` separate the thirty-second
+lifetime-binding/durable-admission allowance from fourteen seconds of native execution, inside
+a forty-four-second overall limit. Input is withheld until the original worker grant. The native
+cache tests derive their scenario deadlines from that operation budget and include delayed-grant
+and original-intent checks; no identity, approval or original-owner requirement is relaxed.
 
 Approved System design (master turn 241, originally reviewed as 240): contracts
 `src/system-resources.ts` owns readings, freshness and conservative
