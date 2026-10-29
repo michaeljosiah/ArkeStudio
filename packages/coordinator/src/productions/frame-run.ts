@@ -38,6 +38,7 @@ import {
   beatPictureShotId,
   productionShape,
 } from "@arke-studio/contracts";
+import { deterministicUlid } from "../queue/deterministic-ulid.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import { decodePng, encodePng, type RgbaImage } from "../references/png.js";
 import { recordTakesFromJob } from "../takes/arrival.js";
@@ -743,12 +744,6 @@ function enqueueInput(
     ...(dispatch.recipe !== undefined ? { recipe: dispatch.recipe } : {}),
     ...(dispatch.engine !== undefined ? { engine: dispatch.engine } : {}),
   };
-}
-
-function deterministicUlid(value: string): string {
-  const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-  const digest = createHash("sha256").update(value).digest();
-  return Array.from({ length: 26 }, (_, index) => alphabet[digest[index % digest.length]! % 32]).join("");
 }
 
 /** Wake/advance one run. Serialization closes terminal-event and control-command races. */

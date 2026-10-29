@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { writeFile } from "node:fs/promises";
-import { ulid, deriveRehearsalLines, legacySceneView, orderedShots, type Job, type ProviderStatus } from "@arke-studio/contracts";
+import { ulid, deriveRehearsalLines, legacySceneView, orderedShots, UlidSchema, type Job, type ProviderStatus } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
 import { audioWorldPath } from "../../src/audio/storage.js";
 import { planTableRead, finalizeTableReadCache } from "../../src/audio/table-read.js";
@@ -66,6 +66,20 @@ it("Gemini table reads quote bounded WAV jobs, retain cached audio and refuse un
     const cached = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], [], async () => "Turned off.");
     assert.equal(cached.plan.items.find(item => item.lineId === input.target.id)!.route, "cached");
   }
+});
+it("keys each cloud line as a ULID the job journal accepts, the same for the same plan", async t => {
+  // `table-read/<token>/<n>` failed JobSchema's idempotencyKey on every cloud line, so no table
+  // read with a cloud voice could be queued at all (2026-10-29, First Contact's Gemini voices).
+  const store = await WorldStore.open(await makeTempWorld()); t.after(() => store.close());
+  const production = store.getBundle().productions.find(p => p.scenes.some(s => deriveRehearsalLines(s, store.getBundle().sheets).some(l => l.speakerSheetId === "maren-kest")))!;
+  const scene = production.scenes.find(s => deriveRehearsalLines(s, store.getBundle().sheets).some(l => l.speakerSheetId === "maren-kest"))!;
+  const providers: ProviderStatus[] = [{ id: "elevenlabs", configured: true, validation: "valid", fault: null, probes: [{ capability: "voice-tts", available: true }] }];
+  const first = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], providers);
+  assert.ok(first.cloud.length > 0);
+  for (const job of first.cloud) assert.ok(UlidSchema.safeParse(job.idempotencyKey).success, String(job.idempotencyKey));
+  assert.equal(new Set(first.cloud.map(job => job.idempotencyKey)).size, first.cloud.length, "each line has its own key");
+  const again = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], providers);
+  assert.deepEqual(again.cloud.map(job => job.idempotencyKey), first.cloud.map(job => job.idempotencyKey), "the same plan derives the same keys");
 });
 it("plans exact cache preparation, sees running work, and reuses verified cache without formal performance creation", async t => {
   const store = await WorldStore.open(await makeTempWorld()); t.after(() => store.close());

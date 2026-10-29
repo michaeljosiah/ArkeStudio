@@ -10,6 +10,7 @@ import { audioHash } from "./qc.js";
 import { readAudioBytes } from "./media-tools.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
+import { deterministicUlid } from "../queue/deterministic-ulid.js";
 
 /** The voice a visual novel's narration is read in: the narrator the audiobook resolves (turn 174). */
 export interface TableReadNarrator { provider: string; model?: string; voiceId: string; label?: string }
@@ -105,7 +106,8 @@ export async function planTableRead(store: WorldStore, productionId: string, sce
   const totalEstimatedMicroUsd = items.reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
   const confirmationToken = audioHash(Buffer.from(JSON.stringify({ worldId: store.worldId, productionId, sceneId, version: scene.version,
     manifestVersion: manifest.manifestVersion, generated: manifest.generated, items, bindings })));
-  cloud.forEach((job, index) => { job.idempotencyKey = `table-read/${confirmationToken}/${index}`; });
+  // The queue's journal takes only a ULID key; the same plan still derives the same keys.
+  cloud.forEach((job, index) => { job.idempotencyKey = deterministicUlid(`table-read/${confirmationToken}/${index}`); });
   return { plan: TableReadPlanSchema.parse({ productionId, sceneId, sceneVersion: scene.version, confirmationToken, totalEstimatedMicroUsd, items }), cloud, local, queued };
 }
 export async function prepareLocalTableRead(store: WorldStore, voice: VoiceService, inputs: readonly { file: string; spec: SpeechSpec }[]) {
