@@ -874,6 +874,7 @@ const PROPOSAL_WHY: Record<string, string> = {
   "story-overview": "story overview",
   "prose-style": "prose style",
   "episode-script": "episode script draft",
+  "comic-script": "pages draft",
   "season-edit": "season change",
   "episode-edit": "episode change",
   "series-edit": "series change",

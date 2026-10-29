@@ -1,0 +1,112 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { ModelWorldChatActionSchema, comicPageHash, newId, ulid, type ComicPage, type ConversationId } from "@arke-studio/contracts";
+import { ProposalManager } from "../../src/gate/proposals.js";
+import { createChapter, createProduction, setChapterRetired } from "../../src/productions/ops.js";
+import { saveComicScript } from "../../src/productions/graphic-novel.js";
+import { stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
+import { productionRecord } from "../../src/world-chat/production-record.js";
+import { WorldStore } from "../../src/world/store.js";
+import { readWorldMeta } from "../../src/world/scan.js";
+import { COMIC_ADAPTATION_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { makeTempWorld } from "../world/helpers.js";
+import { closeOnCleanup } from "../tmp.js";
+
+/**
+ * Arke turns prose into pages (SPEC-064 R-13, design turn 249): a chapter's pages staged whole as a
+ * draft the author keeps or discards, each panel citing its passage, and nothing written until kept.
+ */
+const CLOCK = "2026-10-29T12:00:00.000Z";
+async function book(pages: ComicPage[] = []) {
+  const store = await WorldStore.open(await makeTempWorld(), { clock: () => CLOCK });
+  closeOnCleanup(() => store.close());
+  const id = await createProduction(store, { title: "Low Water, drawn", medium: "story", productionKind: "graphic-novel" });
+  const chapter = await createChapter(store, id, { title: "Salt", order: 1 });
+  if (pages.length > 0) await saveComicScript(store, id, { chapter, pages, baseHash: null });
+  return { store, id, chapter, gate: new ProposalManager(store), intent: { actionId: newId("act"), conversationId: newId("cv") as ConversationId } };
+}
+const production = (store: WorldStore, id: string) => store.getBundle().productions.find((p) => p.meta.id === id)!;
+const action = (id: string, chapter: string, baseHash: string | null, pages: unknown[]) => ({
+  kind: "world-chat-production-comic-script" as const, worldId: "", action: { kind: "production-comic-script" as const, productionId: id, chapter, baseHash, checkReceiptIds: [], pages: pages as never },
+});
+
+describe("Arke's pages (SPEC-064 R-13, turn 249)", () => {
+  it("is a model action Arke can name, with pages, panels and lines that need no id", () => {
+    const parsed = ModelWorldChatActionSchema.safeParse({
+      kind: "production-comic-script", productionId: "low-water-drawn", chapter: "salt", baseHash: null, checkReceiptIds: [`check_${ulid()}`],
+      pages: [{ layout: "feature", panels: [{ description: "The harbour at slack water.", lettering: [{ kind: "caption", text: "Salt was in everything." }], source: { story: "low-water", chapter: "salt", paragraphs: [1, 2] } }] }],
+    });
+    assert.ok(parsed.success, parsed.success ? "" : parsed.error.message);
+  });
+
+  it("lists a chapter with no pages for Arke, and stages its pages as a draft, citing the chapter as it stands", async () => {
+    const { store, id, chapter, gate, intent } = await book();
+    const read = productionRecord(store.getBundle(), id) as { unpagedChapters?: { chapters: Array<{ chapter: string; baseHash: string | null }> } };
+    assert.deepEqual(read.unpagedChapters?.chapters, [{ chapter, baseHash: null }]);
+    const run = action(id, chapter, null, [{ layout: "feature", panels: [
+      { description: "Maren walks the hard with her lantern.", characters: ["maren-kest"], lettering: [{ kind: "caption", text: "Salt was in everything that week." }], source: { story: id, chapter, paragraphs: [1, 2] } },
+      { description: "Bray at the weigh house door.", characters: ["bray-half-hitch"], lettering: [{ kind: "speech", speaker: "bray-half-hitch", text: "You walked the hard again." }] },
+    ] }]);
+    run.worldId = store.worldId;
+    const proposal = await stageWorldChatProductionAuthoredAction(store, gate, intent, run);
+    assert.equal(proposal.kind, "comic-script");
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= COMIC_ADAPTATION_SCHEMA_VERSION, "a drafted-pages proposal is past older readers");
+    assert.equal(production(store, id).comicScripts?.length ?? 0, 0, "nothing is written while the draft waits");
+    const staged = store.getBundle().proposals.find((entry) => entry.proposal.id === proposal.id)!;
+    const drafted = Object.values(staged.comicScripts ?? {})[0]!;
+    const panel = drafted.pages[0]!.panels[0]!;
+    assert.match(panel.id, /^[0-9A-HJKMNP-TV-Z]{26}$/, "a new panel is given its id");
+    assert.equal(panel.source?.version, production(store, id).chapters[0]!.version ?? 1, "an unversioned citation is pinned to the chapter as it stands");
+    assert.equal((await gate.accept(proposal.id)).status, "accepted");
+    assert.equal(production(store, id).comicScripts![0]!.script.pages[0]!.panels.length, 2);
+  });
+
+  it("keeps a page's id, so its takes stay its own, and fences on the pages Arke read", async () => {
+    const page: ComicPage = { id: ulid(), layout: "feature", status: "draft", panels: [{ id: ulid(), description: "Maren on the pier.", characters: ["maren-kest"], lettering: [] }] };
+    const { store, id, chapter, gate, intent } = await book([page]);
+    const baseHash = production(store, id).comicScripts![0]!.hash;
+    const stale = action(id, chapter, "sha256:old", [{ id: page.id, layout: "feature", panels: [{ id: page.panels[0]!.id, description: "Maren on the pier." }] }]);
+    stale.worldId = store.worldId;
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, stale), /changed since/);
+    const fresh = action(id, chapter, null, stale.action.pages);
+    fresh.worldId = store.worldId;
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, fresh), /already has pages/);
+    const run = action(id, chapter, baseHash, [{ id: page.id, layout: "feature", panels: [{ id: page.panels[0]!.id, description: "Maren on the pier.", characters: ["maren-kest"] }] }, { id: "guessed", layout: "splash", panels: [{ description: "The bell." }] }]);
+    run.worldId = store.worldId;
+    const proposal = await stageWorldChatProductionAuthoredAction(store, gate, intent, run);
+    const drafted = Object.values(store.getBundle().proposals.find((entry) => entry.proposal.id === proposal.id)!.comicScripts!)[0]!;
+    assert.equal(drafted.pages[0]!.id, page.id);
+    assert.equal(comicPageHash(drafted.pages[0]!, { reading: "ltr", aspect: "2:3" }, "baked"), comicPageHash(page, { reading: "ltr", aspect: "2:3" }, "baked"), "an unchanged page is still the page its takes were made from");
+    assert.notEqual(drafted.pages[1]!.id, "guessed", "a guessed id is never taken");
+    // One draft of a chapter at a time.
+    const again = action(id, chapter, baseHash, [{ layout: "splash", panels: [{ description: "The bell." }] }]);
+    again.worldId = store.worldId;
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, again), /is waiting/);
+  });
+
+  it("names an emptied chapter's own base, and drafts no pages for a retired chapter (codex on PR 2246)", async () => {
+    const { store, id, chapter, gate, intent } = await book();
+    const saved = await saveComicScript(store, id, { chapter, pages: [], baseHash: null });
+    const read = productionRecord(store.getBundle(), id) as { unpagedChapters?: { chapters: Array<{ chapter: string; baseHash: string | null }> } };
+    assert.deepEqual(read.unpagedChapters?.chapters, [{ chapter, baseHash: saved.hash }], "a saved empty script is drafted on its own hash, not null");
+    await setChapterRetired(store, id, production(store, id).chapters.find((c) => c.id === chapter)!.file, true);
+    assert.deepEqual((productionRecord(store.getBundle(), id) as { unpagedChapters?: { chapters: unknown[] } }).unpagedChapters?.chapters, []);
+    const retired = action(id, chapter, saved.hash, [{ layout: "splash", panels: [{ description: "x" }] }]);
+    retired.worldId = store.worldId;
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, retired), /has no chapter/);
+  });
+
+  it("refuses a sheet that is not in the world, a passage in a chapter that is not, and a book that is not a graphic novel", async () => {
+    const { store, id, chapter, gate, intent } = await book();
+    const nobody = action(id, chapter, null, [{ layout: "splash", panels: [{ description: "x", characters: ["nobody-at-all"] }] }]);
+    nobody.worldId = store.worldId;
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, nobody), /not a sheet/);
+    const nowhere = action(id, chapter, null, [{ layout: "splash", panels: [{ description: "x", source: { story: id, chapter: "nowhere", paragraphs: [1] } }] }]);
+    nowhere.worldId = store.worldId;
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, nowhere), /not in this world/);
+    const novel = await createProduction(store, { title: "A book", medium: "story" });
+    const wrong = action(novel, chapter, null, [{ layout: "splash", panels: [{ description: "x" }] }]);
+    wrong.worldId = store.worldId;
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, wrong), /not a graphic novel/);
+  });
+});

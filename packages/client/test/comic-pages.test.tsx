@@ -201,6 +201,42 @@ describe("Pages (turn 247)", () => {
   });
 });
 
+describe("Arke's pages (turn 249)", () => {
+  const PATH = "productions/low-water-drawn/comic/the-tide.json";
+  function withDraft(pages: ComicPage[]): ClientState {
+    const state = withBook([], {});
+    const proposal = { id: "pr_01J8H0000000000000000000Q9", kind: "comic-script", status: "pending", summary: "The tide pages", draftRevision: 2,
+      targets: [{ path: PATH, baseVersion: null, baseHash: null }], createdAt: AT } as never;
+    state.world!.proposals = [...state.world!.proposals, { proposal, ripple: [], comicScripts: { [PATH]: { version: 1, pages } } } as never];
+    return state;
+  }
+
+  it("says a chapter has no pages, and offers + Page (249c)", async () => {
+    const m = await mount(withBook([], {}));
+    assert.match(m.container.textContent!, /1 · The tide has no pages/);
+    assert.ok(button(m.container, "+ Page"));
+  });
+
+  it("shows Arke's draft dashed, every panel with its passage, and Make waits for Keep (249d)", async () => {
+    const drafted = page();
+    drafted.panels[0]!.source = { story: "low-water-drawn", chapter: "the-tide", version: 1, paragraphs: [1, 2] };
+    const m = await mount(withDraft([drafted, page()]));
+    assert.match(m.container.textContent!, /Arke’s draft2 pages from chapter 1/);
+    assert.equal(m.container.querySelectorAll(".fy-comic__thumb--draft").length, 2);
+    assert.match(m.container.querySelector(".fy-comic__src")!.textContent!, /1.2/);
+    const make = [...m.container.querySelectorAll("button")].find((b) => b.textContent?.includes("Make page"))!;
+    assert.equal((make as unknown as HTMLButtonElement).disabled, true);
+    assert.match(m.container.textContent!, /Keep the draft first/);
+
+    await act(async () => props(button(m.container, "Keep")!).onClick({}));
+    const keep = m.sent.find((message) => message.kind === "proposal-accept") as Extract<ClientMessage, { kind: "proposal-accept" }>;
+    assert.equal(keep.proposalId, "pr_01J8H0000000000000000000Q9");
+    assert.equal(keep.expectedDraftRevision, 2, "kept as drafted, never a later revision");
+    await act(async () => props(button(m.container, "Discard")!).onClick({}));
+    assert.ok(m.sent.some((message) => message.kind === "proposal-discard"));
+  });
+});
+
 describe("Style (turn 248)", () => {
   const styleSent = (sent: ClientMessage[]) => sent.filter((message): message is Extract<ClientMessage, { kind: "set-comic-settings" }> => message.kind === "set-comic-settings").at(-1);
   const card = (name: string) => [...dom.document.querySelectorAll(".fy-comic-style")].find((el) => el.querySelector(".fy-comic-style__name")?.textContent === name)!;
