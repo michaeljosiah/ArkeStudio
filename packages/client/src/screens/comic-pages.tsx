@@ -94,51 +94,65 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const scripts = useRef(production.comicScripts);
   scripts.current = production.comicScripts;
   const bases = useRef(new Map<string, string | null>());
-  const draft = useRef<{ chapter: string; pages: ComicPage[] } | null>(null);
-  const pending = useRef<{ requestId: string; chapter: string } | null>(null);
+  // Drafts by chapter: switching chapters never shows or saves one chapter's pages as another's, and a
+  // chapter's incomplete draft waits there until it is whole (codex on PR 2226).
+  const drafts = useRef(new Map<string, ComicPage[]>());
+  const pending = useRef<{ requestId: string; chapter: string; pages: ComicPage[] } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [unsaved, setUnsaved] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const baseFor = (id: string) => bases.current.has(id) ? bases.current.get(id)! : scripts.current?.find((entry) => entry.chapter === id)?.hash ?? null;
+  const settle = () => setUnsaved(drafts.current.size > 0 || pending.current !== null);
   const send = () => {
     clearTimeout(timer.current);
-    const next = draft.current;
-    if (next === null) return;
+    if (drafts.current.size === 0) return;
     if (pending.current !== null) { timer.current = setTimeout(send, 150); return; }
     // A new panel or line is empty until written: the coordinator would refuse the whole script, and
-    // a refused message is never answered. It stays here, unsaved, until it is whole (codex on PR 2226).
-    if (!ComicScriptSchema.safeParse({ version: 1, pages: next.pages }).success) return;
-    draft.current = null;
-    const requestId = saveComicScript(worldId, productionId, next.chapter, next.pages, baseFor(next.chapter));
-    if (requestId === null) { draft.current = next; setProblem("not connected"); return; }
-    pending.current = { requestId, chapter: next.chapter };
+    // a refused message is never answered. It stays here, unsaved, until it is whole.
+    const ready = [...drafts.current].find(([, next]) => ComicScriptSchema.safeParse({ version: 1, pages: next }).success);
+    if (ready === undefined) return;
+    const [id, next] = ready;
+    drafts.current.delete(id);
+    const requestId = saveComicScript(worldId, productionId, id, next, baseFor(id));
+    if (requestId === null) { drafts.current.set(id, next); setProblem("not connected"); return; }
+    pending.current = { requestId, chapter: id, pages: next };
     // A save never answered — a dropped socket — frees the queue rather than holding it for good.
     setTimeout(() => {
       if (pending.current?.requestId !== requestId) return;
       pending.current = null;
-      draft.current ??= next;
+      if (!drafts.current.has(id)) drafts.current.set(id, next);
       setProblem("not saved");
+      settle();
     }, 15_000);
+    if (drafts.current.size > 0) timer.current = setTimeout(send, 150);
   };
   useEffect(() => {
-    // Another window's save, or a chapter change: the stored script wins when nothing is unsaved here.
-    if (draft.current === null && pending.current === null && chapter) {
-      setPages(stored?.script.pages ?? []);
-      bases.current.set(chapter.id, stored?.hash ?? null);
-    }
+    // A chapter change, or another window's save: this chapter's own draft wins, then its save in
+    // flight, then the stored script. Another chapter's save never keeps this one from loading.
+    if (!chapter) return;
+    const held = drafts.current.get(chapter.id) ?? (pending.current?.chapter === chapter.id ? pending.current.pages : undefined);
+    if (held !== undefined) { setPages(held); return; }
+    setPages(stored?.script.pages ?? []);
+    bases.current.set(chapter.id, stored?.hash ?? null);
   }, [stored?.hash, chapter?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => subscribeComicScriptSaveResults((result) => {
     if (result.requestId !== pending.current?.requestId) return;
-    const saved = pending.current.chapter;
+    const sent = pending.current;
     pending.current = null;
     // The base is that chapter's own: a late answer never moves another chapter's base.
-    if (result.disposition === "saved" && result.hash) { bases.current.set(saved, result.hash); setProblem(null); }
-    else setProblem(result.reason ?? "not saved");
-    if (draft.current === null) setUnsaved(false);
-  }), []);
+    if (result.disposition === "saved" && result.hash) { bases.current.set(sent.chapter, result.hash); setProblem(null); }
+    else {
+      // Refused, so not saved: the pages wait again, unsaved, and the next try takes the chapter's
+      // current base rather than the one that was refused (codex on PR 2226).
+      if (!drafts.current.has(sent.chapter)) drafts.current.set(sent.chapter, sent.pages);
+      bases.current.delete(sent.chapter);
+      setProblem(result.reason ?? "not saved");
+    }
+    settle();
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
   const edit = (next: ComicPage[]) => {
     if (!chapter) return;
-    draft.current = { chapter: chapter.id, pages: next };
+    drafts.current.set(chapter.id, next);
     setUnsaved(true);
     setPages(next);
     clearTimeout(timer.current);
