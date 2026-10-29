@@ -144,6 +144,15 @@ describe("Pages (turn 247)", () => {
     assert.equal(save.pages[0]!.panels[0]!.lettering[0]!.text, "Where are you now?");
   });
 
+  it("keeps a new, empty panel here until it is written, and holds Export meanwhile (codex on PR 2226)", async () => {
+    const m = await mount(withBook([page()], {}));
+    const panel = [...m.container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Panel")!;
+    await act(async () => props(panel).onClick({}));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
+    assert.equal(m.sent.some((message) => message.kind === "save-comic-script"), false, "an empty panel would be refused unanswered");
+    assert.equal((button(m.container, "Export") as unknown as HTMLButtonElement).disabled, true);
+  });
+
   it("holds Export while a page has no accepted take, with Go to (247g)", async () => {
     const m = await mount(withBook([page(), page()], {}));
     await act(async () => props(button(m.container, "Export")!).onClick({}));
