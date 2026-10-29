@@ -19,6 +19,7 @@ export const SCREENS: ScreenEntry[] = [
   // Shell
 
   { id: "startup", samplePath: "/" },
+  { id: "onboarding", samplePath: "/setup" },
   { id: "first-run", samplePath: "/first-run" },
   { id: "world-picker", samplePath: "/worlds" },
   { id: "publications", samplePath: "/publications" },
@@ -92,6 +93,8 @@ export const SCREENS: ScreenEntry[] = [
   // The audiobook's door (turn 146): the fixture's story production has no chapters, so the
   // sample path renders the head, the seg and the empty state under them.
   { id: "audiobook", samplePath: `${P}/story/audiobook` },
+  // A graphic novel's Pages (design turn 247, SPEC-064); any production mounts it.
+  { id: "comic-pages", samplePath: `${P}/story/pages` },
   { id: "scenes", samplePath: `${P}/scenes` },
   { id: "scene-detail", samplePath: `${P}/scenes/sc_04` },
   { id: "shot", samplePath: `${P}/scenes/sc_04/shots/sh_12` },

@@ -18,6 +18,8 @@ import {
   productionShape,
   productionExportFingerprint,
   publicationBlockers,
+  storyReplay,
+  storyIdentity,
   routingFindings,
   RoutingSchema,
   sceneBeats,
@@ -43,9 +45,8 @@ import type { CommitInput } from "../world/commit.js";
 import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
 
 /**
- * Save the routing record — the import boundary where the no-state rule is enforced twice:
- * the strict parse here refuses a `condition` key by name, and the gate's own routing lane
- * (JSON_TRACK_SCHEMAS) refuses the same shape arriving through a proposal.
+ * Save the strict routing record. Story rules opt into SPEC-063 schemaVersion 2; the same
+ * schema is used by the gate lane for proposals and by the scanner on reopen.
  */
 export async function saveRouting(
   store: WorldStore,
@@ -137,8 +138,18 @@ export function applyRoutingCommand(current: Routing | null, command: RoutingCom
     if (command.operation !== "set-start") throw new Error("Set the start scene before editing routing.");
     return RoutingSchema.parse({ version: 1, start: command.sceneId, choices: [], endings: [], excluded: [], groups: [] });
   }
+  if ("baseVersion" in command && command.baseVersion !== undefined && current.version !== command.baseVersion) throw new Error("Story rules changed while this dialog was open. Review the current rules before saving.");
   let next: Routing;
   switch (command.operation) {
+    case "set-facts":
+      next = { ...current, schemaVersion: 2, facts: command.facts };
+      break;
+    case "set-presentation":
+      next = { ...current, schemaVersion: 2, presentation: [...(current.presentation ?? []).filter(p => p.sceneId !== command.presentation.sceneId), command.presentation] };
+      break;
+    case "set-ending-variants":
+      next = { ...current, schemaVersion: 2, endings: [...current.endings.filter(e => e.sceneId !== command.sceneId), { sceneId: command.sceneId, title: command.title, variants: command.variants }] };
+      break;
     case "set-start":
       next = { ...current, start: command.sceneId };
       break;
@@ -153,7 +164,7 @@ export function applyRoutingCommand(current: Routing | null, command: RoutingCom
       if (index < 0) throw new Error(`Choice ${command.choiceId} does not exist.`);
       next = {
         ...current,
-        choices: current.choices.map((choice, at) => at === index ? { ...choice, ...command.changes } : choice),
+        choices: current.choices.map((choice, at) => at === index ? { ...choice, ...command.changes, when: command.changes.when === null ? undefined : command.changes.when ?? choice.when, unavailable:command.changes.unavailable === null ? undefined : command.changes.unavailable ?? choice.unavailable } : choice),
       };
       break;
     }
@@ -168,7 +179,7 @@ export function applyRoutingCommand(current: Routing | null, command: RoutingCom
         ...current,
         endings: [
           ...current.endings.filter((ending) => ending.sceneId !== command.sceneId),
-          { sceneId: command.sceneId, title: command.title },
+          { ...current.endings.find(ending => ending.sceneId === command.sceneId), sceneId: command.sceneId, title: command.title },
         ],
       };
       break;
@@ -225,6 +236,8 @@ export function applyRoutingCommand(current: Routing | null, command: RoutingCom
   ) {
     refuseExcludedOnRoute(next);
   }
+  if (next.choices.some(c => c.when !== undefined || c.effects?.length || c.unavailable !== undefined)) next = { ...next, schemaVersion: 2 };
+  if (next.schemaVersion !== 2) next = { ...next, choices: next.choices.map(({ when: _when, effects: _effects, unavailable:_unavailable, ...choice }) => choice) };
   return RoutingSchema.parse({ ...next, version: current.version + 1 });
 }
 
@@ -237,6 +250,7 @@ function scenesNamedBy(command: RoutingCommand): string[] {
   switch (command.operation) {
     case "set-start":
     case "set-ending":
+    case "set-ending-variants":
     case "exclude-scene":
       return [command.sceneId];
     case "add-choice":
@@ -247,6 +261,7 @@ function scenesNamedBy(command: RoutingCommand): string[] {
       return command.group.scenes;
     case "edit-group":
       return command.changes.scenes ?? [];
+    case "set-presentation": return [command.presentation.sceneId];
     default:
       return [];
   }
@@ -277,6 +292,12 @@ export function applyRoutingCommandOnDisk(
     const known = new Set(production.scenes.map((scene) => scene.id));
     const missing = scenesNamedBy(command).find((sceneId) => !known.has(sceneId));
     if (missing !== undefined) throw new Error(`Scene ${missing} is no longer in this production.`);
+    if (command.operation === "set-presentation") {
+      const scene = production.scenes.find(s => s.id === command.presentation.sceneId)!;
+      const blocks = new Set((scene.script?.blocks ?? []).map(b => b.id));
+      const shots = new Set(orderedShots(scene).map(s => s.id));
+      if (command.presentation.blocks.some(b => !blocks.has(b.blockId)) || command.presentation.shots.some(s => !shots.has(s.shotId))) throw new Error("A presentation rule refers to a missing dialogue block or shot");
+    }
     // The map derives a new choice's id from its label against the routing it last saw; two quick
     // adds with one label derive the same id, and the second would be refused as a duplicate. The
     // id is the map's own coinage, so it is made unique here, against the file it applies to.
@@ -307,6 +328,15 @@ export async function appendTraversal(
 ): Promise<void> {
   const parsed = TraversalEvidenceSchema.parse(line);
   await store.gateOp(async () => {
+    const routing = store.getBundle().productions.find(p => p.meta.id === productionId)?.routing;
+    if (routing?.schemaVersion === 2) {
+      if (!parsed.story || parsed.story.identity !== storyIdentity(routing)) throw new Error("Story traversal is stale or missing its route witness");
+      const before = storyReplay(routing, parsed.story.prefix);
+      const after = storyReplay(routing, [...parsed.story.prefix, parsed.choiceId]);
+      const expectedRoute = [routing.start, ...parsed.story.prefix.map(id => routing.choices.find(c => c.id === id)!.to)];
+      if (JSON.stringify(parsed.route) !== JSON.stringify(expectedRoute)) throw new Error("Story traversal scene route does not match its choice prefix");
+      if (before.sceneId !== parsed.from || after.sceneId !== parsed.to || parsed.story.before !== storyIdentity(before.state) || parsed.story.after !== storyIdentity(after.state)) throw new Error("Story traversal does not replay");
+    }
     if (options.requestId !== undefined) {
       const existing = await readStoredTraversal(store, productionId);
       if (existing.some((entry) => entry.requestId === options.requestId)) return;
@@ -349,7 +379,7 @@ export async function readTraversal(store: WorldStore, productionId: string): Pr
 }
 
 export async function readTraversalFromDirectory(dir: string, productionId: string, routing?: Routing): Promise<TraversalEvidence[]> {
-  if (!routing) return (await readStoredTraversal({dir}, productionId)).map(({ requestId: _requestId, ...entry }) => entry);
+  if (!routing || routing.schemaVersion === 2) return (await readStoredTraversal({dir}, productionId)).map(({ requestId: _requestId, ...entry }) => entry);
   if (!routing.choices.length) return [];
   const byChoice = new Map(routing.choices.map(choice => [choice.id, choice])), found = new Map<string, TraversalEvidence>();
   const input = createReadStream(toExtendedLength(join(dir, "productions", productionId, EVIDENCE_FILE)), { encoding: "utf8" });
@@ -482,7 +512,7 @@ function playerHtml(
   presentation: { worldId: string; title: string; eyebrow: string; titles: Record<string, string> },
 ): string {
   const json = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
-  const player = INTERACTIVE_PLAYER_SOURCE.replace("export function mountInteractivePlayer", "function mountInteractivePlayer").replace(/<\/script/gi, "<\\/script");
+  const player = INTERACTIVE_PLAYER_SOURCE.replace(/^export function /gm, "function ").replace(/<\/script/gi, "<\\/script");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>${presentation.title.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!)}</title>
@@ -498,7 +528,7 @@ ${player}
 // interactive movie made a visual novel on the same routing would open on beat 12 for 12s in.
 const manifest = ${json(manifest)};
 const titles = ${json(presentation.titles)};
-const KEY = "arke-iv-" + ${json(presentation.worldId)} + "-" + manifest.provenance.productionId + "-v" + manifest.provenance.routingVersion + (manifest.beats ? "-beats" : "");
+const KEY = "arke-iv-" + ${json(presentation.worldId)} + "-" + manifest.provenance.productionId + "-v" + manifest.provenance.routingVersion + (manifest.beats ? "-beats" : "") + (manifest.routing.schemaVersion === 2 ? "-" + manifest.provenance.exportId : "");
 mountInteractivePlayer(document.getElementById("app"), {
   title: ${json(presentation.title)},
   eyebrow: ${json(presentation.eyebrow)},
@@ -507,6 +537,7 @@ mountInteractivePlayer(document.getElementById("app"), {
     title: titles[m.sceneId] || m.sceneId,
     clips: m.windows && m.windows.length > 0 ? m.windows.map((w) => ({ src: m.file, from: w.from, to: w.to })) : [m.file],
   }]).concat((manifest.beats || []).map((s) => [s.sceneId, { title: titles[s.sceneId] || s.sceneId, beats: s.beats }]))),
+  story: manifest.routing.schemaVersion === 2 ? manifest.routing : undefined,
   choices: manifest.routing.choices,
   endings: manifest.routing.endings,
   storageKey: KEY,
@@ -515,7 +546,8 @@ mountInteractivePlayer(document.getElementById("app"), {
 `;
 }
 
-type PlaybackWindow = { from: number; to?: number };
+/** A part of a clip, in seconds of its file; no `to`, it plays to the file's end. */
+export type PlaybackWindow = { from: number; to?: number };
 
 /** A visual novel's beat as the package carries it: its picture and voice are files in `files`. */
 type ManifestBeat = PlayerBeat;
@@ -602,6 +634,8 @@ function parseInteractiveManifest(value: unknown): InteractiveExportManifest | n
       // A beat names only files the package lists, so every one of them is re-hashed below.
       return (b["picture"] === undefined || (packaged(b["picture"]) && listed.has(b["picture"] as string))) &&
         (b["audio"] === undefined || (packaged(b["audio"]) && listed.has(b["audio"] as string))) &&
+        (routing.data.schemaVersion !== 2 || (typeof b["shotId"] === "string" && /^sh_[a-z0-9-]+$/.test(b["shotId"]) && typeof b["pictureShotId"] === "string" && /^sh_[a-z0-9-]+$/.test(b["pictureShotId"]))) &&
+        (b["blockId"] === undefined || (typeof b["blockId"] === "string" && /^blk_[a-z0-9-]+$/.test(b["blockId"]))) &&
         (b["text"] === undefined || typeof b["text"] === "string") &&
         (b["speaker"] === undefined || typeof b["speaker"] === "string") &&
         ["voice", "tap", "hold"].includes(b["advance"] as string) &&
@@ -743,103 +777,12 @@ export async function exportInteractive(
   if (routing === null) return { ok: false, blockers: ["this production has no routing yet"] };
   const findings = await interactiveFindings(store, production);
   const blockers = publicationBlockers(findings).map((finding) => finding.detail);
+  if (routing.schemaVersion === 2 && routing.presentation?.some(rule => rule.blocks.length || rule.shots.length) && !productionShape(production.meta).playsAsBeats) return { ok: false, blockers: ["Conditional dialogue and shots require beat playback; composite movies cannot hide inactive content."] };
   if (productionShape(production.meta).playsAsBeats) return exportBeats(store, production, routing, blockers, clock, options);
 
-  // Every routed, unexcluded scene ships ONE file that covers the whole scene: a pass take, or
-  // the single shot's accepted clip. A multi-shot scene with only per-shot takes is refused by
-  // name — silently shipping the first shot's clip was a package missing most of its scene.
-  const excluded = new Set(routing.excluded.map((entry) => entry.sceneId));
-  const shipped = production.scenes.filter((scene) => !excluded.has(scene.id));
-  const media: Array<{ sceneId: string; source: string; file: string; windows: PlaybackWindow[] }> = [];
-  const cut = new Map(deriveCut(production).entries.map((entry) => [entry.shot.id, entry]));
-  for (const scene of shipped) {
-    const shots = orderedShots(scene);
-    const acceptedIds = new Set(
-      shots
-        .map((shot) => production.selections[shot.id]?.acceptedTakeId ?? null)
-        .filter((takeId): takeId is string => takeId !== null),
-    );
-    // Segments resolve to the pass clip that actually holds the pixels.
-    const resolved = [...acceptedIds].map((takeId) => {
-      const take = production.takes.find((t) => t.id === takeId);
-      return take?.segment !== undefined
-        ? production.takes.find((t) => t.id === take.segment!.passTakeId)
-        : take;
-    });
-    const covering = resolved.find(
-      (take) =>
-        take?.media !== undefined && shots.every((shot) => take.coversShots.includes(shot.id)),
-    );
-    if (covering?.media === undefined) {
-      blockers.push(
-        shots.length > 1 && acceptedIds.size > 0
-          ? `${scene.id} spans ${shots.length} shots with no single clip covering them — cut a whole-scene pass before export`
-          : `${scene.id} has no accepted footage to ship`,
-      );
-      continue;
-    }
-    // Every shot's accepted take must BE the covering clip (directly or as its segment): a
-    // covering pass silently overriding a newer per-shot accept would ship footage the screen
-    // says was replaced.
-    const outsideCovering = shots.filter((shot) => {
-      const acceptedId = production.selections[shot.id]?.acceptedTakeId ?? null;
-      if (acceptedId === null) return true;
-      const accepted = production.takes.find((t) => t.id === acceptedId);
-      return accepted === undefined || (accepted.segment?.passTakeId ?? accepted.id) !== covering.id;
-    });
-    if (outsideCovering.length > 0) {
-      blockers.push(
-        `${scene.id}'s accepted takes for ${outsideCovering
-          .map((shot) => shot.id)
-          .join(", ")} are not part of the covering clip — re-cut the pass or accept its takes before export`,
-      );
-      continue;
-    }
-    // `media` is an unrestricted string in the take schema, and a hand-edited or imported take
-    // can name `../../..`; joined onto the take's folder, the export copied a host file into a
-    // portable package. A take's media is a plain filename in its own folder, as the scanner holds.
-    if (!/^[^/\\]+$/.test(covering.media) || covering.media === "." || covering.media === "..") {
-      blockers.push(`${scene.id}'s accepted take names media outside its own folder`);
-      continue;
-    }
-    // The parts of the file the cut plays, shot by shot — a trim's in-point, a segment's range,
-    // the slot's end — so the package plays the scene the preview plays, not the whole file with
-    // its discarded head and tail. An unsegmented pass covering several shots has no cut entries
-    // of its own and plays whole, which is what it is.
-    const path = `productions/${production.meta.id}/takes/${covering.id}/${covering.media}`;
-    const windows: PlaybackWindow[] = [];
-    const unplayed: string[] = [];
-    for (const shot of shots) {
-      const entry = cut.get(shot.id);
-      const played = entry?.media?.path === path ? playbackWindow(entry) : null;
-      if (played) windows.push(played);
-      else unplayed.push(shot.id);
-    }
-    // No window at all is either a whole pass the scene accepted as itself — no cut entries of
-    // its own, so it plays whole — or a cut that leaves nothing, every shot trimmed past its end.
-    // Read as the first, the second shipped the whole file, the footage the trims discarded too.
-    const wholePass =
-      covering.segment === undefined &&
-      covering.coversShots.length > 1 &&
-      shots.every((shot) => production.selections[shot.id]?.acceptedTakeId === covering.id);
-    // Every shot plays its window, or the scene is the whole pass: some windows and not others
-    // (a shot still on the unsegmented pass beside its neighbours' segments, one trimmed past its
-    // end) shipped the scene with those shots silently missing.
-    if (!wholePass && windows.length === 0) {
-      blockers.push(`${scene.id}'s cut leaves nothing to play — its trims run past the end of every shot`);
-      continue;
-    }
-    if (!wholePass && unplayed.length > 0) {
-      blockers.push(`${scene.id}'s cut has nothing to play for ${unplayed.join(", ")} — accept a segment for each shot, or trim less`);
-      continue;
-    }
-    media.push({
-      sceneId: scene.id,
-      source: join(store.dir, "productions", production.meta.id, "takes", covering.id, covering.media),
-      file: `media/${scene.id}${covering.media.slice(covering.media.lastIndexOf("."))}`,
-      windows,
-    });
-  }
+  const resolved = resolveMovieScenes(store, production, routing);
+  blockers.push(...resolved.blockers.map((blocker) => blocker.detail));
+  const media = resolved.media;
   if (blockers.length > 0) return { ok: false, blockers };
 
   return store.gateOp(async () => {
@@ -888,6 +831,141 @@ export async function exportInteractive(
     if (problems.length > 0) return { ok: false, blockers: problems };
     return { ok: true, id: exportId, dir: `exports/${outName}`, file: `exports/${outName}/player.html` };
   }, options.precondition);
+}
+
+/** A scene that cannot ship: the web package's words, and the one clause Export → Arke Player shows (turn 245c). */
+export interface SceneBlocker {
+  sceneId?: string;
+  detail: string;
+  clause: string;
+}
+
+/**
+ * One scene's footage as the cut plays it: the file that covers it, world-relative and joined, and
+ * the windows of that file the scene plays, with the shot each stands for — absent, the whole pass.
+ */
+export interface MovieSceneMedia {
+  sceneId: string;
+  /** World-relative, `productions/<id>/takes/<take>/<file>`. */
+  rel: string;
+  source: string;
+  file: string;
+  windows: PlaybackWindow[];
+  /** The shot each window plays, index for index. */
+  shots: string[];
+}
+
+/**
+ * What an interactive movie's scenes ship (brief §6): every routed, unexcluded scene — or, given
+ * `only`, those scenes alone — resolved to ONE file that covers it and the windows of it the cut
+ * plays. The web package and Export → Arke Player (SPEC-058 R-89) both read a scene here, so the
+ * two can never ship a scene differently.
+ */
+export function resolveMovieScenes(store: Pick<WorldStore, "dir">, production: ProductionBundle, routing: Routing, only?: ReadonlySet<string>): { media: MovieSceneMedia[]; blockers: SceneBlocker[] } {
+  const blockers: SceneBlocker[] = [];
+  // Every routed, unexcluded scene ships ONE file that covers the whole scene: a pass take, or
+  // the single shot's accepted clip. A multi-shot scene with only per-shot takes is refused by
+  // name — silently shipping the first shot's clip was a package missing most of its scene.
+  const excluded = new Set(routing.excluded.map((entry) => entry.sceneId));
+  const shipped = production.scenes.filter((scene) => !excluded.has(scene.id) && (only === undefined || only.has(scene.id)));
+  const media: MovieSceneMedia[] = [];
+  const cut = new Map(deriveCut(production).entries.map((entry) => [entry.shot.id, entry]));
+  for (const scene of shipped) {
+    const shots = orderedShots(scene);
+    const acceptedIds = new Set(
+      shots
+        .map((shot) => production.selections[shot.id]?.acceptedTakeId ?? null)
+        .filter((takeId): takeId is string => takeId !== null),
+    );
+    // Segments resolve to the pass clip that actually holds the pixels.
+    const resolved = [...acceptedIds].map((takeId) => {
+      const take = production.takes.find((t) => t.id === takeId);
+      return take?.segment !== undefined
+        ? production.takes.find((t) => t.id === take.segment!.passTakeId)
+        : take;
+    });
+    const covering = resolved.find(
+      (take) =>
+        take?.media !== undefined && shots.every((shot) => take.coversShots.includes(shot.id)),
+    );
+    if (covering?.media === undefined) {
+      blockers.push(
+        shots.length > 1 && acceptedIds.size > 0
+          ? { sceneId: scene.id, detail: `${scene.id} spans ${shots.length} shots with no single clip covering them — cut a whole-scene pass before export`, clause: "no clip covers every shot" }
+          : { sceneId: scene.id, detail: `${scene.id} has no accepted footage to ship`, clause: "no clip" },
+      );
+      continue;
+    }
+    // Every shot's accepted take must BE the covering clip (directly or as its segment): a
+    // covering pass silently overriding a newer per-shot accept would ship footage the screen
+    // says was replaced.
+    const outsideCovering = shots.filter((shot) => {
+      const acceptedId = production.selections[shot.id]?.acceptedTakeId ?? null;
+      if (acceptedId === null) return true;
+      const accepted = production.takes.find((t) => t.id === acceptedId);
+      return accepted === undefined || (accepted.segment?.passTakeId ?? accepted.id) !== covering.id;
+    });
+    if (outsideCovering.length > 0) {
+      blockers.push({
+        sceneId: scene.id,
+        detail: `${scene.id}'s accepted takes for ${outsideCovering
+          .map((shot) => shot.id)
+          .join(", ")} are not part of the covering clip — re-cut the pass or accept its takes before export`,
+        clause: "a take outside its clip",
+      });
+      continue;
+    }
+    // `media` is an unrestricted string in the take schema, and a hand-edited or imported take
+    // can name `../../..`; joined onto the take's folder, the export copied a host file into a
+    // portable package. A take's media is a plain filename in its own folder, as the scanner holds.
+    if (!/^[^/\\]+$/.test(covering.media) || covering.media === "." || covering.media === "..") {
+      blockers.push({ sceneId: scene.id, detail: `${scene.id}'s accepted take names media outside its own folder`, clause: "a clip outside its folder" });
+      continue;
+    }
+    // The parts of the file the cut plays, shot by shot — a trim's in-point, a segment's range,
+    // the slot's end — so the package plays the scene the preview plays, not the whole file with
+    // its discarded head and tail. An unsegmented pass covering several shots has no cut entries
+    // of its own and plays whole, which is what it is.
+    const path = `productions/${production.meta.id}/takes/${covering.id}/${covering.media}`;
+    const windows: PlaybackWindow[] = [];
+    const played: string[] = [];
+    const unplayed: string[] = [];
+    for (const shot of shots) {
+      const entry = cut.get(shot.id);
+      const window = entry?.media?.path === path ? playbackWindow(entry) : null;
+      if (window) {
+        windows.push(window);
+        played.push(shot.id);
+      } else unplayed.push(shot.id);
+    }
+    // No window at all is either a whole pass the scene accepted as itself — no cut entries of
+    // its own, so it plays whole — or a cut that leaves nothing, every shot trimmed past its end.
+    // Read as the first, the second shipped the whole file, the footage the trims discarded too.
+    const wholePass =
+      covering.segment === undefined &&
+      covering.coversShots.length > 1 &&
+      shots.every((shot) => production.selections[shot.id]?.acceptedTakeId === covering.id);
+    // Every shot plays its window, or the scene is the whole pass: some windows and not others
+    // (a shot still on the unsegmented pass beside its neighbours' segments, one trimmed past its
+    // end) shipped the scene with those shots silently missing.
+    if (!wholePass && windows.length === 0) {
+      blockers.push({ sceneId: scene.id, detail: `${scene.id}'s cut leaves nothing to play — its trims run past the end of every shot`, clause: "its cut leaves nothing to play" });
+      continue;
+    }
+    if (!wholePass && unplayed.length > 0) {
+      blockers.push({ sceneId: scene.id, detail: `${scene.id}'s cut has nothing to play for ${unplayed.join(", ")} — accept a segment for each shot, or trim less`, clause: `nothing to play for ${unplayed.length === 1 ? "a shot" : `${unplayed.length} shots`}` });
+      continue;
+    }
+    media.push({
+      sceneId: scene.id,
+      rel: path,
+      source: join(store.dir, "productions", production.meta.id, "takes", covering.id, covering.media),
+      file: `media/${scene.id}${covering.media.slice(covering.media.lastIndexOf("."))}`,
+      windows,
+      shots: played,
+    });
+  }
+  return { media, blockers };
 }
 
 /**
@@ -945,23 +1023,31 @@ function safeWorldFile(path: string): boolean {
   return path.split("/").every((part) => part !== "" && part !== "." && part !== "..") && !path.includes("\\");
 }
 
+/** A visual novel's scenes, read as beats before anything is copied (turn 174). */
+export interface ResolvedBeatScenes {
+  scenes: Array<{ sceneId: string; beats: PlayerBeat[] }>;
+  /** Package file → world-relative source, so a picture two beats share is copied once. */
+  copies: Map<string, string>;
+  blockers: SceneBlocker[];
+  /**
+   * Under the gate: what moved since the beats were read, in the words the export refuses with —
+   * an empty list when nothing did.
+   */
+  moved(now: ProductionBundle | undefined): Promise<string[]>;
+}
+
 /**
- * A visual novel's package (turn 174): the same player, reading each routed scene as beats. Each
- * picture is copied once, however many beats show it; each prepared voice once; the text travels
- * as text. A beat with no picture is refused by name, as a scene with no footage is; a line with
- * no voice is not — the package reads it as text.
+ * What a visual novel's scenes ship (turn 174): every routed, unexcluded scene — or, given `only`,
+ * those scenes alone — as beats, each picture and prepared voice named once by the package file it
+ * would be. The web package and Export → Arke Player (SPEC-058 R-89) both read a scene here, and
+ * both read it again under the gate through `moved`, so neither ships a picture, a voice or a
+ * routing the other would refuse.
  */
-async function exportBeats(
-  store: WorldStore,
-  production: ProductionBundle,
-  routing: Routing,
-  blockers: string[],
-  clock: () => string,
-  options: { exportId?: string; precondition?: WorldStatePrecondition; voices?: BeatVoices; current?: () => ProductionBundle | undefined },
-): Promise<InteractiveExportResult> {
+export async function resolveBeatScenes(store: WorldStore, production: ProductionBundle, routing: Routing, options: { voices?: BeatVoices; only?: ReadonlySet<string> } = {}): Promise<ResolvedBeatScenes> {
   const artifacts = store.getBundle().artifacts;
   const sheets = store.getBundle().sheets;
   const excluded = new Set(routing.excluded.map((entry) => entry.sceneId));
+  const blockers: SceneBlocker[] = [];
   /** Package file → world-relative source, so a picture two beats share is copied once. */
   const copies = new Map<string, string>();
   const packaged = (source: string, name: string) => {
@@ -987,7 +1073,7 @@ async function exportBeats(
   const narratorNow = async () => (options.voices ? JSON.stringify(await options.voices.narrator().catch(() => ({ unreadable: true })) ?? null) : "");
   const narratorBefore = await narratorNow();
   const scenes: Array<{ sceneId: string; beats: PlayerBeat[] }> = [];
-  for (const scene of production.scenes.filter((candidate) => !excluded.has(candidate.id))) {
+  for (const scene of production.scenes.filter((candidate) => !excluded.has(candidate.id) && (options.only === undefined || options.only.has(candidate.id)))) {
     // A resolver that fails is not a scene with no voices: shipping every prepared line as text
     // would pass for a finished package (codex round 9).
     let planned: Awaited<ReturnType<BeatVoices["plan"]>> | null = null;
@@ -995,7 +1081,7 @@ async function exportBeats(
       try {
         planned = await options.voices.plan(scene.id);
       } catch {
-        blockers.push(`${scene.id}'s voices could not be gathered — export again`);
+        blockers.push({ sceneId: scene.id, detail: `${scene.id}'s voices could not be gathered — export again`, clause: "its voices could not be gathered" });
         continue;
       }
     }
@@ -1003,13 +1089,14 @@ async function exportBeats(
     // would ship its old lines beside voices for new ones, or without the ones it had, so the
     // package is refused rather than mixed (codex round 8).
     if (planned !== null && planned.sceneVersion !== scene.version) {
-      blockers.push(`${scene.id} changed while the package was made — export again`);
+      blockers.push({ sceneId: scene.id, detail: `${scene.id} changed while the package was made — export again`, clause: "changed meanwhile" });
       continue;
     }
     const voices = planned?.files ?? new Map<string, string>();
     let beats: PlayerBeat[];
     try {
       beats = playerBeats(scene, {
+        story: routing.schemaVersion === 2,
         picture: (shotId) => {
           const source = beatPicturePath(production, artifacts, shotId);
           pictures.set(shotId, source);
@@ -1022,27 +1109,25 @@ async function exportBeats(
         speakerName: (id) => sheets.find((sheet) => sheet.id === id)?.name ?? id,
       });
     } catch {
-      blockers.push(`${scene.id}'s shots do not read in order — repair its flow before export`);
+      blockers.push({ sceneId: scene.id, detail: `${scene.id}'s shots do not read in order — repair its flow before export`, clause: "its shots do not read in order" });
       continue;
     }
     if (beats.length === 0) {
-      blockers.push(`${scene.id} has no beats to read`);
+      blockers.push({ sceneId: scene.id, detail: `${scene.id} has no beats to read`, clause: "no beats" });
       continue;
     }
     beats.forEach((beat, index) => {
-      if (beat.picture === undefined) blockers.push(`${scene.id}, beat ${index + 1} needs a picture`);
+      if (beat.picture === undefined) blockers.push({ sceneId: scene.id, detail: `${scene.id}, beat ${index + 1} needs a picture`, clause: `beat ${index + 1} · no picture` });
     });
     scenes.push({ sceneId: scene.id, beats });
   }
-  if (blockers.length > 0) return { ok: false, blockers };
 
-  return store.gateOp(async () => {
+  const moved = async (now: ProductionBundle | undefined): Promise<string[]> => {
     // Under the gate, the production is read again: an edited scene or a frame accepted while the
     // voices were gathered would ship beside the snapshot's (codex round 9). A frame choice is
     // not a scene edit and moves no scene version, so each picture is resolved again as well.
-    const now = (options.current ?? (() => store.getBundle().productions.find((candidate) => candidate.meta.id === production.meta.id)))();
     const nowArtifacts = store.getBundle().artifacts;
-    const moved = scenes.filter(({ sceneId }) =>
+    const edited = scenes.filter(({ sceneId }) =>
       now?.scenes.find((scene) => scene.id === sceneId)?.version !== production.scenes.find((scene) => scene.id === sceneId)?.version);
     const reframed = now === undefined || [...pictures].some(([shotId, source]) => beatPicturePath(now, nowArtifacts, shotId) !== source);
     // The routing the package plays is the snapshot's; a choice drawn meanwhile would ship the
@@ -1058,16 +1143,42 @@ async function exportBeats(
     // is the snapshot's, so a production that is no longer the snapshot refuses it whole; the
     // named cases above only say which change it was.
     const drifted = JSON.stringify(now ?? null) !== JSON.stringify(production);
-    if (moved.length > 0 || reshaped || reframed || rerouted || revoiced || drifted) {
-      const named = [
-        ...moved.map(({ sceneId }) => `${sceneId} changed while the package was made — export again`),
-        ...(reshaped && moved.length === 0 ? ["a scene was added or removed while the package was made — export again"] : []),
-        ...(reframed && moved.length === 0 ? ["a picture changed while the package was made — export again"] : []),
-        ...(rerouted ? ["the branch map changed while the package was made — export again"] : []),
-        ...(revoiced ? ["a voice or a speaker changed while the package was made — export again"] : []),
-      ];
-      return { ok: false, blockers: named.length > 0 ? named : ["the production changed while the package was made — export again"] };
-    }
+    if (edited.length === 0 && !reshaped && !reframed && !rerouted && !revoiced && !drifted) return [];
+    const named = [
+      ...edited.map(({ sceneId }) => `${sceneId} changed while the package was made — export again`),
+      ...(reshaped && edited.length === 0 ? ["a scene was added or removed while the package was made — export again"] : []),
+      ...(reframed && edited.length === 0 ? ["a picture changed while the package was made — export again"] : []),
+      ...(rerouted ? ["the branch map changed while the package was made — export again"] : []),
+      ...(revoiced ? ["a voice or a speaker changed while the package was made — export again"] : []),
+    ];
+    return named.length > 0 ? named : ["the production changed while the package was made — export again"];
+  };
+  return { scenes, copies, blockers, moved };
+}
+
+/**
+ * A visual novel's package (turn 174): the same player, reading each routed scene as beats. Each
+ * picture is copied once, however many beats show it; each prepared voice once; the text travels
+ * as text. A beat with no picture is refused by name, as a scene with no footage is; a line with
+ * no voice is not — the package reads it as text.
+ */
+async function exportBeats(
+  store: WorldStore,
+  production: ProductionBundle,
+  routing: Routing,
+  blockers: string[],
+  clock: () => string,
+  options: { exportId?: string; precondition?: WorldStatePrecondition; voices?: BeatVoices; current?: () => ProductionBundle | undefined },
+): Promise<InteractiveExportResult> {
+  const resolved = await resolveBeatScenes(store, production, routing, options.voices !== undefined ? { voices: options.voices } : {});
+  blockers.push(...resolved.blockers.map((blocker) => blocker.detail));
+  const { scenes, copies } = resolved;
+  if (blockers.length > 0) return { ok: false, blockers };
+
+  return store.gateOp(async () => {
+    const now = (options.current ?? (() => store.getBundle().productions.find((candidate) => candidate.meta.id === production.meta.id)))();
+    const named = await resolved.moved(now);
+    if (named.length > 0) return { ok: false, blockers: named };
     const exportId = options.exportId ?? `iv_${ulid()}`;
     if (!/^iv_[0-9A-HJKMNP-TV-Z]{26}$/.test(exportId)) throw new Error("invalid interactive export id");
     const outName = `interactive-${production.meta.id}-${exportId}`;

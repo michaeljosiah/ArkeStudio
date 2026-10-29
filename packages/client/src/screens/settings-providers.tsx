@@ -643,7 +643,7 @@ function EnginePane({ engine, supporting }: { engine: EngineId; supporting: read
           (setup?.components ?? []).some((c) => c.provides?.includes(m.id) && (c.state === "ready" || c.state === "present")),
         ).length;
   if (isRemoteSession()) return <div className="fy-pane" data-testid="provider-pane"><h1 className="fy-pane__name">{ENGINE_LABEL[engine]}</h1>
-    <FactRow what="State">{engine === "comfyui" ? comfyui?.engine.state ?? "not started" : engine === "voxa" ? state?.app.voiceRuntime?.processState ?? "not set up" : state?.app.providers.find(p => p.id === "ollama")?.validation ?? "untested"}</FactRow>
+    <FactRow what="State">{engine === "comfyui" ? comfyui?.engine.state ?? "not started" : engine === "voxa" ? state?.app.voiceRuntime?.processState ?? "not set up" : state?.app.ollama?.state ?? state?.app.providers.find(p => p.id === "ollama")?.validation ?? "untested"}</FactRow>
     <OnYourPC>engine controls and restarts</OnYourPC><ModelsAside>{models.length} models, {ready} ready.</ModelsAside></div>;
   return (
     <div className="fy-pane" data-testid="provider-pane">
@@ -722,6 +722,9 @@ export function SettingsProvidersScreen() {
     if (engine === "comfyui" && comfyui?.engine.locality === "remote") return "elsewhere";
     if (engine === "comfyui") return comfyui === null ? "not started" : comfyui.engine.state;
     if (engine === "ollama") {
+      // Runtime readiness and installed model availability are independent. An empty
+      // catalogue must not label a healthy service "not answering".
+      if (state?.app.ollama) return state.app.ollama.state === "absent" ? "not set up" : state.app.ollama.state;
       const validation = providerStatus.find((p) => p.id === "ollama")?.validation;
       return validation === "valid" ? "answering" : validation === "testing" ? "testing" : validation === undefined || validation === "untested" ? "untested" : "not answering";
     }

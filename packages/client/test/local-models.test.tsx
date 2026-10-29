@@ -4,6 +4,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import {
   activationFor,
+  modelSetupComponent,
   ActivationStateSchema,
   EngineIdSchema,
   comfyUiWeightsComponentId,
@@ -103,6 +104,13 @@ function component(patch: Partial<SetupComponent> & Pick<SetupComponent, "id">):
     ...patch,
   };
 }
+
+it("installs Ming through the model leaf so one press includes its runtime and weights", () => {
+  const dependencies = component({id: "ming-runtime-dense", provides: ["ming-3-0.5b"], requires: ["comfyui-runtime"], state: "available"});
+  const weights = component({id: "ming-model-dense", provides: ["ming-3-0.5b"], requires: [dependencies.id], state: "available"});
+  assert.equal(modelSetupComponent([dependencies, weights], "ming-3-0.5b")?.id, weights.id);
+  assert.equal(activationFor("ming", "ming-3-0.5b", {components: [dependencies, {...weights, state: "ready"}]}), "not-installed");
+});
 
 function runtime(over: Partial<LocalRuntimeStatus> = {}): LocalRuntimeStatus {
   return {

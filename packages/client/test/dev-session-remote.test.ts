@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { it } from "node:test";
 import { createServer } from "vite";
-import { devSessionPlugin, sessionEndpoints, widenPolicy } from "../dev-session-plugin.js";
+import { devSessionPlugin, fontPackagesOutside, sessionEndpoints, widenPolicy } from "../dev-session-plugin.js";
 
 const remote = { VITE_ARKE_WS: "wss://studio.tail1234.ts.net:8443", ARKE_DEV_LOCAL_WS: "ws://127.0.0.1:8791",
   ARKE_DEV_ORIGIN: "https://studio.tail1234.ts.net" };
@@ -68,7 +68,12 @@ it("an accepted proxied session widens the host allowance and the page policy fo
   assert.deepEqual(served.allowedHosts, ["studio.tail1234.ts.net"]);
   assert.ok(served.deny.includes("**/.dev/**"), "the handoff stays unservable");
   const repo = resolve(clientRoot, "../..");
-  assert.deepEqual(served.allow.map(path => path.slice(repo.length + 1).replace(/\\/g, "/")).sort(),
+  // A worktree's fonts resolve outside it, into the main checkout, and so does Vite's own client,
+  // which Vite adds itself. In a normal checkout both sit inside node_modules and add nothing.
+  const posix = (path: string) => path.replace(/\\/g, "/");
+  const fonts = fontPackagesOutside([resolve(repo, "node_modules")]).map(posix), allowed = served.allow.map(posix);
+  for (const font of fonts) assert.ok(allowed.includes(font), font);
+  assert.deepEqual(allowed.filter(path => !fonts.includes(path) && !path.endsWith("/node_modules/vite/dist/client")).map(path => path.slice(repo.length + 1)).sort(),
     ["node_modules", "packages/client", "packages/contracts"], "a tailnet device sees what the page is built from, not the checkout");
   assert.ok(served.policy["connect-src"]!.includes("wss://studio.tail1234.ts.net:8443"));
   assert.ok(served.policy["media-src"]!.includes("https://studio.tail1234.ts.net:8443"));
@@ -83,6 +88,12 @@ it("a local or refused setup changes neither the host allowance nor the page pol
     assert.equal(served.allow.includes(resolve(clientRoot, "../contracts")), false, "the loopback workspace allowance is unchanged");
     assert.deepEqual(served.policy, shipped, JSON.stringify(env));
   }
+});
+
+it("serves the font packages only where they live outside what Vite already serves", () => {
+  const fonts = fontPackagesOutside([]);
+  assert.deepEqual(fonts.map(dir => basename(dir)).sort(), ["geist-sans", "jost"]);
+  assert.deepEqual(fontPackagesOutside([dirname(dirname(fonts[0]!))]), [], "a checkout's own node_modules already serves them");
 });
 
 it("the widened policy adds the coordinator's reach and nothing else", async () => {

@@ -12,6 +12,156 @@ import { FakeProvider, pngBytes } from "./queue/fake-provider.js";
 import { makeTempRoot } from "./world/helpers.js";
 import { tempDir } from "./tmp.js";
 import { until } from "./wait.js";
+import type { LocalSetupService } from "../src/setup/local-setup.js";
+
+it("coordinator model removal uses the inference fence until the runtime confirms deletion", async () => {
+  const { root } = await makeTempRoot(), provider = new FsWorldProvider(root);
+  let calls = 0, finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  const coordinator = new Coordinator({ provider, adapter: null, appRoot: root, appVersion: "test", changeLogPath: join(root, "log.jsonl"),
+    setup: { which: async () => null, probeUrl: async () => false, diskFreeMb: async () => 100_000,
+      fetchStream: async () => { throw new Error("No download expected"); },
+      run: async (_command, args) => { assert.deepEqual(args, ["rm", "fixture:model"]); calls++; await pending; return { code: 0, output: "" }; },
+    },
+    setupExtraEntries: [{ id: "reviewed-model", displayName: "Fixture", purpose: "Test", optional: true, engine: "ollama", sizeMb: 1,
+      spec: { kind: "pull", command: "fixture", args: ["pull", "fixture:model"] } }],
+  });
+  const { localGpu: gpu, setup } = coordinator as unknown as { localGpu: LocalGpu; setup: LocalSetupService };
+  try {
+    const active = await gpu.acquire("Ollama", new AbortController().signal);
+    await setup.remove("reviewed-model"); assert.equal(calls, 0); active();
+    const removing = setup.remove("reviewed-model"); await until(() => calls === 1, "runtime deletion entered");
+    assert(gpu.isBusy("Ollama"));
+    let inferred = false; const next = gpu.acquire("Ollama", new AbortController().signal).then(release => { inferred = true; release(); });
+    await Promise.resolve(); assert.equal(inferred, false);
+    finish(); await removing; await next; assert(inferred); assert.equal(calls, 1);
+  } finally { finish(); await coordinator.stop(); await provider.close(); }
+});
+
+it("model removal refuses active inference and holds the idle lane without an eviction", async () => {
+  const unloaded: string[] = [], gpu = new LocalGpu(async engine => { unloaded.push(engine); });
+  const signal = new AbortController().signal;
+  const active = await gpu.acquire("Ollama", signal);
+  assert.throws(() => gpu.reserveFileChange("Ollama"), /Finish or cancel/);
+  active(); unloaded.length = 0;
+  const release = gpu.reserveFileChange("Ollama");
+  assert.throws(() => gpu.reserveFileChange("Ollama"), /Finish or cancel/);
+  let entered = false;
+  const next = gpu.acquire("ComfyUI", signal).then(done => { entered = true; done(); });
+  await Promise.resolve(); assert.equal(entered, false); assert.deepEqual(unloaded, []);
+  release(); release(); await next; assert(entered); assert.deepEqual(unloaded, ["Ollama"]);
+  gpu.stop(); assert.throws(() => gpu.reserveFileChange("Ollama"), /stopping/);
+});
+
+it("runs queued creative work before background explanations without preempting the current owner", async () => {
+  const gpu = new LocalGpu(async () => {}, ["Ollama", "ComfyUI", "Ming"]), signal = new AbortController().signal;
+  const owner = await gpu.acquire("ComfyUI", signal), order: string[] = [];
+  const next = (name: string, priority: "normal" | "background") => gpu.acquire("Ollama", signal, () => {}, priority).then(release => { order.push(name); release(); });
+  const work = [next("explain-1", "background"), next("creative-1", "normal"), next("explain-2", "background"), next("creative-2", "normal")];
+  assert.deepEqual(order, []); assert(gpu.isBusy("ComfyUI"));
+  owner(); await Promise.all(work); assert.deepEqual(order, ["creative-1", "creative-2", "explain-1", "explain-2"]); gpu.stop();
+});
+
+it("cancels a queued background explanation without releasing the admitted owner or bypassing retained cleanup", async () => {
+  const gpu = new LocalGpu(async () => {}), owner = await gpu.acquire("ComfyUI", new AbortController().signal), stop = new AbortController();
+  const explanation = assert.rejects(gpu.acquire("Ollama", stop.signal, () => {}, "background"), /explanation cancelled/);
+  stop.abort(new Error("explanation cancelled")); await explanation; assert(gpu.isBusy("ComfyUI"));
+  let admitted = false; const creative = gpu.acquire("Ollama", new AbortController().signal).then(release => { admitted = true; release(); });
+  assert.equal(admitted, false); owner(); await creative; assert(admitted); gpu.stop();
+});
+
+it("carries a prepared Studio session's background priority through the shared harness wrapper", async () => {
+  const gpu = new LocalGpu(async () => {}), signal = new AbortController().signal, owner = await gpu.acquire("ComfyUI", signal), sent: string[] = [];
+  const raw: HarnessAdapter = { id: "test", capabilities: () => new Set(), readiness: () => ({ ready: true }),
+    createSession: async input => ({ sessionId: input.title! }),
+    sendMessage: async input => { sent.push(input.sessionId); return { sessionId: input.sessionId, correlationId: "test" }; },
+    dispatchAsync: async () => { throw new Error("Only the shared wrapper dispatches"); }, streamEvents: () => ({ async *[Symbol.asyncIterator]() {} }) };
+  const adapter = withLocalGpu(raw, gpu);
+  try {
+    for (const title of ["explanation", "creative"]) {
+      adapter.prepareSession!({ preparationId: title, model: "ollama/test", inferencePriority: title === "explanation" ? "background" : "normal" });
+      await adapter.createSession({ purpose: "ask", title, preparationId: title });
+    }
+    const background = adapter.sendMessage({ sessionId: "explanation", parts: [] }), creative = adapter.sendMessage({ sessionId: "creative", parts: [] });
+    assert.deepEqual(sent, []); owner(); await Promise.all([background, creative]); assert.deepEqual(sent, ["creative", "explanation"]);
+  } finally { owner(); gpu.stop(); await adapter.dispose?.(); }
+});
+
+it("keeps a Ming batch on the card through cancellation and confirmed process cleanup", async () => {
+  const unloaded: string[] = [];
+  let finishCleanup!: () => void;
+  const gpu = new LocalGpu(async engine => {
+    unloaded.push(engine);
+    if (engine === "Ming") await new Promise<void>(resolve => { finishCleanup = resolve; });
+  }, ["Ollama", "ComfyUI", "Ming"]);
+  const cancel = new AbortController();
+  let started = false;
+  const batch = gpu.runMingBatch(async signal => {
+    started = true;
+    await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+    signal.throwIfAborted();
+  }, cancel.signal);
+  const rejected = assert.rejects(batch, /cancelled/);
+  await until(() => started, "Ming started after releasing other engines");
+  assert.deepEqual(unloaded, ["Ollama", "ComfyUI"]);
+  cancel.abort(new Error("cancelled"));
+  await until(() => finishCleanup !== undefined, "Ming cleanup started");
+  let admitted = false;
+  const writing = gpu.acquire("Ollama", new AbortController().signal).then(release => { admitted = true; return release; });
+  assert.equal(admitted, false);
+  finishCleanup(); await rejected;
+  // Handover rechecks every other participant, even after a previous cleanup.
+  await until(() => unloaded.filter(engine => engine === "Ming").length === 2, "handover confirmation");
+  finishCleanup(); (await writing)(); gpu.stop();
+});
+
+it("refuses the next job when Ming cannot confirm release", async () => {
+  const gpu = new LocalGpu(async engine => { if (engine === "Ming") throw new Error("Ming exit unconfirmed"); }, ["Ollama", "ComfyUI", "Ming"]);
+  await assert.rejects(gpu.runMingBatch(async () => "done", new AbortController().signal), /unconfirmed/);
+  assert.equal(gpu.isBusy("Ming"), true);
+  const next = assert.rejects(gpu.acquire("ComfyUI", new AbortController().signal), /stopping/);
+  gpu.stop(); await next;
+});
+
+it("a newly authorized Ming reading confirms the old retained cleanup without replaying its work", async () => {
+  let refuse = true, readings = 0, confirmations = 0;
+  const gpu = new LocalGpu(async engine => {
+    if (engine === "Ming") { confirmations++; if (refuse) throw new Error("Ming exit unconfirmed"); }
+  }, ["Ollama", "ComfyUI", "Ming"]);
+  try {
+    await assert.rejects(gpu.runMingBatch(async () => { readings++; }, new AbortController().signal), /unconfirmed/);
+    assert.equal(readings, 1); assert(gpu.isBusy("Ming"));
+    await assert.rejects(gpu.runMingBatch(async () => { readings++; }, new AbortController().signal), /unconfirmed/);
+    assert.equal(readings, 1, "new work stayed unsubmitted while cleanup was unknown");
+    refuse = false;
+    await gpu.runMingBatch(async () => { assert(confirmations >= 3); readings++; }, new AbortController().signal);
+    assert.equal(readings, 2); assert(!gpu.isBusy("Ming"));
+  } finally { gpu.stop(); }
+});
+
+it("drains and closes the world even when a cancelled Ming batch cannot confirm cleanup", async () => {
+  const { root } = await makeTempRoot();
+  let closed = false, started = false, refuse = true;
+  class Provider extends FsWorldProvider {
+    override async close() { await super.close(); closed = true; }
+  }
+  const provider = new Provider(root);
+  const coordinator = new Coordinator({ provider, adapter: null, appRoot: root, appVersion: "test",
+    changeLogPath: join(root, "log.jsonl"), ming: {
+      run: async (_command, signal) => { started = true; await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true })); signal.throwIfAborted(); },
+      unload: async () => { if (refuse) throw new Error("Ming exit unconfirmed"); },
+      dispose: async () => { if (refuse) throw new Error("Ming exit unconfirmed"); },
+    } });
+  try {
+    await coordinator.start(0);
+    const batch = coordinator.generateMingBatch({ python: process.execPath, worker: join(root, "unused.py"), args: [], cacheRoot: root }, new AbortController().signal);
+    const rejected = assert.rejects(batch, /unconfirmed/);
+    await until(() => started, "batch entered");
+    await assert.rejects(coordinator.stop(), /cleanup did not confirm/);
+    await rejected;
+    assert.equal(closed, true, "runtime failure did not skip world/provider close");
+  } finally { refuse = false; await coordinator.stop(); await provider.close(); }
+});
 
 it("hands over in order, awaits unloading, and cancels waiting work without taking the card", async () => {
   const unloaded: string[] = [];

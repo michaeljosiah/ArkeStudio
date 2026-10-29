@@ -1,5 +1,7 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { once } from "node:events";
+import { resolve } from "node:path";
+import { readFile } from "node:fs/promises";
 import type { WireModel } from "../../src/model-metadata.js";
 
 /**
@@ -35,11 +37,19 @@ export class StubOpenCodeV2 {
   readonly pendingPermissions = new Map<string, Array<{ id: string; action: string; resources: string[]; save?: string[] }>>();
   /** What GET /api/session/:id/message replays, newest first, per session. */
   readonly messagesBySession = new Map<string, unknown[]>();
+  /** Synchronous transient generation has no message-history/SSE completion. */
+  readonly generations = new Map<string, ServerResponse>();
   /** Extra latency on the first health answer — the server-global warm-up switch. */
   coldHealthMs = 0;
   version = "2.0.26";
   /** Answer the next GET .../message with a 503 — the completion-fetch blip switch. */
   failNextMessageFetch = false;
+  /** Error bodies can echo private request text; privacy tests must exercise this path. */
+  failNextPrompt: string | null = null;
+  nextSessionId: string | null = null;
+  failSessionDelete = false;
+  retainDeletedMessages = false;
+  readonly sessionStates = new Map<string, { id: string; agent?: string; model?: { providerID: string; id: string; variant?: string }; location?: { directory?: string } }>();
   private healthAnswered = false;
   /** The location echoed on session create; null echoes the requested one honestly. */
   echoLocation: string | null = null;
@@ -48,6 +58,7 @@ export class StubOpenCodeV2 {
   modelResponse?: (directory: string | undefined) => {
     models?: WireModel[]; status?: number; directory?: string | null; hold?: boolean;
   };
+  pluginResponse?: (directory: string | undefined) => { plugins?: unknown[]; directory?: string | null };
   defaultModel: (WireModel & { id: string; providerID: string }) | null = null;
   /** The integration catalog GET /api/integration serves — raw wire rows, scripted per test. */
   integrations: unknown[] = [];
@@ -77,7 +88,7 @@ export class StubOpenCodeV2 {
 
       let body = "";
       req.on("data", (c: Buffer) => (body += c.toString("utf8")));
-      req.on("end", () => {
+      req.on("end", async () => {
         const parsed = body ? (JSON.parse(body) as unknown) : undefined;
         this.requests.push({ method: req.method ?? "", path: url.pathname, query, body: parsed, authorized });
 
@@ -117,8 +128,11 @@ export class StubOpenCodeV2 {
 
         if (url.pathname === "/api/session" && req.method === "POST") {
           const requested = (parsed as { location?: { directory?: string } } | undefined)?.location?.directory;
-          const id = `ses_stub_${++this.sessionCounter}`;
+          const id = this.nextSessionId ?? `ses_stub_${++this.sessionCounter}`; this.nextSessionId = null;
           const directory = this.echoLocation ?? requested;
+          if (!this.sessionStates.has(id)) this.sessionStates.set(id, { id,
+            ...(directory ? { location: { directory } } : {}),
+            ...((parsed as { model?: object })?.model ? { model: { variant: "default", ...(parsed as { model: { providerID: string; id: string } }).model } } : {}) });
           res.writeHead(200, { "Content-Type": "application/json" }).end(
             envelope({
               id,
@@ -133,11 +147,19 @@ export class StubOpenCodeV2 {
         let m = /^\/api\/session\/([^/]+)\/agent$/.exec(url.pathname);
         if (m && req.method === "POST") {
           if (this.holdAgentPin) return;
+          const state = this.sessionStates.get(m[1]!); if (state) state.agent = (parsed as { agent: string }).agent;
           res.writeHead(204).end();
           return;
         }
         m = /^\/api\/session\/([^/]+)$/.exec(url.pathname);
+        if (m && req.method === "GET") {
+          const state = this.sessionStates.get(m[1]!);
+          res.writeHead(state ? 200 : 404, { "Content-Type": "application/json" }).end(envelope(state)); return;
+        }
         if (m && req.method === "DELETE") {
+          if (this.failSessionDelete) { res.writeHead(503).end(JSON.stringify({ message: "synthetic retirement failure" })); return; }
+          this.sessionStates.delete(m[1]!);
+          if (!this.retainDeletedMessages) this.messagesBySession.delete(m[1]!);
           res.writeHead(204).end();
           return;
         }
@@ -157,6 +179,10 @@ export class StubOpenCodeV2 {
 
         m = /^\/api\/session\/([^/]+)\/prompt$/.exec(url.pathname);
         if (m && req.method === "POST") {
+          if (this.failNextPrompt !== null) {
+            const message = this.failNextPrompt; this.failNextPrompt = null;
+            res.writeHead(503, { "Content-Type": "application/json" }).end(JSON.stringify({ message })); return;
+          }
           const sessionId = m[1]!;
           const prompt = parsed as { id?: string; text?: string } | undefined;
           const id = prompt?.id;
@@ -182,6 +208,15 @@ export class StubOpenCodeV2 {
           return;
         }
 
+        m = /^\/api\/session\/([^/]+)\/generate$/.exec(url.pathname);
+        if (req.method === "POST" && m) {
+          const id = m[1]!;
+          if (!this.sessionStates.has(id)) { res.writeHead(404).end(); return; }
+          if (this.generations.has(id)) { res.writeHead(409).end(); return; }
+          this.generations.set(id, res);
+          res.on("close", () => { if (this.generations.get(id) === res) this.generations.delete(id); });
+          return;
+        }
         m = /^\/api\/session\/([^/]+)\/interrupt$/.exec(url.pathname);
         if (m && req.method === "POST") {
           res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ interrupted: false }));
@@ -190,6 +225,7 @@ export class StubOpenCodeV2 {
 
         m = /^\/api\/session\/([^/]+)\/message$/.exec(url.pathname);
         if (m && req.method === "GET") {
+          if (!this.sessionStates.has(m[1]!) && !this.retainDeletedMessages) { res.writeHead(404).end(JSON.stringify({ message: "session not found" })); return; }
           if (this.failNextMessageFetch) {
             this.failNextMessageFetch = false;
             res.writeHead(503).end();
@@ -232,6 +268,16 @@ export class StubOpenCodeV2 {
           return;
         }
 
+        if (url.pathname === "/api/plugin" && req.method === "GET") {
+          const reply = this.pluginResponse?.(locationDir);
+          const path = resolve(locationDir ?? ".", ".arke-private-control/index.js");
+          let id = "arke.studio.private-control.v1";
+          try { id = /id: "([^"]+)"/.exec(await readFile(path, "utf8"))?.[1] ?? id; } catch { /* Logical-location fixtures use the fixed legacy control. */ }
+          const plugins = reply?.plugins ?? [{ id, source: { type: "local", path },
+            features: { server: true }, state: { status: "active" } }];
+          res.writeHead(200, { "Content-Type": "application/json" }).end(envelope(plugins, reply?.directory === null ? undefined : reply?.directory ?? locationDir));
+          return;
+        }
         if (url.pathname === "/api/model" && req.method === "GET") {
           const reply = this.modelResponse?.(locationDir);
           if (reply?.hold) return;
@@ -353,6 +399,7 @@ export class StubOpenCodeV2 {
       {
         id: messageId,
         type: "assistant",
+        finish: "stop",
         time: { created: 1, completed: 2 },
         content: [{ type: "text", text }],
       },
@@ -368,6 +415,14 @@ export class StubOpenCodeV2 {
       });
     }
     this.emit({ id: this.eventId(), type: "session.execution.succeeded", data: { sessionID: sessionId } });
+  }
+
+  /** Finish the transient API without creating a transcript row or an SSE notification. */
+  finishGeneration(sessionId: string, data: unknown, status = 200): void {
+    const response = this.generations.get(sessionId);
+    if (!response) throw new Error("No pending synthetic native generation");
+    this.generations.delete(sessionId);
+    response.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify({ data }));
   }
 
   /** Script a held tool call: input streams, the call is recorded unexecuted, the ask fires. */
@@ -398,9 +453,15 @@ export class StubOpenCodeV2 {
     return [...this.requests].reverse().find((r) => pathPattern.test(r.path));
   }
 
-  async stop(): Promise<void> {
+  disconnectEvents(): void {
     for (const client of this.sseClients) client.end();
     this.sseClients.clear();
+  }
+
+  async stop(): Promise<void> {
+    this.disconnectEvents();
+    for (const response of this.generations.values()) response.destroy();
+    this.generations.clear();
     const server = this.server;
     this.server = null;
     if (server) await new Promise<void>((resolve) => server.close(() => resolve()));

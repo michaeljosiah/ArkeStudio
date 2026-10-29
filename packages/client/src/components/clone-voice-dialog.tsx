@@ -49,6 +49,7 @@ export function CloneVoiceDialog({
   const [consent, setConsent] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [transcript, setTranscript] = useState("");
   const [language, setLanguage] = useState("en");
   const [saving, setSaving] = useState(false);
   const [trouble, setTrouble] = useState<string | null>(null);
@@ -68,6 +69,7 @@ export function CloneVoiceDialog({
     setConsent(false);
     setName("");
     setDescription("");
+    setTranscript("");
     setLanguage("en");
     setSaving(false);
     setTrouble(null);
@@ -195,6 +197,8 @@ export function CloneVoiceDialog({
           <NameStep
             name={name}
             description={description}
+            transcript={transcript}
+            onTranscript={setTranscript}
             language={language}
             saving={saving}
             ready={clipId !== null}
@@ -212,6 +216,7 @@ export function CloneVoiceDialog({
                 clipId,
                 name: name.trim(),
                 description: description.trim(),
+                ...(transcript.trim() ? { transcript: transcript.trim() } : {}),
                 language,
                 ...(sheetId !== undefined ? { sheetId } : {}),
               });
@@ -331,6 +336,8 @@ export function ClipStep({
 export function NameStep({
   name,
   description,
+  transcript = "",
+  onTranscript,
   language = "en",
   saving,
   ready,
@@ -343,6 +350,8 @@ export function NameStep({
 }: {
   name: string;
   description: string;
+  transcript?: string;
+  onTranscript?: (value: string) => void;
   /** The recording's language (ISO 639-1), which a hosted reader saves the voice under (issue 1163). */
   language?: string;
   saving: boolean;
@@ -380,6 +389,12 @@ export function NameStep({
           placeholder="Low, dry, unhurried. Coastal."
           onChange={(e) => onDescription(e.target.value)}
         />
+      </label>
+      <label className="fy-clone__field">
+        <span className="fy-clone__label">Words spoken in the recording <em className="fy-clone__labelnote">required for Ming 3</em></span>
+        <Textarea value={transcript} rows={3} maxLength={4000} data-testid="clone-transcript"
+          placeholder="Copy the recording's exact words. These identify the voice; they are not the text to generate."
+          onChange={event => onTranscript?.(event.target.value)} />
       </label>
       {/* Asked here, once, beside the words: Breeze saves a voice under a language and took every
           one for English before this was asked; a French recording read with English tags is

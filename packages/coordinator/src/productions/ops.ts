@@ -48,6 +48,11 @@ import {
   type ChapterImplies,
   AudioDramaRecordSchema,
   DEFAULT_AUDIO_DRAMA_PLAN,
+  EMPTY_MUSIC_RECORD,
+  MUSIC_RECORD_FILE,
+  MusicRecordSchema,
+  musicKindOf,
+  DEFAULT_COMIC_SETTINGS,
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
 import { posterNameFor } from "../takes/poster.js";
@@ -57,7 +62,7 @@ import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sceneLookReleases } from "../references/kit.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import { JsonFile, MarkdownFile, sha256 } from "../world/text-files.js";
-import { AUDIO_DRAMA_SCHEMA_VERSION, CommitStaleError, type CommitFileInput, type CommitResult } from "../world/commit.js";
+import { AUDIO_DRAMA_SCHEMA_VERSION, CommitStaleError, MUSIC_SCHEMA_VERSION, type CommitFileInput, type CommitResult } from "../world/commit.js";
 import { readSceneRecord } from "./scene-record.js";
 import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
@@ -85,6 +90,8 @@ export interface CreateProductionInput {
   frameRate?: FrameRate;
   defaults?: Season["defaults"];
   logline?: string;
+  /** The production a Soundtrack is for (SPEC-060 R-3); music only. */
+  soundtrackFor?: string;
   /** Stamped on the commit's change lines so a redelivered request finds its commit (#384). */
   requestId?: string;
 }
@@ -106,7 +113,15 @@ export function planProductionCreation(
   });
   const format = legacyFormatFor(medium);
   const defaultShape = productionShape({ format });
-  const productionKind = input.productionKind ?? (input.medium === "interactive-video" ? "interactive" : undefined);
+  // Music is one of its three kinds and nothing else, and a soundtrack names the production it is
+  // for (SPEC-060 R-1, R-3), as the dialog's own create says: World Chat's plan is held to both.
+  const productionKind = medium === "music"
+    ? musicKindOf({ kind: input.productionKind })
+    : input.productionKind ?? (input.medium === "interactive-video" ? "interactive" : undefined);
+  const soundtrackFor = medium === "music" && productionKind === "soundtrack" ? input.soundtrackFor : undefined;
+  if (medium === "music" && productionKind === "soundtrack" && (soundtrackFor === undefined || !bundle.productions.some((production) => production.meta.id === soundtrackFor))) {
+    throw new Error("A soundtrack is for one of this world's productions; choose which");
+  }
   const carriesNewModel = medium !== defaultShape.medium ||
     (productionKind !== undefined && productionKind !== defaultShape.kind);
   const production = ProductionSchema.parse({
@@ -124,7 +139,12 @@ export function planProductionCreation(
   });
   const shape = productionShape(production);
   if (!shape.isEpisodic) {
-    return { production, initialSeason: null, series: { operation: "none" } };
+    return {
+      production,
+      initialSeason: null,
+      series: { operation: "none" },
+      ...(shape.isMusic ? { music: soundtrackFor !== undefined ? { for: soundtrackFor } : {} } : {}),
+    };
   }
   const initialSeason = SeasonSchema.parse({ version: 1, ...(input.defaults ? { defaults: input.defaults } : {}) });
   const seriesTitle = input.seriesTitle ?? input.title;
@@ -215,6 +235,21 @@ export async function createProductionFromPlan(
       path: `productions/${plan.production.id}/audio-drama.json`,
       action: "create",
       content: `${JSON.stringify(AudioDramaRecordSchema.parse({ version: 1, plan: DEFAULT_AUDIO_DRAMA_PLAN }), null, 2)}\n`,
+      baseHash: null,
+    });
+  }
+  // A graphic novel starts with how it reads (SPEC-064 R-12); the committer raises the world for it.
+  if (shape.hasPages) {
+    files.push({ path: `productions/${plan.production.id}/comic.json`, action: "create", content: `${JSON.stringify(DEFAULT_COMIC_SETTINGS, null, 2)}\n`, baseHash: null });
+  }
+  // Music starts with its record (SPEC-060 R-4), a soundtrack's `for` fixed in the plan. A plan
+  // prepared before plans carried one starts as the empty album its first change writes.
+  if (plan.music !== undefined) {
+    if (!shape.isMusic) throw new Error("The prepared production plan has a music record for a production that is not music.");
+    files.push({
+      path: `productions/${plan.production.id}/${MUSIC_RECORD_FILE}`,
+      action: "create",
+      content: `${JSON.stringify(MusicRecordSchema.parse({ ...EMPTY_MUSIC_RECORD, ...plan.music }), null, 2)}\n`,
       baseHash: null,
     });
   }
@@ -321,7 +356,14 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
    * for dropped on the floor. What that input means now is the video medium carrying the
    * interactive kind, so that is what lands on disk.
    */
-  const kind = input.productionKind ?? (input.medium === "interactive-video" ? "interactive" : undefined);
+  // Music is one of its three kinds and nothing else (SPEC-060 R-1): an unknown word reads as an album.
+  const kind = medium === "music"
+    ? musicKindOf({ kind: input.productionKind })
+    : input.productionKind ?? (input.medium === "interactive-video" ? "interactive" : undefined);
+  const soundtrackFor = medium === "music" && kind === "soundtrack" ? input.soundtrackFor : undefined;
+  if (medium === "music" && kind === "soundtrack" && (soundtrackFor === undefined || !taken.includes(soundtrackFor))) {
+    throw new Error("A soundtrack is for one of this world's productions; choose which");
+  }
   const carriesNewModel =
     medium !== plainShape.medium || (kind !== undefined && kind !== plainShape.kind);
   const shape = productionShape({ format: legacyFormat, ...(carriesNewModel ? { medium, kind } : {}) });
@@ -352,6 +394,19 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
       path: `productions/${slug}/audio-drama.json`,
       action: "create",
       content: JSON.stringify(AudioDramaRecordSchema.parse({ version: 1, plan: DEFAULT_AUDIO_DRAMA_PLAN }), null, 2) + "\n",
+      baseHash: null,
+    });
+  }
+  // A graphic novel reads left to right on 2:3 pages until the author says otherwise (SPEC-064 D-3, D-4).
+  if (shape.hasPages) {
+    files.push({ path: `productions/${slug}/comic.json`, action: "create", content: JSON.stringify(DEFAULT_COMIC_SETTINGS, null, 2) + "\n", baseHash: null });
+  }
+  // Music starts with no tracks and the album's loudness (SPEC-060 R-4); a soundtrack names its production.
+  if (shape.isMusic) {
+    files.push({
+      path: `productions/${slug}/${MUSIC_RECORD_FILE}`,
+      action: "create",
+      content: JSON.stringify(MusicRecordSchema.parse({ ...EMPTY_MUSIC_RECORD, ...(soundtrackFor !== undefined ? { for: soundtrackFor } : {}) }), null, 2) + "\n",
       baseHash: null,
     });
   }
@@ -401,7 +456,9 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
     files,
     // Any new-model write crosses the schema boundary (SPEC-023 R-23) so older builds refuse
     // this world by name instead of silently dropping the production from the bundle.
-    ...(shape.isAudioDrama
+    ...(shape.isMusic
+      ? { raiseSchemaVersion: MUSIC_SCHEMA_VERSION }
+      : shape.isAudioDrama
       ? { raiseSchemaVersion: AUDIO_DRAMA_SCHEMA_VERSION }
       : input.frameRate !== undefined
       ? { raiseSchemaVersion: 5 }

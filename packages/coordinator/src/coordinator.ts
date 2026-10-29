@@ -1,6 +1,14 @@
 import { savedPicture, openSavedPicture, type SavedPicture } from "./productions/audiobook-picture-reuse.js";
+import { NEW_ONBOARDING, onboardingComponents, onboardingWritingReadiness, onboardingWritingModels, type OnboardingPlan } from "@arke-studio/contracts";
+import { checkOnboardingWorkspace, validateOnboardingPlan } from "./setup/onboarding.js";
+import { checkWorldImport } from "./world/import-world.js";
+import { createStudioAssistantHost, type StudioAssistantHost, type StudioAssistantHostOptions } from "./studio-assistant/host.js";
+import { RecoveryActionRegistry } from "./recovery/actions.js";
+import { restartActionHistory, reviewedActionHistory } from "./recovery/action-history.js";
+import { RECOVERY_POLICY, studioLocalNarrator, type RecoveryPolicySnapshot, type RecoveryRetryPlan, type MingCleanupSnapshot } from "@arke-studio/contracts";
 import { chapterReviewSummary } from "@arke-studio/contracts";
 import { rebuildBenchPrefill } from "@arke-studio/contracts";
+import { MUSIC_IMPORT_EXTENSIONS } from "@arke-studio/contracts";
 import { ChapterReviewService } from "./productions/chapter-review.js";
 import { makeReviewTaskRunner } from "./harness/review-task.js";
 import { needsExpressiveDirection, directionSchemaVersion } from "@arke-studio/contracts";
@@ -30,6 +38,10 @@ import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdap
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
 import { DramaEditionService } from "./publications/drama.js";
 import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
+import { acceptComicTake, changeComicPage, comicPageRecord, comicPageRequest, comicPageTake, saveComicScript, setComicSettings, verifyComicTake } from "./productions/graphic-novel.js";
+import { harnessPageReader, type PageReader } from "./productions/graphic-novel-reader.js";
+import { ComicExportBlocked, exportComic } from "./productions/comic-export.js";
+import { makeImageJsonRunner } from "./harness/review-task.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
@@ -41,6 +53,10 @@ import { createLocalEnginePolicy, LOCAL_ENGINE_CONTEXT } from "./application/loc
 import { createStudioStorage, type StudioStorage } from "./application/studio-composition.js";
 import { referenceInputProblem, ollamaLlmAvailable } from "@arke-studio/contracts";
 import { LocalGpu } from "./local-ai/gpu.js";
+import type { MingBatchCommand } from "./local-ai/ming.js";
+import { MingSpeechService } from "./local-ai/ming-speech.js";
+import { MingBatchStorage } from "./storage/ming-batches.js";
+import type { MingSynthesis } from "@arke-studio/providers";
 import { withLocalGpu } from "./harness/local-gpu.js";
 import { withModelValidation } from "./harness/model-validation.js";
 import { HarnessModelCatalog, selectHarnessModel, type LanguageModelSelection } from "./harness/model-catalog.js";
@@ -83,7 +99,7 @@ import { tmpdir } from "node:os";
 import type { SessionInput } from "./harness/session-files.js";
 import { existsSync, mkdirSync } from "node:fs";
 import { copyFile, mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { basename, extname, join, resolve, sep } from "node:path";
 import {
   DomainEventSchema,
@@ -98,11 +114,13 @@ import {
   OPENCODE_AVAILABILITY,
   type Capability,
   type ClientMessage,
+  takePasses,
   type HarnessAvailability,
   type HarnessEngine,
   type ClientState,
   type ClonedVoice,
   type DomainEvent,
+  type ComicMode,
   type HarnessAdapter,
   type PermissionRequest,
   type HealthComponent,
@@ -188,6 +206,7 @@ import {
   makesShape,
   type BenchSession,
   type BenchTake,
+  type MusicWaveform,
   type SessionId,
   type Delivery,
   supportedDeliveries,
@@ -254,11 +273,25 @@ import {
 import { recordBenchOutcome, serialiseSceneConversation } from "./bench/outcome.js";
 import type { AppLog } from "./app-log.js";
 import { type AppSettingsFile, routingFaults } from "./app-settings.js";
+import type { OllamaEngineService } from "./local-ai/ollama.js";
+import { normalizeOllamaUrl } from "@arke-studio/contracts";
 import { AskService } from "./canon/ask.js";
 import type { CredentialStore, Cipher } from "./credentials/store.js";
 import { CoalescedReads, ReadStalledError, type ReadTurn } from "./coalesced-reads.js";
 import { buildDiagnosticsBundle } from "./diagnostics.js";
 import { DiagnosticsSnapshotHolder } from "./diagnostics-snapshot.js";
+import type { SystemResourceService } from "./system-resources.js";
+import type { AppStorageService } from "./storage/service.js";
+import { SetupFileStorage } from "./storage/setup-files.js";
+import { SetupArchiveStorage } from "./storage/setup-archive.js";
+import { JobArtifactStorage } from "./storage/job-artifacts.js";
+import { ImportFileStorage, type ImportFileSpace } from "./storage/import-files.js";
+import { withBrowserImportBatch } from "./artifacts/browser-import-batch.js";
+import type { RecoveryControlService } from "./recovery/control.js";
+import type { RecoveryHistoryService } from "./recovery/history.js";
+import { recoveryCommand } from "./recovery/commands.js";
+import { SupervisorRecovery, type SupervisedRecoveryOwner } from "./recovery/supervisor.js";
+import type { HarnessRecoveryOwner } from "./harness/runtime-change.js";
 import {
   highestChapterRank,
   compileBoard,
@@ -342,6 +375,7 @@ import {
   fileArtifact,
   fileGeneratedArtifact,
   importFolder,
+  kindForFile,
   retireArtifact,
   restoreArtifact,
 } from "./artifacts/filing.js";
@@ -387,6 +421,7 @@ import { AudioStudioPreviews } from "./productions/audio-studio-preview.js";
 import { renderAudioStudioMix } from "./productions/audio-studio-mix.js";
 import { audiobookPlayerFile, exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
 import { exportArkePlayer, listArkePlayerPackages } from "./productions/arke-player-export.js";
+import { readStoryExport } from "./productions/story-export.js";
 import { guideVoiceLines, setGuideEntry, setGuideTeasers } from "./productions/world-guide.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
@@ -488,7 +523,7 @@ import {
   AUDIO_EXTENSIONS as CLONEABLE_AUDIO_EXTENSIONS,
   audioBytesLookRight,
   clipFor,
-  clipHashOf,
+  readerReferenceHash,
   clipPresent,
   cloneVoice,
   MIN_CLONE_SECONDS,
@@ -529,6 +564,10 @@ import {
 import { makeArtDirector } from "./references/art-director.js";
 import { enhancerBrief } from "./bench/enhancer.js";
 import { LYRICS_MAX_CHARS, lyricistBrief } from "./bench/lyricist.js";
+import { addMusicTrack, chooseMusicTake, editMusicTrack, ensureMusicSession, MusicRefusal, musicTakeViews, readMusicRecord, removeMusicTrack, reorderMusicTracks, setMusicCover, setMusicSequence, tagMusicTakes, untaggedMusicTakes, updateMusicTrack } from "./productions/music.js";
+import { musicWaveform } from "./productions/music-waveform.js";
+import { musicHeardIn } from "./productions/music-heard.js";
+import { renderMusicAlbum } from "./productions/music-render.js";
 import { KEY_ART_EXTENSIONS, WORLD_IMAGE_DIR, worldImagePrompt, worldImageRequest } from "./references/world-image.js";
 import { adoptKeyArtCandidate } from "./references/key-art.js";
 import { assembleKeyArt, keyArtComposition, readKeyArtBrief } from "./references/key-art-references.js";
@@ -615,6 +654,7 @@ import { FoundingBuildService } from "./world/founding-build.js";
 import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
 import { NoArkeCloud, type AccountService } from "./account.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
+import { localAiSetupReadiness, type SetupStatus } from "@arke-studio/contracts";
 import {
   SETUP_CATALOGUE,
   VOXA_SETUP_COMPONENT_IDS,
@@ -881,6 +921,7 @@ async function landUploadedImage(
 }
 
 export interface CoordinatorOptions {
+  harnessRecovery?: HarnessRecoveryOwner;
   /** Explicit local infrastructure, normally supplied by desktop/dev composition. */
   storage?: StudioStorage;
   /** Host-minted session capability. Omission creates a fresh capability, never an open socket. */
@@ -905,6 +946,15 @@ export interface CoordinatorOptions {
   sampleWorldDownload?: StoryDownload;
   /** App root for remembered grants (SPEC-005 R-16). Absent → grants are session-only. */
   appRoot?: string;
+  /** Host-owned scoped resource measurement and capacity planning. Direct fixtures may omit it. */
+  storageHealth?: AppStorageService | null;
+  /** Turn 240: on-demand, host-owned observations; never world or financial authority. */
+  systemResources?: SystemResourceService | null;
+  /** Persistent restart authority, separate from removable diagnostic history. */
+  recoveryControl?: RecoveryControlService | null;
+  recoveryHistory?: RecoveryHistoryService | null;
+  /** Private app conversation. Model routing must be proved by native host composition. */
+  studioAssistant?: StudioAssistantHostOptions | null;
   /**
    * The Arke account behind the chrome's control (design turn 151). Absent, Studio has no cloud
    * — `NoArkeCloud`, the local default — and the control says so when pressed.
@@ -961,7 +1011,7 @@ export interface CoordinatorOptions {
    * into app state so Settings can name it (issue 327 §9, SPEC-005 R-1).
    */
   harnessInfo?: {
-    generation: "v2" | "v1" | "claude" | "codex";
+    generation: "v2" | "claude" | "codex";
     source: "configured" | "path" | "bundled";
     version: string | null;
     beta: boolean;
@@ -1004,6 +1054,7 @@ export interface CoordinatorOptions {
   detectHarnesses?: (configuredPath: string | null, codexPath: string | null) => Promise<HarnessAvailability[]>;
   /** The host's native file dialog for pointing at a Claude Code PATH does not carry. */
   chooseClaudeExecutable?: () => Promise<string | null>;
+  chooseWorldFolder?: () => Promise<string | null>;
   chooseCodexExecutable?: () => Promise<string | null>;
   /**
    * The ComfyUI engine (SPEC-021): the service that discovers, supervises and verifies it,
@@ -1015,6 +1066,14 @@ export interface CoordinatorOptions {
     choosePath?: () => Promise<string | null>;
     chooseModelsDir?: () => Promise<string | null>;
   };
+  ollama?: {
+    service: OllamaEngineService;
+    reconfigureHarness?: (apply?: () => Promise<void>) => Promise<void>;
+  };
+  /** Ming owns a separate process even when its interpreter belongs to ComfyUI. */
+  ming?: { readonly running?: boolean; readonly cleanupAuthorized?: boolean; readonly storageOwner?: string; run(command: MingBatchCommand, signal: AbortSignal): Promise<void>; unload(signal: AbortSignal): Promise<void>; dispose(): Promise<void> };
+  /** Real filesystem worker path for a packaged host; never supplied by renderer commands. */
+  mingWorkerPath?: string;
   /**
    * Vendor-side voice state for the hosted readers (SPEC-046 R-13): the calls that save a clip
    * into a Breeze voice slot and remove it, wired by the host from the provider clients. Absent
@@ -1101,6 +1160,7 @@ export interface CoordinatorOptions {
   nativeIndex?: { ok: boolean; reason?: string };
   /** SPEC-011: the Voxa sidecar and voice catalogue sources, injected from the desktop. */
   voice?: {
+    recovery?: SupervisedRecoveryOwner;
     sidecar: SidecarLike | null;
     /** Wait for recovered Kokoro work until Voxa can actually synthesize. */
     waitUntilReady?: () => Promise<boolean>;
@@ -1215,7 +1275,7 @@ function worldOpenFailureKind(err: unknown): string {
  * every other agent's first turn. The prose reviewer reads the chapter from its prompt and
  * returns tags (issue 1952).
  */
-const PROMPT_ONLY_AGENTS: ReadonlySet<string> = new Set(["conversation-summarizer", "conversation-namer", "chapter-prose-reviewer"]);
+const PROMPT_ONLY_AGENTS: ReadonlySet<string> = new Set(["conversation-summarizer", "conversation-namer", "chapter-prose-reviewer", "page-lettering-reader"]);
 
 export class Coordinator {
   private readonly engine: ReturnType<typeof createEngine>;
@@ -1241,6 +1301,35 @@ export class Coordinator {
    * emit during construction; every hook guards, and it exists before the constructor returns.
    */
   private diagnosticsSnapshot: DiagnosticsSnapshotHolder | null = null;
+  private readonly storageWritingJobs = new Set<string>();
+  private readonly storageWritingExports = new Set<string>();
+
+  private syncStorageObservation(event?: DomainEvent): void {
+    const service = this.opts.storageHealth;
+    if (!service || this.stopping) return;
+    service.setWorld(this.opts.provider.openStore?.()?.dir ?? null);
+    const ollama = this.opts.ollama?.service;
+    const modelStore = ollama && !ollama.externallySelected() ? ollama.modelsDir() : null;
+    // Only the managed runtime's two known store subfolders, not an arbitrary selected
+    // parent or an external server's files. Nested default roots are counted once.
+    service.setManagedModelRoots(modelStore ? [join(modelStore, "blobs"), join(modelStore, "manifests")] : []);
+    const active = (job: Job) => job.status === "submitting" || job.status === "running" || job.finalization?.status === "pending";
+    if (!event) {
+      this.storageWritingJobs.clear();
+      for (const job of this.getState().app.jobs) if (active(job)) this.storageWritingJobs.add(job.id);
+    } else if (event.type === "job.updated") {
+      if (active(event.job)) this.storageWritingJobs.add(event.job.id); else this.storageWritingJobs.delete(event.job.id);
+    } else if (event.type === "export.progress") {
+      if (event.status === "running") this.storageWritingExports.add(event.exportId); else this.storageWritingExports.delete(event.exportId);
+    }
+    service.setWriting(this.storageWritingJobs.size > 0 || this.storageWritingExports.size > 0 || this.getState().app.setup?.running === true);
+  }
+
+  /** Trusted desktop/Node host wake callback. No renderer path or mutation authority. */
+  async wakeStorage(): Promise<void> {
+    if (this.stopping || !this.opts.storageHealth) return;
+    const work = this.opts.storageHealth.wake(); this.trackBackground(work); await work;
+  }
   /**
    * The bounded operational-log tail the derivation reads (SPEC-032 R-18), cached so a
    * derivation per event tick does not become a file read per event tick. Refreshed only when
@@ -1349,6 +1438,12 @@ export class Coordinator {
   private readonly derivingLooks = new Map<string, AbortController>();
   /** A picture being made for a block (turn 191a): one at a time a block, ended with the world. */
   private readonly makingPictures = new Map<string, AbortController>();
+  /** Comic pages being made in this process, by world/production/page (SPEC-064 R-25). */
+  private readonly makingComicPages = new Map<string, AbortController>();
+  /** Page reads in flight, stopped with the app as a review is (codex on PR 2223). */
+  private readonly readingComicPages = new Set<AbortController>();
+  /** Book exports in flight, stopped with the app (SPEC-064 R-47). */
+  private readonly exportingComics = new Set<AbortController>();
   /**
    * A book's `Make 290 tall` run (design turn 235a), by world and production: one at a time,
    * stoppable, and its last progress replayed to a window that connects, so a paid run going on
@@ -1498,6 +1593,11 @@ export class Coordinator {
       if (input.capability !== "voice-tts") continue;
       if (!supportsVoiceUse(input, "preview")) throw new Error("This provider no longer supports speech. Choose an available voice reader.");
       if (this.readModel.getState().app.models.disabled.includes(input.model)) throw new Error("That voice model is turned off in AI models.");
+      if (input.provider === "ming") {
+        const status = await this.mingSpeechStatus(input.model);
+        if (!status.ready) throw new Error(status.reason ?? "Install this Ming model before reading.");
+        continue;
+      }
       if (input.provider !== "google") continue;
       const model = this.opts.manifest?.models.find(row => row.id === input.model && row.provider === input.provider);
       if (!model) throw new Error("That Gemini voice model is unavailable.");
@@ -1607,7 +1707,7 @@ export class Coordinator {
     if (source.kind === "cloned") {
       const clip = await clipFor(store, source.voice);
       if (clip !== null) {
-        return { narrator: { provider: chosen.provider, model: chosen.model, voiceId: chosen.voiceId, label: chosen.label ?? source.voice.name, cloned: true, clonedVoice: source.voice, clipHash: clipHashOf(clip) }, catalogue };
+        return { narrator: { provider: chosen.provider, model: chosen.model, voiceId: chosen.voiceId, label: chosen.label ?? source.voice.name, cloned: true, clonedVoice: source.voice, clipHash: readerReferenceHash(chosen.provider, clip) }, catalogue };
       }
     }
     const speaks = source.kind === "catalogue" ? chosen : narratorFor(null, narrationCatalogue);
@@ -2889,7 +2989,7 @@ export class Coordinator {
         if (input.defaultNarrator === true && modelOf({ provider: assigned.provider, model })?.speechPlan === "free-plan") return narration;
         return { provider: assigned.provider, model, voiceId: assigned.voiceId, label: assigned.label ?? listed.label, cloned: source.kind === "cloned",
           ...(source.kind === "cloned" ? { clonedVoice: source.voice } : {}),
-          ...(clip !== null ? { clipHash: clipHashOf(clip) } : {}) };
+          ...(clip !== null ? { clipHash: readerReferenceHash(assigned.provider, clip) } : {}) };
       }),
     );
     const isLocal = (voice: { provider: string; model: string }) => voice.provider === "kokoro" && voice.model === "kokoro-82m";
@@ -3119,6 +3219,72 @@ export class Coordinator {
   }
 
   private readonly sessionInput: SessionInput;
+  private studioAssistantHost: StudioAssistantHost | null = null;
+  private readonly recoveryTargetObservers = new Map<string, () => void>();
+  private readonly mingObservationKey = randomBytes(32).toString("hex");
+  private mingConfirmation: { revision: number; at: number } | null = null;
+  private mingScope(revision: number): string { return createHash("sha256").update(JSON.stringify(["ming-original-cleanup", this.mingObservationKey, revision])).digest("hex"); }
+  private mingCleanupSnapshot(): MingCleanupSnapshot | undefined {
+    if (!this.opts.ming) return undefined;
+    const source = this.localGpu.mingCleanupState(), at = Date.parse(this.nowIso());
+    if (source.confirmed !== null && source.confirmed !== this.mingConfirmation?.revision) this.mingConfirmation = { revision: source.confirmed, at };
+    return { state: source.state, scope: source.state === "held" || source.state === "checking" ? this.mingScope(source.revision) : null,
+      authority: this.opts.ming.cleanupAuthorized === true ? "original-worker" : "unavailable",
+      available: source.state === "held" && this.opts.ming.cleanupAuthorized === true && this.recoveryActions.mingCleanupAvailable(),
+      waiting: source.waiting, measuredAt: at,
+      confirmation: this.mingConfirmation ? { scope: this.mingScope(this.mingConfirmation.revision), at: this.mingConfirmation.at } : null };
+  }
+  private readonly recoveryActions = new RecoveryActionRegistry({ now: () => Date.parse(this.nowIso()), publish: result => {
+    if (!this.stopping) {
+      this.opts.recoveryHistory?.observeActions(reviewedActionHistory(result, Date.parse(this.nowIso())));
+      this.emit({ type: "recovery.action-result", at: this.nowIso(), result }); this.publishRecoveryPolicy();
+    }
+  }, ownerSettled: () => this.publishRecoveryPolicy(), automaticAllowed: () => {
+    const policy = this.opts.recoveryControl?.policySnapshot();
+    return this.started && !this.stopping && policy?.accepting === true && policy.audit === "available" && policy.mode === "automatic";
+  } });
+  private recoveryPolicy(): RecoveryPolicySnapshot | null {
+    const policy = this.opts.recoveryControl?.policySnapshot(); if (!policy) return null;
+    const targets = new Map(policy.targets.map(target => [target.key, target]));
+    for (const target of this.recoveryActions.availability()) {
+      if (!targets.has(target.key) && targets.size >= RECOVERY_POLICY.maxTargets) continue;
+      targets.set(target.key, { stoppedByUser: false, circuitOpen: false, pendingOutcome: false, ...targets.get(target.key), ...target });
+    }
+    return { ...policy, targets: [...targets.values()], cleanup: this.recoveryActions.cleanupAvailability(),
+      ...(this.opts.ming ? { mingCleanup: this.mingCleanupSnapshot() } : {}) };
+  }
+  private publishRecoveryPolicy(reconstructed = false): void {
+    if (!this.started || this.stopping) return;
+    this.opts.recoveryHistory?.observeActions([
+      ...(this.opts.recoveryControl ? restartActionHistory(this.opts.recoveryControl.snapshot().control) : []),
+      ...(this.cataloguePreviews?.cleanupHistory() ?? []),
+    ], reconstructed);
+    const policy = this.recoveryPolicy(); if (policy) this.emit({ type: "recovery.policy", at: this.nowIso(), policy });
+  }
+  private registerRecoveryTarget(key: string, service: RecoveryRetryPlan["service"], supervisor: ChildSupervisor, current: () => boolean): void {
+    this.recoveryActions.register(key, { service, prepare: () => current() ? supervisor.prepareRecoveryRetry() : null });
+    this.recoveryTargetObservers.get(key)?.();
+    const changed = () => this.publishRecoveryPolicy(); supervisor.on("status", changed); supervisor.on("recovery-settled", changed);
+    this.recoveryTargetObservers.set(key, () => { supervisor.off("status", changed); supervisor.off("recovery-settled", changed); });
+  }
+  private studioConversation(): StudioAssistantHost | null {
+    if (this.stopping || !this.opts.appRoot || this.opts.studioAssistant === null) return null;
+    return this.studioAssistantHost ??= createStudioAssistantHost({ root: this.opts.appRoot,
+      adapter: () => this.opts.adapter ?? null, sessionInput: this.sessionInput, options: this.opts.studioAssistant,
+      transcribe: (audio, contentType, signal) => {
+        if (!this.voiceService) return Promise.reject(new Error("Local dictation is unavailable."));
+        return this.voiceService.transcribe(audio, contentType, signal);
+      },
+      readSpeech: async (text, expectedVoice, signal, current) => {
+        const voice = this.voiceService, selected = this.readModel.getState().app.narrator;
+        const voiceId = studioLocalNarrator(selected);
+        if (!voice || !voiceId || expectedVoice && voiceId !== expectedVoice) throw new Error("Private local speech is unavailable.");
+        const allowed = () => current() && !this.stopping && this.voiceService === voice && studioLocalNarrator(this.readModel.getState().app.narrator) === voiceId;
+        const audio = await voice.privateLocalSpeech(voiceId, text, signal, allowed); return { audio, voiceId };
+      },
+      now: () => Date.parse(this.nowIso()), evidence: () => ({ history: this.opts.recoveryHistory?.snapshot(),
+        policy: this.opts.recoveryControl?.policySnapshot(), storage: this.opts.storageHealth?.snapshot(), jobs: this.jobQueue?.listJobs() }) });
+  }
 
   /**
    * Put a clip somewhere the clone can read it, and say what is wrong with it if anything is.
@@ -3364,6 +3530,7 @@ export class Coordinator {
   private started = false;
   private stopping = false;
   private sampleInstallAbort: AbortController | null = null;
+  private worldImportAbort: AbortController | null = null;
   private engineClosed = false;
   /** Page reads told to stop (codex, PR 879): the narration loop checks between blocks. */
   private readonly stoppedReads = new Set<string>();
@@ -3386,7 +3553,11 @@ export class Coordinator {
   /** In-flight dispatch-scene-planned requestIds (SPEC-024 R-12): the same redelivery guard. */
   private readonly creatingPlans = new Set<string>();
   private readonly activeMessages = new Set<Promise<void>>();
-  private readonly browserMediaImports = new BrowserMediaImports();
+  private readonly browserMediaImports: BrowserMediaImports;
+  private readonly importFileSpace?: ImportFileStorage;
+  private readonly exportFileSpace?: ImportFileStorage;
+  /** Trusted host publication copies share setup/import/result reservations. */
+  get publicationFileSpace(): ImportFileSpace | undefined { return this.exportFileSpace; }
   private cataloguePreviews: CataloguePreviewService | null = null;
   private readonly backgroundWork = new Set<Promise<unknown>>();
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
@@ -3413,6 +3584,8 @@ export class Coordinator {
   private readonly performanceGenerations = new Map<string, AbortController>();
   /** SPEC-013: exports in flight, cancellable by id (R-21). */
   private readonly exports = new Map<string, ExportHandle>();
+  /** Play all's renders in flight (SPEC-060 R-8), by request: aborted with the coordinator. */
+  private readonly renderingMusic = new Map<string, AbortController>();
   /** The audiobook video render going for a book, by `<world>/<production>`: two never run at once (design turn 197, rule 10). */
   private readonly videoRenders = new Map<string, string>();
   /** Safe read projections for the target-read surface; output paths remain world-relative. */
@@ -3450,6 +3623,28 @@ export class Coordinator {
   private backfillStore: WorldStore | null = null;
 
   private readonly localGpu: LocalGpu;
+  private readonly mingSpeech: MingSpeechService | null;
+  private readonly mingBatchSpace: MingBatchStorage | undefined;
+  mingSpeechStatus(model: string): Promise<{ready: boolean; reason?: string}> {
+    return this.mingSpeech?.status(model) ?? Promise.resolve({ready: false, reason: "Ming is not configured on this host."});
+  }
+  synthesizeMing(input: Parameters<MingSynthesis["synthesize"]>[0], signal: AbortSignal): Promise<Uint8Array> {
+    if (!this.mingSpeech || this.stopping) return Promise.reject(new Error("Ming is stopped or unavailable."));
+    return this.mingSpeech.synthesize(input, AbortSignal.any([signal, this.runtimeStop.signal]));
+  }
+  private readonly runtimeStop = new AbortController();
+
+  /** Host-only entry for the optional Ming worker; no paths or commands come from the renderer. */
+  runMingBatch<T>(work: (signal: AbortSignal) => Promise<T>, signal: AbortSignal, waiting?: (reason: string | null) => void): Promise<T> {
+    if (!this.opts.ming) return Promise.reject(new Error("The Ming worker is not configured."));
+    const task = this.localGpu.runMingBatch(work, AbortSignal.any([signal, this.runtimeStop.signal]), waiting);
+    this.trackBackground(task);
+    return task;
+  }
+
+  generateMingBatch(command: MingBatchCommand, signal: AbortSignal, waiting?: (reason: string | null) => void): Promise<void> {
+    return this.runMingBatch(combined => this.opts.ming!.run(command, combined), signal, waiting);
+  }
   private readonly effectAnalysis: EditorEffectAnalysisService;
   private readonly effectDependencies: EditorEffectDependencies;
   /**
@@ -3464,8 +3659,11 @@ export class Coordinator {
   private readonly storyPublications: StoryPublicationService;
   private readonly dramaEditions: DramaEditionService;
   constructor(private readonly opts: CoordinatorOptions) {
+    this.importFileSpace = opts.storageHealth?.supportsAdmission ? new ImportFileStorage(opts.storageHealth) : undefined;
+    this.exportFileSpace = opts.storageHealth?.supportsAdmission ? new ImportFileStorage(opts.storageHealth, "export") : undefined;
+    this.browserMediaImports = new BrowserMediaImports(this.importFileSpace);
     this.dramaEditions = new DramaEditionService(opts.appRoot ? join(opts.appRoot, "drama-editions") : opts.changeLogPath + ".drama-editions", opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {});
-    this.storyPublications = new StoryPublicationService(opts.appRoot ? join(opts.appRoot, "story-publications") : opts.changeLogPath + ".story-publications", { ...(opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {}), ...(opts.mediaProbe ? { probe: opts.mediaProbe } : {}) });
+    this.storyPublications = new StoryPublicationService(opts.appRoot ? join(opts.appRoot, "story-publications") : opts.changeLogPath + ".story-publications", { ...(opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {}), ...(opts.mediaProbe ? { probe: opts.mediaProbe } : {}), fileSpace: this.exportFileSpace });
     this.effectAnalysis = new EditorEffectAnalysisService(opts.effectAudioAnalysisHost, (analysis, scope) => this.emit({
       at: this.nowIso(), type: "editor-effect.analysis", ...scope, analysis,
     }));
@@ -3485,10 +3683,63 @@ export class Coordinator {
     // comes up settles both from its failure paths below, and a session on it fails at creation.
     if (!opts.adapter) this.settleHarnessGates();
     this.localGpu = new LocalGpu(async (engine, signal) => {
-      if (engine === "ComfyUI" && opts.comfyui?.service.engineIdentity()?.locality !== "local") return;
+      if (engine === "Ming") { await opts.ming?.unload(signal); return; }
+      if (engine === "Ollama" && opts.ollama && opts.ollama.service.baseUrl() === null && !opts.ollama.service.externallySelected()) {
+        // An uninstalled runtime owns no memory. A failed owned child must confirm exit;
+        // a nullable endpoint by itself is not evidence that it released its allocations.
+        await opts.ollama.service.prepareGpuHandover();
+        this.clearLocalResidency("ollama");
+        return;
+      }
+      if (engine === "ComfyUI") {
+        if (opts.comfyui?.service.engineStatus().locality === "remote") return;
+        await opts.comfyui?.service.prepareGpuHandover();
+      }
       await opts.dispatchClients?.[engine === "Ollama" ? "ollama" : "comfyui"]?.unload?.(signal);
       this.clearLocalResidency(engine === "Ollama" ? "ollama" : "comfyui");
-    });
+    }, ["Ollama", "ComfyUI", "Ming"]);
+    if (opts.ming) {
+      const owner = opts.ming;
+      this.recoveryActions.registerMingCleanup({ prepare: () => {
+        if (this.stopping || this.opts.ming !== owner || owner.cleanupAuthorized !== true) return null;
+        const prepared = this.localGpu.prepareMingCleanup(); if (!prepared) return null;
+        const current = () => !this.stopping && this.opts.ming === owner && owner.cleanupAuthorized === true && prepared.current();
+        return { scope: this.mingScope(prepared.revision), current,
+          run: (signal, allowed) => prepared.run(AbortSignal.any([signal, this.runtimeStop.signal]), () => allowed() && current()) };
+      } });
+      this.lifecycleDisposers.add(this.localGpu.subscribeMingCleanup(() => this.publishRecoveryPolicy()));
+    }
+    if (opts.recoveryControl && opts.ollama && opts.appRoot) {
+      const service = opts.ollama.service, control = opts.recoveryControl;
+      // The control file already belongs to this app root. Path spelling or a replacement
+      // supervisor must not mint a fresh budget for its one managed Ollama role.
+      const key = createHash("sha256").update("managed-ollama").digest("hex");
+      service.configureRecovery(supervisor => {
+        this.registerRecoveryTarget(key, "ollama", supervisor, () => !this.stopping && service.ownsSupervisor(supervisor));
+        return new SupervisorRecovery({ control, identity: { key, service: "ollama" },
+        current: () => !this.stopping && service.ownsSupervisor(supervisor), ownership: () => service.externallySelected() ? "external" : "managed",
+        componentDigest: () => createHash("sha256").update(JSON.stringify([SETUP_CATALOGUE.find(entry => entry.id === "ollama-runtime"), service.modelsDir()])).digest("hex"),
+        acquire: signal => this.localGpu.acquire("Ollama", signal),
+        });
+      });
+    }
+    if (opts.recoveryControl && opts.comfyui && opts.appRoot) {
+      const control = opts.recoveryControl;
+      opts.comfyui.service.configureRecovery((owner, supervisor) => {
+        const key = createHash("sha256").update(`managed-comfyui:${owner.recoveryTarget().role}`).digest("hex");
+        this.registerRecoveryTarget(key, "comfyui", supervisor, () => !this.stopping && owner.ownsSupervisor(supervisor));
+        return new SupervisorRecovery({ control, identity: { key, service: "comfyui" },
+          current: () => !this.stopping && owner.ownsSupervisor(supervisor), ownership: () => owner.recoveryTarget().ownership,
+          componentDigest: () => createHash("sha256").update(JSON.stringify([SETUP_CATALOGUE.find(entry => entry.id === "comfyui-runtime"), owner.recoveryTarget().configurationDigest])).digest("hex"),
+          acquire: signal => this.localGpu.acquire("ComfyUI", signal),
+        });
+      });
+    }
+    this.mingBatchSpace = opts.storageHealth?.supportsAdmission && opts.ming?.storageOwner
+      ? new MingBatchStorage(opts.storageHealth, opts.ming.storageOwner) : undefined;
+    this.mingSpeech = opts.appRoot && opts.ming && opts.comfyui ? new MingSpeechService({ appRoot: opts.appRoot, space: this.mingBatchSpace,
+      python: () => opts.comfyui!.service.sharedMingPython(), run: (command, signal) => this.generateMingBatch(command, signal),
+      processRunning: () => opts.ming!.running === true, ...(opts.mingWorkerPath ? {worker: opts.mingWorkerPath} : {}) }) : null;
     if (opts.adapter) opts.adapter = withModelValidation(
       withLocalGpu(opts.adapter, this.localGpu, () => { void this.refreshLocalResidency(); }, (model) => this.harnessOllamaModels.add(model)),
       (reference, needsImages, signal) => this.validateLanguageModel(reference, needsImages, signal),
@@ -3596,6 +3847,9 @@ export class Coordinator {
                 ),
               append: (entry) => this.recordLedger(entry),
             },
+            artifactSpace: opts.storageHealth?.supportsAdmission ? new JobArtifactStorage(opts.storageHealth) : undefined,
+            checkStorageBeforeSubmission: () => opts.recoveryControl?.advancedSettings().checkStorageBeforeSubmission ?? true,
+            artifactTransferSettings: () => opts.recoveryControl?.advancedSettings().artifactTransfer,
             landInWorld: async (worldId, fn) => {
               try {
                 if (worldId === VOICE_PREVIEW_SCOPE && opts.appRoot) {
@@ -3612,13 +3866,13 @@ export class Coordinator {
                 }
                 if (this.opts.provider.withWorldStore) {
                   await this.opts.provider.withWorldStore(worldId, (store) =>
-                    store.ownedWrite(() => fn(store.dir)),
+                    store.ownedWrite(() => fn(store.dir, () => store.assertOwnership())),
                   );
                   return true;
                 }
                 const store = this.opts.provider.openStore?.();
                 if (!store || store.worldId !== worldId) return false;
-                await store.ownedWrite(() => fn(store.dir));
+                await store.ownedWrite(() => fn(store.dir, () => store.assertOwnership()));
                 return true;
               } catch {
                 return false;
@@ -3697,6 +3951,7 @@ export class Coordinator {
                 if (source.kind !== "cloned") {
                   throw new Error("That cloned voice is no longer in this world — choose another voice.");
                 }
+                if (provider === "ming" && (!source.voice.consent || !source.voice.transcript?.trim())) throw new Error("Clone this recording with permission and its exact spoken words to use Ming 3.");
                 const clip = await clipFor(store, source.voice);
                 if (!clip) {
                   throw new Error(
@@ -3850,6 +4105,7 @@ export class Coordinator {
       ? new VoiceService({
           sidecar: opts.voice.sidecar,
           localPresets: opts.voice.localPresets,
+          ...(this.mingSpeech ? { localReaderAvailability: (model: string) => this.mingSpeechStatus(model) } : {}),
           cloudSources: opts.voice.cloudSources,
           modelEnabled: (model) => !this.readModel.getState().app.models.disabled.includes(model),
           ...(opts.voice.hostedReaders !== undefined ? { hostedReaders: opts.voice.hostedReaders } : {}),
@@ -3878,8 +4134,15 @@ export class Coordinator {
       : null;
     if (opts.appRoot && opts.voice) this.cataloguePreviews = new CataloguePreviewService({
       root: join(opts.appRoot, "voice-previews"), sidecar: opts.voice.sidecar, get manifest() { return opts.manifest; },
+      storage: opts.storageHealth ?? undefined, now: () => Date.parse(this.nowIso()), cleanupChanged: () => this.publishRecoveryPolicy(),
       ...(this.jobQueue ? { enqueue: input => this.jobQueue!.enqueue(input), cancel: id => this.jobQueue!.cancel(id) } : {}),
       emit: event => this.emit(event),
+    });
+    if (this.cataloguePreviews) this.recoveryActions.registerCleanup({
+      available: () => this.cataloguePreviews!.cleanupAvailability(), prepare: (signal, scope) => this.cataloguePreviews!.prepareCleanup(signal, scope),
+      reconcile: signal => this.cataloguePreviews!.reconcileCleanup(signal),
+      setMaintenance: enabled => this.cataloguePreviews!.setMaintenance(enabled), revokeMaintenance: () => this.cataloguePreviews!.revokeMaintenance(),
+      maintenanceReady: () => this.cataloguePreviews!.maintenanceReady(), runMaintenance: (id, signal, valid) => this.cataloguePreviews!.runMaintenance(id, signal, valid),
     });
     this.serverApplication = {
       attachTransport: sink => {
@@ -3963,8 +4226,21 @@ export class Coordinator {
         const conversationId = this.readModel.getState().worldChat?.conversationId;
         if (conversationId) await this.openWorldChat(store, conversationId, conversationId);
       },
-      onMessage: (msg) => {
+      onMessage: (msg, requester) => {
         if (this.stopping) return;
+        // Private Studio transport is separate from broadcast/world command handling.
+        if (msg.kind === "studio-assistant") {
+          const studio = requester && this.studioConversation();
+          if (!studio || !requester) requester?.reply(msg.requestId, { type: "result", status: "refused", reason: "unavailable", threadId: null, runId: null });
+          else {
+            const handling = studio.handle(msg, requester).catch(() => {
+              try { requester.reply(msg.requestId, { type: "result", status: "unconfirmed", reason: "unavailable", threadId: null, runId: null }); }
+              catch { /* Private presentation must not disable model-free diagnostics. */ }
+            }).finally(() => this.activeMessages.delete(handling));
+            this.activeMessages.add(handling);
+          }
+          return;
+        }
         const updateCommand =
           msg.kind === "install-update-and-restart" || msg.kind === "install-update-on-close";
         // Every handler answers its own failures; this is the backstop. One that throws instead
@@ -3999,7 +4275,7 @@ export class Coordinator {
         if (edition) return this.storyPublications.serve(edition[1]!, edition[2]!);
         const storyPreview = /^\/story-preview-media\/([a-f0-9-]+)\/(cover|illustration-\d+\.(?:png|jpg)|story\.(?:epub|m4b|pdf))$/.exec(urlPath);
         if (storyPreview) return this.storyPublications.previewMedia(storyPreview[1]!, storyPreview[2]!);
-        const preview = /^\/voice-preview-media\/([a-f0-9]{64}\.(?:wav|mp3|flac))$/.exec(urlPath);
+        const preview = /^\/voice-preview-media\/((?:local-[a-f0-9]{64}\.wav)|(?:[a-f0-9]{64}\.(?:wav|mp3|flac)))$/.exec(urlPath);
         if (preview) return this.cataloguePreviews?.serve(preview[1]!) ?? null;
         // GET /genesis-media/<genesis-id>/<sandbox-relative-file> — the look preview, which
         // exists before any world does (SPEC-031 R-50). A distinct prefix, not a magic slug:
@@ -4030,6 +4306,7 @@ export class Coordinator {
       // back in would re-trigger its own derivation, and journalling it would record to disk a
       // projection of state the change log already carries.
       onSnapshot: (snapshot) => {
+        if (!this.stopping) this.opts.recoveryHistory?.observeDiagnostics(snapshot);
         // The broadcast runs inside the holder's setImmediate; a snapshot the event schema
         // refuses must degrade to a logged line, never an uncaught exception (R-14's spirit,
         // carried to the wire).
@@ -4221,7 +4498,7 @@ export class Coordinator {
       changed: (adapters) => {
         this.emit({ type: "adapters.changed", at: new Date().toISOString(), adapters });
         if (this.setup) {
-          const setup = this.visibleAdapterSetup(this.setup.status());
+          const setup = this.projectSetup(this.setup.status());
           this.readModel.setSetup(setup);
           this.emit({ type: "setup.status", at: new Date().toISOString(), setup });
         }
@@ -4232,7 +4509,7 @@ export class Coordinator {
         ? new LocalSetupService(
             opts.setup,
             (event) => {
-              if (event.type === "setup.status") event = { ...event, setup: this.visibleAdapterSetup(event.setup) };
+              if (event.type === "setup.status") event = { ...event, setup: this.projectSetup(event.setup) };
               // The snapshot carries it too: a window that opens mid-download still sees it.
               if (event.type === "setup.status") {
                 const previous = this.readModel.getState().app.setup;
@@ -4248,6 +4525,8 @@ export class Coordinator {
             },
             {
               appRoot: opts.appRoot,
+              fileSpace: opts.storageHealth?.supportsAdmission ? new SetupFileStorage(opts.storageHealth) : undefined,
+              archiveSpace: opts.storageHealth?.supportsAdmission ? new SetupArchiveStorage(opts.storageHealth) : undefined,
               // The static catalogue plus what the host derives from provider-owned data —
               // the per-recipe weight entries (SPEC-021 §2.4). One list, one service.
               catalogue: [...SETUP_CATALOGUE, ...(opts.setupExtraEntries ?? []), ...adapterSetupEntries(HEARMEMAN_ADAPTERS)],
@@ -4263,11 +4542,40 @@ export class Coordinator {
                 },
               },
               onComponentReady: (componentId) => this.onSetupComponentReady(componentId),
-              beforeComponentInstall: async id => { if (id.startsWith("adapter-")) await this.adapterLibrary?.guardInstall(id); },
+              beforeComponentInstall: async id => {
+                if (id.startsWith("adapter-")) await this.adapterLibrary?.guardInstall(id);
+                if (id.startsWith("ming-") && (this.mingSpeech?.busy || this.localGpu.isBusy("Ming"))) throw new Error("Wait for the current Ming reading to stop before changing its files.");
+                if (id === "ollama-runtime" && this.localGpu.isBusy("Ollama")) throw new Error("Wait for current local work before changing Ollama's files.");
+              },
+              beginComponentInstall: async (id, signal) => {
+                if (id !== "ollama-runtime" || !this.opts.ollama) return undefined;
+                // The earlier busy check is presentation, not an idle fence: a submission may
+                // have arrived since it ran. Drain that work under the ordinary inference lane
+                // before stopping the worker. The owner's file lease then keeps activation
+                // closed without holding the graphics card throughout the download.
+                const release = await this.localGpu.acquire("Ollama", signal);
+                try { signal.throwIfAborted(); } catch (error) { release(); throw error; }
+                return this.opts.ollama.service.reserveInstallation(release);
+              },
+              beginFileMutation: (id, entry, signal) => {
+                if (entry.spec.kind === "pull" && entry.engine === "ollama") return this.localGpu.reserveFileChange("Ollama");
+                if (id.startsWith("ming-")) {
+                  if (this.localGpu.isBusy("Ming")) throw new Error("Stop the current Ming reading before changing its model files.");
+                  return this.mingSpeech?.reserveFileChange();
+                }
+                if (entry.engine === "comfyui") return this.localGpu.reserveFileChange("ComfyUI");
+                if (entry.engine === "voxa") {
+                  if (!this.opts.voice?.sidecar?.reserveRuntime) throw new Error("Close the voice engine before repairing its model files; this host cannot hold its requests.");
+                  return this.opts.voice.sidecar.reserveRuntime(signal);
+                }
+                return undefined;
+              },
               onFileInstalled: async (id, path) => { if (id.startsWith("adapter-")) await this.adapterLibrary?.recordInstalled(id, path); },
             },
           )
         : null;
+    // Seed before transport opens: an early snapshot must not bypass the gate during detect().
+    if (this.setup) this.readModel.setSetup(this.projectSetup(this.setup.status()));
     this.askService = opts.authoring
       ? new AskService(opts.adapter, {
           sessionInput: this.sessionInput,
@@ -4293,6 +4601,9 @@ export class Coordinator {
   private readonly pendingVoiceReads = new Map<string, { token: string; inputs: EnqueueInput[] }>();
 
   private onSetupComponentReady(componentId: string): Promise<void> {
+    if (this.stopping) return Promise.resolve();
+    if (componentId.startsWith("ming-")) return this.providerService.validate("ming").then(() => { this.voiceService?.invalidateCatalogue(); });
+    if (componentId === "ollama-runtime") return this.opts.ollama?.service.refresh() ?? Promise.resolve();
     if (componentId !== "comfyui-runtime" && !isComfyUiWeightsComponent(componentId)) return Promise.resolve();
     const work = this.comfyUiSetupWork
       .catch(() => {})
@@ -4311,6 +4622,14 @@ export class Coordinator {
     this.comfyUiSetupWork = work.catch(() => {});
     this.trackBackground(this.comfyUiSetupWork);
     return work;
+  }
+
+  private publishSetupReadiness(): void {
+    if (!this.setup || this.stopping) return;
+    const setup = this.projectSetup(this.setup.status());
+    if (JSON.stringify(setup.localAi) === JSON.stringify(this.readModel.getState().app.setup?.localAi)) return;
+    this.readModel.setSetup(setup);
+    this.emit({ type: "setup.status", at: this.nowIso(), setup });
   }
 
   getState(): ClientState {
@@ -4416,6 +4735,7 @@ export class Coordinator {
       this.exportReads.set(parsed.exportId, exportReadRecord(parsed, this.exportReads.get(parsed.exportId)));
     }
     this.readModel.apply(parsed);
+    if (parsed.type === "storage.health" || parsed.type === "comfyui.status" || parsed.type === "recovery.policy") this.opts.recoveryHistory?.observeAvailability(this.readModel.getState().app);
     if (parsed.type === "export.progress" && exportStatusChanged) {
       const state = this.readModel.getState();
       if (state.world?.meta.worldId === parsed.worldId && state.worldChat?.messages.some(m => m.productionPlan?.productionId === parsed.productionId)) {
@@ -4452,6 +4772,10 @@ export class Coordinator {
       // carries the findings — whose firstSeen bookkeeping R-35 says is never written to disk.
       // Journalling the event would have durably recorded both on every generate.
       parsed.type !== "diagnostics.ready" &&
+      // Resource readings are replaceable observations, not a second durable operation journal.
+      parsed.type !== "storage.health" &&
+      parsed.type !== "system.resources" &&
+      !parsed.type.startsWith("recovery.") &&
       // Several a second while a world opens, and over once it has (issue 1844).
       parsed.type !== "world.open-progress"
     ) {
@@ -4459,6 +4783,7 @@ export class Coordinator {
       void this.changeLog.append({ kind: "event", event: journalRecord(parsed) });
     }
     this.transport.broadcast(parsed);
+    this.syncStorageObservation(parsed);
     if (parsed.type === "proposal.resolved") {
       const store = this.opts.provider.openStore?.();
       if (store?.worldId === parsed.worldId && !this.stopping) {
@@ -4474,7 +4799,7 @@ export class Coordinator {
     // A tail read that failed transiently (an AV pass holding app.jsonl) would otherwise stick
     // as `unavailable` until the next append; retrying on the next event is still event-driven.
     if (this.diagnosticsLogTail === "unavailable") this.refreshDiagnosticsLogTail();
-    this.diagnosticsSnapshot?.schedule();
+    if (!parsed.type.startsWith("recovery.") || parsed.type === "recovery.policy") this.diagnosticsSnapshot?.schedule();
     try {
       this.opts.observeEvent?.(parsed);
     } catch {
@@ -4651,6 +4976,20 @@ export class Coordinator {
 
   /** Attach a supervised child and mirror its lifecycle into component health (R-6). */
   superviseAs(component: Exclude<HealthComponent, "coordinator">, supervisor: ChildSupervisor): void {
+    if (this.started || this.stopping || this.supervisors.has(component)) throw new Error("Attach each supervised service once before startup.");
+    const harness = this.opts.harnessRecovery;
+    const owner: SupervisedRecoveryOwner | undefined = component === "harness" && harness ? {
+      ownership: () => harness.ownership, componentDigest: () => harness.componentDigest(), reserve: signal => harness.reserve(signal),
+    } : component === "voice" ? this.opts.voice?.recovery : undefined;
+    if (owner && this.opts.recoveryControl && this.opts.appRoot) {
+      const recovery = new SupervisorRecovery({ control: this.opts.recoveryControl,
+        identity: { key: createHash("sha256").update(component === "harness" ? "managed-harness-v2" : "managed-voxa").digest("hex"), service: component },
+        current: () => !this.stopping && this.supervisors.get(component) === supervisor,
+        ownership: () => owner.ownership(), componentDigest: () => owner.componentDigest(), acquire: signal => owner.reserve(signal) });
+      supervisor.setRecoveryPort(recovery);
+      const key = createHash("sha256").update(component === "harness" ? "managed-harness-v2" : "managed-voxa").digest("hex");
+      this.registerRecoveryTarget(key, component, supervisor, () => !this.stopping && this.supervisors.get(component) === supervisor);
+    }
     this.supervisors.set(component, supervisor);
     supervisor.on("status", ({ status, reason }: { status: SupervisorStatus; reason?: string }) => {
       // A healthy harness process is probed before it counts (SPEC-005 R-2): the adapter asks
@@ -4732,7 +5071,48 @@ export class Coordinator {
 
     await this.seed();
     await this.adapterLibrary?.refresh();
+    if (this.opts.recoveryControl) {
+      const control = this.opts.recoveryControl;
+      this.lifecycleDisposers.add(control.subscribe(() => {
+        this.recoveryActions.invalidateReviews(); this.publishRecoveryPolicy();
+        if (!this.stopping) this.trackBackground(this.recoveryActions.maintainCleanup());
+      }));
+      await control.open();
+      await this.cataloguePreviews?.initializeCleanup();
+      await this.cataloguePreviews?.reconcileCleanup();
+      this.publishRecoveryPolicy();
+    }
+    if (this.opts.recoveryHistory) {
+      const history = this.opts.recoveryHistory;
+      this.lifecycleDisposers.add(history.subscribe(snapshot => {
+        if (!this.stopping) this.emit({ type: "recovery.history", at: this.nowIso(), history: snapshot });
+      }));
+      this.lifecycleDisposers.add(history.subscribeNotices(notice => {
+        if (!this.stopping) this.emit({ type: "recovery.notice", at: this.nowIso(), notice });
+      }));
+      await history.open();
+      history.observeDiagnostics(this.diagnosticsSnapshot!.currentSnapshot());
+      this.publishRecoveryPolicy(true);
+    }
     await this.seedAppConfig();
+    if (this.opts.systemResources) {
+      this.lifecycleDisposers.add(this.opts.systemResources.subscribe(resources => {
+        if (!this.stopping) this.emit({ type: "system.resources", at: this.nowIso(), resources });
+      }));
+    }
+    if (this.opts.storageHealth) {
+      this.lifecycleDisposers.add(this.opts.storageHealth.subscribe(health => {
+        if (!this.stopping) {
+          this.emit({ type: "storage.health", at: new Date().toISOString(), health });
+          if (this.cataloguePreviews) this.trackBackground(this.cataloguePreviews.refreshCleanupScope());
+          this.trackBackground(this.recoveryActions.maintainCleanup());
+        }
+      }));
+      this.syncStorageObservation();
+      this.trackBackground(this.importFileSpace?.reconcileIdleImports() ?? this.opts.storageHealth.start());
+      if (this.exportFileSpace) this.trackBackground(this.exportFileSpace.reconcileIdleImports());
+      if (this.mingBatchSpace) this.trackBackground(this.mingBatchSpace.reconcile(this.runtimeStop.signal));
+    }
     for (const run of (await this.audiobookActivity.load()).reverse()) this.readModel.apply({ type: "audiobook.activity", at: run.updatedAt, run });
     // The engine must be resolved BEFORE queue recovery, not after (SPEC-021 §2.11). Recovery
     // asks the service which engine is configured now, and a null answer means "no engine" —
@@ -4744,6 +5124,16 @@ export class Coordinator {
       const settings = await this.appSettings.load();
       await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
     }
+    if (this.opts.ollama && this.appSettings) {
+      const settings = await this.appSettings.load();
+      await this.opts.ollama.service.applySettings(settings.ollama);
+      const publish = () => { if (!this.stopping) {
+        this.emit({ at: this.nowIso(), type: "ollama.status", ollama: this.opts.ollama!.service.status() });
+        this.publishSetupReadiness();
+      } };
+      this.lifecycleDisposers.add(this.opts.ollama.service.subscribe(publish));
+      publish();
+    }
     // Reconcile every non-terminal job before accepting new work (SPEC-009 R-18). The report
     // reaches clients as an event; the folded jobs seed the read model.
     if (this.jobQueue) {
@@ -4751,6 +5141,12 @@ export class Coordinator {
       this.readModel.seedJobs(this.jobQueue.listJobs());
     }
     this.readModel.setWorlds(await this.opts.provider.listWorlds());
+
+    // Existing libraries never acquire a first-run wizard just because their old settings
+    // file was absent. An explicitly started/saved journey still resumes normally.
+    if (this.readModel.getState().worlds.length && this.readModel.getState().app.onboarding?.plan.persona === null) {
+      this.readModel.seedAppConfig({ onboarding: null });
+    }
 
     // Founding builds survive the process (SPEC-031 R-32, R-33): every world's build record
     // is peeked at startup — files only, never a store open — so a run cut off mid-wave is
@@ -4828,8 +5224,8 @@ export class Coordinator {
       this.emit({ at: new Date().toISOString(), type: "env.check", ...envCheck });
     }
 
-    // Local runtimes arrive in the background (R-5 revised): the app is usable throughout, and
-    // every component can be skipped. Detection runs first, so a second launch fetches nothing.
+    // Detect existing files and retained downloads. The catalogue offers missing AI components
+    // until selected; model/service health never gates manual authoring (SPEC-016, turns 242–244).
     void this.setup?.run();
 
     // An external image login restores itself without holding the transport behind a slow
@@ -4845,6 +5241,7 @@ export class Coordinator {
     // starting → healthy → failed. Both in the background: the app never waits on an engine.
     if (this.opts.comfyui) {
       const unsubscribe = this.opts.comfyui.service.subscribe(() => {
+        this.publishSetupReadiness();
         this.trackBackground(
           this.retireAndReleaseComfyUi()
             .then(() => this.refreshComfyUi())
@@ -5754,7 +6151,7 @@ export class Coordinator {
     // harnessInfo, but Settings must still attach its health failure to the engine we tried.
     const generation = this.opts.harnessInfo?.generation;
     this.launchEngine = generation === "claude" || generation === "codex" ? generation
-      : generation === "v1" || generation === "v2" ? "opencode"
+      : generation === "v2" ? "opencode"
       : this.opts.harnessLaunchEngine ?? this.opts.harnessEngineOverride ?? settings?.harness.engine ?? "opencode";
     // Read once here so the first session of the run already carries the user's choices —
     // not the second, after something happened to touch settings.
@@ -5772,6 +6169,7 @@ export class Coordinator {
     if (seededSpend && !seededSpend.ledgerUnavailable) this.spendAlerted = seededSpend.alerted;
     this.readModel.seedAppConfig({
       manifest,
+      onboarding: settings?.onboarding ? { plan: settings.onboarding, workspace: null, localModel: null } : null,
       providers: this.providerService.list(),
       providerTools: [...this.providerTools.values()].map((tool) => tool.current()),
       ...(settings && manifest
@@ -5821,7 +6219,10 @@ export class Coordinator {
     // State is captured AFTER the awaits: an event landing mid-wait would otherwise put the
     // old app section beside findings derived from the new one — the disagreement-in-one-
     // artifact R-13 exists to forbid.
-    return buildDiagnosticsBundle(this.getState(), this.appLog, this.secrets, findings);
+    const history = this.opts.recoveryHistory;
+    return buildDiagnosticsBundle(this.getState(), this.appLog, this.secrets, findings, {
+      history: history?.historyForExport() ?? null, audit: history?.snapshot() ?? null, policy: this.opts.recoveryControl?.policySnapshot() ?? null,
+    });
   }
 
   /** A credential failed mid-session: a provider fault naming the provider, never a work failure (R-4). */
@@ -6359,16 +6760,20 @@ export class Coordinator {
     patch: Partial<import("@arke-studio/contracts").ComfyUiSettings>,
   ): Promise<void> {
     if (!this.appSettings || !this.opts.comfyui) return;
-    const settings = await this.appSettings.setComfyUi(patch);
-    this.jobQueue?.resetProviderTransport("comfyui");
-    await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
-    // Work in flight against the engine that just stopped being the configured one is failed
-    // here, with the reason (SPEC-021 §2.11). Without this the poll loop keeps asking the NEW
-    // engine about a prompt id only the OLD one ever issued — which reads as "the engine no
-    // longer knows this prompt" and looks like the engine lost the job.
-    await this.retireAndReleaseComfyUi();
-    await this.setup?.detect().catch(() => {});
-    await this.refreshComfyUi();
+    if (this.localGpu.isBusy("ComfyUI")) throw new Error("Finish or cancel ComfyUI work before changing its runtime.");
+    const release = await this.localGpu.acquire("ComfyUI", this.runtimeStop.signal);
+    try {
+      if (this.opts.comfyui.service.engineStatus().source === "user-url") await this.opts.dispatchClients?.comfyui?.unload?.(this.runtimeStop.signal);
+      const previous = (await this.appSettings.load()).comfyui;
+      const settings = await this.appSettings.setComfyUi(patch);
+      this.runtimeStop.signal.throwIfAborted();
+      this.jobQueue?.resetProviderTransport("comfyui");
+      try { await this.opts.comfyui.service.applySettings(settings.comfyui); }
+      catch (error) { await this.appSettings.setComfyUi(previous); throw error; }
+      await this.retireAndReleaseComfyUi();
+      await this.setup?.detect().catch(() => {});
+      await this.refreshComfyUi();
+    } finally { release(); }
   }
 
   /**
@@ -6541,9 +6946,11 @@ export class Coordinator {
     return work;
   }
 
-  private visibleAdapterSetup(setup: import("@arke-studio/contracts").SetupStatus): import("@arke-studio/contracts").SetupStatus {
-    return this.readModel.getState().app.adapters?.adultContent.enabled ? setup :
-      { ...setup, components: setup.components.filter(row => !row.id.startsWith("adapter-")) };
+  private projectSetup(setup: SetupStatus): SetupStatus {
+    const components = this.readModel.getState().app.adapters?.adultContent.enabled ? setup.components
+      : setup.components.filter(row => !row.id.startsWith("adapter-"));
+    return { ...setup, components, localAi: localAiSetupReadiness(components,
+      this.opts.comfyui?.service.engineStatus(), this.opts.ollama?.service.status()) };
   }
 
   /** Release recovered work when a host-owned runtime reports capability readiness. */
@@ -6976,6 +7383,7 @@ export class Coordinator {
     genesisDecisionHeld = false,
     browserImportStore?: WorldStore,
     audiobookStore?: WorldStore,
+    browserImportSpace?: ImportFileSpace,
   ): Promise<void> {
     // A request owns its world independently of the renderer route. Use the same authenticated
     // commands and store, never a second coordinator or an unowned filesystem writer.
@@ -6985,7 +7393,7 @@ export class Coordinator {
       this.opts.provider.withBackgroundWorldStore) {
       if (this.stopping) return;
       return this.opts.provider.withBackgroundWorldStore(msg.worldId, store =>
-        this.handleClientMessage(msg, benchTakeActionHeld, benchDispatchHeld, genesisDecisionHeld, browserImportStore, store));
+        this.handleClientMessage(msg, benchTakeActionHeld, benchDispatchHeld, genesisDecisionHeld, browserImportStore, store, browserImportSpace));
     }
     if (!genesisDecisionHeld && (msg.kind === "genesis-propose-world" || msg.kind === "genesis-import-resolve" || msg.kind === "genesis-voice-generate" || msg.kind === "genesis-voice-decide" || msg.kind === "genesis-image-generate" || msg.kind === "genesis-image-decide" || msg.kind === "generate-look-preview" || msg.kind === "genesis-discard" || msg.kind === "genesis-chat" || msg.kind === "genesis-decide" || msg.kind === "genesis-review" || msg.kind === "genesis-readiness" || msg.kind === "genesis-readiness-leave" || msg.kind === "genesis-voices" || msg.kind === "genesis-images" || msg.kind === "genesis-imports" || msg.kind === "begin-founding-build" || msg.kind === "genesis-attach" || msg.kind === "genesis-attach-files" || msg.kind === "create-world") && msg.genesisId) {
       return serializeFileMutation(`founding-decisions:${msg.genesisId}`, () => this.handleClientMessage(msg, false, false, true));
@@ -7017,8 +7425,10 @@ export class Coordinator {
       const releaseId = msg.componentId.slice("adapter-".length);
       if (msg.kind === "setup-install" || msg.kind === "setup-retry" || msg.kind === "setup-resume") {
         await this.adapterLibrary?.handle({ action: "install", releaseIds: [releaseId] }).catch(() => {});
-      } else if (msg.kind === "setup-remove" || msg.kind === "setup-repair") {
+      } else if (msg.kind === "setup-remove") {
         await this.adapterLibrary?.handle({ action: "remove", releaseId, deleteOwnedFile: true }).catch(() => {});
+      } else if (msg.kind === "setup-repair") {
+        throw new Error("Use the adapter’s own removal and installation controls to replace it.");
       } else if (msg.kind === "setup-pause" || msg.kind === "setup-skip") {
         this.setup?.pause(msg.componentId);
       }
@@ -7074,6 +7484,8 @@ export class Coordinator {
       }
       case "hello":
         return; // handled inside the transport
+      case "studio-assistant":
+        return; // owner reply channel only; never entered through world/model commands
       case "open-world":
         try {
           await this.openWorld(msg.worldId);
@@ -7209,6 +7621,30 @@ export class Coordinator {
           await this.refreshStoryDownload();
           if (!this.stopping) this.transport.broadcastSnapshot();
         }
+        return;
+      }
+      case "import-world": {
+        const answer = (result: { worldId?: string; reason?: string; cancelled?: boolean }) => {
+          if (!this.stopping) this.emit({ at: this.nowIso(), type: "world.import-result", requestId: msg.requestId, ...result });
+        };
+        if (!this.opts.chooseWorldFolder || !this.opts.provider.installSampleWorld || !this.opts.appRoot) { answer({ reason: "Import a world from the desktop app on your computer." }); return; }
+        if (this.worldImportAbort || this.stopping) { answer({ reason: "A world import is already in progress." }); return; }
+        const control = new AbortController(); this.worldImportAbort = control;
+        const work = (async () => {
+          try {
+            const source = await this.opts.chooseWorldFolder!();
+            if (source === null) { answer({ cancelled: true }); return; }
+            const checked = await checkWorldImport(source, this.opts.appRoot!, control.signal);
+            const result = await this.opts.provider.installSampleWorld!(checked, control.signal);
+            if (this.stopping) return;
+            this.readModel.setWorlds(await this.opts.provider.listWorlds());
+            this.transport.broadcastSnapshot();
+            answer({ worldId: result.worldId });
+          } catch (error) { answer({ reason: describeCoordinatorError(error) }); }
+          finally { this.worldImportAbort = null; }
+        })();
+        this.backgroundWork.add(work);
+        try { await work; } finally { this.backgroundWork.delete(work); }
         return;
       }
       case "install-sample-world": {
@@ -8480,7 +8916,7 @@ export class Coordinator {
         const attachments = new WorldChatAttachmentStore(store.dir, () => this.nowIso());
         try {
           await attachments.promote(msg.conversationId, attachment, msg.requestId, async ({ sourcePath }) => {
-            const outcome = await fileArtifact(store, {
+            const outcome = await fileArtifact(store, { ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
               sourcePath,
               importedFrom: `world-chat:${msg.conversationId}/${msg.attachmentId}`,
               ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
@@ -8873,7 +9309,7 @@ export class Coordinator {
         // Only a completed deletion queues work. A held file remains a stated repair failure;
         // running detection there would otherwise bless the same corrupt bytes as present again.
         const setup = this.setup;
-        if (setup && await setup.repair(msg.componentId)) {
+        if (setup && await setup.repair(msg.componentId, msg.revision)) {
           await setup.run();
           // If Repair joined a pass that had already attempted this component, only a fresh pass
           // can collect the newly queued download. An ordinary completed repair makes this a
@@ -9931,6 +10367,7 @@ export class Coordinator {
           chosen !== undefined &&
             modelEligible(chosen, {
               providers: state.providers,
+              components: state.setup?.components ?? [],
               disabled: state.models.disabled,
               recipes: state.comfyui?.recipes ?? [],
               comfyUiLocality: state.comfyui?.engine.locality,
@@ -10244,6 +10681,58 @@ export class Coordinator {
         await this.applyComfyUiPatch({ enginePath: null, engineUrl: null });
         return;
       }
+      case "set-ollama-url":
+      case "clear-ollama-engine": {
+        const service = this.opts.ollama?.service;
+        const settingsFile = this.appSettings;
+        if (!service || !settingsFile) return;
+        const engineUrl = msg.kind === "clear-ollama-engine" ? null : normalizeOllamaUrl(msg.url);
+        if (msg.kind === "set-ollama-url" && engineUrl === null) return;
+        if ((await settingsFile.load()).ollama.engineUrl === engineUrl) return;
+        if (this.localGpu.isBusy("Ollama")) {
+          this.emit({ at: this.nowIso(), type: "ollama.status", ollama: { ...service.status(), detail: "Finish or cancel local language work before changing its runtime." } });
+          return;
+        }
+        const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
+        try {
+          const apply = async () => {
+            if (service.baseUrl() !== null || service.externallySelected()) await this.opts.dispatchClients?.ollama?.unload?.(this.runtimeStop.signal);
+            const previous = (await settingsFile.load()).ollama;
+            const settings = await settingsFile.setOllama({ engineUrl });
+            this.runtimeStop.signal.throwIfAborted();
+            try { await service.applySettings(settings.ollama); }
+            catch (error) { await settingsFile.setOllama(previous); throw error; }
+            await this.setup?.detect();
+          };
+          if (this.opts.ollama?.reconfigureHarness) await this.opts.ollama.reconfigureHarness(apply);
+          else await apply();
+        } finally { release(); }
+        return;
+      }
+      case "ollama-refresh": {
+        const service = this.opts.ollama?.service;
+        if (!service) return;
+        // A health check loads no model. Opening Settings must not evict ComfyUI/Ming or
+        // wait behind creative work merely to read the selected service's version.
+        if (service.externallySelected() || service.status().state === "ready") { await service.refresh(); return; }
+        if (this.localGpu.isBusy("Ollama")) return;
+        const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
+        try { await service.refresh(); }
+        finally { release(); }
+        return;
+      }
+      case "ollama-update-runtime": {
+        const service = this.opts.ollama?.service;
+        if (!service || !this.setup || !this.appSettings || this.localGpu.isBusy("Ollama")) return;
+        // A selected user service is never stopped or modified by a managed-runtime update.
+        const external = service.externallySelected();
+        try {
+          // Setup's installation owner acquires/drains the lane and confirms stop. Taking an
+          // outer lease here would reject our own busy check, then deadlock on reacquisition.
+          await this.setup.updateTree("ollama-runtime");
+        } finally { if (!external && !this.stopping) await service.refresh(); }
+        return;
+      }
       case "use-detected-comfyui": {
         // Only a location the host itself just discovered and published (SPEC-021 D10): the
         // renderer selects among offers, it does not originate paths.
@@ -10273,15 +10762,14 @@ export class Coordinator {
       }
       case "setup-remove": {
         await this.setup?.remove(msg.componentId).catch(() => {});
+        await this.opts.storageHealth?.refresh().catch(() => {});
         return;
       }
       case "comfyui-restart": {
         if (!this.appSettings || !this.opts.comfyui) return;
         // Re-applying the settings *is* the restart: `applySettingsOnce` stops supervision,
         // resolves the selection again and starts the child, whether or not anything changed.
-        const settings = await this.appSettings.load();
-        await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
-        await this.refreshComfyUi();
+        await this.applyComfyUiPatch({});
         return;
       }
       case "comfyui-refresh": {
@@ -10303,18 +10791,22 @@ export class Coordinator {
       case "comfyui-update-runtime": {
         const service = this.opts.comfyui?.service;
         if (!service || !this.setup || !this.appSettings) return;
-        // Stop only the managed child (SPEC-021 R-20): a user-directed engine is supervised
-        // identically and is somebody else's work, and the case this serves is a stale managed tree
-        // behind a selected user engine. The swap runs with the files closed; the engine comes back
-        // through the same path Settings uses, and only if it was the one stopped.
-        const stopped = await service.stopManagedSupervision().catch(() => false);
-        await this.setup.updateTree("comfyui-runtime").catch(() => false);
-        await this.setup.detect().catch(() => {});
-        if (stopped) {
-          const settings = await this.appSettings.load();
-          await service.applySettings(settings.comfyui).catch(() => {});
-        }
-        await this.refreshComfyUi();
+        if (this.localGpu.isBusy("ComfyUI")) throw new Error("Finish or cancel ComfyUI work before updating its runtime.");
+        const release = await this.localGpu.acquire("ComfyUI", this.runtimeStop.signal);
+        try {
+          // Only Arke's managed child is stopped; an explicitly selected URL/path keeps
+          // its owner's lifecycle. Ming has already exited before the tree can move.
+          const stopped = await service.stopManagedSupervision();
+          try { await this.setup.updateTree("comfyui-runtime"); }
+          finally {
+            if (stopped && !this.stopping) {
+              const settings = await this.appSettings.load();
+              await service.applySettings(settings.comfyui);
+            }
+          }
+          await this.setup.detect();
+          await this.refreshComfyUi();
+        } finally { release(); }
         return;
       }
       case "repair-voice-models": {
@@ -10416,6 +10908,7 @@ export class Coordinator {
           ...(msg.frameRate !== undefined ? { frameRate: msg.frameRate } : {}),
           ...(msg.defaults !== undefined ? { defaults: msg.defaults } : {}),
           ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
+          ...(msg.soundtrackFor !== undefined ? { soundtrackFor: msg.soundtrackFor } : {}),
           ...(requestId !== undefined ? { requestId } : {}),
         }, () => this.refreshWorldSnapshot(msg.worldId));
         if (result.status === "created") answer({ disposition: "created", slug: result.slug });
@@ -10847,6 +11340,109 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "save-comic-script": {
+        // A graphic novel chapter's comic script (SPEC-064 R-10), answered by name either way so
+        // the editor knows its new base.
+        const store = this.opts.provider.openStore?.();
+        const answer = (result: { disposition: "saved"; version: number; hash: string } | { disposition: "refused"; reason: string }) =>
+          this.emit({ at: new Date().toISOString(), type: "comic-script.save-result", requestId: msg.requestId,
+            worldId: msg.worldId, productionId: msg.productionId, chapter: msg.chapter, ...result });
+        if (!store || store.worldId !== msg.worldId) {
+          answer({ disposition: "refused", reason: "that world is not open" });
+          return;
+        }
+        try {
+          answer({ disposition: "saved", ...await saveComicScript(store, msg.productionId,
+            { chapter: msg.chapter, pages: msg.pages, baseHash: msg.baseHash }, { requestId: msg.requestId }) });
+        } catch (err) {
+          answer({ disposition: "refused", reason: describeCoordinatorError(err) });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "quote-comic-page": {
+        // Opening a page asks its price; it also files what landed while the app was closed (R-25).
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const answer = (quote: Extract<DomainEvent, { type: "comic.page-quote" }>["quote"]) =>
+          this.emit({ at: new Date().toISOString(), type: "comic.page-quote", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, quote });
+        try {
+          await this.reconcileComicPage(store, msg.productionId, msg.page);
+          const model = await this.pictureModel(store);
+          if (!model) answer({ ok: false, reason: "no picture model is on" });
+          else {
+            const request = comicPageRequest(store, msg.productionId, msg.page, model, msg.mode);
+            const riding = request.ok ? request.who.filter((entry) => entry.carried && entry.reference !== null) : [];
+            answer(!request.ok ? { ok: false, reason: request.reason } : {
+              ok: true, model: model.id, modelName: model.displayName, mode: request.mode, aspect: request.aspect, microUsd: request.microUsd,
+              brief: request.prompt(riding.map((entry, index) => ({ name: entry.name, kind: entry.kind, token: `ref${index + 1}` }))),
+              riding: riding.map((entry) => entry.name), missing: request.missing,
+            });
+          }
+        } catch (err) {
+          answer({ ok: false, reason: describeCoordinatorError(err) });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "make-comic-page": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await this.makeAndCheckComicPage(store, msg);
+        return;
+      }
+      case "export-comic": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const answer = (result: Extract<DomainEvent, { type: "comic.exported" }>["result"]) =>
+          this.emit({ at: new Date().toISOString(), type: "comic.exported", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, result });
+        // Stopped by the world closing and by the app stopping, as a manuscript export is (codex on PR 2225).
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        this.exportingComics.add(control);
+        try {
+          answer({ ok: true, files: await exportComic(store, msg.productionId, msg.formats, new Date(this.nowIso()), control.signal, msg.requestId) });
+        } catch (err) {
+          // Bounded as the event is: a book of many pages names its first holds, which is enough to act on.
+          answer({ ok: false, reason: describeCoordinatorError(err), blockers: err instanceof ComicExportBlocked ? err.blockers.slice(0, 500) : [] });
+        } finally {
+          this.exportingComics.delete(control);
+          store.closingSignal.removeEventListener("abort", onClose);
+        }
+        return;
+      }
+      case "check-comic-take":
+      case "accept-comic-take": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const answer = (disposition: "checked" | "accepted" | "refused", reason?: string) => this.emit({ at: new Date().toISOString(), type: "comic.take-result",
+          requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, take: msg.take, disposition, ...(reason ? { reason } : {}) });
+        try {
+          if (msg.kind === "check-comic-take") {
+            await this.readComicTake(store, msg.productionId, msg.page, msg.take);
+            answer("checked");
+          } else {
+            await acceptComicTake(store, msg.productionId, msg.page, msg.take, msg.override, this.nowIso());
+            answer("accepted");
+          }
+        } catch (err) {
+          answer("refused", describeCoordinatorError(err));
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "set-comic-settings": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        try {
+          await setComicSettings(store, msg.productionId, msg.settings);
+        } catch (err) {
+          this.emit({ at: new Date().toISOString(), type: "command.failed", command: msg.kind, requestId: null, reason: describeCoordinatorError(err) });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "retire-chapter":
       case "restore-chapter-retired": {
         const store = this.opts.provider.openStore?.();
@@ -10962,6 +11558,154 @@ export class Coordinator {
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
+      }
+      case "music-track-add":
+      case "music-track-update":
+      case "music-track-remove":
+      case "music-tracks-reorder":
+      case "music-set-cover": {
+        // The album's tracks and cover (design turn 238c – 238e, SPEC-060 R-5 – R-7): one fenced
+        // write of music.json each. A refusal is said; the page follows the snapshot below either way.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        try {
+          if (msg.kind === "music-track-add") await addMusicTrack(store, msg.productionId, msg.artifactId, { makeAlbum: msg.makeAlbum === true });
+          else if (msg.kind === "music-track-update") await updateMusicTrack(store, msg.productionId, msg.trackId, { ...(msg.title !== undefined ? { title: msg.title } : {}), ...(msg.lyrics !== undefined ? { lyrics: msg.lyrics } : {}) });
+          else if (msg.kind === "music-track-remove") await removeMusicTrack(store, msg.productionId, msg.trackId);
+          else if (msg.kind === "music-tracks-reorder") await reorderMusicTracks(store, msg.productionId, msg.order);
+          else await setMusicCover(store, msg.productionId, msg.artifactId);
+        } catch (err) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The album could not be saved" });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "music-draft-lyrics": {
+        // Draft with Arke on a track (238e, R-7): the lyricist Bench's music mode asks, answered as
+        // an event, because words reach the track only when the author keeps them.
+        const answer = (lyrics: string | null, reason?: string) =>
+          this.emit({ at: this.nowIso(), type: "music.lyrics-drafted", worldId: msg.worldId, productionId: msg.productionId, trackId: msg.trackId, requestId: msg.requestId, lyrics, ...(reason !== undefined ? { reason } : {}) });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return answer(null, "that world is not open");
+        if (!this.opts.adapter?.readiness().ready) return answer(null, "the writing harness is not running");
+        const lyricist = makeArtDirector(
+          this.opts.adapter,
+          this.sessionInput,
+          this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
+          { agent: "lyricist", answerKey: "lyrics", maxChars: LYRICS_MAX_CHARS },
+        );
+        const drafted = await lyricist(lyricistBrief({ description: msg.description })).catch(() => null);
+        void this.appLog?.append({ kind: drafted ? "music.lyrics-drafted" : "music.lyrics-unavailable", worldId: msg.worldId });
+        return answer(drafted, drafted === null ? "the lyricist had no answer this time" : undefined);
+      }
+      case "read-music-heard-in": {
+        // Heard in (R-14): found again each time it is asked for, never kept.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const tracks = await readMusicRecord(store, msg.productionId).then(({ record }) => musicHeardIn(store, msg.productionId, record)).catch(() => ({}));
+        this.emit({ at: this.nowIso(), type: "music.heard-in", worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId, tracks });
+        return;
+      }
+      case "render-music": {
+        // Play all (R-8): the export's render, made on demand and cached.
+        const answer = (result: { ok: true; file: string; durationMs: number; starts: Array<{ trackId: string; atMs: number }> } | { ok: false; reason: string }) =>
+          this.emit({ at: this.nowIso(), type: "music.rendered", worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId, result });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return answer({ ok: false, reason: "that world is not open" });
+        if (this.opts.ffmpeg === undefined) return answer({ ok: false, reason: "Needs ffmpeg" });
+        if (this.stopping) return;
+        // Cancelled with the world, and with the coordinator before it drains its handlers.
+        const control = new AbortController();
+        this.renderingMusic.set(msg.requestId, control);
+        try {
+          const { record } = await readMusicRecord(store, msg.productionId);
+          const album = await renderMusicAlbum(store, record, { ffmpeg: this.opts.ffmpeg, signal: AbortSignal.any([control.signal, store.closingSignal]) });
+          return answer({ ok: true, file: album.file, durationMs: album.durationMs, starts: album.starts });
+        } catch (err) {
+          void this.appLog?.append({ kind: "music.render-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+          return answer({ ok: false, reason: control.signal.aborted ? "the render was cancelled" : err instanceof Error ? err.message.slice(0, 300) : "the album could not be rendered" });
+        } finally {
+          this.renderingMusic.delete(msg.requestId);
+        }
+      }
+      case "music-track-make": {
+        // A track's composer (238i, SPEC-060 R-9): its takes are Bench takes in the album's own
+        // session, made by the Bench's own dispatch — the plan, quote, reservation, ledger and
+        // Activity a press in Bench gets — and then tagged with the track that asked for them.
+        // Its answer is the Bench dispatch's, under the same request, whether it is refused here
+        // or by the plan, so the composer listens for one kind of result.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return this.rejectEnqueue(msg.requestId, "bench-dispatch", "That world is not open.");
+        if (msg.composer.params.kind !== "music") return this.rejectEnqueue(msg.requestId, "bench-dispatch", "A track's takes are music.");
+        let sessionId: SessionId;
+        try {
+          const { record } = await readMusicRecord(store, msg.productionId);
+          if (!record.tracks.some((track) => track.id === msg.trackId)) throw new MusicRefusal("That track is no longer on the album.");
+          sessionId = await ensureMusicSession(store, msg.productionId, this.nowIso());
+        } catch (err) {
+          return this.rejectEnqueue(msg.requestId, "bench-dispatch", err instanceof Error ? err.message.slice(0, 300) : "The album could not be read.");
+        }
+        // The track rides in each reservation (codex on PR 2191): fsynced before any job exists,
+        // so a take whose tagging below never lands is still found as this track's.
+        await this.handleClientMessage({ kind: "bench-dispatch", worldId: msg.worldId, sessionId, requestId: msg.requestId, composer: { mode: "music", ...msg.composer, params: { ...msg.composer.params, track: msg.trackId } } });
+        // A press of several takes reserves `<request>/<n>`; one take reserves the request itself.
+        const made = (await this.benchFor(msg.worldId, sessionId))?.session.takes
+          .filter((take) => take.requestId === msg.requestId || take.requestId.startsWith(`${msg.requestId}/`)) ?? [];
+        try {
+          await tagMusicTakes(store, msg.productionId, msg.trackId, made.map((take) => ({ sessionId, takeId: take.id })));
+        } catch (err) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The takes could not be added to the track" });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        await this.emitMusicTakes(store, msg.productionId, msg.requestId);
+        return;
+      }
+      case "music-track-choose": {
+        // Choose (238i, R-10): the take is kept to the shelf as Bench's Keep keeps one, and the
+        // track plays it from there, so the render, the export and Heard in read it as any track.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        try {
+          await this.chooseAlbumTake(store, msg.productionId, msg.trackId, msg.sessionId, msg.takeId, msg.requestId);
+        } catch (err) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The take could not be chosen" });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        await this.emitMusicTakes(store, msg.productionId, msg.requestId);
+        return;
+      }
+      case "music-track-edit":
+      case "music-sequence-set": {
+        // The track editor's Save (238j, R-11) and the album's sequence (238k, R-13): one fenced
+        // write of music.json each, applied at render; the take itself is never touched.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        try {
+          if (msg.kind === "music-track-edit") await editMusicTrack(store, msg.productionId, msg.trackId, { trim: msg.trim, fadeInMs: msg.fadeInMs, fadeOutMs: msg.fadeOutMs, sections: msg.sections });
+          else await setMusicSequence(store, msg.productionId, { loudness: msg.loudness, joins: msg.joins });
+        } catch (err) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The album could not be saved" });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "read-music-takes": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await this.emitMusicTakes(store, msg.productionId, msg.requestId);
+        return;
+      }
+      case "read-music-waveform": {
+        // A strip for the editor and the sequence (238j, 238k): decoded once and cached.
+        const answer = (waveform: MusicWaveform | null, reason?: string) =>
+          this.emit({ at: this.nowIso(), type: "music.waveform", worldId: msg.worldId, requestId: msg.requestId, file: msg.file, waveform, ...(reason !== undefined ? { reason } : {}) });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return answer(null, "that world is not open");
+        try {
+          return answer(await musicWaveform(store.dir, msg.file, { ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), signal: store.closingSignal }));
+        } catch (err) {
+          return answer(null, err instanceof Error ? err.message.slice(0, 300) : "the waveform could not be read");
+        }
       }
       case "list-guide-voice-lines": {
         const store = this.opts.provider.openStore?.();
@@ -11446,6 +12190,7 @@ export class Coordinator {
               boardPanelCap: videoModel?.limits.storyboardPanels,
               eligible: modelEligible(model, {
                 providers: app.providers,
+                components: app.setup?.components ?? [],
                 disabled: app.models.disabled,
                 recipes: app.comfyui?.recipes ?? [],
                 comfyUiLocality: app.comfyui?.engine.locality,
@@ -11708,14 +12453,17 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId) return;
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production || production.routing === null) return;
-        await appendTraversal(store, msg.productionId, {
+        try { await appendTraversal(store, msg.productionId, {
           ts: new Date().toISOString(),
           routingVersion: production.routing.version,
           choiceId: msg.choiceId,
           from: msg.from,
           to: msg.to,
           route: msg.route,
-        }).catch(() => {});
+          ...(msg.story ? { story: msg.story } : {}),
+        }); } catch (error) {
+          if (this.stillOpen(store) && production.routing.schemaVersion === 2) this.emit({ type: "command.failed", at: new Date().toISOString(), command: msg.kind, requestId: null, reason: error instanceof Error ? error.message : String(error) });
+        }
         if (!this.stillOpen(store)) return;
         await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
         await this.refreshWorldSnapshot(msg.worldId);
@@ -13041,13 +13789,14 @@ export class Coordinator {
       }
       case "export-world": {
         const store = this.opts.provider.openStore?.();
-        if (!store || !this.opts.appRoot) return;
+        if (!store || store.worldId !== msg.worldId || !this.opts.appRoot) return;
         const stamp = new Date()
           .toISOString()
           .replace(/[-:TZ.]/g, "")
           .slice(0, 14);
         const target = join(this.opts.appRoot, "exports", `${store.getBundle().meta.slug}-${stamp}`);
-        const exported = await exportWorld(store.dir, target).then(
+        const exported = await store.ownedRead(() => exportWorld(store.dir, target, { fileSpace: this.exportFileSpace,
+          signal: AbortSignal.any([store.closingSignal, this.runtimeStop.signal]) })).then(
           () => true,
           (err) => {
           void this.appLog?.append({
@@ -13184,7 +13933,12 @@ export class Coordinator {
           } catch (error) {
             this.emit({ type: "command.failed", at: this.nowIso(), command: msg.kind, requestId: null, reason: describeCoordinatorError(error) });
           }
-        } else await this.openBenchWorkspace(store, undefined, true);
+        } else {
+          // Make cover (238c, SPEC-060 R-5): a music cover is square, so its session is made at
+          // 1:1 with the album's words before the Bench shows it, and the picture is made that
+          // shape rather than cut to it.
+          await this.openBenchWorkspace(store, undefined, true, msg.image === undefined ? undefined : { mode: "image", brief: msg.image.brief, aspect: msg.image.aspect });
+        }
         return;
       }
       case "bench-close": {
@@ -14044,6 +14798,35 @@ export class Coordinator {
         // Schedules only; the derivation runs on the next immediate, off this handler's path
         // (R-34), and reaches the asker as the ordinary broadcast.
         this.diagnosticsSnapshot?.refresh();
+        this.publishRecoveryPolicy();
+        if (this.opts.storageHealth) this.trackBackground(this.opts.storageHealth.refresh());
+        if (this.cataloguePreviews) this.trackBackground(this.cataloguePreviews.refreshCleanupScope());
+        return;
+      }
+      case "refresh-system-resources": {
+        if (this.opts.systemResources) this.trackBackground(this.opts.systemResources.refresh());
+        return;
+      }
+      case "recovery-history-read": {
+        const page = this.opts.recoveryHistory?.page(msg.query) ?? { status: "unavailable" as const, filter: msg.query.filter, pageSize: msg.query.pageSize, offset: 0,
+          ...(msg.query.view === "actions" ? { view: "actions" as const, actions: [] } : {}),
+          at: Date.now(), audit: "unavailable" as const, incidents: [], totalCount: 0, revision: null, nextCursor: null, previousCursor: null };
+        this.emit({ type: "recovery.history-page", at: this.nowIso(), requestId: msg.requestId, page });
+        return;
+      }
+      case "recovery-set-mode":
+      case "recovery-set-advanced":
+      case "recovery-set-preferences":
+      case "recovery-history-control": {
+        const oldTransfer = this.opts.recoveryControl?.advancedSettings().artifactTransfer;
+        const result = await recoveryCommand(msg, { control: this.opts.recoveryControl, history: this.opts.recoveryHistory });
+        if (msg.kind === "recovery-set-advanced" && result.status === "saved" && !this.stopping && JSON.stringify(oldTransfer) !== JSON.stringify(msg.settings.artifactTransfer)) this.jobQueue?.retryHeldArtifactTransfers();
+        if (!this.stopping) this.emit({ type: "recovery.command-result", at: this.nowIso(), result });
+        return;
+      }
+      case "recovery-action": {
+        await this.recoveryActions.handle(msg); this.publishRecoveryPolicy();
+        if (!this.stopping) this.trackBackground(this.recoveryActions.maintainCleanup());
         return;
       }
       case "probe-grouped-read": {
@@ -14251,6 +15034,7 @@ export class Coordinator {
           return;
         }
         const made = await cloneVoice(store, store.getBundle().clonedVoices, {
+          ...(msg.transcript !== undefined ? { transcript: msg.transcript } : {}),
           sourcePath: clip.path,
           name: msg.name,
           description: msg.description,
@@ -14466,6 +15250,7 @@ export class Coordinator {
           msg.sourcePath,
           this.opts.mediaProbe,
           () => !this.stillOpen(store) || this.stopping,
+          this.importFileSpace,
         ).catch(() => null);
         if (report) {
           this.emit({ at: new Date().toISOString(), type: "import.report", worldId: msg.worldId, ...report });
@@ -14720,6 +15505,7 @@ export class Coordinator {
             sourceFingerprint = productionExportFingerprint(store.getBundle(),production);
             const made = await exportManuscript(store, msg.productionId, msg.format, {
               exportId,
+              fileSpace: this.exportFileSpace,
               language: msg.language ?? "en",
               now: () => this.nowIso(),
               signal: control.signal,
@@ -14796,6 +15582,29 @@ export class Coordinator {
         }
         return;
       }
+      case "read-story-export": {
+        // What Export → Arke Player would make of an interactive movie or a visual novel (design
+        // turn 245a – 245c, SPEC-058 R-89): read the way the export reads it, so the sheet's rows
+        // and blockers are the export's own. Nothing is made.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId };
+        try {
+          const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+          const voices = production !== undefined && productionShape(production.meta).playsAsBeats ? this.interactiveExportVoices(store, msg.productionId) : undefined;
+          const publish = await this.storyPublications.settings(msg.worldId, msg.productionId).catch(() => undefined);
+          const state = await readStoryExport(store, msg.productionId, {
+            ffmpeg: this.opts.ffmpeg !== undefined,
+            ...(voices !== undefined ? { voices } : {}),
+            ...(msg.size !== undefined ? { pictureSize: msg.size } : {}),
+            ...(publish !== undefined ? { publish: { title: publish.title, author: publish.author, cover: publish.cover } } : {}),
+          });
+          this.emit({ at: this.nowIso(), type: "story.export-state", ...ids, state });
+        } catch (err) {
+          this.emit({ at: this.nowIso(), type: "story.export-state", ...ids, state: null, refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
       case "set-audiobook-picture-focus": {
         // Where a picture's subject stands (design turn 197b): kept on the picture, answered as the record.
         const store = this.opts.provider.openStore?.();
@@ -14855,7 +15664,11 @@ export class Coordinator {
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         // A part says so in Activity (236d): Release · New chapters is a different thing to make.
-        const label = `Arke Player · ${msg.options.part !== undefined ? "part · " : ""}${production.meta.title}`.slice(0, 200);
+        // So does a story (245): its package is not the world's.
+        const story = productionShape(production.meta).isBranching;
+        const label = `Arke Player · ${msg.options.part !== undefined ? "part · " : story ? "story · " : ""}${production.meta.title}`.slice(0, 200);
+        // A visual novel's lines in their prepared voices, as the web package reads them (turn 174).
+        const voices = story && productionShape(production.meta).playsAsBeats ? this.interactiveExportVoices(store, msg.productionId) : undefined;
         let last = 0;
         const progress = (status: "running" | "done" | "cancelled" | "failed", percent: number, step?: string, output: string | null = null, error: string | null = null) =>
           this.emit({ at: new Date().toISOString(), type: "export.progress", worldId: msg.worldId, productionId: msg.productionId, exportId: msg.exportId, status, percent: Math.max(0, Math.min(100, Math.round(percent))), label, ...(step !== undefined ? { step: step.slice(0, 200) } : {}), output, error });
@@ -14870,6 +15683,7 @@ export class Coordinator {
           include: { book: msg.options.book, motion: msg.options.motion },
           ...(msg.options.size !== undefined ? { pictureSize: msg.options.size } : {}),
           ...(msg.options.part !== undefined ? { part: msg.options.part } : {}),
+          ...(voices !== undefined ? { voices } : {}),
           ...(publish !== undefined ? { publish: { title: publish.title, author: publish.author, language: publish.language, cover: publish.cover } } : {}),
           studioVersion: this.opts.appVersion,
           // Each step said at once, the percent within it at most twice a second.
@@ -14900,7 +15714,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         const packages = [...(await listWebPackages(store).catch(() => [])), ...(await listVideoExports(store).catch(() => [])), ...(await listArkePlayerPackages(store).catch(() => []))].sort((a, b) => (a.exportedAt < b.exportedAt ? 1 : -1));
-        this.emit({ at: new Date().toISOString(), type: "web-packages.listed", requestId: msg.requestId, worldId: msg.worldId, packages });
+        this.emit({ at: new Date().toISOString(), type: "web-packages.listed", requestId: msg.requestId, worldId: msg.worldId, packages, running: [...this.exports.keys()].slice(0, 1000) });
         return;
       }
       case "pick-manuscript": {
@@ -15191,7 +16005,7 @@ export class Coordinator {
               recorded: found.lines.filter(line => line.recorded).length, awaiting: found.lines.filter(line => line.state !== "made").length });
             return;
           }
-          const made = await exportScript(store, msg.productionId, msg.speaker, { scope: msg.scope, label: msg.label, narrator, exportId: ulid(), now: () => store.now() });
+          const made = await exportScript(store, msg.productionId, msg.speaker, { scope: msg.scope, label: msg.label, narrator, exportId: ulid(), now: () => store.now(), fileSpace: this.exportFileSpace });
           answer({ output: made.output, lines: made.lines, chapters: made.chapters, notCast: made.notCast });
         } catch (err) {
           answer({ refused: err instanceof RecordedTakeRefusal ? err.message : describeCoordinatorError(err) });
@@ -17491,7 +18305,7 @@ export class Coordinator {
         // (SPEC-046 R-39). Absent for a preset, and for a clone whose clip is gone, which the
         // checks below refuse by name.
         const previewClip = source.kind === "cloned" ? await clipFor(store, source.voice) : null;
-        const previewReference = previewClip !== null ? clipHashOf(previewClip) : undefined;
+        const previewReference = previewClip !== null ? readerReferenceHash(msg.provider, previewClip) : undefined;
         if (
           source.kind === "cloned" &&
           (await this.requireVoiceUploadConfirmation({
@@ -18224,7 +19038,10 @@ export class Coordinator {
           if (browserFiles.length === 0) { this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true); return; }
           try {
             await this.browserMediaImports.run(browserFiles, () => !this.stillOpen(store) || this.stopping,
-              sourcePaths => this.handleClientMessage({ ...request, sourcePaths }, false, false, false, store));
+              (sourcePaths, payloads) => withBrowserImportBatch(store, payloads.filter((_payload, index) => msg.audioStudio
+                ? kindForFile(sourcePaths[index]!) === "audio"
+                : msg.music === undefined || (MUSIC_IMPORT_EXTENSIONS as readonly string[]).includes(extname(sourcePaths[index]!).slice(1).toLowerCase())), this.importFileSpace,
+                space => this.handleClientMessage({ ...request, sourcePaths }, false, false, false, store, undefined, space)), store.closingSignal);
           } catch (error) { this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error)); }
           return;
         }
@@ -18232,7 +19049,7 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "Filing artifacts is unavailable.");
           return;
         }
-        const chosen = msg.sourcePaths ?? await pick!({ accept: [...ATTACHABLE_EXTENSIONS] }).catch(() => []);
+        const chosen = msg.sourcePaths ?? await pick!({ accept: msg.music !== undefined ? [...MUSIC_IMPORT_EXTENSIONS] : [...ATTACHABLE_EXTENSIONS] }).catch(() => []);
         if (chosen.length > 16) {
           this.rejectEnqueue(msg.requestId, msg.kind, "Import up to 16 files at a time.");
           return;
@@ -18242,9 +19059,11 @@ export class Coordinator {
           this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
           return;
         }
+        const importSpace = browserImportSpace ?? this.importFileSpace;
         if (msg.audioStudio) {
           try {
             const failures = await importAudioStudioMedia(store, chosen, msg.audioStudio, {
+              ...(importSpace ? { importSpace } : {}),
               ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
               ...(this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
               ...(this.opts.confirmLargeMediaImport ? { confirmLarge: this.opts.confirmLargeMediaImport } : {}),
@@ -18258,9 +19077,36 @@ export class Coordinator {
           }
           return;
         }
+        if (msg.music !== undefined) {
+          // Import a file as a track (238d, SPEC-060 R-6): WAV, MP3, M4A or FLAC, checked and
+          // probed as any import is, filed as the production's own, then added to the album. A
+          // file the probe hears no sound in is filed but never becomes a track.
+          const music = msg.music;
+          const failures: Array<{ index: number; reason: string }> = [];
+          for (const [index, sourcePath] of chosen.entries()) {
+            if (!this.stillOpen(store)) return;
+            if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
+            const name = basename(sourcePath);
+            if (!(MUSIC_IMPORT_EXTENSIONS as readonly string[]).includes(extname(name).slice(1).toLowerCase())) { failures.push({ index, reason: `${name}: a track is WAV, MP3, M4A or FLAC` }); continue; }
+            const outcome = await fileArtifact(store, { ...(importSpace ? { importSpace } : {}),
+              sourcePath,
+              ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
+              abandoned: () => !this.stillOpen(store) || this.stopping,
+              production: music.productionId,
+            }).catch((err: unknown) => ({ outcome: "refused" as const, reason: describeCoordinatorError(err) }));
+            if (outcome.outcome !== "filed" && outcome.outcome !== "deduplicated") { failures.push({ index, reason: `${name}: ${outcome.reason}` }); continue; }
+            if (outcome.artifact.kind !== "audio" || outcome.artifact.mediaInfo?.hasAudio !== true) { failures.push({ index, reason: `${name}: no sound could be read from it` }); continue; }
+            await addMusicTrack(store, music.productionId, outcome.artifact.id, { makeAlbum: music.makeAlbum === true })
+              .catch((err: unknown) => failures.push({ index, reason: `${name}: ${err instanceof Error ? err.message : describeCoordinatorError(err)}` }));
+          }
+          await this.refreshWorldSnapshot(msg.worldId);
+          this.emitEnqueueResult(msg.requestId, msg.kind, chosen.length, [], failures, true);
+          return;
+        }
         if (msg.editor) {
           try {
             const failures = await importEditorMedia(store, chosen, msg.editor, {
+              ...(importSpace ? { importSpace } : {}),
               ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
               ...(this.opts.takePosterMaker ? { poster: this.opts.takePosterMaker } : {}),
               onPosterUnavailable: (artifactId, reason) => {
@@ -18283,7 +19129,7 @@ export class Coordinator {
         for (const [index, sourcePath] of chosen.entries()) {
           if (!this.stillOpen(store)) return;
           if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
-          const outcome = await fileArtifact(store, {
+          const outcome = await fileArtifact(store, { ...(importSpace ? { importSpace } : {}),
             sourcePath,
             // Measured as it is filed (#283): an artifact is immutable, so its length and whether
             // it carries audio are true once and true forever.
@@ -20188,6 +21034,91 @@ export class Coordinator {
         await this.emitHarnessStatus();
         return;
       }
+      case "check-onboarding": {
+        if (!this.appSettings || !this.opts.appRoot) return;
+        await this.emitHarnessStatus();
+        await this.measureRuntime();
+        await this.setup?.detect();
+        const workspace = await checkOnboardingWorkspace(this.opts.appRoot);
+        const settings = await this.appSettings.load();
+        if (this.stopping) return;
+        const plan = settings.onboarding ?? NEW_ONBOARDING;
+        let localModel: import("@arke-studio/contracts").OnboardingStatus["localModel"] = null;
+        if (plan.writing === "local" && plan.modelId && this.opts.ollama?.service.status().state === "ready") {
+          const model = this.opts.manifest?.models.find(m => m.id === plan.modelId);
+          const installed = onboardingComponents(plan, this.setup?.status().components ?? []).filter(c => c.engine === "ollama");
+          if (model && installed.length && installed.every(c => c.state === "ready" || c.state === "present")) {
+            const endpoint = this.opts.ollama.service.baseUrl();
+            localModel = { modelId: plan.modelId, endpoint, ready: false, detail: "Checking the downloaded writing model…" };
+            this.emit({ at: this.nowIso(), type: "onboarding.changed", onboarding: { plan, workspace, localModel } });
+            const check = (async () => {
+              const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
+              try { await this.opts.ollama!.service.checkLocalModel(model.providerModelId ?? model.id, this.runtimeStop.signal); }
+              finally { release(); }
+            })();
+            this.backgroundWork.add(check);
+            try { await check; localModel = { modelId: plan.modelId, endpoint, ready: true, detail: "The writing model responded successfully." }; }
+            catch (error) { localModel = { modelId: plan.modelId, endpoint, ready: false, detail: describeCoordinatorError(error) }; }
+            finally { this.backgroundWork.delete(check); }
+          }
+        }
+        if (this.stopping) return;
+        // A long model check must never move a newer choice back to an older step.
+        const current = (await this.appSettings.load()).onboarding ?? NEW_ONBOARDING;
+        if (current.modelId !== plan.modelId || current.writing !== plan.writing || current.harness !== plan.harness) return;
+        this.emit({ at: this.nowIso(), type: "onboarding.changed", onboarding: { plan: current, workspace, localModel } });
+        if (localModel?.ready && current.modelId) {
+          const model = this.opts.manifest?.models.find(m => m.id === current.modelId);
+          const selected = model && await this.validateLanguageModel(harnessModelReference({ provider: model.provider, id: model.providerModelId ?? model.id }));
+          if (selected?.sessionModel && !selected.reason) {
+            const updated = await this.appSettings.setOnboarding(current, selected.sessionModel);
+            this.agentOverrides = updated.agents; this.refreshAgents(updated.agents); this.transport.broadcastSnapshot();
+          }
+        }
+        return;
+      }
+      case "save-onboarding": {
+        if (!this.appSettings || !this.opts.appRoot || this.stopping) return;
+        const refuse = (reason: string) => this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason });
+        const plan: OnboardingPlan = { ...msg.plan, step: msg.action === "finish" ? "done" : msg.action === "install" ? "progress" : msg.plan.step };
+        if (msg.action !== "save" && plan.persona === null) return refuse("Choose how you want to set up Arke.");
+        if (msg.action === "save" && plan.step === "done") return refuse("Use Start using Arke to finish setup.");
+        const workspace = msg.action === "save" ? this.readModel.getState().app.onboarding?.workspace ?? null
+          : await checkOnboardingWorkspace(this.opts.appRoot);
+        if (msg.action !== "save" && !workspace?.ready) return refuse(workspace?.detail ?? "Check your Arke folder before continuing.");
+        if (msg.action === "install") {
+          const reason = validateOnboardingPlan(plan, this.readModel.getState().app);
+          if (reason) return refuse(reason);
+        }
+        if (plan.writing !== "none") {
+          const available = await this.harnessAvailability();
+          if (!available.some(h => h.id === plan.harness && h.installed)) return refuse("That assistant is no longer available. Choose another or set up writing later.");
+        }
+        if (this.stopping) return;
+        const app = this.readModel.getState().app;
+        let writingModel: string | undefined;
+        if (msg.action !== "save" && onboardingWritingReadiness(app, plan).ready && plan.modelId) {
+          const model = onboardingWritingModels(app, plan).find(m => harnessModelReference(m) === plan.modelId ||
+            this.opts.manifest?.models.some(entry => entry.id === plan.modelId && (entry.providerModelId ?? entry.id) === m.id));
+          if (model) {
+            const selected = await this.validateLanguageModel(harnessModelReference(model));
+            if (!selected.reason) writingModel = selected.sessionModel;
+          }
+        }
+        const settings = await this.appSettings.setOnboarding(plan, writingModel);
+        this.agentOverrides = settings.agents;
+        this.refreshAgents(settings.agents);
+        await this.emitHarnessStatus();
+        const localModel = app.onboarding?.localModel?.modelId === plan.modelId ? app.onboarding.localModel : null;
+        this.emit({ at: this.nowIso(), type: "onboarding.changed", onboarding: { plan, workspace, localModel } });
+        this.transport.broadcastSnapshot();
+        if (msg.action === "install" && this.setup) {
+          for (const component of onboardingComponents(plan, this.setup.status().components)) this.setup.installClosure(component.id);
+          await this.setup.run();
+          if (!this.stopping) await this.setup.run();
+        }
+        return;
+      }
       case "set-harness-engine": {
         if (!this.appSettings) return;
         const harnesses = await this.harnessAvailability();
@@ -20435,7 +21366,7 @@ export class Coordinator {
   private async fileGenesisAttachments(dir: string, store: WorldStore): Promise<void> {
     try {
       for (const sourcePath of await sandboxAttachments(dir)) {
-        const outcome = await fileArtifact(store, { sourcePath,
+        const outcome = await fileArtifact(store, { ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}), sourcePath,
           ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
           abandoned: () => this.stopping,
         });
@@ -20504,7 +21435,7 @@ export class Coordinator {
       const app = this.readModel.getState().app;
       if (!model || !["image", "video"].includes(model.capability) || settings?.models.disabled.includes(model.id) || !modelEligible(model, {
         providers: app.providers, disabled: app.models.disabled, recipes: app.comfyui?.recipes ?? [],
-        comfyUiLocality: app.comfyui?.engine.locality, gated: app.runtime?.models ?? [],
+        comfyUiLocality: app.comfyui?.engine.locality, gated: app.runtime?.models ?? [], components: app.setup?.components ?? [],
       })) throw new Error("Choose an enabled, eligible production model.");
       return model;
     };
@@ -20843,6 +21774,166 @@ export class Coordinator {
     return { ok: true, record, sessionId: made.sessionId, estimatedMicroUsd: made.estimatedMicroUsd };
   }
 
+  /**
+   * A page that landed with nobody waiting (SPEC-064 R-25): admitted, its session written on the
+   * page record, then the app closed. The Bench kept the job; this files what it made as a take,
+   * once, and drops an entry whose session made nothing. Never asks again — a page is paid once.
+   */
+  private async reconcileComicPage(store: WorldStore, productionId: string, pageId: string): Promise<void> {
+    if (this.makingComicPages.has(`${store.worldId}/${productionId}/${pageId}`)) return;
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+    if (!production) return;
+    for (const making of comicPageRecord(production, pageId).making) {
+      let bench = making.session === undefined ? null : await this.benchFor(store.worldId, making.session as SessionId);
+      // A reservation the app closed on before it was sent stays `allocating` in the log: the Bench's
+      // own recovery fails it, so this admission is let go rather than waited on forever (codex on PR 2222).
+      if (bench !== null && await recoverBenchSession(bench, this.benchJobFacts(store.worldId), () => this.nowIso())) bench = await this.benchFor(store.worldId, making.session as SessionId);
+      // The take this admission reserved, by its request: the author may have made others in the
+      // same session since, and the last one need not be the page's (codex on PR 2222).
+      const take = comicPageTake(bench, making.requestId);
+      let landed: { id: string } | null = null;
+      if (bench !== null && take?.media !== undefined) {
+        landed = await this.fileBenchTake(store, bench, take, `comic-keep:${making.requestId}`);
+      } else if (bench !== null && take !== undefined && !["failed", "cancelled", "needs-reconciliation"].includes(take.status)) {
+        continue;
+      } else if (making.session === undefined && Date.now() - Date.parse(making.at) < PICTURE_WAIT_MS) {
+        continue;
+      }
+      const cost = take?.cost?.actualMicroUsd;
+      await changeComicPage(store, productionId, pageId, (record) => ({
+        ...record,
+        making: record.making.filter((entry) => entry.requestId !== making.requestId),
+        takes: landed === null || record.takes.some((existing) => existing.artifact === landed!.id) ? record.takes : [...record.takes, {
+          id: ulid(), artifact: landed.id, hash: making.hash, mode: making.mode, model: making.model, language: making.language,
+          ...(typeof cost === "number" ? { usd: cost / 1_000_000 } : {}), at: this.nowIso(),
+        }],
+      }));
+    }
+  }
+
+  /**
+   * One comic page (SPEC-064 R-22 – R-27): made through the Bench as any picture is, reserved before
+   * a job exists, on the price the press showed. The page record says it is being made before the
+   * session opens, and names the session once it does, so a restart files what lands (R-25). The take
+   * is added beside any accepted one; nothing here accepts it (R-26).
+   */
+  /**
+   * The page reader (SPEC-064 R-29, R-35): the writing harness's own image inspection, under the
+   * same consent as a chapter review's. None is a check that cannot run, never a pass.
+   */
+  private pageReader(store: WorldStore): PageReader | null {
+    const adapter = this.opts.adapter;
+    if (!adapter?.readiness().ready || adapter.imageInput !== true) return null;
+    return harnessPageReader(makeImageJsonRunner({ adapter, beforeDispatch: () => store.assertOwnership(), sessionInput: this.sessionInput, scratch: this.extractScratch(),
+      ...(this.opts.imageRenditionMaker ? { maker: this.opts.imageRenditionMaker } : {}),
+      cloudAllowed: async (provider) => {
+        const settings = this.appSettings ? await this.appSettings.load() : null;
+        return store.getBundle().meta.cloudImageInspection !== false && settings?.imageInspection.cloud === true && settings.imageInspection.providers[provider] !== false;
+      },
+    }));
+  }
+
+  /**
+   * Make a page, then check it; with `untilPasses`, make it again until a take passes, up to the
+   * book's cap of attempts and dollars and the price the press confirmed (D-6, R-27). Each attempt
+   * is its own admission; a failure, a stop or an unavailable check ends the run — trying again
+   * cannot fix a reader that is not there.
+   */
+  private async makeAndCheckComicPage(store: WorldStore, msg: Extract<ClientMessage, { kind: "make-comic-page" }>): Promise<void> {
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId);
+    const cap = production?.comic?.cap ?? { attempts: 3, usd: 5 };
+    const attempts = msg.untilPasses ? cap.attempts : 1;
+    const budget = msg.untilPasses ? Math.min(msg.confirmedMicroUsd, Math.round(cap.usd * 1_000_000)) : msg.confirmedMicroUsd;
+    let spent = 0;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      const emit = (state: "making" | "made" | "failed", extra: { take?: string; reason?: string; sessionId?: string; passed?: boolean } = {}) =>
+        this.emit({ at: new Date().toISOString(), type: "comic.page-made", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, state,
+          ...(msg.untilPasses ? { attempt } : {}), ...extra });
+      const made = await this.makeComicPage(store, { productionId: msg.productionId, page: msg.page, requestId: attempt === 1 ? msg.requestId : ulid(),
+        confirmedMicroUsd: budget - spent, ...(msg.mode !== undefined ? { mode: msg.mode } : {}) }, emit);
+      if (!made.ok) return;
+      spent += made.microUsd;
+      const verification = await this.readComicTake(store, msg.productionId, msg.page, made.take)
+        .catch((err: unknown) => ({ status: "unavailable" as const, reason: "reader-failed" as const, detail: describeCoordinatorError(err), at: this.nowIso() }));
+      await this.refreshWorldSnapshot(msg.worldId);
+      const passed = takePasses(verification);
+      emit("made", { take: made.take, sessionId: made.sessionId, passed });
+      if (passed || verification.status !== "compared") return;
+    }
+  }
+
+  /** A take read back under a control the app's stop aborts, and the world's close too. */
+  private async readComicTake(store: WorldStore, productionId: string, page: string, take: string) {
+    const control = new AbortController();
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    this.readingComicPages.add(control);
+    try {
+      return await verifyComicTake(store, productionId, page, take, this.pageReader(store), control.signal, () => this.nowIso());
+    } finally {
+      this.readingComicPages.delete(control);
+      store.closingSignal.removeEventListener("abort", onClose);
+    }
+  }
+
+  private async makeComicPage(store: WorldStore, input: { productionId: string; page: string; mode?: ComicMode; requestId: string; confirmedMicroUsd: number },
+    emit: (state: "making" | "made" | "failed", extra?: { take?: string; reason?: string; sessionId?: string }) => void): Promise<{ ok: true; take: string; sessionId: string; microUsd: number } | { ok: false }> {
+    const key = `${store.worldId}/${input.productionId}/${input.page}`;
+    const failed = (reason: string, sessionId?: string) => { emit("failed", { reason, ...(sessionId !== undefined ? { sessionId } : {}) }); return { ok: false as const }; };
+    if (this.makingComicPages.has(key)) return failed("making this page already");
+    const control = new AbortController();
+    this.makingComicPages.set(key, control);
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    try {
+      const model = await this.pictureModel(store);
+      if (!model) return failed("no picture model is on");
+      const request = comicPageRequest(store, input.productionId, input.page, model, input.mode);
+      if (!request.ok) return failed(request.reason);
+      if (request.microUsd > input.confirmedMicroUsd) return failed(`the price moved · ${priceLabel(request.microUsd)}`);
+      const language = request.settings.language;
+      await changeComicPage(store, input.productionId, input.page, (record) => ({ ...record,
+        making: [...record.making, { requestId: input.requestId, hash: request.hash, mode: request.mode, model: model.id, language, at: this.nowIso() }] }));
+      emit("making");
+      const made = await this.makeBenchPicture(store, {
+        title: `Page ${request.number}`,
+        prompt: request.prompt([]),
+        brief: request.prompt,
+        model,
+        ...(model.limits.providerSelectedSize !== true ? { aspect: request.aspect } : {}),
+        who: request.who,
+        requestId: input.requestId,
+        ceilingMicroUsd: input.confirmedMicroUsd,
+        signal: control.signal,
+        onSession: async (sessionId) => {
+          await changeComicPage(store, input.productionId, input.page, (record) => ({ ...record,
+            making: record.making.map((entry) => entry.requestId === input.requestId ? { ...entry, session: sessionId } : entry) }));
+        },
+      });
+      const take = made.ok ? ulid() : undefined;
+      // A picture still running when the wait ran out, or one that landed and could not be filed, may
+      // still be paid for: its admission stays for the next quote to file (codex on PR 2222). Only a
+      // made take, or a take the Bench says ended, lets it go.
+      const reserved = !made.ok && made.sessionId !== undefined ? comicPageTake(await this.benchFor(store.worldId, made.sessionId), input.requestId) : undefined;
+      const unresolved = reserved !== undefined && (reserved.media !== undefined || !["failed", "cancelled", "needs-reconciliation"].includes(reserved.status));
+      await changeComicPage(store, input.productionId, input.page, (record) => ({ ...record,
+        making: unresolved ? record.making : record.making.filter((entry) => entry.requestId !== input.requestId),
+        takes: !made.ok ? record.takes : [...record.takes, {
+          id: take!, artifact: made.artifact.id, hash: request.hash, mode: request.mode, model: model.id, language,
+          usd: (made.costMicroUsd ?? made.estimatedMicroUsd) / 1_000_000, at: this.nowIso(),
+        }],
+      }));
+      await this.refreshWorldSnapshot(store.worldId);
+      if (!made.ok) return failed(made.reason, made.sessionId);
+      return { ok: true, take: take!, sessionId: made.sessionId, microUsd: made.costMicroUsd ?? made.estimatedMicroUsd };
+    } catch (err) {
+      return failed(describeCoordinatorError(err));
+    } finally {
+      store.closingSignal.removeEventListener("abort", onClose);
+      if (this.makingComicPages.get(key) === control) this.makingComicPages.delete(key);
+    }
+  }
+
   private async makeBenchPicture(
     store: WorldStore,
     input: {
@@ -20853,6 +21944,14 @@ export class Coordinator {
        * the picture it recomposes already fixes who is in it.
        */
       recompose?: string;
+      /**
+       * The whole brief, written once the Bench has named the references that ride (SPEC-064
+       * R-23). A comic page is lettered, so the audiobook's closing lines — no added text — must
+       * never wrap it.
+       */
+      brief?: (cited: ReadonlyArray<{ name: string; kind: "character" | "place"; token: string }>) => string;
+      /** Told the session as soon as it is open, so a restart can find what it lands (SPEC-064 R-25). */
+      onSession?: (sessionId: SessionId) => Promise<void>;
     },
   ): Promise<{ ok: true; sessionId: SessionId; artifact: { id: string; file: string }; costMicroUsd: number | null; estimatedMicroUsd: number } | { ok: false; reason: string; sessionId?: SessionId; provider?: true }> {
     if (input.signal?.aborted) return { ok: false, reason: "stopped" };
@@ -20862,6 +21961,9 @@ export class Coordinator {
     const opened = input.saved !== undefined ? await openSavedPicture(store, input.saved, () => this.nowIso(), input.title) : await openBenchSession(store.dir, () => this.nowIso(), { fresh: true, defaultModel: { provider: input.model.provider, model: input.model.id }, initial: { mode, brief: input.prompt, title: input.title } }).catch(() => null);
     if (opened === null) return { ok: false, reason: "the Bench could not open a session" };
     const sessionId = opened.session.id;
+    if (input.onSession !== undefined) {
+      try { await input.onSession(sessionId); } catch (err) { return { ok: false, reason: describeCoordinatorError(err), sessionId }; }
+    }
     const fail = async (reason: string) => {
       this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
       this.transport.broadcastSnapshot();
@@ -20898,7 +22000,7 @@ export class Coordinator {
       else cited.push({ name: entry.name, kind: entry.kind, token: outcome.token });
     }
     if (input.signal?.aborted) return fail("stopped");
-    const brief = input.saved?.brief ?? (input.recompose !== undefined || input.motion !== undefined ? input.prompt : pictureBench(input.prompt, cited, input.mood, input.detailed ?? []));
+    const brief = input.saved?.brief ?? (input.brief !== undefined ? input.brief(cited) : input.recompose !== undefined || input.motion !== undefined ? input.prompt : pictureBench(input.prompt, cited, input.mood, input.detailed ?? []));
     const composed = await this.benchFor(worldId, sessionId);
     if (composed === null) return fail("the Bench session is gone");
     if (input.saved === undefined) await composed.store.append({ type: "composer-set", mode, provider: input.model.provider, model: input.model.id, params, brief }, { at: this.nowIso(), requestId: `pic-brief:${input.requestId}` });
@@ -21017,13 +22119,14 @@ export class Coordinator {
    * Recovery is idempotent, so running it on every open costs a read and buys the two crash
    * windows their answer (issue 305 §6).
    */
-  private async openBenchWorkspace(store: WorldStore, sessionId?: SessionId, fresh = false): Promise<void> {
+  private async openBenchWorkspace(store: WorldStore, sessionId?: SessionId, fresh = false, initial?: { mode: "image"; brief: string; aspect: string }): Promise<void> {
     const settings = this.appSettings ? await this.appSettings.load() : null;
     const routed = this.opts.manifest ? imageModelFor(settings, this.opts.manifest, undefined, store.getBundle().meta.models) : null;
     const opened = await openBenchSession(store.dir, () => this.nowIso(), {
       sessionId,
       fresh,
       ...(routed ? { defaultModel: { provider: routed.provider, model: routed.id } } : {}),
+      ...(initial !== undefined ? { initial } : {}),
     }).catch(() => null);
     if (!opened) {
       this.readModel.setBench(null);
@@ -21161,6 +22264,45 @@ export class Coordinator {
   }
 
   /** Re-fold and push the open workspace + the bundle's session rows after a command. */
+  /**
+   * A track's take chosen (238i, SPEC-060 R-10), from its composer or World Chat: kept to the
+   * shelf as Bench's Keep keeps one, then played from there by the track.
+   */
+  private async chooseAlbumTake(store: WorldStore, productionId: string, trackId: string, sessionId: string, takeId: string, requestId: string, baseHash?: string): Promise<void> {
+    const { record } = await readMusicRecord(store, productionId);
+    if (record.session === undefined || record.session !== sessionId) throw new MusicRefusal("that take is not this album's");
+    const session = record.session;
+    const takeOf = async () => (await this.benchFor(store.worldId, session))?.session.takes.find((take) => take.id === takeId);
+    let take = await takeOf();
+    if (take?.media === undefined) throw new MusicRefusal("that take has not finished");
+    if (take.keptArtifactId === undefined) {
+      await this.handleClientMessage({ kind: "bench-keep", worldId: store.worldId, sessionId: session, takeId: take.id, requestId });
+      take = await takeOf();
+    }
+    if (take?.keptArtifactId === undefined) throw new MusicRefusal("that take could not be kept");
+    await chooseMusicTake(store, productionId, trackId, { sessionId: session, takeId: take.id }, take.keptArtifactId, baseHash === undefined ? undefined : { baseHash });
+  }
+
+  /**
+   * The album's takes by track (238i), to a composer open on it. A refresh of the album's session
+   * sends them too, so a take that lands while its composer is open shows without asking again.
+   */
+  private async emitMusicTakes(store: WorldStore, productionId: string, requestId: string | null, onlyFor?: SessionId): Promise<void> {
+    const read = async () => {
+      let { record } = await readMusicRecord(store, productionId);
+      if (record.session === undefined || (onlyFor !== undefined && record.session !== onlyFor)) return null;
+      const session = (await this.benchFor(store.worldId, record.session))?.session ?? null;
+      // Takes reserved for a track whose tagging never landed are given to it now (codex on PR 2191).
+      const untagged = session === null ? new Map() : untaggedMusicTakes(record, session);
+      for (const [trackId, refs] of untagged) await tagMusicTakes(store, productionId, trackId, refs);
+      if (untagged.size > 0) ({ record } = await readMusicRecord(store, productionId));
+      return musicTakeViews(record, session);
+    };
+    const takes = await read().catch(() => null);
+    if (takes === null || !this.stillOpen(store)) return;
+    this.emit({ at: this.nowIso(), type: "music.takes", worldId: store.worldId, productionId, requestId, takes });
+  }
+
   private async refreshBench(worldId: string, sessionId: SessionId): Promise<void> {
     const store = this.opts.provider.openStore?.();
     if (!store || store.worldId !== worldId) return;
@@ -21182,6 +22324,9 @@ export class Coordinator {
       }
       this.readModel.setBenchSessions(sessions);
       this.transport.broadcastSnapshot();
+      // An album's own session (SPEC-060 R-9) tells the composer open on it what landed.
+      const subject = bench?.session.subject;
+      if (subject?.kind === "production" && subject.role === "music") void this.emitMusicTakes(store, subject.productionId, null, sessionId);
     } finally {
       if (this.benchRefreshes.get(key) === refresh) this.benchRefreshes.delete(key);
     }
@@ -21274,7 +22419,7 @@ export class Coordinator {
   ): Promise<string | null> {
     const store = this.opts.provider.openStore?.();
     if (!store || store.worldId !== worldId) return null;
-    const outcome = await fileArtifact(store, {
+    const outcome = await fileArtifact(store, { ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
       sourcePath,
       // Measured once, at the moment the bytes land, rather than by every reader afterwards (#283).
       ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
@@ -21625,7 +22770,7 @@ export class Coordinator {
   private benchModelEligible(model: ManifestModel): boolean {
     const app = this.readModel.getState().app;
     return modelEligible(model, { providers: app.providers, disabled: app.models.disabled,
-      recipes: app.comfyui?.recipes ?? [], comfyUiLocality: app.comfyui?.engine.locality, gated: app.runtime?.models ?? [] });
+      recipes: app.comfyui?.recipes ?? [], comfyUiLocality: app.comfyui?.engine.locality, gated: app.runtime?.models ?? [], components: app.setup?.components ?? [] });
   }
 
   private benchGenerationRoutes() {
@@ -21924,6 +23069,12 @@ export class Coordinator {
           try {
             const reservation = await bench.store.append({ type: "takes-reserved", takes: reserved }, { at: this.nowIso(), requestId: id });
             if (reservation.deduplicated) return { status: "running", detail: "Rejoining the reserved Bench generation." };
+            // A track's takes (SPEC-060 R-9) are its own once reserved, as its composer's are.
+            if (action.musicTrack !== undefined) {
+              await tagMusicTakes(store, action.musicTrack.productionId, action.musicTrack.trackId, reserved.map((take) => ({ sessionId, takeId: take.id }))).catch((error: unknown) => {
+                void this.appLog?.append({ kind: "music.takes-untagged", production: action.musicTrack!.productionId, message: error instanceof Error ? error.message : String(error) });
+              });
+            }
             for (const [index, input] of admittedInputs.entries()) {
               // An absent queue row after an uncertain append is not proof of no purchase.
               await bench.store.append({ type: "take-status", takeId: reserved[index]!.id, status: "needs-reconciliation",
@@ -21957,6 +23108,10 @@ export class Coordinator {
       },
     }, quotePorts);
     return {
+      chooseMusicTake: async (productionId, trackId, sessionId, takeId, baseHash) => {
+        await this.chooseAlbumTake(store, productionId, trackId, sessionId, takeId, ulid(), baseHash);
+        await this.refreshWorldSnapshot(store.worldId);
+      },
       reconcileChapterReview: async (productionId, chapterId, requestId) => {
         const review = await this.chapterReviews().read({ worldId: store.worldId, productionId, chapterId }, requestId);
         return review && review.status !== "running" ? { id: review.id, summary: chapterReviewSummary(review) } : null;
@@ -22038,6 +23193,7 @@ export class Coordinator {
       activePlans: (productionId) => this.activeScenePlans(store, productionId),
       ...(this.opts.pickFiles ? { pickFiles: this.opts.pickFiles } : {}),
       ...(this.opts.pickFolder ? { pickFolder: this.opts.pickFolder } : {}),
+      ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
       ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
       extractArtifact: (artifactId, mutation) =>
         this.extractArtifactForConversationAction(store, artifactId, mutation),
@@ -22059,7 +23215,8 @@ export class Coordinator {
             exportWorld: async (actionId) => {
               const exportId = `${store.getBundle().meta.slug}-${actionId}`;
               const target = join(this.opts.appRoot!, "exports", exportId);
-              await exportWorld(store.dir, target);
+              await store.ownedRead(() => exportWorld(store.dir, target, { fileSpace: this.exportFileSpace,
+                signal: AbortSignal.any([store.closingSignal, this.runtimeStop.signal]) }));
               void this.appLog?.append({ kind: "world-export.done", exportId });
               return { id: exportId };
             },
@@ -22691,13 +23848,29 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    this.recoveryActions.closeAdmission();
+    for (const detach of this.recoveryTargetObservers.values()) detach(); this.recoveryTargetObservers.clear();
+    const systemResourcesStopped = this.opts.systemResources?.stop();
+    this.opts.storageHealth?.closeAdmission();
+    this.opts.recoveryControl?.closeAdmission();
+    this.opts.recoveryHistory?.closeAdmission();
+    // Presentation handlers are part of activeMessages. Start their bounded drain now, before
+    // waiting for those handlers, so stalled nonessential I/O cannot prevent native cleanup.
+    const historyStopped = this.opts.recoveryHistory?.stop();
+    const studioStopped = this.studioAssistantHost?.stop();
     this.sampleInstallAbort?.abort();
+    this.worldImportAbort?.abort();
     const audioStudioStopped = this.audioStudioPreviews.stop();
     this.cataloguePreviews?.close();
     // A keyless command waiting on the catalogue would otherwise hold shutdown open: the
     // reload timer that would have settled it is cleared below, and nothing else fires.
     this.settleHarnessGates();
     this.localGpu.stop();
+    this.runtimeStop.abort(new Error("Local runtimes are stopping."));
+    // Setup completion can be awaiting startup: cancel that wait before setup itself drains.
+    this.opts.ollama?.service.beginShutdown();
+    this.opts.comfyui?.service.beginShutdown();
+    for (const supervisor of this.supervisors.values()) supervisor.quiesce();
     for (const controller of this.performanceGenerations.values()) controller.abort();
     for (const controller of this.keyArtPromptDrafts.values()) controller.abort();
     this.keyArtPromptReviews.clear();
@@ -22708,7 +23881,7 @@ export class Coordinator {
       await this.chapterReviewService?.stop();
       await audioStudioStopped;
       await this.effectAnalysis.stop();
-      const setupStopped = this.setup?.dispose();
+      const setupStopped = Promise.allSettled([this.setup?.dispose()]);
       await this.adapterLibrary?.dispose();
       for (const dispose of this.lifecycleDisposers) dispose();
       this.lifecycleDisposers.clear();
@@ -22727,6 +23900,10 @@ export class Coordinator {
       for (const run of this.groupingChapters.values()) run.control.abort();
       for (const control of this.derivingLooks.values()) control.abort();
       for (const control of this.makingPictures.values()) control.abort();
+      // A page waiting on its picture would hold the drain below for the picture's whole wait (codex on PR 2222).
+      for (const control of this.makingComicPages.values()) control.abort();
+      for (const control of this.readingComicPages) control.abort();
+      for (const control of this.exportingComics) control.abort();
       for (const control of this.makingMotion.values()) control.abort();
       for (const control of this.preparingWordTiming.values()) control.abort();
       for (const run of this.checkingAudiobookWords.values()) run.control.abort();
@@ -22738,6 +23915,7 @@ export class Coordinator {
       await this.storyPublications.stop();
       this.dramaEditions.stop();
       for (const handle of this.exports.values()) handle.cancel();
+      for (const control of this.renderingMusic.values()) control.abort();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused
       // by the store anyway once the world begins closing.
       this.backfillAbort?.abort();
@@ -22746,23 +23924,32 @@ export class Coordinator {
       await connectionsClosed;
       await Promise.allSettled(this.activeMessages);
       await this.openWorldTail;
-      await setupStopped;
+      const setupStops = await setupStopped;
       await Promise.all([...this.stagedClips.keys()].map((clipId) => this.dropStagedClip(clipId)));
 
       // Message handlers have now either committed their queue rows or recorded their refusal.
       // Only now may queue disposal cancel execution and suppress further journal transitions.
       await this.jobQueue?.dispose();
       this.opts.voice?.dispose?.();
-      await this.opts.comfyui?.service.dispose().catch(() => {});
+      const comfyUiStops = await Promise.allSettled([this.opts.comfyui?.service.dispose()]);
       await Promise.allSettled(this.backgroundWork);
       await Promise.allSettled(this.carrying.values());
       await this.appearanceWrite;
       await this.jobQueue?.waitForIdle();
       await this.jobQueue?.drain();
       await this.audiobookActivity.drain();
-      await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
+      const supervisedStops = await Promise.allSettled([...this.supervisors.values()].map(supervisor => supervisor.stopAndConfirm()));
       await this.opts.adapter?.dispose?.().catch(() => {});
       await this.releaseOllama();
+      const runtimeStops = await Promise.allSettled([
+        this.opts.ming?.dispose().then(() => this.localGpu.confirmMingCleanup(AbortSignal.timeout(30_000))),
+        this.opts.ollama?.service.dispose(),
+      ]);
+      // The captured transport checks BOTH original native owners itself. Failed cleanup of
+      // either owner cannot be replaced by a successful stop of a newer process or HTTP client.
+      const studioRetirementStops = await Promise.allSettled([Promise.resolve().then(() => this.studioAssistantHost?.reconcileRetirement())]);
+      await historyStopped;
+      await studioStopped;
       await this.worldQuery.stop();
       // Provider close is the critical gate: it saves pending state and releases the world lock.
       this.engineClosed = true;
@@ -22775,6 +23962,13 @@ export class Coordinator {
       // called, so a fault recorded in the last moments of a run — the kind most worth having,
       // because the run ended — could still be in the queue when the process left.
       await this.appLog?.drain();
+      const failedRuntimeStops = [...setupStops, ...comfyUiStops, ...runtimeStops, ...supervisedStops, ...studioRetirementStops].filter(result => result.status === "rejected");
+      if (failedRuntimeStops.length) throw new AggregateError(failedRuntimeStops.map(result => result.reason), "Local runtime cleanup did not confirm exit.");
+      await this.opts.storageHealth?.stop();
+      await systemResourcesStopped;
+      // Admission closed synchronously above; owner settlement must remain available across
+      // a failed native stop so a later confirmed cleanup can resolve its retained intent.
+      await this.opts.recoveryControl?.stop();
     })();
     try {
       await this.stopPromise;

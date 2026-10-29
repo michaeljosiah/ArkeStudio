@@ -43,6 +43,7 @@ async function harness(probeRuntime: () => Promise<RuntimeProbes>) {
     reverify: async () => {},
     subscribe: () => () => {},
     dispose: async () => {},
+    beginShutdown: () => {},
   } as unknown as ComfyUiEngineService;
   const coordinator = new Coordinator({
     provider,

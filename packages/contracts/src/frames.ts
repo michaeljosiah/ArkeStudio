@@ -1,3 +1,5 @@
+import { TraversalEvidenceSchema } from "./routing.js";
+import { OnboardingPlanSchema } from "./onboarding.js";
 import { GuideVoiceLinesRequestSchema, SetGuideEntrySchema, SetGuideTeasersSchema } from "./world-guide.js";
 import { ARKE_PLAYER_PICTURE_SIZES } from "./world-package.js";
 import { ArkePlayerPartRequestSchema } from "./arke-player-release.js";
@@ -37,10 +39,14 @@ import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX, CadencePlanSchema } from "./cad
 import { PerformanceIdSchema } from "./performance.js";
 import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
+import { RecoveryModeSchema, RecoveryAdvancedSettingsSchema } from "./recovery-policy.js";
+import { RecoveryHistoryCommandSchema, RecoveryHistoryQuerySchema } from "./recovery-settings.js";
+import { RecoveryActionCommandSchema } from "./recovery-actions.js";
 import { CharacterAliasesInputSchema } from "./world.js";
 import { RoutingCommandSchema } from "./world-chat-actions.js";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
-import { ClientStateSchema } from "./client-state.js";
+import { MusicSequenceSchema, MusicTrackEditSchema } from "./music.js";
+import { ClientStateSchema, type ClientState } from "./client-state.js";
 import { AdapterActionSchema } from "./adapters.js";
 import { MAX_CLIP_LANE } from "./cut.js";
 import {
@@ -55,9 +61,10 @@ import { EffectReviewCommandSchema } from "./editor-effect-review.js";
 import { TransitionReviewCommandSchema } from "./editor-transition-proposal.js";
 import { PictureReviewCommandSchema } from "./editor-picture-proposal.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
-import { DomainEventSchema } from "./events.js";
+import { DomainEventSchema, type DomainEvent } from "./events.js";
 import { DramaDeliverySchema } from "./audio-drama-edition.js";
 import { DramaChapterDecisionSchema, DramaReviewDecisionSchema, DramaRoleKeySchema, DramaRoleSchema, EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
+import { COMIC_LIMITS, ComicAttemptCapSchema, ComicModeSchema, ComicPageSchema, ComicReadingSchema, ComicStyleSchema, LetteringThresholdsSchema } from "./graphic-novel.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema, PropStateSelectionSchema } from "./prop.js";
 import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
@@ -76,9 +83,11 @@ import { ProductionSetupCommandSchema } from "./production-setup.js";
 import { NarrativeFieldsSchema } from "./production-narrative.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
 import { DecideConversationActionSchema, PrepareConversationTakeReviewSchema } from "./arke-actions.js";
+import { StudioAssistantCommandSchema, StudioAssistantResponseSchema, type StudioAssistantResponse } from "./studio-assistant.js";
 
 /**
- * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then `event` frames, sequence
+ * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then events and requester-only
+ * Studio replies. Private replies never enter shared app/world state. Sequence
  * numbers monotonic per connection. A reconnecting client sends its last-seen sequence and
  * receives a fresh snapshot — partial replay is deliberately not offered (D4).
  */
@@ -91,11 +100,22 @@ import { DecideConversationActionSchema, PrepareConversationTakeReviewSchema } f
 export const PASSAGE_SPAN_MAX = 20_000;
 export const PASSAGE_KEPT_MAX = 2_400;
 
-export const FrameSchema = valueSchema(z.discriminatedUnion("kind", [
+/**
+ * Named rather than inferred: the snapshot carries the whole client state and the event every
+ * domain event, and inferred together they outgrew what the compiler will write into the engine's
+ * bundled declarations (TS7056, once the graphic novel's events joined the studio assistant's
+ * frame). Naming the parts keeps the declaration a reference to them.
+ */
+export type Frame =
+  | { kind: "snapshot"; seq: number; state: ClientState; retainedHistory?: ("jobs" | "ledger")[] | undefined }
+  | { kind: "event"; seq: number; event: DomainEvent }
+  | { kind: "studio-assistant"; seq: number; requestId: string; response: StudioAssistantResponse };
+
+export const FrameSchema: z.ZodType<Frame, z.ZodTypeDef, unknown> = valueSchema(z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema, retainedHistory: z.array(z.enum(["jobs", "ledger"])).optional() }).strict(),
   z.object({ kind: z.literal("event"), seq: z.number().int().min(1), event: DomainEventSchema }).strict(),
+  z.object({ kind: z.literal("studio-assistant"), seq: z.number().int().min(1), requestId: z.string().uuid(), response: StudioAssistantResponseSchema }).strict(),
 ]));
-export type Frame = z.infer<typeof FrameSchema>;
 
 /** What a client may send up. Commands arrive with their owning specs. */
 /** A staged-reference key, as strictly as the coordinator needs it to be — it becomes a folder. */
@@ -126,7 +146,16 @@ export const AudioStudioImportSchema = z.object({
 }).strict();
 export type AudioStudioImport = z.infer<typeof AudioStudioImportSchema>;
 
+/** Import a file as a music production's track (SPEC-060 R-6, 238d): filed to the production, probed, then added. */
+export const MusicImportSchema = z.object({ productionId: SlugSchema, makeAlbum: z.boolean().optional() }).strict();
+export type MusicImport = z.infer<typeof MusicImportSchema>;
+
 export const ClientMessageSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("import-world"), requestId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("check-onboarding") }).strict(),
+  z.object({ kind: z.literal("save-onboarding"), plan: OnboardingPlanSchema,
+    action: z.enum(["save", "install", "finish"]).default("save") }).strict(),
+  StudioAssistantCommandSchema,
   ProductionSetupCommandSchema,
   z.object({ kind: z.literal("save-production-narrative"), worldId: UlidSchema, productionId: SlugSchema,
     requestId: UlidSchema, expectedVersion: z.number().int().min(1).nullable(), narrative: NarrativeFieldsSchema }).strict(),
@@ -945,7 +974,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * there — presence is completion — so it is no answer to a file that arrived intact and is
    * the wrong bytes. Repair is the answer to a digest that did not match.
    */
-  z.object({ kind: z.literal("setup-repair"), componentId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("setup-repair"), componentId: z.string().min(1), revision: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
   z.object({ kind: z.literal("setup-cancel") }).strict(),
   /** Genesis conversation: shape a world that does not exist yet, in a sandbox session. */
   z
@@ -1449,6 +1478,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("clear-comfyui-models-dir") }).strict(),
   z.object({ kind: z.literal("set-comfyui-url"), url: z.string().min(1).max(2000) }).strict(),
   z.object({ kind: z.literal("clear-comfyui-engine") }).strict(),
+  z.object({ kind: z.literal("set-ollama-url"), url: z.string().min(1).max(2000) }).strict(),
+  z.object({ kind: z.literal("clear-ollama-engine") }).strict(),
+  z.object({ kind: z.literal("ollama-refresh") }).strict(),
+  z.object({ kind: z.literal("ollama-update-runtime") }).strict(),
   z.object({ kind: z.literal("use-detected-comfyui"), location: z.string().min(1) }).strict(),
   /** Re-read node classes and dependency identity on demand — the Settings refresh. */
   z.object({ kind: z.literal("comfyui-refresh") }).strict(),
@@ -1471,7 +1504,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("repair-voice-models") }).strict(),
   z.object({ kind: z.literal("open-model-folder") }).strict(),
   /** Open what a spawned engine said, host-owned end to end (SPEC-033 R-70; issue 585). */
-  z.object({ kind: z.literal("open-engine-log"), engine: z.enum(["comfyui", "voxa"]) }).strict(),
+  z.object({ kind: z.literal("open-engine-log"), engine: z.enum(["comfyui", "voxa", "ollama"]) }).strict(),
   z.object({ kind: z.literal("test-local-voice"), requestId: UlidSchema }).strict(),
   z
     .object({
@@ -2057,6 +2090,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         .strict()
         .optional(),
       logline: z.string().max(500).optional(),
+      /** The production a Soundtrack is for (SPEC-060 R-3): music only, written to its `music.json`. */
+      soundtrackFor: SlugSchema.optional(),
     })
     .strict(),
   /**
@@ -2442,6 +2477,82 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("restore-chapter-retired"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  /** A graphic novel chapter's comic script, saved whole and fenced on the file the editor read (SPEC-064 R-10). */
+  z
+    .object({
+      kind: z.literal("save-comic-script"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapter: SlugSchema,
+      pages: z.array(ComicPageSchema).max(COMIC_LIMITS.pagesPerChapter),
+      baseHash: z.string().min(1).nullable(),
+    })
+    .strict(),
+  /**
+   * What a page would cost and send, before anything is spent (SPEC-064 R-19, R-23, R-27). Asking
+   * also files a page that landed while the app was closed (R-25).
+   */
+  z
+    .object({
+      kind: z.literal("quote-comic-page"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      mode: ComicModeSchema.optional(),
+    })
+    .strict(),
+  /** One page made on the price its press showed (R-22, R-25, R-27). */
+  z
+    .object({
+      kind: z.literal("make-comic-page"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      mode: ComicModeSchema.optional(),
+      /**
+       * The most the press may spend. With `untilPasses` it covers every attempt: the page is made
+       * again until its lettering passes, up to the book's cap (D-6, R-27).
+       */
+      confirmedMicroUsd: z.number().int().min(0),
+      untilPasses: z.literal(true).optional(),
+    })
+    .strict(),
+  /** The book as CBZ and/or PDF from the accepted pages (SPEC-064 R-47, R-49). */
+  z.object({ kind: z.literal("export-comic"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, formats: z.array(z.enum(["cbz", "pdf", "epub"])).min(1).max(3) }).strict(),
+  /** Read a take back and check its lettering again (R-29). */
+  z.object({ kind: z.literal("check-comic-take"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, page: UlidSchema, take: UlidSchema }).strict(),
+  /** Keep a take as the page (R-26); past findings or an unchecked take only with an override (R-33). */
+  z
+    .object({
+      kind: z.literal("accept-comic-take"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      take: UlidSchema,
+      override: z.object({ findings: z.array(z.string().min(1).max(80)).max(200), reason: z.string().trim().min(1).max(400).optional() }).strict().optional(),
+    })
+    .strict(),
+  /** How a graphic novel reads and how its pages are checked (SPEC-064 R-12, R-31). */
+  z
+    .object({
+      kind: z.literal("set-comic-settings"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      settings: z.object({
+        reading: ComicReadingSchema.optional(),
+        aspect: z.string().min(3).max(12).optional(),
+        mode: ComicModeSchema.optional(),
+        thresholds: LetteringThresholdsSchema.optional(),
+        cap: ComicAttemptCapSchema.optional(),
+        /** The book's style (R-21a); `null` is World look, the world's art direction alone. */
+        style: ComicStyleSchema.nullable().optional(),
+      }).strict(),
+    })
+    .strict(),
   /**
    * The plan on the chapter (turn 127): title, synopsis, point of view, story-time and the facts
    * it implies, saved in place as the prose is — no proposal, no version cut. `null` clears a
@@ -2752,6 +2863,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       from: SceneIdSchema,
       to: SceneIdSchema,
       route: z.array(SceneIdSchema),
+      story: TraversalEvidenceSchema.shape.story,
     })
     .strict(),
   /** Epic 401 (brief §4): ask for the named findings. */
@@ -3067,6 +3179,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     production: SlugSchema.nullable().optional(),
     editor: EditorImportSchema.optional(),
     audioStudio: AudioStudioImportSchema.optional(),
+    music: MusicImportSchema.optional(),
   }).strict(),
   /**
    * Another world's placeable files, for the Cut's Library to browse (issue 1033): names, kinds,
@@ -3267,6 +3380,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("clone-voice"),
+      transcript: z.string().trim().min(1).max(4000).optional(),
       worldId: UlidSchema,
       /**
        * A clip already staged by `stage-voice-clip`, never a path. The renderer has no path to
@@ -4040,6 +4154,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * What Export → Arke Player would make of an interactive movie or a visual novel (design turn
+   * 245a – 245c, SPEC-058 R-89): its rows, its estimate and what stands in the way, at the picture
+   * Size chosen, answered as `story.export-state`. Nothing is made.
+   */
+  z.object({ kind: z.literal("read-story-export"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, size: z.enum(ARKE_PLAYER_PICTURE_SIZES).optional() }).strict(),
+  /**
    * The audiobook as a video (design turn 197, SPEC-047): the chapters read whole rendered to MP4
    * on this machine, one a chapter or one for the book, answered as `audiobook.video-exported`
    * and followed in Activity through `export.progress`.
@@ -4063,6 +4183,61 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("set-guide-entry"), worldId: UlidSchema, change: SetGuideEntrySchema }).strict(),
   /** The Guide's teasers (SPEC-059 R-24, R-27), replaced whole in the author's order. */
   z.object({ kind: z.literal("set-guide-teasers"), worldId: UlidSchema, change: SetGuideTeasersSchema }).strict(),
+  /**
+   * A music production's tracks (SPEC-060 R-5 – R-7, design turn 238). Each writes `music.json`
+   * through the production store. Adding a second track to a Single makes it an Album only when
+   * the person said so (`makeAlbum`): a Single holds one track.
+   */
+  z.object({ kind: z.literal("music-track-add"), worldId: UlidSchema, productionId: SlugSchema, artifactId: ArtifactIdSchema, makeAlbum: z.boolean().optional() }).strict(),
+  z.object({
+    kind: z.literal("music-track-update"),
+    worldId: UlidSchema,
+    productionId: SlugSchema,
+    trackId: SlugSchema,
+    title: z.string().trim().min(1).max(200).optional(),
+    /** Plain text; an empty string clears them. */
+    lyrics: z.string().max(20_000).optional(),
+  }).strict(),
+  z.object({ kind: z.literal("music-track-remove"), worldId: UlidSchema, productionId: SlugSchema, trackId: SlugSchema }).strict(),
+  /** The tracks in their new order, every one of them. */
+  z.object({ kind: z.literal("music-tracks-reorder"), worldId: UlidSchema, productionId: SlugSchema, order: z.array(SlugSchema).min(1).max(64) }).strict(),
+  /** The album's cover (R-5): an image on the shelf, or null to clear it. */
+  z.object({ kind: z.literal("music-set-cover"), worldId: UlidSchema, productionId: SlugSchema, artifactId: ArtifactIdSchema.nullable() }).strict(),
+  /** Draft with Arke (R-7): the lyricist's words for a track, answered as `music.lyrics-drafted`. */
+  z.object({ kind: z.literal("music-draft-lyrics"), worldId: UlidSchema, productionId: SlugSchema, trackId: SlugSchema, requestId: UlidSchema, description: z.string().trim().min(1).max(2_000) }).strict(),
+  /** Where each track is heard in the world's other productions (R-14), answered as `music.heard-in`. */
+  z.object({ kind: z.literal("read-music-heard-in"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  /** Play all (R-8): the album rendered as the export renders it, answered as `music.rendered`. */
+  z.object({ kind: z.literal("render-music"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  /**
+   * A track's composer (design turn 238i, SPEC-060 R-9): takes made in the album's own Bench
+   * session at the Bench's quote, tagged to the track. Answered as the Bench answers a dispatch
+   * (`queue.result` by requestId), then `music.takes`.
+   */
+  z.object({
+    kind: z.literal("music-track-make"),
+    worldId: UlidSchema,
+    productionId: SlugSchema,
+    trackId: SlugSchema,
+    requestId: UlidSchema,
+    composer: z.object({ provider: z.string().min(1), model: z.string().min(1), params: BenchParamsSchema, brief: z.string().max(4_000) }).strict(),
+  }).strict(),
+  /** Choose a take as its track's (238i, R-10): kept to the shelf if it is not yet, and played from there. */
+  z.object({ kind: z.literal("music-track-choose"), worldId: UlidSchema, productionId: SlugSchema, trackId: SlugSchema, sessionId: SessionIdSchema, takeId: TakeIdSchema, requestId: UlidSchema }).strict(),
+  /**
+   * The track editor's Save (238j, R-11): its trim, fades and sections, applied at render and
+   * never to the take. A null trim plays the whole source.
+   */
+  z.object({ kind: z.literal("music-track-edit"), worldId: UlidSchema, productionId: SlugSchema, trackId: SlugSchema, ...MusicTrackEditSchema.shape }).strict(),
+  /**
+   * The album's sequence (238k, R-13): each track's join to the next — a gap, a crossfade, or
+   * back to back — and its loudness target.
+   */
+  z.object({ kind: z.literal("music-sequence-set"), worldId: UlidSchema, productionId: SlugSchema, ...MusicSequenceSchema.shape }).strict(),
+  /** The takes of the album's Bench session by track (238i), answered as `music.takes`. */
+  z.object({ kind: z.literal("read-music-takes"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  /** A waveform of a world audio file (238j, 238k), answered as `music.waveform`. */
+  z.object({ kind: z.literal("read-music-waveform"), worldId: UlidSchema, file: z.string().min(1).max(1000), requestId: UlidSchema }).strict(),
   /** The sentences a character speaks in takes of chapters read whole (R-6), answered as `guide.voice-lines`. */
   z.object({ kind: z.literal("list-guide-voice-lines"), ...GuideVoiceLinesRequestSchema.shape }).strict(),
   z.object({ kind: z.literal("pick-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
@@ -4106,6 +4281,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * finally looks. Coalesced like any other trigger; never a timer.
    */
   z.object({ kind: z.literal("refresh-diagnostics") }).strict(),
+  /** Turn 240: resource-only UI observations never accelerate storage or provider probing. */
+  z.object({ kind: z.literal("refresh-system-resources") }).strict(),
+  /** Host presentation/policy controls; opening an incident never invokes these. */
+  z.object({ kind: z.literal("recovery-set-mode"), requestId: UlidSchema, mode: RecoveryModeSchema }).strict(),
+  z.object({ kind: z.literal("recovery-set-advanced"), requestId: UlidSchema, settings: RecoveryAdvancedSettingsSchema }).strict(),
+  z.object({ kind: z.literal("recovery-set-preferences"), requestId: UlidSchema,
+    preferences: z.object({ transientMuted: z.boolean().optional(), desktopOptIn: z.boolean().optional() }).strict() }).strict(),
+  z.object({ kind: z.literal("recovery-history-control"), requestId: UlidSchema, command: RecoveryHistoryCommandSchema }).strict(),
+  z.object({ kind: z.literal("recovery-history-read"), requestId: UlidSchema, query: RecoveryHistoryQuerySchema }).strict(),
+  RecoveryActionCommandSchema,
   /**
    * The grouped-read probe (design turn 185): the same few consecutive blocks of a chapter read
    * as one request three ways — every turn its whole style, the notes once with each later turn
@@ -4167,7 +4352,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /** Clear-the-bench: a NEW session. The old one keeps running; nothing is cancelled by this. */
-  z.object({ kind: z.literal("bench-new-session"), worldId: UlidSchema, picture: z.object({ source: PictureReuseSchema, prompt: z.string().min(1).max(PICTURE_PROMPT_MAX) }).strict().optional() }).strict(),
+  z.object({
+    kind: z.literal("bench-new-session"),
+    worldId: UlidSchema,
+    picture: z.object({ source: PictureReuseSchema, prompt: z.string().min(1).max(PICTURE_PROMPT_MAX) }).strict().optional(),
+    /**
+     * A fresh image session set to a shape, with words to start from: Make cover opens one at
+     * 1:1 for a music cover (SPEC-060 R-5, call 5), so the cover is made square, never cut.
+     */
+    image: z.object({ aspect: z.string().min(1).max(20), brief: z.string().max(4_000) }).strict().optional(),
+  }).strict(),
   z.object({ kind: z.literal("bench-close"), worldId: UlidSchema }).strict(),
   z
     .object({

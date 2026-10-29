@@ -378,14 +378,16 @@ export function ShotFields({
     <div className="fy-shot__fields" data-testid="shot-fields">
       {playsAsBeats ? (
         <Section icon={<Speaker size={15} />} name="Beat">
-          <BeatLines beats={shotBeats} sheets={sheets} voices={lineVoices(tableRead.plan)} />
+          <BeatLines story={{ worldId: world.meta.worldId, production, scene }} beats={shotBeats} sheets={sheets} voices={lineVoices(tableRead.plan)} />
           <p className="fy-shot__hint">From the scene’s script · narration is read by the narrator, a line by its speaker</p>
           <div className="fy-shot__row">
             <span className="fy-shot__rowlabel">advance</span>
             <span className="fy-shot__choices" role="group" aria-label="Advance">
-              {([["voice", "After the voice"], ["tap", "On tap"], ["hold", "Hold"]] as const).map(([value, label]) => (
+              {/* A story plays itself (turn 246, 246h): a beat moves on after its line or holds. A
+                  beat saved On tap reads as After the line, and is rewritten only when pressed. */}
+              {([["voice", "After the line"], ["hold", "Hold"]] as const).map(([value, label]) => (
                 <button key={value} type="button" aria-pressed={playback.advance === value} disabled={disabled}
-                  onClick={() => beatSet({ advance: value })}>{label}</button>
+                  onClick={() => beatSet({ advance: value })}>{value === "hold" && playback.advance !== "hold" ? `Hold ${playback.holdSec}s` : label}</button>
               ))}
             </span>
             {playback.advance === "hold" ? (

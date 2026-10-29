@@ -9,7 +9,7 @@ import { createNormalizeV2State, normalizeOpenCodeV2 } from "../src/v2/normalize
 import { buildSessionConfigV2 } from "../src/v2/config.js";
 import { credentialEnvPatch } from "../src/config.js";
 import { sameDirectory } from "../src/v2/http.js";
-import { meetsV2Gate, OPENCODE2_PINNED_VERSION, discoverOpenCode, discoverOpenCode2, discoverPreferredHarness } from "../src/discovery.js";
+import { meetsV2Gate, OPENCODE2_PINNED_VERSION, discoverOpenCode2, discoverPreferredHarness } from "../src/discovery.js";
 import { StubOpenCodeV2, STUB_V2_PASSWORD } from "./helpers/stub-server-v2.js";
 import { until } from "./wait.js";
 
@@ -157,6 +157,13 @@ describe("v2 normalisation (issue 327 §6)", () => {
 });
 
 describe("v2 adapter against the scripted server (issue 327 §11)", () => {
+  it("changes its lifecycle revision on confirmed runtime exit even while the adapter object survives", async () => {
+    const adapter = new OpenCodeV2Adapter({ baseUrl: () => "http://127.0.0.1:1", password: () => STUB_V2_PASSWORD });
+    const before = adapter.lifecycleRevision();
+    adapter.runtimeExited(); assert(adapter.lifecycleRevision() > before);
+    const replacement = adapter.lifecycleRevision();
+    await adapter.dispose(); assert(adapter.lifecycleRevision() > replacement);
+  });
   const stub = new StubOpenCodeV2();
   before(async () => stub.start());
   after(async () => stub.stop());
@@ -623,7 +630,7 @@ describe("v2 session config (issue 327 §7)", () => {
   it("orders the confinement block deny-first, managed re-allows after", () => {
     const config = buildSessionConfigV2({ defaultAgent: "scene-writer" });
     const agents = config["agents"] as Record<string, { permissions: Array<{ action: string; resource: string; effect: string }> }>;
-    const someAgent = Object.values(agents)[0]!;
+    const someAgent = agents["scene-writer"]!;
     const external = someAgent.permissions.filter((r) => r.action === "external_directory");
     assert.ok(external.length >= 2, "the confinement block exists");
     assert.deepEqual(external[0], { action: "external_directory", resource: "*", effect: "deny" });
@@ -680,23 +687,42 @@ describe("v2 session config (issue 327 §7)", () => {
 });
 
 describe("v2 discovery and the release pin (issue 327 §3)", () => {
+  it("passes a host-owned environment through configured, PATH and bundled discovery probes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "arke-oc2-env-")), configured = join(dir, "configured.exe"), bundled = join(dir, "bundled.exe");
+    writeFileSync(configured, "stub"); writeFileSync(bundled, "stub");
+    try {
+      for (const source of ["configured", "path", "bundled"] as const) {
+        const env = { HOME: "synthetic-owned-profile", PATH: "synthetic-bin", OPENCODE_DISABLE_AUTOUPDATE: "1" };
+        let probes = 0;
+        const result = await discoverPreferredHarness({ v2: { configuredPath: configured, bundledPath: bundled, env,
+          runCommand: async (command, args, _timeoutMs, actualEnv) => {
+            probes++; assert.equal(actualEnv, env);
+            if (command === "where" || command === "which") return source === "path" && args[0] === "opencode2"
+              ? { status: 0, stdout: "synthetic-path.exe" } : { status: 1, stdout: "" };
+            return { status: 0, stdout: command === configured && source !== "configured" ? "1.0.0" : "2.0.26" };
+          },
+        } });
+        assert.equal(result.found?.discovery.source, source); assert(probes > 0);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it("keeps the adapter's release gate in lockstep with the packaged runtime", () => {
     const metadata = JSON.parse(readFileSync(new URL("../../../apps/desktop/runtime-sources.json", import.meta.url), "utf8"));
     assert.equal(OPENCODE2_PINNED_VERSION, metadata.opencode2.version);
     assert.ok(metadata.opencode2.x64.url.endsWith(`/cli-windows-x64-${OPENCODE2_PINNED_VERSION}.tgz`));
   });
 
-  it("discovers stable v2 under its upstream opencode name and never routes it to the v1 adapter", async () => {
+  it("discovers stable v2 under its upstream opencode name and accepts only the qualified release", async () => {
     for (const version of ["2.0.26", "2.0.25", "2.0.27", "0.0.0-beta-19271"]) {
       const runCommand = async (command: string, args: string[]) => {
         if (command === "where" || command === "which") return args[0] === "opencode"
           ? { status: 0, stdout: "C:\\bin\\opencode.exe\n" } : { status: 1, stdout: "" };
         return { status: 0, stdout: `opencode v${version}` };
       };
-      const result = await discoverPreferredHarness({ v1: { runCommand }, v2: { runCommand }, preferV1: true });
+      const result = await discoverPreferredHarness({ v2: { runCommand } });
       assert.equal(result.found?.generation ?? null, version === "2.0.26" ? "v2" : null);
       assert.equal(result.rejectedV2?.version ?? null, version === "2.0.26" ? null : version);
-      assert.equal(await discoverOpenCode({ runCommand }), null);
     }
   });
   it("accepts only the qualified release, including its exact patch version", () => {
@@ -706,7 +732,7 @@ describe("v2 discovery and the release pin (issue 327 §3)", () => {
     }
   });
 
-  it("prefers v2, falls back to v1, and honours the Settings escape hatch", async () => {
+  it("selects v2 when both are installed and refuses a v1-only machine", async () => {
     const machine = (present: Record<string, string>) => async (command: string, args: string[]) => {
       if (command === "where" || command === "which") {
         const target = args[0]!;
@@ -719,23 +745,16 @@ describe("v2 discovery and the release pin (issue 327 §3)", () => {
     };
 
     const both = { opencode: "opencode v1.18.18", opencode2: "opencode2 v2.0.26" };
-    const preferred = await discoverPreferredHarness({ v1: { runCommand: machine(both) }, v2: { runCommand: machine(both) } });
+    const preferred = await discoverPreferredHarness({ v2: { runCommand: machine(both) } });
     assert.equal(preferred.found?.generation, "v2");
 
     const v1Only = { opencode: "opencode v1.18.18" };
-    const fallback = await discoverPreferredHarness({ v1: { runCommand: machine(v1Only) }, v2: { runCommand: machine(v1Only) } });
-    assert.equal(fallback.rejectedV2, null, "a v1 command is not a rejected v2 installation");
-    assert.equal(fallback.found?.generation, "v1");
-
-    const escape = await discoverPreferredHarness({
-      preferV1: true,
-      v1: { runCommand: machine(both) },
-      v2: { runCommand: machine(both) },
-    });
-    assert.equal(escape.found?.generation, "v1");
+    const fallback = await discoverPreferredHarness({ v2: { runCommand: machine(v1Only) } });
+    assert.equal(fallback.rejectedV2?.version, "1.18.18");
+    assert.equal(fallback.found, null, "v1 is unsupported and cannot be launched");
 
     const gated = { opencode2: "opencode2 v0.0.0-next-9000" };
-    const tooOld = await discoverPreferredHarness({ v1: { runCommand: machine(gated) }, v2: { runCommand: machine(gated) } });
+    const tooOld = await discoverPreferredHarness({ v2: { runCommand: machine(gated) } });
     assert.equal(tooOld.found, null, "a binary older than the pin cannot be launched");
     assert.equal(tooOld.rejectedV2?.version, "0.0.0-next-9000", "the rejected version remains diagnostic evidence without a fallback");
   });
@@ -762,7 +781,7 @@ describe("v2 discovery and the release pin (issue 327 §3)", () => {
     }
   });
 
-  it("carries the too-old v2 as the honest reason when discovery falls back to v1", async () => {
+  it("retains the unsupported version and never falls back to v1", async () => {
     const run = async (command: string, args: string[]) => {
       if (command === "where" || command === "which") {
         return { status: 0, stdout: `C:\\bin\\${args[0]}.exe\n` };
@@ -771,8 +790,8 @@ describe("v2 discovery and the release pin (issue 327 §3)", () => {
         ? { status: 0, stdout: "opencode2 v0.0.0-next-9000" }
         : { status: 0, stdout: "opencode v1.18.18" };
     };
-    const result = await discoverPreferredHarness({ v1: { runCommand: run }, v2: { runCommand: run } });
-    assert.equal(result.found?.generation, "v1");
+    const result = await discoverPreferredHarness({ v2: { runCommand: run } });
+    assert.equal(result.found, null);
     assert.equal(
       result?.rejectedV2?.version,
       "0.0.0-next-9000",

@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { OnboardingPlanSchema } from "./onboarding.js";
 import { ImageInspectionSettingsSchema } from "./world-chat-images.js";
 import { BenchPresetSchema } from "./bench.js";
 import { IsoDateTimeSchema } from "./ids.js";
 import { LocalSamplingSettingsSchema } from "./local-sampling.js";
 import { HarnessEngineSchema } from "./harness.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
+import { OllamaSettingsSchema } from "./ollama.js";
 
 /**
  * App-level settings (SPEC-008 §2.7, §2.10): routing defaults that resolve to concrete models
@@ -258,6 +260,8 @@ export const PAID_PLANS: ProviderPlans = { google: "paid", mistral: "paid", goog
 
 const AppSettingsObjectSchema = z
   .object({
+    /** Null preserves pre-journey installations. New files explicitly receive the welcome plan. */
+    onboarding: OnboardingPlanSchema.nullable().optional(),
     /**
      * Whether the studio may go online when asked to research (2026-08-22, widened 2026-08-23).
      *
@@ -310,6 +314,8 @@ const AppSettingsObjectSchema = z
         VoxaSettingsSchema,
       )
       .default({ executablePath: null, extraArgs: [] }),
+    /** null endpoint selects the Arke-managed runtime; malformed overrides refuse on load. */
+    ollama: OllamaSettingsSchema.default({}),
     /** Where the ComfyUI engine is (SPEC-021 §2.2); guarded the same way voxa is. */
     comfyui: z
       .preprocess(

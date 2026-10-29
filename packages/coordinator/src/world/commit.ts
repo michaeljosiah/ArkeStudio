@@ -227,6 +227,7 @@ type Classified =
   | { track: "narrative"; production: string }
   | { track: "episode"; production: string; file: string }
   | { track: "episode-script"; production: string; file: string }
+  | { track: "comic-script"; production: string; file: string }
   | { track: "series"; id: string }
   | { track: "production-meta"; production: string }
   | { track: "art-direction" }
@@ -261,6 +262,9 @@ export function classify(path: string): Classified {
   // An audio drama's episode script (SPEC-057 R-83): versioned and snapshotted like an episode.
   m = /^productions\/([a-z0-9-]+)\/scripts\/([^/]+)\.json$/.exec(path);
   if (m) return { track: "episode-script", production: m[1]!, file: m[2]! };
+  // A graphic novel chapter's comic script (SPEC-064 R-10): versioned and snapshotted the same way.
+  m = /^productions\/([a-z0-9-]+)\/comic\/([^/]+)\.json$/.exec(path);
+  if (m) return { track: "comic-script", production: m[1]!, file: m[2]! };
   m = /^series\/([a-z0-9-]+)\.json$/.exec(path);
   if (m) return { track: "series", id: m[1]! };
   m = /^productions\/([a-z0-9-]+)\/production\.json$/.exec(path);
@@ -461,6 +465,52 @@ export const GUIDE_TEASERS_SCHEMA_VERSION = 108;
  */
 export const AUDIOBOOK_PICTURE_MARKS_SCHEMA_VERSION = 109;
 /**
+ * Music productions (design turn 238, SPEC-060 R-1, R-4): `medium: "music"` on a production and
+ * its `music.json`. A build before it cannot read the medium, so it would drop the production from
+ * the world without a word; the world is raised when the first music production is made.
+ */
+export const MUSIC_SCHEMA_VERSION = 110;
+/**
+ * Music in the Guide (design turn 238f, 238g, SPEC-059 R-35, R-36): `theme` on a Guide entry and a
+ * `song` teaser, both on the strict Guide record. A build before it reads such a record as
+ * unreadable and the Guide then refuses every write, so the world is raised before the first is kept.
+ * World Chat's music cards (SPEC-060 R-19) share it: a creation plan carrying an album's start, and
+ * an album card, are preparations a build before it cannot read.
+ */
+export const GUIDE_THEMES_SCHEMA_VERSION = 111;
+/**
+ * A music track's composer (design turn 238i, SPEC-060 R-9): `session` on `music.json`, and the
+ * length, instrumental and track a music take's params carry in the album's Bench session. A build
+ * before it reads the strict record and the session's takes as unreadable, so the world is raised
+ * before the first is written.
+ */
+export const MUSIC_COMPOSER_SCHEMA_VERSION = 112;
+
+/** Do these production.json bytes make the production music (SPEC-060 R-1)? */
+function carriesMusic(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return typeof value === "object" && value !== null && (value as Record<string, unknown>)["medium"] === "music";
+  } catch {
+    return false;
+  }
+}
+
+/** Do these guide.json bytes keep a theme or a song teaser (SPEC-059 R-35, R-36)? */
+function carriesGuideMusic(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value !== "object" || value === null) return false;
+    const record = value as Record<string, unknown>;
+    const entries = ["characters", "locations", "factions"].flatMap((kind) => (typeof record[kind] === "object" && record[kind] !== null ? Object.values(record[kind] as Record<string, unknown>) : []));
+    const themed = entries.some((entry) => typeof entry === "object" && entry !== null && "theme" in entry);
+    const sung = Array.isArray(record["teasers"]) && record["teasers"].some((teaser: unknown) => typeof teaser === "object" && teaser !== null && (teaser as Record<string, unknown>)["kind"] === "song");
+    return themed || sung;
+  } catch {
+    return false;
+  }
+}
+/**
  * Where a picture's subject stands (design turn 197b): `focus` on a picture in the chapter's
  * strict audiobook record, which the video's vertical crop and Slow push follow. A build before
  * it reads such a record as unreadable, so the world is raised before the first. Sixty-two and
@@ -526,6 +576,12 @@ export const AUDIO_DRAMA_SCHEMA_VERSION = 90;
  */
 export const EPISODE_SCRIPT_SCHEMA_VERSION = 91;
 /**
+ * A graphic novel (SPEC-064): the kind, `comic.json`, its chapters' comic scripts and its pages'
+ * takes. An older scanner would open the production as a plain book and drop the comic files.
+ */
+export const GRAPHIC_NOVEL_SCHEMA_VERSION = 114;
+const GRAPHIC_NOVEL_FILE = /^productions\/[^/]+\/(comic\.json$|comic\/|comic-pages\/)/;
+/**
  * An audio drama's takes (SPEC-057 R-29, codex on PR 1871): `drama-takes/` and the `episode` on a
  * take's strict audiobook sidecar. A build before them drops each such artifact as unreadable.
  */
@@ -570,6 +626,7 @@ function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: strin
   for (const file of files) {
     if (!file.newContent || !file.path.endsWith(".json")) continue;
     try {
+      if (/^productions\/[^/]+\/routing\.json$/.test(file.path) && JSON.parse(file.newContent)?.schemaVersion === 2) boundary = Math.max(boundary, 113);
       if (/^productions\/[^/]+\/editor-requests\.json$/.test(file.path) && JSON.parse(file.newContent)?.schemaVersion === 2)
         boundary = Math.max(boundary, EDITOR_EFFECT_PROPOSALS_SCHEMA_VERSION);
       if (/^references\/[^/]+\/kit\.json$/.test(file.path)) {
@@ -671,6 +728,7 @@ export function changesAnything(path: string, live: string, proposed: string): b
       track === "narrative" ||
       track === "episode" ||
       track === "episode-script" ||
+      track === "comic-script" ||
       track === "series" ||
       track === "guide"
     ) {
@@ -847,6 +905,7 @@ export class Committer {
         kind.track === "narrative" ||
         kind.track === "episode" ||
         kind.track === "episode-script" ||
+        kind.track === "comic-script" ||
         kind.track === "series" ||
         kind.track === "guide"
       ) {
@@ -864,7 +923,9 @@ export class Committer {
                     ? `episodes/${kind.file}`
                     : kind.track === "episode-script"
                       ? `scripts/${kind.file}`
-                      : kind.track
+                      : kind.track === "comic-script"
+                        ? `comic/${kind.file}`
+                        : kind.track
               }`;
         const baseDoc = base !== null ? JsonFile.parse(base) : null;
         fromVersion = baseDoc ? ((baseDoc.value["version"] as number) ?? 1) : null;
@@ -1024,6 +1085,7 @@ export class Committer {
     const raiseSchemaVersion = Math.max(
       input.raiseSchemaVersion ?? 0,
       files.some((f) => classify(f.path).track === "episode-script" && f.newContent != null) ? EPISODE_SCRIPT_SCHEMA_VERSION : 0,
+      files.some((f) => GRAPHIC_NOVEL_FILE.test(f.path) && f.newContent != null) ? GRAPHIC_NOVEL_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/drama-takes\//.test(f.path) && f.newContent != null) ? DRAMA_TAKE_SCHEMA_VERSION : 0,
       files.some((f) => {
         if (!f.newContent) return false;
@@ -1059,6 +1121,15 @@ export class Committer {
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesBeat(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,
       // The kind as much as the beat: a visual novel created or converted, before any beat is set.
       files.some(f => classify(f.path).track === "production-meta" && f.newContent != null && carriesVisualNovel(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,
+      // A music production, however it is written (SPEC-060 R-1): the dialog, World Chat's
+      // prepared create, a metadata edit, or its record. An older build refuses the world by name
+      // rather than reading a production whose medium it does not know.
+      files.some(f => f.newContent != null && ((classify(f.path).track === "production-meta" && carriesMusic(f.newContent)) || /^productions\/[^/]+\/music\.json$/.test(f.path))) ? MUSIC_SCHEMA_VERSION : 0,
+      // A theme or a song in the Guide (SPEC-059 R-35, R-36), at the one boundary every write of
+      // the record passes, so no path to it can keep one in a world an older build would open.
+      files.some(f => classify(f.path).track === "guide" && f.newContent != null && carriesGuideMusic(f.newContent)) ? GUIDE_THEMES_SCHEMA_VERSION : 0,
+      // The album's own session, however it is first written (SPEC-060 R-9).
+      files.some(f => f.newContent != null && /^productions\/[^/]+\/music\.json$/.test(f.path) && "session" in JsonFile.parse(f.newContent).value) ? MUSIC_COMPOSER_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "shortName" in MarkdownFile.parse(f.newContent).data) ? SHEET_SHORT_NAME_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "aliases" in MarkdownFile.parse(f.newContent).data) ? CHARACTER_ALIASES_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "narration" in MarkdownFile.parse(f.newContent).data) ? SHEET_NARRATION_SCHEMA_VERSION : 0,

@@ -12,6 +12,7 @@ import {
   CharacterAliasesInputSchema,
   MICRODRAMA_DEFAULTS,
   AUDIO_DRAMA_KIND,
+  GRAPHIC_NOVEL_KIND,
   adaptableStories,
   newId,
   deriveCut,
@@ -73,6 +74,8 @@ import { Wave } from "../components/wave.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
 import { artifactDisplayName, artifactOpenLabel, artifactUses, linkNameResolver } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
+import { ComicStylePicker } from "../components/comic-style-picker.js";
+import { draftFromStyle, styleFromDraft, type ComicStyleDraft } from "../lib/comic-styles.js";
 import { clearQueue, enqueueClip, playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
 import { ReadAloud } from "../components/read-aloud.js";
@@ -89,6 +92,7 @@ import {
   subscribeVoiceUploadConfirmations,
   createProduction,
   subscribeProductionCreateResults,
+  setComicSettings,
   createSheetFromSentence,
   attachFiles,
   stopExtraction,
@@ -4664,16 +4668,16 @@ export function ProductionsScreen() {
  * to the contracts. What changed is only where it is offered, because step one is a set of
  * intentions now and branching is one a person arrives holding.
  *
- * Audio is deliberately not a card: turn 99 claimed it as a medium and nothing has ever shipped
- * behind it, so the audiobook rides under `WRITE` — and so does the audio drama, a kind of story
- * rather than a fourth door (design turn 230 revision 2, SPEC-057 R-1): the work is writing first.
+ * The audiobook rides under `WRITE`, and so does the audio drama, a kind of story rather than a
+ * door of its own (design turn 230 revision 2, SPEC-057 R-1): the work is writing first. Music is
+ * the fourth card, `LISTEN` (design turn 238a, SPEC-060 R-2), because its work is the songs.
  */
 export const DOOR_CHOICES = [
   {
     id: "write",
     eyebrow: "WRITE",
     label: "Tell a story",
-    body: "Novel, novella, episodic fiction, audio drama or audiobook",
+    body: "Novel, novella, episodic fiction, graphic novel, audio drama or audiobook",
     affordance: "Begin with words",
     medium: "story",
   },
@@ -4693,6 +4697,14 @@ export const DOOR_CHOICES = [
     affordance: "Begin with a choice",
     medium: "video",
     productionKind: "interactive",
+  },
+  {
+    id: "listen",
+    eyebrow: "LISTEN",
+    label: "Make music",
+    body: "Album, single or soundtrack",
+    affordance: "Begin with a song",
+    medium: "music",
   },
 ] as const;
 
@@ -4753,7 +4765,19 @@ export const INTERACTIVE_KIND_CHOICES = [
 export const STORY_KIND_CHOICES = [
   { id: "book", label: "Novel", body: "Chapters, to read." },
   { id: AUDIO_DRAMA_KIND, label: "Audio drama", body: "Episodes, for the ear." },
+  // A graphic novel (SPEC-064 R-3): chapters of pages, each page a picture made from its script.
+  { id: GRAPHIC_NOVEL_KIND, label: "Graphic novel", body: "Pages, to look at." },
   { id: "other", label: "Other", body: "Nothing assumed." },
+] as const;
+
+/**
+ * What `LISTEN` asks (design turn 238b, SPEC-060 R-3): which kind of music. Each is written down,
+ * so a production says what it is; a soundtrack then asks which production it is for.
+ */
+export const MUSIC_KIND_CHOICES = [
+  { id: "album", label: "Album", body: "Tracks, in order." },
+  { id: "single", label: "Single", body: "One song." },
+  { id: "soundtrack", label: "Soundtrack", body: "For a production." },
 ] as const;
 
 type KindChoice = { id: string; label: string; body: string; aspect?: string };
@@ -4763,14 +4787,14 @@ type KindChoice = { id: string; label: string; body: string; aspect?: string };
  * `interactive` is still one of them and still reads back the same way — it just arrives from
  * the door now rather than from the kind row (turn 113a).
  */
-const STORED_KINDS = new Set(["microdrama", "music-video", "interactive", "visual-novel", AUDIO_DRAMA_KIND]);
+const STORED_KINDS = new Set(["microdrama", "music-video", "interactive", "visual-novel", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, "album", "single", "soundtrack"]);
 
 /*
  * The kinds with a plate in `public/video-kinds`. Other is deliberately absent: an image of
  * "nothing assumed" would be a picture of something, and the empty box saying so is the truer
  * one. A kind added without a plate falls back to that same empty box rather than breaking.
  */
-export const KIND_PLATES = new Set(["microdrama", "film", "music-video", "interactive", "visual-novel", "book", AUDIO_DRAMA_KIND]);
+export const KIND_PLATES = new Set(["microdrama", "film", "music-video", "interactive", "visual-novel", "book", AUDIO_DRAMA_KIND, "album", "single", "soundtrack"]);
 
 /** The episode-length ranges step two offers, and the seconds each one means (turn 53). */
 export const EPISODE_LENGTH_CHOICES = [
@@ -4802,6 +4826,7 @@ export const KINDS_BY_DOOR: Record<DoorId, readonly KindChoice[]> = {
   write: STORY_KIND_CHOICES,
   watch: VIDEO_KIND_CHOICES,
   choose: INTERACTIVE_KIND_CHOICES,
+  listen: MUSIC_KIND_CHOICES,
 };
 
 /** The kind each door's row starts on, and so what an untouched step two creates. */
@@ -4809,6 +4834,7 @@ const DEFAULT_KIND_BY_DOOR: Record<DoorId, string> = {
   write: "book",
   watch: "film",
   choose: "interactive",
+  listen: "album",
 };
 
 /** The question step two asks above a door's kind row. */
@@ -4816,6 +4842,7 @@ const KIND_QUESTION: Record<DoorId, string> = {
   write: "What kind of story?",
   watch: "What kind of video?",
   choose: "What kind of interactive?",
+  listen: "What kind of music?",
 };
 
 export const FRAME_RATE_CHOICES = [24, 25, 30] as const satisfies readonly FrameRate[];
@@ -4842,6 +4869,11 @@ export function NewProductionScreen() {
   const [titleFollows, setTitleFollows] = useState(true);
   // The story an audio drama adapts (design turn 230b): empty is an original drama.
   const [source, setSource] = useState(adaptFrom ?? "");
+  // The production a soundtrack is for (design turn 238b): none until it is chosen.
+  const [soundtrackFor, setSoundtrackFor] = useState("");
+  // A graphic novel's style (design turn 248): World look until a card is chosen.
+  const [comicStyle, setComicStyle] = useState<ComicStyleDraft>(() => draftFromStyle(undefined));
+  const isGraphicNovel = door === "write" && videoKind === GRAPHIC_NOVEL_KIND;
   // Seeded from the kind and re-seeded whenever the kind changes: a default the kind can answer
   // is the kind's to answer (turn 99), and a film that silently kept a micro drama's 9:16 would
   // be the exact failure the grouping is meant to prevent.
@@ -4860,19 +4892,25 @@ export function NewProductionScreen() {
     return subscribeProductionCreateResults((result) => {
       if (result.requestId !== pendingRequest) return;
       if (result.disposition === "created" && result.slug) {
+        // The style is the book's setting, written once the book exists; World look writes nothing.
+        const style = isGraphicNovel ? styleFromDraft(comicStyle) : null;
+        if (worldId && style) setComicSettings(worldId, result.slug, { style });
         navigate(`/w/${worldId}/p/${result.slug}`);
       } else {
         setPendingRequest(null);
         setFailure(result.reason ?? "The production could not be created.");
       }
     });
-  }, [pendingRequest, worldId, navigate]);
-  const characters = world?.sheets.filter((s) => s.type === "character").length ?? 0;
+  }, [pendingRequest, worldId, navigate, isGraphicNovel, comicStyle]);
+  const characters =world?.sheets.filter((s) => s.type === "character").length ?? 0;
   const chosen = door === null ? null : DOOR_CHOICES.find((d) => d.id === door)!;
   const kinds = door === null ? [] : KINDS_BY_DOOR[door];
   const isMicrodrama = door === "watch" && videoKind === "microdrama";
   const lengthRange = parseEpisodeLength(episodeLength);
   const isAudioDrama = door === "write" && videoKind === AUDIO_DRAMA_KIND;
+  const isSoundtrack = door === "listen" && videoKind === "soundtrack";
+  // What a soundtrack can be for: the world's productions that are not music, each with its kind and length.
+  const scored = (world?.productions ?? []).filter((entry) => !productionShape(entry.meta).isMusic);
   const stories = adaptableStories(world?.productions ?? []);
   const story = isAudioDrama && source ? stories.find((s) => s.id === source) ?? null : null;
   // A name the author has not typed follows the story it adapts, so a drama of Low Water starts
@@ -4916,6 +4954,7 @@ export function NewProductionScreen() {
         // kind (turn 99): before this, a film could not be made vertical until after it existed.
         ...(chosen.medium === "video" ? { aspect } : {}),
         ...(chosen.medium === "video" ? { frameRate } : {}),
+        ...(isSoundtrack && soundtrackFor !== "" ? { soundtrackFor } : {}),
         ...(isMicrodrama
           ? {
               // One name, not two (turn 113): the series takes the production's name. The
@@ -5043,6 +5082,32 @@ export function NewProductionScreen() {
               </Select>
             </label>
           )}
+          {/* Style (design turn 248a, SPEC-064 R-21a): a graphic novel's one other question, asked by
+              showing the same page drawn each way. */}
+          {isGraphicNovel && (
+            <div className="fy-production-step__adapt">
+              <span className="fy-production-step__label">Style</span>
+              <ComicStylePicker
+                draft={comicStyle}
+                onChange={setComicStyle}
+                worldPicture={world?.keyArt ? mediaUrl(world.meta.slug, world.keyArt) : null}
+              />
+            </div>
+          )}
+          {/* For (design turn 238b, SPEC-060 R-3): the one other question a soundtrack asks. */}
+          {isSoundtrack && (
+            <label className="fy-production-step__adapt">
+              <span className="fy-production-step__label">For</span>
+              <Select label="For" value={soundtrackFor} onChange={(e) => setSoundtrackFor(e.target.value)}>
+                <option value="">Choose a production</option>
+                {scored.map((entry) => (
+                  <option key={entry.meta.id} value={entry.meta.id}>
+                    {entry.meta.title} · {productionLength(entry)}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          )}
           {/*
             Everything the kind can answer, under one label that says what it is (turn 99). What
             is not here is ENDING: it sat in this row as though how a season ends were a setting,
@@ -5109,7 +5174,7 @@ export function NewProductionScreen() {
             )}
             <span style={{ flex: 1 }} />
             {/* Back to the door, and nothing was created on the way here. */}
-            <Button variant="ghost" onClick={() => { setDoor(null); setSource(""); }}>
+            <Button variant="ghost" onClick={() => { setDoor(null); setSource(""); setSoundtrackFor(""); }}>
               Back
             </Button>
             {story ? (
@@ -5121,7 +5186,7 @@ export function NewProductionScreen() {
             ) : (
             <Button
               variant="primary"
-              disabled={title.trim().length === 0 || pendingRequest !== null || (isAudioDrama && source !== "")}
+              disabled={title.trim().length === 0 || pendingRequest !== null || (isAudioDrama && source !== "") || (isSoundtrack && soundtrackFor === "")}
               onClick={create}
             >
               {pendingRequest
@@ -5130,6 +5195,8 @@ export function NewProductionScreen() {
                   ? "Create Series and Season 1"
                   : isAudioDrama
                     ? "Create"
+                    : chosen.medium === "music"
+                      ? "Create production"
                     : chosen.medium === "story"
                       ? "Create and open day one"
                       : "Create and open it"}
@@ -5223,6 +5290,16 @@ export function NewProductionScreen() {
       <div style={{ height: 46 }} />
     </div>
   );
+}
+
+/** `Micro drama · 45 episodes`: a production as For names it (design turn 238b). */
+function productionLength(entry: { meta: Parameters<typeof productionShape>[0]; chapters: readonly unknown[]; scenes: readonly unknown[]; episodes: readonly unknown[]; audioDrama?: { plan: { episodes: number } } | null }): string {
+  const shape = productionShape(entry.meta);
+  const count = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
+  if (shape.isAudioDrama) return `${shape.displayLabel} · ${count(entry.audioDrama?.plan.episodes ?? 0, "episode")}`;
+  if (shape.hasChapters) return `${shape.displayLabel} · ${count(entry.chapters.length, "chapter")}`;
+  if (shape.isEpisodic) return `${shape.displayLabel} · ${count(entry.episodes.length, "episode")}`;
+  return `${shape.displayLabel} · ${count(entry.scenes.length, "scene")}`;
 }
 
 /**

@@ -158,3 +158,40 @@
 .fy-guide-pick__grid .fy-guide-tz:disabled{cursor:default}
 .fy-guide-pick__grid .fy-guide-tz.on .im{outline:2px solid var(--foreground);outline-offset:1px}
 .fy-guide-pick__foot{display:flex;align-items:center;gap:8px}
+
+/* Music in the Guide (design turn 238f, 238g, SPEC-059 R-35, R-36): a row's Theme pill and its
+   menu of the world's music, a song card's square cover whole over its own blur, and the excerpt
+   a song teaser shows. */
+.fy-guide-col--theme{flex:.9;overflow:visible;display:flex;color:var(--foreground)}
+.fy-guide-theme{display:inline-flex;align-items:center;gap:5px;max-width:100%;height:24px;padding:0 9px;border:1px solid var(--border);border-radius:99px;background:var(--background);color:var(--foreground);font:var(--type-label);font-size:var(--text-2xs);white-space:nowrap;cursor:pointer}
+.fy-guide-theme>span{overflow:hidden;text-overflow:ellipsis}
+.fy-guide-theme svg{flex:none}
+.fy-guide-theme.none{border-style:dashed;color:var(--muted-foreground)}
+.fy-guide-theme.gone{color:var(--muted-foreground);text-decoration:line-through}
+.fy-guide-theme:hover{border-color:var(--foreground)}
+.fy-guide-row--off .fy-guide-theme{color:var(--muted-foreground)}
+.fy-guide-menu-dim{position:fixed;inset:0;z-index:60}
+.fy-guide-menu{position:fixed;z-index:61;overflow:auto;padding:6px;border:1px solid var(--border);border-radius:12px;background:var(--popover);box-shadow:var(--shadow-lg);display:flex;flex-direction:column}
+.fy-guide-menu__h{padding:6px 8px 4px;font:var(--type-label);font-size:var(--text-2xs);letter-spacing:var(--tracking-label);text-transform:uppercase;color:var(--muted-foreground)}
+.fy-guide-menu__sec{display:flex;align-items:center;gap:8px;padding:8px 8px 4px;font:var(--type-label);color:var(--muted-foreground)}
+.fy-guide-menu__sec img,.fy-guide-menu__mark{width:20px;height:20px;border-radius:4px;object-fit:cover;flex:none;background:var(--secondary);display:inline-flex;align-items:center;justify-content:center}
+.fy-guide-menu__it{display:flex;width:100%;align-items:center;gap:8px;min-height:32px;padding:0 8px;border:0;border-radius:8px;background:none;color:var(--foreground);font:var(--type-ui);font-weight:400;text-align:left;cursor:pointer}
+.fy-guide-menu__it:hover{background:var(--secondary)}
+.fy-guide-menu__it.on{font-weight:600}
+.fy-guide-menu__ck{width:14px;flex:none;display:inline-flex}
+.fy-guide-menu__t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fy-guide-menu__m{font:var(--type-meta);color:var(--muted-foreground);white-space:nowrap}
+.fy-guide-menu hr{width:100%;margin:6px 0;border:0;border-top:1px solid var(--border)}
+.fy-guide-tz:not(.fy-guide-tz--add) .im>img.bl{filter:blur(14px);transform:scale(1.2);opacity:.85}
+.fy-guide-tz:not(.fy-guide-tz--add) .im>img.sq{position:relative;inset:auto;width:auto;height:100%;aspect-ratio:1/1;object-fit:cover}
+.fy-guide-excerpt{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:12px;font-size:var(--text-sm)}
+.fy-guide-excerpt>b{font-weight:500}
+.fy-guide-excerpt .fy-guide-play:disabled{opacity:.4;cursor:default}
+.fy-guide-excerpt__track{position:relative;flex:1;min-width:0;display:flex;color:var(--muted-foreground);cursor:pointer}
+.fy-guide-excerpt__win{position:absolute;top:-4px;bottom:-4px;border:1.5px solid var(--foreground);border-radius:6px;background:color-mix(in srgb,var(--foreground) 10%,transparent);pointer-events:none}
+.fy-guide-excerpt__f{display:flex;flex-direction:column;gap:2px;font:var(--type-meta);color:var(--muted-foreground)}
+.fy-guide-excerpt__f input{width:58px;height:28px;padding:0 8px;border:1px solid var(--border);border-radius:8px;background:var(--background);color:var(--foreground);font:var(--type-mono);font-size:var(--text-xs)}
+@media (max-width:760px){
+  .fy-guide-excerpt{flex-wrap:wrap}
+  .fy-guide-excerpt__track{flex-basis:100%;order:3}
+}

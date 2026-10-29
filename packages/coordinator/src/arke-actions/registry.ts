@@ -36,6 +36,9 @@ import {
   WorldChatProductionEpisodeOrderActionSchema,
   WorldChatProductionMetadataActionSchema,
   WorldChatProductionModelActionSchema,
+  WorldChatMusicSequenceActionSchema,
+  WorldChatMusicTrackChooseActionSchema,
+  WorldChatMusicTrackEditActionSchema,
   WorldChatProductionOverviewActionSchema,
   WorldChatProductionProseStyleActionSchema,
   WorldChatProductionEpisodeScriptActionSchema,
@@ -95,6 +98,7 @@ import {
   WorldChatWorldExportActionSchema,
   WorldChatWorldMetadataActionSchema,
   WorldChatAudioSpineActionSchema,
+  WorldChatProductionMusicActionSchema,
   WorldChatBenchGenerationActionSchema,
   ProductionRoutingModelActionSchema,
   ProductionTraversalModelActionSchema,
@@ -202,6 +206,9 @@ const COMPLETE_TIMELINE_READ = AVAILABLE;
  * honest answer is that it is read-only, global, or reserved for the person at the controls.
  */
 const CLIENT_COMMAND_METADATA = {
+  "check-onboarding": globalOnly(GLOBAL_OPERATION),
+  "import-world": globalOnly(GLOBAL_OPERATION),
+  "save-onboarding": globalOnly(GLOBAL_OPERATION),
   "chapter-review-start": action("production", "command", "production-store", "external-network-action", ["chapters"]),
   "chapter-review-read": readOnly("Reads retained chapter review findings."),
   "chapter-review-cancel": humanOnly("Stopping specialist work belongs to the person."),
@@ -229,6 +236,7 @@ const CLIENT_COMMAND_METADATA = {
   "discard-master-look": action("world", "destructive", "world-store", "destructive-change", ["art-direction", "references"]),
   "archive-world": action("world", "destructive", "world-store", "world-administration", ["world-metadata", "jobs"]),
   "install-sample-world": globalOnly(GLOBAL_OPERATION),
+  "studio-assistant": globalOnly("Studio conversations require a separate authenticated owner reply channel; world tools cannot invoke them."),
   "cancel-sample-world-download": globalOnly(GLOBAL_OPERATION),
   "discard-sample-world-download": globalOnly(GLOBAL_OPERATION),
   "refresh-sample-world-download": globalOnly(GLOBAL_OPERATION),
@@ -363,6 +371,10 @@ const CLIENT_COMMAND_METADATA = {
   "clear-comfyui-models-dir": globalOnly(GLOBAL_OPERATION),
   "set-comfyui-url": globalOnly(GLOBAL_OPERATION),
   "clear-comfyui-engine": globalOnly(GLOBAL_OPERATION),
+  "set-ollama-url": globalOnly(GLOBAL_OPERATION),
+  "clear-ollama-engine": globalOnly(GLOBAL_OPERATION),
+  "ollama-update-runtime": globalOnly(GLOBAL_OPERATION),
+  "ollama-refresh": readOnly(QUERY),
   "use-detected-comfyui": globalOnly(GLOBAL_OPERATION),
   "comfyui-refresh": readOnly(QUERY),
   "comfyui-restart": globalOnly(GLOBAL_OPERATION),
@@ -450,6 +462,13 @@ const CLIENT_COMMAND_METADATA = {
   "decide-drama-note": humanOnly(HUMAN_DECISION),
   "generate-drama-sound": humanOnly("Making a sound spends at the author's press, against the quote they saw."),
   "save-episode-script": humanOnly("A direct episode script save is the author's editor; Arke's script changes are reviewed proposals."),
+  "save-comic-script": humanOnly("A direct comic script save is the author's editor; Arke's script changes are reviewed proposals."),
+  "set-comic-settings": humanOnly("How a graphic novel reads and is checked is the author's setting."),
+  "quote-comic-page": readOnly(QUERY),
+  "make-comic-page": humanOnly("A comic page is made on the price its press showed the author."),
+  "check-comic-take": humanOnly("Checking a page sends its picture to the image reader the author allowed."),
+  "export-comic": humanOnly("Exporting the book writes files the author chose to make."),
+  "accept-comic-take": humanOnly("Which take is the page, and any override of its findings, is the author's decision."),
   "save-chapter": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   // The chapter workspace's own commands (turn 126): a read, and an undo shaped like the bible's.
   "open-chapter": readOnly(QUERY),
@@ -462,6 +481,24 @@ const CLIENT_COMMAND_METADATA = {
   "restore-bible": action("world", "authored-diff", "bible", "authored-change", ["bible"]),
   "set-guide-entry": humanOnly("What a reader of the world may see is the author's to choose (SPEC-059 R-2)."),
   "set-guide-teasers": humanOnly("What anyone sees of a world before installing it is the author's to choose (SPEC-059 R-26)."),
+  // A music production's tracks (SPEC-060 R-5 – R-7): authored changes World Chat reaches through
+  // production-music (R-19). Draft with Arke is the page's; in a conversation Arke writes the words.
+  "music-track-add": action("production", "command", "production-store", "authored-change", ["production-metadata", "artifacts"]),
+  "music-track-update": action("production", "command", "production-store", "authored-change", ["production-metadata"]),
+  "music-track-remove": action("production", "command", "production-store", "authored-change", ["production-metadata"]),
+  "music-tracks-reorder": action("production", "command", "production-store", "authored-change", ["production-metadata"]),
+  "music-set-cover": action("production", "command", "production-store", "authored-change", ["production-metadata", "artifacts"]),
+  "music-draft-lyrics": readOnly("Returns a lyrics draft without changing the track."),
+  "read-music-heard-in": readOnly(QUERY),
+  "render-music": readOnly(QUERY),
+  // A track's composer, editor and the album's sequence (SPEC-060 R-9 – R-13): the composer
+  // spends as the Bench does; the editor and the sequence are authored changes to music.json.
+  "music-track-make": action("production", "generation", "bench", "spend-and-compute", ["bench", "artifacts", "jobs", "production-metadata"]),
+  "music-track-choose": action("production", "command", "production-store", "authored-change", ["production-metadata", "artifacts", "bench"]),
+  "music-track-edit": action("production", "command", "production-store", "authored-change", ["production-metadata"]),
+  "music-sequence-set": action("production", "command", "production-store", "authored-change", ["production-metadata"]),
+  "read-music-takes": readOnly(QUERY),
+  "read-music-waveform": readOnly(QUERY),
   "list-guide-voice-lines": readOnly(QUERY),
   "reorder-chapters": action("production", "command", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   "reorder-scenes": action("production", "command", "production-store", "authored-change", ["scenes", "episodes"]),
@@ -654,9 +691,12 @@ const CLIENT_COMMAND_METADATA = {
   "accept-audiobook-timing": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   // The audiobook's web package and the world's packages (turn 186e): a file the host writes, and a read.
   "export-audiobook-player": action("production", "host-action", "export", "export", ["chapters", "artifacts", "exports"]),
-  "export-arke-player": action("production", "host-action", "export", "export", ["chapters", "artifacts", "exports"]),
+  // An interactive movie's or a visual novel's story package reads its routing and scenes too (SPEC-058 R-89).
+  "export-arke-player": action("production", "host-action", "export", "export", ["chapters", "routing", "scenes", "artifacts", "exports"]),
   "export-audiobook-video": action("production", "host-action", "export", "export", ["chapters", "artifacts", "exports"]),
   "read-audiobook-video": readOnly(QUERY),
+  // What Export → Arke Player would make of a story (turn 245a – 245c): read the way the export reads it, nothing made.
+  "read-story-export": readOnly(QUERY),
   "list-web-packages": readOnly(QUERY),
   "read-audiobook-book": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
   "stop-audiobook-book": action("production", "command", "voice", "external-network-action", ["chapters"]),
@@ -677,9 +717,16 @@ const CLIENT_COMMAND_METADATA = {
   "install-update-on-close": globalOnly(GLOBAL_OPERATION),
   "acknowledge-update": globalOnly(GLOBAL_OPERATION),
   "generate-diagnostics": globalOnly(GLOBAL_OPERATION),
+  "recovery-set-mode": humanOnly(HUMAN_DECISION),
+  "recovery-set-advanced": humanOnly(HUMAN_DECISION),
+  "recovery-set-preferences": humanOnly(HUMAN_DECISION),
+  "recovery-history-control": humanOnly(HUMAN_DECISION),
+  "recovery-action": humanOnly("A host owner reviews the exact service retry before approving it."),
+  "recovery-history-read": globalOnly(GLOBAL_OPERATION),
   // One real, priced request to learn whether a reader can group (design turn 185): a person runs it.
   "probe-grouped-read": humanOnly("The grouped-read probe spends one request so a person can listen to it."),
   "refresh-diagnostics": readOnly(QUERY),
+  "refresh-system-resources": humanOnly("The System overview samples local host resources as a bounded UI observation."),
   "open-data-folder": globalOnly(GLOBAL_OPERATION),
   "bench-open": humanOnly("Opening or implicitly creating a Bench session is a human workspace control."),
   "bench-open-subject": humanOnly("Opening a subject in Bench is a human handoff control, not an action on that subject."),
@@ -815,6 +862,11 @@ const COMMAND_MODEL_PATHS = {
   "set-style-override": ["reference-style"],
   "voice-preview": ["voice-audition"],
   "create-production": ["production-create"],
+  "music-track-add": ["production-music"],
+  "music-track-update": ["production-music"],
+  "music-track-remove": ["production-music"],
+  "music-tracks-reorder": ["production-music"],
+  "music-set-cover": ["production-music"],
   "propose-story-overview": ["production-overview", "candidateOperations"],
   "propose-season": ["production-season", "candidateOperations"],
   "create-episode": ["production-episode", "candidateOperations"],
@@ -864,6 +916,11 @@ const COMMAND_MODEL_PATHS = {
   "extract-artifact": ["artifact-extraction"],
   "stop-extraction": ["artifact-extraction-stop"],
   "bench-dispatch": ["bench-generation"],
+  // A track's takes are a Bench generation naming the track; the rest are typed actions (SPEC-060).
+  "music-track-make": ["bench-generation"],
+  "music-track-choose": ["music-track-choose"],
+  "music-track-edit": ["music-track-edit"],
+  "music-sequence-set": ["music-sequence-set"],
   "bench-rerun": ["bench-generation"],
   "bench-keep": ["bench-keep"],
   "bench-select-take": ["bench-select"],
@@ -1165,6 +1222,13 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     schema: WorldChatProductionModelActionSchema,
     ...action("production", "setting", "production-store", "authored-change", ["production-metadata"]),
   },
+  // A music track's take, its edit and the album's sequence (SPEC-060 R-10 – R-13).
+  "world-chat-music-track-choose": { kind: "world-chat-music-track-choose", schema: WorldChatMusicTrackChooseActionSchema,
+    ...action("production", "command", "production-store", "authored-change", ["production-metadata", "bench"]) },
+  "world-chat-music-track-edit": { kind: "world-chat-music-track-edit", schema: WorldChatMusicTrackEditActionSchema,
+    ...action("production", "command", "production-store", "authored-change", ["production-metadata"]) },
+  "world-chat-music-sequence-set": { kind: "world-chat-music-sequence-set", schema: WorldChatMusicSequenceActionSchema,
+    ...action("production", "command", "production-store", "authored-change", ["production-metadata"]) },
   "world-chat-production-series": {
     kind: "world-chat-production-series",
     schema: WorldChatProductionSeriesActionSchema,
@@ -1305,6 +1369,11 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     kind: "world-chat-audio-spine-command",
     schema: WorldChatAudioSpineActionSchema,
     ...action("production", "command", "audio-spine", "authored-change", ["spine"]),
+  },
+  "world-chat-production-music": {
+    kind: "world-chat-production-music",
+    schema: WorldChatProductionMusicActionSchema,
+    ...action("production", "command", "production-store", "authored-change", ["production-metadata"]),
   },
   "world-chat-production-timeline-transcribe": { kind: "world-chat-production-timeline-transcribe", schema: WorldChatProductionTimelineTranscribeActionSchema,
     ...action("production", "generation", "timeline", "privacy-sensitive", ["timeline", "scenes", "takes", "artifacts"]) },
@@ -1676,8 +1745,12 @@ export function arkeClientCommand<K extends ClientMessageKind>(
 
 /** Kept local to this boundary so arbitrary strings never acquire a descriptor by assertion. */
 export function findArkeClientCommand(kind: string): ArkeClientCommandDescriptor | undefined {
-  return Object.prototype.hasOwnProperty.call(ARKE_CLIENT_COMMAND_REGISTRY, kind)
-    ? ARKE_CLIENT_COMMAND_REGISTRY[kind as ClientMessageKind]
+  // Indexed by the whole kind union, the mapped registry is past what the checker will represent
+  // (TS2590) once ClientMessage passed five hundred commands; a lookup by string reads it as the
+  // record it is at runtime.
+  const registry = ARKE_CLIENT_COMMAND_REGISTRY as unknown as Readonly<Record<string, ArkeClientCommandDescriptor>>;
+  return Object.prototype.hasOwnProperty.call(registry, kind)
+    ? registry[kind]
     : undefined;
 }
 

@@ -1,8 +1,8 @@
 import { SocketWriter } from "./socket-writer.js";
 import { timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
-import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import type { ReadStream } from "node:fs";
+import { open, type FileHandle } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
@@ -13,11 +13,12 @@ import {
   type ClientState,
   type DomainEvent,
   type Frame,
+  type StudioAssistantResponse,
 } from "@arke-studio/contracts";
 
 /**
  * The coordinator transport (SPEC-001 §2.5, R-3): ordered, monotonically sequenced,
- * schema-validated frames — one snapshot, then events. Sequence numbers are per connection.
+ * schema-validated frames — one snapshot, then events and private requester replies. Sequence numbers are per connection.
  * A reconnecting client sends its last-seen sequence and receives a fresh snapshot; partial
  * replay is deliberately not offered (D4).
  */
@@ -30,6 +31,8 @@ interface HistoryBase {
 }
 
 interface Connection {
+  lifetime: AbortController;
+  requester: TransportRequester;
   writer: SocketWriter;
   retainHistory: boolean;
   jobs?: ClientState["app"]["jobs"];
@@ -42,10 +45,25 @@ interface Connection {
   pending: ClientMessage[];
 }
 
+/** Captured authenticated socket only. Never serialize or expose to world/model tools. */
+export interface TransportRequester {
+  readonly signal: AbortSignal;
+  /** True means handed to the bounded writer, not acknowledged delivery or execution. */
+  reply(requestId: string, response: StudioAssistantResponse): boolean;
+}
+
 export interface TransportAuth {
   /** A fresh 32-byte capability, supplied by the host; never included in snapshots or logs. */
   token: string;
   allowedOrigins: readonly string[];
+}
+
+/** Host-only media ownership. Release follows descriptor closure, including aborted reads. */
+export interface ResolvedMediaFile {
+  path: string;
+  contentType: string;
+  downloadName?: string;
+  release?: () => void;
 }
 
 export interface TransportOptions {
@@ -56,7 +74,7 @@ export interface TransportOptions {
   /** Reconcile durable state before a new or reconnecting renderer receives its snapshot. */
   beforeInitialSnapshot?(): Promise<void>;
   /** Client → coordinator messages, after the hello. */
-  onMessage?: (msg: ClientMessage) => void;
+  onMessage?: (msg: ClientMessage, requester?: TransportRequester) => void;
   /** Somewhere for the transport to say what it dropped; silence is the default, not the goal. */
   log?: (line: string) => void;
   /**
@@ -64,7 +82,7 @@ export interface TransportOptions {
    * `/media/<world-slug>/<world-relative-file>` to an absolute file, or null to 404. The
    * resolver owns path-traversal guarding; the transport owns nothing but the plumbing.
    */
-  serveFile?: (urlPath: string) => Promise<{ path: string; contentType: string; downloadName?: string } | null>;
+  serveFile?: (urlPath: string) => Promise<ResolvedMediaFile | null>;
 }
 
 /**
@@ -97,6 +115,7 @@ export function parseByteRange(
 }
 
 export class Transport {
+  private readonly mediaReads = new Set<ReadStream>();
   private wss: WebSocketServer | null = null;
   private http: Server | null = null;
   private readonly connections = new Set<Connection>();
@@ -145,8 +164,20 @@ export class Transport {
           res.writeHead(404).end();
           return;
         }
+        let hit: ResolvedMediaFile | null = null;
+        let file: FileHandle | undefined;
+        let stream: ReadStream | undefined;
+        let handedOff = false;
+        let released = false;
+        const release = (): void => {
+          if (released) return;
+          released = true;
+          try { hit?.release?.(); } catch { this.opts.log?.("media ownership release failed"); }
+        };
+        const disconnected = (): void => { stream?.destroy(); };
+        res.once("close", disconnected);
         try {
-          const hit = await this.opts.serveFile(decodeURIComponent(url.pathname));
+          hit = await this.opts.serveFile(decodeURIComponent(url.pathname));
           if (!hit) {
             res.writeHead(404).end();
             return;
@@ -157,7 +188,12 @@ export class Transport {
            * every `currentTime` assignment — playback works, scrubbing does not, and nothing
            * anywhere says why.
            */
-          const size = (await stat(hit.path)).size;
+          if (res.destroyed || this.http !== server) return;
+          file = await open(hit.path, "r");
+          const info = await file.stat();
+          if (!info.isFile()) throw new Error("media is not a regular file");
+          if (res.destroyed || this.http !== server) return;
+          const size = info.size;
           // Kit grids and boards are overwritten in place on recompile — never cache.
           const headers: Record<string, string> = {
             "Content-Type": hit.contentType,
@@ -170,19 +206,40 @@ export class Transport {
             res.writeHead(416, { ...headers, "Content-Range": `bytes */${size}` }).end();
             return;
           }
-          const stream =
+          stream =
             asked === null
-              ? (res.writeHead(200, { ...headers, "Content-Length": String(size) }), createReadStream(hit.path))
+              ? (res.writeHead(200, { ...headers, "Content-Length": String(size) }), file.createReadStream({ autoClose: false }))
               : (res.writeHead(206, {
                   ...headers,
                   "Content-Range": `bytes ${asked.start}-${asked.end}/${size}`,
                   "Content-Length": String(asked.end - asked.start + 1),
                 }),
-                createReadStream(hit.path, { start: asked.start, end: asked.end }));
+                file.createReadStream({ start: asked.start, end: asked.end, autoClose: false }));
+          const ownedFile = file;
+          this.mediaReads.add(stream);
+          stream.once("close", () => {
+            this.mediaReads.delete(stream!);
+            res.off("close", disconnected);
+            if (!res.writableEnded) res.destroy();
+            // A failed close leaves ownership unknown. It cannot make this file disposable.
+            void ownedFile.close().then(release, () => this.opts.log?.("media descriptor cleanup is unknown"));
+          });
           stream.on("error", () => res.destroy());
+          stream.once("end", () => stream!.destroy());
+          handedOff = true;
           stream.pipe(res);
         } catch {
-          res.writeHead(404).end();
+          if (res.headersSent) res.destroy();
+          else if (!res.destroyed) res.writeHead(404).end();
+        } finally {
+          if (!handedOff) {
+            res.off("close", disconnected);
+            let closed = true;
+            if (file) {
+              try { await file.close(); } catch { closed = false; this.opts.log?.("media descriptor cleanup is unknown"); }
+            }
+            if (closed) release();
+          }
         }
       })();
     });
@@ -200,16 +257,22 @@ export class Transport {
 
   private accept(socket: WebSocket, origin: string | undefined): void {
     const writer = new SocketWriter(socket, { label: "coordinator", trace: detail => this.opts.log?.(JSON.stringify(detail)) });
-    const conn: Connection = { socket, writer, retainHistory: false, seq: 0, helloed: false, initialising: false, refused: false, pending: [] };
+    const lifetime = new AbortController();
+    const requester: TransportRequester = { signal: lifetime.signal, reply: (requestId, response) => {
+      if (lifetime.signal.aborted || !this.connections.has(conn) || !conn.helloed || conn.refused || socket.readyState !== 1) return false;
+      this.sendFrame(conn, { kind: "studio-assistant", seq: ++conn.seq, requestId, response }); return true;
+    } };
+    const conn: Connection = { socket, writer, lifetime, requester, retainHistory: false, seq: 0, helloed: false, initialising: false, refused: false, pending: [] };
     const refuse = () => {
       conn.refused = true;
       conn.helloed = false;
+      lifetime.abort(); conn.pending = [];
       this.opts.log?.("refused unauthenticated WebSocket session");
       socket.close(1008, "session authentication required");
     };
     this.connections.add(conn);
-    socket.on("close", () => { writer.dispose(); this.connections.delete(conn); });
-    socket.on("error", () => { writer.dispose(); this.connections.delete(conn); });
+    socket.on("close", () => { lifetime.abort(); writer.dispose(); this.connections.delete(conn); });
+    socket.on("error", () => { lifetime.abort(); writer.dispose(); this.connections.delete(conn); });
     if (!this.allowedOrigin(origin)) {
       refuse();
       return;
@@ -261,7 +324,7 @@ export class Transport {
           for (const event of this.opts.getInitialEvents?.() ?? []) {
             this.sendFrame(conn, { kind: "event", seq: ++conn.seq, event });
           }
-          for (const pending of conn.pending.splice(0)) this.opts.onMessage?.(pending);
+          for (const pending of conn.pending.splice(0)) this.opts.onMessage?.(pending, requester);
         };
         if (this.opts.beforeInitialSnapshot && !conn.helloed) {
           conn.helloed = false;
@@ -294,7 +357,7 @@ export class Transport {
         socket.close(1002, "expected hello before any other message");
         return;
       }
-      this.opts.onMessage?.(msg);
+      this.opts.onMessage?.(msg, requester);
     });
   }
 
@@ -323,7 +386,7 @@ export class Transport {
       } }, ...(retainedHistory.length ? { retainedHistory } : {}) };
       conn.jobs = jobs; conn.ledger = ledger;
       snapshot = { key, base, ...(options.supersede ? {} : { keep: true as const }) };
-    } else if (conn.retainHistory && (frame.event.type === "job.updated" || frame.event.type === "job.ready")) {
+    } else if (frame.kind === "event" && conn.retainHistory && (frame.event.type === "job.updated" || frame.event.type === "job.ready")) {
       outgoing = { ...frame, event: { ...frame.event, job: jobSummary(frame.event.job) } };
     }
     conn.writer.send(JSON.stringify(FrameSchema.parse(outgoing)), snapshot !== undefined ? { snapshot } : {});
@@ -359,7 +422,8 @@ export class Transport {
     this.wss = null;
     const http = this.http;
     this.http = null;
-    for (const conn of this.connections) { conn.writer.dispose({ preserveCloseTimeout: true }); conn.socket.close(1001, "coordinator stopping"); }
+    for (const stream of this.mediaReads) stream.destroy();
+    for (const conn of this.connections) { conn.lifetime.abort(); conn.writer.dispose({ preserveCloseTimeout: true }); conn.socket.close(1001, "coordinator stopping"); }
     this.connections.clear();
     await Promise.allSettled(this.initialisations);
     await new Promise<void>((resolve) => wss.close(() => resolve()));

@@ -26,6 +26,7 @@ bundling; `scripts/verify-licenses.mjs` gates packaging on this file staying com
 | brotli.js decoder | MIT / Apache-2.0 | Devon Govett's JavaScript port and Google's decoder code, used by fontkit. Upstream declarations, Google copyright notice and Apache text are retained in `licenses/story-pdf/`. No encoder or remote font service is used. |
 | Kokoro TTS models | Apache-2.0 | **Not installer contents** (R-8) — downloaded on first use; notice recorded here for the downloaded artefact. |
 | whisper.cpp models | MIT | **Not installer contents** — downloaded on first use. |
+| Ming 3 vocoder adapter | MIT | Adapted from inclusionAI/Ming-3.0-tts revision `028c1eace193e7acdb256453da89b6e9207e052b`. Full copyright and licence text retained in `licenses/ming-audition-MIT.txt`, shipped beside the Python worker as `resources/ming/ming-MIT.txt` and in the Node engine package. Ming source, model weights and dependency wheels download separately on explicit installation; wheel licence notices remain in their original archives and private extracted overlays. |
 
 The offline Krea 2 node installer carries unmodified source from
 [ComfyUI-ConditioningKrea2Rebalance](https://github.com/nova452/ComfyUI-ConditioningKrea2Rebalance)

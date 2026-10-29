@@ -38,6 +38,7 @@ import {
   Message,
   PanelLeft,
   MenuLines,
+  MusicMark,
   Plus,
   Scroll,
   Sparkle,
@@ -159,7 +160,7 @@ function ProductionSwitcher({
         onClick={() => (at === null ? open() : setAt(null))}
       >
         <span className="fy-prodrail__switchmark" aria-hidden>
-          {compact ? production && productionShape(production.meta).isAudioDrama ? <Speaker size={20} /> : production && productionShape(production.meta).hasChapters ? <BookOpen size={20} /> : <Film size={20} /> : (production?.meta.title ?? "P").trim().charAt(0).toUpperCase() || "P"}
+          {compact ? production && productionShape(production.meta).isMusic ? <MusicMark size={20} /> : production && productionShape(production.meta).isAudioDrama ? <Speaker size={20} /> : production && productionShape(production.meta).hasChapters ? <BookOpen size={20} /> : <Film size={20} /> : (production?.meta.title ?? "P").trim().charAt(0).toUpperCase() || "P"}
         </span>
         <div className="fy-prodrail__switchcopy">
           <div className="fy-prodrail__switchname">{production?.meta.title ?? "…"}</div>
@@ -242,7 +243,7 @@ function ProductionSwitcher({
           const shape = productionShape(candidate.meta);
           const current = candidate.meta.id === production?.meta.id;
           return <button key={candidate.meta.id} type="button" className="fy-production-switch-row" aria-current={current ? "true" : undefined} onClick={() => go(candidate.meta.id)}>
-            <span className="fy-production-switch-row__mark">{shape.isAudioDrama ? <Speaker size={18} /> : shape.hasChapters ? <BookOpen size={18} /> : <Film size={18} />}</span>
+            <span className="fy-production-switch-row__mark">{shape.isMusic ? <MusicMark size={18} /> : shape.isAudioDrama ? <Speaker size={18} /> : shape.hasChapters ? <BookOpen size={18} /> : <Film size={18} />}</span>
             <span className="fy-production-switch-row__copy"><b>{candidate.meta.title}</b><span>{shape.displayLabel.toLowerCase()}{shape.hasChapters ? ` · ${candidate.chapters.filter(chapter => !chapter.retired).length} chapters` : ""}</span></span>
             {current && <Check size={18} />}
           </button>;
@@ -421,7 +422,7 @@ export function ProductionLayout() {
    * One shape, one mark, one count: that is the whole of "standardised".
    */
   const MARKS: Record<string, (p: { size?: number }) => ReactNode> = {
-    "": Home,
+    "": shape?.isMusic ? MusicMark : Home,
     artifacts: Folder,
     cast: Users,
     story: Message,
@@ -500,12 +501,15 @@ export function ProductionLayout() {
     : runtimeSeconds((cut?.totalSec ?? 0) - (cut?.uncoveredSec ?? 0));
   // An audio drama counts the episodes its plan sets out (SPEC-057 R-7) until scripts exist.
   const dramaEpisodes = production?.audioDrama?.plan.episodes ?? 0;
+  const musicTracks = production?.music?.tracks.length ?? 0;
   // The switch card counts what the format counts: seconds of cut for video, chapters for story.
   const switchSub = production
     ? shape?.isEpisodic
       ? phone ? `${shape.displayLabel.toLowerCase()} · season ${Math.max(1,(world?.series.find(series=>series.seasons.includes(production.meta.id))?.seasons.indexOf(production.meta.id) ?? 0)+1)} · ${Math.max(production.episodes.length, production.season?.defaults?.episodeCount ?? production.episodes.length)} episodes` : `series · ${production.episodes.length} episode${production.episodes.length === 1 ? "" : "s"} · ${production.scenes.length} scene${production.scenes.length === 1 ? "" : "s"}`
       : shape?.isAudioDrama
       ? `${shape.displayLabel.toLowerCase()} · ${dramaEpisodes} episode${dramaEpisodes === 1 ? "" : "s"}`
+      : shape?.isMusic
+      ? `${shape.displayLabel.toLowerCase()} · ${musicTracks} track${musicTracks === 1 ? "" : "s"}`
       : isStory
       ? `${shape!.displayLabel.toLowerCase()} · ${production.chapters.length} chapter${production.chapters.length === 1 ? "" : "s"}`
       : `${shape!.displayLabel.toLowerCase()}${phone ? ` · ${production.scenes.length} scenes` : ""}${cut ? ` · ${cutFigure} cut` : ""}`
@@ -717,6 +721,13 @@ export function ProductionLayout() {
               )}
               {item("cut", "Cut", cut ? railFigure : "0:00")}
             </>
+          ) : shape?.isMusic ? (
+            /* A music production (design turn 238c): its tracks are the page, and what they are made of. */
+            <>
+              {item("", "Tracks", String(musicTracks))}
+              <span className="fy-prodrail__section-divider" aria-hidden="true" />
+              {item("artifacts", "Artifacts", String(artifactCount))}
+            </>
           ) : shape?.isAudioDrama ? (
             /* An audio drama (design turn 230 revision 3): no Develop, Overview or Chapters — its
                writing happens in its episodes, and Arke is the Chat beside every page. */
@@ -741,7 +752,10 @@ export function ProductionLayout() {
                   {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0), undefined, undefined, undefined, undefined, audioStudioRoute ? false : undefined)}
                   {compact && chapterRoute && <div className="fy-prodrail__chapters">{production?.chapters.filter(chapter => !chapter.retired).map(chapter => <NavLink key={chapter.id} to={`${base}/story/chapters/${encodeURIComponent(chapter.id)}`} className="fy-prodrail__chapter">{String(chapter.order).padStart(2,"0")} · {chapter.title}</NavLink>)}</div>}
                   {/* The reading (turn 146, SPEC-047 R-29): chapters read of those with prose, from the door's last answer. */}
-                  {item("story/audiobook", "Audiobook", audiobookCount, undefined, audioStudioRoute)}
+                  {/* A graphic novel's pictures are its pages (design turn 247): Pages in place of Audiobook. */}
+                  {shape?.hasPages
+                    ? item("story/pages", "Pages", String(production?.comicScripts?.reduce((count, entry) => count + entry.script.pages.length, 0) ?? 0))
+                    : item("story/audiobook", "Audiobook", audiobookCount, undefined, audioStudioRoute)}
                   <span className="fy-prodrail__section-divider" aria-hidden="true" />
                   {item("artifacts", "Artifacts", String(artifactCount))}
                 </>

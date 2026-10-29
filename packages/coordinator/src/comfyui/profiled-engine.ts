@@ -1,5 +1,5 @@
 import type { ComfyUiSettings, ComfyUiStatus, RuntimeProbes } from "@arke-studio/contracts";
-import { ComfyUiEngineService, type EngineServiceDeps } from "./engine.js";
+import { ComfyUiEngineService, type EngineServiceDeps, type ComfyUiRecoveryFactory } from "./engine.js";
 
 /** Recipe startup requirements belong to a separate process, never to a user's shared URL. */
 export class ProfiledComfyUiEngineService extends ComfyUiEngineService {
@@ -10,6 +10,10 @@ export class ProfiledComfyUiEngineService extends ComfyUiEngineService {
   constructor(deps: EngineServiceDeps, private readonly model: string, launch: NonNullable<EngineServiceDeps["launch"]>) {
     super({ ...deps, recipes: deps.recipes.filter(recipe => recipe.id !== model) });
     this.worker = new ComfyUiEngineService({ ...deps, recipes: deps.recipes.filter(recipe => recipe.id === model), launch });
+  }
+
+  override configureRecovery(factory: ComfyUiRecoveryFactory): void {
+    super.configureRecovery(factory); this.worker.configureRecovery(factory);
   }
 
   override subscribe(listener: () => void): () => void {
@@ -39,6 +43,16 @@ export class ProfiledComfyUiEngineService extends ComfyUiEngineService {
 
   override isManagedEndpointGone(url: string): boolean {
     return super.isManagedEndpointGone(url) || this.worker.isManagedEndpointGone(url);
+  }
+
+  override prepareGpuHandover(): Promise<void> {
+    const work = this.profileWork.then(async () => {
+      const results = await Promise.allSettled([super.prepareGpuHandover(), this.worker.prepareGpuHandover()]);
+      const failure = results.find(result => result.status === "rejected");
+      if (failure?.status === "rejected") throw failure.reason;
+    });
+    this.profileWork = work.catch(() => {});
+    return work;
   }
 
   override instanceId(model?: string): string | null {
@@ -106,8 +120,12 @@ export class ProfiledComfyUiEngineService extends ComfyUiEngineService {
     return work;
   }
 
+  override beginShutdown(): void {
+    this.closing = true; super.beginShutdown(); this.worker.beginShutdown();
+  }
+
   override async dispose(): Promise<void> {
-    this.closing = true;
+    this.beginShutdown();
     const stopped = Promise.all([super.dispose(), this.worker.dispose()]);
     await this.profileWork;
     await stopped;

@@ -112,9 +112,10 @@ describe("a scene read as beats", () => {
     assert.equal(beatPictureShotId([{ id: "a", beat: { samePicture: true } }], "a"), "a", "the first shot has nothing before it to keep");
   });
 
-  it("plays on the defaults until a beat says otherwise", () => {
-    assert.deepEqual(beatPlayback({}), { advance: "tap", holdSec: 4, motion: "push" });
+  it("plays on the defaults until a beat says otherwise: after the line, never on tap (turn 246)", () => {
+    assert.deepEqual(beatPlayback({}), { advance: "voice", holdSec: 4, motion: "push" });
     assert.deepEqual(beatPlayback({ beat: { advance: "hold", holdSec: 6, motion: "none" } }), { advance: "hold", holdSec: 6, motion: "none" });
+    assert.deepEqual(beatPlayback({ beat: { advance: "tap" } }), { advance: "voice", holdSec: 4, motion: "push" }, "a beat saved On tap plays as after the line");
   });
 
   it("the beat fields are optional and strict", () => {
@@ -133,7 +134,7 @@ describe("a scene's beats as the player reads them", () => {
       audio: (lineId) => (lineId.endsWith("blk_wash") ? "voice/wash.mp3" : undefined),
       speakerName: (id) => ({ maren: "Maren", bray: "Bray" })[id] ?? id,
     });
-    assert.deepEqual(beats[0], { picture: "pic/sh_1.png", text: "They hung the washing out the morning the water came.", audio: "voice/wash.mp3", advance: "tap", holdSec: 4, motion: "push" });
+    assert.deepEqual(beats[0], { picture: "pic/sh_1.png", text: "They hung the washing out the morning the water came.", audio: "voice/wash.mp3", advance: "voice", holdSec: 4, motion: "push" });
     assert.equal(beats[1]!.speaker, "Maren");
     assert.equal(beats[1]!.audio, undefined, "an unvoiced line reads as text");
     assert.equal(beats[3]!.picture, "pic/sh_2.png", "sh_3 keeps sh_2's picture");

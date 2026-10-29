@@ -24,9 +24,16 @@ export class OllamaClient implements ProviderClient {
 
   constructor(
     private readonly fetchImpl: FetchLike,
-    private readonly baseUrl = "http://127.0.0.1:11434",
+    private readonly endpoint: string | (() => string | null) = "http://127.0.0.1:11434",
     private readonly residencyPause: (signal?: AbortSignal) => Promise<void> = async (signal) => { await pause(1_000, undefined, { signal }); },
+    private readonly cleanupEndpoint?: () => string | null,
   ) {}
+
+  private get baseUrl(): string {
+    const url = typeof this.endpoint === "function" ? this.endpoint() : this.endpoint;
+    if (url === null) throw new Error("Ollama is not ready. Install or start the selected runtime in Settings.");
+    return url;
+  }
 
   async validateKey(): Promise<CapabilityProbe[]> {
     // Bounded: this probe is re-run on a timer (issue 462), and a loopback port that accepts a
@@ -109,9 +116,11 @@ export class OllamaClient implements ProviderClient {
 
   async unload(signal?: AbortSignal, only?: ReadonlySet<string>): Promise<void> {
     const bounded = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(15_000)]);
+    const base = this.cleanupEndpoint ? this.cleanupEndpoint() : this.baseUrl;
+    if (base === null) throw new Error("No Ollama runtime is selected for memory cleanup.");
     let response: Awaited<ReturnType<typeof jsonRequest>>;
     try {
-      response = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/ps`, { signal: bounded });
+      response = await jsonRequest(this.fetchImpl, this.id, `${base}/api/ps`, { signal: bounded });
     } catch (error) {
       // An absent local server holds no models. An unresponsive or malformed server is not absent.
       if ((error as { cause?: { code?: string } }).cause?.code === "ECONNREFUSED") return;
@@ -123,7 +132,7 @@ export class OllamaClient implements ProviderClient {
     }
     for (const model of models) {
       if (only !== undefined && !only.has(model.name!)) continue;
-      const result = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/generate`, {
+      const result = await jsonRequest(this.fetchImpl, this.id, `${base}/api/generate`, {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: bounded,
         body: JSON.stringify({ model: model.name, keep_alive: 0, stream: false }),
       });

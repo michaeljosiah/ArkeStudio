@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
-import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainEvent, SetupStatus } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
@@ -114,6 +115,33 @@ function last(events: DomainEvent[]): SetupStatus {
 }
 
 describe("the tree kind installs a whole runtime atomically (§2.4, D10)", () => {
+  it("selects the architecture archive and records its verified version independently of the current pin", async () => {
+    const appRoot = await tempDir("arke-tree-receipt-");
+    const declared = treeEntry();
+    assert.equal(declared.spec.kind, "tree");
+    if (declared.spec.kind !== "tree") return;
+    const hash = createHash("sha256").update(bytes(2048, SEVENZ)).digest("hex");
+    const entry = { ...declared, optional: false, spec: { ...declared.spec, version: "0.40.10",
+      byArch: { arm64: { ...declared.spec.file, url: "https://example.test/arm64.7z", sha256: hash, sizeMb: 2 } } } };
+    const d = deps({ onTar: async staged => {
+      await mkdir(join(staged, "ComfyUI"), { recursive: true });
+      await writeFile(join(staged, "ComfyUI", "main.py"), "runtime");
+    } });
+    const first = new LocalSetupService(d, () => {}, { appRoot, arch: "arm64", catalogue: [entry] });
+    try {
+      await first.run();
+      assert.equal(first.status().components[0]!.state, "ready");
+      assert.ok(d.calls.includes("fetch https://example.test/arm64.7z"));
+      const receipt = JSON.parse(await readFile(join(appRoot, "comfyui-runtime", ".arke-runtime.json"), "utf8"));
+      assert.equal(receipt.sha256, hash);
+    } finally { await first.dispose(); }
+    const next = new LocalSetupService(d, () => {}, { appRoot, arch: "arm64", catalogue: [{ ...entry, spec: { ...entry.spec, version: "0.40.11" } }] });
+    try {
+      await next.detect();
+      assert.equal(next.status().components[0]!.installedVersion, "0.40.10");
+      assert.equal(next.status().components[0]!.currency, "behind");
+    } finally { await next.dispose(); }
+  });
   it("downloads, extracts into staging, verifies the marker one level deep, and renames whole", async () => {
     const appRoot = await tempDir("arke-tree-");
     const events: DomainEvent[] = [];

@@ -1,3 +1,5 @@
+import { TraversalEvidenceSchema, UnavailableChoiceSchema } from "./routing.js";
+import { StoryFactSchema, StoryPredicateSchema, StoryEffectSchema, StoryPresentationSchema, StoryEndingSchema } from "./story-state-schema.js";
 import { z } from "zod";
 import { AudioStudioProposalInputSchema } from "./audio-arrangement-schema.js";
 import { DraftScriptBlockSchema } from "./audio-drama.js";
@@ -7,6 +9,7 @@ import { ProductionCreationPlanSchema } from "./production-creation.js";
 import { ArkeReadObservationSchema, ConversationActionSemanticIdSchema, type ArkeReadObservation } from "./arke-actions.js";
 import { AudioPolicySchema, FailureModesSchema, KeyArtIntentSchema } from "./art-direction.js";
 import { BenchModeSchema, BenchParamsSchema } from "./bench.js";
+import { MusicSequenceSchema, MusicTrackEditSchema } from "./music.js";
 import { BibleEditSchema } from "./bible.js";
 import { DialogueTimingIntentSchema, ExportPresetSchema } from "./cut.js";
 import { CadencePlanObjectSchema } from "./cadence.js";
@@ -42,6 +45,7 @@ import { SceneRecordSchema, type SceneRecord } from "./scene-flow.js";
 import { AudioSpineCommandSchema } from "./spine.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { TimelineClipIdSchema, TimelineTrackIdSchema } from "./timeline.js";
+import { MAX_MUSIC_TRACKS } from "./world-package.js";
 import {
   CHARACTER_ROLE_MAX,
   FrameRateSchema,
@@ -559,6 +563,8 @@ const ProductionCreateModelActionSchema = z
         frameRate: FrameRateSchema.optional(),
         defaults: SeasonDefaultsSchema.optional(),
         logline: z.string().trim().min(1).max(1_000).optional(),
+        /** The production a music Soundtrack is for (SPEC-060 R-3); music only, and a soundtrack needs one. */
+        soundtrackFor: SlugSchema.optional(),
       })
       .strict(),
     checkReceiptIds: CompleteReadIdsSchema,
@@ -596,6 +602,25 @@ const ProductionModelModelActionSchema = z
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
+
+// A music production's track (SPEC-060 R-10 – R-13, design turn 238i – 238k): choose one of its
+// finished takes, set its trim, fades and sections, or set the album's joins and loudness. Each is
+// the page's own write of music.json; the takes themselves are never changed.
+// `baseHash` is get_production's `music.baseHash`: a card is stale once the album it read has
+// changed, so it never writes over a newer edit.
+const MusicBaseHashSchema = z.string().min(1).max(200);
+const MusicTrackChooseModelActionSchema = z.object({
+  kind: z.literal("music-track-choose"), productionId: SlugSchema, trackId: SlugSchema,
+  sessionId: SessionIdSchema, takeId: TakeIdSchema, baseHash: MusicBaseHashSchema, checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
+const MusicTrackEditModelActionSchema = z.object({
+  kind: z.literal("music-track-edit"), productionId: SlugSchema, trackId: SlugSchema,
+  ...MusicTrackEditSchema.shape, baseHash: MusicBaseHashSchema, checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
+const MusicSequenceModelActionSchema = z.object({
+  kind: z.literal("music-sequence-set"), productionId: SlugSchema,
+  ...MusicSequenceSchema.shape, baseHash: MusicBaseHashSchema, checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
 
 const ProductionSeriesModelActionSchema = z
   .object({
@@ -723,7 +748,7 @@ const ProductionChapterModelActionSchema = z
           viewpointCharacter: z.string().trim().max(200).optional().describe("Character sheet id from the current cast (lowercase kebab-case), or an unambiguous character name. Omit when unknown; close third is prose style, not a character."),
           when: z.string().trim().max(80).optional(),
         }).strict()).min(1).max(100),
-      }).strict().describe("Append a planned outline as one proposal: chapters in order, with synopses and no prose. Existing chapters are kept."),
+      }).strict().describe("Append a planned outline as one proposal: chapters in order, with synopses and no prose. Existing chapters are kept. Readers decide in the first two chapters whether to go on: plan the book's central question into chapters 1 and 2, happening in the present, and end each on a turn."),
       z
         .object({
           operation: z.literal("create"),
@@ -1131,6 +1156,25 @@ export const AudioSpineModelActionSchema = z
   .strict();
 export type AudioSpineModelAction = z.infer<typeof AudioSpineModelActionSchema>;
 
+/**
+ * A music production's album (SPEC-060 R-5 – R-7, R-19): a track added from the shelf, a track's
+ * title or lyrics, a track removed, the tracks in a new order, or the cover — one command a card,
+ * each the album page's own. Lyrics are plain text; Arke drafts them in its own words and sets them
+ * here, as Draft with Arke's words reach a track only when they are kept.
+ */
+export const MusicAlbumCommandSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("add-track"), artifactId: ArtifactIdSchema, makeAlbum: z.boolean().optional() }).strict(),
+  z.object({ kind: z.literal("update-track"), trackId: SlugSchema, title: z.string().trim().min(1).max(200).optional(), lyrics: z.string().max(20_000).optional() }).strict(),
+  z.object({ kind: z.literal("remove-track"), trackId: SlugSchema }).strict(),
+  z.object({ kind: z.literal("reorder-tracks"), order: z.array(SlugSchema).min(1).max(MAX_MUSIC_TRACKS) }).strict(),
+  z.object({ kind: z.literal("set-cover"), artifactId: ArtifactIdSchema.nullable() }).strict(),
+]);
+export type MusicAlbumCommand = z.infer<typeof MusicAlbumCommandSchema>;
+export const ProductionMusicModelActionSchema = z
+  .object({ kind: z.literal("production-music"), productionId: SlugSchema, command: MusicAlbumCommandSchema, checkReceiptIds: CompleteReadIdsSchema })
+  .strict();
+export type ProductionMusicModelAction = z.infer<typeof ProductionMusicModelActionSchema>;
+
 const RoutingChoiceIdSchema = z.string().regex(/^ch_[a-z0-9-]+$/, "expected ch_<slug>");
 const RoutingGroupIdSchema = z.string().regex(/^grp_[a-z0-9-]+$/, "expected grp_<slug>");
 const NonEmptyRoutingChangesSchema = <T extends z.ZodRawShape>(shape: T, message: string) =>
@@ -1138,19 +1182,23 @@ const NonEmptyRoutingChangesSchema = <T extends z.ZodRawShape>(shape: T, message
 
 /** Closed semantic edits replace the legacy whole-routing JSON submission. */
 export const RoutingCommandSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("set-facts"), baseVersion: z.number().int().min(1).optional(), facts: z.array(StoryFactSchema).max(32) }).strict(),
+  z.object({ operation: z.literal("set-presentation"), baseVersion: z.number().int().min(1).optional(), presentation: StoryPresentationSchema }).strict(),
+  z.object({ operation: z.literal("set-ending-variants"), baseVersion: z.number().int().min(1).optional(), sceneId: SceneIdSchema, title: z.string().min(1), variants: z.array(StoryEndingSchema).min(1) }).strict(),
   z.object({ operation: z.literal("set-start"), sceneId: SceneIdSchema }).strict(),
   z
     .object({
       operation: z.literal("add-choice"),
-      choice: z.object({ id: RoutingChoiceIdSchema, from: SceneIdSchema, label: z.string().trim().min(1), to: SceneIdSchema }).strict(),
+      choice: z.object({ id: RoutingChoiceIdSchema, from: SceneIdSchema, label: z.string().trim().min(1), to: SceneIdSchema, when: StoryPredicateSchema.optional(), effects: z.array(StoryEffectSchema).max(32).optional(), unavailable:UnavailableChoiceSchema.optional() }).strict(),
     })
     .strict(),
   z
     .object({
       operation: z.literal("edit-choice"),
+      baseVersion: z.number().int().min(1).optional(),
       choiceId: RoutingChoiceIdSchema,
       changes: NonEmptyRoutingChangesSchema(
-        { from: SceneIdSchema.optional(), label: z.string().trim().min(1).optional(), to: SceneIdSchema.optional() },
+        { from: SceneIdSchema.optional(), label: z.string().trim().min(1).optional(), to: SceneIdSchema.optional(), when: StoryPredicateSchema.nullable().optional(), effects: z.array(StoryEffectSchema).max(32).optional(), unavailable:UnavailableChoiceSchema.nullable().optional() },
         "a choice edit must change at least one field",
       ),
     })
@@ -1196,6 +1244,7 @@ export const ProductionTraversalModelActionSchema = z
     from: SceneIdSchema,
     to: SceneIdSchema,
     route: z.array(SceneIdSchema).min(1),
+    story: TraversalEvidenceSchema.shape.story,
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
@@ -1259,6 +1308,11 @@ export const BenchGenerationModelActionSchema = z
     kind: z.literal("bench-generation"),
     productionId: SlugSchema.optional(),
     cueRole: z.enum(["music", "ambience"]).optional(),
+    /**
+     * A music production's track asking for takes (SPEC-060 R-9, 238i): music only, made in the
+     * album's own session and tagged to the track, so they are its takes as its composer's are.
+     */
+    musicTrack: z.object({ productionId: SlugSchema, trackId: SlugSchema }).strict().optional(),
     sessionId: SessionIdSchema.optional(),
     /** Rerun repeats this take's immutable request through a new quoted card. */
     rerunTakeId: TakeIdSchema.optional(),
@@ -1371,6 +1425,9 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionCreateModelActionSchema.extend(ActionSequencingShape),
   ProductionMetadataModelActionSchema.extend(ActionSequencingShape),
   ProductionModelModelActionSchema.extend(ActionSequencingShape),
+  MusicTrackChooseModelActionSchema.extend(ActionSequencingShape),
+  MusicTrackEditModelActionSchema.extend(ActionSequencingShape),
+  MusicSequenceModelActionSchema.extend(ActionSequencingShape),
   ProductionSeriesModelActionSchema.extend(ActionSequencingShape),
   ProductionOverviewModelActionSchema.extend(ActionSequencingShape),
   ProductionSeasonModelActionSchema.extend(ActionSequencingShape),
@@ -1429,6 +1486,7 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionAudioCueModelActionSchema.extend(ActionSequencingShape),
   ProductionTimelineModelActionSchema.extend(ActionSequencingShape),
   ChapterReviewModelActionSchema.extend(ActionSequencingShape),
+  ProductionMusicModelActionSchema.extend(ActionSequencingShape),
 ]);
 export type ModelWorldChatAction = z.infer<typeof ModelWorldChatActionSchema>;
 
@@ -1497,6 +1555,9 @@ export const WorldChatProductionCreateActionSchema = z
   .strict();
 export const WorldChatProductionMetadataActionSchema = preparedAction("world-chat-production-metadata", ProductionMetadataModelActionSchema);
 export const WorldChatProductionModelActionSchema = preparedAction("world-chat-production-model", ProductionModelModelActionSchema);
+export const WorldChatMusicTrackChooseActionSchema = preparedAction("world-chat-music-track-choose", MusicTrackChooseModelActionSchema);
+export const WorldChatMusicTrackEditActionSchema = preparedAction("world-chat-music-track-edit", MusicTrackEditModelActionSchema);
+export const WorldChatMusicSequenceActionSchema = preparedAction("world-chat-music-sequence-set", MusicSequenceModelActionSchema);
 export const WorldChatProductionSeriesActionSchema = preparedAction("world-chat-production-series", ProductionSeriesModelActionSchema);
 export const WorldChatProductionOverviewActionSchema = preparedAction("world-chat-production-overview", ProductionOverviewModelActionSchema);
 export const WorldChatProductionProseStyleActionSchema = preparedAction("world-chat-production-prose-style", ProductionProseStyleModelActionSchema);
@@ -1561,6 +1622,7 @@ export const WorldChatBenchGenerationActionSchema = preparedAction("world-chat-b
 export const WorldChatBenchKeepActionSchema = preparedAction("world-chat-bench-keep", BenchKeepModelActionSchema);
 export const WorldChatBenchSelectActionSchema = preparedAction("world-chat-bench-select", BenchSelectModelActionSchema);
 export const WorldChatBenchDiscardActionSchema = preparedAction("world-chat-bench-discard", BenchDiscardModelActionSchema);
+export const WorldChatProductionMusicActionSchema = preparedAction("world-chat-production-music", ProductionMusicModelActionSchema);
 
 export type WorldChatWorldMetadataAction = z.infer<typeof WorldChatWorldMetadataActionSchema>;
 export type WorldChatCanonAction = z.infer<typeof WorldChatCanonActionSchema>;
@@ -1600,6 +1662,9 @@ export type WorldChatWorldExportAction = z.infer<typeof WorldChatWorldExportActi
 export type WorldChatProductionCreateAction = z.infer<typeof WorldChatProductionCreateActionSchema>;
 export type WorldChatProductionMetadataAction = z.infer<typeof WorldChatProductionMetadataActionSchema>;
 export type WorldChatProductionModelAction = z.infer<typeof WorldChatProductionModelActionSchema>;
+export type WorldChatMusicTrackChooseAction = z.infer<typeof WorldChatMusicTrackChooseActionSchema>;
+export type WorldChatMusicTrackEditAction = z.infer<typeof WorldChatMusicTrackEditActionSchema>;
+export type WorldChatMusicSequenceAction = z.infer<typeof WorldChatMusicSequenceActionSchema>;
 export type WorldChatProductionSeriesAction = z.infer<typeof WorldChatProductionSeriesActionSchema>;
 export type WorldChatProductionOverviewAction = z.infer<typeof WorldChatProductionOverviewActionSchema>;
 export type WorldChatProductionProseStyleAction = z.infer<typeof WorldChatProductionProseStyleActionSchema>;
@@ -1643,6 +1708,7 @@ export type WorldChatBenchGenerationAction = z.infer<typeof WorldChatBenchGenera
 export type WorldChatBenchKeepAction = z.infer<typeof WorldChatBenchKeepActionSchema>;
 export type WorldChatBenchSelectAction = z.infer<typeof WorldChatBenchSelectActionSchema>;
 export type WorldChatBenchDiscardAction = z.infer<typeof WorldChatBenchDiscardActionSchema>;
+export type WorldChatProductionMusicAction = z.infer<typeof WorldChatProductionMusicActionSchema>;
 
 /** Existing World Chat outputs after coordinator validation, before an authority prepares them. */
 export const WorldChatProposalActionSchema = z
@@ -1745,6 +1811,9 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionCreateActionSchema,
   WorldChatProductionMetadataActionSchema,
   WorldChatProductionModelActionSchema,
+  WorldChatMusicTrackChooseActionSchema,
+  WorldChatMusicTrackEditActionSchema,
+  WorldChatMusicSequenceActionSchema,
   WorldChatProductionSeriesActionSchema,
   WorldChatProductionOverviewActionSchema,
   WorldChatProductionProseStyleActionSchema,
@@ -1795,5 +1864,6 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionAudioCueActionSchema,
   WorldChatProductionTimelineActionSchema,
   WorldChatProductionTimelineTranscribeActionSchema,
+  WorldChatProductionMusicActionSchema,
 ]);
 export type WorldChatPreparedAction = z.infer<typeof WorldChatPreparedActionSchema>;

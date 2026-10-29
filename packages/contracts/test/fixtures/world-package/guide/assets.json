@@ -52,5 +52,17 @@
     "mediaType": "image/jpeg",
     "byteLength": 1,
     "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "t-verse-cover": {
+    "path": "guide/teasers/songs-of-the-drowned-quarter.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "t-verse-excerpt": {
+    "path": "guide/teasers/the-drowned-verse.m4a",
+    "mediaType": "audio/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
   }
 }

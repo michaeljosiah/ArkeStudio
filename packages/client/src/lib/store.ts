@@ -1,3 +1,4 @@
+import type { TraversalEvidence } from "@arke-studio/contracts";
 import type { ArkePlayerPartRequest, ArkePlayerPictureSize, SetGuideEntry, SetGuideTeasers } from "@arke-studio/contracts";
 import type { StoryPublishAction } from "@arke-studio/contracts";
 import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
@@ -26,6 +27,8 @@ import {
   type DramaChapterDecision,
   type DramaRole,
   type EpisodeScriptBlock,
+  type ComicPage,
+  type ComicMode,
   type Delivery,
   type Frame,
   type HarnessEngine,
@@ -234,6 +237,9 @@ interface StoreState {
    * not a part of it — folding it in would make the read model carry its own derivative.
    */
   diagnostics: import("@arke-studio/contracts").DiagnosticsSnapshot | null;
+  recoveryCommandResults: Record<string, import("@arke-studio/contracts").RecoveryCommandResult>;
+  recoveryActionResults: Record<string, import("@arke-studio/contracts").RecoveryActionResult>;
+  recoveryHistoryPages: Record<string, import("@arke-studio/contracts").RecoveryHistoryPage>;
   /** Build reviews by conversation and request, so a late response cannot erase a newer answer. */
   buildPlans: Record<
     string,
@@ -640,6 +646,9 @@ let current: StoreState = {
   keyArtPlans: {},
   setupStatus: null,
   diagnostics: null,
+  recoveryCommandResults: {},
+  recoveryActionResults: {},
+  recoveryHistoryPages: {},
   reading: {},
   deriving: {},
   casting: {},
@@ -806,6 +815,13 @@ const arkePlayerExportedListeners = new Set<(answer: ArkePlayerExported) => void
 export function subscribeArkePlayerExported(listener: (answer: ArkePlayerExported) => void): () => void {
   arkePlayerExportedListeners.add(listener);
   return () => arkePlayerExportedListeners.delete(listener);
+}
+/** What Export → Arke Player would make of a story (design turn 245a – 245c), answered to the read that asked. */
+export type StoryExportStateAnswer = Extract<DomainEvent, { type: "story.export-state" }>;
+const storyExportStateListeners = new Set<(answer: StoryExportStateAnswer) => void>();
+export function subscribeStoryExportState(listener: (answer: StoryExportStateAnswer) => void): () => void {
+  storyExportStateListeners.add(listener);
+  return () => storyExportStateListeners.delete(listener);
 }
 /** `Make 290 tall` (design turn 235a): how many, how many landed, what was refused. */
 export type AudiobookTallProgress = Extract<DomainEvent, { type: "audiobook.tall-progress" }>;
@@ -1020,6 +1036,41 @@ export function subscribeLyricsDrafted(listener: (answer: LyricsDrafted) => void
   return () => lyricsDraftedListeners.delete(listener);
 }
 
+// A music production's answers (design turn 238, SPEC-060): a track's drafted lyrics, where its
+// tracks are heard, and Play all's render, each to the window that asked by its request id.
+export type MusicLyricsDrafted = Extract<DomainEvent, { type: "music.lyrics-drafted" }>;
+export type MusicHeardIn = Extract<DomainEvent, { type: "music.heard-in" }>;
+export type MusicRendered = Extract<DomainEvent, { type: "music.rendered" }>;
+const musicLyricsListeners = new Set<(answer: MusicLyricsDrafted) => void>();
+const musicHeardListeners = new Set<(answer: MusicHeardIn) => void>();
+const musicRenderedListeners = new Set<(answer: MusicRendered) => void>();
+export function subscribeMusicLyricsDrafted(listener: (answer: MusicLyricsDrafted) => void): () => void {
+  musicLyricsListeners.add(listener);
+  return () => musicLyricsListeners.delete(listener);
+}
+export function subscribeMusicHeardIn(listener: (answer: MusicHeardIn) => void): () => void {
+  musicHeardListeners.add(listener);
+  return () => musicHeardListeners.delete(listener);
+}
+export function subscribeMusicRendered(listener: (answer: MusicRendered) => void): () => void {
+  musicRenderedListeners.add(listener);
+  return () => musicRenderedListeners.delete(listener);
+}
+// A track's takes (238i), asked for or pushed when the album's session moves, and a file's
+// waveform (238j, 238k), each to whoever is listening.
+export type MusicTakes = Extract<DomainEvent, { type: "music.takes" }>;
+export type MusicWaveformAnswer = Extract<DomainEvent, { type: "music.waveform" }>;
+const musicTakesListeners = new Set<(answer: MusicTakes) => void>();
+const musicWaveformListeners = new Set<(answer: MusicWaveformAnswer) => void>();
+export function subscribeMusicTakes(listener: (answer: MusicTakes) => void): () => void {
+  musicTakesListeners.add(listener);
+  return () => musicTakesListeners.delete(listener);
+}
+export function subscribeMusicWaveform(listener: (answer: MusicWaveformAnswer) => void): () => void {
+  musicWaveformListeners.add(listener);
+  return () => musicWaveformListeners.delete(listener);
+}
+
 
 export function subscribeFiledBatch(listener: (batch: FiledBatch) => void): () => void {
   filedBatchListeners.add(listener);
@@ -1064,6 +1115,13 @@ export type ProductionCreateResult = Extract<DomainEvent, { type: "production.cr
 /** Refused direct scene writes (review 2026-08-22), delivered to the storyboard that sent them. */
 type CommandFailure = Extract<DomainEvent, { type: "command.failed" }>;
 const commandFailureListeners = new Set<(event: CommandFailure) => void>();
+const worldImportListeners = new Set<(event: Extract<DomainEvent, { type: "world.import-result" }>) => void>();
+export function subscribeWorldImport(listener: (event: Extract<DomainEvent, { type: "world.import-result" }>) => void): () => void {
+  worldImportListeners.add(listener); return () => { worldImportListeners.delete(listener); };
+}
+export function importWorld(): string | null {
+  const requestId = ulid(); return send({ kind: "import-world", requestId }) ? requestId : null;
+}
 export function subscribeCommandFailures(listener: (event: CommandFailure) => void): () => void {
   commandFailureListeners.add(listener);
   return () => commandFailureListeners.delete(listener);
@@ -1146,6 +1204,33 @@ const dramaSoundListeners = new Set<(result: DramaSound) => void>();
 export function subscribeDramaSound(listener: (result: DramaSound) => void): () => void {
   dramaSoundListeners.add(listener);
   return () => dramaSoundListeners.delete(listener);
+}
+
+/** What became of one comic script save (SPEC-064 R-10): the new base, or a refusal by name. */
+export type ComicScriptSaveResult = Extract<DomainEvent, { type: "comic-script.save-result" }>;
+const comicScriptSaveListeners = new Set<(result: ComicScriptSaveResult) => void>();
+export function subscribeComicScriptSaveResults(listener: (result: ComicScriptSaveResult) => void): () => void {
+  comicScriptSaveListeners.add(listener);
+  return () => comicScriptSaveListeners.delete(listener);
+}
+
+/** A page's price and brief (SPEC-064 R-19, R-23), and a page being made (R-25). */
+export type ComicPageQuote = Extract<DomainEvent, { type: "comic.page-quote" }>;
+export type ComicPageMade = Extract<DomainEvent, { type: "comic.page-made" }>;
+export type ComicTakeResult = Extract<DomainEvent, { type: "comic.take-result" }>;
+type ComicPageEvent = ComicPageQuote | ComicPageMade | ComicTakeResult;
+const comicPageListeners = new Set<(event: ComicPageEvent) => void>();
+export function subscribeComicPages(listener: (event: ComicPageEvent) => void): () => void {
+  comicPageListeners.add(listener);
+  return () => comicPageListeners.delete(listener);
+}
+
+/** What became of a book's export (SPEC-064 R-47, R-49). */
+export type ComicExported = Extract<DomainEvent, { type: "comic.exported" }>;
+const comicExportListeners = new Set<(event: ComicExported) => void>();
+export function subscribeComicExported(listener: (event: ComicExported) => void): () => void {
+  comicExportListeners.add(listener);
+  return () => comicExportListeners.delete(listener);
 }
 
 /** What became of one episode script save (SPEC-057 R-83): the new base, or a refusal by name. */
@@ -1355,6 +1440,12 @@ export function subscribeJobReady(listener: (job: Job) => void): () => void {
   return () => jobReadyListeners.delete(listener);
 }
 
+const recoveryNoticeListeners = new Set<(notice: import("@arke-studio/contracts").RecoveryNotice, history: import("@arke-studio/contracts").RecoveryHistorySnapshot) => void>();
+const seenRecoveryNotices = new Set<string>();
+export function subscribeRecoveryNotices(listener: (notice: import("@arke-studio/contracts").RecoveryNotice, history: import("@arke-studio/contracts").RecoveryHistorySnapshot) => void): () => void {
+  recoveryNoticeListeners.add(listener); return () => recoveryNoticeListeners.delete(listener);
+}
+
 function queueRequest(command: QueueCommand, characterName?: string): string {
   const requestId = ulid();
   if (current.connection === "open") {
@@ -1447,6 +1538,8 @@ export function __applyForTest(state: ClientState, event: DomainEvent): ClientSt
 
 function fold(state: ClientState, event: DomainEvent): ClientState {
   switch (event.type) {
+    case "onboarding.changed":
+      return { ...state, app: { ...state.app, onboarding: event.onboarding } };
     case "health.changed":
       return {
         ...state,
@@ -1535,6 +1628,19 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, residency: event.residency } };
     case "comfyui.status":
       return { ...state, app: { ...state.app, comfyui: event.comfyui } };
+    case "ollama.status":
+      return { ...state, app: { ...state.app, ollama: event.ollama } };
+    case "storage.health":
+      return { ...state, app: { ...state.app, storageHealth: event.health } };
+    case "system.resources":
+      return { ...state, app: { ...state.app, systemResources: event.resources } };
+    case "recovery.history":
+      return { ...state, app: { ...state.app, recoveryHistory: event.history } };
+    case "recovery.policy": return { ...state, app: { ...state.app, recoveryPolicy: event.policy } };
+    case "recovery.notice":
+    case "recovery.history-page":
+    case "recovery.command-result": return state;
+    case "recovery.action-result": return state;
     case "adapters.changed":
       return { ...state, app: { ...state.app, adapters: event.adapters } };
     case "harness.status":
@@ -1642,6 +1748,12 @@ function handleFrame(json: string): void {
     return;
   }
   lastSeq = frame.seq;
+  if (frame.kind === "studio-assistant") {
+    for (const listener of studioAssistantReplyListeners) {
+      try { listener(frame); } catch { /* A private panel cannot interrupt shared state folding. */ }
+    }
+    return;
+  }
   if (frame.kind === "snapshot") {
     if (frame.retainedHistory?.length) {
       if (!current.state || rejoining) { send({ kind: "hello", lastSeq, retainHistory: true }); return; }
@@ -1815,6 +1927,7 @@ function handleFrame(json: string): void {
     let setupStatus = current.setupStatus;
     let permissions = current.permissions;
     const event = frame.event;
+    if (event.type === "world.import-result") for (const listener of worldImportListeners) listener(event);
     let frameRunQuotes = current.frameRunQuotes;
     let frameRunStartResults = current.frameRunStartResults;
     if (event.type === "command.failed") {
@@ -1860,6 +1973,17 @@ function handleFrame(json: string): void {
     if (event.type === "job.ready") {
       for (const listener of jobReadyListeners) listener(event.job);
     }
+    if (event.type === "recovery.notice") {
+      const key = `${event.notice.incidentId}:${event.notice.at}:${event.notice.reason}`;
+      if (!seenRecoveryNotices.has(key)) {
+        seenRecoveryNotices.add(key);
+        if (seenRecoveryNotices.size > 256) seenRecoveryNotices.delete(seenRecoveryNotices.values().next().value!);
+        const history = current.state?.app.recoveryHistory;
+        if (history?.audit === "available" && !history.preferences.transientMuted) {
+          for (const listener of recoveryNoticeListeners) try { listener(event.notice, history); } catch { /* Alert delivery cannot interrupt state folding. */ }
+        }
+      }
+    }
     if (event.type === "production.create-result") {
       for (const listener of productionCreateListeners) listener(event);
     }
@@ -1887,6 +2011,15 @@ function handleFrame(json: string): void {
     }
     if (event.type === "episode-script.save-result") {
       for (const listener of episodeScriptSaveListeners) listener(event);
+    }
+    if (event.type === "comic.page-quote" || event.type === "comic.page-made" || event.type === "comic.take-result") {
+      for (const listener of comicPageListeners) listener(event);
+    }
+    if (event.type === "comic.exported") {
+      for (const listener of comicExportListeners) listener(event);
+    }
+    if (event.type === "comic-script.save-result") {
+      for (const listener of comicScriptSaveListeners) listener(event);
     }
     if (event.type === "drama.source") {
       for (const listener of dramaSourceListeners) listener(event);
@@ -1969,6 +2102,9 @@ function handleFrame(json: string): void {
     if (event.type === "arke-player.exported") {
       for (const listener of arkePlayerExportedListeners) listener(event);
     }
+    if (event.type === "story.export-state") {
+      for (const listener of storyExportStateListeners) listener(event);
+    }
     if (event.type === "audiobook.tall-progress") {
       lastTallProgress.set(`${event.worldId}/${event.productionId}`, event);
       for (const listener of audiobookTallProgressListeners) listener(event);
@@ -2032,6 +2168,11 @@ function handleFrame(json: string): void {
     if (event.type === "bench.lyrics-drafted") {
       for (const listener of lyricsDraftedListeners) listener(event);
     }
+    if (event.type === "music.lyrics-drafted") for (const listener of musicLyricsListeners) listener(event);
+    if (event.type === "music.heard-in") for (const listener of musicHeardListeners) listener(event);
+    if (event.type === "music.rendered") for (const listener of musicRenderedListeners) listener(event);
+    if (event.type === "music.takes") for (const listener of musicTakesListeners) listener(event);
+    if (event.type === "music.waveform") for (const listener of musicWaveformListeners) listener(event);
     if (event.type === "artifact.filed-batch") {
       for (const listener of filedBatchListeners) listener(event);
     }
@@ -2840,6 +2981,15 @@ function handleFrame(json: string): void {
     let envCheck = current.envCheck;
     let diagnosticsBundle = current.diagnosticsBundle;
     let diagnostics = current.diagnostics;
+    const recoveryCommandResults = event.type === "recovery.command-result"
+      ? Object.fromEntries([...Object.entries(current.recoveryCommandResults).filter(([id]) => id !== event.result.requestId), [event.result.requestId, event.result] as const].slice(-32))
+      : current.recoveryCommandResults;
+    const recoveryActionResults = event.type === "recovery.action-result"
+      ? Object.fromEntries([...Object.entries(current.recoveryActionResults).filter(([id]) => id !== event.result.requestId), [event.result.requestId, event.result] as const].slice(-32))
+      : current.recoveryActionResults;
+    const recoveryHistoryPages = event.type === "recovery.history-page"
+      ? Object.fromEntries([...Object.entries(current.recoveryHistoryPages).filter(([id]) => id !== event.requestId), [event.requestId, event.page] as const].slice(-4))
+      : current.recoveryHistoryPages;
     let providerCallsByJob = current.providerCallsByJob;
     if (event.type === "diagnostics.snapshot") {
       diagnostics = event.snapshot;
@@ -2992,6 +3142,9 @@ function handleFrame(json: string): void {
       envCheck,
       diagnosticsBundle,
       diagnostics,
+      recoveryCommandResults,
+      recoveryActionResults,
+      recoveryHistoryPages,
       providerCallsByJob,
       frameRunQuotes,
       frameRunStartResults,
@@ -3571,8 +3724,8 @@ export function setupRetry(componentId: string): void {
   send({ kind: "setup-retry", componentId });
 }
 
-export function setupRepair(componentId: string): void {
-  send({ kind: "setup-repair", componentId });
+export function setupRepair(componentId: string, revision: string): void {
+  send({ kind: "setup-repair", componentId, revision });
 }
 
 export function setupPause(componentId: string): void {
@@ -3601,6 +3754,9 @@ export function useDiagnostics(): import("@arke-studio/contracts").DiagnosticsSn
 /** Ask for a fresh derivation — R-33's on-demand half, sent when the Diagnostics view opens. */
 export function refreshDiagnostics(): void {
   send({ kind: "refresh-diagnostics" });
+}
+export function refreshSystemResources(): void {
+  send({ kind: "refresh-system-resources" });
 }
 
 function genesisChatBusy(genesisId: string): boolean {
@@ -4125,6 +4281,11 @@ export function detectRuntimes(): void {
   send({ kind: "detect-runtimes" });
 }
 
+export function checkOnboarding(): void { send({ kind: "check-onboarding" }); }
+export function saveOnboarding(plan: import("@arke-studio/contracts").OnboardingPlan, action: "save" | "install" | "finish" = "save"): void {
+  send({ kind: "save-onboarding", plan, action });
+}
+
 /** Look for the harnesses this machine has. Cheap — discovery only, never a live turn. */
 export function detectHarnesses(): void {
   send({ kind: "detect-harnesses" });
@@ -4197,6 +4358,11 @@ export function setComfyUiUrl(url: string): void {
 export function clearComfyUiEngine(): void {
   send({ kind: "clear-comfyui-engine" });
 }
+
+export function setOllamaUrl(url: string): void { send({ kind: "set-ollama-url", url }); }
+export function useManagedOllama(): void { send({ kind: "clear-ollama-engine" }); }
+export function refreshOllama(): void { send({ kind: "ollama-refresh" }); }
+export function updateOllamaRuntime(): void { send({ kind: "ollama-update-runtime" }); }
 
 export function useDetectedComfyUi(location: string): void {
   send({ kind: "use-detected-comfyui", location });
@@ -4895,6 +5061,7 @@ export function discardVoiceClip(clipId: string): void {
  * the button rather than being passed along as data that could be forgotten.
  */
 export function cloneVoice(input: {
+  transcript?: string;
   worldId: string;
   clipId: string;
   name: string;
@@ -4905,6 +5072,7 @@ export function cloneVoice(input: {
 }): void {
   send({
     kind: "clone-voice",
+    ...(input.transcript?.trim() ? { transcript: input.transcript.trim() } : {}),
     worldId: input.worldId,
     clipId: input.clipId,
     name: input.name,
@@ -4964,9 +5132,11 @@ export function createProduction(
   input: {
     title: string;
     /** The audience-facing medium (SPEC-023 R-1) — step one of the dialog. */
-    medium: "story" | "video" | "interactive-video";
+    medium: "story" | "video" | "interactive-video" | "music";
     /** The named format beneath it (SPEC-023 R-2), sent only when it says something. */
     productionKind?: string;
+    /** The production a soundtrack is for (SPEC-060 R-1). */
+    soundtrackFor?: string;
     seriesTitle?: string;
     aspect?: string;
     frameRate?: 24 | 25 | 30;
@@ -4986,6 +5156,87 @@ export function createProduction(
   const requestId = ulid();
   send({ kind: "create-production", worldId, requestId, ...input });
   return requestId;
+}
+
+// ---- SPEC-060: a music production's album (design turn 238) ---------------
+
+/** A kept take as the album's last track (238d, R-6); a Single's second asks for `makeAlbum`. */
+export function addMusicTrack(worldId: string, productionId: string, artifactId: string, makeAlbum = false): boolean {
+  return send({ kind: "music-track-add", worldId, productionId, artifactId, ...(makeAlbum ? { makeAlbum: true } : {}) });
+}
+
+/** A track's title or lyrics (238e, R-7); empty lyrics clear them. */
+export function updateMusicTrack(worldId: string, productionId: string, trackId: string, change: { title?: string; lyrics?: string }): boolean {
+  return send({ kind: "music-track-update", worldId, productionId, trackId, ...change });
+}
+
+/** Remove from album (R-7): the take stays on the shelf. */
+export function removeMusicTrack(worldId: string, productionId: string, trackId: string): boolean {
+  return send({ kind: "music-track-remove", worldId, productionId, trackId });
+}
+
+/** The tracks in a new order (R-5), every one, each once. */
+export function reorderMusicTracks(worldId: string, productionId: string, order: readonly string[]): boolean {
+  return send({ kind: "music-tracks-reorder", worldId, productionId, order: [...order] });
+}
+
+/** The album's cover (R-5): a picture on the shelf, or none. */
+export function setMusicCover(worldId: string, productionId: string, artifactId: string | null): boolean {
+  return send({ kind: "music-set-cover", worldId, productionId, artifactId });
+}
+
+/** Draft with Arke on a track (R-7): answered as `music.lyrics-drafted` under the id returned. */
+export function draftMusicLyrics(worldId: string, productionId: string, trackId: string, description: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "music-draft-lyrics", worldId, productionId, trackId, requestId, description }) ? requestId : null;
+}
+
+/** Heard in (R-14), read each time: answered as `music.heard-in` under the id returned. */
+export function readMusicHeardIn(worldId: string, productionId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "read-music-heard-in", worldId, productionId, requestId }) ? requestId : null;
+}
+
+/** Play all (R-8): answered as `music.rendered` under the id returned. */
+export function renderMusic(worldId: string, productionId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "render-music", worldId, productionId, requestId }) ? requestId : null;
+}
+
+/**
+ * Make takes for a track (238i, R-9): the Bench's own dispatch in the album's session, so its
+ * answer is a Bench dispatch's `queue.enqueue-result` under the id returned.
+ */
+export function makeMusicTakes(worldId: string, productionId: string, trackId: string, composer: Extract<ClientMessage, { kind: "music-track-make" }>["composer"]): string | null {
+  const requestId = queueRequest("bench-dispatch");
+  return send({ kind: "music-track-make", worldId, productionId, trackId, requestId, composer }) ? requestId : null;
+}
+
+/** Choose a take as its track's (238i, R-10). */
+export function chooseMusicTake(worldId: string, productionId: string, trackId: string, sessionId: string, takeId: string): boolean {
+  return send({ kind: "music-track-choose", worldId, productionId, trackId, sessionId, takeId, requestId: ulid() });
+}
+
+/** The track editor's Save (238j, R-11): its trim, fades and sections. */
+export function editMusicTrack(worldId: string, productionId: string, trackId: string, edit: Omit<Extract<ClientMessage, { kind: "music-track-edit" }>, "kind" | "worldId" | "productionId" | "trackId">): boolean {
+  return send({ kind: "music-track-edit", worldId, productionId, trackId, ...edit });
+}
+
+/** The album's sequence (238k, R-13): every join and the loudness target. */
+export function setMusicSequence(worldId: string, productionId: string, loudness: number, joins: Extract<ClientMessage, { kind: "music-sequence-set" }>["joins"]): boolean {
+  return send({ kind: "music-sequence-set", worldId, productionId, loudness, joins: [...joins] });
+}
+
+/** The album's takes by track (238i): answered as `music.takes` under the id returned. */
+export function readMusicTakes(worldId: string, productionId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "read-music-takes", worldId, productionId, requestId }) ? requestId : null;
+}
+
+/** A world audio file's waveform (238j, 238k): answered as `music.waveform` under the id returned. */
+export function readMusicWaveform(worldId: string, file: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "read-music-waveform", worldId, file, requestId }) ? requestId : null;
 }
 
 /** Stage the structured overview through the gate — nothing is written live (issue 385). */
@@ -5211,6 +5462,50 @@ export function saveChapter(
 }
 
 /**
+ * Save a graphic novel chapter's comic script whole (SPEC-064 R-10). `baseHash` is the file the
+ * editor read, null for a chapter with no script yet; the answer, by requestId, carries the next base.
+ */
+export function saveComicScript(worldId: string, productionId: string, chapter: string, pages: ComicPage[], baseHash: string | null): string | null {
+  const requestId = ulid();
+  return send({ kind: "save-comic-script", requestId, worldId, productionId, chapter, pages, baseHash }) ? requestId : null;
+}
+
+/** Ask what a page would cost and send; also files a page that landed while the app was closed (SPEC-064 R-25). */
+export function quoteComicPage(worldId: string, productionId: string, page: string, mode?: ComicMode): string | null {
+  const requestId = ulid();
+  return send({ kind: "quote-comic-page", requestId, worldId, productionId, page, ...(mode !== undefined ? { mode } : {}) }) ? requestId : null;
+}
+
+/** Make a page on the price its press showed (SPEC-064 R-27). */
+export function makeComicPage(worldId: string, productionId: string, page: string, confirmedMicroUsd: number, mode?: ComicMode, untilPasses?: boolean): string | null {
+  const requestId = ulid();
+  return send({ kind: "make-comic-page", requestId, worldId, productionId, page, confirmedMicroUsd, ...(mode !== undefined ? { mode } : {}), ...(untilPasses ? { untilPasses: true as const } : {}) }) ? requestId : null;
+}
+
+/** The book as CBZ and/or PDF from its accepted pages (SPEC-064 R-47). */
+export function exportComic(worldId: string, productionId: string, formats: Array<"cbz" | "pdf" | "epub">): string | null {
+  const requestId = ulid();
+  return send({ kind: "export-comic", requestId, worldId, productionId, formats }) ? requestId : null;
+}
+
+/** Read a take back and check its lettering again (SPEC-064 R-29). */
+export function checkComicTake(worldId: string, productionId: string, page: string, take: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "check-comic-take", requestId, worldId, productionId, page, take }) ? requestId : null;
+}
+
+/** Keep a take as the page; past findings or an unchecked take only with an override (SPEC-064 R-33). */
+export function acceptComicTake(worldId: string, productionId: string, page: string, take: string, override?: { findings: string[]; reason?: string }): string | null {
+  const requestId = ulid();
+  return send({ kind: "accept-comic-take", requestId, worldId, productionId, page, take, ...(override ? { override } : {}) }) ? requestId : null;
+}
+
+/** How a graphic novel reads and how its pages are checked (SPEC-064 R-12). */
+export function setComicSettings(worldId: string, productionId: string, settings: Extract<ClientMessage, { kind: "set-comic-settings" }>["settings"]): boolean {
+  return send({ kind: "set-comic-settings", worldId, productionId, settings });
+}
+
+/**
  * Save an audio drama's episode script whole (SPEC-057 R-83). `baseHash` is the file the score
  * read, null for an episode with no script yet; the answer, by requestId, carries the next base.
  */
@@ -5426,8 +5721,9 @@ export function recordTraversal(
   from: string,
   to: string,
   route: string[],
+  story?: TraversalEvidence["story"],
 ): void {
-  send({ kind: "record-traversal", worldId, productionId, choiceId, from, to, route });
+  send({ kind: "record-traversal", worldId, productionId, choiceId, from, to, route, ...(story ? { story } : {}) });
 }
 
 /** Ask for the named routing findings (epic 401) — evidence, never a score. */
@@ -5631,6 +5927,7 @@ export function importEditorMedia(
   worldId: string, editor: Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"],
   files?: readonly File[], production?: string,
   audioStudio?: Extract<ClientMessage, { kind: "upload-artifacts" }>["audioStudio"],
+  music?: Extract<ClientMessage, { kind: "upload-artifacts" }>["music"],
 ): { requestId: string | null; reason?: string } {
   if (isRemoteSession()) return { requestId: null, reason: "Import media on the desktop app." };
   if (files && files.length > 16) return { requestId: null, reason: "Import up to 16 files at a time." };
@@ -5641,7 +5938,7 @@ export function importEditorMedia(
   const requestId = queueRequest("upload-artifacts");
   // Omitted rather than sent as undefined: the frame is `.strict()`, and the picker and the drop
   // have to carry the same scope or one entrance on a page would file somewhere the other did not.
-  const scope = { ...(production !== undefined ? { production } : {}), ...(audioStudio ? { audioStudio } : {}) };
+  const scope = { ...(production !== undefined ? { production } : {}), ...(audioStudio ? { audioStudio } : {}), ...(music ? { music } : {}) };
   if (browserImport) {
     const currentBridge = bridge;
     let worldChanged = false;
@@ -6540,6 +6837,12 @@ export function exportAudiobookPlayer(worldId: string, productionId: string, exp
   return send({ kind: "export-audiobook-player", worldId, productionId, requestId, ...(exportId !== undefined ? { exportId } : {}), ...(scope !== undefined ? { scope } : {}) }) ? requestId : null;
 }
 
+/** What Export → Arke Player would make of a story (design turn 245a – 245c): answered as `story.export-state` under the id returned. */
+export function readStoryExport(worldId: string, productionId: string, size?: ArkePlayerPictureSize): string | null {
+  const requestId = ulid();
+  return send({ kind: "read-story-export", worldId, productionId, requestId, ...(size !== undefined ? { size } : {}) }) ? requestId : null;
+}
+
 /** The world package for Arke Player (design turn 233): answered as `arke-player.exported` for the export id given. */
 export function exportArkePlayer(worldId: string, productionId: string, exportId: string, options: { book: boolean; motion: boolean; size?: ArkePlayerPictureSize; part?: ArkePlayerPartRequest }): string | null {
   const requestId = ulid();
@@ -6664,6 +6967,26 @@ export function generateDiagnostics(): void {
   send({ kind: "generate-diagnostics" });
 }
 
+/** The returned ID correlates a flushed receipt; sending does not establish persistence. */
+export function setRecoveryMode(mode: import("@arke-studio/contracts").RecoveryMode): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-set-mode", requestId, mode }) ? requestId : null;
+}
+export function setRecoveryAdvanced(settings: import("@arke-studio/contracts").RecoveryAdvancedSettings): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-set-advanced", requestId, settings }) ? requestId : null;
+}
+export function reviewRecoveryAction(command: import("@arke-studio/contracts").RecoveryActionCommand["command"]): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-action", requestId, command }) ? requestId : null;
+}
+export function setRecoveryPreferences(preferences: { transientMuted?: boolean; desktopOptIn?: boolean }): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-set-preferences", requestId, preferences }) ? requestId : null;
+}
+export function controlRecoveryHistory(command: Extract<ClientMessage, { kind: "recovery-history-control" }>["command"]): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-history-control", requestId, command }) ? requestId : null;
+}
+export function readRecoveryHistory(query: import("@arke-studio/contracts").RecoveryHistoryQuery): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-history-read", requestId, query }) ? requestId : null;
+}
+
 export function listProviderCalls(jobId: string | null): void {
   send({ kind: "list-provider-calls", jobId });
 }
@@ -6770,6 +7093,9 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     keyArtPlans: {},
     setupStatus: null,
     diagnostics: null,
+    recoveryCommandResults: {},
+    recoveryActionResults: {},
+    recoveryHistoryPages: {},
     reading: {},
   deriving: {},
     casting: {},
@@ -7299,8 +7625,8 @@ export function sendBenchRebuildSubject(worldId: string, sessionId: string): str
     : null;
 }
 
-export function sendBenchNewSession(worldId: string, picture?: Extract<ClientMessage, { kind: "bench-new-session" }>["picture"]): void {
-  send({ kind: "bench-new-session", worldId, ...(picture !== undefined ? { picture } : {}) });
+export function sendBenchNewSession(worldId: string, picture?: Extract<ClientMessage, { kind: "bench-new-session" }>["picture"], image?: Extract<ClientMessage, { kind: "bench-new-session" }>["image"]): void {
+  send({ kind: "bench-new-session", worldId, ...(picture !== undefined ? { picture } : {}), ...(image !== undefined ? { image } : {}) });
 }
 
 export function sendBenchClose(worldId: string): void {
@@ -7556,7 +7882,7 @@ export function acceptPropState(
 }
 
 /** The Logs control on a spawned engine's row (SPEC-033 R-70; issue 585): the host opens the file. */
-export function openEngineLog(engine: "comfyui" | "voxa"): void {
+export function openEngineLog(engine: "comfyui" | "voxa" | "ollama"): void {
   send({ kind: "open-engine-log", engine });
 }
 
@@ -7572,6 +7898,11 @@ export function generatePerformance(input: Omit<Extract<ClientMessage, { kind: "
 }
 
 const remoteRefusalListeners = new Set<(refusal: RemoteCommandRefusal) => void>();
+const studioAssistantReplyListeners = new Set<(frame: Extract<Frame, { kind: "studio-assistant" }>) => void>();
+/** Private panel subscription only: no transcript is folded into app/world state. */
+export function onStudioAssistantReply(listener: (frame: Extract<Frame, { kind: "studio-assistant" }>) => void): () => void {
+  studioAssistantReplyListeners.add(listener); return () => studioAssistantReplyListeners.delete(listener);
+}
 export function subscribeRemoteRefusals(listener: (refusal: RemoteCommandRefusal) => void): () => void {
   remoteRefusalListeners.add(listener);
   return () => remoteRefusalListeners.delete(listener);

@@ -17,7 +17,12 @@ Start with the root [AGENTS.md](../../AGENTS.md) and shared [operational rules](
 | What generates this file or ships this asset? | [Maintenance map](maintenance.md) |
 | How do I add or replace a local generation recipe? | [ComfyUI recipe procedure](comfyui-recipes.md) |
 | How do local Llama and Gemma models run? | [Local language models](local-language-models.md) |
+| Who owns local Python/CUDA and engine processes? | [Managed local runtimes](managed-local-runtimes.md) |
+| How do I install and use Ming's optional local readers? | [Ming setup, voice recordings and limits](managed-local-runtimes.md#ming-qualification-and-delivery-boundary) |
+| How is Ming local speech evaluated before integration? | [Ming local auditions](ming-tts-audition.md) |
 | What is implemented versus planned? | [Bounded implementation status](status.md), then the relevant spec |
+| Which recovery guardrails can an operator adjust? | [Advanced recovery settings](recovery-settings.md) |
+| How do I test recovery as a user, and what remains unqualified? | [Recovery acceptance and user journeys](recovery-acceptance.md) |
 | Why is the product structured this way? | [Architecture guide](../architecture/index.html); for requirements, the master specification in the private document set (see below) |
 | Which disk writes does an operation perform? | [Filesystem operations](../filesystem-operations.md) |
 

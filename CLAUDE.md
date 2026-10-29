@@ -123,11 +123,13 @@ npm test            # node --test per workspace
 ```
 
 CI runs lint, typecheck and build once, on ubuntu-latest, in a job beside the tests, and the tests
-on **both** windows-latest and ubuntu-latest, in four coordinator shards plus a separate
+on **both** windows-latest and ubuntu-latest, in eight coordinator shards plus a separate
 other-workspaces job per platform, each with a 30-minute ceiling. Typecheck used to ride on shard
 1 of both platforms, 9.5 minutes each, and took Windows shard 1 to the ceiling on 2026-10-23. The
 other workspaces outgrew their former place alongside shard 2: on 2026-10-17 that combination
-exhausted the ceiling without a failed test. Three things run elsewhere, each named in
+exhausted the ceiling without a failed test. The four-way Windows shard 2 reached the ceiling
+again while tests were passing on 2026-10-27; eight automatically discovered shards split that
+work without extending the ceiling or silence guard. Three things run elsewhere, each named in
 `scripts/ci-test-plan.mjs` or its workflow: the Production Chat film runs only in its own job
 (the shards skip it by name), and the effect benchmarks (`effects.yml`) and the engine's package
 check (`engine.yml`) run on main and on pull requests that touch what they cover. Windows jobs
@@ -214,7 +216,9 @@ options: `start()` returns its generated token alongside the port for trusted ho
   `ws:` or `http:` end: either puts the capability, or a page that reads it, on the wire. Only an
   accepted proxied session widens Vite's allowed hosts and the page policy, for that one origin
   and server, and narrows `/@fs` to the client, contracts and `node_modules`. The built page
-  keeps its loopback-only policy.
+  keeps its loopback-only policy. In a worktree the two `@fontsource` packages resolve to the main
+  checkout; both modes serve those two folders and nothing else outside it, or the client draws in
+  Segoe UI.
 - **Remembered remote devices (#1311):** desktop owns a separate loopback gateway over its
   existing coordinator. Owner controls stay on trusted desktop IPC. Paired browsers use
   individual Secure/HttpOnly cookies; only proof hashes persist, with expiry and revocation.
@@ -239,6 +243,16 @@ Implementation entry points: coordinator `src/transport.ts`; desktop `src/transp
 The product-level explanation is in [the architecture guide](docs/architecture/the-program.html).
 
 ## Publishing a world to Arke Player
+
+For illustrated narration, assess the image holds, not just the image count. Use recorded take
+lengths when available; keep estimated sentence anchors labelled honestly. After narration and
+again on the exported listening plan, review the opening, every picture-to-picture interval and
+the final hold. Report the longest holds and their story purpose. A 30–60 second still is a useful
+starting point; review holds over 75 seconds, without making that a mandatory cut or image quota.
+Let the passage's action, emotional turns, suspense, humour and intended stillness set the pace.
+Additional views must add a supported reaction, detail or change of focus, preserve reveal timing,
+and avoid near duplicates. Portrait variants and unverified camera motion do not count as new
+moments. A count or chapter-wide average alone does not establish sufficient visual coverage.
 
 Arke Player's Available list and its `Update` come from one list of worlds, shipped in the app and
 fetched from the public ArkeStudio release `arke-player-worlds` (SPEC-058 R-29 – R-36, Player P9
@@ -286,11 +300,47 @@ parts and empties the entry's `parts`. A Guide with teasers exports guide versio
 from before ArkePlayer PR #11 refuse, with the package carrying it: publish one only once phones
 have that Player.
 
+**A story as a package of its own** (SPEC-058 R-79 – R-90, turn 245): an interactive movie or a
+visual novel goes out by the same four steps with `--story <production id>` in place of the
+production id (`npx tsx scripts/export-arke-player.mts <copy> --story <production id> <ffmpeg>`,
+`--size` for a novel's pictures, `--cover`/`--tall` for its covers), or from the Branch Map's
+Export → Arke Player. It makes `exports/<production-id>-story-<UTC date>.zip`, schema 6 and alone,
+read back with every route replayed, and is blocked as the sheet is — every choice walked in
+preview, a clip or picture for each reachable scene. The script carries only the character voices
+already prepared for the table read, so make a voiced novel from the app. Upload it under that name
+to the world's story release, pin it with ArkePlayer's `pin_world`, paste the pin on the production
+as `story` — never `package`: a Player of revision 11 installs every production `package` and would
+fetch a story it cannot read — raise the `serial`, and publish the list.
+
+**A graphic novel as a package of its own** (SPEC-064 R-50, R-51; Player P20): the same four
+steps, made from the Pages screen's Export → Arke Player (or `exportArkePlayer` on the production).
+It makes `exports/<production-id>-comic-<UTC date>.zip`, schema 7 and alone: one `arke-comic`
+document and each accepted page, read back before it is named, and refused while any page is not
+accepted or its lettering not cleared. Upload it under that name, pin it with ArkePlayer's
+`pin_world`, paste the pin on the production as `comic` — never `package` or `story`: an older
+Player would fetch what it cannot read — raise the `serial`, and publish the list.
+
+**A picture comes with the list** (SPEC-058 R-63 – R-67): a world's key art, a story's wide cover
+(16:9) or its upright cover (2:3), new or changed, needs no app release.
+1. Upload it under a name of its own, `<world id>-<keyArt|picture|tall>-<yyyymmdd>.<ext>`, to the
+   same `arke-player-worlds` release. Never replace one: a pinned phone would refuse new bytes.
+2. `dart run arke_world:pin_picture <file> <url>` from ArkePlayer prints its pin. Put the pin under
+   the entry's `pins` (`keyArt` on the world; `picture` and `tall` on the production), raise the
+   `serial`, and publish the list.
+3. Leave `picture`, `tall` and `keyArt` as bundle paths. Released Players read them as text, and
+   an object there would make them ignore the whole list.
+
+Phones fetch pinned pictures with the list, on any network. Players from before ArkePlayer PR #15
+keep their bundled pictures.
+
 ## Pull requests
 
-Branch, push, raise the PR, then comment `@codex review` on it. Fix every P1 and re-request until a
-round comes back clean. There are no required checks on this repo, so `--auto` merges immediately —
-poll CI yourself before merging rather than trusting auto-merge to gate.
+Branch, push, raise the PR, then comment `@codex review` on it. Automated code review is capped
+at three rounds per PR, including previously completed rounds; a new push does not reset the
+count. Stop sooner when a round returns no P1 findings. Address returned P1s, but do not request
+a fourth round; report any unresolved P1s rather than treating the limit as approval to merge.
+Tests and CI remain independent gates. There are no required checks on this repo, so `--auto`
+merges immediately — poll CI yourself before merging rather than trusting auto-merge to gate.
 
 `gh pr merge --delete-branch` switches your checkout to main, and commits made there afterwards
 skip PR review entirely. Prefer merging without it and cleaning up separately.

@@ -16,13 +16,20 @@ export function defaultEpisodeFor(
 }
 
 /** Turn 166's page strip; scene and episode trees live on their owning pages. */
-export function productionPages(shape: { hasChapters: boolean; isEpisodic: boolean; isBranching: boolean; playsAsBeats?: boolean; isAudioDrama?: boolean } | null) {
+export function productionPages(shape: { hasChapters: boolean; isEpisodic: boolean; isBranching: boolean; playsAsBeats?: boolean; isAudioDrama?: boolean; isMusic?: boolean; hasPages?: boolean } | null) {
+  // A music production (design turn 238c): its tracks, and what they are made of.
+  if (shape?.isMusic) return [["", "Tracks"], ["artifacts", "Artifacts"]] as const;
   // An audio drama (design turn 230 revision 3): its episodes, who plays them, what they are made
   // of. Adaptation joins when it is built; Dashboard and Overview only repeated Episodes.
   if (shape?.isAudioDrama) return [["", "Episodes"], ["cast", "Cast"], ["artifacts", "Artifacts"]] as const;
   if (shape?.isEpisodic) return [
     ["", "Overview"], ["season", "Episodes"], ["story-structure", "Story structure"],
     ["cast", "Cast"], ["artifacts", "Artifacts"], ["generate", "Generate"], ["cut", "Cut"],
+  ] as const;
+  // A graphic novel (SPEC-064 R-43): its pictures are its pages, so it has no audiobook to read.
+  if (shape?.hasPages) return [
+    ["", "Dashboard"], ["cast", "Cast"], ["story", "Develop"], ["overview", "Overview"],
+    ["story/chapters", "Chapters"], ["story/pages", "Pages"], ["artifacts", "Artifacts"],
   ] as const;
   if (shape?.hasChapters) return [
     ["", "Dashboard"], ["cast", "Cast"], ["story", "Develop"], ["overview", "Overview"],

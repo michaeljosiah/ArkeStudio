@@ -647,7 +647,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       return [{ id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }], needsSignIn: false }];
     } });
     const supervisor = Object.assign(new EventEmitter(), {
-      id: "harness", status: "stopped", start: async () => {}, stop: async () => {}, restart: async () => {},
+      id: "harness", status: "stopped", start: async () => {}, stop: async () => {}, restart: async () => {}, quiesce: () => {}, stopAndConfirm: async () => {},
     }) as unknown as ChildSupervisor;
     const test = await fixture({ adapter, supervisor });
     try {
@@ -681,7 +681,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       return answer;
     } });
     const supervisor = Object.assign(new EventEmitter(), {
-      id: "harness", status: "stopped", start: async () => {}, stop: async () => {}, restart: async () => {},
+      id: "harness", status: "stopped", start: async () => {}, stop: async () => {}, restart: async () => {}, quiesce: () => {}, stopAndConfirm: async () => {},
     }) as unknown as ChildSupervisor;
     const test = await fixture({ adapter, supervisor });
     try {
@@ -824,7 +824,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       return [{ id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }], needsSignIn: false }];
     } });
     const supervisor = Object.assign(new EventEmitter(), {
-      id: "harness", status: "stopped", start: async () => {}, stop: async () => {}, restart: async () => {},
+      id: "harness", status: "stopped", start: async () => {}, stop: async () => {}, restart: async () => {}, quiesce: () => {}, stopAndConfirm: async () => {},
     }) as unknown as ChildSupervisor;
     const test = await fixture({ adapter, supervisor });
     try {

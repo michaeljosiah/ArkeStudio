@@ -10,11 +10,13 @@ import type { MediaProbe } from "../media/probe.js";
 import type { TakePosterMaker, TakePosterUnavailableReason } from "../takes/poster.js";
 import type { WorldStore } from "../world/store.js";
 import { applyTimelineCommand } from "./timeline.js";
+import type { ImportFileSpace } from "../storage/import-files.js";
 
 export type EditorImport = NonNullable<Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"]>;
 
 /** Filing survives a stale edit; only placement and Library membership form the timeline transaction. */
 export async function importEditorMedia(store: WorldStore, sources: readonly (string | null)[], editor: EditorImport, options: {
+  importSpace?: ImportFileSpace;
   mediaProbe?: MediaProbe;
   /** Draws a video artifact's picture as it lands (issue 1037); absent on a build without ffmpeg. */
   poster?: TakePosterMaker;

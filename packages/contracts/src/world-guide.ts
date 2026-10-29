@@ -2,7 +2,21 @@ import { z } from "zod";
 import { CanonIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { mainPhotoFor, orderedLocationViews, type ReferenceKit } from "./reference.js";
 import type { CanonEntry, Sheet } from "./world.js";
-import { GUIDE_FORMAT, MAX_GUIDE_TEASERS, packageSlug, type GuideCharacter, type GuideDocument, type GuideLore, type GuidePlace, type GuideSection, type GuideTeaser, type GuideVoice } from "./world-package.js";
+import {
+  GUIDE_FORMAT,
+  MAX_GUIDE_TEASERS,
+  MAX_TEASER_CLIP_MS,
+  packageSlug,
+  type GuideCharacter,
+  type GuideDocument,
+  type GuideLore,
+  type GuidePlace,
+  type GuideSection,
+  type GuideTeaser,
+  type GuideTeaserV2,
+  type GuideTheme,
+  type GuideVoice,
+} from "./world-package.js";
 
 /**
  * A world's Guide (SPEC-059 R-1 – R-8): which of the world's characters, places and settled lore a
@@ -36,6 +50,13 @@ export const GuideRecordVoiceSchema = z
   .strict();
 export type GuideRecordVoice = z.infer<typeof GuideRecordVoiceSchema>;
 
+/**
+ * A character's or place's theme (SPEC-059 R-35, design turn 238f): one track of the world's music,
+ * by its production and its id on that album. It follows the entry's own gate, so it has none.
+ */
+export const GuideRecordThemeSchema = z.object({ production: SlugSchema, track: SlugSchema }).strict();
+export type GuideRecordTheme = z.infer<typeof GuideRecordThemeSchema>;
+
 export const GuideRecordEntrySchema = z
   .object({
     public: z.boolean(),
@@ -43,6 +64,8 @@ export const GuideRecordEntrySchema = z
     /** By heading. */
     sections: z.record(z.string().min(1), GuideRecordSectionSchema).optional(),
     voice: GuideRecordVoiceSchema.optional(),
+    /** A build before themes reads the key as unreadable, so the world is raised first. */
+    theme: GuideRecordThemeSchema.optional(),
   })
   .strict();
 export type GuideRecordEntry = z.infer<typeof GuideRecordEntrySchema>;
@@ -60,13 +83,30 @@ export const GuideRecordTeaserSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("faction"), sheet: SlugSchema }).strict(),
   z.object({ kind: z.literal("picture"), production: SlugSchema, chapter: SlugSchema, block: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("clip"), production: SlugSchema, chapter: SlugSchema, block: z.string().min(1) }).strict(),
+  // A song (R-36, 238g): a track's excerpt, kept by its track and the window the author set, in ms
+  // on the track as it plays, so an edit to the track ships in the next package.
+  z.object({
+    kind: z.literal("song"),
+    production: SlugSchema,
+    track: SlugSchema,
+    start: z.number().int().min(0),
+    duration: z.number().int().min(1).max(MAX_TEASER_CLIP_MS),
+  }).strict(),
 ]);
 export type GuideRecordTeaser = z.infer<typeof GuideRecordTeaserSchema>;
 export type GuideRecordMoment = Extract<GuideRecordTeaser, { kind: "picture" | "clip" }>;
+export type GuideRecordSong = Extract<GuideRecordTeaser, { kind: "song" }>;
 
-/** Two choices are one teaser when they name the same thing the same way. */
-export const sameGuideTeaser = (a: GuideRecordTeaser, b: GuideRecordTeaser) =>
-  a.kind === b.kind && ("sheet" in a ? "sheet" in b && a.sheet === b.sheet : !("sheet" in b) && a.production === b.production && a.chapter === b.chapter && a.block === b.block);
+/**
+ * Two choices are one teaser when they name the same thing the same way. A song is one teaser
+ * however much of it is chosen: two windows on one track would show the same card twice.
+ */
+export const sameGuideTeaser = (a: GuideRecordTeaser, b: GuideRecordTeaser): boolean => {
+  if (a.kind !== b.kind) return false;
+  if ("sheet" in a) return "sheet" in b && a.sheet === b.sheet;
+  if (a.kind === "song") return b.kind === "song" && a.production === b.production && a.track === b.track;
+  return b.kind !== "song" && !("sheet" in b) && a.production === b.production && a.chapter === b.chapter && a.block === b.block;
+};
 
 export const GuideRecordSchema = z
   .object({
@@ -247,10 +287,12 @@ export function guideChapterOf(productions: readonly GuideProductionChapters[], 
   return production !== undefined && chapter !== undefined ? { production, number: chapter.number, title: chapter.title } : null;
 }
 
-/** What the Guide's head counts (R-1, R-24): `3 of 6 teasers · 4 of 5 characters · 3 of 6 places · 7 of 16 lore · 4 after a chapter`. */
+/** What the Guide's head counts (R-1, R-24, R-35): `3 of 6 teasers · 4 of 5 characters · 2 themes · 3 of 6 places · 7 of 16 lore · 4 after a chapter`. */
 export interface GuideCounts {
   teasers: { chosen: number; of: number };
   characters: { public: number; of: number };
+  /** Public characters and places with a theme. */
+  themes: number;
   places: { public: number; of: number };
   lore: { public: number; of: number };
   after: number;
@@ -272,9 +314,11 @@ export function guideCounts(record: GuideRecord, world: GuideWorld): GuideCounts
   const characters = guideLiving(world.characters);
   const places = [...guideLiving(world.locations).map((sheet) => ["locations", sheet.id] as const), ...guideLiving(world.factions).map((sheet) => ["factions", sheet.id] as const)];
   const lore = guideLiving(world.canon).filter(guideLoreChoosable);
+  const themed = (kind: Exclude<GuideKind, "lore">, id: string) => on(kind, id) && record[kind][id]!.theme !== undefined;
   return {
     teasers: { chosen: record.teasers?.length ?? 0, of: MAX_GUIDE_TEASERS },
     characters: { public: characters.filter((sheet) => on("characters", sheet.id)).length, of: characters.length },
+    themes: characters.filter((sheet) => themed("characters", sheet.id)).length + places.filter(([kind, id]) => themed(kind, id)).length,
     places: { public: places.filter(([kind, id]) => on(kind, id)).length, of: places.length },
     lore: { public: lore.filter((entry) => on("lore", entry.id)).length, of: lore.length },
     after:
@@ -282,6 +326,21 @@ export function guideCounts(record: GuideRecord, world: GuideWorld): GuideCounts
       places.filter(([kind, id]) => waits(kind, id)).length +
       lore.filter((entry) => waits("lore", entry.id)).length,
   };
+}
+
+/**
+ * Whose theme a track is (R-35; design turn 238c, 238e): the living characters and places whose
+ * public entry names it, characters first, as an album's rows and a track's Theme of list them.
+ */
+export function guideThemeHolders(record: GuideRecord, world: Omit<GuideWorld, "canon">, theme: GuideRecordTheme): Array<{ kind: GuideSheetKind; sheet: Sheet }> {
+  return (["characters", "locations", "factions"] as const).flatMap((kind) =>
+    guideLiving(world[kind])
+      .filter((sheet) => {
+        const entry = record[kind][sheet.id];
+        return entry?.public === true && entry.theme?.production === theme.production && entry.theme.track === theme.track;
+      })
+      .map((sheet) => ({ kind, sheet })),
+  );
 }
 
 /** A picture or clip teaser as the exporter made it: its files as assets, and the name it is shown by. */
@@ -295,6 +354,16 @@ export interface GuideMadeMoment {
   motion?: string;
 }
 
+/** A song teaser as the exporter made it (R-36, R-37): its excerpt and the picture it is shown by. */
+export interface GuideMadeSong {
+  title: string;
+  /** The music production's square cover, else the world's key art. */
+  picture: string;
+  /** The excerpt, and its length in milliseconds, at most 30 seconds. */
+  audio: string;
+  duration: number;
+}
+
 /** What a package needs that only the exporter has: each picture as an asset, and each voice line cut. */
 export interface GuideMaterial extends GuideWorld {
   productions: readonly GuideProductionChapters[];
@@ -302,6 +371,10 @@ export interface GuideMaterial extends GuideWorld {
   voice: (sheet: Sheet, voice: GuideRecordVoice) => GuideVoice | undefined;
   /** A picture or clip teaser made, or undefined when its moment is gone or no longer read whole (R-27). */
   moment?: (teaser: GuideRecordMoment) => GuideMadeMoment | undefined;
+  /** A theme's track as it is now, its title and length; undefined when the track is gone (R-35). */
+  theme?: (theme: GuideRecordTheme) => { title: string; duration: number } | undefined;
+  /** A song teaser made, or undefined when its track is gone (R-36). */
+  song?: (teaser: GuideRecordSong) => GuideMadeSong | undefined;
 }
 
 /**
@@ -346,6 +419,13 @@ export function guideDocument(record: GuideRecord, material: GuideMaterial): Gui
   };
 
   type Pending<T> = { entry: T; links: readonly string[] };
+  // A theme rides on its entry, so it shows when the entry does (R-35); one whose track is gone stays
+  // in the Guide, marked, and out of the package. Named by the package's own ids.
+  const themes = new Map<string, GuideTheme>();
+  const themeOf = (id: string, theme: GuideRecordTheme | undefined) => {
+    const made = theme !== undefined ? material.theme?.(theme) : undefined;
+    if (theme !== undefined && made !== undefined) themes.set(id, { production: packageSlug(theme.production), track: theme.track, title: made.title.slice(0, 200), duration: made.duration });
+  };
   const characters: Pending<GuideCharacter>[] = [];
   for (const sheet of guideLiving(material.characters)) {
     const entry = record.characters[sheet.id];
@@ -357,9 +437,11 @@ export function guideDocument(record: GuideRecord, material: GuideMaterial): Gui
     // A voice line names its chapter in the guide too, so a reader can say where it was heard.
     const heard = voice !== undefined && resolve({ production: voice.production, chapter: voice.chapter }) !== false;
     const spoken = heard ? { ...voice, production: packageSlug(voice.production) } : undefined;
+    const id = idOf(`characters:${sheet.id}`, sheet.id);
+    themeOf(id, entry.theme);
     characters.push({
       entry: {
-        id: idOf(`characters:${sheet.id}`, sheet.id),
+        id,
         name: sheet.name.slice(0, 200),
         ...(sheet.role?.trim() ? { role: sheet.role.trim().slice(0, 200) } : {}),
         ...(portrait !== undefined ? { portrait } : {}),
@@ -379,9 +461,11 @@ export function guideDocument(record: GuideRecord, material: GuideMaterial): Gui
       if (after === false) continue;
       const picture = material.picture(kind, sheet);
       const role = kind === "locations" ? sheet.region?.trim() : "Faction";
+      const id = idOf(`${kind}:${sheet.id}`, sheet.id);
+      themeOf(id, entry.theme);
       places.push({
         entry: {
-          id: idOf(`${kind}:${sheet.id}`, sheet.id),
+          id,
           name: sheet.name.slice(0, 200),
           ...(role ? { role: role.slice(0, 200) } : {}),
           ...(picture !== undefined ? { picture } : {}),
@@ -410,6 +494,11 @@ export function guideDocument(record: GuideRecord, material: GuideMaterial): Gui
   // Guide, marked, and out of the package.
   const teasers: GuideTeaser[] = [];
   for (const choice of record.teasers ?? []) {
+    if (choice.kind === "song") {
+      const made = material.song?.(choice);
+      if (made !== undefined) teasers.push({ kind: "song", title: made.title.slice(0, 200), picture: made.picture, audio: made.audio, duration: made.duration, production: packageSlug(choice.production), track: choice.track });
+      continue;
+    }
     if (choice.kind === "picture" || choice.kind === "clip") {
       const made = material.moment?.(choice);
       const from = made !== undefined ? resolve({ production: choice.production, chapter: choice.chapter }) : false;
@@ -446,6 +535,11 @@ export function guideDocument(record: GuideRecord, material: GuideMaterial): Gui
     places: places.map(linked),
     lore: lore.map(linked),
   } as const;
-  // Version 2 only with teasers, so a guide without them reads in every Player (R-28).
-  return teasers.length > 0 ? { ...document, version: 2, teasers } : { ...document, version: 1 };
+  // The lowest version that holds what ships (R-28, R-37): 3 only with a theme or a song, 2 only
+  // with teasers, so a guide without them reads in every Player that reads the rest.
+  if (themes.size > 0 || teasers.some((teaser) => teaser.kind === "song")) {
+    const themed = <T extends { id: string }>(entry: T): T => (themes.has(entry.id) ? { ...entry, theme: themes.get(entry.id)! } : entry);
+    return { ...document, characters: document.characters.map(themed), places: document.places.map(themed), version: 3, ...(teasers.length > 0 ? { teasers } : {}) };
+  }
+  return teasers.length > 0 ? { ...document, version: 2, teasers: teasers as GuideTeaserV2[] } : { ...document, version: 1 };
 }

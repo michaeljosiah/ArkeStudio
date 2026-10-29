@@ -1,8 +1,9 @@
+import { Script } from "node:vm";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { appendFile, mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { deriveProductionReadiness, productionExportFingerprint, INTERACTIVE_PLAYER_SOURCE, migrateLegacyScene, RoutingSchema, type ClientMessage, type DomainEvent, type ProductionBundle, type Routing, type Take } from "@arke-studio/contracts";
+import { deriveProductionReadiness, productionExportFingerprint, storyIdentity, storyReplay, INTERACTIVE_PLAYER_SOURCE, migrateLegacyScene, RoutingSchema, type ClientMessage, type DomainEvent, type ProductionBundle, type Routing, type Take } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import type { ChangeLog } from "../../src/change-log.js";
 import {
@@ -425,7 +426,7 @@ describe("interactive video through the coordinator (epic 401)", () => {
     // One player, two homes: the module's own text, inlined whole — not a second player kept
     // alike by hand, which is how the package and the preview drifted apart before.
     assert.ok(
-      player.includes(INTERACTIVE_PLAYER_SOURCE.replace("export function mountInteractivePlayer", "function mountInteractivePlayer")),
+      player.includes(INTERACTIVE_PLAYER_SOURCE.replace(/^export function /gm, "function ")),
       "the module's text is in the page, verbatim",
     );
     assert.equal(player.match(/mountInteractivePlayer\(document\.getElementById\("app"\)/g)?.length, 1, "and the page mounts it once");
@@ -439,7 +440,7 @@ describe("interactive video through the coordinator (epic 401)", () => {
     // buttons render, the first takes focus, and the player waits.
     assert.ok(!/setTimeout|setInterval|requestAnimationFrame/.test(player), "no timer anywhere in the player");
     assert.ok(!/countdown|autoAdvance|defaultChoice|timeoutSec/i.test(player), "and no timed-choice vocabulary");
-    assert.match(player, /choicesEl\.querySelector\("button"\)\?\.focus\(\)/, "the keyboard lands on the first choice");
+    assert.match(player, /choicesEl\.querySelector\("button:not\(\[disabled\]\)"\)\?\.focus\(\)/, "the keyboard lands on the first available choice");
   });
 });
 
@@ -548,10 +549,34 @@ describe("a visual novel's package (turn 174)", () => {
     assert.deepEqual(manifest.files.map((entry) => entry.file).sort(), ["media/picture-sh_v1.png", "media/picture-sh_v3.png", "media/voice-sc_i1_sh_v1_blk_wash.mp3"], "each file once");
     assert.equal(await readFile(join(dir, result.dir, "media", "voice-sc_i1_sh_v1_blk_wash.mp3"), "utf8"), "the narrator reads");
     const player = await readFile(join(dir, result.file), "utf8");
+    assert.doesNotThrow(() => new Script(player.match(/<script>([\s\S]*?)<\/script>/)![1]!));
     assert.match(player, /manifest\.beats/, "the page reads the beats");
     assert.match(player, /\+ \(manifest\.beats \? "-beats" : ""\)/, "a beat package keeps its place apart from a clip package's (codex round 15)");
-    assert.ok(player.includes(INTERACTIVE_PLAYER_SOURCE.replace("export function mountInteractivePlayer", "function mountInteractivePlayer").slice(0, 200)), "the one player");
+    assert.ok(player.includes(INTERACTIVE_PLAYER_SOURCE.replace(/^export function /gm, "function ").slice(0, 200)), "the one player");
     assert.equal(await interactiveExportCompleted(store, production.meta.id, exportId), true, "it verifies as complete");
+  });
+
+  it("exports remembered state, guarded beat identities and ending variants in executable offline HTML", async () => {
+    const { dir, store, bundle } = await open();
+    const production = await novel(dir, bundle.productions[0]!);
+    production.routing = RoutingSchema.parse({ ...ROUTING, schemaVersion: 2,
+      facts: [{ id: "surveyor", label: "Surveyor", type: "boolean", default: true }],
+      choices: [{ ...ROUTING.choices[0], effects: [{ fact: "surveyor", value: false }] }],
+      presentation: [{ sceneId: "sc_i2", shots: [], blocks: [{ blockId: "blk_level", when: { op: "eq", fact: "surveyor", value: true } }] }],
+      endings: [{ sceneId: "sc_i2", title: "The pier", variants: [{ id: "empty", title: "An empty seat", text: "One place is empty.", fallback: true }] }],
+    });
+    const routing = production.routing;
+    await appendTraversal(store, production.meta.id, { ...walked, story: { identity: storyIdentity(routing), prefix: [], before: storyIdentity(storyReplay(routing).state), after: storyIdentity(storyReplay(routing, ["ch_on"]).state), provenance: "human" } });
+    const result = await exportInteractive(store, production, CLOCK, { current: () => production });
+    assert.ok(result.ok, result.ok ? "" : result.blockers.join("; "));
+    const manifest = JSON.parse(await readFile(join(dir, result.dir, "manifest.json"), "utf8"));
+    assert.deepEqual(manifest.routing, routing);
+    assert.equal(manifest.beats.find((entry: {sceneId: string}) => entry.sceneId === "sc_i2").beats[0].blockId, "blk_level");
+    assert.equal(manifest.beats[0].beats[0].shotId, "sh_v1");
+    const html = await readFile(join(dir, result.file), "utf8");
+    assert.doesNotThrow(() => new Script(html.match(/<script>([\s\S]*?)<\/script>/)![1]!));
+    assert.match(html, /story: manifest.routing.schemaVersion === 2/);
+    assert.equal(await interactiveExportCompleted(store, production.meta.id, result.id), true);
   });
 
   it("refuses a beat with no picture by name, and never a line with no voice", async () => {

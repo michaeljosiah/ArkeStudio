@@ -1,0 +1,32 @@
+{
+  "music": {
+    "path": "songs-of-the-drowned-quarter/music.json",
+    "mediaType": "application/vnd.arke.music+json",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "cover": {
+    "path": "songs-of-the-drowned-quarter/cover.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "a-drowned-verse": {
+    "path": "songs-of-the-drowned-quarter/tracks/the-drowned-verse.m4a",
+    "mediaType": "audio/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "a-slack-water": {
+    "path": "songs-of-the-drowned-quarter/tracks/slack-water.m4a",
+    "mediaType": "audio/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "a-saltmouth-bells": {
+    "path": "songs-of-the-drowned-quarter/tracks/saltmouth-bells.m4a",
+    "mediaType": "audio/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

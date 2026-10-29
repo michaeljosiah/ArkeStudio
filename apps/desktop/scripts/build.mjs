@@ -68,4 +68,6 @@ cpSync(join(root, "../../packages/coordinator/src/publications/fonts"), join(roo
 cpSync(join(root, "../../licenses/story-pdf"), join(root, "dist/story-pdf-licenses"), { recursive: true });
 cpSync(join(root, "../../packages/coordinator/src/harness/skills"), join(root, "dist/skills"), { recursive: true });
 cpSync(join(root, "../../packages/coordinator/src/media/local-audio-listener.py"), join(root, "dist/local-audio-listener.py"));
+cpSync(join(root, "../../packages/coordinator/src/local-ai/ming-worker.py"), join(root, "dist/ming-worker.py"));
+cpSync(join(root, "../../licenses/ming-audition-MIT.txt"), join(root, "dist/ming-MIT.txt"));
 console.log(`[build] main.cjs + preload.cjs, story PDF worker/fonts and authoring skills at ${version}`);

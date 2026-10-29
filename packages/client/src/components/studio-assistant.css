@@ -1,0 +1,92 @@
+/* Approved turn 239 revision 2. Scope these rules to Studio; contextual chat keeps its layout. */
+.fy-page-sheet.fy-studio-assistant { position: fixed; inset: 50px 10px calc(12px + var(--studio-keyboard, 0px)) auto; width: 440px; max-width: calc(100% - 20px); height: auto; max-height: none; min-height: 0; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); color: var(--foreground); box-shadow: var(--shadow-lg); z-index: 70; overflow: hidden; }
+.fy-studio-assistant > .fy-page-sheet__grab { display: none; }
+.fy-studio-assistant > .fy-page-sheet__body { flex: 1; min-height: 0; padding: 0; gap: 0; overflow: hidden; }
+.fy-studio-dialog { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100%; }
+.fy-studio-head { display: flex; align-items: center; gap: 8px; flex: none; padding: 18px 18px 14px; border-bottom: 1px solid var(--border); }
+.fy-studio-head > div { flex: 1; min-width: 0; }
+.fy-studio-head h2 { font: var(--type-h3); margin: 0 0 5px; }
+/* A block line: inline, it sat on the 22px strut of the body text and the head grew 8px taller than 239. */
+.fy-studio-head span { display: block; font: var(--type-label); color: var(--muted-foreground); }
+.fy-studio-assistant .fy-studio-icon { width: 32px; height: 32px; min-width: 32px; min-height: 32px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.fy-studio-assistant .fy-studio-icon:hover { background: var(--secondary); }
+.fy-studio-scope { display: flex; align-items: center; gap: 12px; flex: none; padding: 11px 18px; font: var(--type-label); border-bottom: 1px solid var(--border); }
+.fy-studio-scope > span { font: var(--type-meta); color: var(--muted-foreground); }
+.fy-studio-messages, .fy-studio-history { flex: 1; min-height: 0; padding: 24px 18px; display: flex; flex-direction: column; gap: 22px; overflow: auto; overscroll-behavior: contain; overflow-wrap: anywhere; }
+.fy-studio-welcome { margin: auto 0; text-align: center; padding: 28px 4px; }
+.fy-studio-mark { display: grid; place-items: center; width: 40px; height: 40px; margin: 0 auto 16px; border: 1px solid var(--border); border-radius: 12px; font: var(--type-h2); }
+.fy-studio-welcome h3 { font: var(--type-h3); margin: 0 0 14px; }
+.fy-studio-welcome p { font: var(--type-ui); font-weight: var(--weight-regular); color: var(--muted-foreground); line-height: var(--leading-body); max-width: 29ch; margin: 0 auto 28px; }
+.fy-studio-prompts { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.fy-studio-prompt { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-pill); min-height: 34px; padding: 6px 14px; font: var(--type-ui); background: var(--background); color: inherit; cursor: pointer; }
+.fy-studio-user { align-self: flex-end; max-width: 88%; padding: 12px 14px; border-radius: 10px; background: var(--secondary); font: var(--type-ui); font-weight: var(--weight-regular); line-height: var(--leading-body); white-space: pre-wrap; }
+/* 1.6, as 239 renders its reply paragraphs; the replies here are inline text, not paragraphs. */
+.fy-studio-answer { font: var(--type-ui); font-weight: var(--weight-regular); line-height: 1.6; }
+.fy-studio-answer > p { margin: 0 0 14px; }
+.fy-studio-answer > p:last-child { margin-bottom: 0; }
+.fy-studio-answer-label { font: var(--type-label); font-weight: var(--weight-semibold); margin-bottom: 12px; }
+.fy-studio-fact-card { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin: 16px 0; background: var(--background); }
+.fy-studio-fact-head { display: flex; align-items: center; gap: 8px; font: var(--type-ui); font-weight: var(--weight-medium); margin-bottom: 5px; }
+.fy-studio-fact-head svg { flex: none; width: 15px; height: 15px; color: var(--warning); }
+.fy-studio-meta { font: var(--type-meta); color: var(--muted-foreground); }
+.fy-studio-facts { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin: 18px 0; font: var(--type-ui); }
+.fy-studio-facts dt { color: var(--muted-foreground); }
+.fy-studio-facts dd { margin: 0; text-align: right; }
+.fy-studio-remedies .fy-set__row { flex-wrap: wrap; padding-inline: 0; gap: 12px; }
+.fy-studio-remedies .fy-set__name { width: auto; min-width: 0; flex: 1 1 180px; }
+.fy-studio-remedies .fy-diag__meta { overflow-wrap: anywhere; }
+.fy-studio-note { font: var(--type-label); line-height: var(--leading-body); color: var(--muted-foreground); margin: 12px 0; }
+.fy-studio-button { min-height: 34px; padding: 7px 11px; border: 1px solid var(--border); border-radius: 7px; font: var(--type-label); background: var(--background); color: var(--foreground); cursor: pointer; }
+.fy-studio-button--primary { background: var(--foreground); color: var(--background); border-color: var(--foreground); }
+.fy-studio-button:disabled { cursor: default; opacity: .5; }
+.fy-studio-work-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.fy-studio-working { display: flex; align-items: center; justify-content: space-between; gap: 8px; font: var(--type-label); color: var(--muted-foreground); }
+.fy-studio-trouble { flex: none; max-height: 90px; overflow: auto; margin: 0; padding: 10px 18px; font: var(--type-label); color: var(--muted-foreground); }
+.fy-studio-unsaved { padding: 12px; border: 1px solid var(--border); border-radius: 10px; }
+.fy-studio-history > div { display: flex; align-items: center; gap: 8px; }
+.fy-studio-history-choice { flex: 1; min-width: 0; padding: 8px; background: transparent; color: inherit; border: 0; text-align: left; font: var(--type-ui); overflow-wrap: anywhere; cursor: pointer; }
+.fy-studio-history-choice[aria-current=true] { background: var(--secondary); border-radius: 7px; }
+.fy-studio-consent { display: flex; align-items: center; gap: 8px; margin: 14px 0; font: var(--type-label); }
+.fy-studio-fact-card pre { max-height: 260px; padding: 10px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--type-label); background: var(--secondary); border-radius: 7px; }
+.fy-studio-handoff-draft { display: block; width: 100%; min-height: 90px; margin: 12px 0; padding: 8px; resize: vertical; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: inherit; font: var(--type-ui); white-space: pre-wrap; }
+.fy-studio-target { display: flex; flex-direction: column; gap: 8px; font: var(--type-label); }
+.fy-studio-target select { min-height: 34px; background: var(--background); color: inherit; border: 1px solid var(--border); border-radius: 7px; }
+.fy-studio-compose { flex: none; max-height: 48%; overflow-y: auto; padding: 12px 14px 14px; margin: 0; border-top: 1px solid var(--border); }
+.fy-studio-compose-scope { font: var(--type-meta); color: var(--muted-foreground); margin: 0 0 8px; }
+.fy-studio-compose .fy-cx { border-radius: 10px; background: var(--background); }
+/* Turn 239 draws the approved 225 composer, as the chapter dock does (global-chat.css): 32px tools
+   with 6px corners, Read replies named beside its speaker and the model chip taking the free width.
+   The shared toolbar's own container query would otherwise drop the name at this 394px bar. */
+.fy-studio-compose :is(.fy-cx__editor, .fy-cx__placeholder) { padding: 13px 14px 8px; font: var(--type-ui); font-weight: var(--weight-regular); line-height: 1.6; }
+.fy-studio-compose .fy-cx__editor { min-height: 70px; }
+.fy-studio-compose .fy-cx__bar { padding: 8px; gap: 6px; }
+.fy-studio-compose .fy-cx__left { gap: 5px; }
+.fy-studio-compose .fy-cx__left > .fy-mchip { flex: 1; min-width: 0; }
+.fy-studio-compose .fy-cx :is(.fy-cx__attach, .fy-cx__mic, .fy-cx__send) { width: 32px; height: 32px; min-width: 32px; margin-left: 0; border-radius: 6px; }
+.fy-studio-compose .fy-cx .fy-cx__left > .fy-cx__tool { width: auto; height: 32px; flex: 0 1 auto; padding: 6px; border-radius: 6px; }
+.fy-studio-compose .fy-cx :is(.fy-cx__mic, .fy-cx__send, .fy-cx__left > .fy-cx__tool) > svg { width: 16px; height: 16px; }
+.fy-studio-compose .fy-cx .fy-cx__left > .fy-cx__tool > span { display: inline; font: var(--type-meta); }
+.fy-studio-assistant::backdrop { background: linear-gradient(to bottom, transparent 44px, color-mix(in srgb, var(--foreground) 18%, transparent) 44px); }
+@media (width < 1100px) {
+  .fy-page-sheet.fy-studio-assistant { inset: 60px 16px calc(16px + var(--studio-keyboard, 0px)) auto; width: min(520px, calc(100% - 32px)); }
+}
+@media (width < 600px) {
+  .fy-page-sheet.fy-studio-assistant { inset: 60px 12px calc(max(12px, env(safe-area-inset-bottom)) + var(--studio-keyboard, 0px)) auto; width: calc(100% - 24px); max-width: none; border-radius: 12px; }
+  .fy-studio-head { padding: 12px; }
+  .fy-studio-scope { padding: 10px 14px; gap: 10px; }
+  .fy-studio-messages, .fy-studio-history { padding: 18px 14px; gap: 18px; }
+  .fy-studio-welcome { padding: 10px 0; }
+  .fy-studio-prompt, .fy-studio-button, .fy-studio-history-choice { min-height: 44px; }
+  .fy-studio-assistant .fy-studio-icon { width: 44px; height: 44px; min-width: 44px; }
+  .fy-studio-compose { padding: 10px; }
+  .fy-studio-compose :is(.fy-cx__editor, .fy-cx__placeholder) { padding: 12px; }
+  .fy-studio-compose .fy-cx__bar { padding: 8px 3px; gap: 3px; }
+  .fy-studio-compose .fy-cx__left { gap: 3px; }
+  .fy-studio-compose .fy-cx__left > .fy-mchip { flex: 0 1 auto; }
+  .fy-studio-compose .fy-cx .fy-cx__left > .fy-cx__tool > span { display: none; }
+  .fy-studio-fact-card { padding: 12px; }
+}
+@media (width < 600px), (pointer: coarse) {
+  .fy-studio-assistant .fy-studio-icon, .fy-studio-button, .fy-studio-prompt { min-width: 44px; min-height: 44px; }
+  .fy-studio-compose .fy-cx :is(.fy-cx__attach, .fy-cx__mic, .fy-cx__send, .fy-cx__tool, .fy-mchip__btn, .fy-cx__chipx, .fy-cx__chipaction) { min-width: 44px; min-height: 44px; justify-content: center; }
+}

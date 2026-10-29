@@ -17,6 +17,7 @@ import {
   type GuideRecord,
   type GuideRecordAfter,
   type GuideRecordEntry,
+  type GuideRecordTheme,
   type GuideRecordVoice,
   type GuideSheetKind,
   type GuideVoiceLine,
@@ -26,9 +27,9 @@ import {
 import { characterPortraitPath, locationPortraitPath, Portrait } from "../components/portrait.js";
 import { Button, Checkbox, IconButton, Select, Switch, cx } from "../components/ui.js";
 import { EyeOff, PauseSolid, PlaySolid, Smartphone, X } from "../components/icons.js";
-import { mediaUrl } from "../lib/media.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import { listGuideVoiceLines, setGuideEntry, subscribeGuideVoiceLines } from "../lib/store.js";
+import { ThemeCell, ThemeSelect, useWindowPlayer } from "./world-guide-music.js";
 import { GuideTeasers } from "./world-guide-teasers.js";
 
 /**
@@ -36,7 +37,8 @@ import { GuideTeasers } from "./world-guide-teasers.js";
  * entry by entry and section by section, each from the start or after a chapter. Nothing is public
  * until the author turns it on; only settled canon has a switch; a voice line is chosen from the
  * character's own takes. The Player's page beside an entry, and Preview's whole guide, are read by
- * the same `guideDocument` the package is, so what is drawn here is what ships.
+ * the same `guideDocument` the package is, so what is drawn here is what ships. A character or place
+ * may have a theme, one track of the world's music (238f, R-35), which follows the entry's gate.
  */
 
 type Open = { kind: GuideKind; id: string } | null;
@@ -112,6 +114,11 @@ export function GuideScreen() {
     const was = record[kind][id] as GuideRecordEntry | undefined;
     save(kind, id, { ...was, public: on });
   };
+  // A theme rides on the entry (R-35): set or cleared, the entry's other choices stay as they are.
+  const setTheme = (kind: GuideSheetKind, id: string, theme: GuideRecordTheme | undefined) => {
+    const { theme: _was, ...rest } = record[kind][id] ?? { public: false };
+    save(kind, id, theme === undefined ? rest : { ...rest, theme });
+  };
   const lore = [...canon].sort((a, b) => Number(guideLoreChoosable(b)) - Number(guideLoreChoosable(a)) || a.id.localeCompare(b.id));
 
   return (
@@ -120,7 +127,8 @@ export function GuideScreen() {
         <div>
           <h1 className="fy-guide-title">Guide</h1>
           <div className="fy-guide-meta" data-testid="guide-counts">
-            {counts.teasers.chosen} of {counts.teasers.of} teasers · {counts.characters.public} of {counts.characters.of} characters · {counts.places.public} of {counts.places.of} places · {counts.lore.public} of {counts.lore.of} lore
+            {counts.teasers.chosen} of {counts.teasers.of} teasers · {counts.characters.public} of {counts.characters.of} characters
+            {counts.themes > 0 ? ` · ${counts.themes} theme${counts.themes === 1 ? "" : "s"}` : ""} · {counts.places.public} of {counts.places.of} places · {counts.lore.public} of {counts.lore.of} lore
             {counts.after > 0 ? ` · ${counts.after} after a chapter` : ""}
           </div>
         </div>
@@ -135,13 +143,13 @@ export function GuideScreen() {
         <div>
           <Group title="Characters" count={`${counts.characters.public} of ${counts.characters.of}`}>
             {listed.characters.map((sheet) => (
-              <SheetRow key={sheet.id} world={world} kind="characters" sheet={sheet} entry={record.characters[sheet.id]} productions={productions} onToggle={(on) => toggle("characters", sheet.id, on)} onOpen={() => setOpen({ kind: "characters", id: sheet.id })} />
+              <SheetRow key={sheet.id} world={world} record={record} kind="characters" sheet={sheet} entry={record.characters[sheet.id]} productions={productions} onToggle={(on) => toggle("characters", sheet.id, on)} onTheme={(theme) => setTheme("characters", sheet.id, theme)} onOpen={() => setOpen({ kind: "characters", id: sheet.id })} />
             ))}
           </Group>
           <Group title="Places" count={`${counts.places.public} of ${counts.places.of}`}>
             {(["locations", "factions"] as const).flatMap((kind) =>
               listed[kind].map((sheet) => (
-                <SheetRow key={`${kind}:${sheet.id}`} world={world} kind={kind} sheet={sheet} entry={record[kind][sheet.id]} productions={productions} onToggle={(on) => toggle(kind, sheet.id, on)} onOpen={() => setOpen({ kind, id: sheet.id })} />
+                <SheetRow key={`${kind}:${sheet.id}`} world={world} record={record} kind={kind} sheet={sheet} entry={record[kind][sheet.id]} productions={productions} onToggle={(on) => toggle(kind, sheet.id, on)} onTheme={(theme) => setTheme(kind, sheet.id, theme)} onOpen={() => setOpen({ kind, id: sheet.id })} />
               )),
             )}
           </Group>
@@ -198,7 +206,7 @@ function Shows({ after, productions }: { after: GuideRecordAfter | undefined; pr
   return <span className="fy-guide-tag"><EyeOff size={12} />{chapter !== null ? `After Chapter ${chapter.number}` : "Chapter removed"}</span>;
 }
 
-function SheetRow({ world, kind, sheet, entry, productions, onToggle, onOpen }: { world: WorldBundle; kind: GuideSheetKind; sheet: Sheet; entry: GuideRecordEntry | undefined; productions: readonly GuideProductionChapters[]; onToggle: (on: boolean) => void; onOpen: () => void }) {
+function SheetRow({ world, record, kind, sheet, entry, productions, onToggle, onTheme, onOpen }: { world: WorldBundle; record: GuideRecord; kind: GuideSheetKind; sheet: Sheet; entry: GuideRecordEntry | undefined; productions: readonly GuideProductionChapters[]; onToggle: (on: boolean) => void; onTheme: (theme: GuideRecordTheme | undefined) => void; onOpen: () => void }) {
   const on = entry?.public === true;
   const sections = guideSections(sheet).filter((section) => entry?.sections?.[section.heading]?.public === true).map((section) => section.heading);
   const role = roleOf(kind, sheet);
@@ -216,6 +224,8 @@ function SheetRow({ world, kind, sheet, entry, productions, onToggle, onOpen }: 
         {kind === "characters" && <span className="fy-guide-col fy-guide-col--voice">{on && entry.voice !== undefined ? `Voice ${entry.voice.seconds !== undefined ? clock(entry.voice.seconds) : ""}`.trim() : "—"}</span>}
         <span className="fy-guide-col fy-guide-col--shows">{on ? <Shows after={entry.after} productions={productions} /> : "—"}</span>
       </button>
+      {/* Its own button beside the row's, so choosing a theme never opens the entry. */}
+      <ThemeCell world={world} record={record} name={sheet.name} holder={sheet.id} theme={entry?.theme} onChange={onTheme} />
       <Switch checked={on} label={`${sheet.name} public`} onChange={onToggle} />
     </div>
   );
@@ -303,6 +313,15 @@ function EntryPanel({ world, worldId, open, record, productions, save, toggle, o
               </div>
             </div>
           )}
+          {sheet !== undefined && (
+            <div className="fy-guide-line">
+              <b>Theme</b>
+              <ThemeSelect world={world} theme={base.theme} onChange={(theme) => {
+                const { theme: _was, ...rest } = base;
+                put(theme === undefined ? rest : { ...rest, theme });
+              }} />
+            </div>
+          )}
           {canon !== undefined && (
             <div className="fy-guide-line fy-guide-line--top">
               <b>Text</b>
@@ -329,41 +348,13 @@ function EntryPanel({ world, worldId, open, record, productions, save, toggle, o
   );
 }
 
-/** Plays a line straight from its take: from where the sentence starts, for as long as it lasts. */
-function useLinePlayer(worldSlug: string) {
-  const audio = useRef<HTMLAudioElement | null>(null);
-  const [playing, setPlaying] = useState<string | null>(null);
-  useEffect(() => () => audio.current?.pause(), []);
-  const play = (key: string, line: { file: string; start: number; seconds: number }) => {
-    audio.current?.pause();
-    if (playing === key) {
-      setPlaying(null);
-      return;
-    }
-    const element = new Audio(mediaUrl(worldSlug, line.file));
-    audio.current = element;
-    const end = line.start + line.seconds;
-    element.addEventListener("loadedmetadata", () => {
-      element.currentTime = line.start;
-      void element.play().catch(() => setPlaying(null));
-    }, { once: true });
-    element.addEventListener("timeupdate", () => {
-      if (element.currentTime < end) return;
-      element.pause();
-      setPlaying((now) => (now === key ? null : now));
-    });
-    element.addEventListener("ended", () => setPlaying((now) => (now === key ? null : now)));
-    setPlaying(key);
-  };
-  return { playing, play };
-}
-
 function VoiceField({ world, worldId, sheet, voice, onChange }: { world: WorldBundle; worldId: string; sheet: Sheet; voice: GuideRecordVoice | undefined; onChange: (voice: GuideRecordVoice | undefined) => void }) {
   const [lines, setLines] = useState<GuideVoiceLine[] | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const [choosing, setChoosing] = useState(false);
   const asked = useRef<string | null>(null);
-  const player = useLinePlayer(world.meta.slug);
+  // A line plays straight from its take: from where the sentence starts, for as long as it lasts.
+  const player = useWindowPlayer(world.meta.slug);
   useEffect(() => {
     setLines(null);
     const off = subscribeGuideVoiceLines((answer) => {

@@ -28,6 +28,8 @@ import {
   mappedReferenceKinds,
   modeCapability,
   MUSIC_DURATION_SEC,
+  musicTakesInstrumental,
+  musicTakesLength,
   newId,
   orderedShots,
   pricedDuration,
@@ -150,8 +152,11 @@ export async function openBenchSession(
     defaultModel?: { provider: string; model: string } | undefined;
     /** Force a new session even where others exist — the clear-the-bench gesture. */
     fresh?: boolean | undefined;
-    /** Create an exact, fresh session with these reviewed words when sessionId does not exist. */
-    initial?: { mode: Extract<BenchMode, "image" | "video">; brief: string; title?: string } | undefined;
+    /**
+     * Create an exact, fresh session with these reviewed words when sessionId does not exist. An
+     * image's shape starts it too: Make cover's is square (SPEC-060 R-5).
+     */
+    initial?: { mode: Extract<BenchMode, "image" | "video">; brief: string; title?: string; aspect?: string } | undefined;
   } = {},
 ): Promise<OpenedBench | null> {
   if (options.sessionId !== undefined) {
@@ -182,7 +187,7 @@ async function createBenchSession(
   at: string,
   options: {
     defaultModel?: { provider: string; model: string } | undefined;
-    initial?: { mode: Extract<BenchMode, "image" | "video">; brief: string; title?: string } | undefined;
+    initial?: { mode: Extract<BenchMode, "image" | "video">; brief: string; title?: string; aspect?: string } | undefined;
   },
 ): Promise<OpenedBench | null> {
   const mode = options.initial?.mode ?? "image";
@@ -197,7 +202,7 @@ async function createBenchSession(
         mode,
         provider: options.defaultModel?.provider ?? "",
         model: options.defaultModel?.model ?? "",
-        params: mode === "image" ? { kind: "image", count: 1 } : { kind: "video" },
+        params: mode === "image" ? { kind: "image", count: 1, ...(options.initial?.aspect !== undefined ? { aspect: options.initial.aspect } : {}) } : { kind: "video" },
         brief: options.initial?.brief ?? "",
       },
       { at, requestId: composerRequestId },
@@ -1078,8 +1083,16 @@ export function planBenchDispatch(
   // minimax-music-3 requires prompt AND lyrics. Refused here with the missing half named,
   // rather than sent and 422'd: the brief is already guarded above, and words nobody wrote
   // are not something to discover from a provider error.
-  if (params.kind === "music" && params.lyrics.trim().length === 0) {
+  // An instrumental (SPEC-060 R-9) goes without words, on a route that can make one; anything
+  // else still needs its lyrics. A length goes only to a route that keeps it.
+  if (params.kind === "music" && params.instrumental === true) {
+    if (!musicTakesInstrumental(model)) return { ok: false, reason: `${model.displayName} needs lyrics` };
+    if (params.lyrics.trim().length > 0) return { ok: false, reason: "An instrumental is sent without lyrics" };
+  } else if (params.kind === "music" && params.lyrics.trim().length === 0) {
     return { ok: false, reason: "There are no lyrics yet — write them, or ask for a draft." };
+  }
+  if (params.kind === "music" && params.lengthSec !== undefined && !musicTakesLength(model)) {
+    return { ok: false, reason: `${model.displayName} takes no length` };
   }
 
   const videoDuration =
@@ -1316,12 +1329,13 @@ export function planBenchDispatch(
           // refuses a length a model does not declare, and its comment is the reason this is
           // here at all: a request that runs at the provider's default while the estimate was
           // computed from a number is the bug that machinery exists to prevent.
-          durationSec: MUSIC_DURATION_SEC,
+          // A track's composer may ask a length a route keeps (SPEC-060 R-9); priced at it.
+          durationSec: params.kind === "music" && params.lengthSec !== undefined ? params.lengthSec : MUSIC_DURATION_SEC,
         },
         // A ceiling, not a quote — the route calls `duration` an upper bound and stops when the
         // song is done. The take states the length that was actually made, measured from the
         // file, and the ledger records what was actually charged.
-        estimatedMicroUsd: estimateMicroUsd(model, { durationSec: MUSIC_DURATION_SEC }),
+        estimatedMicroUsd: estimateMicroUsd(model, { durationSec: params.kind === "music" && params.lengthSec !== undefined ? params.lengthSec : MUSIC_DURATION_SEC }),
         landing: { dir: sessionMediaDir(session.id, takeId) },
       });
     }

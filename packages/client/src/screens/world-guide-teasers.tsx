@@ -6,12 +6,14 @@ import {
   listeningPictureNamed,
   MAX_GUIDE_TEASERS,
   MAX_TEASER_CLIP_MS,
+  musicClock,
   sameGuideTeaser,
   type AudiobookListening,
   type GuideProductionChapters,
   type GuideRecord,
   type GuideRecordEntry,
   type GuideRecordMoment,
+  type GuideRecordSong,
   type GuideRecordTeaser,
   type ListeningChapter,
   type Sheet,
@@ -22,21 +24,24 @@ import { Button, IconButton, cx } from "../components/ui.js";
 import { PlaySolid, Plus, X } from "../components/icons.js";
 import { mediaUrl } from "../lib/media.js";
 import { openAudiobookListening, setGuideTeasers, subscribeAudiobookListening, useStore } from "../lib/store.js";
+import { clampExcerpt, musicChoiceOf, SongExcerpt, trackWhat, worldMusic, type WorldAlbum } from "./world-guide-music.js";
 
 /**
  * A world's teasers (design turn 236a – 236c, SPEC-059 R-24 – R-27): up to six things from the
  * world, in the author's order, that Arke Player shows to anyone before the world is installed. A
  * character or place must be public from the start; a picture is any picture made for the world's
- * productions; a clip is a moment of a chapter read whole, its picture and narration. Kept as
- * choices: a teaser that stops qualifying stays here, marked, and is left out of the package.
+ * productions; a clip is a moment of a chapter read whole, its picture and narration; a song is a
+ * window of at most 30 seconds on a track of the world's music (238g, R-36). Kept as choices: a
+ * teaser that stops qualifying stays here, marked, and is left out of the package.
  */
 
-type Tab = "characters" | "places" | "pictures" | "clips";
-const TABS: Array<[Tab, string]> = [["characters", "Characters"], ["places", "Places"], ["pictures", "Pictures"], ["clips", "Clips"]];
+type Tab = "characters" | "places" | "pictures" | "clips" | "songs";
+const TABS: Array<[Tab, string]> = [["characters", "Characters"], ["places", "Places"], ["pictures", "Pictures"], ["clips", "Clips"], ["songs", "Songs"]];
 
 /** A card as the Guide and the picker draw it: one shape whatever it holds (236 rule 12). */
 interface Card {
-  picture: { kind: "sheet"; path: string; label: string } | { kind: "file"; file: string } | null;
+  /** A square cover is drawn whole over its own blur, so the card keeps its 16:9 (238g). */
+  picture: { kind: "sheet"; path: string; label: string } | { kind: "file"; file: string } | { kind: "cover"; file: string } | null;
   name: string;
   what: string;
   clip: boolean;
@@ -117,6 +122,9 @@ function usePlans(worldId: string, productionIds: readonly string[], wanted: boo
   return plans;
 }
 
+const teaserKey = (teaser: GuideRecordTeaser) =>
+  `${teaser.kind}:${"sheet" in teaser ? teaser.sheet : teaser.kind === "song" ? `${teaser.production}/${teaser.track}` : `${teaser.production}/${teaser.chapter}/${teaser.block}`}`;
+
 const sheetKind = (teaser: GuideRecordTeaser) => (teaser.kind === "character" ? "characters" : teaser.kind === "location" ? "locations" : "factions") as "characters" | "locations" | "factions";
 const SHEET_TYPE = { characters: "character", locations: "location", factions: "faction" } as const;
 
@@ -162,7 +170,16 @@ export function GuideTeasers({ world, worldId, record, productions }: { world: W
     const mark = clip && !moment.whole ? "Not read whole" : undefined;
     return { picture: { kind: "file", file: moment.file }, name: moment.title, what: clip ? `Clip · ${clock(moment.seconds)} · Chapter ${moment.number}` : `Picture · Chapter ${moment.number}`, clip, ...(mark !== undefined ? { mark } : {}) };
   };
-  const cardOf = (teaser: GuideRecordTeaser) => ("sheet" in teaser ? sheetCard(teaser) : momentCard(teaser));
+  // A song shows its album's cover, or the key art where it has none, as the package does (R-37);
+  // in the picker it says which track it is, on the page how long its excerpt is.
+  const albums = worldMusic(world);
+  const songCard = (teaser: GuideRecordSong, picking: boolean): Card => {
+    const choice = musicChoiceOf(albums, teaser);
+    if (choice === undefined) return { picture: null, name: "Track removed", what: "Song", clip: true, mark: "Track removed" };
+    const picture: Card["picture"] = choice.cover !== undefined ? { kind: "cover", file: `artifacts/${choice.cover.file}` } : world.keyArt ? { kind: "file", file: world.keyArt } : null;
+    return { picture, name: choice.track.title, what: picking ? trackWhat(choice) : `Song · ${clock(teaser.duration / 1000)}`, clip: true };
+  };
+  const cardOf = (teaser: GuideRecordTeaser, picking = false) => ("sheet" in teaser ? sheetCard(teaser) : teaser.kind === "song" ? songCard(teaser, picking) : momentCard(teaser));
   const move = (from: number, to: number) => {
     if (from === to) return;
     const next = [...teasers];
@@ -179,7 +196,7 @@ export function GuideTeasers({ world, worldId, record, productions }: { world: W
           const card = cardOf(teaser);
           return (
             <div
-              key={`${teaser.kind}:${"sheet" in teaser ? teaser.sheet : `${teaser.production}/${teaser.chapter}/${teaser.block}`}`}
+              key={teaserKey(teaser)}
               className={cx("fy-guide-tz", card.mark !== undefined && "no", dragged === index && "drag")}
               draggable
               onDragStart={(event) => {
@@ -213,6 +230,7 @@ export function GuideTeasers({ world, worldId, record, productions }: { world: W
           world={world}
           teasers={teasers}
           moments={moments}
+          albums={albums}
           loading={storyIds.some((id) => !plans.has(id))}
           cardOf={cardOf}
           sameTeaser={sameTeaser}
@@ -237,6 +255,8 @@ function TeaserPicture({ world, card, n }: { world: WorldBundle; card: Card; n?:
       {card.picture?.kind === "sheet" && shown && <Portrait worldSlug={world.meta.slug} path={card.picture.path} label={card.picture.label} radius={0} loading="lazy" onAvailabilityChange={setShown} />}
       {card.picture?.kind === "sheet" && !shown && <span className="fy-guide-ini">{initialsOf(card.picture.label)}</span>}
       {card.picture?.kind === "file" && <img src={mediaUrl(world.meta.slug, card.picture.file)} alt="" loading="lazy" />}
+      {card.picture?.kind === "cover" && <img className="bl" src={mediaUrl(world.meta.slug, card.picture.file)} alt="" loading="lazy" />}
+      {card.picture?.kind === "cover" && <img className="sq" src={mediaUrl(world.meta.slug, card.picture.file)} alt="" loading="lazy" />}
       {card.clip && <span className="play"><PlaySolid size={14} /></span>}
       {n !== undefined && <span className="n">{n}</span>}
     </span>
@@ -247,6 +267,7 @@ function TeaserPicker({
   world,
   teasers,
   moments,
+  albums,
   loading,
   cardOf,
   sameTeaser,
@@ -256,8 +277,9 @@ function TeaserPicker({
   world: WorldBundle;
   teasers: readonly GuideRecordTeaser[];
   moments: readonly Moment[];
+  albums: readonly WorldAlbum[];
   loading: boolean;
-  cardOf: (teaser: GuideRecordTeaser) => Card;
+  cardOf: (teaser: GuideRecordTeaser, picking?: boolean) => Card;
   sameTeaser: (a: GuideRecordTeaser, b: GuideRecordTeaser) => boolean;
   onAdd: (teaser: GuideRecordTeaser) => void;
   onClose: () => void;
@@ -272,12 +294,15 @@ function TeaserPicker({
     return () => window.removeEventListener("keydown", close);
   }, [onClose]);
   const sheets = (type: Sheet["type"]) => guideLiving(world.sheets.filter((sheet) => sheet.type === type));
+  const song = picked?.kind === "song" ? musicChoiceOf(albums, picked) : undefined;
   const options: GuideRecordTeaser[] =
     tab === "characters"
       ? sheets("character").map((sheet) => ({ kind: "character", sheet: sheet.id }))
       : tab === "places"
         ? [...sheets("location").map((sheet) => ({ kind: "location" as const, sheet: sheet.id })), ...sheets("faction").map((sheet) => ({ kind: "faction" as const, sheet: sheet.id }))]
-        : moments.filter((moment) => tab === "pictures" || moment.whole).map((moment) => ({ kind: tab === "pictures" ? ("picture" as const) : ("clip" as const), production: moment.production, chapter: moment.chapter, block: moment.block }));
+        : tab === "songs"
+          ? albums.flatMap((album) => album.tracks).map((choice) => ({ kind: "song" as const, production: choice.production.meta.id, track: choice.track.id, start: 0, duration: clampExcerpt(choice.lengthMs, 0, MAX_TEASER_CLIP_MS).duration }))
+          : moments.filter((moment) => tab === "pictures" || moment.whole).map((moment) => ({ kind: tab === "pictures" ? ("picture" as const) : ("clip" as const), production: moment.production, chapter: moment.chapter, block: moment.block }));
 
   return (
     <div className="fy-guide-dim fy-guide-dim--center" onClick={onClose}>
@@ -295,13 +320,13 @@ function TeaserPicker({
           {options.length === 0 && <span className="fy-guide-muted">{loading && (tab === "pictures" || tab === "clips") ? "…" : "None"}</span>}
           {options.map((option) => {
             const at = teasers.findIndex((teaser) => sameTeaser(teaser, option));
-            const card = cardOf(option);
+            const card = cardOf(option, true);
             // Already a teaser, or not one it can be: said in one clause, never offered and refused (R-25).
             const clause = at !== -1 ? `Teaser ${at + 1}` : card.mark;
             const on = picked !== null && sameGuideTeaser(picked, option);
             return (
               <button
-                key={`${option.kind}:${"sheet" in option ? option.sheet : `${option.production}/${option.chapter}/${option.block}`}`}
+                key={teaserKey(option)}
                 type="button"
                 className={cx("fy-guide-tz", clause !== undefined && "no", on && "on")}
                 disabled={clause !== undefined}
@@ -315,7 +340,11 @@ function TeaserPicker({
             );
           })}
         </div>
+        {song !== undefined && picked?.kind === "song" && (
+          <SongExcerpt world={world} choice={song} start={picked.start} duration={picked.duration} onChange={(start, duration) => setPicked({ ...picked, start, duration })} />
+        )}
         <div className="fy-guide-pick__foot">
+          {song !== undefined && picked?.kind === "song" && <span className="fy-guide-muted">{song.track.title} · {musicClock(picked.start)}–{musicClock(picked.start + picked.duration)}</span>}
           <span className="fy-guide-grow" />
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="primary" disabled={picked === null || teasers.length >= MAX_GUIDE_TEASERS} onClick={() => picked !== null && onAdd(picked)} data-testid="guide-teaser-confirm">Add</Button>

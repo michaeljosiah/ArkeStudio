@@ -3000,11 +3000,17 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-set__why > .fy-diag__cause { font: 400 10.5px/1.5 var(--font-sans); color: var(--muted-foreground); }
 .fy-diag__meta { font: 400 9.5px var(--font-mono); color: var(--neutral-400); flex: none; }
 .fy-diag__place { font: 400 9.5px var(--font-mono); color: var(--neutral-400); flex: none; }
+.fy-diag__manual { font: 400 10.5px/1.6 var(--font-sans); color: var(--muted-foreground); margin: 7px 0 0 17px; overflow-wrap: anywhere; }
+/* Evidence and manual guidance must wrap independently of non-shrinking timestamps/notes. */
+[data-screen="settings-diagnostics"] .fy-set__why { display: grid; grid-template-columns: 5px minmax(0, 1fr); align-items: start; gap: 4px 7px; }
+[data-screen="settings-diagnostics"] .fy-set__why > .fy-set__dot { margin-top: 5px; }
+[data-screen="settings-diagnostics"] .fy-set__why > :not(.fy-set__dot) { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
 .fy-diag__go { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: 500 11px var(--font-sans); cursor: pointer; flex: none; }
 .fy-diag__go:hover { background: var(--accent); }
 .fy-diag__chip { font: 500 8.5px var(--font-mono); color: var(--neutral-400); border: 1px solid var(--border); border-radius: 999px; padding: 1px 6px; flex: none; }
 .fy-diag__explains { margin-top: 6px; padding-left: 17px; }
-.fy-diag__sub { display: flex; align-items: center; gap: 9px; padding: 3px 0 3px 17px; opacity: 0.6; }
+.fy-diag__sub { display: grid; grid-template-columns: 5px minmax(0, 1fr); align-items: start; gap: 4px 9px; padding: 3px 0 3px 17px; opacity: 0.6; }
+.fy-diag__sub .fy-diag__meta { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
 .fy-diag__sub span:nth-child(2) { font: 400 11px var(--font-sans); flex: none; }
 .fy-diag__empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 80px 0; }
 .fy-diag__emptytitle { font: 600 14px var(--font-sans); }

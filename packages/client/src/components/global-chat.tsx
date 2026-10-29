@@ -16,6 +16,7 @@ import { ChevronDown, More, X } from "./icons.js";
 import { ProductionStudioCanvas } from "./production-studio-canvas.js";
 import { RouteErrorBoundary } from "./route-error-boundary.js";
 import { setWorldChatInitiative, subscribeProductionSetupResults, subscribeWorldChatCreateResults } from "../lib/store.js";
+import { StudioAssistantProvider } from "./studio-assistant.js";
 
 function afterPaint(action: () => void): () => void {
   if (typeof requestAnimationFrame === "function" && typeof cancelAnimationFrame === "function") {
@@ -217,6 +218,7 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
     panelHost: inPanel ? panelHost : null, hasHome: !!home, historyPage, scopeMissing: selected.scopeMissing, conversationId: selected.conversationId, newThread: selected.newThread } : null;
   const menuConversation = rowMenu ? world?.conversations.find(row => row.id === rowMenu.id) : undefined;
   return <GlobalChatContext.Provider value={owner}>
+    <StudioAssistantProvider>
     {children}
     <div hidden ref={parked} />
     <PageSheet open={snapshot.open} onClose={close} title={selected?.title ?? "Chat"} headless modeless={!phone || !chapterChat} keepMounted className={`fy-global-chat${chapterChat ? " fy-global-chat--chapter" : ""}`}
@@ -256,5 +258,6 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
         : <ProductionConversationBody key={selected.key} {...(selected.props ?? conversationProps(selected.worldId, selected.entry))} />}
       </RouteErrorBoundary>
     </ConversationPresentationContext.Provider>, bodyHost)}
+    </StudioAssistantProvider>
   </GlobalChatContext.Provider>;
 }

@@ -43,6 +43,8 @@ export interface RosterAgent {
    * it must not have them at all.
    */
   readOnly?: boolean;
+  /** Host-scoped explanation roles: no world, filesystem, web or native delegation tools. */
+  operationalOnly?: boolean;
 }
 
 const CONFINEMENT_PREAMBLE = `You are working inside an Arke Studio proposal directory. The files in your working
@@ -87,6 +89,7 @@ export function agentPromptFor(agent: {
   brief: string;
   needsProposal: boolean;
   readOnly?: boolean;
+  operationalOnly?: boolean;
   /** Settings' `research.web`, off unless the person turned it on. */
   researchWeb?: boolean;
   skill?: { id: string; version: number; body: string } | undefined;
@@ -125,11 +128,24 @@ When the person has not named a shape, and nothing they are working in sets one,
 
 - A story's cover, upright: 2:3, 1024 × 1536. It is the poster Arke Player shows. Keep the subject and any title in its upper two-thirds, where the words laid over its foot do not reach, and leave the top twentieth clear, because the phone's feature trims it.
 - An audiobook's Tall picture of a moment: 9:16. It fills a phone held upright.
+- A music production's cover (an album, a single or a soundtrack): 1:1, 1024 × 1024, square as album art is everywhere.
 - Everything wide (key art, a scene, a place, a wide shot, a story's wide cover): 16:9.
 
 A shape the person names always wins, and so does one their work already sets: a production's aspect, or the shapes an audiobook makes its pictures in. Ask a route only for a shape it lists. When it lists none of these, ask for the nearest one it does, and say which in the reply. A route that takes its size from the brief makes what the brief says, so name the shape in the brief.`;
 
 const BRIEFS: ReadonlyArray<Omit<RosterAgent, "prompt">> = [
+  {
+    name: "studio-assistant", description: "Help with Arke, setup and operational diagnostics",
+    needsProposal: false, readOnly: true, operationalOnly: true,
+    brief: "You are Arke, the Studio assistant. Explain Arke and its local AI setup. Delegate operational diagnosis through the coordinator's scoped diagnostic protocol. Creative requests belong in an explicitly chosen World or Builder conversation.",
+    postscript: `Your scope is Studio, independently of any open world. You receive only the person's Studio request and explicitly supplied operational evidence. Never claim to read a world, run a shell, edit files or execute a repair. A diagnostic delegation conveys only enumerated topics and evidence references, never the person's prose or attachments. A repair proposal is not approval. Unknown, stale and unavailable facts remain unknown. Opening a world never changes your scope. A creative handoff is an editable draft, never a send or an approval. Follow the coordinator's supplied response schema exactly.`,
+  },
+  {
+    name: "diagnostic-specialist", description: "Explain bounded operational evidence for Arke",
+    needsProposal: false, readOnly: true, operationalOnly: true,
+    brief: "Explain the supplied operational facts and their measured limits. Return findings and references through the coordinator's diagnostic response schema.",
+    postscript: `Only the enumerated operational evidence is in scope. You have no Studio transcript, world prose, reference audio, raw logs, credentials, filesystem, shell, web or native subagent tools. Do not invent a cause, available action, successful repair, completed generation or charge. Mark hypotheses explicitly. Preparation of a registered repair plan conveys no execution authority; only the host's existing gates can execute it. Return only the coordinator's supplied response schema.`,
+  },
   {
     name: "world-author",
     description: "Draft a new world from a name and a sentence",
@@ -299,6 +315,11 @@ The summary has these sections, in this order, each a heading on its own line. W
     name: "chapter-visual-reviewer", description: "Review actual chapter illustrations against prose and neighboring images",
     needsProposal: false, readOnly: true,
     brief: "You are Arke's visual continuity reviewer. Inspect the supplied image pixels and source text. Separate observation from inference. Do not claim to inspect an image that was not supplied. Return only the requested JSON findings. Do not rewrite, delegate or generate media.",
+  },
+  {
+    name: "page-lettering-reader", description: "Read back every word lettered on a comic page, for the check against its script",
+    needsProposal: false, readOnly: true,
+    brief: "You are Arke's comic page lettering reader. Transcribe the words actually visible in the supplied page image, exactly as drawn, misspellings included. Do not correct, complete or guess words, and do not read the script into the picture. Return only the requested JSON. Do not rewrite, delegate or generate media.",
   },
   {
     name: "chapter-prose-reviewer", description: "Tag the patterns that read as AI-written prose, for the review to count",

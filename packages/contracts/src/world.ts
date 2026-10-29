@@ -310,8 +310,11 @@ export type CanonEntry = z.infer<typeof CanonEntrySchema>;
 export const ProductionFormatSchema = z.enum(["story", "video", "stills"]);
 export type ProductionFormat = z.infer<typeof ProductionFormatSchema>;
 
-/** The audience-facing classification (SPEC-023 R-1): what the audience receives. */
-export const ProductionMediumSchema = z.enum(["story", "video", "interactive-video"]);
+/**
+ * The audience-facing classification (SPEC-023 R-1): what the audience receives. `music` is
+ * heard as songs (SPEC-060 R-1, design turn 238): no frame, no frame rate, no scenes, no chapters.
+ */
+export const ProductionMediumSchema = z.enum(["story", "video", "interactive-video", "music"]);
 export type ProductionMedium = z.infer<typeof ProductionMediumSchema>;
 
 export const FrameRateSchema = z.union([z.literal(24), z.literal(25), z.literal(30)]);

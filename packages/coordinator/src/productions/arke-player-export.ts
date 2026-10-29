@@ -1,3 +1,4 @@
+import { exportComicPlayer } from "./comic-player-export.js";
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -10,9 +11,13 @@ import {
   LISTENING_MEDIA_TYPE,
   manuscriptDocument,
   packageSlug,
+  productionShape,
   SlugSchema,
+  StoryExportMadeSchema,
   WORLD_PACKAGE_FORMAT,
   withUnplannedChapters,
+  type StoryExportBlocker,
+  type StoryExportMade,
   type ArkePlayerPartRequest,
   type ArkePlayerPictureSize,
   type ArkePlayerRelease,
@@ -28,13 +33,15 @@ import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { documentChapter, listeningDocument } from "./arke-player-listening.js";
 import { audiobookListening } from "./audiobook-listening.js";
-import { containedWorldFile } from "./interactive.js";
+import { containedWorldFile, type BeatVoices } from "./interactive.js";
 import { writeEpub } from "./manuscript.js";
+import { exportStoryPlayer } from "./story-export.js";
 import { openChapter } from "./ops.js";
 import { checkWorldPackageZip, editionFingerprint, readWorldPackageRelease, writeWorldPackageZip } from "./world-package.js";
 import { guideDraft, packGuide } from "./world-guide.js";
-import { fitReadingImage, pngHasAlpha } from "../references/reading-image.js";
-export { pngHasAlpha } from "../references/reading-image.js";
+import { exportMusicPlayer } from "./music-export.js";
+import { fitReadingImage, pngHasAlpha, webpHasAlpha } from "../references/reading-image.js";
+export { pngHasAlpha, webpHasAlpha } from "../references/reading-image.js";
 
 /**
  * Export → Arke Player (design turn 233, SPEC-058 R-1 – R-8): one world package of a Story
@@ -55,8 +62,8 @@ const COMPILER_VERSION = 1;
 const MOTION_SIDE = 1080;
 
 export type ArkePlayerExportResult =
-  | { ok: true; file: string; bytes: number; sha256: string; edition: string; chapters: number; pictures: number; book: boolean; guide: boolean; part?: number }
-  | { ok: false; blockers: string[] };
+  | { ok: true; file: string; bytes: number; sha256: string; edition: string; chapters: number; pictures: number; book: boolean; guide: boolean; part?: number; tracks?: number; story?: StoryExportMade }
+  | { ok: false; blockers: string[]; problems?: StoryExportBlocker[] };
 
 export interface ArkePlayerExportOptions {
   clock: () => string;
@@ -65,10 +72,15 @@ export interface ArkePlayerExportOptions {
   signal?: AbortSignal;
   /** The book and the pictures' loops are each the author's to leave out (233a). */
   include: { book: boolean; motion: boolean };
-  /** The long side the narration's pictures ship at (235d, SPEC-058 R-41); full when absent. */
+  /** The long side the narration's pictures ship at (235d, SPEC-058 R-41), or a novel's beats' (245b); full when absent. */
   pictureSize?: ArkePlayerPictureSize;
-  /** Publish's title, author, language and cover for the production, where it has them (R-2). */
-  publish?: { title?: string; author?: string; language?: string; cover?: string | null };
+  /**
+   * Publish's title, author, language and cover for the production, where it has them (R-2), and
+   * a story's Tall cover (R-79), world-relative, which only the script names today.
+   */
+  publish?: { title?: string; author?: string; language?: string; cover?: string | null; tall?: string };
+  /** A visual novel's prepared voices, as the web package takes them (turn 174); without them every line goes as text. */
+  voices?: BeatVoices;
   studioVersion: string;
   /** What is in hand and how far through, for Activity (233b). */
   onStep?: (step: string, percent: number) => void;
@@ -102,17 +114,6 @@ const pad = (value: number, width: number) => String(value).padStart(width, "0")
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 export { packageSlug } from "@arke-studio/contracts";
-
-/** Whether a WebP carries alpha: the VP8X alpha flag, or a lossless image's alpha bit (R-6). */
-export function webpHasAlpha(bytes: Uint8Array): boolean {
-  if (bytes.length < 30) return false;
-  const view = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (view.toString("latin1", 0, 4) !== "RIFF" || view.toString("latin1", 8, 12) !== "WEBP") return false;
-  const chunk = view.toString("latin1", 12, 16);
-  if (chunk === "VP8X") return (view[20]! & 0x10) !== 0;
-  if (chunk === "VP8L") return ((view.readUInt32LE(21) >>> 28) & 1) === 1;
-  return false;
-}
 
 /** Whether a picture must stay PNG to keep its transparency. */
 const transparent = (bytes: Uint8Array) => pngHasAlpha(bytes) || webpHasAlpha(bytes);
@@ -165,6 +166,12 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
   const bundle = store.getBundle();
   const production = bundle.productions.find((entry) => entry.meta.id === productionId);
   if (production === undefined) return { ok: false, blockers: ["that production is no longer in this world"] };
+  // A music production is its own package (SPEC-060 R-15 – R-17), made by the same press, and so
+  // is an interactive movie or a visual novel (SPEC-058 R-89).
+  if (productionShape(production.meta).isMusic) return exportMusicPlayer(store, productionId, options);
+  if (productionShape(production.meta).isBranching) return exportStoryPlayer(store, productionId, options);
+  // A graphic novel is its own package too, schema 7 (SPEC-064 R-50; Player P20).
+  if (productionShape(production.meta).hasPages) return exportComicPlayer(store, productionId, options);
   const step = options.onStep ?? (() => {});
 
   if (signal.aborted) return cancelled();
@@ -505,8 +512,13 @@ const ArkePlayerListedSchema = z.object({
   guide: z.boolean().optional(),
   /** What it released (SPEC-058 R-43); absent in a record made before releases, and then read from the package. */
   release: ArkePlayerReleaseSchema.optional(),
+  /** A music production's package (SPEC-060 R-15): its tracks and how long they play. */
+  tracks: z.number().int().min(0).optional(),
+  durationMs: z.number().int().min(0).optional(),
+  /** A story's package (SPEC-058 R-89): its scenes, the routes read back and its endings. */
+  story: StoryExportMadeSchema.optional(),
 }).strict();
-type ArkePlayerListed = z.infer<typeof ArkePlayerListedSchema>;
+export type ArkePlayerListed = z.infer<typeof ArkePlayerListedSchema>;
 
 // What a package made before releases holds, read from the package once: its records are written
 // once and never again, and a 400 MB package is not reread each time Publications opens.
@@ -528,11 +540,13 @@ async function releaseOfPackage(file: string, bytes: number): Promise<ArkePlayer
 
 /**
  * The world's Arke Player packages and parts for Publications (233e, 236e), newest first: each by
- * the record written beside it, and only while the package is there at the length it records.
+ * the record written beside it, and only while the package is there at the length it records. A
+ * production package is named by its production (SPEC-060 R-17), so any dated ZIP is looked at;
+ * the record is what decides, and a guide alone, which has none, is never listed.
  */
 export async function listArkePlayerPackages(store: WorldStore): Promise<Array<ArkePlayerListed & { dir: string; file: string }>> {
   const exportsDir = join(store.dir, "exports");
-  const names = (await readdir(toExtendedLength(exportsDir)).catch(() => [] as string[])).filter((name) => /-(?:player|part)-\d{4}-\d{2}-\d{2}(?:-\d+)?\.zip$/.test(name));
+  const names = (await readdir(toExtendedLength(exportsDir)).catch(() => [] as string[])).filter((name) => /-\d{4}-\d{2}-\d{2}(?:-\d+)?\.zip$/.test(name));
   const out: Array<ArkePlayerListed & { dir: string; file: string }> = [];
   for (const name of names) {
     try {

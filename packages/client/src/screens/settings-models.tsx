@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { SetupRepairControl } from "../components/setup-repair-control.js";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   ENGINE_LABEL,
@@ -25,11 +26,10 @@ import { OnYourPC } from "../components/on-your-pc.js";
 import { SamplingLine, hasSampling } from "../components/local-sampling.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
+import { SetupRemoveControl } from "../components/setup-remove-control.js";
 import {
   setModelEnabled,
   setupInstall,
-  setupRemove,
-  setupRepair,
   setupRetry,
   testLocalVoice,
   useSetup,
@@ -308,20 +308,11 @@ function entryFacts(entry: Entry, onOpenDownloads: () => void): LocalFacts {
         <Button onClick={() => setupInstall(entry.component!.id)}>Install · {sizeMb(entry.closure.downloadMb)}</Button>
       )}
       {entry.state === "needs-attention" && entry.component !== undefined && (
-        <button
-          type="button"
-          className="fy-set__link"
-          onClick={() =>
-            entry.component!.repairRequired === true ? setupRepair(entry.component!.id) : setupInstall(entry.component!.id)
-          }
-        >
-          {entry.component.repairRequired === true ? "Repair" : "Retry"}
-        </button>
+        entry.component.repairRequired === true ? <SetupRepairControl component={entry.component} /> :
+        <button type="button" className="fy-set__link" onClick={() => setupInstall(entry.component!.id)}>Retry</button>
       )}
       {entry.state === "installed" && entry.component?.removable === true && (
-        <button type="button" className="fy-set__link" onClick={() => setupRemove(entry.component!.id)}>
-          Remove
-        </button>
+        <SetupRemoveControl component={entry.component} />
       )}
       {moving && (
         <button type="button" className="fy-set__link" onClick={onOpenDownloads}>
@@ -380,9 +371,7 @@ function recipeTileFacts(
       {/* For the file that is on disk, intact, and not the bytes the recipe pins — the one case
           Retry cannot answer, because presence is completion to it. */}
       {(facts.settled || weights?.repairRequired === true) && weights !== undefined && (
-        <button type="button" className="fy-set__link" onClick={() => setupRepair(weights.id)}>
-          Repair
-        </button>
+        <SetupRepairControl component={weights} />
       )}
       <button type="button" className="fy-set__link" onClick={() => verifyComfyUiRecipe(recipe.recipeId)}>
         Re-verify

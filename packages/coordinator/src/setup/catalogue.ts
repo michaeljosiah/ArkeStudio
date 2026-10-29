@@ -1,9 +1,10 @@
 import type { EngineId, ProviderId } from "@arke-studio/contracts";
+import { mingCatalogue } from "../local-ai/ming-catalogue.js";
 
 /**
- * What setup fetches onto this machine, and where from. The engine ships; the language model
- * it runs does not — that is a choice about quality and disk that belongs to the person whose
- * disk it is, so it is made in Settings · Providers rather than assumed here.
+ * What setup offers for this machine, and where from. Runtime and model acquisition follows
+ * an explicit choice in setup or Settings; merely opening Arke must not spend the disk or
+ * bandwidth of someone choosing manual or hosted writing (SPEC-016, approved turns 242–244).
  *
  * Sizes are the published figures, used for arithmetic *before* anything starts — the
  * free-disk guard and the totals on screen — so they are stated here rather than discovered
@@ -66,7 +67,7 @@ export type ComponentKind =
    * because upstream archives wrap their content in a single top-level folder.
    */
   /** `version` is what the release pins; `versionFile` is where the tree records its own, relative to the same root as `rootMarker` (issue 592). */
-  | { kind: "tree"; dir: string; rootMarker: string; file: DownloadFile; version?: string; versionFile?: string };
+  | { kind: "tree"; dir: string; rootMarker: string; file: DownloadFile; byArch?: Partial<Record<"x64" | "arm64", DownloadFile>>; version?: string; versionFile?: string };
 
 export interface CatalogueEntry {
   id: string;
@@ -114,6 +115,8 @@ export interface CatalogueEntry {
    * someone asks for it. Big models belong here — the disk is the user's to spend.
    */
   optional?: boolean;
+  /** Offering a download does not grant removal of an installed runtime or its live files. */
+  removable?: false;
   /** Never replace a file that appeared while a managed optional download was running. */
   preserveExistingFiles?: boolean;
   /**
@@ -153,6 +156,7 @@ const SEVENZ_MAGIC = [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c] as const;
  * without a portable release asset, so 0.38.0 is the newest build with a published digest.
  */
 export const COMFYUI_VERSION = "0.38.0";
+export const OLLAMA_VERSION = "0.40.11";
 
 /** Canonical setup identities for the two model directories Voxa reads at launch. */
 export const VOXA_SETUP_COMPONENT_IDS = {
@@ -176,22 +180,36 @@ export function voxaSetupCompleted(
 }
 
 export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
+  ...mingCatalogue(),
   {
     id: "ollama-runtime",
+    optional: true,
+    removable: false,
     engine: "ollama",
     displayName: "Ollama",
     purpose: "Runs language models here",
-    sizeMb: 750,
+    sizeMb: 1587,
+    installedMb: 6800,
     spec: {
-      kind: "installer",
-      file: { url: "https://ollama.com/download/OllamaSetup.exe", file: "OllamaSetup.exe", sizeMb: 750 },
-      // Inno Setup's flags. If the installer refuses them it is launched visibly instead,
-      // and the row says so — never a silent failure, never a silent install either.
-      silentArgs: ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
+      kind: "tree", dir: "ollama-runtime", rootMarker: "ollama.exe", version: OLLAMA_VERSION,
+      byArch: {
+        arm64: {
+          url: `https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-windows-arm64.zip`,
+          file: "ollama-windows-arm64.zip", sizeMb: 214, magic: [0x50, 0x4b, 0x03, 0x04],
+          sha256: "a43eeaea23bef3157b0f7d42216fe8a8fecdd7a9f06722f7f8e623470308bd9a",
+        },
+      },
+      file: {
+        url: `https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-windows-amd64.zip`,
+        file: "ollama-windows-amd64.zip", sizeMb: 1587, magic: [0x50, 0x4b, 0x03, 0x04],
+        sha256: "bda4a493ba8a7c24d57263cd843cd68cee84f44aed4299eeed532acad7eda12a",
+      },
     },
   },
   {
     id: VOXA_SETUP_COMPONENT_IDS.kokoro,
+    optional: true,
+    removable: false,
     engine: "voxa",
     displayName: "Kokoro 82M · voice",
     purpose: "Speaks lines · six preset voices",
@@ -215,6 +233,8 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   },
   {
     id: VOXA_SETUP_COMPONENT_IDS.whisper,
+    optional: true,
+    removable: false,
     engine: "voxa",
     displayName: "Whisper base.en · dictation",
     purpose: "Speech to text · on this machine",
@@ -245,6 +265,10 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     displayName: "Higgsfield CLI",
     purpose: "Images and video · Higgsfield account",
     sizeMb: 7,
+    // Both pinned archives inspected with the numeric-owner manifest reader (2026-10-26):
+    // amd64 19,051,008 and arm64 17,610,752 expansion bytes including entry allowance.
+    // Keep the 7 MiB declared download plus 19 MiB expansion simultaneously.
+    installedMb: 26,
     optional: true,
     spec: {
       kind: "archive",
@@ -268,13 +292,15 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
       },
     },
   },
-  // The ComfyUI engine (SPEC-021 §2.4, D10). Optional and selection-first: a source the user
+  // The ComfyUI engine (SPEC-021 §2.4, D10). Offered until selected: a source the user
   // deliberately selected is reused, while mere detection remains an offer and does not suppress
   // this managed option. Pinned to a release with the release's own published sha256; the
   // NVIDIA build only, said on the row (§1.4). The archive is 7z, which the resolved System32
   // bsdtar reads (verified on the supported platform — see systemTar in local-setup.ts).
   {
     id: "comfyui-runtime",
+    optional: true,
+    removable: false,
     engine: "comfyui",
     displayName: "ComfyUI",
     purpose: "Runs image and video recipes",
@@ -283,7 +309,6 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     // at once. Almost none of it is ComfyUI: the tree is an embedded Python plus torch and the
     // CUDA libraries, which is the cost §2.1 says every alternative runtime pays too.
     installedMb: 8200,
-    optional: true,
     caveat: `v${COMFYUI_VERSION} · NVIDIA build · about 6 GB on disk`,
     spec: {
       kind: "tree",

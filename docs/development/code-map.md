@@ -1,5 +1,426 @@
 # Code map
 
+Setup file repair uses the host-issued `SetupRepairReview` and shared client
+`components/setup-repair-control.tsx`. `setup/repair-review.ts` binds the selected component
+and destination, records bounded flushed intent, and retains interrupted repairs for explicit
+review after restart. `LocalSetupService` revalidates under the existing runtime/file owner.
+The visual acceptance handover for epic #2194 is [here](visual-handoff-2194.md).
+
+Proactive storage services (epic #2194): contracts `storage-health.ts` defines opaque volume facts,
+fresh peak-space admission, qualified forecasts and warning hysteresis. Coordinator
+`storage/monitor.ts` owns bounded polling, wake/failure invalidation and probe coalescing;
+`storage/reservations.ts` serializes durable multi-volume admission, changed peaks and owner-confirmed
+settlement; `storage/reservation-file.ts` keeps its flushed app-local control state bounded.
+`storage/windows-volume.ts` reads actual GUID/root identities and caller-available bytes through a
+bounded kernel-leashed native reader. `storage/linux-volume.ts` checks bounded mountinfo, native
+device/inode identity and statfs for ext2/3/4, XFS and tmpfs, grouping bind aliases by device.
+Other Linux filesystems remain explicitly unsupported; user/project quota limits are unknown.
+Its single metadata chain remains retained after a bounded observation is abandoned, without
+overlapping replacements or late publication. No native child or shell is started.
+`storage/service.ts` composes collection and durable planning;
+`application/studio-host.ts` enables it for app-root hosts. Coordinator startup/world switching,
+writing cadence and desktop wake feed it; `storage.health` reaches authenticated snapshots and both
+state folds without entering the world diagnostic journal. Contracts `storage-diagnostics.ts` derives
+measured storage findings for Settings · Diagnostics; its Refresh requests the host collector.
+Known failed admission checks also publish a bounded, anonymous `spaceChecks` projection through
+the same snapshot. `storage/service.ts` retains 16 recent checks for 15 minutes without retaining
+their paths or inventing pending work. `storage-diagnostics.ts` groups fresh shortfalls by volume;
+client `components/studio-storage.tsx` renders their per-drive arithmetic separately from current
+capacity. These facts never grant a retry or release a reservation (SPEC-062 R-13/R-21/R-23).
+Current queue waits use the separate wire-only `JobSummary.storageWait`, published by the
+existing dispatcher and cleared on settlement/cancellation. Contracts `storage-work.ts` counts
+those observations and setup's typed disk blocks for Studio's Activity/Downloads handoffs.
+No job journal or error-text parser is added; a historical check is not a pending operation.
+Contracts `storage-inventory.ts` defines the seven scoped logical-size categories. Coordinator
+`syncStorageObservation` registers the managed Ollama store's `blobs` and `manifests` subfolders
+for inventory and actual-volume observation, including a configured location outside the app root.
+External runtimes and unrelated files in the selected parent stay outside this inventory.
+`storage/inventory.ts` walks only registered managed folders and the open world, yielding after
+50 ms/1,000 entries, skipping links and retaining a single metadata chain until it settles.
+A 15-second lack of progress abandons the reading; a large progressing scan can continue.
+The service coalesces write/wake hints and cancels old-world results. Catalogue preview receipts
+feed incremental counts through `recordPreviewInventory`, excluding that subtree from scanning.
+Studio's collapsed inventory distinguishes partial/old/unknown estimates from drive capacity;
+allocation/reclaimable space stays unknown. Custom model locations are not yet inventoried.
+Optional model removal reuses `components/setup-remove-control.tsx` in Models and Downloads,
+with an estimated-size/consequence review before the existing command. Studio links to that
+model page only when the current setup has a removable installed model. `LocalSetupService`
+tracks admitted removal/repair through shutdown and excludes duplicate file mutations;
+`local-ai/gpu.ts` lends an idle lane to Ollama deletion without evicting a model. Ming retains
+its existing file-change owner. Runtime acknowledgement does not measure released allocation.
+Tests: contracts `test/storage-{health,diagnostics}.test.ts`, coordinator `test/storage/`, client
+`test/storage-health.test.ts`; requirements SPEC-032 R-17/R-33, SPEC-062 R-1–R-14/R-24.
+`storage/setup-files.ts` now connects setup's direct HTTP file owner to the shared registry on
+qualified native ports. Actual per-file destinations include mapped model folders; retained prefixes
+and existing files reduce remaining need before HTTP starts. Catalogue peak/headroom is retained
+once, larger declared responses replan before body writes, and unknown-length responses stop at the
+declared file bound with a valid resumable checkpoint where supported. Progress records consumed
+bytes; verified publication/pause/failure settles only after handles/checkpoints close, before
+component activation. Space/audit holds use existing Downloads/Diagnostics state and report the
+measured available/committed/remaining/reserve figures. Capacity admission waits through the
+collector's coalescing floor for a post-report reading; it stays bounded and cancellable.
+Admission also withholds a performed probe sharing the freshness fence's clock tick and waits
+for a later eligible reading, rather than misclassifying that valid observation as probe failure.
+It retains only the fence identity; no same-tick capacity may qualify a write. Storage
+authority also bounds stalled reads/saves during shutdown, retaining uncertain intents and refusing
+late write permission. Unsupported host ports retain their existing unknown-capacity policy and
+do not claim shared admission. Runtime-owned pulls, other write owners,
+restart reconciliation, other native ports and broader cleanup remain outstanding.
+Publication capture, directory copies, stored ZIP output and pinned-ZIP/extraction use the finite
+copy implementation in `storage/import-files.ts` with a separate export owner/prefix.
+`publications/capture.ts` and `archive.ts` declare measured payloads and bounded metadata;
+story input copies pass the same port. Desktop `PublicationHost` obtains that port from the
+coordinator, sharing setup/import/result reservations. ZIP output enforces a payload/header bound;
+extraction admits the expanded declared extent after its pinned input closes. Sources and completed
+editions are preserved on holds. Native render peaks and pre-dispatch output planning remain separate.
+Whole-world exports use `takes/export-world.ts` through the same export reservation port. Both
+the direct command and approved World Chat action hold the source's existing read/lifetime gate.
+A yielding metadata walk measures included files and directories before payload copying, retaining
+history and excluding the existing operational/cache set. Copies are bounded by the measured
+source extent, report consumption and settle after file handles close. Cancellation, changed
+sources or insufficient capacity keep the source and any partial export; exclusive destinations
+prevent a retry from overwriting prior output. Linked/special sources and destinations inside the
+source world refuse rather than producing a nonportable or recursively growing copy. Tests:
+`test/takes/export-world-storage.test.ts`, existing takes export, world-schema and exclusion tests.
+Manuscript DOCX/EPUB and recording-script PDF exports in `productions/manuscript.ts` and
+`productions/audiobook-lines.ts` use that same port for their exact encoded payloads, destination
+metadata and replacement script manifest. Admission, staging and publication drain through the
+existing world write gate; closing a world during admission settles late leases without writing.
+Rename reserves no second payload copy. Tests: `test/productions/document-export-storage.test.ts`
+and the existing manuscript/recording-script suites.
+
+Known import payloads use `storage/import-files.ts`. Its closed Node-copy owner joins the same
+durable per-volume registry as setup/results, reports written bytes and settles after original
+file/metadata work. `artifacts/filing.ts` admits each new decoded copy after content deduplication,
+then rechecks world ownership before its atomic write. Small authored sidecars/journals keep the
+world's existing commit path; complete metadata peak planning is not claimed. Duplicate creative
+bytes are reused, not deleted. `artifacts/browser-import-batch.ts` plans the bounded browser
+batch's remaining unique world copies before the first copy; producer receipts and verified
+retained media permit deduplication without a second payload reservation. Each child revalidates
+fresh capacity while spending the parent's budget, and original children/admission flushes retain
+ownership through cancellation. Audio Studio and Music exclude files their routes reject before
+filing. A changed zero-copy plan cannot grant an unreserved replacement. After admission, filing
+rechecks mutation preconditions and destination absence before copying.
+`artifacts/browser-media-import.ts` separately admits the bounded
+whole spool before payload writes and holds it through filing/cleanup, so shared/separate spool
+and world volumes cannot be confused. Coordinator UI, editor/audio/music, folder import and scoped
+World Chat controls pass only host-owned capabilities. Failed accounting retains valid media.
+Startup reconciles only this port's known imports after host exit; a process-wide live-owner set
+protects pending writes across service instances, and unrelated imports remain uncertain.
+`storage/service.ts` can retain an explicitly stable destination while its world stays active,
+keeping a mounted artifact-volume warning after an operation fails. Temporary/per-job roots keep
+their lease lifetime. No directory scan, native worker, generic cleanup or new write authority is
+added. `JobArtifactStorage.checkSubmission` uses the registry's read-only `assess` lane before
+reference preparation and again before the submission outbox flush. It checks the app receipt,
+world staging and selected landing volumes against existing commitments, reserve and 64 KiB of
+bookkeeping headroom per distinct directory. Empty destination metadata is prepared inside the
+existing world ownership envelope. A held job remains unsent with the same identity/attempt,
+yields its provider lane and rechecks after 30 seconds; cancellation/stop prevents late dispatch.
+The hold reason is an observation over the already durable queued row, requiring no journal
+append on a full app disk; restart remeasures it.
+Assessment never persists, consumes or grants an output reservation. This floor is not a bound
+or fit claim for generated media or scratch: complete provider output/scratch plans, other
+batch/import/export owners and remaining storage/platform acceptance are still open. Tests:
+`test/queue/submission-storage.test.ts`, `test/queue/result-storage.test.ts` and
+`test/storage/reservations.test.ts`; SPEC-062 R-7/R-10/R-11/R-14.
+Separate FAL, ComfyUI and Higgsfield result retrievals use providers `clients/artifact-transfer.ts`,
+`clients/artifact-body.ts` and contracts
+`artifact-result-limits.ts`. Remote metadata is capped at 1 MiB and each response at 128K read
+steps; decoded media shares receipt ceilings (64 files, 1 GiB/file, 4 GiB aggregate). Header
+limits reject before body reads; actual chunks enforce unknown/encoded lengths, and identity
+length mismatches refuse incomplete output. Queue cancellation reaches metadata/media through
+ephemeral `ArtifactFetchOptions`, kept separate from recorded provider context by `capture.ts`.
+HTTP error bodies never become media. A transfer-limit refusal leaves the accepted job and
+reported cost durable, yields inference ownership and stops repeated downloads in that session;
+restart may recheck the same remote result, never submit it again. The hold reason is observed
+without another journal append. Original stalled readers retain their stream lock through
+settlement; their late bytes cannot file. These are supported transfer ceilings, not output
+estimates, disk reservations, resumable partial downloads or provider-retention guarantees.
+Synchronous providers retain their generation timing and share receipt admission limits.
+`capture.ts` forwards selected settings separately from recorded context to desktop
+`provider-transport.ts`, whose overall retrieval deadline honours them; connection/header/
+inactivity policy remains separate. Higgsfield's bounded original CLI query cannot start a late
+download after cancellation. Complete pre-dispatch output/scratch planning remains unfinished. Tests:
+contracts `test/artifact-result-limits.test.ts`, providers `test/artifact-transfer.test.ts` /
+`test/shared-artifact-transfer.test.ts` / `test/capture.test.ts`, desktop
+`test/provider-transport.test.ts`, coordinator `test/queue/result-storage.test.ts`; SPEC-062 R-9/R-10/R-11.
+Media-reader protection: `transport.ts` accepts an optional host-only `ResolvedMediaFile.release`
+lease from a resolver. It opens one descriptor for size/range and streaming, retains ownership
+through pending resolution/open/close, and releases only after confirmed descriptor closure.
+Playback disconnect and transport shutdown destroy admitted streams and their unfinished HTTP
+responses. Failed descriptor cleanup retains the lease as unknown. Local fixed-preset previews
+now supply these read leases through `storage/local-preview-cache.ts`. Tests:
+`test/media-read-leases.test.ts`, `test/transport.test.ts`, `test/voice/catalogue-preview.test.ts`.
+The local cache records producer identity/hash/size receipts only for new, fixed-line free Kokoro
+previews in a separate app directory. Legacy/public/paid/ledgered previews are never adopted.
+Its bounded receipt overview is explicitly incomplete for unscanned files and reports allocation
+as unknown. Per-file read/write holds survive service replacement; failed native close or uncertain
+storage settlement retains the exact owner capabilities. Qualified storage ports reserve at most
+12 MiB audio plus 256 KiB new metadata before inference, then replan from fresh capacity and the
+actual audio size before opening output. The closed `preview` reservation owner reduces confirmed
+writes and settles only after file/receipt handles close. Unsupported ports make no fit claim.
+Tests: `test/storage/local-preview-cache.test.ts`; broader inventory and
+remaining write owners remain unfinished.
+`storage/windows-cache-file.ts` supplies the host-only native identity/removal primitive.
+Its fixed, bounded, kernel-leashed program takes data through stdin, binds native and producer
+receipt identities, observes logical/allocation bytes separately, rejects links/reparse points
+and conflicting I/O handles, and sets deletion disposition on the exact verified exclusive handle. It
+never performs a second pathname-based unlink. Native failure/cancellation can be unknown after
+mutation; metadata-only handles that leave deletion pending also produce unknown. No automatic
+retry or reclaimed-capacity claim follows. Native tests:
+`test/storage/windows-cache-file.test.ts`; other platform removal ports remain pending.
+The same `recovery/actions.ts` review executor now offers host-only cleanup of at most eight
+receipt-backed, fixed local Kokoro auditions aged at least seven days. Preview inspects every
+selected target without deletion; separate one-use approval revalidates ownership, exclusive
+leases and native proof. `storage/cache-cleanup-control.ts` flushes one exact private intent
+before each native removal and retains unknown outcomes across restart. The catalogue service
+owns the fixed-recipe allowlist and lifecycle; `recovery-cache-cleanup.tsx` presents review,
+approval, cancellation and measured outcomes in Settings. `storage/service.ts` supplies a
+post-fence capacity reading through the existing collector; observed improvement is never
+attributed wholly to cleanup. Native input waits until its exact worker PID is flushed to the
+intent. Startup and the host-only Check cleanup outcome control reconcile without deletion:
+the original owner/control chain must be finished, or both recorded processes positively absent;
+then current native root/file proof distinguishes intact, absent and changed targets. Unknown
+handles retain their exact capabilities until confirmed close. Audit restoration refuses a
+different intent. Legacy/unprovable unknown resolution remains unfinished. Tests: `test/storage/cache-cleanup*.test.ts`,
+contracts `test/recovery-actions.test.ts`, client `test/recovery-cache-cleanup.test.tsx`.
+Standing maintenance is off by default. The host-only setting binds one fixed cache root and
+the existing seven-day/eight-file/2 GiB limits. `recovery-cache-maintenance.tsx` separates scope
+review from enabling and keeps withdrawal available during active maintenance. The catalogue
+owner retains that root's storage observation while producer receipts exist or maintenance is opted in; pressure on another volume
+cannot trigger its cleanup. `recovery/actions.ts` uses the same active executor and current
+Automatic recovery mode gate for background maintenance. Before preparation the private
+control flushes a five-minute cooldown/attempt, retained across restart. Every file/input fence
+rechecks the standing grant; withdrawal revokes it synchronously before a setting flush.
+The same cleanup owner stops at measured headroom and records partial/unknown outcomes. A
+control-file owner remains retained through pending writes and the whole automatic run, so a
+replacement cannot overwrite it. Tests: `test/storage/cache-maintenance-host.test.ts`, extended
+control/cleanup/action tests and client `test/recovery-cache-maintenance.test.tsx`. Broader cache
+classes, cross-process qualification and the rest of the epic remain unfinished.
+Storage warnings can link to this same fixed-preview review when fresh bounded receipt candidates
+and the cache's measured volume/mapping match the warning. `diagnosticsSources` admits only
+cleanup availability, pending state and seven closed observation fields; history retains only
+the numeric reviewable count. The opaque `cleanupScope` Settings target binds producer root and
+volume mapping, grants no deletion and is revalidated before preview, approval and file input.
+`recovery-cache-cleanup.tsx` separates explicit review from approval and discards a late review
+when its warning changes. Other volume remedies remain manual unless an existing owner supplies
+a qualified action. Tests: contracts storage/diagnostics/recovery suites and the authenticated
+native cleanup host, including changed-mapping refusal with original bytes retained.
+Capacity invalidation/root changes revoke captured admission evidence across a reservation flush;
+an already-saved intent remains uncertain until its owner settles it. Completed-only destinations
+are excluded from direct-file admission, so a full old model volume does not block a different
+volume that has room for the missing files.
+
+Ming retained cleanup: `local-ai/gpu.ts` observes the exact failed batch lease and captures a
+generation-bound confirmation; `setup/process.ts` latches original cleanup authority only after
+native binding and the child-ledger flush. `local-ai/ming.ts` exposes that authority after the
+batch settles. Coordinator publishes a closed `recoveryPolicy.mingCleanup` observation, and
+contracts `ming-recovery.ts` derives the proactive finding without probing a process or guessing
+inference health. `recovery/actions.ts` uses its existing single executor for separate review and
+approval of original cleanup. `recovery-ming-cleanup.tsx` presents impact and never resubmits a
+reading. Positive confirmation clears only the matching incident; missing state does not.
+Chronological outcomes contain hashed presentation IDs, with no executable scope/PID/path.
+Tests: `test/recovery/ming-{cleanup,host}.test.ts`, native runner/Ming tests and corresponding
+contracts/client suites. Cross-restart correlation of the ephemeral hold remains unqualified;
+the original child ledger keeps its existing startup cleanup authority.
+
+Setup native ownership: `setup/process.ts` gates catalogue commands behind a private anchor;
+`setup/process-job.ts` binds Windows trees to a reused non-breakaway job, queries active processes
+and confirms termination. Ordinary POSIX helpers share the still-live anchor's private process
+group. Commands remain shell-free, output bounded, and actual completion waits for helper exit.
+`setup/node-deps.ts` injects the host child ledger. `setup/local-setup.ts` retains install/mutation
+leases after unknown native cleanup, including legacy listing/removal/fallback paths, and refuses
+later setup writes until owner cleanup confirms exit. Stop cannot discard their staging while
+cleanup is unknown. Coordinator shutdown still stops other owners after setup failure and retains
+minimum storage/recovery settlement until a later confirmed cleanup. Tests:
+`test/setup/process.test.ts`, `host-process-cleanup.test.ts` and `local-setup.test.ts`.
+
+`storage/setup-archive.ts` connects tree/tool archives to shared staging-volume admission.
+The known download and declared expansion coexist in one reservation; a larger verified manifest
+grows/rechecks it before native extraction. `setup/archive-manifest.ts` reads numeric-owner
+GNU/BSD listings through the owned executor, bounding entries, bytes, lines and duration without
+retaining member names. A complete archive stays under its durable UUID checkpoint until confirmed
+extraction and successful marker verification, permitting explicit Resume without another HTTP
+request. Same-volume rename/carry creates no second payload copy. Unknown native cleanup retains
+the disk/install lease. Missing expansion facts hold honestly; runtime-owned pulls, legacy native
+installers and other write owners remain outstanding. `StorageMonitor` also revokes admissions when
+accepted native observations discover remounts, unavailable facts or less capacity during a save.
+Captured roots are validated after collection and again after flush, so a fresh requested reading
+can establish new authority while an observation change cannot restore an older grant.
+
+Recovery control foundation (#2194, SPEC-061 R-7/R-11/R-25): contracts `recovery-policy.ts`
+defines the closed restart context and rolling budget. Coordinator `recovery/control.ts` serializes
+single-use durable intents, unknown-outcome reconciliation, Suggest only/user Stop, final owner-fence
+checks and shutdown; `recovery/control-file.ts` keeps minimal authority in a separate bounded file.
+Each target retains one exact latest outcome receipt atomically with owner settlement. Startup
+projects interrupted intents as unknown; rejected receipt writes retain unknown authority.
+The policy snapshot and opt-in `diagnostics.ts` export include only closed outcome/time facts,
+excluding intent IDs, component digests and process generations. Client `recovery-controls.tsx`
+shows these as past attempts, not current service health or completed creative work. Removable
+incident history cannot erase them or refund rolling attempts; the 128-target/256 KiB control
+cap remains unchanged. This is latest-outcome evidence, not complete action history or a repair grant.
+Reviewed retry: contracts `recovery-actions.ts` defines a closed preview/approve/cancel protocol.
+Coordinator `recovery/actions.ts` keeps at most 64 five-minute one-use reviews over registered
+native owners. `ChildSupervisor.prepareRecoveryRetry` offers only a failed, confirmed-stopped
+idle owner; `SupervisorRecovery` binds its epoch/configuration/policy evidence and rechecks after
+GPU/runtime waiting, under serialized durable admission and at final spawn. Ollama, ComfyUI
+primary/profiles, bundled harness and managed voice register their existing supervisors.
+Personal owners, live unhealthy workers and unresolved cleanup cannot offer this retry.
+`recoveryPolicy.retryAvailable` is advisory; control changes invalidate unapproved reviews.
+Host-only `recovery-action` receipts stay transient and never enter world journals; shared
+client `store.ts` retains 32 correlated results. `components/recovery-retry.tsx` separates
+Review from Approve and never resubmits on reconnect/timeout. Cancellation revokes waiting
+admission; an already started service still needs owner verification. Manual Stop/interruption,
+repair/re-download/model/cache plans, Ming actions and complete action history remain pending.
+`recovery/supervisor.ts` admits the existing owner's restart through the shared GPU lane. The host
+factory enables control; Coordinator connects managed Ollama and ComfyUI before their first child starts.
+ComfyUI's primary and isolated recipe processes each retain a stable recovery target;
+`comfyui/profiled-engine.ts` propagates the factory and early shutdown fence to both owners.
+Desktop/dev/Node select its endpoint early but defer managed startup until this composition.
+Ollama setup holds `beginComponentInstall` / `reserveInstallation` through verified publication,
+so activation cannot race changed files. It drains inference under the GPU lane before stopping;
+unconfirmed exit retains that reservation in the owner until confirmed stop. Tests: contracts `test/recovery-policy.test.ts`, coordinator
+`test/recovery/`, `test/ollama-engine.test.ts` and `test/setup/local-setup.test.ts`.
+Managed Ollama/ComfyUI unexpected exits now use durable policy; failed health retains the live process for review.
+GPU handover preserves a confirmed crashed child's waiting recovery. Host shutdown closes both
+owners before setup drains, reports failed native cleanup and permits a later confirmation retry.
+The assembled OpenCode v2 server now declares its recovery ownership and configuration digest.
+Desktop/dev/Node pass that owner through `harnessRecovery`; `superviseAs` attaches the durable
+policy before startup. Only the bundled source may restart automatically. `harness/runtime-change.ts`
+reserves one cancellable writing fence, waiting for admitted cloud/local turns and blocking new
+turns/configuration changes until verified replacement or confirmed cleanup. No turn is replayed.
+The launcher validates the running pinned protocol and process identity over private authenticated
+health. Generic supervisors quiesce before handler drain and confirm native exit during shutdown;
+failed confirmation retains recovery settlement for a later retry.
+The supervisor's generation-bound direct-child exit signal ends the real OpenCode adapter's
+pending turns with an explicit unknown outcome before the writing recovery fence drains. Prompt
+requests from that process generation are cancelled locally, never replayed. Confirmed stop owns
+retained settlement for manual restart, credential relaunch and reconfiguration as well as shutdown.
+Desktop supplies Voxa's dynamic bundled/personal ownership and launch digest before supervised
+startup. `voice/src/index.ts` drains admitted TTS/STT (including queued synthesis, WAV preparation
+and body reads) under one cancellable recovery reservation; native failure cancels requests without
+replay. Personal voice selections retain their managed role's circuit without automatic replacement.
+Other service owners, reviewed stop/restart actions and broader qualification
+remain outstanding. No completed recovery-agent claim follows from this slice.
+
+Operational incidents (#2194): contracts `recovery-incidents.ts` owns closed numeric facts,
+incident phases, verified resolution and persisted notification-budget decisions. Coordinator
+`recovery/history.ts` correlates the existing primary Diagnostics findings, uses one coalesced
+writer, retains bounded in-memory state after persistence failure and emits notices only after
+their budget marker is flushed. `recovery/history-file.ts` stores at most 1,000 incident and 1,000
+action summaries within the shared 10 MiB file, outside world and financial journals; settled
+summaries age out after 30 days. Restart authority
+remains in its separate control file. Current ComfyUI readiness and two separated fresh high-space
+readings can resolve their matching incident; missing measurements or changed mounts cannot.
+The app-root factory enables history before a world opens. `recovery.history` reaches both state
+folds and reconnect snapshots, with up to 100 summaries plus explicit counts/limits. Activity queries
+actionable global health/storage incidents through existing rows; Review only opens Diagnostics,
+whose existing styles render local history. Neither transient notices nor muted state grants a
+repair. `recovery/commands.ts` routes host-only mode/preferences/acknowledge/snooze/clear commands
+to their separate control/history owners with flushed correlated receipts. `recovery-settings.ts`
+exposes a bounded policy projection without intent capabilities. Settings · Diagnostics uses
+`components/recovery-controls.tsx` for mode, mute, explicit desktop opt-in and reviewed summary
+clearing. Changing mode cannot reset a stop, circuit or pending outcome. `queue-toaster.tsx`
+uses the existing notification drawing for admitted notices; desktop `background-notifications.ts`
+uses generic copy only after the separate opt-in. Both deduplicate live notices in bounded sets;
+opening an alert only navigates. The phone's existing notification opt-in does not subscribe to
+these host recovery events.
+Chronological repair outcomes use contracts `recovery-action-history.ts` for the closed schema,
+retention, unconfirmed-row protection and presentation labels. Coordinator
+`recovery/action-history.ts` hashes separate presentation IDs and projects owner restart receipts,
+whole cleanup runs and read-only outcome checks. `CataloguePreviewService` records at most 32
+whole-run receipts in the existing bounded cleanup control; these do not replace file intents.
+History uses its existing writer, read-only paging and export boundary. Settings switches between
+Incidents and Actions; action rows cannot execute repairs. Clearing settled history saves a
+bounded watermark/tie marker, preserves unconfirmed outcomes and leaves minimum control intact.
+Startup reconstructs only retained owner receipts and marks missing historical coverage; legacy
+incident files remain readable. Tests: contracts `test/recovery-action-history.test.ts`, coordinator
+`test/recovery/action-history.test.ts` plus owner/host/export suites, client
+`test/recovery-action-history.test.tsx`.
+`recovery-history-read` serves at most 100 retained summaries per revision-bound page; source,
+filter or page-size changes return stale rather than mixing revisions. The client retains four
+response pages and `components/recovery-history.tsx` supplies filtering, pagination and host-only
+acknowledge/advisory snooze controls. Snapshot history stays capped at 100. The existing opt-in
+`generate-diagnostics` bundle enumerates all retained summaries and safe policy holds through its
+normal secret/path boundary, excluding intent capabilities, mappings and session tokens.
+Shutdown starts bounded presentation draining before tracked message handlers. Managed supervisors
+use the durable rolling budget; only supervisors without a recovery port use the legacy lifetime count.
+Recovery mode command waits end unconfirmed as soon as shutdown closes admission. Control reads,
+authority calls and owner settlement get a bounded two-second shutdown drain, retaining unknown
+intents and spent attempts when persistence cannot confirm. Native cleanup remains the lifecycle
+owner's responsibility; only confirmed exit permits its retained resource lease to release.
+After all native owners confirm, control shutdown bounds its remaining writer wait. An already
+issued replacement may finish, but cannot publish a late saved receipt or grant new authority;
+queued mutations stay refused. Restart reads any remaining intent as unknown and holds startup.
+Tests: contracts `test/recovery-incidents.test.ts`, coordinator `test/recovery/history*.test.ts`,
+client `test/recovery-{history,controls}.test.tsx`, desktop `test/background-notifications.test.ts`.
+Full lifecycle/action adapters, action-outcome export and approved Studio assistant visual acceptance
+remain outstanding (SPEC-061 R-1–R-5/R-15–R-18/R-24–R-28; SPEC-014/032 amendments).
+
+Managed local engines: coordinator `local-ai/ollama.ts` owns portable Ollama and explicit URL
+overrides; `setup/catalogue.ts` / `setup/local-setup.ts` own pinned archives and architecture/
+version receipts. `harness/v2-launch.ts` writes only the selected Ollama endpoint into the
+owned OpenCode profile. `local-ai/gpu.ts` serializes writing, ComfyUI and Ming; `local-ai/ming.ts`
+uses the existing gated `setup/process.ts` native executor for Python batches and ordinary
+helper exit. Its cancellation retains native ownership; `LocalGpu.confirmMingCleanup` retains
+the exact failed-cleanup lease and releases it only after later confirmation, without replay.
+`ming-speech.ts` gives the original native owner a batch-specific input/scratch lease. Later
+confirmed cleanup removes those temporary copies only after host reads/writes also settle;
+a cancelled GPU waiter does not borrow another batch's process state. Failed settlement retains
+the callback for retry, and native disposal drains the original run and log writes.
+`storage/ming-batches.ts` joins input/expansion/audio and monitored private-cache growth to shared
+per-volume admission. The pinned asset lock supplies expansion/entry bounds checked by the
+worker before writes. `local-ai/ming-owner.ts` reconciles only an exited original host plus its
+exact global Windows job; `setup/process-job.ts` exposes read-only inspection without creating
+or terminating a missing job. Unknown original writes retain uncertain reservations, and no
+restart scan/deletion of old scratch or creative files is authorized. Native cache growth and
+abandoned metadata reads retain original ownership through cancellation. Tests: `ming-owner`,
+`storage/ming-batches`, `ming-speech`, `ming-process` and `setup/process`.
+Batch generation is exposed through Coordinator's host-only
+`generateMingBatch`. Desktop/dev/`node-studio-host.ts` compose these services; desktop
+`startup-runtime-owners.ts` retains them across initialization failure until transfer to
+Coordinator. `harness/runtime-change.ts` fences endpoint changes against cloud/local turns.
+Node hosts compose ComfyUI through `comfyui/node-engine.ts`; its scoped HTTP transport,
+digest cache and weight catalogue live beside the engine and are also reused by desktop.
+OpenCode has only the pinned v2 adapter; discovery refuses v1 and other unqualified releases.
+Contracts `ollama.ts`, wire status
+folds and client `screens/engine-panes.tsx` expose runtime ownership. Tests: coordinator
+`ollama-engine`, `ming-process`, `local-gpu`, `supervisor`, `v2-launch` and `setup/comfyui-setup`;
+client `engine-panes`; contracts `ollama`; providers `clients`. See
+[managed runtime policy and delivery boundary](managed-local-runtimes.md).
+
+Contracts `setup.ts` and Coordinator project installation/health into `setup.localAi`, seeded
+before detection and refreshed by both engine subscriptions. This full-stack status no longer
+gates manual app entry (approved turns 242–244, SPEC-016 R-21–R-28). `contracts/src/onboarding.ts`
+owns the saved journey and readiness decisions; client `screens/onboarding.tsx` implements the
+three paths at `/setup`. Coordinator `setup/onboarding.ts` checks workspace writability; existing
+settings, discovery, vendor sign-in and setup services persist and execute choices. Desktop
+`workspace-location.ts` remembers a library selection without moving worlds or copying credentials;
+main/preload restart after confirmed shutdown. `world/import-world.ts` checks a chosen closed world
+before the existing copy/identity-publication path imports it. Setup's catalogue offers
+missing runtimes and voice/dictation files until selected; `screens/launch.tsx` allows background
+continuation after the core connects. Downloads reports selected transfers; queued runtime work
+can be skipped while active native owners retain Pause/Stop. Tests: contracts `local-ai-setup`,
+coordinator `setup/local-setup` and `setup/local-ai-readiness`, client `launch-lifecycle`/
+`downloads`, plus `setup/onboarding`, `setup/onboarding-wire`, `world/import-world`,
+desktop `workspace-location` and client `onboarding`.
+
+Ming's optional 0.5B and experimental 7.9B readers are declared in contracts `ming.ts` and providers
+`ming-models.ts` / `clients/ming.ts`. Coordinator `local-ai/ming-catalogue.ts` / `ming-assets.json`
+declare the complete setup closure; `ming-speech.ts` verifies it, chunks narration and owns private
+inputs; `ming-worker.py` plans the full verified archive set before extraction and executes the
+locked offline source with private dependency overlays. Extracted streams must match their
+declared size; the existing audio byte/duration budget is checked before the WAV writer.
+`voice/service.ts` offers saved library voices with consent and a reference transcript; `voice/library.ts`
+and `local-ai/ming-reference.ts` bind clip bytes and words to queued/cache identity. Dispatcher
+rechecks that identity before submit. Client `clone-voice-dialog.tsx` collects the reference words;
+`local-models.tsx` selects the dependency leaf for complete installation. Desktop packages the worker
+outside asar; Node engine builds copy it beside the bundle. Tests: coordinator `ming-speech`,
+`voice/ming`, `queue/dispatcher`; providers `ming`; client `clone-voice`, `local-models`; desktop
+`packaged-runtimes`; root `scripts/test-ming-worker.py`. See [setup and delivery limits](managed-local-runtimes.md#ming-qualification-and-delivery-boundary).
+The standalone audition remains `scripts/probe-ming-tts.py`, with input/environment checks in
+`scripts/test-probe-ming-tts.py`; see [audition evidence](ming-tts-audition.md). Voxa is unchanged.
+
 On-demand story delivery: coordinator `world/undersong-release.ts` pins the public archive;
 `world/story-download.ts` owns pinned single/multipart resumable archives, disk-space inspection, verification
 and extraction, then `world/sample-world.ts` installs an independent copy. Contracts
@@ -18,6 +439,25 @@ the ZIP back, `world-guide.ts` keeps the Guide and its teasers and packs the gui
 `arke-player-guide-export.ts` makes the guide alone. Client `components/arke-player-export.tsx` is
 the Export sheet's Arke Player kind with Release; `screens/world-guide.tsx` and
 `world-guide-teasers.tsx` are the Guide page. See [publications](publications.md).
+
+Stories for Arke Player (SPEC-058 R-79 – R-81): contracts `world-package.ts` also reads schema 6, an
+interactive story published alone, and its `arke-story` document (`readStory`). `story-document.ts`
+compiles a production's routing and the clips or beats the export resolved into that document
+(`compileStoryDocument`), and walks every route through it with SPEC-063's evaluator
+(`storyRoutes`). These fixtures are the Studio's, not the Player's:
+`packages/contracts/scripts/story-fixtures.ts` writes `test/fixtures/world-package/story/`, which
+arke_world copies, and the contracts test fails until they are regenerated after a change to
+`story-state.js`.
+
+Export → Arke Player for a story (SPEC-058 R-89; turn 245): coordinator
+`productions/story-export.ts` reads an interactive movie or a visual novel through the web
+package's own resolvers (`resolveMovieScenes`, `resolveBeatScenes` in `interactive.ts`), counts and
+blocks it for the sheet (`readStoryExport`, answering `read-story-export`), and makes the schema 6
+package (`exportStoryPlayer`, reached through `export-arke-player`), each clip measured by
+`media/mp4-info.ts` and shipped as made or re-encoded. Contracts `story-export.ts` holds the sheet's
+state, its blockers and the read-back line. Client `components/story-export.tsx` is the Export sheet
+on the Branch Map: Web package and Arke Player. `scripts/export-arke-player.mts --story` makes the
+same package from a copy of a world.
 
 Audio Studio (approved turn 226): client
 `screens/chapter-audio-studio.tsx` composes the Cut layout, shared `EditorPanelTabs`,
@@ -304,6 +744,7 @@ See [running the standalone server](standalone-server.md) and coordinator
 | Local H3 reference video | providers `src/comfyui/h3-reference-recipe.ts`, `reference-inputs.ts`, `clients/comfyui.ts`; contracts `reference-budget.ts`, `reference-prompt.ts`, `audio-reference.ts`; coordinator `media/prepare-references.ts`, `media/reference-media.ts`, `bench/service.ts` and queue preparation | providers `test/h3-reference.test.ts`; coordinator `test/media/reference-media.test.ts`, `test/bench/bench.test.ts`, `test/queue/dispatcher.test.ts`; [setup and GPU smoke check](h3-reference-video.md) |
 | Writing/chat | client `src/components/conversation.tsx` (shared world/production transcript), `inline-markdown.tsx` (reply formatting); coordinator `src/harness/v2-launch.ts`, `harness/authoring.ts`, `world-chat/`; adapter packages | client `test/world-chat-fidelity.test.tsx`, `test/inline-markdown.test.tsx`; adapter `test/`; coordinator `test/world-chat/` |
 | OpenCode v2 release pin | adapter-opencode `src/discovery.ts` accepts only 2.0.26 under `opencode2` or `opencode`; `src/v2/` owns authenticated `/api/info` and permission `decision` payloads; desktop `runtime-sources.json` and `scripts/prepare-opencode2.mjs` stage the same release | adapter `test/v2-adapter.test.ts`, opt-in `test/v2-input-protocol.test.ts` and `test/live-credential-store.test.ts`; coordinator `test/v2-launch.test.ts`; [qualification commands](testing.md#writing-engines-and-model-control) |
+| OpenCode owned launch environment | coordinator `harness/v2-launch.ts` gives discovery probes and the server one isolated home/config/data/state/cache environment. It removes inherited `OPENCODE_*`/`OTEL_*` controls and disables native auto-update/SDK telemetry; explicit executable paths still use Arke's profile. `credentialEnvPatch` supplies managed keys separately. This is configuration isolation, not native log/DB erasure or HTTP trace-header removal. | adapter `test/v2-adapter.test.ts` covers configured/PATH/bundled probe environments; coordinator `test/v2-launch.test.ts` covers parent-env preservation and optional actual native startup with poisoned synthetic personal DB/config/cache controls. |
 | Additional conversation input (#1138, partial) | contracts `src/world-chat-input.ts`; coordinator `src/world-chat/input-journal.ts`, `input-fold.ts`, `input-recovery.ts`, `run.ts` (`sendQueued`); world schema boundary 44. Durable inputs and queued-primary execution only; scheduling, native steering and the composer are outstanding. See [conversation inputs](conversation-inputs.md) | coordinator `test/world-chat/input-journal.test.ts`, `run.test.ts`; opt-in native probes adapter-codex `test/steering-protocol.test.ts`, adapter-opencode `test/v2-input-protocol.test.ts` |
 | What Arke is told it can prepare | coordinator `src/world-chat/action-guide.ts` renders each turn's "Actions you can prepare" from contracts `ModelWorldChatActionSchema`, `WORLD_ACTION_DESCRIPTIONS` and the drift-tested examples in `src/world-chat.ts`, plus the registry's `worldChatActionDescriptor` for card family, reads and support; scoped by entry context, collapsed to one line per kind past a fifth of the turn budget, with the leased `describe_action` read for the rest. A new model action needs a description or contracts will not compile | coordinator `test/world-chat/action-guide.test.ts`, `test/world-chat/retrieval.test.ts`, `test/world-chat/run.test.ts`; SPEC-050 R-1..R-6, issue 1404 |
 | What conversation can actually reach | coordinator `src/arke-actions/registry.ts` names each supported command's `reachedBy` model kinds or typed turn-result channels; commands with no path carry `no-model-action`. Its `conversationSchema` projects only the command variants those paths support, while the transport schema retains human controls. `src/world-chat/model-action-input.ts` rejects execution-blocked kinds before turn completion or preparation; `actions.ts` also refuses copying reviewed visual facts on chat duplication and rechecks old pending shared-resource cards. Contracts `world-chat-actions.ts` removes visual facts from chat insert/edit commands while retaining the structural schema for old prepared cards. `arke-actions/lifecycle.ts` stales cards with recognized obsolete permission labels, without executing them. Human scene controls retain the shared scene vocabulary | coordinator `test/arke-actions.test.ts`, `test/world-chat/turn-result.test.ts`, `test/world-chat/actions.test.ts`; contracts `test/world-chat-actions.test.ts`; SPEC-050 R-7..R-10, SPEC-051 R-46..R-48; issues 1405, 1421 |
@@ -364,7 +805,7 @@ See [running the standalone server](standalone-server.md) and coordinator
 | Founding depiction rules | contracts `src/genesis.ts`, `src/world.ts`, `src/founding-build.ts`; coordinator `src/harness/blueprint.ts`, `src/harness/genesis.ts`, `src/world/founding-build.ts`: `neverDepicted` survives the conversation and sheet acceptance, omits image work and supplies review notes | coordinator `test/world/founding-build.test.ts`; SPEC-031, issue 905 |
 | Audio/performance | coordinator `src/audio/`; contracts audio/performance modules; client performance components; desktop media tools | coordinator `test/audio/`; desktop `test/media-tools.test.ts`; audio integration notes (private document set) |
 | Dialogue guidance/feedback | contracts `src/dialogue-assessment.ts`, `provider-guidance.ts`, `take-feedback.ts`; coordinator `src/productions/visual-facts.ts`, `takes/feedback.ts`; client `src/components/take-dialogue-feedback.tsx` (the scene page's guidance left with SPEC-044) | contracts `test/dialogue-assessment.test.ts`; coordinator `test/takes/dialogue-feedback.test.ts`; client `test/take-dialogue-feedback.test.tsx` |
-| Desktop/platform | desktop `src/main.ts`, `startup.ts` (foreground/background first paint), `preload.ts`, `transport-auth.ts`; client `src/arke-bridge.d.ts` | desktop `test/startup.test.ts`, `transport-auth.test.ts`, `preload-auth.test.ts`, `scripts/smoke-background-startup.mjs` |
+| Desktop/platform | desktop `src/main.ts`, `startup.ts` (foreground/background first paint and retaining the window until confirmed quit), `preload.ts`, `transport-auth.ts`; client `src/arke-bridge.d.ts` | desktop `test/startup.test.ts`, `updates.test.ts`, `transport-auth.test.ts`, `preload-auth.test.ts`, `scripts/smoke-background-startup.mjs` |
 | Shot prompts | contracts `src/planning.ts` selects the authored `promptOverride` for its image/video capability; existing `set-prompt-override` in coordinator `src/productions/scene-commands.ts` saves words and source versions; World Chat authors/revises them, `productions/ops.ts` requests them during standalone scene drafting, and the shot editor edits the same record | coordinator `test/productions/planning.test.ts`, `test/productions/scene-commands.test.ts`; client `test/scene-workspace.test.tsx` |
 | Art direction below desktop width | client `screens/art-direction.tsx` owns touch picture doors, Models sheet and the proposal footer; `screens/art-direction.css` owns turn 167 geometry; `components/generation-dialog.tsx` shares the preview-first sheet with character workflows | client `test/art-direction-layout.test.tsx`, `test/art-direction-step.test.tsx`; `scripts/smoke-art-direction-layout.mjs`; [design turn 167](../../design-system/Arke%20Studio.dc.html#t167), issue 1352 |
 | World key art | contracts `src/art-direction.ts` (`keyArtIntent.prompt`); coordinator `src/harness/genesis.ts` authors the founding prompt, `references/key-art-references.ts` preserves it and assembles references, `references/prompt-review.ts` supplies world sources for alternatives; existing `plan-key-art` / `generate-world-image` review and dispatch | coordinator `test/references/key-art-composition.test.ts`, `test/world/founding-build.test.ts` |
@@ -897,10 +1338,10 @@ Regressions are in coordinator `retrieval.test.ts`,
 `turn-result.test.ts`, `run.test.ts` and `world/schema-version.test.ts`.
 
 Proposal cancellation (#1981): `harness/authoring.ts` retains the active-run guard through the
-writer's terminal event and interrupt acknowledgement. The v1 adapter scopes abort to the same
-directory and execution API as prompt_async, waits for pending prompt admission, and translates
-MessageAbortedError to cancellation. Requests are bounded; partial proposal files remain intact.
-Tests: coordinator `test/harness/authoring.test.ts`, adapter-opencode `test/adapter.test.ts`.
+writer's terminal event and interrupt acknowledgement. OpenCode uses only the pinned v2 adapter
+and its execution interruption protocol; the v1 adapter and fallback are removed. Requests are
+bounded; partial proposal files remain intact. Tests: coordinator `test/harness/authoring.test.ts`,
+adapter-opencode `test/v2-adapter.test.ts`.
 
 Ready EPUB editions (#2062) expose Preview EPUB from `StoryEditionFiles`, in both the
 world-independent Publications library and Publish. The shared `StoryBookPreview` reads only
@@ -932,3 +1373,473 @@ take selection or acoustic word-timing record is changed. Tests: coordinator
 Explicit same-file audiobook picture choices preserve the existing generation look/shot, focus and motion, and may record a separate current-look review (SPEC-047 R-98/R-103, #2125). `setAudiobookPicture` fences source/selection/look freshness; `pictureLookChanged` applies that review consistently in the existing picker and illustrated EPUB preflight. `writeAudiobook` raises reader boundary105 before the first review field.
 
 Audio-only story publication fingerprints exclude chapter pictures, look/own-look choices and their shared update timestamp; all other narration fields and the existing resolved blocks/mix/arrangement, text, metadata, rights and media identities remain checked in `publications/story-review.ts` (#2122, SPEC-048 section2.11). Illustrated outputs retain picture dependencies; coherent capture and immutable ready-edition verification are unchanged.
+
+## Completed generation result storage
+
+Contracts `job.ts` carries the optional pre-submission `resultReceiptId`. Queue
+`artifact-files.ts` owns bounded, hash-verified private completed-response receipts, cancellation
+and enumerated post-filing retirement. `dispatcher.ts` preserves accepted bytes across local
+storage holds and restores the exact result/usage/cost before considering provider recovery.
+Confirmed inline completion or terminal success plus complete retrieval releases the inference
+reservation before storage-only retries. The next GPU owner still performs normal engine
+handover; result buffers, file reservations and job/ledger settlement remain independently owned.
+Verified legacy inline receipts retain their old identity across repeated held restarts.
+Partial publication verifies/reuses matching destination files as well as staging prefixes;
+already-published bytes need no second payload reservation or copy.
+`storage/job-artifacts.ts` joins known remaining file writes to shared volume reservations and
+reconciles only its known idle host-file leases, preserving live or unfamiliar owners. The
+production coordinator injects that port and the existing world's ownership recheck. No shell,
+native-worker release, provider replay or generic cleanup authority is added. Queue and storage
+regressions cover disk faults, prefixes, separate volumes, cancellation, restart, rejected journal
+appends and billing. See [filesystem operations](../filesystem-operations.md#jobs-takes-reviews-and-exports)
+for paths, limits and the remaining generation/scratch/admission boundary.
+
+## Studio operational session boundary
+
+Studio assistant session boundary (SPEC-061 R-21–R-23): contracts `roster.ts` declares
+`studio-assistant` and `diagnostic-specialist` as operational roles; `confinement.ts` denies
+filesystem/world/web/native delegation tools independently of editable briefs/research settings.
+Coordinator `harness/session-files.ts` applies an operational configuration allowlist after
+world/Settings enrichment, pins that same role at creation and strips world/author memory,
+query URLs, skills and other-role overrides before adapter preparation/file writes.
+`agent-session.ts` carries background inference priority through `harness/local-gpu.ts` into
+`local-ai/gpu.ts`: normal creative/recovery waiters precede background explanations, without
+preempting any admitted owner. Tests cover actual OpenCode v2/Claude/Codex gates, role pinning,
+configuration isolation, normal FIFO/background ordering and cancellation. These are session
+prerequisites; production route/spend integration, the reviewed repair registry and turn-239
+dialog/visual acceptance remain unfinished.
+
+The Studio core lives in coordinator `studio-assistant/`: `service.ts` owns one
+on-demand conversation turn, flushed phase intents, a closed diagnostic delegation and editable
+handoff data. `evidence.ts` selects bounded enumerated operational facts without world content,
+free-text causes, provider IDs, paths or raw logs. `store.ts` keeps a separate bounded private
+conversation file, preserving corrupt/full history and interrupted outcomes without replay.
+`runner.ts` pins an explicit live model and operational role, requires a host-proved destination,
+and retains unknown native work until actual owner settlement. Nonlocal calls need one-use
+approval of each application-controlled payload and destination. `contracts/studio-assistant.ts`
+defines the closed schemas and limits. Private transcripts/sharing payloads must never enter the
+common app snapshot, broadcast events, world journal or support export. These modules are tested
+together with the actual session/GPU wrappers. `host.ts` lazily composes the private conversation
+owner on the first authenticated Studio command, using `R/studio-assistant/conversations.json`.
+Production model-route/spend authorization, remaining UI controls, reviewed actions and matched
+visual acceptance remain required before claiming the Studio assistant is delivered.
+
+Private native sessions: `contracts/adapter.ts` defines a host-only private visibility request
+and a one-use `SessionRef.privateEvents` capability bound to that session. The Studio runner
+requires the adapter's explicit isolation guarantee and returned observer; it never falls back
+to the shared stream. OpenCode v2 accepts only prepared operational roles, excludes their
+events and session trace facts (including backend errors that echo content), and rejects any
+unexpected private tool permission internally. Grants cannot override that rejection. The GPU
+wrapper also excludes private session activity from its common stream. Ordinary authoring
+events/traces keep their existing path. Other adapters have not yet qualified private sessions;
+native route/spend, actual backing-inference cleanup qualification and complete payload bounds
+remain gates.
+
+OpenCode `src/v2/config.ts` gives operational sessions a closed native policy: wildcard tool
+permission denial, no tool/integration catalogue, a literal selected-provider policy and disabled
+title/summary/compaction/warming helpers. Ordinary authoring configuration keeps its existing
+path. Adapter `test/v2-operational-config.test.ts` checks policy construction; opt-in
+`test/v2-operational-protocol.test.ts` runs the pinned executable with a credential-free profile
+and scripted local provider, proving native unknown/read denials, zero advertised tool schemas
+and exactly one request per successful scripted operational turn. This is not a failure-retry,
+destination/locality or spend guarantee.
+
+`SessionRef.privateDestination` is a host-only scoped route capability preserved through
+prepared-session composition. V2 `private-destination.ts` verifies the native session's pinned
+model/variant/role/directory and its exact scoped catalogue row, then bounds/read-checks the
+measured native Ollama route's model metadata with matching authentication. Unknown transports,
+extra proxy/header options, redirects, missing/ambiguous scope and unproved metadata refuse.
+Cloud forwarding stays nonlocal; URLs/credentials remain behind an opaque route digest. Reading
+the capability pins its first proof. Native dispatch rechecks the route before its final fence,
+including changes during metadata I/O; failed or cancelled proof cannot authorize a prompt.
+Adapter `test/v2-private-destination.test.ts` and the exact-binary operational fixture qualify
+this boundary. Qualified adapters advertise `privateDestinations` and must supply both the
+session capability and native dispatch fence; GPU/runtime wrappers refuse a missing native
+fence rather than fabricating it through their ordinary fallback. The Studio runner combines
+the native proof with a trusted host attestation before approval. Either nonlocal verdict
+requires cloud consent, and the disclosure digest binds both identities. Coordinator
+`test/studio-assistant/native-route.test.ts` covers the production wrapper composition;
+opt-in `pinned-native.test.ts` drives the actual launcher/runner through a zero-tool native
+completion and scripted provider failures. Unguarded 2.0.26 retried two HTTP 503/429 responses:
+one Arke dispatch/approval produced three identical provider requests before success. A terminal
+HTTP 400 remains unknown to inference ownership and is never replayed by the application;
+its failed native assistant row on the prompt protocol still has `time.completed`. The unsealed
+comparison protocol's private completion reader
+therefore requires the newest assistant's error-free `finish: "stop"`; missing/unknown finish,
+truncation, tool requests and cached error rows cannot publish a reply. It cannot search behind
+a newer unfinished assistant to reveal an older reply after reconnect. These checks preserve
+ordinary authoring's existing completion path. The production host attestation port still
+defaults to refusal. Full payload, spend, native retention/cleanup and production authorization
+remain unfinished gates.
+
+V2 `private-control.ts` supplies fixed, dependency-free application code through the existing
+session-file writer, with a literal integration allow for only that session's control directory.
+Its native retry hook refuses internal retries. Scoped plugin activation/source is checked before
+private dispatch and on both sides of destination metadata I/O; missing/failed/wrong/extra controls
+refuse. Initial empty location activation is polled only within the existing bounded verification.
+The pinned fixture now verifies one model request for success, HTTP 503/429/400 and a dropped socket,
+with unknown work still retaining GPU/runtime ownership. This qualifies that pinned native Ollama
+path; it does not prove arbitrary SDKs, host-file tamper resistance or physical model cleanup.
+`sessionFiles` receives its resolved directory from coordinator `harness/session-files.ts` while
+filesystem writes remain host-owned. `harness/private-files.ts` retires only captured preparation
+bytes after native retirement, protects successor generations/links/changed or unrelated files,
+and keeps failed known-file cleanup reachable for reconciliation without inference replay.
+
+Qualified Studio invocation also requires `HarnessAdapter.privatePayloads` and `privateTransient`. The runner captures
+immutable request values, constructs the exact roster system instructions and a 4,096-token
+answer cap, and supplies `CreateSessionInput.privateRequest` through the host file writer.
+V2 binds that manifest's digest to native control activation and verifies its options at setup.
+Its HTTP hook consumes/bounds the original native request before replacing it with the reviewed
+system/user messages and closed generation fields. Ambient native environment/instructions,
+tools and internal session headers cannot expand that provider body. A changed prompt, manifest,
+model or unexpected second transmission refuses. The private cloud approval includes the full
+system instructions and answer cap in its existing contents review. Nondefault native effort
+payloads remain unqualified and refuse rather than silently changing their semantics.
+Pinned fixtures compare the complete received body to approval and reject changed manifests
+before approval/network; an injected HTTP-hook refusal proves zero provider calls while keeping
+the native owner unknown. Native transport still adds tracing headers after this hook; the
+qualified managed bridge below strips them and verifies the original local-only route.
+This native control alone does not qualify arbitrary provider persistence or paid spend.
+
+`SessionRef.privateRetire` retires only its exact ephemeral native session, never canonical
+Studio/World history. V2 captures the original server/authentication before creation and refuses
+unknown submitted work, changed generations and mismatched role/model/variant/directory.
+Success requires both session and message reads to return native absence; failed/unknown
+retirement stays reachable. Late fetch/dispatch callbacks and untracked SSE frames cannot
+repopulate private caches, publish private replies or expose retired facts through traces.
+Bounded tombstones prevent identity reuse: at most 8,192 private admissions per adapter,
+including failed creation, before host reconciliation is required. Ordinary creation keeps its
+existing path. The runner waits for bounded retirement on success; failure retains one private
+owner/config and blocks new Studio inference while the confirmed GPU/runtime lease is free.
+Host-only `reconcileRetirement` retries known-complete/unsent retirement without regenerating
+an answer. Native protocol/service fixtures verify canonical history/creative bytes survive.
+This qualifies logical native API retirement, not secure erasure of database/WAL/log bytes,
+restart reconciliation or full financial-record retention; this logical retirement alone
+cannot qualify a production provider route.
+
+Native qualification now measures the retained copy: retired prompt-path markers remain in
+SQLite WAL, while direct `/generate` leaves message history unchanged. The separately identified
+`privateControlFiles(request, "generate")` control seals the reviewed body, denies retries and
+reconstructs only a complete zero-tool response after bounded UTF-8/SSE/finish validation.
+Its activation proof cannot borrow a primary control. Adapter `test/v2-transient-control.test.ts`
+executes the emitted source; coordinator `test/studio-assistant/transient-native.test.ts` checks
+eleven direct native scenarios and bounded entire-profile scans before/after owned native exit,
+with retained prompt-path markers as the detector's positive control. Native `/generate` alone
+returns truncated output as HTTP success. Sealed private dispatch now uses the guarded API,
+rechecks control after its bounded result, and never consults cached messages or native SSE
+text/completion/usage. Stop suppresses publication while an independent API observer may still
+confirm the exact original owner. Its five-minute deadline (host override up to fifteen minutes),
+HTTP/shape/text refusal, runtime exit or interruption acknowledgement cannot release unknown
+inference. Adapter `v2-private-transient.test.ts` and coordinator `native-owner.test.ts` cover
+those boundaries; pinned runner fixtures include acknowledged Stop, late completion and complete
+bounded profile scans through owned exit. Ordinary writing and unsealed comparison ports keep
+the prompt protocol. Production host route attestation still defaults to refusal.
+Native's HTTP bridge buffers upstream bytes before the response hook, so its allocation remains
+a separate qualification gap; the hook's admission limit does not bound that allocation.
+
+`adapter-opencode/src/sse.ts` bounds each native frame at 64 MiB, above the current 20 MB
+encoded image budget, and cancels its reader on refusal/abort without echoing frame data.
+V2 checks private decoded UTF-8 response bytes before normalization (including split surrogate
+pairs), coalesces pending deltas, caps private queues/control requests at 64, bounds metadata
+and opaque IDs, and redacts native error/end text. Private prompt receipts, completion JSON
+and permission reconciliation have finite body bounds. An absent/oversized/failed private
+retrieval cannot promote partial stream text into a reply. Positive native execution success
+settles unsealed comparison-protocol inference independently of reply retrieval; a size/error
+refusal alone does not. Sealed transient requests exclude that native SSE authority entirely.
+Unscoped native session errors and raw stream exception text never enter shared observations.
+Private unsupported/malformed events also stay out of the common dead-letter buffer. After
+an observed private error or Stop, cached assistant rows on reconnect cannot settle its unknown
+inference; a late positive native execution event may still retire the exact original owner.
+Adapter `test/sse.test.ts`/`test/v2-private-payload.test.ts` plus the coordinator native-route
+composition cover these refusal/ownership boundaries. Real managed-payload, profile, application
+and restart evidence is described below; arbitrary native profiles and paid spend remain
+unqualified by these isolated cases.
+
+Private inference ownership uses `SessionRef.privateTurnSettled`: native v2 completion or the
+exact host-only `privateOwnerStopped` cleanup capability can settle one turn. A send error,
+Stop acknowledgement, writing-child exit or adapter disposal cannot. Private sessions admit
+only one prompt. The GPU and runtime-change wrappers keep the admitted lease/fence after an
+unknown send and release it only after native proof plus send settlement; an error before
+dispatch cancels that queued waiter. `session-files.ts` preserves opaque capability receivers
+and promise identity through prepared-session composition. The runner retains its private
+config until settlement, fences old-session interrupts against replacement generations and
+does not publish a late reply. Its optional busy subscription updates the private service so
+an interrupted request can be explicitly acknowledged without polling or replay. Closing
+admission removes that observer. The cleanup capability is ephemeral native authority, not
+a model, renderer, persisted-plan or wire command. Actual reviewed cleanup plans, route/spend
+composition and physical runtime/platform qualification remain unfinished.
+
+Guarded Studio sends use `HarnessAdapter.sendMessageWithFence`: the GPU and runtime-change
+wrappers propagate a synchronous final owner/route check through admission waits. A cancelled
+GPU waiter that never reaches that check is known not-dispatched and can retire; a submitted
+unknown outcome remains held. OpenCode v2 increments `lifecycleRevision` on host-confirmed runtime
+exit/disposal; Studio refuses adapters without a verified revision instead of equating missing
+tokens. These host-only callbacks carry no renderer/model repair authority.
+
+Private Studio transport: `contracts/studio-assistant.ts` defines closed correlated commands
+and replies; `frames.ts` adds a requester-only frame on the existing per-connection sequence.
+Coordinator `transport.ts` supplies an authenticated `TransportRequester` callback, captured for
+one socket and revoked on refusal/close/error/stop. It sends after the initial snapshot and
+never broadcasts private replies. Client `store.ts` dispatches these frames to explicit private
+subscribers without folding them into app/world state. The remote gateway and world action
+registry refuse the command. Coordinator routes it through `studio-assistant/host.ts`, separately
+from common world commands, and stops its admission before draining ordinary handlers. The
+controller bounds pending asynchronous work (eight total, two per socket) and observation waits;
+uncertain operations retain admission until actual settlement. Cancel/sharing/unwatch controls
+remain available. A 64-ID volatile duplicate window is not a durable execution ledger.
+The private `dictate` action uses the existing `VoiceService.transcribe`/Voxa lifecycle seam,
+with one in-flight request, a 6 MB input cap, 45-second observation bound and 8,000-character
+result cap. It returns only to the captured requester, without shared `dictation.result` events
+or history writes. Stop/disconnect/shutdown revoke delivery; uncertain transcription remains
+single-flight until its promise settles. No model, cloud fallback or voice service is installed
+by this action. The local service retains its existing inference/recovery fences.
+Default model invocation refuses absent host-proved routes; native route/spend composition,
+reviewed repairs and full turn-239 interaction/visual acceptance remain unfinished.
+Private snapshots have a 2.5 MiB aggregate UTF-8 bound (the 2 MiB conversation plus one
+disclosure/unsaved reply); individual field limits do not multiply into an oversized frame.
+The reply callback's boolean acknowledges handoff to the bounded writer, not peer receipt or
+successful execution.
+
+Studio dialog: client `components/studio-assistant.tsx` mounts inside `GlobalChatProvider`
+with its own `studio-assistant-context.tsx` owner. `lib/studio-assistant.ts` retains private
+per-thread drafts/model choices, correlates results and restores only a watch on reconnect;
+unconfirmed mutations are never replayed. The top-right titlebar Chat button opens Studio.
+A separate page-scoped Arke control uses the current native Sparkle icon to reopen the registered
+World/Builder/shot conversation, preserving its captured scope and draft. Its legacy
+`data-global-chat-trigger` selector continues to mean the contextual entry; Studio has its own
+selector. Native touch sizing prevents the contextual control shrinking beside a long title.
+Existing World/Builder page entries keep their contextual controller and layout. The new dialog uses
+the native PageSheet, composer, ModelChip, reply renderer and icons; its CSS affects only Studio,
+including modal behavior below 1100px, 44px phone/coarse-pointer controls, an explicit composer
+scope and keyboard inset. Entry requests composer focus once; a later busy/unlock cycle does not
+steal focus from another control. History is private, cloud consent is scoped
+to one disclosure, and `GlobalChatController.stageDraft` carries only the editable request to
+a named World/Builder destination. Replacement consent matches the exact existing draft;
+later typing requires fresh review. Staging creates/sends no coordinator conversation command.
+`components/studio-storage.tsx` shows the latest host measurements beside the latest storage
+diagnosis, using the same volume grouping and pressure findings as System/Diagnostics. Saved
+diagnostic evidence stays historical; disconnected/stale readings are labelled, future readings
+are withheld and missing capacity is unknown. No operation deficit or fit is inferred from free
+space. The existing scoped cleanup control retains separate review/approval. Tests:
+`test/studio-storage.test.tsx`, `studio-assistant-view.test.tsx`, `recovery-cache-cleanup.test.tsx`.
+
+Studio effort selection uses the existing `ModelChip` and a conversation/model-bound draft choice
+in `lib/studio-assistant.ts`. Contracts `privateSessionVariants` filters catalogue choices to the
+private request grammar. The coordinator runner validates the current model before preparation;
+service delegation keeps the choice only for the same model. The request manifest, managed writer
+and provider payload bind that value. Studio labels Default and Off explicitly without changing
+World/Builder labels. Runner/service, private-control, managed-writer and Studio UI tests cover
+this path; the optional pinned native bridge test covers explicit default and unsupported refusal.
+`components/studio-dictation.tsx` reuses `ComposerMicControl` with separately owned capture:
+explicit start/stop, one-minute/6 MB limits, cancelled pending microphone permission and
+discard-on-close/disconnect. `StudioConversationClient.dictationTarget` captures the original
+thread/new-draft key; newer typing is preserved and no transcript is automatically submitted.
+Studio reply playback now uses `studio-read-replies.ts` and the existing single app player. The
+private host resolves saved Arke reply IDs, normalizes/splits bounded text, and returns one WAV
+part only to its requester. `voice/service.ts` shares the existing synthesis lane with no world
+cache or cloud fallback. Voice client private reads pin literal loopback, forbid redirects and
+bound streamed bytes/fragments before assembly. Cancelled body cleanup retains its original
+inference/lane owner until actual consumer settlement. Subsequent parts bind source digest and
+chosen local narrator; changing scope/voice, closing, history navigation or disconnect stops the
+read without replay. Restored/offscreen history is never read automatically. Tests:
+`test/studio-assistant/speech{,-host}.test.ts`, `test/voice/private-speech.test.ts`, voice/client
+private-speech and Studio read-reply suites. Actual model/physical cleanup qualification remains
+separate; selected cloud or world-bound voices are unavailable for this private local path.
+Studio text documents use contracts `StudioTextAttachmentsSchema` and `studioRequestFits`,
+client `lib/studio-documents.ts` and the shared Composer's existing attach/drop/paste/removal
+controls. A bounded selected UTF-8 slice becomes unsent per-thread workspace; close/reconnect
+invalidates a pending read and no replacement starts until actual settlement. Explicit Send
+captures document bytes into the private Studio user message and the main assistant's prompt.
+Cloud review seals their full contents; the diagnostic specialist still receives only closed
+operational evidence. No path/import/world filing or new native tool authority is granted.
+Private history preserves sent documents across restart within the existing aggregate store cap.
+Images/audio and extracted PDF/Office attachments remain unimplemented and explicitly refused.
+The default native inference route still refuses absent host proof. Remaining media attachments,
+effort selection, reviewed repair/cleanup cards and actual matched turn-239 rendering remain pending.
+Optional native Studio transport uses `studio-assistant/provider-bridge.ts`: one exact reviewed
+body, private authenticated loopback listener, bounded response collection before native
+buffering and stripped native metadata. `runner.ts` binds the opaque identity into disclosure
+and owns the route through native, HTTP and exact private-file retirement. Contracts
+`PrivateSessionTransport` carries only its ephemeral URL/capability through existing native
+configuration; it is absent from model input, ordinary sessions and wire commands.
+`PrivateSessionWriter` separately carries host-only original native API closures, never config.
+
+`studio-assistant/managed-provider-bridge.ts` composes the existing managed Ollama owner with
+`local-ai/managed-ollama-transport.ts`. `ollama.ts` captures only its current managed selection,
+excluding explicit existing installs, installation and shutdown. `supervisor.ts` supplies an
+immutable original-child capability, revoked by unhealthy status/Stop/exit/replacement.
+`local-ai/windows-connection-origin.ts` verifies the established reverse TCP tuple and image
+path against that original live process before HTTP bytes. `local-ai/verified-loopback-http.ts`
+owns the exact paused socket, proof, bounded request/response and actual close; it never pools,
+redirects, reconnects or retries. Other platforms refuse native proof pending qualification.
+`harness/managed-writer-transport.ts` adds a closed original-auth API policy for one private
+directory/role/session/request and one generation. `harness/v2-launch.ts` supplies it only for
+the current bundled Windows writer. Its asynchronous factory also checks executable content
+against `harness/private-writer-pin.json` before granting the capability. The pin is embedded
+with Arke, not read from a self-reported runtime manifest. `harness/executable-content.ts`
+streams one bounded descriptor, checks file identity/metadata and canonical path around the
+read, and refuses changed bytes, owner, cancellation or aliases. Original pending I/O drains
+before the task returns. This is byte qualification, not an atomic loader-image/hostile-filesystem
+fence. Packaging checks the same executable/archive/version pin before probing/staging it.
+Failed native creation retains original files until HTTP drains.
+`local-ai/runtime-content.ts` verifies the fixed Ollama executable/library tree from the
+archive-derived `ollama-private-pin-x64.json` before a managed private provider opens sockets.
+It bounds directory iteration and streamed file reads, refuses missing/extra/linked code and
+rechecks all earlier files before qualifying. File evidence is cached only for the captured
+process generation; subsequent requests check metadata/identity and the complete fixed tree.
+`OllamaEngineService.qualifyManagedOrigin` couples this to existing selection/install/shutdown
+fences. The bridge retains pending qualification through Stop and cannot publish a late route.
+Only host fixtures can inject a synthetic content pin; normal settings/wire state cannot.
+Managed startup allows sixty seconds for cold GPU discovery while retaining exact version health.
+Managed Ollama launches with `OLLAMA_NO_CLOUD=1`, including its ordinary local routes. After
+content qualification, the private bridge reads bounded `/api/status` over an original verified
+socket and requires cloud disabled by the environment (`env` or `both`), before preparing
+metadata or exposing a private URL. Enabled, config-only, missing and malformed evidence
+refuses admission. The route identity includes this policy; explicit existing services keep
+their own configuration and cannot acquire the managed capability.
+
+The pinned native metadata deadline is one second. Managed startup verifies two unwritten
+one-use sockets before exposing the URL; initial metadata can consume each once, with final
+child/service/socket checks. They expire after thirty seconds within the eight-socket cap.
+Responses are fresh; later metadata uses a new verified socket, never cached data or HTTP reuse.
+
+Stop seals new writer/provider writes and retains the bound refusing listener while work is
+uncertain. Already-sent bounded completion may drain. Native retirement precedes writer HTTP
+drain, final listener release and exact file retirement. Known retirement survives later
+cleanup retries. The existing host-only `SessionRef.privateOwnerStopped` confirmation of BOTH
+original native owners retires only captured local session/cache state, even after exit/disposal,
+without querying a dead/replacement endpoint. A pending creation retains this confirmation and
+its files until its original host work settles. Writer exit or HTTP Stop alone is insufficient.
+`supervisor.ts` now keeps a host-only cleanup witness for each captured process generation;
+only successful native `stopAndConfirm()` qualifies it, independently of current readiness.
+The original writer and managed provider expose their own captured witnesses. A private
+transport may bind their conjunction into its runner entry; reconciliation snapshots that
+method and retains unknown/incomplete proof. Production coordinator shutdown calls retirement
+reconciliation after supervised writer and managed provider cleanup. A retirement failure joins
+the existing cleanup error report after durable world closure, rather than skipping that closure.
+This wires shutdown housekeeping independently of destination/model admission.
+
+Actual bundled Windows fixtures qualify normal completion, upstream overflow, verified writer/
+provider composition and Stop with a held synthetic provider. They retain address/GPU planning
+ownership after writer exit, then verify release and exact file retirement after original
+provider process cleanup. These are finite protocol/process tests, not live GPU/model evidence.
+Real local-model and normal-host qualification is described below. These synthetic cases do
+not qualify arbitrary models/profiles or replace remaining full application/fault/platform
+acceptance and actual matched turn-239 visuals. The bridge adds no model process or agent loop.
+
+`harness/v2-launch.ts` exports the shared `managedStudioAssistant` host composition for the
+qualified bundled Windows writer and managed local-only Ollama owner. It uses the adapter's
+own exported `privateWireBody` mapping, binds destination identity to both original processes
+and the exact selected model, and combines their native cleanup witnesses. The runner captures
+original lifecycle methods before awaiting optional route preparation, retaining failed or
+cancelled qualification through actual cleanup without reading an unready configuration.
+Actual pinned fixtures now exercise this shared factory for completion and held-provider Stop;
+58 focused checks include original-method retention, personal-endpoint refusal and background
+GPU scheduling. Desktop, development and Node startup now supply this factory by default.
+It admits only the qualified bundled Windows writer plus managed local-only Ollama; absent,
+configured/PATH, personal-service, nonlocal and unsupported profiles still refuse. Bare/custom
+Coordinator construction retains its explicit host options and closed default. No additional
+daemon, model download, paid fallback or new repair authority is introduced.
+The transient response control recognizes the pinned Ollama string `reasoning` delta but
+reconstructs only answer text and bounded usage; reasoning never reaches native SDK history.
+`scripts/qualify-studio-local.mjs` provides explicit pinned-runtime/copied-model live and
+restart qualification in a separately owned directory, with complete bounded profile/home/log
+canary scans and a positive detector control. It is a maintainer operation, not a startup model
+download, renderer tool or production activation switch.
+Local operational bodies use the pinned Ollama API's `max_tokens` and `reasoning_effort: none`,
+preserving the 4,096-token cap without letting hidden reasoning consume its bounded context.
+Hosted private bodies retain `max_completion_tokens`; ordinary writing is unchanged.
+`scripts/qualify-studio-host.mjs` then exercises normal authenticated Studio RPC, published model
+admission, real main/specialist/final delegation, canonical private history, exclusion from the
+other socket/shared state/logs and author notes, and host restart without inference replay.
+It uses the existing native launcher controls and original shutdown owners, not a model-port
+substitute. This is finite Windows application evidence, not universal model quality or the
+remaining full platform/fault/storage/visual acceptance.
+
+History replacement reads wait for an already admitted same-path write that outlived bounded
+shutdown in this process. This prevents a late old rename from overwriting a successor's history;
+it is not a cross-process/multiple-active-host lock. Private state is not replayed on reconnect
+until the owner explicitly watches again, and no user/model operation is automatically resent.
+
+## System status overview
+
+Advanced recovery preferences live in contracts `recovery-policy.ts` and
+`artifact-result-limits.ts`, persisted by coordinator `recovery/control.ts` through host-only,
+human-only `recovery-set-advanced`. Client `components/recovery-advanced.tsx` renders the closed
+Advanced section and retains optional cache maintenance there. Queue preflight reads the saved
+preference; FAL, ComfyUI and Higgsfield capture shared limits and timeout once per retrieval,
+including the desktop transport's overall deadline. `ArtifactResultFiles`
+reads existing receipts against support ceilings, preserving accepted results after a lower
+admission preference. A saved changed transfer policy retries only the queue's witnessed remote
+result holds, sequentially through `retryHeldArtifactTransfers`, without dispatch or poll replay.
+See [recovery preferences](recovery-settings.md); focused tests are named `recovery-advanced`,
+`recovery/advanced`, `artifact-transfer-preferences`, `queue/artifact-preferences` and the existing
+submission/result-storage suites.
+
+Recovery user-journey qualification uses `scripts/qualify-recovery-ui.mjs`: the actual built
+client, production coordinator composition, authenticated transport and isolated persistent
+settings/history over controlled runtime/capacity faults. It is not an alternate product host
+or runtime installer. Read [the acceptance record](recovery-acceptance.md) for its boundaries.
+`recovery/refresh-health.test.ts` covers metadata-only Ollama refresh during creative GPU work;
+`settings-providers.tsx` presents runtime state independently of model availability.
+Studio's closed private interruption vocabulary and user guidance live in contracts
+`studio-assistant.ts`; the conversation service preserves the reason through restart and
+acknowledgement without retaining raw errors or replaying the turn. Diagnostics uses independently
+wrapping evidence/manual guidance and collapsed consequence disclosures. Native supervisor forced
+termination falls back to its captured child handle when a returned tree-kill command leaves it
+alive; `stopAndConfirm` still requires child/descendant exit. Focused regressions live in
+`studio-assistant/service.test.ts`, `supervisor.test.ts` and the corresponding client suites.
+Native fixed-preview operations in `storage/windows-cache-file.ts` separate the thirty-second
+lifetime-binding/durable-admission allowance from fourteen seconds of native execution, inside
+a forty-four-second overall limit. Input is withheld until the original worker grant. The native
+cache tests derive their scenario deadlines from that operation budget and include delayed-grant
+and original-intent checks; no identity, approval or original-owner requirement is relaxed.
+
+Approved System design (master turn 241, originally reviewed as 240): contracts
+`src/system-resources.ts` owns readings, freshness and conservative
+per-volume grouping. Coordinator `src/system-resources.ts` owns bounded/coalesced observations;
+`application/studio-host.ts` composes OS collection. Desktop `src/system-resources.ts` uses the
+existing owned native-command executor for fixed GPU counters, retained by StartupRuntimeOwners.
+Client `components/system-panel.tsx`/CSS and `lib/system-panel.ts` own the rounded overview;
+`components/chrome.tsx` replaces only the proposal shortcut. Readings fold through the existing
+authenticated event/snapshot path, without becoming journal or support-export data. The existing
+Diagnostics route receives a finding reference for warning focus. See [system status](system-status.md)
+for collection limits, ownership, unavailable data and validation.
+### Remembered interactive story state (SPEC-063, approved turn 240)
+
+`packages/contracts/src/story-state-schema.ts` owns finite fact declarations and the closed predicate/effect vocabulary. `routing.ts` keeps legacy routing strict and opts story rules into `schemaVersion: 2` separately from the authored `version`. `story-state.js` is the dependency-free authority for evaluation, prefix replay, scene-entry projection, ending selection, canonical SHA-256 identity, fact references and bounded state exploration (100,000 states, 1,000,000 transitions, 1,000,000 retained witness entries and depth 2,048). Its declarations are in `story-state.d.ts`.
+
+Client `components/story-controls.tsx` owns the connector helper and facts form, typed predicate/effect controls and acknowledged draft saves; `story-scene-controls.tsx` owns dialogue/shot guards, ending variants and explicit valid-route preview entry. `screens/branch-map.tsx` owns map destination picking and the selected connector. Scene `BeatLines` opens the same Show when control. `productions/interactive.ts` in coordinator persists semantic commands and replay-validated evidence through the world gate, and packages the shared player. Stateful export saves are namespaced by publication and retain separate restarted playthroughs; legacy saves keep their existing namespace and four-field shape. New full-rule replacement forms carry `baseVersion` to refuse stale replacements while retaining the draft. Loading current rules explicitly replaces that draft with the latest saved fields before advancing its base version. Compact map rows have a separate Settings control; destination-first repairs can choose a source, and keyboard map picking shares the pointer path. Production Chat reads all facts/presentation rows through `get_routing` and uses those same commands.
+
+The generic commit boundary raises the world minimum reader to 113 when any routing write introduces schema version 2, including proposals and whole-file imports. The original production is never automatically migrated. `scripts/interactive-player-source.mjs` composes the evaluator and player into the exact exporter source; regenerate it after changing either JavaScript module. Conditional composite films are refused because they cannot remove an inactive line or person; beat packages carry block, shot and picture-source identities.
+
+Focused coverage: contracts `test/story-state.test.ts`; client `test/branch-map-canvas.test.tsx`, `test/interactive-player.test.ts`, `test/season-layout.test.tsx`; coordinator `test/productions/story-state.test.ts`, `test/productions/interactive.test.ts` and `test/world/schema-version.test.ts`.
+
+A story plays itself (SPEC-063 R-11a, turn 246). `story-state.js` `storyLoneChoice` is the one
+definition of a lone way — exactly one open choice and no closed choice shown with its reason — and
+`storyLinks` names the choices lone in every reachable state (`always`, drawn as links) or in some
+(`sometimes`, which keep their pill). The shared player asks `storyLoneChoice` at a scene's end and
+plays straight through a lone way as a step of the route, with its evidence; a beat moves on by
+itself (its voice, its reading time or its hold, each a CSS animation), and a click shows 156a's film
+bar rather than moving on. Client `lib/branch-map.ts` `routingLinks` and `previewUnwalked` serve the
+map's link drawing and inspector and the preview strip's count of choices, not links; Arke Player's
+Dart port implements the same definition (SPEC-058 R-87).
+
+Turn 240's visual alignment adds the Story facts Inspector and individual fact dialog, compact
+is/is-not condition rows, an unsaved draft path and atomic Review/Keep in the choice and dialogue
+Inspectors. Optional `choice.unavailable` carries an authored disabled label/reason; omitted
+means hidden. Stateful findings carry `witnessPrefix`, so the map can display named facts and
+preview that exact state without parsing diagnostic text. Preview facts link values back to
+their originating choice; Test another route opens the reachable-prefix picker through
+`InteractivePlayerAuthor.onTestRoute`, rather than inventing audience state.
+
+`scripts/smoke-story-layout.mjs` qualifies the complete App/global-chat layout, including the
+Story facts Inspector and one/two/three/four/five-option beat previews in both themes at desktop,
+window, tablet and phone sizes. It measures the desktop dialogue/vertical-choice columns, narrow
+dialogue-first stack, visible alternatives, full labels, scroll access and selection of a
+distinct second route. Four short clip-stage checks also verify overflow from the first choice
+through the last; six long-dialogue cases verify readable, scrollable copy and usable choices.
+Scene-editor Preview has sixteen additional full-App window-bound and choice-access cases.
+The shared window-overlay rules in `branch-map.css` cover both entry points and release the
+scene centre query container while its modal player is open. Its `--baseline` capture supports comparisons against
+turn 240 without reading or writing an author's world; see the testing guide.

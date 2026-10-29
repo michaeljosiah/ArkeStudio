@@ -573,7 +573,10 @@ export const ShotSchema = z
      */
     beat: z
       .object({
-        /** `voice`: when its voice ends; `tap`: when the reader moves on; `hold`: after `holdSec`. */
+        /**
+         * `voice`: after the line — its voice, or its reading time; `hold`: after `holdSec`.
+         * `tap` is still read — never tightened away — and plays as `voice` (turn 246).
+         */
         advance: z.enum(["voice", "tap", "hold"]).optional(),
         holdSec: z.number().positive().max(60).optional(),
         /** A slow push into the picture, a drift across it, or a still picture. */

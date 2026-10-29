@@ -14,22 +14,39 @@ export interface ReviewTaskInput {
 export type ReviewTaskRunner = (input: ReviewTaskInput, signal: AbortSignal,
   receipt: (value: Pick<ReviewTask, "sessionId" | "model" | "provider" | "disclosure">) => Promise<void>) => Promise<ReviewAnswer>;
 
-/** Named, bounded sessions are launched here; no model receives a general-purpose spawn tool. */
-export function makeReviewTaskRunner(deps: {
+export interface ImageJsonDeps {
   adapter: HarnessAdapter; sessionInput: SessionInput; scratch: string; maker?: ImageRenditionMaker;
   beforeDispatch(): Promise<void>;
   cloudAllowed(provider: string): Promise<boolean>;
-}): ReviewTaskRunner {
+}
+export type ImageJsonRunner = (input: { agent: string; skillFamily?: string; prompt: string; images: ReviewTaskInput["images"] }, signal: AbortSignal,
+  receipt: (value: Pick<ReviewTask, "sessionId" | "model" | "provider" | "disclosure">) => Promise<void>) => Promise<unknown>;
+
+/** Named, bounded sessions are launched here; no model receives a general-purpose spawn tool. */
+export function makeReviewTaskRunner(deps: ImageJsonDeps): ReviewTaskRunner {
+  const ask = makeImageJsonRunner(deps);
   return async (input, signal, receipt) => {
-    signal.throwIfAborted();
     const agent = input.specialist === "script" ? "chapter-script-reviewer" : input.specialist === "prose" ? "chapter-prose-reviewer" : "chapter-visual-reviewer";
+    return ReviewAnswerReadSchema.parse(await ask({ agent, skillFamily: "chapter-review", prompt: input.prompt, images: input.images }, signal, receipt));
+  };
+}
+
+/**
+ * One isolated, read-only session that looks at the supplied pictures and answers one JSON object:
+ * the chapter review's specialists and a comic page's lettering reader (SPEC-064 R-29) share it, so
+ * both carry the same consent, byte budget, receipt and single resend.
+ */
+export function makeImageJsonRunner(deps: ImageJsonDeps): ImageJsonRunner {
+  return async ({ agent, skillFamily, prompt, images }, signal, receipt) => {
+    signal.throwIfAborted();
+    const input = { prompt, images };
     const root = resolve(deps.scratch);
     await mkdir(root, { recursive: true });
     const dir = await mkdtemp(join(root, "chapter-review-"));
     let sessionId: string | undefined;
     try {
       // Review only the pinned snapshot: never inherit the selected world's memory, tools or authoring skill.
-      const isolated = Promise.resolve(deps.sessionInput({ agent })).then(configured => ({ ...configured, agent, skillFamily: "chapter-review", skillModelId: undefined,
+      const isolated = Promise.resolve(deps.sessionInput({ agent })).then(configured => ({ ...configured, agent, skillFamily, skillModelId: undefined,
         worldQueryUrl: undefined, memoryDir: undefined, authorNotesFile: undefined, researchWeb: false }));
       const session = await createPreparedSession(deps.adapter, dir, isolated,
         { purpose: "ask", agent }, undefined, signal);
@@ -120,7 +137,7 @@ export function makeReviewTaskRunner(deps: {
         try { json = extractJson(resent); }
         catch (again) { throw new Error(`The answer was not valid JSON, and neither was the one resend: ${again instanceof Error ? again.message : "parse error"}`); }
       }
-      return ReviewAnswerReadSchema.parse(json);
+      return json;
     } finally {
       if (sessionId) await deps.adapter.interrupt?.(sessionId).catch(() => {});
       const inside = relative(root, resolve(dir));

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { guideChapterNumber, guideTeasers, listeningPhraseAt, listeningPictureAt, readGuide, readListening, readWorldManifest, WorldAssetSchema, type GuideDocument, type ListeningDocumentChapter, type WorldAsset } from "../src/index.js";
+import { guideChapterNumber, guideTeasers, guideTheme, listeningPhraseAt, listeningPictureAt, readGuide, readListening, readMusic, readWorldManifest, WORLD_SCHEMA_VERSION, WorldAssetSchema, type GuideDocument, type ListeningDocumentChapter, type WorldAsset } from "../src/index.js";
 
 // SPEC-058 R-16: one reader in two languages. These fixtures are Arke Player's own
 // (`packages/arke_world/test/fixtures/listening`, made by its tool/make_listening_fixtures.py) and
@@ -94,7 +94,7 @@ describe("world.json (Player ADR 0005; SPEC-058 R-9, R-15)", () => {
   });
 
   it("refuses what it does not know as made with a newer Arke", () => {
-    assert.equal(verdict({ ...base, schemaVersion: 5 }), "newer-arke");
+    assert.equal(verdict({ ...base, schemaVersion: WORLD_SCHEMA_VERSION + 1 }), "newer-arke");
     // A schema 2 reader does not know a guide (SPEC-059 R-9).
     assert.equal(verdict({ ...base, guide: "listening" }), "newer-arke");
     assert.equal(verdict({ ...base, requires: ["video-v1"] }), "newer-arke");
@@ -129,6 +129,8 @@ describe("the shared guide cases (SPEC-059 R-9 – R-14, R-16)", () => {
     after?: Array<{ entry: string; section?: number; number: number | null }>;
     /** The teasers' kinds in order (revision 5). */
     teasers?: string[];
+    /** The track each entry's theme names (revision 9). */
+    themes?: Array<{ entry: string; track: string }>;
   }
   const afterOf = (guide: GuideDocument, entryId: string, section: number | undefined) => {
     const entry = [...guide.characters, ...guide.places, ...guide.lore].find((candidate) => candidate.id === entryId)!;
@@ -145,6 +147,10 @@ describe("the shared guide cases (SPEC-059 R-9 – R-14, R-16)", () => {
         if (entry.counts !== undefined) assert.deepEqual({ characters: guide.characters.length, places: guide.places.length, lore: guide.lore.length }, entry.counts);
         for (const probe of entry.after ?? []) assert.equal(guideChapterNumber(guide, afterOf(guide, probe.entry, probe.section)), probe.number, `${probe.entry} ${probe.section ?? ""}`);
         if (entry.teasers !== undefined) assert.deepEqual(guideTeasers(guide).map((teaser) => teaser.kind), entry.teasers);
+        for (const probe of entry.themes ?? []) {
+          const found = [...guide.characters, ...guide.places].find((candidate) => candidate.id === probe.entry)!;
+          assert.equal(guideTheme(found)?.track, probe.track, probe.entry);
+        }
       } else {
         assert.equal(result.ok, false);
         if (!result.ok) assert.equal(result.refusal, entry.expect === "newerArke" ? "newer-arke" : "not-a-package", result.reason);
@@ -157,6 +163,60 @@ describe("the shared guide cases (SPEC-059 R-9 – R-14, R-16)", () => {
     assert.ok(result.ok);
     assert.equal(result.manifest.guide, "guide");
     assert.deepEqual(result.manifest.productions, []);
+  });
+});
+
+// SPEC-058 R-68 – R-70: the music cases, Arke Player's own (`packages/arke_world/test/fixtures/music`,
+// made by its tool/make_music_fixtures.py), which arke_world runs too: a music document read against
+// the inventory, and production packages, schema 5.
+describe("the shared music cases (SPEC-058 R-68 – R-70)", () => {
+  const music = join(import.meta.dirname, "fixtures", "world-package", "music");
+  const readMusicFixture = (name: string) => readFileSync(join(music, name), "utf8");
+  const musicAssets: Record<string, WorldAsset> = Object.fromEntries(Object.entries(JSON.parse(readMusicFixture("assets.json")) as Record<string, unknown>).map(([id, raw]) => [id, WorldAssetSchema.parse(raw)]));
+  interface MusicCase {
+    file: string;
+    reader: "music" | "manifest";
+    expect: "ok" | "newerArke" | "notAPackage";
+    kind?: string;
+    tracks?: string[];
+    sections?: number;
+    alone?: boolean;
+    music?: string;
+  }
+  for (const entry of (JSON.parse(readMusicFixture("cases.json")) as { cases: MusicCase[] }).cases) {
+    it(entry.file, () => {
+      const expected = entry.expect === "newerArke" ? "newer-arke" : "not-a-package";
+      if (entry.reader === "manifest") {
+        const result = readWorldManifest(readMusicFixture(entry.file));
+        if (entry.expect !== "ok") {
+          assert.equal(result.ok, false);
+          if (!result.ok) assert.equal(result.refusal, expected, result.reason);
+          return;
+        }
+        if (!result.ok) assert.fail(result.reason);
+        assert.equal(result.manifest.alone === true, entry.alone ?? false);
+        if (entry.music !== undefined) assert.equal(result.manifest.productions[0]!.music, entry.music);
+        return;
+      }
+      const result = readMusic(readMusicFixture(entry.file), musicAssets);
+      if (entry.expect !== "ok") {
+        assert.equal(result.ok, false);
+        if (!result.ok) assert.equal(result.refusal, expected, result.reason);
+        return;
+      }
+      if (!result.ok) assert.fail(result.reason);
+      if (entry.kind !== undefined) assert.equal(result.document.kind, entry.kind);
+      if (entry.tracks !== undefined) assert.deepEqual(result.document.tracks.map((track) => track.id), entry.tracks);
+      if (entry.sections !== undefined) assert.equal(result.document.tracks[0]!.lyrics?.sections?.length, entry.sections);
+    });
+  }
+
+  it("reads an album's words, sections and where a track is heard", () => {
+    const result = readMusic(readMusicFixture("album.json"), musicAssets);
+    assert.ok(result.ok);
+    const verse = result.document.tracks[0]!;
+    assert.deepEqual(verse.lyrics?.sections?.map((section) => [section.label, section.at]), [["Intro", 0], ["Verse", 14_000], ["Chorus", 62_000], ["Outro", 220_000]]);
+    assert.deepEqual(verse.heardIn, [{ production: "the-ledger-of-nights", chapter: "a-choir-underwater", at: 730_000 }]);
   });
 });
 

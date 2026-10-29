@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertNothingForbidden, assertAudioListenerWorker, assertStoryPdfAssets } from "../scripts/verify-packaged-runtimes.mjs";
+import { assertNothingForbidden, assertAudioListenerWorker, assertMingWorker, assertStoryPdfAssets } from "../scripts/verify-packaged-runtimes.mjs";
 
 /**
  * The "must never ship" half of the afterPack guard.
@@ -30,6 +30,21 @@ it("requires the exact audio worker as a loose resource Python can read", () => 
     assert.throws(() => assertAudioListenerWorker(dir), /differs from source/);
     writeFileSync(path, readFileSync(new URL("../../../packages/coordinator/src/media/local-audio-listener.py", import.meta.url)));
     assert.doesNotThrow(() => assertAudioListenerWorker(dir));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+it("requires the exact Ming worker and upstream notice as loose resources", () => {
+  const dir = resources();
+  try {
+    assert.throws(() => assertMingWorker(dir), /Ming asset is missing/);
+    mkdirSync(join(dir, "ming"));
+    for (const [source, name] of [
+      ["../../../packages/coordinator/src/local-ai/ming-worker.py", "ming-worker.py"],
+      ["../../../licenses/ming-audition-MIT.txt", "ming-MIT.txt"],
+    ]) writeFileSync(join(dir, "ming", name), readFileSync(new URL(source, import.meta.url)));
+    assert.doesNotThrow(() => assertMingWorker(dir));
+    writeFileSync(join(dir, "ming", "ming-worker.py"), "stale worker");
+    assert.throws(() => assertMingWorker(dir), /differs from source/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

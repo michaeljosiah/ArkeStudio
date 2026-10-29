@@ -13,7 +13,7 @@ describe("the private Codex lane", () => {
   it("assembles independently and keeps Arke media keys out of the Codex login lane", async () => {
     const unrelated = async () => { throw new Error("OpenCode discovery must not run"); };
     const wiring = await assembleHarness({ appRoot: process.cwd(), engine: "codex", codex: codex("0.154.0"),
-      v1: { runCommand: unrelated }, v2: { runCommand: unrelated },
+      v2: { runCommand: unrelated },
     });
     assert.equal(wiring.adapter?.id, "codex");
     assert.equal(wiring.supervisor, null);

@@ -2,6 +2,8 @@ import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { EMPTY_GUIDE_RECORD, GuideRecordSchema } from "./world-guide.js";
 import { valueSchema } from "./value-schema.js";
 import { AudioDramaRecordSchema, EpisodeScriptSchema, EpisodeTakesSchema } from "./audio-drama.js";
+import { ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema } from "./graphic-novel.js";
+import { MusicRecordSchema } from "./music.js";
 import { DesignedVoiceSchema } from "./designed-voice.js";
 import { StageReviewSchema } from "./human-decision.js";
 import { AdapterLibraryStateSchema } from "./adapters.js";
@@ -18,6 +20,7 @@ import { ProductionNarrativeSchema } from "./production-narrative.js";
 import { AudiobookBookSchema } from "./audiobook.js";
 import { HarnessStatusSchema } from "./harness.js";
 import { ModelInfoSchema } from "./adapter.js";
+import { OnboardingStatusSchema } from "./onboarding.js";
 import { HarnessModelStatusSchema } from "./harness-models.js";
 import { ProductionSpineSchema } from "./spine.js";
 import { TakeMediaInfoRecordSchema } from "./media.js";
@@ -35,6 +38,11 @@ import { ArtDirectionRecordSchema, ResolvedArtDirectionSchema } from "./art-dire
 import { EMPTY_BIBLE, WorldBibleSchema } from "./bible.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
+import { OllamaRuntimeStatusSchema } from "./ollama.js";
+import { StorageHealthSnapshotSchema } from "./storage-health.js";
+import { SystemResourcesSchema } from "./system-resources.js";
+import { RecoveryHistorySnapshotSchema } from "./recovery-incidents.js";
+import { RecoveryPolicySnapshotSchema } from "./recovery-settings.js";
 import { LocalSamplingSettingsSchema } from "./local-sampling.js";
 import { FoundingBuildStateSchema } from "./founding-build.js";
 import { FrameRunStateSchema } from "./frame-run.js";
@@ -171,6 +179,8 @@ export const ProductionBundleSchema = valueSchema(z
     narrative: ProductionNarrativeSchema.nullable().optional(),
     /** audio-drama.json — an audio drama's plan and source (SPEC-057 R-7), or null. */
     audioDrama: AudioDramaRecordSchema.nullable().optional(),
+    /** music.json — a music production's cover, loudness and tracks (SPEC-060 R-4), or null. */
+    music: MusicRecordSchema.nullable().optional(),
     /**
      * An audio drama's episode scripts (SPEC-057 R-11, R-83), whole, as a scene's script is: the
      * score renders from these. `hash` is the file's, the base its next save is fenced on.
@@ -178,6 +188,12 @@ export const ProductionBundleSchema = valueSchema(z
     episodeScripts: z.array(z.object({ file: z.string().min(1), hash: z.string().min(1), script: EpisodeScriptSchema }).strict()).optional(),
     /** Each episode's takes (SPEC-057 R-29): the kept take and any waiting, by script block. */
     episodeTakes: z.array(EpisodeTakesSchema).optional(),
+    /** comic.json — a graphic novel's reading, page shape and checks (SPEC-064 R-12), or null. */
+    comic: ComicSettingsSchema.nullable().optional(),
+    /** Each chapter's comic script (SPEC-064 R-10), with the hash its next save is fenced on. */
+    comicScripts: z.array(z.object({ chapter: z.string().min(1), hash: z.string().min(1), script: ComicScriptSchema }).strict()).optional(),
+    /** Each page's takes and what the author chose (SPEC-064 R-26), by page id. */
+    comicPages: z.array(z.object({ page: z.string().min(1), hash: z.string().min(1), record: ComicPageRecordSchema }).strict()).optional(),
     /**
      * prose-style.json — the style the book is written in, or null when none (turn 128).
      * Optional rather than defaulted so a bundle from before it existed still types as one.
@@ -429,6 +445,7 @@ export const ClientStateSchema = valueSchema(z
     app: z
       .object({
         version: z.string(),
+        onboarding: OnboardingStatusSchema.nullable().optional(),
         health: AppHealthSchema,
         jobs: z.array(JobSummarySchema),
         audiobookActivity: z.array(AudiobookActivitySchema).optional(),
@@ -518,7 +535,7 @@ export const ClientStateSchema = valueSchema(z
          */
         harnessInfo: z
           .object({
-            generation: z.enum(["v2", "v1", "claude", "codex"]),
+            generation: z.enum(["v2", "claude", "codex"]),
             source: z.enum(["configured", "path", "bundled"]),
             version: z.string().nullable(),
             beta: z.boolean(),
@@ -557,6 +574,11 @@ export const ClientStateSchema = valueSchema(z
         harness: HarnessStatusSchema.nullable().default(null),
         /** The ComfyUI engine and its recipes (SPEC-021 §2.12) — one result, read everywhere. */
         comfyui: ComfyUiStatusSchema.nullable().default(null),
+        ollama: OllamaRuntimeStatusSchema.nullable().optional(),
+        storageHealth: StorageHealthSnapshotSchema.nullable().optional(),
+        systemResources: SystemResourcesSchema.nullable().optional(),
+        recoveryHistory: RecoveryHistorySnapshotSchema.nullable().optional(),
+        recoveryPolicy: RecoveryPolicySnapshotSchema.nullable().optional(),
         /** Sampling per local recipe and its measured times (design turn 177); absent before the host seeds it. */
         localSampling: LocalSamplingSettingsSchema.optional(),
         adapters: AdapterLibraryStateSchema.nullable().optional(),

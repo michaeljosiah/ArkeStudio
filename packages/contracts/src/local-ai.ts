@@ -72,7 +72,7 @@ export const ENGINE_LABEL: Record<EngineId, string> = {
  * port and restart twice. The rail takes the engine and the groups take the providers.
  */
 export const ENGINE_PROVIDERS: Record<EngineId, readonly ProviderId[]> = {
-  comfyui: ["comfyui"],
+  comfyui: ["comfyui", "ming"],
   ollama: ["ollama"],
   voxa: ["kokoro", "whispercpp"],
 };
@@ -199,6 +199,12 @@ export interface ActivationInputs {
   components: readonly SetupComponent[];
   /** The resolved ComfyUI engine's state, where one has been asked. */
   comfyUiEngineState?: ComfyUiEngineState;
+}
+
+/** When several components provide one model, install its dependent leaf to obtain the whole closure. */
+export function modelSetupComponent(components: readonly SetupComponent[], modelId: string): SetupComponent | undefined {
+  const candidates = components.filter(component => component.provides?.includes(modelId) || component.id === comfyUiWeightsComponentId(modelId));
+  return candidates.find(component => !candidates.some(other => other.id !== component.id && other.requires?.includes(component.id))) ?? candidates[0];
 }
 
 /**

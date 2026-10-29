@@ -1,0 +1,176 @@
+/* A music production's page (design turn 238c - 238e, SPEC-060 R-5 - R-7): the square cover and
+   what it is on the left, the tracks in order on the right, a track open in a panel beside them.
+   A cover is 1:1, the fourth picture shape after 2:3 story covers, 9:16 Talls and 16:9 wide.
+   Type through the tokens only. */
+.fy-music { position: relative; display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 36px; padding: 28px 40px; align-items: start; }
+.fy-music .grow { flex: 1; }
+.fy-music__m { font: var(--type-meta); color: var(--muted-foreground); }
+.fy-music__side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.fy-music__cover { position: relative; width: 300px; aspect-ratio: 1 / 1; border-radius: 14px; overflow: hidden; border: 1px solid var(--border); background: var(--secondary); display: grid; place-items: center; color: var(--muted-foreground); }
+.fy-music__cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.fy-music__makecover { display: flex; align-items: center; gap: 8px; }
+.fy-music__eyebrow { font: var(--type-meta); letter-spacing: var(--tracking-label); color: var(--muted-foreground); margin-top: 6px; }
+.fy-music__title { margin: 4px 0 4px; font: var(--type-ui); font-weight: 650; font-size: var(--text-2xl); letter-spacing: -.02em; line-height: 1.15; overflow-wrap: anywhere; }
+.fy-music__acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.fy-music__more { position: relative; }
+.fy-music__ib { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border); background: var(--background); color: var(--muted-foreground); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: none; }
+.fy-music-dlg__head .fy-music__ib, .fy-music-panel header .fy-music__ib { border-color: transparent; }
+.fy-music__menu { position: absolute; z-index: 5; top: 38px; left: 0; min-width: 170px; padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover, var(--background)); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; }
+.fy-music__menu button { min-height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--foreground); font: var(--type-ui); text-align: left; cursor: pointer; }
+.fy-music__menu button:hover:not(:disabled) { background: var(--secondary); }
+.fy-music__menu button:disabled { color: var(--muted-foreground); cursor: default; }
+
+/* The Tracks table (238c): number, title, From, Heard in, Length and play; drag reorders. */
+.fy-music__group { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; min-width: 0; }
+.fy-music__gh { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px; background: var(--secondary); font: var(--type-ui); font-weight: 600; }
+.fy-music__gh .fy-music__m { font: var(--type-mono); font-size: var(--text-2xs); }
+.fy-music__seg { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--muted); gap: 2px; }
+.fy-music__seg button { height: 26px; padding: 0 11px; border: 0; border-radius: 7px; background: none; font: var(--type-label); color: var(--muted-foreground); cursor: pointer; }
+.fy-music__seg button.on { background: var(--background); color: var(--foreground); box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 18%, transparent); }
+.fy-music__seg button:disabled { cursor: default; opacity: .55; }
+.fy-music__th, .fy-music__tr { display: flex; align-items: center; gap: 12px; padding: 0 14px; border-top: 1px solid var(--border); }
+.fy-music__th { height: 30px; border-top: 0; font: var(--type-meta); color: var(--muted-foreground); }
+.fy-music__tr { min-height: 52px; padding-block: 6px; font-size: var(--text-sm); background: var(--background); }
+.fy-music__tr.on { background: color-mix(in srgb, var(--foreground) 5%, var(--background)); }
+.fy-music__tr .grip, .fy-music__th .grip { width: 14px; color: var(--muted-foreground); display: flex; cursor: grab; flex: none; }
+.fy-music__tr .n, .fy-music__th .n { width: 20px; text-align: right; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); flex: none; }
+.fy-music__tr .t, .fy-music__th .t { flex: 1.5; min-width: 0; }
+.fy-music__tr .t { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.fy-music__tr .t b { display: block; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-music__theme { display: block; font: var(--type-meta); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-music__tr .src, .fy-music__th .src { flex: 1.1; min-width: 0; font: var(--type-meta); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-music__tr .heard, .fy-music__th .heard { flex: 1.3; min-width: 0; font: var(--type-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-music__tr .heard.none { color: var(--muted-foreground); }
+.fy-music__tr .len, .fy-music__th .len { width: 44px; text-align: right; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); flex: none; }
+.fy-music__tr .pl, .fy-music__th .pl { width: 28px; display: flex; justify-content: center; flex: none; }
+.fy-music__addrow { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 6px 14px; border: 0; border-top: 1px dashed var(--border); background: none; font: var(--type-label); color: var(--muted-foreground); cursor: pointer; }
+
+/* Add track (238d): filters, search, and the kept takes as tiles, Import a file the last. */
+.fy-music-dlg { display: flex; flex-direction: column; max-height: 86vh; }
+.fy-music-dlg__head { display: flex; align-items: center; gap: 10px; padding: 18px 20px 10px; }
+.fy-music-dlg__head h3 { margin: 0; font: var(--type-title); font-size: var(--text-xl); }
+.fy-music-dlg__head small, .fy-music-dlg__foot small { font: var(--type-ui); font-weight: 400; color: var(--muted-foreground); }
+.fy-music-dlg__bd { padding: 4px 20px 16px; display: flex; flex-direction: column; gap: 14px; overflow: auto; }
+.fy-music-dlg__foot { display: flex; align-items: center; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border); }
+.fy-music-dlg__filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fy-music__chip { height: 26px; padding: 0 10px; border-radius: 99px; border: 1px solid var(--border); background: none; font: var(--type-label); color: var(--muted-foreground); white-space: nowrap; cursor: pointer; }
+.fy-music__chip.on { background: var(--foreground); color: var(--background); border-color: transparent; }
+.fy-music__search { height: 32px; min-width: 220px; border: 1px solid var(--border); border-radius: 99px; display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--muted-foreground); }
+.fy-music__search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: var(--type-ui); font-weight: 400; color: var(--foreground); }
+.fy-music-dlg__tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.fy-music-tile { position: relative; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--background); display: flex; flex-direction: column; }
+.fy-music-tile.on { border-color: var(--foreground); box-shadow: inset 0 0 0 1px var(--foreground); }
+.fy-music-tile.no { opacity: .45; }
+.fy-music-tile .art { position: relative; height: 76px; background: var(--muted); display: flex; align-items: center; justify-content: center; }
+.fy-music-tile .art .play { position: absolute; left: 8px; bottom: 8px; }
+.fy-music-tile .art .rad { position: absolute; right: 8px; top: 8px; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--muted-foreground); background: var(--background); cursor: pointer; }
+.fy-music-tile.on .art .rad { box-shadow: inset 0 0 0 5px var(--foreground); }
+.fy-music-tile .nm { padding: 8px 10px 10px; border: 0; background: none; color: inherit; display: flex; flex-direction: column; gap: 2px; font: var(--type-label); text-align: left; cursor: pointer; }
+.fy-music-tile .nm b { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-music-tile .nm small { font: var(--type-meta); color: var(--muted-foreground); }
+.fy-music-tile.dash { border-style: dashed; background: none; align-items: center; justify-content: center; gap: 6px; min-height: 130px; padding: 10px; font: var(--type-label); color: var(--foreground); text-align: center; cursor: pointer; }
+.fy-music-tile.dash svg { color: var(--muted-foreground); }
+.fy-music-tile.dash small { font: var(--type-meta); color: var(--muted-foreground); }
+.fy-music-dlg__covers { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.fy-music-coverpick { aspect-ratio: 1 / 1; padding: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--secondary); cursor: pointer; }
+.fy-music-coverpick img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fy-music-coverpick.on { outline: 2px solid var(--foreground); outline-offset: 2px; }
+
+/* A track open (238e): its player, From, lyrics, Heard in and Theme of, beside the album. */
+.fy-music-panel { position: absolute; top: 0; right: 0; bottom: 0; width: 460px; min-height: 100%; background: var(--popover, var(--background)); border-left: 1px solid var(--border); box-shadow: -20px 0 50px color-mix(in srgb, var(--foreground) 10%, transparent); display: flex; flex-direction: column; }
+.fy-music-panel > header { display: flex; align-items: flex-start; gap: 10px; padding: 18px 20px 12px; }
+.fy-music-panel__title { width: 100%; margin-top: 2px; padding: 0; border: 0; outline: 0; background: none; color: var(--foreground); font: var(--type-title); font-size: var(--text-xl); }
+.fy-music-panel__title:focus-visible { box-shadow: 0 1px 0 var(--foreground); }
+.fy-music-panel__bd { padding: 0 20px 16px; display: flex; flex-direction: column; gap: 14px; overflow: auto; }
+.fy-music-panel > footer { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border); }
+.fy-music-panel__player { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; }
+.fy-music-panel__wave { flex: 1; min-width: 0; overflow: hidden; display: flex; }
+.fy-music-panel__kv { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px 12px; align-items: start; font-size: var(--text-sm); }
+.fy-music-panel__kv > span:nth-child(odd) { font: var(--type-label); color: var(--muted-foreground); padding-top: 6px; }
+.fy-music-panel__from { display: flex; align-items: center; gap: 8px; }
+.fy-music-panel__from .ui-btn { margin-left: auto; }
+.fy-music-panel__lyrics { display: flex; flex-direction: column; gap: 8px; }
+.fy-music-panel__lyrics textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--background); color: var(--foreground); font: var(--type-body); line-height: 1.55; resize: vertical; }
+.fy-music-panel__row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fy-music-panel__heard { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
+.fy-music-panel__link { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: 10px; color: var(--foreground); font-size: var(--text-sm); text-decoration: none; }
+.fy-music-panel__link .fy-music__m { margin-left: auto; }
+.fy-music-panel__themes { padding-top: 6px; }
+
+/* A track's composer (238i): the panel widened to 640, its takes in a strip of three. The page
+   stretches to the window's foot, so the panel beside it does and its strip is not cut short. */
+.lay-screen[data-screen="music-album"] { align-content: stretch; }
+.fy-music-panel--wide { width: 640px; }
+.ui-input.fy-music__time { width: 90px; flex: none; font: var(--type-mono); font-size: var(--text-2xs); }
+.fy-music__tag { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--secondary); font: var(--type-label); font-size: var(--text-2xs); color: var(--foreground); white-space: nowrap; }
+.fy-music-takes__head { display: flex; align-items: center; gap: 8px; margin-top: 4px; font: var(--type-ui); }
+.fy-music-takes__head b { font-weight: 600; }
+.fy-music-takes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.fy-music-take { border: 1px solid var(--border); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0; color: var(--foreground); }
+.fy-music-take.on { border-color: var(--foreground); box-shadow: inset 0 0 0 1px var(--foreground); }
+.fy-music-take .hd { display: flex; align-items: center; gap: 8px; min-height: 24px; font: var(--type-label); }
+.fy-music-take .ft { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.fy-music-take svg[data-testid="music-peaks"], .fy-music-take > svg { color: color-mix(in srgb, var(--foreground) 42%, transparent); }
+.fy-music-take__wait { height: 34px; display: flex; align-items: center; font: var(--type-meta); color: var(--muted-foreground); overflow: hidden; }
+.fy-music-take__wait.bad { color: var(--destructive, var(--muted-foreground)); }
+.fy-music-panel__wave { color: color-mix(in srgb, var(--foreground) 42%, transparent); }
+
+/* The track editor (238j): ruler, sections, the waveform with its handles, the stanzas under. */
+.fy-music-ed { position: relative; margin-top: 4px; user-select: none; }
+.fy-music-ed__ruler { position: relative; height: 18px; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-music-ed__ruler span { position: absolute; top: 0; transform: translateX(-50%); }
+.fy-music-ed__ruler span:first-child { transform: none; }
+.fy-music-ed__secs { position: relative; height: 26px; }
+.fy-music-ed__sec, .fy-music-ed__name { position: absolute; top: 0; bottom: 4px; border: 0; border-radius: 6px; background: var(--secondary); display: flex; align-items: center; padding: 0 8px; font: var(--type-label); color: var(--foreground); white-space: nowrap; overflow: hidden; cursor: grab; touch-action: none; }
+.fy-music-ed__name { cursor: text; outline: 1px solid var(--foreground); z-index: 2; }
+.fy-music-ed__wave { position: relative; height: 120px; border-radius: 10px; background: color-mix(in srgb, var(--foreground) 4%, transparent); overflow: hidden; color: color-mix(in srgb, var(--foreground) 42%, transparent); touch-action: none; }
+.fy-music-ed__wave > svg, .fy-music-ed__seed { position: absolute; inset: 5px 0; display: flex; }
+.fy-music-ed__seed svg { width: 100%; height: 100%; }
+.fy-music-ed__cut { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--foreground) 10%, transparent) 0 6px, transparent 6px 12px); }
+.fy-music-ed__fade { position: absolute; top: 0; bottom: 0; background: linear-gradient(to right, color-mix(in srgb, var(--background) 85%, transparent), transparent); pointer-events: none; }
+.fy-music-ed__fade.out { background: linear-gradient(to left, color-mix(in srgb, var(--background) 85%, transparent), transparent); }
+.fy-music-ed__trim { position: absolute; top: 0; bottom: 0; width: 10px; margin-left: -5px; border-radius: 4px; background: var(--foreground); cursor: ew-resize; touch-action: none; }
+.fy-music-ed__trim::after { content: ""; position: absolute; left: 4px; top: 42%; width: 2px; height: 16%; border-radius: 1px; background: var(--background); }
+.fy-music-ed__fh { position: absolute; top: 6px; width: 12px; height: 12px; margin-left: -6px; border-radius: 99px; background: var(--background); border: 2px solid var(--foreground); cursor: ew-resize; touch-action: none; }
+.fy-music-ed__trim:focus-visible, .fy-music-ed__fh:focus-visible { outline: 2px solid var(--ring, var(--foreground)); outline-offset: 2px; }
+.fy-music-ed__div { position: absolute; top: 0; bottom: 0; border-left: 1px dashed color-mix(in srgb, var(--foreground) 30%, transparent); pointer-events: none; }
+.fy-music-ed__lines { position: relative; height: 66px; margin-top: 8px; }
+.fy-music-ed__lines div { position: absolute; top: 0; padding: 0 8px; box-sizing: border-box; font: var(--type-meta); color: var(--foreground); line-height: 1.5; overflow: hidden; }
+.fy-music-ed__lines div.none { color: var(--muted-foreground); }
+.fy-music-ed__ctrls { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.fy-music-ed__fl { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.fy-music-ed__fl > span:first-child { font: var(--type-label); color: var(--muted-foreground); }
+.fy-music-ed__ro { height: 34px; display: inline-flex; align-items: center; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; font: var(--type-mono); font-size: var(--text-2xs); white-space: nowrap; }
+.fy-music-ed__ctrls .grow { flex: 1; }
+
+/* The album's sequence (238k): each track with its waveform, and the join to the next. */
+.fy-music-seq { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 6px 14px; border-top: 1px solid var(--border); font-size: var(--text-sm); background: var(--background); }
+.fy-music-seq .n { width: 20px; text-align: right; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); flex: none; }
+.fy-music-seq b { flex: 1; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-music-seq__wave { width: 220px; display: flex; color: color-mix(in srgb, var(--foreground) 42%, transparent); flex: none; }
+.fy-music-seq .len { width: 44px; text-align: right; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); flex: none; }
+.fy-music-join { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 2px 14px 2px 46px; border-top: 1px dashed var(--border); background: color-mix(in srgb, var(--foreground) 2.5%, var(--background)); }
+.fy-music-join .fy-music__seg button { height: 22px; padding: 0 9px; }
+.fy-music-join .ui-input.fy-music__time { width: 64px; height: 26px; }
+.fy-music-join__line { flex: 1; border-top: 1px solid var(--border); }
+
+@media (max-width: 1099px) {
+  .fy-music { grid-template-columns: 240px minmax(0, 1fr); gap: 24px; padding: 24px 32px; }
+  .fy-music__cover { width: 240px; }
+  .fy-music-panel { position: fixed; z-index: 30; top: 52px; width: min(460px, 100vw); }
+  .fy-music-panel--wide { width: min(640px, 100vw); }
+  .fy-music-dlg__tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 599px) {
+  .fy-music { grid-template-columns: minmax(0, 1fr); padding: 16px; gap: 16px; }
+  .fy-music__cover { width: 100%; }
+  .fy-music-panel, .fy-music-panel--wide { width: 100vw; }
+  .fy-music-takes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fy-music-seq__wave { display: none; }
+  .fy-music-dlg__tiles, .fy-music-dlg__covers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fy-music__search { min-width: 0; flex: 1; }
+}
+
+/* The export sheet's rows (238h): the world's key art and the square cover, small beside their row. */
+.fy-music-export .fy-abv-opt img { width: 44px; height: 25px; object-fit: cover; border-radius: 4px; flex: none; }
+.fy-music-export .fy-abv-opt img.sq { width: 30px; height: 30px; }

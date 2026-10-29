@@ -420,6 +420,8 @@ function engineDeps(
         off: () => fake,
         start: async () => {},
         stop: async () => {},
+        stopAndConfirm: async () => {},
+        quiesce: () => {},
       };
       return fake as unknown as ChildSupervisor;
     },
@@ -507,11 +509,16 @@ it("download completion starts an isolated recipe worker with bundled code, with
     Object.assign(children[0]!, { status: "failed" });
     const primaryUrl = `http://127.0.0.1:${children[0]!.port}`;
     assert.equal(service.isManagedEndpointGone(primaryUrl), false, "unhealthy is not proof of exit");
+    children[0]!.stopAndConfirm = async () => { throw new Error("primary exit unconfirmed"); };
+    await assert.rejects(service.prepareGpuHandover(), /primary exit unconfirmed/);
+    children[0]!.stopAndConfirm = async () => {};
     livePids.delete(children[0]!.pid!);
     assert.equal(service.isManagedEndpointGone(primaryUrl), true);
     assert.equal(service.baseUrl(), null);
     assert.ok(service.baseUrl("qwen"));
     assert.equal(await service.waitUntilReady(50), true, "a healthy isolated worker releases startup recovery");
+    await service.prepareGpuHandover();
+    assert.ok(service.baseUrl("qwen"), "confirmed cleanup of the failed primary preserves the healthy sibling");
   } finally {
     await service.dispose();
   }
@@ -766,7 +773,9 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
           status = "healthy";
           emitStatus?.();
         },
+        quiesce: () => {},
         stop: async () => {},
+        stopAndConfirm: async () => {},
       };
       return fake as unknown as ChildSupervisor;
     };
@@ -809,6 +818,8 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
         stop: async () => {
           calls.push("stop");
         },
+        quiesce: () => {},
+        stopAndConfirm: async () => {},
       };
       return fake as unknown as ChildSupervisor;
     };
@@ -817,6 +828,53 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     await service.applySettings({ enginePath: "C:/AI/ComfyUI", engineUrl: null, modelsDir: null });
     await service.dispose();
     assert.deepEqual(calls, ["backstop", "off", "stop"]);
+  });
+
+  it("retains the current selection and child when a source change cannot confirm exit", async () => {
+    const world = fakeWorld();
+    world.files.add("C:/AI/ComfyUI/python_embeded/python.exe");
+    world.files.add("C:/AI/ComfyUI/ComfyUI/main.py");
+    world.urls.set("http://127.0.0.1:8189", { version: "0.38.0" });
+    const deps = engineDeps(world, "C:/app");
+    const makeSupervisor = deps.createSupervisor;
+    let refuse = true;
+    deps.createSupervisor = spec => {
+      const child = makeSupervisor(spec);
+      child.stopAndConfirm = async () => { if (refuse) throw new Error("process exit unconfirmed"); };
+      return child;
+    };
+    const service = new ComfyUiEngineService(deps);
+    try {
+      await service.applySettings({ ...NO_SETTINGS, enginePath: "C:/AI/ComfyUI" });
+      const original = service.engineIdentity();
+      await assert.rejects(service.applySettings({ ...NO_SETTINGS, engineUrl: "http://127.0.0.1:8189" }), /unconfirmed/);
+      assert.deepEqual(service.engineIdentity(), original);
+      refuse = false;
+      await service.applySettings({ ...NO_SETTINGS, engineUrl: "http://127.0.0.1:8189" });
+      assert.equal(service.engineStatus().source, "user-url");
+    } finally { await service.dispose(); }
+  });
+
+  it("cannot hide an unhealthy owned worker from GPU handover by removing its ready URL", async () => {
+    const world = fakeWorld();
+    world.files.add("C:/AI/ComfyUI/python_embeded/python.exe");
+    world.files.add("C:/AI/ComfyUI/ComfyUI/main.py");
+    const deps = engineDeps(world, "C:/app"), makeSupervisor = deps.createSupervisor;
+    let refuse = true, child!: ChildSupervisor;
+    deps.createSupervisor = spec => {
+      child = makeSupervisor(spec);
+      child.stopAndConfirm = async () => { if (refuse) throw new Error("owned exit unconfirmed"); };
+      return child;
+    };
+    const service = new ComfyUiEngineService(deps);
+    try {
+      await service.applySettings({ ...NO_SETTINGS, enginePath: "C:/AI/ComfyUI" });
+      Object.assign(child, { status: "failed" });
+      assert.equal(service.baseUrl(), null);
+      await assert.rejects(service.prepareGpuHandover(), /unconfirmed/);
+      refuse = false;
+      await service.prepareGpuHandover();
+    } finally { refuse = false; await service.dispose(); }
   });
 
   it("joins a paused settings write and cannot start a supervisor after disposal", async () => {
@@ -848,7 +906,9 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
         start: async () => {
           starts += 1;
         },
+        quiesce: () => {},
         stop: async () => {},
+        stopAndConfirm: async () => {},
       };
       return fake as unknown as ChildSupervisor;
     };

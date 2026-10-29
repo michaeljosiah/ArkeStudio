@@ -1,5 +1,6 @@
 import { EMPTY_GUIDE_RECORD, GUIDE_RECORD_FILE, GuideRecordSchema } from "@arke-studio/contracts";
 import { ProductionSetupOriginSchema } from "@arke-studio/contracts";
+import { ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema, type ComicPageRecord, type ComicScript } from "@arke-studio/contracts";
 import { parseDesignedVoices, type WorldDesignedVoice } from "@arke-studio/contracts";
 import { isWorldImagePath } from "@arke-studio/contracts";
 import { BorrowedImageOriginSchema, type BorrowedImageOrigin, TakeDialogueFeedbackSchema, type TakeDialogueFeedback } from "@arke-studio/contracts";
@@ -31,6 +32,8 @@ import {
   EpisodeSchema,
   ProductionNarrativeSchema,
   AudioDramaRecordSchema,
+  MUSIC_RECORD_FILE,
+  MusicRecordSchema,
   EpisodeScriptSchema,
   EpisodeTakesSchema,
   episodeScriptFile,
@@ -209,7 +212,13 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 107: a chapter's own audiobook narrator, `chapterNarrators` on the book (SPEC-047 R-195).
 // 108: a world's teasers, `teasers` on the Guide record (design turn 236, SPEC-059 R-24).
 // 109: picture marks — a picture set at a sentence inside its block (design turn 237, SPEC-047 R-202).
-export const SUPPORTED_SCHEMA_VERSION = 109;
+// 110: music productions — `medium: "music"` and `music.json` (design turn 238, SPEC-060 R-1, R-4).
+// 111: music in the Guide — a character's or place's `theme` and a `song` teaser (design turn 238, SPEC-059 R-35, R-36) —
+// and World Chat's music cards (SPEC-060 R-19).
+// 112: a music track's composer — the album's session and a take's length, instrumental and track (SPEC-060 R-9).
+// 113: remembered story facts and conditional routing (SPEC-063, turn 240).
+// 114: the graphic novel — comic.json, comic scripts and page takes (SPEC-064, issue 2219).
+export const SUPPORTED_SCHEMA_VERSION = 114;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -1150,8 +1159,28 @@ export async function scanWorld(
       }
       if (takes) episodeTakes.push(takes);
     }
+    // A graphic novel's chapter scripts and page records (SPEC-064 R-10, R-26). Each is named for
+    // what it holds, and a page record names the take ids its accepts point at, so a stray copy is
+    // reported here rather than shadowing the real file.
+    const comicScripts: Array<{ chapter: string; hash: string; script: ComicScript }> = [];
+    for (const file of (await listDir(join(pdir, "comic"))).filter((f) => f.endsWith(".json")).sort()) {
+      const rel = `productions/${id}/comic/${file}`;
+      const script = await tryParse(rel, (raw) => ComicScriptSchema.parse(JSON.parse(raw)));
+      if (script) comicScripts.push({ chapter: file.slice(0, -5), hash: manifest[toPortable(rel)]!, script });
+    }
+    const comicPages: Array<{ page: string; hash: string; record: ComicPageRecord }> = [];
+    for (const file of (await listDir(join(pdir, "comic-pages"))).filter((f) => f.endsWith(".json")).sort()) {
+      const rel = `productions/${id}/comic-pages/${file}`;
+      const record = await tryParse(rel, (raw) => ComicPageRecordSchema.parse(JSON.parse(raw)));
+      if (record) comicPages.push({ page: file.slice(0, -5), hash: manifest[toPortable(rel)]!, record });
+    }
     productions.push({
       ...(episodeScripts.length > 0 ? { episodeScripts } : {}),
+      ...(comicScripts.length > 0 ? { comicScripts } : {}),
+      ...(comicPages.length > 0 ? { comicPages } : {}),
+      comic: await exists(join(pdir, "comic.json"))
+        ? await tryParse(`productions/${id}/comic.json`, raw => ComicSettingsSchema.parse(JSON.parse(raw)))
+        : null,
       ...(episodeTakes.length > 0 ? { episodeTakes } : {}),
       rehearsals, rehearsalHashes, feedback,
       performanceReview: { reviews: performanceReviews ?? [], selections: performanceSelections ?? {},
@@ -1163,6 +1192,9 @@ export async function scanWorld(
         : null,
       audioDrama: await exists(join(pdir, "audio-drama.json"))
         ? await tryParse(`productions/${id}/audio-drama.json`, raw => AudioDramaRecordSchema.parse(JSON.parse(raw)))
+        : null,
+      music: await exists(join(pdir, MUSIC_RECORD_FILE))
+        ? await tryParse(`productions/${id}/${MUSIC_RECORD_FILE}`, raw => MusicRecordSchema.parse(JSON.parse(raw)))
         : null,
       story,
       proseStyle,

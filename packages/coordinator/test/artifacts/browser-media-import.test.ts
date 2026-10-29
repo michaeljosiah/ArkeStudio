@@ -12,6 +12,7 @@ import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { pngBytes } from "../queue/fake-provider.js";
 import { arkeClientCommand } from "../../src/arke-actions/registry.js";
 import { WorldStore } from "../../src/world/store.js";
+import { AppStorageService } from "../../src/storage/service.js";
 
 const REQUEST = "01J8E1000000000000000000V1";
 const file = { name: "title.png", data: Buffer.from(pngBytes()).toString("base64") };
@@ -96,4 +97,40 @@ it("keeps browser failure paths private and refuses a replaced open-store identi
   events.length = 0;
   await send(request, previousStore);
   assert.match(JSON.stringify(events), /world changed during import/);
+});
+for (const full of ["spool", "world", "none", "shared"] as const) it(`production browser import ${full === "none" ? "admits healthy spool and world destinations" : full === "shared" ? "shares capacity between spool and world copies" : `refuses a full ${full} volume`} without exposing the spool path`, async () => {
+  const { root, worldDir } = await makeTempRoot(), provider = new FsWorldProvider(root); await provider.loadWorld(WORLD_ID);
+  const store = provider.openStore()!, before = store.getBundle().artifacts.length;
+  let roots: readonly { rootId: string; path: string }[] = [], spool = "";
+  const storage = new AppStorageService({ appRoot: root, native: {
+    setRoots(value) { roots = value; for (const row of value) if (row.path.includes("arke-browser-import-")) spool = row.path; }, async stop() {}, async probe(rootId) {
+      const path = roots.find(row => row.rootId === rootId)!.path, isSpool = path.includes("arke-browser-import-");
+      const held = full === "spool" ? isSpool : full === "world" && path === join(worldDir, "artifacts");
+      return { state: "measured", source: "host-provided", limitations: [], capacity: { volumeId: full === "shared" ? "shared-volume" : isSpool ? "spool-volume" : path.startsWith(worldDir) ? "world-volume" : "app-volume",
+        mappingRevision: rootId, measuredAt: Date.now(), availableBytes: full === "shared" ? 1024 ** 3 + 64 * 1024 + pngBytes().length : held ? 0 : 100 * 1024 ** 3, totalBytes: 200 * 1024 ** 3 } };
+    },
+  } });
+  storage.setWorld(worldDir);
+  const events: DomainEvent[] = [], coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test",
+    storageHealth: storage, observeEvent: event => events.push(event) });
+  try {
+    await (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage({
+      kind: "upload-artifacts", worldId: WORLD_ID, requestId: REQUEST, browserFiles: [file],
+    });
+    const result = events.find(event => event.type === "queue.enqueue-result"); assert(result?.type === "queue.enqueue-result");
+    if (full === "none") {
+      assert.deepEqual(result.failures, []); assert.equal(store.getBundle().artifacts.length, before + 1);
+      assert.deepEqual(await readFile(join(worldDir, "artifacts", "title.png")), Buffer.from(pngBytes()));
+    } else {
+      assert.match(result.failures[0]!.reason, /storage/); assert.equal(store.getBundle().artifacts.length, before);
+      assert(!existsSync(join(worldDir, "artifacts", "title.png")));
+    }
+    assert(spool); assert(!existsSync(spool));
+    assert(!JSON.stringify(events).includes("arke-browser-import-")); assert.equal(storage.reservations.snapshot().records.length, 0);
+    if (full === "world") {
+      assert(storage.snapshot().roots.some(row => row.capacity?.availableBytes === 0), "the mounted artifact-volume warning survives the failed operation");
+      storage.setWorld(null);
+      assert(!storage.snapshot().roots.some(row => row.capacity?.availableBytes === 0), "closing the world ends this stable destination scope");
+    }
+  } finally { await coordinator.stop(); await provider.close(); await storage.stop(); }
 });

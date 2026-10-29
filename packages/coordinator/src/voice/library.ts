@@ -17,6 +17,7 @@ import { sha256 } from "../world/text-files.js";
 import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 import type { DispatchVoiceReference } from "../queue/dispatcher.js";
 import { verifyArtifact } from "../queue/verify.js";
+import { mingReferenceHash } from "../local-ai/ming-reference.js";
 
 /**
  * The cloned-voice write path (SPEC-022 T-4).
@@ -110,6 +111,7 @@ export function wavSeconds(data: Uint8Array): number | null {
 }
 
 export interface CloneVoiceInput {
+  transcript?: string;
   /** Absolute path to the recording the user chose or made. */
   sourcePath: string;
   name: string;
@@ -184,6 +186,7 @@ async function cloneVoiceSerialised(
   ];
 
   const made = newClonedVoice({
+    ...(input.transcript !== undefined ? { transcript: input.transcript } : {}),
     name: input.name,
     description: input.description,
     clip: "pending",
@@ -529,6 +532,8 @@ export async function clipFor(store: WorldStore, voice: ClonedVoice): Promise<Di
         name: `${digest}.${extension}`,
         contentType,
         data,
+          ...(voice.transcript !== undefined ? { transcript: voice.transcript } : {}),
+          language: voice.language,
       };
     } finally {
       await handle.close();
@@ -605,4 +610,8 @@ async function recordVoiceReaderNow(
 /** The hash the library compares a reader's slot against: the clip's bytes, as `clipFor` reads them. */
 export function clipHashOf(clip: DispatchVoiceReference): string {
   return `sha256:${createHash("sha256").update(clip.data).digest("hex")}`;
+}
+
+export function readerReferenceHash(provider: string, clip: DispatchVoiceReference): string {
+  return provider === "ming" ? mingReferenceHash(clip) : clipHashOf(clip);
 }

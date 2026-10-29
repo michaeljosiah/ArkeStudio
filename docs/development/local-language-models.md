@@ -2,6 +2,11 @@
 
 Arke uses Ollama to run local language models. There are two paths:
 
+Local setup installs Arke's managed portable Ollama by default. Existing services are used
+only after selecting their URL in Settings → Providers → Ollama. Downloads and both paths
+below use that selected endpoint; the managed copy has its own model folder and private port.
+See [Managed local runtimes](managed-local-runtimes.md) for ownership, overrides and updates.
+
 - Authoring sessions use the selected writing harness. OpenCode v2 2.0.26 natively discovers
   installed Ollama completion models on loopback; select one from the live harness catalogue. OpenCode owns prompts and
   tool calls; Ollama owns inference. A model must appear in that catalogue before Arke can
@@ -33,6 +38,9 @@ of download progress.
 ```powershell
 ollama pull hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M
 ```
+
+That CLI example targets a service you manage. In Arke, use the model's Install control so
+the pull reaches the selected managed or explicitly overridden service.
 
 Use Ollama 0.34.3 or newer: 0.34.2 failed this pull during validation because it rejected
 Hugging Face's CDN redirect. [Ollama 0.34.3 fixes Hugging Face pulls](https://github.com/ollama/ollama/releases/tag/v0.34.3).

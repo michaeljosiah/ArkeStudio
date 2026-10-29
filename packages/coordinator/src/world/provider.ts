@@ -411,9 +411,10 @@ export class FsWorldProvider implements WorldProvider {
    * the same way it learns about a folder someone dropped in by hand — the next `listWorlds`
    * finds it and scans it, so its counts come from the world rather than from an assumption.
    */
-  async installSampleWorld(sourceDir: string): Promise<{ worldId: string; slug: string; name: string }> {
+  async installSampleWorld(sourceDir: string, signal?: AbortSignal): Promise<{ worldId: string; slug: string; name: string }> {
     await this.ensureAppRoot();
-    return installSampleWorld({ sourceDir, appRoot: this.appRoot });
+    return serializeFileMutation(join(this.appRoot, ".world-creations", "writer"), () =>
+      installSampleWorld({ sourceDir, appRoot: this.appRoot, ...(signal ? { signal } : {}) }));
   }
 
   async worldDir(worldId: string): Promise<string> {
@@ -726,6 +727,8 @@ export class FsWorldProvider implements WorldProvider {
     ".mp3": "audio/mpeg",
     ".wav": "audio/wav",
     ".flac": "audio/flac",
+    // A music production's render and an imported track (SPEC-060 R-6, R-8): AAC in MP4.
+    ".m4a": "audio/mp4",
     ".pdf": "application/pdf",
   };
 
@@ -757,8 +760,9 @@ export class FsWorldProvider implements WorldProvider {
     if (portable.startsWith("exports/")) {
       if (ext === ".docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
       if (ext === ".epub") return "application/epub+zip";
-      // An Arke Player package, so a paired phone can download it and hand it to the Player (233f).
-      if (ext === ".zip" && /^exports\/[^/]+-player-\d{4}-\d{2}-\d{2}(?:-\d+)?\.zip$/.test(portable)) return "application/zip";
+      // An Arke Player package, so a paired phone can download it and hand it to the Player (233f):
+      // the world's edition, or a story's package (SPEC-058 R-89; codex on PR 2205).
+      if (ext === ".zip" && /^exports\/[^/]+-(?:player|story)-\d{4}-\d{2}-\d{2}(?:-\d+)?\.zip$/.test(portable)) return "application/zip";
     }
     const text = FsWorldProvider.TEXT_TYPES[ext];
     if (text === undefined) return undefined;

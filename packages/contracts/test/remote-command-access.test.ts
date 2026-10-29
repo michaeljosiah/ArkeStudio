@@ -28,7 +28,7 @@ it("host installers, deletion, native folders and chooser payloads stay on the P
     { kind: "discard-sample-world-download" },
     { kind: "refresh-sample-world-download" },
     { kind: "setup-remove", componentId: "kokoro-82m" }, { kind: "setup-install", componentId: "kokoro-82m" },
-    { kind: "setup-repair", componentId: "kokoro-82m" }, { kind: "comfyui-update-runtime" },
+    { kind: "setup-repair", componentId: "kokoro-82m", revision: "a".repeat(64) }, { kind: "comfyui-update-runtime" },
     { kind: "repair-voice-models" }, { kind: "open-model-folder" }, { kind: "open-engine-log", engine: "voxa" },
     { kind: "download-update" }, { kind: "adapter-command", command: { action: "install", releaseIds: ["sample"] } },
     { kind: "adapter-command", command: { action: "remove", releaseId: "sample", deleteOwnedFile: true } },

@@ -17,6 +17,7 @@ import { CHAPTER_SOURCE_SCHEMA_VERSION } from "../world/commit.js";
 import { toExtendedLength } from "../world/paths.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import type { WorldStore } from "../world/store.js";
+import type { ImportFileSpace, ImportFileLease } from "../storage/import-files.js";
 import { MarkdownFile } from "../world/text-files.js";
 import { highestChapterRank, openChapter } from "./ops.js";
 import { illustrationName, type StoryIllustration } from "../publications/story-illustrations.js";
@@ -521,7 +522,7 @@ export async function exportManuscript(
   store: WorldStore,
   productionId: string,
   format: "docx" | "epub",
-  opts: { exportId: string; language: string; now: () => string; signal?: AbortSignal },
+  opts: { exportId: string; language: string; now: () => string; signal?: AbortSignal; fileSpace?: ImportFileSpace },
 ): Promise<ManuscriptExport> {
   const doc = await manuscriptOf(store, productionId);
   if (doc.chapters.length === 0) throw new Error("nothing to export · no chapter has prose yet");
@@ -537,19 +538,31 @@ export async function exportManuscript(
   const stageDir = join(store.dir, ".cache", "exports");
   const stage = join(stageDir, `${opts.exportId}.${format}`);
   const finalDir = join(store.dir, "exports");
-  await mkdir(toExtendedLength(stageDir), { recursive: true });
-  await mkdir(toExtendedLength(finalDir), { recursive: true });
-  try {
-    await writeFile(toExtendedLength(stage), bytes);
-    if (opts.signal?.aborted) throw new Error("cancelled");
-    await store.ownedWrite(async () => {
-      if (opts.signal?.aborted) throw new Error("cancelled");
+  const signal = opts.signal ? AbortSignal.any([opts.signal, store.closingSignal]) : store.closingSignal;
+  await store.ownedWrite(async () => {
+    const leases: ImportFileLease[] = []; let stageStarted = false;
+    try {
+      signal.throwIfAborted();
+      await mkdir(toExtendedLength(stageDir), { recursive: true });
+      await mkdir(toExtendedLength(finalDir), { recursive: true });
+      if (opts.fileSpace) {
+        leases.push(await opts.fileSpace.reserve(stageDir, bytes.byteLength, signal, "working-files"));
+        signal.throwIfAborted();
+        // Rename does not copy the payload. Its destination still needs metadata headroom,
+        // and a different mounted volume must not borrow the staging volume's free bytes.
+        leases.push(await opts.fileSpace.reserve(finalDir, 0, signal, "exports"));
+      }
+      signal.throwIfAborted(); await store.assertOwnership();
+      stageStarted = true; await writeFile(toExtendedLength(stage), bytes);
+      await leases[0]?.consumed(bytes.byteLength);
+      signal.throwIfAborted();
       await rename(toExtendedLength(stage), toExtendedLength(join(finalDir, name)));
-    });
-  } catch (error) {
-    await rm(toExtendedLength(stage), { force: true }).catch(() => {});
-    throw error;
-  }
+    } catch (error) {
+      for (const lease of leases) lease.writeFailed();
+      if (stageStarted) await rm(toExtendedLength(stage), { force: true }).catch(() => {});
+      throw error;
+    } finally { await Promise.all(leases.map(lease => lease.settle())); }
+  });
   return { output: `exports/${name}`, chapters: doc.chapters.length, leftOut: doc.leftOut, words: doc.words };
 }
 
