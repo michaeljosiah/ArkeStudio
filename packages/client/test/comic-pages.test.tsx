@@ -122,6 +122,19 @@ describe("Pages (turn 247)", () => {
     assert.deepEqual(accept.override, { findings: [`altered:${item}`] });
   });
 
+  it("offers Accept anyway again on an accepted take a re-check found fault with (codex on PR 2226)", async () => {
+    const one = page();
+    const take = ulid();
+    const item = one.panels[0]!.lettering[0]!.id;
+    const record: ComicPageRecord = { version: 1, accepted: { en: take }, lettering: {}, acknowledged: {}, making: [], takes: [{
+      id: take, artifact: ARTIFACT, hash: comicPageHash(one, DEFAULT_COMIC_SETTINGS, "baked"), mode: "baked", model: "gpt-image-2", language: "en", at: AT,
+      verification: { status: "compared", reader, normalizationVersion: 1, thresholds: DEFAULT_LETTERING_THRESHOLDS, score: 0.6, speaker: "not-checked", regions: [], at: AT,
+        findings: [{ id: `missing:${item}`, kind: "missing", item, expected: "Where are you?" }] },
+    }] };
+    const m = await mount(withBook([one], { [one.id]: record }));
+    assert.ok(button(m.container, "Accept anyway"), "the accepted take's new finding can be kept on the record");
+  });
+
   it("says a check that could not run is not checked, never a pass (247e)", async () => {
     const one = page();
     const record: ComicPageRecord = { version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
