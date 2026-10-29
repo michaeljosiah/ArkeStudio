@@ -217,6 +217,17 @@ export const ComicStyleSchema = z.object({
 }).strict();
 export type ComicStyle = z.infer<typeof ComicStyleSchema>;
 
+/**
+ * The story a graphic novel adapts (R-3, turn 249): its own chapter for each of the story's, so
+ * Pages and Arke know which prose a chapter's pages are drawn from. Ids, not text: the prose is
+ * read where it lives.
+ */
+export const ComicAdaptsSchema = z.object({
+  story: SlugSchema,
+  chapters: z.array(z.object({ chapter: z.string().min(1).max(200), from: z.string().min(1).max(200) }).strict()).max(500),
+}).strict();
+export type ComicAdapts = z.infer<typeof ComicAdaptsSchema>;
+
 /** `productions/<id>/comic.json` (R-12): how the book reads and how its pages are checked. */
 export const ComicSettingsSchema = z.object({
   version: z.literal(1),
@@ -228,11 +239,74 @@ export const ComicSettingsSchema = z.object({
   cap: ComicAttemptCapSchema.default(DEFAULT_COMIC_ATTEMPT_CAP),
   /** Absent is World look: the world's art direction alone, as before there was a style. */
   style: ComicStyleSchema.optional(),
+  /** The story it adapts, when Plan with Arke made it from one (turn 249). */
+  adapts: ComicAdaptsSchema.optional(),
 }).strict().superRefine((settings, ctx) => {
   if (normalizeAspect(settings.aspect) !== settings.aspect) ctx.addIssue({ code: "custom", path: ["aspect"], message: `“${settings.aspect}” is not an aspect.` });
 });
 export type ComicSettings = z.infer<typeof ComicSettingsSchema>;
 export const DEFAULT_COMIC_SETTINGS: ComicSettings = ComicSettingsSchema.parse({ version: 1 });
+
+/**
+ * A graphic novel's plan in setup (R-4, turn 249b): how it reads, its page shape and style, whether
+ * Arke drafts a pilot chapter first, and a chapter of pages for each chapter of the story it adapts,
+ * named by that chapter's number. Page counts and layouts are first guesses, never limits.
+ */
+export interface ComicPlanChapter {
+  /** The adapted story's chapter number. */
+  from: number;
+  title: string;
+  pages: number;
+  layout?: string | undefined;
+}
+/**
+ * Named rather than inferred, as `Frame` is: the plan rides in every setup draft and its review,
+ * inside the conversation's loaded schema, and inferred there it took the engine's bundled
+ * declarations past what the compiler will write (TS7056).
+ */
+export interface ComicPlan {
+  reading: ComicReading;
+  aspect: string;
+  style?: ComicStyle | undefined;
+  pilot: boolean;
+  chapters: ComicPlanChapter[];
+}
+export const ComicPlanChapterSchema: z.ZodType<ComicPlanChapter, z.ZodTypeDef, unknown> = z.object({
+  from: z.number().int().min(1).max(500),
+  title: z.string().trim().min(1).max(200),
+  pages: z.number().int().min(1).max(COMIC_LIMITS.pagesPerChapter),
+  layout: z.string().min(1).max(60).optional(),
+}).strict();
+export const ComicPlanSchema: z.ZodType<ComicPlan, z.ZodTypeDef, unknown> = z.object({
+  reading: ComicReadingSchema,
+  aspect: z.string().min(3).max(12),
+  style: ComicStyleSchema.optional(),
+  pilot: z.boolean(),
+  chapters: z.array(ComicPlanChapterSchema).max(500),
+}).strict().superRefine((plan, ctx) => {
+  if (normalizeAspect(plan.aspect) !== plan.aspect) ctx.addIssue({ code: "custom", path: ["aspect"], message: `“${plan.aspect}” is not an aspect.` });
+});
+
+/** What a graphic novel made from a plan is created with (turn 249b); named for the same reason. */
+export interface ComicCreation {
+  reading: ComicReading;
+  aspect: string;
+  style?: ComicStyle | undefined;
+  adapts?: ComicAdapts | undefined;
+  chapters: Array<{ stem: string; title: string }>;
+}
+export const ComicCreationSchema: z.ZodType<ComicCreation, z.ZodTypeDef, unknown> = z.object({
+  reading: ComicReadingSchema,
+  aspect: z.string().min(3).max(12),
+  style: ComicStyleSchema.optional(),
+  adapts: ComicAdaptsSchema.optional(),
+  chapters: z.array(z.object({ stem: SlugSchema, title: z.string().trim().min(1).max(200) }).strict()).max(500),
+}).strict();
+export const DEFAULT_COMIC_PLAN: ComicPlan = { reading: "ltr", aspect: DEFAULT_COMIC_ASPECT, pilot: true, chapters: [] };
+
+/** The three things setup asks by example (R-4): the page draws example cards for the one open. */
+export const ComicAskSchema = z.enum(["reading", "aspect", "pilot"]);
+export type ComicAsk = z.infer<typeof ComicAskSchema>;
 
 // ---------------------------------------------------------------------------
 // Layout templates (R-14 – R-17)
