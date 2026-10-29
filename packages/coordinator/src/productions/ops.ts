@@ -52,6 +52,7 @@ import {
   MUSIC_RECORD_FILE,
   MusicRecordSchema,
   musicKindOf,
+  ComicSettingsSchema,
   DEFAULT_COMIC_SETTINGS,
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
@@ -239,8 +240,22 @@ export async function createProductionFromPlan(
     });
   }
   // A graphic novel starts with how it reads (SPEC-064 R-12); the committer raises the world for it.
+  // Made from setup's plan (turn 249b) it reads, looks and adapts as planned, with a chapter for each
+  // planned one, empty until its pages are drafted.
   if (shape.hasPages) {
-    files.push({ path: `productions/${plan.production.id}/comic.json`, action: "create", content: `${JSON.stringify(DEFAULT_COMIC_SETTINGS, null, 2)}\n`, baseHash: null });
+    const comic = content?.graphicNovel;
+    const settings = comic ? ComicSettingsSchema.parse({
+      ...DEFAULT_COMIC_SETTINGS, reading: comic.reading, aspect: comic.aspect,
+      ...(comic.style ? { style: comic.style } : {}), ...(comic.adapts ? { adapts: comic.adapts } : {}),
+    }) : DEFAULT_COMIC_SETTINGS;
+    files.push({ path: `productions/${plan.production.id}/comic.json`, action: "create", content: `${JSON.stringify(settings, null, 2)}\n`, baseHash: null });
+    const day = store.now().slice(0, 10);
+    comic?.chapters.forEach((chapter, index) => files.push({
+      path: `productions/${plan.production.id}/chapters/${chapter.stem}.md`,
+      action: "create",
+      content: MarkdownFile.create({ id: chapter.stem, title: chapter.title, order: index + 1, status: "planned", version: 1, created: day, updated: day }, "").serialize(),
+      baseHash: null,
+    }));
   }
   // Music starts with its record (SPEC-060 R-4), a soundtrack's `for` fixed in the plan. A plan
   // prepared before plans carried one starts as the empty album its first change writes.

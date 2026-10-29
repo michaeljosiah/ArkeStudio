@@ -1,13 +1,14 @@
 import {
   EpisodeSchema, ProductionCreationPlanSchema, ProductionNarrativeSchema, ProductionSchema,
   ProductionSetupDraftSchema, SceneRecordSchema, SeasonSchema, SeriesSchema,
-  AUDIO_DRAMA_KIND, AudioDramaRecordSchema, DEFAULT_AUDIO_DRAMA_PLAN,
+  AUDIO_DRAMA_KIND, AudioDramaRecordSchema, DEFAULT_AUDIO_DRAMA_PLAN, DEFAULT_COMIC_PLAN, GRAPHIC_NOVEL_KIND,
   migrateLegacyScene, normalizeAspect, pickableSheets, productionSetupProblems,
   type ProductionCreationPlan, type ProductionSetupDraft, type WorldBundle,
 } from "@arke-studio/contracts";
 import { stableJson } from "../arke-actions/digest.js";
 import { sha256 } from "../world/text-files.js";
 import { planProductionCreation } from "./ops.js";
+import { slugify, uniqueSlug } from "../world/slug.js";
 
 /** Full relevant records, not a windowed search or just version numbers. */
 export function setupSourceDigest(bundle: WorldBundle, sourceId?: string): string {
@@ -51,6 +52,38 @@ export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDra
         audioDrama: AudioDramaRecordSchema.parse({
           version: 1, plan: draft.audioDrama ?? DEFAULT_AUDIO_DRAMA_PLAN, ...(draft.source ? { source: draft.source } : {}),
         }),
+      },
+    });
+  }
+  // A graphic novel is a Story production too (SPEC-064 R-4, turn 249b): its plan becomes
+  // comic.json, and each planned chapter a chapter of its own, mapped to the one it adapts.
+  if (draft.kind === GRAPHIC_NOVEL_KIND) {
+    const base = planProductionCreation(bundle, {
+      title: draft.title, medium: "story", productionKind: GRAPHIC_NOVEL_KIND,
+      ...(draft.logline !== undefined ? { logline: draft.logline } : {}),
+    }, at);
+    if (draft.models && Object.keys(draft.models).length > 0) {
+      base.production = ProductionSchema.parse({ ...base.production, models: draft.models });
+    }
+    const plan = draft.graphicNovel ?? DEFAULT_COMIC_PLAN;
+    const story = draft.source ? bundle.productions.find((production) => production.meta.id === draft.source!.productionId) : undefined;
+    const taken: string[] = [];
+    const chapters = plan.chapters.map((chapter) => {
+      const stem = uniqueSlug(slugify(chapter.title) || `chapter-${chapter.from}`, "chapter", taken);
+      taken.push(stem);
+      return { stem, title: chapter.title, from: story?.chapters.find((candidate) => candidate.order === chapter.from && candidate.retired !== true)?.id };
+    });
+    return ProductionCreationPlanSchema.parse({
+      ...base,
+      initialContent: {
+        worldId: draft.worldId, setupId: draft.setupId, revision: draft.revision,
+        narrative: null, episodes: [], scenes: [],
+        graphicNovel: {
+          reading: plan.reading, aspect: plan.aspect,
+          ...(plan.style ? { style: plan.style } : {}),
+          ...(story ? { adapts: { story: story.meta.id, chapters: chapters.flatMap((chapter) => chapter.from ? [{ chapter: chapter.stem, from: chapter.from }] : []) } } : {}),
+          chapters: chapters.map(({ stem, title }) => ({ stem, title })),
+        },
       },
     });
   }

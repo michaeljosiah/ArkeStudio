@@ -4913,7 +4913,9 @@ export function NewProductionScreen() {
   // What a soundtrack can be for: the world's productions that are not music, each with its kind and length.
   const scored = (world?.productions ?? []).filter((entry) => !productionShape(entry.meta).isMusic);
   const stories = adaptableStories(world?.productions ?? []);
-  const story = isAudioDrama && source ? stories.find((s) => s.id === source) ?? null : null;
+  // An audio drama and a graphic novel both adapt a story through setup (SPEC-057 R-2, SPEC-064 R-3).
+  const adapts = isAudioDrama || isGraphicNovel;
+  const story = adapts && source ? stories.find((s) => s.id === source) ?? null : null;
   // A name the author has not typed follows the story it adapts, so a drama of Low Water starts
   // as Low Water, and an original drama starts unnamed; anything typed is never replaced.
   useEffect(() => {
@@ -4930,7 +4932,11 @@ export function NewProductionScreen() {
   const planWithArke = () => {
     if (!worldId || !story) return;
     navigate(`/w/${worldId}/productions/setup/${newId("cv")}`, {
-      state: { seed: { kind: AUDIO_DRAMA_KIND, source: { productionId: story.id }, ...(title.trim() ? { title: title.trim() } : {}) } },
+      state: { seed: {
+        kind: isGraphicNovel ? GRAPHIC_NOVEL_KIND : AUDIO_DRAMA_KIND, source: { productionId: story.id }, ...(title.trim() ? { title: title.trim() } : {}),
+        // The style chosen on the cards rides into setup (turns 248a, 249b); World look sends none.
+        ...(isGraphicNovel && styleFromDraft(comicStyle) ? { comicStyle: styleFromDraft(comicStyle)! } : {}),
+      } },
     });
   };
 
@@ -5069,11 +5075,11 @@ export function NewProductionScreen() {
           />
           {/* Adapt from (design turn 230b, SPEC-057 R-2): an audio drama's one other question.
               A novel or Other has none, and a video asks it in setup. */}
-          {isAudioDrama && (stories.length > 0 || source !== "") && (
+          {adapts && (stories.length > 0 || source !== "") && (
             <label className="fy-production-step__adapt">
               <span className="fy-production-step__label">Adapt from</span>
               <Select label="Adapt from" value={source} onChange={(e) => setSource(e.target.value)}>
-                <option value="">Nothing · an original drama</option>
+                <option value="">{isGraphicNovel ? "Nothing · an original book" : "Nothing · an original drama"}</option>
                 {stories.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.title} · {s.kind} · {s.chapters} chapter{s.chapters === 1 ? "" : "s"} · {s.words.toLocaleString("en-GB")} words
@@ -5187,7 +5193,7 @@ export function NewProductionScreen() {
             ) : (
             <Button
               variant="primary"
-              disabled={title.trim().length === 0 || pendingRequest !== null || (isAudioDrama && source !== "") || (isSoundtrack && soundtrackFor === "")}
+              disabled={title.trim().length === 0 || pendingRequest !== null || (adapts && source !== "") || (isSoundtrack && soundtrackFor === "")}
               onClick={create}
             >
               {pendingRequest
