@@ -17,6 +17,7 @@ import {
   type ComicPageTake,
   type ComicPanel,
   type ComicReading,
+  type ComicStyle,
   type LetteringFinding,
   type LetteringItem,
   type LetteringKind,
@@ -28,6 +29,8 @@ import { Check, ChevronLeft, ChevronRight, CircleAlert, Plus, Sparkle, TriangleA
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
 import { mediaUrl } from "../lib/media.js";
+import { ComicStylePicker } from "../components/comic-style-picker.js";
+import { comicStylePicture, comicStylePreset, draftFromStyle, styleFromDraft, type ComicStyleDraft } from "../lib/comic-styles.js";
 import { useProduction } from "../lib/selectors.js";
 import {
   acceptComicTake,
@@ -171,6 +174,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
 
   const [reading, setReading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [styling, setStyling] = useState(false);
 
   if (chapters.length === 0) {
     return <Screen id="comic-pages"><EmptyState title="No chapters yet" action={<Button onClick={() => navigate(`${base}/story/chapters`)}>Chapters</Button>} /></Screen>;
@@ -187,6 +191,12 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
             ))}
           </span>
           <span className="grow" />
+          {/* Style (design turn 248b): the style's page and name, opening the same cards as Tell a story. */}
+          <button type="button" className="fy-comic__sel as-button" aria-label={`Style: ${styleName(settings.style)}`} onClick={() => setStyling(true)}>
+            <b>Style</b>
+            {comicStylePreset(settings.style?.preset) && <img src={comicStylePicture(settings.style!.preset!)} alt="" />}
+            {styleName(settings.style)}
+          </button>
           <label className="fy-comic__sel"><b>Reading</b>
             <select aria-label="Reading" value={settings.reading} onChange={(event) => setComicSettings(worldId, productionId, { reading: event.target.value as ComicReading })}>
               {READING.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -226,6 +236,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
           )}
         </div>
       </div>
+      {styling && <ComicStyleSheet world={world} production={production} made={book.filter((entry) => entry.take !== undefined).length} onClose={() => setStyling(false)} />}
       {reading && <ComicReader world={world} production={production} onClose={() => setReading(false)} />}
       {exporting && <ComicExport world={world} production={production} onClose={() => setExporting(false)}
         goTo={(id) => { const entry = book.find((item) => item.id === id); if (entry) { setChapterId(entry.chapter); setPageId(id); } setExporting(false); }} />}
@@ -482,6 +493,43 @@ export function ComicReader({ world, production, onClose }: { world: WorldBundle
         </>
       )}
     </div>
+  );
+}
+
+/** What the head says the style is: World look, a preset's name, or Your own. */
+function styleName(style: ComicStyle | undefined): string {
+  if (!style) return "World look";
+  return comicStylePreset(style.preset)?.name ?? "Your own";
+}
+
+/**
+ * Style (design turn 248b, SPEC-064 R-21a): the book's style changed for the pages made from now.
+ * Pages already made keep theirs — a style is not part of a page's picture hash, so nothing is
+ * marked out of date by it.
+ */
+function ComicStyleSheet({ world, production, made, onClose }: { world: WorldBundle; production: ProductionBundle; made: number; onClose: () => void }) {
+  const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
+  const [draft, setDraft] = useState<ComicStyleDraft>(() => draftFromStyle(settings.style));
+  const pages = comicBook(production).length;
+  const use = () => {
+    setComicSettings(world.meta.worldId, production.meta.id, { style: styleFromDraft(draft) });
+    onClose();
+  };
+  return (
+    <EditorDialog open onClose={onClose} width={860} title={`Style · ${production.meta.title}`}>
+      {/* Scrolls inside the dialog: on a short or narrow window the cards run to four rows, and the
+          dialog clips rather than scrolls, which hid Use style (codex on PR 2237). */}
+      <div className="fy-comic-sheet fy-comic-style-sheet">
+        <div className="sub">Graphic novel · {pages} {pages === 1 ? "page" : "pages"} · {made} made</div>
+        <ComicStylePicker draft={draft} onChange={setDraft} worldPicture={world.keyArt ? mediaUrl(world.meta.slug, world.keyArt) : null} />
+        <div className="fy-comic-foot">
+          <span className="m">Pages made from now</span>
+          <span className="grow" />
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={use}>Use style</Button>
+        </div>
+      </div>
+    </EditorDialog>
   );
 }
 

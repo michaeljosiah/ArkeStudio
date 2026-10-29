@@ -200,3 +200,49 @@ describe("Pages (turn 247)", () => {
     assert.equal((exportPress as unknown as HTMLButtonElement).disabled, true);
   });
 });
+
+describe("Style (turn 248)", () => {
+  const styleSent = (sent: ClientMessage[]) => sent.filter((message): message is Extract<ClientMessage, { kind: "set-comic-settings" }> => message.kind === "set-comic-settings").at(-1);
+  const card = (name: string) => [...dom.document.querySelectorAll(".fy-comic-style")].find((el) => el.querySelector(".fy-comic-style__name")?.textContent === name)!;
+  const words = () => dom.document.querySelector("textarea[aria-label='Words for this style']");
+
+  it("shows World look until a style is chosen, then the chosen style's page and name (248b)", async () => {
+    const m = await mount(withBook([page()], {}));
+    assert.equal(button(m.container, "StyleWorld look") !== undefined, true);
+    const state = withBook([page()], {});
+    (state.world!.productions.at(-1) as { comic: object }).comic = { ...DEFAULT_COMIC_SETTINGS, style: { words: "Japanese manga.", preset: "manga" } };
+    const n = await mount(state);
+    const head = n.container.querySelector("button[aria-label='Style: Manga']")!;
+    assert.ok(head.querySelector("img[src='./comic-styles/manga.jpg']"), "the style shown by its page");
+  });
+
+  it("offers every style as its page; a card seeds the words, which stay editable, and Use style sends them", async () => {
+    const m = await mount(withBook([page()], {}));
+    await act(async () => props(button(m.container, "StyleWorld look")!).onClick({}));
+    const names = [...dom.document.querySelectorAll(".fy-comic-style__name")].map((el) => el.textContent);
+    assert.deepEqual(names, ["World look", "Manga", "Superhero", "Clean line", "Noir", "Webtoon", "Painted", "Watercolour", "Ink and wash", "Vintage print", "Your own"]);
+    assert.equal(dom.document.querySelectorAll(".fy-comic-style img[src^='./comic-styles/']").length, 9);
+    assert.equal(words(), null, "World look has no words of its own");
+
+    await act(async () => props(card("Noir")).onClick({}));
+    assert.match(props(words()!).value, /^Crime noir comic/);
+    assert.match(dom.document.body.textContent!, /SEEDED BY NOIR/);
+    await act(async () => props(words()!).onChange({ target: { value: "Crime noir comic, rain everywhere." } }));
+    assert.match(dom.document.body.textContent!, /SEEDED BY NOIR · EDITED/);
+    const use = [...dom.document.querySelectorAll("button")].find((b) => b.textContent === "Use style")!;
+    await act(async () => props(use).onClick({}));
+    assert.deepEqual(styleSent(m.sent)?.settings, { style: { words: "Crime noir comic, rain everywhere.", preset: "noir" } });
+  });
+
+  it("World look, or Your own left empty, clears the style (R-21a)", async () => {
+    const state = withBook([page()], {});
+    (state.world!.productions.at(-1) as { comic: object }).comic = { ...DEFAULT_COMIC_SETTINGS, style: { words: "Japanese manga.", preset: "manga" } };
+    const m = await mount(state);
+    await act(async () => props(m.container.querySelector("button[aria-label='Style: Manga']")!).onClick({}));
+    await act(async () => props(card("Your own")).onClick({}));
+    assert.equal(props(words()!).value, "", "Your own starts empty");
+    const use = () => [...dom.document.querySelectorAll("button")].find((b) => b.textContent === "Use style")!;
+    await act(async () => props(use()).onClick({}));
+    assert.deepEqual(styleSent(m.sent)?.settings, { style: null });
+  });
+});

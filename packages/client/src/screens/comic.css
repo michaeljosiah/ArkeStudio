@@ -116,3 +116,24 @@
 .fy-comic-block svg { color: var(--warning); flex: none; }
 .fy-comic-block .c { flex: 1; min-width: 0; }
 .fy-comic-foot { display: flex; align-items: center; gap: 8px; }
+
+/* A graphic novel's style (design turn 248): the same page drawn ten ways, then the words. */
+.fy-comic-styles { display: flex; flex-direction: column; gap: 14px; width: 100%; }
+.fy-comic-styles__grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.fy-comic-style { display: flex; flex-direction: column; align-items: stretch; text-align: left; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--background); color: var(--foreground); cursor: pointer; }
+.fy-comic-style.is-selected { border-color: var(--foreground); box-shadow: 0 0 0 1px var(--foreground); }
+.fy-comic-style:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-comic-style__frame { position: relative; aspect-ratio: 2 / 3; background: var(--secondary); display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); overflow: hidden; }
+.fy-comic-style__frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fy-comic-style__tick { position: absolute; top: 7px; right: 7px; width: 20px; height: 20px; border-radius: 50%; background: var(--foreground); color: var(--background); display: none; align-items: center; justify-content: center; }
+.fy-comic-style.is-selected .fy-comic-style__tick { display: flex; }
+.fy-comic-style__name { padding: 8px 10px 0; font: var(--type-ui); font-weight: 600; font-size: var(--text-sm); }
+.fy-comic-style__blurb { padding: 0 10px 10px; font: var(--type-meta); color: var(--muted-foreground); }
+.fy-comic-styles__words { display: flex; flex-direction: column; gap: 6px; }
+.fy-comic-styles__wordshead { display: flex; align-items: center; justify-content: space-between; font: var(--type-label); color: var(--muted-foreground); }
+.fy-comic-styles__seed { font: var(--type-mono); font-size: var(--text-2xs); letter-spacing: .04em; }
+.fy-comic__sel img { width: 18px; height: 27px; border-radius: 3px; object-fit: cover; display: block; }
+.fy-comic__sel.as-button { background: none; color: var(--foreground); cursor: pointer; }
+.fy-comic-style-sheet { max-height: calc(100vh - 120px); overflow-y: auto; }
+@media (max-width: 720px) { .fy-comic-styles__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.fy-comic-foot .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }

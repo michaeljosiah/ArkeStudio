@@ -74,6 +74,8 @@ import { Wave } from "../components/wave.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
 import { artifactDisplayName, artifactOpenLabel, artifactUses, linkNameResolver } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
+import { ComicStylePicker } from "../components/comic-style-picker.js";
+import { draftFromStyle, styleFromDraft, type ComicStyleDraft } from "../lib/comic-styles.js";
 import { clearQueue, enqueueClip, playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
 import { ReadAloud } from "../components/read-aloud.js";
@@ -90,6 +92,7 @@ import {
   subscribeVoiceUploadConfirmations,
   createProduction,
   subscribeProductionCreateResults,
+  setComicSettings,
   createSheetFromSentence,
   attachFiles,
   stopExtraction,
@@ -4868,6 +4871,9 @@ export function NewProductionScreen() {
   const [source, setSource] = useState(adaptFrom ?? "");
   // The production a soundtrack is for (design turn 238b): none until it is chosen.
   const [soundtrackFor, setSoundtrackFor] = useState("");
+  // A graphic novel's style (design turn 248): World look until a card is chosen.
+  const [comicStyle, setComicStyle] = useState<ComicStyleDraft>(() => draftFromStyle(undefined));
+  const isGraphicNovel = door === "write" && videoKind === GRAPHIC_NOVEL_KIND;
   // Seeded from the kind and re-seeded whenever the kind changes: a default the kind can answer
   // is the kind's to answer (turn 99), and a film that silently kept a micro drama's 9:16 would
   // be the exact failure the grouping is meant to prevent.
@@ -4886,14 +4892,17 @@ export function NewProductionScreen() {
     return subscribeProductionCreateResults((result) => {
       if (result.requestId !== pendingRequest) return;
       if (result.disposition === "created" && result.slug) {
+        // The style is the book's setting, written once the book exists; World look writes nothing.
+        const style = isGraphicNovel ? styleFromDraft(comicStyle) : null;
+        if (worldId && style) setComicSettings(worldId, result.slug, { style });
         navigate(`/w/${worldId}/p/${result.slug}`);
       } else {
         setPendingRequest(null);
         setFailure(result.reason ?? "The production could not be created.");
       }
     });
-  }, [pendingRequest, worldId, navigate]);
-  const characters = world?.sheets.filter((s) => s.type === "character").length ?? 0;
+  }, [pendingRequest, worldId, navigate, isGraphicNovel, comicStyle]);
+  const characters =world?.sheets.filter((s) => s.type === "character").length ?? 0;
   const chosen = door === null ? null : DOOR_CHOICES.find((d) => d.id === door)!;
   const kinds = door === null ? [] : KINDS_BY_DOOR[door];
   const isMicrodrama = door === "watch" && videoKind === "microdrama";
@@ -5072,6 +5081,18 @@ export function NewProductionScreen() {
                 {source !== "" && !story && <option value={source}>{source} · no longer here</option>}
               </Select>
             </label>
+          )}
+          {/* Style (design turn 248a, SPEC-064 R-21a): a graphic novel's one other question, asked by
+              showing the same page drawn each way. */}
+          {isGraphicNovel && (
+            <div className="fy-production-step__adapt">
+              <span className="fy-production-step__label">Style</span>
+              <ComicStylePicker
+                draft={comicStyle}
+                onChange={setComicStyle}
+                worldPicture={world?.keyArt ? mediaUrl(world.meta.slug, world.keyArt) : null}
+              />
+            </div>
           )}
           {/* For (design turn 238b, SPEC-060 R-3): the one other question a soundtrack asks. */}
           {isSoundtrack && (

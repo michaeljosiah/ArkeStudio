@@ -128,6 +128,20 @@ export const DEFAULT_COMIC_ATTEMPT_CAP = { attempts: 3, usd: 5 } as const;
 
 export const DEFAULT_COMIC_ASPECT = "2:3";
 
+/** The style's words are sent with every page brief, so they are bounded like a look is. */
+export const COMIC_STYLE_WORDS_MAX = 600;
+
+/**
+ * How a book's pages are drawn (R-21a, turn 248). The words are the record; `preset` is only the
+ * card that seeded them, so the picker can show it as chosen. An edited preset is the author's own
+ * words like any other: nothing re-reads the preset's text.
+ */
+export const ComicStyleSchema = z.object({
+  words: z.string().trim().min(1).max(COMIC_STYLE_WORDS_MAX),
+  preset: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/).optional(),
+}).strict();
+export type ComicStyle = z.infer<typeof ComicStyleSchema>;
+
 /** `productions/<id>/comic.json` (R-12): how the book reads and how its pages are checked. */
 export const ComicSettingsSchema = z.object({
   version: z.literal(1),
@@ -137,6 +151,8 @@ export const ComicSettingsSchema = z.object({
   language: z.string().min(2).max(35).default("en"),
   thresholds: LetteringThresholdsSchema.default(DEFAULT_LETTERING_THRESHOLDS),
   cap: ComicAttemptCapSchema.default(DEFAULT_COMIC_ATTEMPT_CAP),
+  /** Absent is World look: the world's art direction alone, as before there was a style. */
+  style: ComicStyleSchema.optional(),
 }).strict().superRefine((settings, ctx) => {
   if (normalizeAspect(settings.aspect) !== settings.aspect) ctx.addIssue({ code: "custom", path: ["aspect"], message: `“${settings.aspect}” is not an aspect.` });
 });

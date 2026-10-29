@@ -64,7 +64,7 @@ import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from
 import { DomainEventSchema, type DomainEvent } from "./events.js";
 import { DramaDeliverySchema } from "./audio-drama-edition.js";
 import { DramaChapterDecisionSchema, DramaReviewDecisionSchema, DramaRoleKeySchema, DramaRoleSchema, EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
-import { COMIC_LIMITS, ComicAttemptCapSchema, ComicModeSchema, ComicPageSchema, ComicReadingSchema, LetteringThresholdsSchema } from "./graphic-novel.js";
+import { COMIC_LIMITS, ComicAttemptCapSchema, ComicModeSchema, ComicPageSchema, ComicReadingSchema, ComicStyleSchema, LetteringThresholdsSchema } from "./graphic-novel.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema, PropStateSelectionSchema } from "./prop.js";
 import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
@@ -2548,6 +2548,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         mode: ComicModeSchema.optional(),
         thresholds: LetteringThresholdsSchema.optional(),
         cap: ComicAttemptCapSchema.optional(),
+        /** The book's style (R-21a); `null` is World look, the world's art direction alone. */
+        style: ComicStyleSchema.nullable().optional(),
       }).strict(),
     })
     .strict(),
