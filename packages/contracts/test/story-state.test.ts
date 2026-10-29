@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { RoutingSchema, routingFindings } from "../src/routing.js";
-import { exploreStory, storyReplay, storyIdentity, storyEnding, storyLinks, storyLoneChoice, storyVisibleBeats } from "../src/story-state.js";
+import { exploreStory, storyReplay, storyIdentity, storyEnding, storyLinkSteps, storyLinks, storyLoneChoice, storyVisibleBeats } from "../src/story-state.js";
 
 const routing = () => RoutingSchema.parse({
   schemaVersion: 2, version: 1, start: "sc_bore", facts: [{ id: "elsie", label: "Elsie Ward", type: "enum", values: ["Alive", "Lost"], default: "Alive" }],
@@ -155,6 +155,20 @@ describe("a lone way plays through (SPEC-063 R-11a)", () => {
     const graph = exploreStory(firstContact(), { states: 3 });
     assert.equal(graph.complete, false);
     assert.ok(![...storyLinks(firstContact(), graph).values()].includes("always"), "an exploration cut short never vouches for every state");
+  });
+
+  it("tells a route's links from its choices in one walk, however long the route (codex on PR 2228)", () => {
+    const r = firstContact();
+    assert.deepEqual(storyLinkSteps(r, ["ch_markers", "ch_weeks", "ch_wall", "ch_landing", "ch_seal", "ch_cage", "ch_board"]), [true, true, true, true, false, true, true]);
+    assert.deepEqual(storyLinkSteps(r, ["ch_markers", "ch_weeks", "ch_wall", "ch_landing", "ch_return", "ch_cage", "ch_board"]).slice(-1), [false], "while Elsie lives the board is a choice");
+    assert.throws(() => storyLinkSteps(r, ["ch_weeks"]), /Invalid route/);
+    const n = 2000;
+    const chain = RoutingSchema.parse({ version: 1, start: "sc_c-0", choices: Array.from({ length: n }, (_, i) => ({ id: `ch_c-${i}`, from: `sc_c-${i}`, to: `sc_c-${i + 1}`, label: "On" })), endings: [{ sceneId: `sc_c-${n}`, title: "End" }], excluded: [], groups: [] });
+    const started = performance.now();
+    const steps = storyLinkSteps(chain, chain.choices.map((choice) => choice.id));
+    assert.equal(steps.length, n);
+    assert.ok(steps.every(Boolean));
+    assert.ok(performance.now() - started < 2000, "a 2,000-step route does not freeze an ending");
   });
 
   it("stays a step of the route: a link with effects replays, and its walk counts as a press's", () => {

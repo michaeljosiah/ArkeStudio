@@ -210,6 +210,20 @@ export function storyLoneChoice(choices, sceneId, state) {
 }
 
 /**
+ * Which steps of a route were lone ways played through rather than choices made, in one walk of
+ * the route: replaying every prefix afresh froze an ending reached by a long route (codex on PR 2228).
+ */
+export function storyLinkSteps(program, prefix) {
+  validateStoryProgram(program);
+  let point = { sceneId: program.start, state: storyDefaults(program), origins: {} };
+  return prefix.map((id) => {
+    const lone = storyLoneChoice(program.choices, point.sceneId, point.state)?.id === id;
+    point = storyAdvance(program, point, id);
+    return lone;
+  });
+}
+
+/**
  * Which choices are links on the map (turn 246 rule 11, call 7): "always" for one lone in every
  * reachable state that offers it, drawn as a plain line with its label as the author's note;
  * "sometimes" for one lone on some routes only, which keeps its pill because the others read its

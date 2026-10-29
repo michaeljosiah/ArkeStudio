@@ -1,4 +1,4 @@
-import { storyReplay, storyPredicate, storyIdentity, storyEnding, storyVisibleBeats, storyLoneChoice, validateStoryProgram } from "./story-state.js";
+import { storyReplay, storyPredicate, storyIdentity, storyEnding, storyVisibleBeats, storyLoneChoice, storyLinkSteps, validateStoryProgram } from "./story-state.js";
 /*
  * The interactive video player (design turn 156): one player for the preview in the app and the
  * exported package. The app imports this module and mounts it over the window; the exporter
@@ -129,6 +129,8 @@ export function mountInteractivePlayer(root, options) {
   // Turn 246: a visual novel is paused or playing, as a film is; paused, its voice, its hold, its
   // tick and its picture's movement all wait where they are.
   let paused = false;
+  // A line heard again from the Log, paused with the story, to go on when it plays again.
+  let logHeld = false;
   // Narration is on where the story carries voices, and the listener may turn it off (rule 5).
   const voiced = Object.keys(scenes).some((id) => (scenes[id].beats || []).some((b) => b.audio));
   let narration = true;
@@ -162,16 +164,18 @@ export function mountInteractivePlayer(root, options) {
     const ways = outOf(id);
     return ways.length === 1 ? ways[0] : undefined;
   };
-  /** Which steps of the route were links played through rather than choices made. */
+  /** Which steps of the route were links played through rather than choices made, in one walk. */
   function linkSteps() {
-    return state.route.map((id, i) => {
-      const c = choiceById(id);
-      if (!c) return false;
+    if (story) {
       try {
-        return loneWay(c.from, story ? storyReplay(story, state.route.slice(0, i)).state : undefined)?.id === c.id;
+        return storyLinkSteps(story, state.route);
       } catch {
-        return false;
+        return state.route.map(() => false);
       }
+    }
+    return state.route.map((id) => {
+      const c = choiceById(id);
+      return Boolean(c) && loneWay(c.from)?.id === c.id;
     });
   }
 
@@ -480,11 +484,21 @@ export function mountInteractivePlayer(root, options) {
   const chromeShown = () => root.classList.contains("aip-shown") || (paused && mode === "playing") || root.hasAttribute("data-held");
 
   const heldPointers = new Set();
-  const holdChrome = (event) => { if(event.pointerType !== "touch") return; heldPointers.add(event.pointerId);root.setAttribute("data-held","");wake(); };
+  // Whether the controls were resting when this press began: a touch wakes them on its way down
+  // and up, so by its click they read as shown, and a tap on an unseen Pause paused the story
+  // instead of showing the bar (codex on PR 2228).
+  let pressHidden = null;
+  const holdChrome = (event) => { pressHidden = !chromeShown(); if(event.pointerType !== "touch") return; heldPointers.add(event.pointerId);root.setAttribute("data-held","");wake(); };
   const releaseChrome = (event) => { if(!heldPointers.delete(event.pointerId)) return; if(!heldPointers.size){root.removeAttribute("data-held");wake();} };
 
-  function play(sceneId, positionSec) {
+  /** A line heard again from the Log stops, and is not one to go on with at the next Play. */
+  function stopLog() {
+    logHeld = false;
     logVoice.pause && logVoice.pause();
+  }
+
+  function play(sceneId, positionSec) {
+    stopLog();
     state.sceneId = sceneId;
     state.positionSec = positionSec || 0;
     save();
@@ -546,7 +560,7 @@ export function mountInteractivePlayer(root, options) {
    */
   function showBeat(index, quiet) {
     stopHold();
-    logVoice.pause && logVoice.pause();
+    stopLog();
     const beats = beatsOf(state.sceneId);
     beatIndex = Math.max(0, Math.min(index, beats.length - 1));
     if (!quiet) {
@@ -683,8 +697,22 @@ export function mountInteractivePlayer(root, options) {
     }
     if (mode !== "playing") return;
     paused = !paused;
-    if (paused) voice.pause && voice.pause();
-    else if (!voiceDone) startVoice(voiceToken);
+    if (paused) {
+      voice.pause && voice.pause();
+      // A line heard again from the Log is the voice sounding now: it pauses too, and goes on
+      // with Play (codex on PR 2228). Its pause is no end, so the story stays held for it.
+      if (logVoice.getAttribute("src") && logVoice.paused === false) {
+        logHeld = true;
+        logVoice.pause && logVoice.pause();
+      }
+    } else {
+      if (!voiceDone) startVoice(voiceToken);
+      if (logHeld) {
+        logHeld = false;
+        const p = logVoice.play && logVoice.play();
+        if (p && p.catch) p.catch(replayDone);
+      }
+    }
     renderBar();
     renderBeat();
     holdFocus();
@@ -726,7 +754,7 @@ export function mountInteractivePlayer(root, options) {
     // A line replayed from the Log stops with the scene too: it would sound over the choice, or
     // on into the next scene's footage, which never passes through showBeat (codex round 11).
     voice.pause && voice.pause();
-    logVoice.pause && logVoice.pause();
+    stopLog();
     finishScene();
   }
   /**
@@ -911,8 +939,7 @@ export function mountInteractivePlayer(root, options) {
     finishScene();
   }
   /** The last step of the route that was a choice made, not a link played through; -1 if none. */
-  function lastChoiceIndex() {
-    const links = linkSteps();
+  function lastChoiceIndex(links = linkSteps()) {
     for (let i = links.length - 1; i >= 0; i--) if (!links[i]) return i;
     return -1;
   }
@@ -982,7 +1009,7 @@ export function mountInteractivePlayer(root, options) {
       const trail = walked();
       // A link's label is the author's note, never shown to a listener (turn 246 rule 11).
       const links = linkSteps();
-      const last = lastChoiceIndex();
+      const last = lastChoiceIndex(links);
       el.hero.innerHTML =
         '<div class="aip-poster-back"></div><div class="aip-hero">' +
         '<div class="aip-eyebrow">' + (ending !== undefined ? "Ending" : "No choices from here") + "</div>" +
@@ -1204,12 +1231,16 @@ export function mountInteractivePlayer(root, options) {
   const onClick = (event) => {
     const target = event.target.closest ? event.target : null;
     if (!target) return;
+    // Judged as the press began, not now: its own pointer events have woken the bar since. A click
+    // with no press behind it (a key on a focused button) reads the bar as it is.
+    const unseen = pressHidden ?? !chromeShown();
+    pressHidden = null;
     // A visual novel's picture (turn 246 rule 2): a press shows the controls, a second hides them,
     // and neither moves the story on. A press where the resting bar was shows it rather than
     // pressing a control nobody could see.
     if (isBeats(state.sceneId) && (mode === "playing" || mode === "choice")) {
       const onPicture = !target.closest("button, .aip-panel, .aip-strip");
-      if (onPicture || (target.closest(".aip-beatbar") && !chromeShown())) {
+      if (onPicture || (target.closest(".aip-beatbar") && unseen)) {
         if (onPicture && pinned && chromeShown() && !(paused && mode === "playing")) rest();
         else {
           wake();
@@ -1245,6 +1276,7 @@ export function mountInteractivePlayer(root, options) {
         // Any hold waits too — an authored one as much as a reading time: it would read on over
         // the line and cut it off (codex round 19). It starts over when the line has been heard.
         stopHold();
+        logHeld = false;
         logVoice.setAttribute("src", b.audio);
         const p = logVoice.play && logVoice.play();
         // A line that cannot be heard again hands the beat back at once, as one heard out would:
@@ -1282,7 +1314,7 @@ export function mountInteractivePlayer(root, options) {
       case "replay": play(state.sceneId, 0); break;
       case "continue": saved = null; play(state.sceneId, state.positionSec); break;
       case "restart": saved = null; startAgain(); break;
-      case "last": if (lastChoiceIndex() >= 0) chooseAgain(lastChoiceIndex()); break;
+      case "last": { const last = lastChoiceIndex(); if (last >= 0) chooseAgain(last); break; }
       case "map": author && author.onBranchMap && author.onBranchMap(); break;
       case "test-route": if (author?.onTestRoute) author.onTestRoute(state.sceneId); break;
       case "close": author && author.onClose && author.onClose(); break;
@@ -1290,6 +1322,8 @@ export function mountInteractivePlayer(root, options) {
   };
 
   const onKey = (event) => {
+    // A key's click on a focused button had no press behind it; a press that never clicked is over.
+    pressHidden = null;
     wake();
     const onButton = event.target && event.target.tagName === "BUTTON";
     const key = event.key;

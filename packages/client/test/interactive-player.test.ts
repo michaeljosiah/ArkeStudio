@@ -538,6 +538,47 @@ describe("the player reading beats (turns 174 and 246)", () => {
     assert.equal(p.root.hasAttribute("data-paused"), true, "shown, it is a button");
   });
 
+  it("a tap on the resting bar shows it, though the tap's own touch woke the bar first (codex on PR 2228)", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    animationEnd(p.q(".aip-beatbar"), "aip-rest");
+    assert.equal(shown(p), false);
+    const pause = p.q('[data-ref="beatToggle"]')!;
+    const touch = (target: EventTarget, type: string) => {
+      const event = new dom.Event(type, { bubbles: true });
+      Object.assign(event, { pointerType: "touch", pointerId: 7 });
+      target.dispatchEvent(event as unknown as Event);
+    };
+    touch(pause as unknown as EventTarget, "pointerdown");
+    touch(dom.window as unknown as EventTarget, "pointerup");
+    p.click(pause);
+    assert.equal(p.root.hasAttribute("data-paused"), false, "the unseen Pause was not pressed");
+    assert.equal(shown(p), true, "the bar shows");
+    touch(pause as unknown as EventTarget, "pointerdown");
+    touch(dom.window as unknown as EventTarget, "pointerup");
+    p.click(pause);
+    assert.equal(p.root.hasAttribute("data-paused"), true, "seen, the next tap presses it");
+  });
+
+  it("pauses a line heard again from the Log with the story, and plays it on after (codex on PR 2228)", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    onward(p);
+    p.key("l");
+    const logVoice = p.all("audio")[1]! as unknown as HTMLMediaElement;
+    const calls: string[] = [];
+    Object.assign(logVoice, { paused: true, play: () => { calls.push("play"); Object.assign(logVoice, { paused: false }); return Promise.resolve(); }, pause: () => { calls.push("pause"); Object.assign(logVoice, { paused: true }); } });
+    p.click(p.q('[aria-label="Log"] [aria-label="Play line"]') as unknown as HTMLElement);
+    assert.deepEqual(calls, ["play"]);
+    p.key(" ");
+    assert.equal(p.root.hasAttribute("data-paused"), true);
+    assert.deepEqual(calls, ["play", "pause"], "the line heard again pauses with the story");
+    p.key(" ");
+    assert.deepEqual(calls, ["play", "pause", "play"], "and goes on with Play");
+    p.key(" ");
+    p.key("ArrowLeft");
+    p.key(" ");
+    assert.deepEqual(calls.slice(-2), ["pause", "pause"], "moved off its beat while paused, it is not taken up again");
+  });
+
   it("plays itself: a voiced beat 1.2 s after its voice, an unvoiced one for its reading time, a Hold beat its own seconds", () => {
     const p = mount({ ...NOVEL, autoplay: true });
     assert.equal(hold(p).style.animation, "none", "a voiced beat waits for its voice");
