@@ -1,0 +1,187 @@
+/* Turn 250 · Arke hears a read, revised 29 October 2026: cards in the chat, no other UI.
+   Corrected the same day so that nothing existing is drawn from memory:
+   - The page beside the chat is a picture of today's app (main at 50b479f19), not a drawing:
+     the world home and a visual novel's scene, shot at 2x in light and dark from a scratch dev
+     root with the Chat panel open. Only the panel's own area is painted over.
+   - The Chat panel is drawn in HTML to the shipped panel's measured styles (global-chat.css,
+     fidelity.css .fy-chat__*, player.css .fy-replyacts, the composer's .fy-cx), so the cards can
+     sit inside it. Two values are not on the type scale because the app's are not:
+     the composer's 13.5px and the receipt line's 10.5px. They are written as token arithmetic.
+   - New: the cards, and the receipt line's words. Everything else is today's.
+   Type through the tokens only (turn 139). */
+.ah250{position:relative;box-sizing:border-box;overflow:hidden;text-align:left;font:var(--type-ui);background:var(--background);color:var(--foreground)}
+.ah250 *{box-sizing:border-box}
+.ah250 svg{flex:none}
+.ah250 p{margin:0}
+
+/* Today's page, as the app draws it: a picture per theme. */
+.ah250-ctx{position:absolute;inset:0}
+.ah250-ctx img{position:absolute;inset:0;width:1360px;height:850px;display:block}
+.ah250-ctx .dk{display:none}
+.dark .ah250-ctx .lt{display:none}
+.dark .ah250-ctx .dk{display:block}
+
+/* The Chat panel (global-chat.css): 400 wide under the 44 bar, its head, the conversation, the composer. */
+.ah250-panel{position:absolute;right:0;top:44px;bottom:0;width:400px;border-left:1px solid var(--border);background:var(--background);color:var(--foreground);display:flex;flex-direction:column}
+.ah250-ph{flex:none;display:flex;align-items:flex-start;gap:8px;padding:18px 16px;border-bottom:1px solid var(--border)}
+.ah250-ph>div{flex:1;min-width:0}
+.ah250-ph h2{margin:0 0 6px;font:var(--type-ui);font-weight:var(--weight-semibold)}
+.ah250-ph p{margin:0;font:var(--type-label);color:var(--muted-foreground)}
+.ah250-ph>span{display:grid;place-items:center;width:32px;height:32px;border-radius:6px;color:var(--muted-foreground)}
+
+/* The transcript (fidelity.css .fy-chat__*), shown scrolled to its end. */
+.ah250-tx{display:flex;flex-direction:column;gap:14px}
+.ah250-turn{display:flex;flex-direction:column}
+.ah250-turn.u{align-self:flex-end;align-items:flex-end;max-width:380px}
+.ah250-turn.s{align-self:flex-start;max-width:440px}
+.ah250-turn.s.act{align-self:stretch;max-width:none}
+.ah250-bubble{white-space:pre-wrap}
+.ah250-acts{display:flex;align-items:center;gap:4px;margin:6px 0 0 -6px}
+.ah250-acts>span{height:24px;display:inline-flex;align-items:center;gap:5px;padding:0 6px;border-radius:var(--radius-sm);font:var(--weight-regular) var(--text-xs) var(--font-sans);color:var(--muted-foreground)}
+/* The receipt line inside a reply (.fy-chat__receipts): the line exists in the client today. */
+.ah250-rc{margin-top:8px;font:var(--weight-regular) calc(var(--text-2xs) - .5px) var(--font-mono);color:var(--neutral-400)}
+
+/* World Chat: replies on --secondary, the author's on --primary. */
+.ah250-panel.w .ah250-main{flex:1;min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--border)}
+.ah250-panel.w .ah250-body{flex:1;min-height:0;overflow:hidden;padding:16px 12px;display:flex;flex-direction:column-reverse}
+.ah250-panel.w .ah250-turn.u .ah250-bubble{background:var(--primary);color:var(--primary-foreground);border-radius:14px 14px 4px 14px;padding:11px 15px;font:var(--weight-regular) var(--text-sm)/1.55 var(--font-sans)}
+.dark .ah250-panel.w .ah250-turn.u .ah250-bubble{background:var(--neutral-700);color:var(--foreground)}
+.ah250-panel.w .ah250-turn.s .ah250-bubble{background:var(--secondary);border-radius:14px 14px 14px 4px;padding:12px 15px;font:var(--weight-regular) var(--text-sm)/1.6 var(--font-sans)}
+.ah250-panel.w .ah250-foot{flex:none;padding:12px}
+
+/* Builder Chat beside a scene (the scene dock, conversation first): a --secondary well, white replies. */
+.ah250-panel.b .ah250-well{flex:1;min-height:0;display:flex;flex-direction:column;padding:0 12px 16px;background:var(--secondary)}
+.ah250-panel.b .ah250-body{flex:1;min-height:0;overflow:hidden;padding:14px 14px 6px;display:flex;flex-direction:column-reverse}
+.ah250-body>.sp{flex:1 1 0;min-height:0}
+.ah250-body>.ah250-tx{flex:none}
+.ah250-panel.b .ah250-turn.u .ah250-bubble{background:var(--foreground);color:var(--background);border-radius:10px;padding:8px 11px;font:var(--weight-regular) var(--text-xs)/1.55 var(--font-sans)}
+.dark .ah250-panel.b .ah250-turn.u .ah250-bubble{background:var(--neutral-700);color:var(--foreground)}
+.ah250-panel.b .ah250-turn.s .ah250-bubble{background:var(--background);border:1px solid var(--border);border-radius:10px;padding:9px 11px;box-shadow:0 1px 2px rgba(0,0,0,.05);font:var(--weight-regular) var(--text-xs)/1.6 var(--font-sans)}
+.ah250-panel.b .ah250-foot{flex:none;display:flex;flex-direction:column;gap:8px;padding:8px 14px 14px}
+.ah250-prompts{display:flex;flex-wrap:wrap;gap:5px}
+.ah250-prompts>span{padding:4px 9px;border:1px solid var(--border);border-radius:999px;background:var(--background);font:var(--weight-regular) var(--text-2xs) var(--font-sans);color:var(--muted-foreground)}
+
+/* The composer (.fy-cx), at rest. */
+.ah250-cx{border:1px solid var(--border);border-radius:14px;background:var(--background);box-shadow:0 1px 2px rgba(0,0,0,.05)}
+.ah250-cx .ed{min-height:44px;padding:13px 15px 8px;font:var(--weight-regular) calc(var(--text-sm) + .5px)/20px var(--font-sans);color:var(--muted-foreground)}
+.ah250-cx .bar{height:48px;display:flex;align-items:center;gap:8px;padding:8px 8px 8px 15px}
+.ah250-cx .left{flex:1;min-width:0;display:flex;align-items:center;gap:4px 10px}
+.ah250-cx .ic{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;color:var(--muted-foreground)}
+.ah250-cx .ic.att{margin-left:-7px}
+.ah250-cx .chip{height:32px;display:inline-flex;align-items:center;padding:0 6px;border-radius:999px;font:var(--type-ui);color:var(--muted-foreground)}
+.ah250-cx .tool{height:26px;display:inline-flex;align-items:center;gap:5px;padding:0 8px;border-radius:8px;font:var(--weight-regular) var(--text-xs) var(--font-sans);color:var(--muted-foreground)}
+.ah250-cx .send{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:var(--primary);color:var(--primary-foreground);opacity:.45}
+
+/* ---- New in this turn: the cards. They sit after a reply's Listen and Copy, where the
+   production plan and a run's report sit today, and fill the message column: 374 in World
+   Chat's 400 panel, 347 in a scene's Builder Chat. ------------------------------------------ */
+.ah250-card{margin-top:8px;border:1px solid var(--border);border-radius:10px;background:var(--background);overflow:hidden;font:var(--type-ui)}
+
+/* Controls inside the cards. */
+.ah250-btn{height:28px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--background);color:var(--foreground);display:inline-flex;align-items:center;justify-content:center;gap:6px;font:var(--type-label);white-space:nowrap}
+.ah250-btn.primary{background:var(--primary);color:var(--primary-foreground);border-color:var(--primary)}
+.ah250-btn.off{color:var(--muted-foreground);background:var(--muted);border-color:var(--muted)}
+.ah250-btn small{font:var(--type-label);font-weight:var(--weight-regular);opacity:.72}
+.ah250-chip{height:20px;padding:0 7px;border-radius:999px;display:inline-flex;align-items:center;gap:4px;font:var(--type-meta);font-weight:var(--weight-medium);white-space:nowrap;background:var(--muted);color:var(--muted-foreground);flex:none}
+.ah250-chip.warn{background:var(--warning-bg);color:var(--warning)}
+.ah250-chip.line{background:transparent;border:1px solid var(--border);color:var(--foreground)}
+.ah250-pb{width:24px;height:24px;border-radius:999px;flex:none;display:grid;place-items:center;background:var(--foreground);color:var(--background)}
+.ah250-pb.sm{width:20px;height:20px}
+.ah250-play{height:28px;padding:0 9px 0 3px;border:1px solid var(--border);border-radius:999px;display:inline-flex;align-items:center;gap:6px;font:var(--type-label);font-variant-numeric:tabular-nums;background:var(--background);color:var(--foreground);white-space:nowrap}
+.ah250-play .pl{width:20px;height:20px;border-radius:999px;display:grid;place-items:center;background:var(--c,var(--foreground));color:var(--background)}
+.ah250-play .l{font-weight:var(--weight-semibold)}
+.ah250-play .s{font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ah250-heard{display:inline-flex;align-items:center;color:var(--success)}
+.ah250-avatar{width:28px;height:28px;border-radius:999px;object-fit:cover;object-position:50% 18%;flex:none;display:block}
+
+.ah250-chd{display:flex;align-items:center;gap:8px;min-height:42px;padding:9px 14px;border-bottom:1px solid var(--border)}
+.ah250-chd b{flex:1;min-width:0;font:var(--type-ui);font-weight:var(--weight-semibold)}
+.ah250-chd span{font:var(--type-meta);color:var(--muted-foreground);white-space:nowrap}
+
+/* The design's quote, already approved. */
+.ah250-quote{display:flex;align-items:center;gap:10px;padding:10px 14px}
+.ah250-quote .t{flex:1;min-width:0}
+.ah250-quote b{display:block;font:var(--type-ui);font-weight:var(--weight-semibold)}
+.ah250-quote small{display:block;margin-top:3px;font:var(--type-meta);color:var(--muted-foreground)}
+.ah250-done{display:inline-flex;align-items:center;gap:5px;font:var(--type-label);color:var(--muted-foreground)}
+.ah250-done svg{color:var(--success)}
+
+/* Two voices a character: one row each, one open at a time. */
+.ah250-vrow{border-top:1px solid var(--border)}
+.ah250-vrow:first-child{border-top:0}
+.ah250-vrow .rh{display:flex;align-items:center;gap:10px;height:40px;padding:0 10px 0 14px}
+.ah250-vrow .rh b{flex:1;min-width:0;font:var(--type-ui);font-weight:var(--weight-semibold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ah250-vrow .rh .st{font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground);white-space:nowrap}
+.ah250-vrow .rh .using{display:inline-flex;align-items:center;gap:5px;font:var(--type-label);color:var(--foreground)}
+.ah250-vrow .rh .using svg{color:var(--success)}
+.ah250-vrow .rh .chev{color:var(--muted-foreground);width:22px;display:grid;place-items:center}
+.ah250-vrow.open{background:color-mix(in srgb,var(--secondary) 45%,transparent)}
+.ah250-mt{display:grid;grid-template-columns:52px 1fr 1fr;column-gap:10px;padding:0 14px 2px}
+.ah250-mt>span{min-height:26px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;border-top:1px solid var(--border);padding:4px 0;font:var(--type-label);font-weight:var(--weight-regular);font-variant-numeric:tabular-nums;min-width:0}
+.ah250-mt>span.k{color:var(--muted-foreground)}
+.ah250-mt>span.hd{border-top:0;min-height:32px;padding-top:0}
+.ah250-mt>span.br{color:var(--muted-foreground);font:var(--type-meta);line-height:1.35}
+.ah250-mt>span.span2{grid-column:2 / span 2;color:var(--muted-foreground)}
+.ah250-mt .v{font-weight:var(--weight-medium);color:var(--foreground)}
+.ah250-mt .q{color:var(--muted-foreground)}
+.ah250-pk{display:flex;gap:9px;margin:6px 14px 0;padding:9px 12px;border-radius:8px;background:var(--secondary);font:var(--type-label);font-weight:var(--weight-regular);line-height:1.45}
+.ah250-pk svg{margin-top:1px}
+.ah250-pk b{font-weight:var(--weight-semibold)}
+.ah250-use{display:grid;grid-template-columns:52px 1fr 1fr;column-gap:10px;padding:8px 14px 10px}
+.ah250-use>span{display:flex;align-items:center;gap:6px;font:var(--type-meta);color:var(--muted-foreground);white-space:nowrap}
+
+/* A line in a read, its stops and its words. */
+.ah250-join{text-decoration:underline wavy var(--warning);text-decoration-thickness:1.5px;text-underline-offset:4px}
+.ah250-miss{text-decoration:line-through;color:var(--warning)}
+
+/* The evidence: the reads on one pitch axis, with pace beside, from the tool's receipt. */
+.ah250-band{position:relative;display:block;height:10px;border-radius:99px;background:var(--muted)}
+.ah250-band>i{position:absolute;top:0;bottom:0;left:var(--l);right:var(--r);border-radius:99px;background:color-mix(in srgb,var(--c) 34%,transparent)}
+.ah250-band>b{position:absolute;top:-3px;bottom:-3px;left:var(--m);width:3px;margin-left:-1.5px;border-radius:2px;background:var(--c)}
+.ah250-band.dim>i{background:color-mix(in srgb,var(--c) 14%,transparent)}
+.ah250-band.dim>b{background:color-mix(in srgb,var(--c) 50%,transparent)}
+.ah250-axis{position:relative;height:14px;font:var(--type-meta);color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.ah250-axis span{position:absolute;top:0;transform:translateX(-50%)}
+.ah250-ev{padding:8px 14px 12px}
+.ah250-evrow{display:grid;grid-template-columns:24px 82px 1fr 48px 30px;column-gap:8px;align-items:center;min-height:38px}
+.ah250-evrow.hd{min-height:20px;font:var(--type-meta);color:var(--muted-foreground)}
+.ah250-evrow.hd>span:nth-child(n+4){text-align:right}
+.ah250-evrow .n{font:var(--type-label);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ah250-evrow .n small{display:block;margin-top:2px;font:var(--type-meta);color:var(--muted-foreground)}
+.ah250-evrow .v{font:var(--type-label);font-weight:var(--weight-regular);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.ah250-evrow.dim .n,.ah250-evrow.dim .v{color:var(--muted-foreground)}
+.ah250-evrow.dim .ah250-pb{background:var(--muted-foreground)}
+
+/* Not measured, then what was. */
+.ah250-not{display:flex;flex-wrap:wrap;gap:6px;padding:10px 14px 12px;border-bottom:1px solid var(--border)}
+.ah250-sub{padding:10px 14px 0;font:var(--type-meta);color:var(--muted-foreground)}
+.ah250-mrow{display:flex;align-items:flex-start;gap:10px;padding:9px 14px}
+.ah250-mrow+.ah250-mrow{border-top:1px solid var(--border)}
+.ah250-mrow .b{flex:1;min-width:0;font:var(--type-label);font-weight:var(--weight-regular);font-variant-numeric:tabular-nums;line-height:1.5}
+.ah250-mrow .b b{font-weight:var(--weight-semibold)}
+.ah250-mrow .b small{display:flex;align-items:center;gap:6px;margin-top:3px;font:var(--type-meta);color:var(--muted-foreground)}
+
+/* The table read's check: one item a flagged line, numbered by its shot as the scene's page numbers it. */
+.ah250-tri{padding:11px 14px 12px;border-top:1px solid var(--border)}
+.ah250-chd+.ah250-tri{border-top:0}
+.ah250-tri .h{display:flex;align-items:center;gap:8px}
+.ah250-tri .num{min-width:20px;height:20px;padding:0 5px;border-radius:6px;display:grid;place-items:center;background:var(--muted);font:var(--type-meta);font-weight:var(--weight-semibold);color:var(--muted-foreground)}
+.ah250-tri .h b{flex:1;min-width:0;font:var(--type-label);font-weight:var(--weight-semibold)}
+.ah250-tri .ln{margin-top:7px;font:var(--type-label);font-weight:var(--weight-regular);line-height:1.55}
+.ah250-tri .ln.nar{font-style:italic}
+.ah250-tri .d{margin-top:5px;font:var(--type-meta);color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.ah250-tri .a{display:flex;align-items:center;gap:6px;margin-top:9px}
+.ah250-tri .a .grow{flex:1}
+
+/* One read, measured. */
+.ah250-rd .said{display:flex;align-items:baseline;gap:10px;padding:10px 14px;font:var(--type-label);font-weight:var(--weight-regular);line-height:1.55;border-bottom:1px solid var(--border)}
+.ah250-rd .said>span:first-child{flex:1;min-width:0}
+.ah250-rd .said .m{font:var(--type-meta);color:var(--muted-foreground);white-space:nowrap}
+.ah250-mx{display:grid;grid-template-columns:62px auto 1fr;padding:2px 14px}
+.ah250-mx>span{min-height:30px;display:flex;align-items:center;gap:6px;border-top:1px solid var(--border);font:var(--type-label);font-weight:var(--weight-regular);font-variant-numeric:tabular-nums;white-space:nowrap;min-width:0}
+.ah250-mx>span:nth-child(-n+3){border-top:0}
+.ah250-mx>span.k{color:var(--muted-foreground)}
+.ah250-mx>span.v{font-weight:var(--weight-medium);padding:0 10px}
+.ah250-mx>span.d{color:var(--muted-foreground);justify-content:flex-end}
+.ah250-foot2{display:flex;align-items:center;gap:6px;padding:10px 14px 12px;border-top:1px solid var(--border)}
+.ah250-foot2 .grow{flex:1}
