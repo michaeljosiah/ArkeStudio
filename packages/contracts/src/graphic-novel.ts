@@ -411,13 +411,17 @@ export function comicBook(production: {
       const record = records.get(page.id);
       const accepted = record?.accepted[settings.language];
       const take = accepted === undefined ? undefined : record!.takes.find((candidate) => candidate.id === accepted);
-      const passed = take?.verification?.status === "compared" && !take.verification.findings.some((finding) => BLOCKING_FINDINGS.has(finding.kind));
+      const blocking = take?.verification?.status === "compared" ? take.verification.findings.filter((finding) => BLOCKING_FINDINGS.has(finding.kind)).map((finding) => finding.id) : [];
+      const passed = take?.verification?.status === "compared" && blocking.length === 0;
+      // An override clears only the findings it names: one made before a re-check that found more
+      // covers nothing new (codex on PR 2225).
+      const covered = take?.override !== undefined && blocking.every((id) => take.override!.findings.includes(id));
       pages.push({
         id: page.id, chapter: entry.chapter, number: pages.length + 1, page,
         ...(take ? { take } : {}),
         outOfDate: take !== undefined && take.hash !== comicPageHash(page, settings, take.mode),
-        cleared: take !== undefined && (passed || take.override !== undefined),
-        overridden: take !== undefined && !passed && take.override !== undefined,
+        cleared: take !== undefined && (passed || covered),
+        overridden: take !== undefined && !passed && covered,
       });
     }
   }
