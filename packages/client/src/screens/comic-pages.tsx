@@ -517,7 +517,9 @@ function ComicStyleSheet({ world, production, made, onClose }: { world: WorldBun
   };
   return (
     <EditorDialog open onClose={onClose} width={860} title={`Style · ${production.meta.title}`}>
-      <div className="fy-comic-sheet">
+      {/* Scrolls inside the dialog: on a short or narrow window the cards run to four rows, and the
+          dialog clips rather than scrolls, which hid Use style (codex on PR 2237). */}
+      <div className="fy-comic-sheet fy-comic-style-sheet">
         <div className="sub">Graphic novel · {pages} {pages === 1 ? "page" : "pages"} · {made} made</div>
         <ComicStylePicker draft={draft} onChange={setDraft} worldPicture={world.keyArt ? mediaUrl(world.meta.slug, world.keyArt) : null} />
         <div className="fy-comic-foot">
