@@ -560,6 +560,20 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       reason: z.string().min(1).optional(),
     })
     .strict(),
+  /** `export-comic` answered: the files made, or what holds the book, one clause a page (R-49). */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic.exported"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      result: z.discriminatedUnion("ok", [
+        z.object({ ok: z.literal(true), files: z.array(z.object({ format: z.enum(["cbz", "pdf"]), file: z.string().min(1) }).strict()) }).strict(),
+        z.object({ ok: z.literal(false), reason: z.string().min(1), blockers: z.array(z.string().min(1)).max(500).default([]) }).strict(),
+      ]),
+    })
+    .strict(),
   /** `check-comic-take` and `accept-comic-take` answered (R-29, R-33). */
   z
     .object({

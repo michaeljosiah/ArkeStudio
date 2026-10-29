@@ -13,12 +13,13 @@ import { audibleTracks } from "./render-plan.js";
 import { hasOwnFrame } from "./scene.js";
 import { beatPictureShotId, sceneBeats } from "./beats.js";
 import { routingFindings, publicationBlockers } from "./routing.js";
+import { comicBook } from "./graphic-novel.js";
 import { deriveRehearsalLines } from "./rehearsal.js";
 import { performanceClipTiming, dialogueSlots, dialogueTimingProblems } from "./dialogue-timing.js";
 
 export const PRODUCTION_READINESS_SCHEMA_VERSION = 60;
 export const ReadinessCheckSchema = z.object({
-  key: z.enum(["script", "shots", "cast", "place", "kits", "start-frames", "selected-takes", "dialogue-voiced", "in-cut", "cut", "subtitles", "export", "chapters", "manuscript", "routing", "beat-text"]),
+  key: z.enum(["script", "shots", "cast", "place", "kits", "start-frames", "selected-takes", "dialogue-voiced", "in-cut", "cut", "subtitles", "export", "chapters", "manuscript", "routing", "beat-text", "pages", "lettering"]),
   label: z.string(), status: z.enum(["ready", "missing", "not-required", "blocked"]),
   completed: z.number().int().nonnegative(), total: z.number().int().nonnegative(), missingIds: z.array(z.string()), detail: z.string(),
 }).strict();
@@ -184,7 +185,19 @@ export function deriveProductionReadiness(world: ReadinessWorld, production: Pro
   ];
   if (!shape.hasScenes || shape.dispatchCapability === "image") for (const c of checks.filter(c => c.key !== "export")) { c.status = "not-required"; c.detail = "This format delivers directly without a video cut or subtitle track."; }
   if (shape.kind === "stills") { const c = checks.find(c=>c.key === "export")!; c.status="not-required"; c.detail="Stills deliver accepted images through the contact sheet; no whole-production export is required."; }
-  if (shape.hasChapters) {
+  if (shape.hasPages) {
+    // A graphic novel (SPEC-064 R-41): its pages are the book; prose in its chapters is optional.
+    // The new keys only appear in a graphic novel's world, which comic.json raised to schema 114 at
+    // creation, so a card carrying them needs no boundary of its own.
+    const book = comicBook(production);
+    const ids = book.map((entry) => entry.id);
+    checks.unshift(
+      check("pages", "Pages", ids, (id) => { const entry = book.find((candidate) => candidate.id === id)!; return entry.take !== undefined && !entry.outOfDate; },
+        "Every page has an accepted take made from its current script.", "missing"),
+      check("lettering", "Lettering", ids, (id) => book.find((candidate) => candidate.id === id)!.cleared,
+        "Every accepted page's lettering passed its check or was accepted anyway.", "missing"),
+    );
+  } else if (shape.hasChapters) {
     const chapters = production.chapters.filter(c=>!c.retired), ids = chapters.map(c=>c.id);
     checks.unshift(check("chapters","Chapters",[production.meta.id],()=>chapters.length > 0,"At least one current chapter is present."),
       check("manuscript","Manuscript",ids,id=>(chapters.find(c=>c.id === id)?.words ?? 0) > 0,"Every current chapter has saved prose.","missing"));

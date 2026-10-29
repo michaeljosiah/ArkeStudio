@@ -33,6 +33,7 @@ import { DramaEditionService } from "./publications/drama.js";
 import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
 import { acceptComicTake, changeComicPage, comicPageRecord, comicPageRequest, comicPageTake, saveComicScript, setComicSettings, verifyComicTake } from "./productions/graphic-novel.js";
 import { harnessPageReader, type PageReader } from "./productions/graphic-novel-reader.js";
+import { ComicExportBlocked, exportComic } from "./productions/comic-export.js";
 import { makeImageJsonRunner } from "./harness/review-task.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
@@ -11059,6 +11060,18 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         await this.makeAndCheckComicPage(store, msg);
+        return;
+      }
+      case "export-comic": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const answer = (result: Extract<DomainEvent, { type: "comic.exported" }>["result"]) =>
+          this.emit({ at: new Date().toISOString(), type: "comic.exported", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, result });
+        try {
+          answer({ ok: true, files: await exportComic(store, msg.productionId, msg.formats, new Date(this.nowIso())) });
+        } catch (err) {
+          answer({ ok: false, reason: describeCoordinatorError(err), blockers: err instanceof ComicExportBlocked ? [...err.blockers] : [] });
+        }
         return;
       }
       case "check-comic-take":
