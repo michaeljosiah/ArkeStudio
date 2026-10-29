@@ -306,8 +306,13 @@ production id (`npx tsx scripts/export-arke-player.mts <copy> --story <productio
 `--size` for a novel's pictures, `--cover`/`--tall` for its covers), or from the Branch Map's
 Export → Arke Player. It makes `exports/<production-id>-story-<UTC date>.zip`, schema 6 and alone,
 read back with every route replayed, and is blocked as the sheet is — every choice walked in
-preview, a clip or picture for each reachable scene. The script carries only the character voices
-already prepared for the table read, so make a voiced novel from the app. Upload it under that name
+preview, a clip or picture for each reachable scene. The script carries the voices already prepared
+for the table read and makes none: the characters' always, the narration only with `--narrator
+designed:<voice id>:<revision>`, the world's designed voice the app's narrator read it in (the
+script cannot read Settings, and refuses anything but a designed voice of that world). Its reads
+are cached by the Gemini model the narrator read it in: add `--narrator-model <model>` when that is
+not the model the voice was made in. The script prints how many narration lines went voiced;
+without `--narrator` they go as text. Upload it under that name
 to the world's story release, pin it with ArkePlayer's `pin_world`, paste the pin on the production
 as `story` — never `package`: a Player of revision 11 installs every production `package` and would
 fetch a story it cannot read — raise the `serial`, and publish the list.
