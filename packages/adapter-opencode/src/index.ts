@@ -3,6 +3,7 @@ export { OpenCodeV2Adapter, type OpenCodeV2AdapterOptions } from "./v2/opencode-
 export { OpenCodeV2Http, sameDirectory, v2BasicAuth, wireDirectory, type V2Envelope } from "./v2/http.js";
 export { createNormalizeV2State, normalizeOpenCodeV2, type NormalizeV2Outcome } from "./v2/normalize.js";
 export { buildSessionConfigV2, type SessionConfigV2Input } from "./v2/config.js";
+export { privateWireBody } from "./v2/private-control.js";
 export {
   discoverOpenCode2,
   discoverPreferredHarness,

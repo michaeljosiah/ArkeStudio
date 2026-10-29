@@ -5,6 +5,9 @@ import { PROVIDERS, type ProviderId } from "./provider.js";
 import { formatMicroUsd } from "./money.js";
 import { formatGb } from "./runtime-gate.js";
 import type { ClientState } from "./client-state.js";
+import { deriveStorageFindings } from "./storage-diagnostics.js";
+import type { RecoveryPolicySnapshot } from "./recovery-settings.js";
+import { mingCleanupFindings } from "./ming-recovery.js";
 
 /**
  * The diagnostics snapshot (SPEC-032): the set of findings true right now, derived from state
@@ -60,6 +63,10 @@ export const FINDING_SEVERITY_RANK: Record<FindingSeverity, number> = {
  * key the view appends a remedy's target under so the screen opens on the right row.
  */
 export const CONTROL_REGISTRY = {
+  "storage-refresh": { label: "Refresh", place: "Settings · Diagnostics", route: "/settings/diagnostics" },
+  "local-preview-cleanup-review": { label: "Review preview cleanup", place: "Settings · Diagnostics", route: "/settings/diagnostics", targetParam: "cleanupScope" },
+  "ming-cleanup-review": { label: "Review Ming cleanup", place: "Settings · Diagnostics", route: "/settings/diagnostics", targetParam: "mingCleanupScope" },
+  "ming-cleanup-refresh": { label: "Refresh", place: "Settings · Diagnostics", route: "/settings/diagnostics" },
   /** Stops the supervised child and resolves the selection again (Settings · Providers). */
   "comfyui-restart": {
     label: "Restart",
@@ -182,6 +189,10 @@ export const CONTROL_IDS = Object.keys(CONTROL_REGISTRY) as [ControlId, ...Contr
  * a finding of a kind that declares it references it as a consequence in the same snapshot.
  */
 export const FINDING_KINDS = {
+  "ming-cleanup-unconfirmed": { subsumes: [] },
+  "storage-pressure": { subsumes: [] },
+  "storage-capacity-unknown": { subsumes: [] },
+  "storage-control-unavailable": { subsumes: [] },
   /** R-20.1 — non-terminal jobs frozen against the resolved engine while it is not ready. */
   "work-held-by-engine": { subsumes: [] },
   /** R-20.2 — a queue lane paused on a credential with work held behind it. */
@@ -277,7 +288,11 @@ export function remedyAbsenceStatement(
   finding: Finding,
 ): string | null {
   if (finding.remedy !== null) return null;
-  return suppressedRefs(snapshot).has(findingRef(finding)) ? null : REMEDY_ABSENT_STATEMENT;
+  if (suppressedRefs(snapshot).has(findingRef(finding))) return null;
+  if (finding.kind === "comfyui-engine-unavailable" && finding.facts.some(fact => fact.name === "source" && fact.value === "user-url")) {
+    return "Start your selected ComfyUI installation and check its URL in Settings · Providers · ComfyUI, then refresh. Arke cannot restart an external installation.";
+  }
+  return REMEDY_ABSENT_STATEMENT;
 }
 
 export const FindingSchema = z
@@ -397,6 +412,7 @@ export type DiagnosticsSources = Pick<
   | "health"
   | "env"
   | "runtime"
+  | "storageHealth"
   | "harness"
   | "harnessInfo"
   | "setup"
@@ -415,7 +431,7 @@ export type DiagnosticsSources = Pick<
   | "drift"
   | "builds"
   | "update"
->;
+> & { cleanup?: Pick<NonNullable<RecoveryPolicySnapshot["cleanup"]>, "available" | "pending" | "scope">; mingCleanup?: RecoveryPolicySnapshot["mingCleanup"] };
 
 export function diagnosticsSources(app: ClientState["app"]): DiagnosticsSources {
   return {
@@ -423,6 +439,16 @@ export function diagnosticsSources(app: ClientState["app"]): DiagnosticsSources 
     health: app.health,
     env: app.env,
     runtime: app.runtime,
+    storageHealth: app.storageHealth,
+    ...(app.recoveryPolicy?.mingCleanup ? { mingCleanup: { state: app.recoveryPolicy.mingCleanup.state, scope: app.recoveryPolicy.mingCleanup.scope,
+      authority: app.recoveryPolicy.mingCleanup.authority, available: app.recoveryPolicy.mingCleanup.available,
+      waiting: app.recoveryPolicy.mingCleanup.waiting, measuredAt: app.recoveryPolicy.mingCleanup.measuredAt,
+      confirmation: app.recoveryPolicy.mingCleanup.confirmation ? { scope: app.recoveryPolicy.mingCleanup.confirmation.scope, at: app.recoveryPolicy.mingCleanup.confirmation.at } : null } } : {}),
+    ...(app.recoveryPolicy?.cleanup ? { cleanup: { available: app.recoveryPolicy.cleanup.available, pending: app.recoveryPolicy.cleanup.pending,
+      ...(app.recoveryPolicy.cleanup.scope ? { scope: { revision: app.recoveryPolicy.cleanup.scope.revision, volumeId: app.recoveryPolicy.cleanup.scope.volumeId,
+        mappingRevision: app.recoveryPolicy.cleanup.scope.mappingRevision, measuredAt: app.recoveryPolicy.cleanup.scope.measuredAt,
+        inventoryAt: app.recoveryPolicy.cleanup.scope.inventoryAt, candidateFiles: app.recoveryPolicy.cleanup.scope.candidateFiles,
+        recordedBytes: app.recoveryPolicy.cleanup.scope.recordedBytes } } : {}) } } : {}),
     harness: app.harness,
     harnessInfo: app.harnessInfo,
     setup: app.setup,
@@ -1285,6 +1311,8 @@ const STATE_RULES: readonly Rule[] = [
   waitingOnComponent,
   hardwareFacts,
   windowsCommitFacts,
+  { kind: "storage-pressure", run: ctx => deriveStorageFindings(ctx.sources.storageHealth, ctx.now, ctx.sources.cleanup) },
+  { kind: "ming-cleanup-unconfirmed", run: ctx => mingCleanupFindings(ctx.sources.mingCleanup, ctx.now) },
   providerRepeatedFaults,
   spendAbovePrevious,
 ];
@@ -1319,6 +1347,7 @@ function sourceStates(sources: DiagnosticsSources, tails: DiagnosticsTails) {
     { name: "app.health", state: "read" },
     { name: "app.env", state: sources.env === null ? "absent" : "read" },
     { name: "app.runtime", state: sources.runtime === null ? "absent" : "read" },
+    { name: "app.storageHealth", state: sources.storageHealth == null ? "absent" : "read" },
     { name: "app.harness", state: sources.harness === null ? "absent" : "read" },
     { name: "app.harnessInfo", state: sources.harnessInfo === null ? "absent" : "read" },
     { name: "app.setup", state: sources.setup === null ? "absent" : "read" },

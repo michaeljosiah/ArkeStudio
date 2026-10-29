@@ -33,7 +33,7 @@ export interface WorldProvider {
    * Copy the sample world shipped with this build into the library under a fresh identity
    * (SPEC-016 R-6). Where the build keeps it is the shell's business, not the provider's.
    */
-  installSampleWorld?(sourceDir: string): Promise<{ worldId: string; slug: string; name: string }>;
+  installSampleWorld?(sourceDir: string, signal?: AbortSignal): Promise<{ worldId: string; slug: string; name: string }>;
   reconcileExternalEdit?(worldId: string, path: string): Promise<WorldBundle>;
   /**
    * The open world took newer Bible bytes for an ungated file and needs no decision (R-BIBLE-6).

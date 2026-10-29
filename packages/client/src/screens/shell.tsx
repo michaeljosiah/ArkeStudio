@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { importWorld, subscribeWorldImport } from "../lib/store.js";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
 import { remoteStudio } from "./launch.js";
 import { HarnessModelStatus, harnessModelsNeedAWord, languageChoiceReason } from "../components/harness-models.js";
@@ -23,7 +24,7 @@ import { reviewGenesisReadiness, leaveGenesisFinding } from "../lib/store.js";
 import { reviewGenesisVoices, generateGenesisVoice, decideGenesisVoice } from "../lib/store.js";
 import { GenesisImportCards } from "../components/genesis-imports.js";
 import { reviewGenesisImports, resolveGenesisImport } from "../lib/store.js";
-import { Archive, Book, ChartLine, ChevronDown, ChevronRight, More, Pencil, Plus, RotateCcw, Sparkle, X } from "../components/icons.js";
+import { Archive, Book, ChartLine, ChevronDown, ChevronRight, More, Pencil, Plus, RotateCcw, Sparkle, Upload, ArrowRight, X } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { AgentsPanel } from "./agents.js";
 import {
@@ -294,6 +295,15 @@ export function WorldPickerScreen() {
   const { state } = useStore();
   const navigate = useNavigate();
   const worlds = state?.worlds ?? [];
+  const [importing, setImporting] = useState(false);
+  const [importNote, setImportNote] = useState<string | null>(null);
+  const importRequest = useRef<string | null>(null);
+  useEffect(() => subscribeWorldImport(result => {
+    if (result.requestId !== importRequest.current) return;
+    setImporting(false); importRequest.current = null;
+    setImportNote(result.reason ?? null);
+    if (result.worldId) navigate(`/w/${result.worldId}`);
+  }), [navigate]);
   /*
    * The ages on the cards are computed at render, and this screen can sit open for hours with
    * nothing else to re-render it — so a card that said `now` when it was drawn went on saying
@@ -307,7 +317,6 @@ export function WorldPickerScreen() {
   }, []);
   const [confirming, setConfirming] = useState<string | null>(null);
   const archiveNote = useArchiveNote();
-  const sample = useSampleWorld();
   const hour = new Date().getHours();
   const greeting = hour < 5 ? "Working late" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   // A count, and nothing else (turn 137).
@@ -330,30 +339,34 @@ export function WorldPickerScreen() {
   const phone = useMediaQuery("(max-width: 599px)");
   const confirmingWorld = worlds.find((w) => w.worldId === confirming);
   return (
-    <div className="fy-app" data-screen="world-picker">
+    <div className={cx("fy-app", worlds.length === 0 && "fy-home-welcome")} data-screen="world-picker">
       {/* No back and no context: this is the top, and the wordmark already says where you are. */}
       <AppChrome divided={false} />
       <div className="fy-content">
         <div className="fy-home-hero">
-          <div className="fy-hero__eyebrow">{greeting}</div>
+          <div className="fy-hero__eyebrow">{worlds.length ? greeting : "Welcome to your studio"}</div>
           <h1 className="fy-hero__title fy-hero__title--home" style={{ textAlign: "left" }}>
-            Pick up where you left off.
+            {worlds.length ? "Pick up where you left off." : "Your first world starts here."}
           </h1>
           <div className="fy-home-count">
-            <p className="fy-hero__lede" style={{ margin: "10px 0 0", maxWidth: 540 }}>
+            <p className="fy-hero__lede" style={{ margin: worlds.length ? "10px 0 0" : 0, maxWidth: 540 }}>
               {lede}
             </p>
-            <Button variant="ghost" className="fy-home-pub" onClick={() => navigate("/publications")}>
+            <Button variant="ghost" className={cx("fy-home-pub", worlds.length === 0 && "fy-home-action")} onClick={() => navigate("/publications")}>
               <Book size={18} />
               Open publication
             </Button>
           </div>
+            {!isRemoteSession() && <div className="fy-home-import"><Button variant="ghost" className="fy-home-action" disabled={importing} onClick={() => {
+              setImportNote(null); importRequest.current = importWorld(); setImporting(importRequest.current !== null);
+            }}><Upload size={18} />{importing ? "Importing world…" : "Import a world"}</Button></div>}
           {archiveNote && (
             <div className="fy-set__why" style={{ marginTop: 10 }}>
               <span className={cx("fy-set__dot", archiveNote.refused ? "fy-set__dot--warn" : "fy-set__dot--ok")} />
               <span>{archiveNote.text}</span>
             </div>
           )}
+          {importNote && <p role="alert">{importNote}</p>}
         </div>
         {featured && (
           <div className="fy-home-feature">
@@ -394,7 +407,7 @@ export function WorldPickerScreen() {
             <div className="fy-home-label">All worlds</div>
           </div>
         )}
-        <div className="fy-home-cards">
+        {worlds.length === 0 ? <WelcomeWorldCards /> : <div className="fy-home-cards">
           <button type="button" className="fy-worldcard fy-newworldcard" onClick={() => navigate("/worlds/new")}>
             <span className="fy-worldcard__frame fy-worldcard__empty" aria-hidden="true"><Plus size={28} /></span>
             <span className="fy-worldcard__name">Create a world</span>
@@ -462,13 +475,8 @@ export function WorldPickerScreen() {
               </div>
             ))}
         </div>
-        {worlds.length === 0 && sample?.available === true && (
-          <div className="fy-home-sample">
-            <Button variant="ghost" disabled={sample.installing} onClick={() => sample.download ? navigate("/settings/sample-world") : installSampleWorld()}>
-              {sample.installing ? "Installing…" : sample.download ? "Explore the story download" : "Install the sample world"}
-            </Button>
-          </div>
-        )}
+        }
+        {worlds.length === 0 && <div className="fy-home-setup"><span>Write and organise now. Add AI whenever you need it.</span><Button className="fy-home-action" onClick={() => navigate("/settings/general")}>Settings <ArrowRight size={18} /></Button></div>}
       </div>
       {phone && confirmingWorld && (
         <ArchiveSheet
@@ -482,6 +490,25 @@ export function WorldPickerScreen() {
       )}
     </div>
   );
+}
+
+function WelcomeWorldCards() {
+  const navigate = useNavigate();
+  const sample = useSampleWorld();
+  return <div className="fy-home-empty fy-firstrun"><div className="fy-firstrun__doors">
+    <div className="fy-fan__drift"><div className="fy-createcard">
+      <div className="fy-createcard__ring"><Plus size={22} /></div>
+      <div className="fy-createcard__title">Your first world</div>
+      <div style={{ marginTop: 4 }}><Button variant="primary" onClick={() => navigate("/worlds/new")}>Create a world</Button></div>
+    </div></div>
+    {sample?.available && <div className="fy-fan__drift" style={{ animationDelay: "0.6s" }}><div className="fy-createcard fy-createcard--filled">
+      <div className="fy-createcard__ring"><Sparkle size={22} /></div>
+      <div className="fy-createcard__title">Or start from ours</div>
+      <div className="fy-createcard__sub">{sample.download ? "The Undersong: an illustrated novel and editable world. Audiobook and video unfinished. Download separately." : "The Undersong: a cast, its canon, and a production part-way through. Yours to take apart."}</div>
+      <div style={{ marginTop: 4 }}><Button disabled={sample.installing} onClick={() => sample.download ? navigate("/settings/sample-world") : installSampleWorld()}>{sample.installing ? "Installing…" : "Explore sample world"}</Button></div>
+      {sample.note?.refused && <div className="fy-createcard__sub" role="alert">{sample.note.text}</div>}
+    </div></div>}
+  </div></div>;
 }
 
 type WorldCardSummary = NonNullable<ReturnType<typeof useStore>["state"]>["worlds"][number];
@@ -1774,16 +1801,18 @@ export function SettingsSignInScreen() {
  * once (R-9). A method with form fields opens them inline; equality-gated fields follow the
  * answers, which is all the measured builds express.
  */
-function VendorSignInRow({
+export function VendorSignInRow({
   vendor,
   signIn,
   linked,
   usedForAuthoring,
+  setup = false,
 }: {
   vendor: VendorIntegration;
   signIn: VendorSignIn | null;
   linked: boolean;
   usedForAuthoring: boolean;
+  setup?: boolean;
 }) {
   const [openMethod, setOpenMethod] = useState<VendorAuthMethod | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -1899,7 +1928,7 @@ function VendorSignInRow({
               {method.label}
             </button>
           ))}
-          {stored.map((connection) =>
+          {!setup && stored.map((connection) =>
             confirmRemove === connection.id ? (
               <button
                 type="button"
@@ -2407,6 +2436,7 @@ export function SettingsGeneralScreen() {
   return (
     <div data-screen="settings-general" className="fy-set fy-set--general">
       <h1 className="fy-pane__name">General</h1>
+      {!isRemoteSession() && <FactRow what="Studio setup"><button type="button" className="fy-fact__link" onClick={() => navigate("/setup")}>Set up an AI writing agent & tools</button></FactRow>}
       {ROUTED_CAPABILITIES.map((capability) => {
         const candidates = (manifest?.models ?? []).filter((m) => m.capability === capability && m.upscale === undefined);
         const usable = (m: (typeof candidates)[number]) =>

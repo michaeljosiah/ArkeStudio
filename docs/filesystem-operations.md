@@ -29,6 +29,7 @@ A new world does **not** start with empty `canon`, `characters`, `productions`, 
 |---|---|
 | First launch | Creates `R\worlds\`, `R\queue\`, `R\logs\`, and `R\config.json` if absent. Opening the app index creates `R\.index\app.db`; SQLite may add `-wal` and `-shm` files. |
 | Save settings | Creates or replaces `R\settings.json` by temporary-file rename. |
+| Private Studio conversation | On an authenticated owner request, creates/replaces `R\studio-assistant\conversations.json` with flushed atomic writes. History is bounded to 2 MiB, independent of worlds and operational support exports. Corrupt/full/unavailable history is retained and blocks further assistant work. A same-path in-process barrier makes replacement reads wait for an admitted old write after bounded shutdown; it is not a multi-host lock. Settled model sessions remove only their known config and empty `R\studio-assistant\turns\turn-*` directory; unknown contents remain. Native model-route/spend integration and the dialog are unfinished. |
 | Save provider key | Creates or replaces encrypted `R\credentials.dat`, then restricts its ACL to the current user. Keys are never stored in a world. |
 | Remember or revoke permission | Creates or replaces `R\grants.json`. Revocation marks a grant revoked rather than deleting its history. |
 | Queue or update a job | Appends the complete job state to `R\queue\jobs.jsonl`. |
@@ -40,6 +41,7 @@ A new world does **not** start with empty `canon`, `characters`, `productions`, 
 | Stage an application update | Creates or replaces the update receipt `R\update\pending.json` by temporary-file rename, recording the target version and whether it lands on restart or on close. The next start reads the receipt and removes it before reporting the outcome; the paths that abandon an install remove it too. |
 | Download local runtime | Streams to `R\models\<component>\<file>.partial`, validates it, then renames it to the real filename. Ollama's installer is staged at `R\models\.staging\OllamaSetup.exe` and removed after successful installation. |
 | Paste a file | Writes `R\.spool\<id>\<name>`. Filing copies it into a world; the next application start removes the spool. |
+| Import selected files | Qualified host paths reserve each new decoded payload on the actual `W\artifacts\` volume before copying. A browser upload separately reserves its whole bounded temporary spool, then plans all remaining unique world copies before the first copy. Children spend one batch budget and recheck fresh capacity; duplicate/retired media is reused. Audio Studio/Music reject unsupported files before world-copy planning. Shared planning includes competing setup/result owners. Original file handles and normal sidecar/journal work settle before reservation release; a failed accounting/metadata write keeps valid source/copied bytes. Changed mutation preconditions/destinations refuse delayed copies. This does not yet plan every other batch/metadata/export/scratch peak. |
 
 ## World lifecycle
 
@@ -130,8 +132,39 @@ the sandbox when it is removed.
 
 ## Jobs, takes, reviews, and exports
 
-Provider output is first verified under `W\.staging\<job-id>\`, renamed into its requested
-world-relative landing directory, and then removed from staging.
+Nonempty buffered provider results first retain a private completed-response checkpoint under
+`R\queue\inline-artifacts\<job-id>\result-<nonce>\`: hash-named binary files and a flushed manifest
+written last. The nonce is flushed in the job's pre-submission row; receipts retain the exact
+accepted provider identity and reported usage/cost. Historical attempt-count folding cannot
+rebind it. Both inline and retrieved results use this path, without another generation request.
+Verified pre-upgrade inline receipts retain their legacy identity through repeated held restarts;
+they are not hidden behind an unmigrated nonce or automatically removed.
+
+After verification, output is staged under `W\.staging\<job-id>\` and renamed into its requested
+world-relative landing directory. The owning world rechecks ownership before publication. Valid
+staging bytes and the private checkpoint survive failed filing. Completed staging prefixes are
+verified and reused. Matching files already published by a partial filing are verified again and
+adopted without another payload copy/reservation. When all files are already published, job
+settlement needs no new file-space grant. Only confirmed successful filing/finalization retires its enumerated current
+checkpoint files; unknown, corrupt, cancelled, previous and legacy copies are retained. There is
+no recursive result-cache cleanup or physical creative-media deletion.
+An ordinary different-sized file at a requested landing path is a nonmatch and follows normal
+reserved staging/replacement; it does not make the new private result receipt corrupt.
+
+On qualified storage ports, known remaining checkpoint/staging writes share the existing volume
+reservation registry, including a 64 KiB per-file metadata estimate. Already verified bytes are
+not reserved again. Staging and target roots must prove one volume for rename publication;
+different volumes are held rather than silently copied. A full world volume cannot borrow space
+from the app drive. Local persistence/filing retries default to thirty seconds and preserve job,
+provider and charge identities. Cancellation stops future writes and waits for an admitted file
+handle before its reservation settles. Host shutdown drains those handles through the queue.
+
+This covers finite, buffered result writes, not all generation/scratch, streaming downloads,
+pre-dispatch estimates or export/import owners. Checkpoint bounds are 64 artifacts, 1 GiB per
+file, 4 GiB aggregate and 128 KiB metadata. Oversized/uncheckpointed responses remain held while
+Arke is open; closing before a complete receipt can lose the in-memory copy. The durable job
+identity remains; an inline-only result without a valid receipt requires reconciliation and
+is never automatically regenerated. Providers do not universally retain retrievable results.
 
 Implemented landing directories include:
 
@@ -149,8 +182,9 @@ Implemented landing directories include:
 | Reject take | Creates or replaces `...\reviews.jsonl` only. The selection and take stay unchanged. |
 | Save audio placement | Creates or replaces `...\cut.json`. It holds audio tracks and placement only; picture order comes from scenes and `selections.json`. |
 | Render production | Encodes to `W\.cache\exports\ex_<id>.mp4`, then renames the complete file to `W\exports\<name>.mp4`. Cancel or failure removes the staged file. |
+| Export manuscript or recording script | Admits the exact encoded DOCX/EPUB/PDF payload in `W\.cache\exports\` and metadata headroom at `W\exports\` through the shared export reservation owner, then writes and renames under the world's existing write gate. A recording script also admits its replacement manifest before writing. Written bytes reduce reservations; all original writes settle before release. A capacity hold preserves earlier exports and manifests; world close during admission prevents publication. Rename does not reserve a second payload copy. |
 | Complete native video, manuscript or interactive export | Writes `W\exports\.completed\<export-id>.json` under world ownership by flushed temporary-file rename before reporting done. The immutable receipt retains native delivery kind, first progress timestamp, output path and captured source fingerprint. Recovery verifies output presence (and native interactive package validity); these operational delivery records do not rewrite authored records or raise the world schema floor. |
-| Export whole world | Recursively copies to `R\exports\<world>-<timestamp>\`. Includes `.history`; excludes `.index`, `.commit`, `.proposals`, `.staging`, `.cache`, `world.lock`, and temporary files. The whole copy is not atomic, so failure can leave a partial export directory. |
+| Export whole world | Measures included files in yielding metadata slices, then reserves the whole known copy on the destination volume through the shared export owner. Copies to a new `R\exports\<world>-<timestamp>\` under the source world's read/lifetime gate. Includes `.history`; excludes `.index`, `.commit`, `.proposals`, `.conversations`, `.sessions`, `.staging`, `.cache`, `world.lock`, and temporary files. Linked/special source entries and destinations inside the source refuse. Cancellation, changed source extents, storage or accounting failure preserve the source and any partial export; an existing destination is never overwritten. The whole copy is not atomic. |
 
 ## Publication foundation
 
@@ -215,7 +249,11 @@ browser preferences keyed by publication id and manifest digest; playback never 
 | Upload main-photo candidate | Copies to `W\references\<sheet>\candidates\upload-<id>.<ext>`. Choosing it copies it into an immutable reference take, changes `kit.json`, records a review, then deletes the candidate. |
 | Compile classic grid | Legacy angle-tile command path, not offered by the current character-reference screen: creates or replaces `W\references\<sheet>\model-sheet-v<version>-grid.png`, then creates or replaces that sheet's `kit.json`. |
 | Preview voice | Creates or reuses `W\.cache\voice-previews\<hash>.<ext>`. Current model-driven formats include Kokoro WAV, cloud MP3, and ComfyUI cloned-voice FLAC. |
-| Preview Settings narrator | Creates or reuses `R\voice-previews\audio\<hash>.<ext>` without opening a world. Cloud synthesis uses the ordinary job journal and ledger with scope `app:voice-previews`; its queue staging is under `R\voice-previews\.staging\`. Public samples are bounded downloads and local Kokoro samples are unmetered. |
+| Preview Settings narrator | Public/paid previews create or reuse `R\voice-previews\audio\<hash>.<ext>` without opening a world. Cloud synthesis uses the ordinary job journal and ledger with scope `app:voice-previews`; its queue staging is under `R\voice-previews\.staging\`. New fixed-line, free Kokoro previews exclusively create `R\voice-previews\local-presets-v1\<hash>.wav` and flush bounded producer receipts in `receipts.json`. Existing legacy files are retained and never adopted. Local preview reads/writes hold leases; qualified storage ports reserve/recheck the bounded peak before inference/output. |
+| Review local preview cleanup | On the qualified Windows port, Settings can preview at most eight receipt-backed fixed Kokoro auditions at least seven days old. Separate one-use approval flushes an exact intent to `R\voice-previews\cleanup-control.json`, then flushes the native worker identity before delivering removal input. Current identity, content, recipe and reader/writer leases are revalidated. Confirmed removal retires only its matching producer receipt. Known partial removals and measured free space are reported; attributable reclaimed bytes stay unknown. Cancellation stops between steps. Unknown outcomes persist across restart and hold affected regeneration and further cleanup. Startup and Check cleanup outcome may settle this intent only after proving the original worker/control chain ended and verifying the current root/file; this check never deletes audio, regenerates it or adopts a successor. Legacy/unprovable unknowns stay held. One-use approval grants no standing maintenance permission; paid/cloned preview adoption and creative-media deletion remain excluded. |
+| Opt into automatic preview maintenance | Off by default. A separate host-owner review/enable binds the fixed local preset preview cache root, minimum seven-day age and at most eight files/2 GiB per run. The same cleanup control saves the standing policy, a five-minute attempt cooldown and latest closed run outcome. Automatic recovery mode and fresh low-space facts for that cache volume are required; another volume's pressure grants nothing. The existing reviewed cleanup executor performs the native effect with its receipt/lease/intent/input fences and measured early stop. Disabling fences further input immediately, before its setting write completes; known admitted removals remain reported and irreversible. Unknown audit/native outcomes remain held. Model, paid/cloned/legacy and creative data are outside this policy. |
+| Open cleanup from a storage warning | Fresh receipt candidates on the affected measured cache volume can offer a Settings review. The opaque scope binds producer root and volume mapping; opening the link performs no cleanup. Candidate counts are bounded receipt metadata, not proof of file eligibility or recoverable space. Explicit review invokes native verification; separate approval rechecks current scope before the existing native owner can act. Changed roots/mappings, stale scope and pending unknown cleanup refuse the old target. Diagnostics reads only the closed observation, while removable history/notices carry its numeric count and generic wording, never a physical path or native identity. |
+| Retain or clear repair outcomes | The app-local recovery-history file retains at most 1,000 incident and 1,000 action summaries within one 10 MiB/30-day budget. Unconfirmed outcomes remain bounded current evidence. Executable intents, target mappings, retry budgets and cleanup receipts stay in their separate minimum controls. The existing cleanup control keeps at most 32 whole-run receipts alongside file outcomes, within its 64 KiB cap; failure to save a run is unconfirmed. Read-only action pages/export use separately hashed references and named facts. Clearing settled summaries preserves unknown rows and saves a bounded presentation-only clear marker; it never removes minimum control, resets attempts, repeats cleanup or deletes creative data. Startup reconstructs only available owner receipts and labels historical gaps. |
 | Dictate | Returns transcript text and does not persist the captured audio. |
 | Generate world image | Lands `W\incoming\world-image\candidate.png`. Accept copies it to `W\world-art.png` and deletes the candidate; discard deletes only the candidate. |
 

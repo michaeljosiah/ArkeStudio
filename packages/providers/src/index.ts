@@ -83,6 +83,7 @@ export { probeRuntime, type ProbeDeps } from "./runtime-detect.js";
 export { gateLocalRuntimes } from "@arke-studio/contracts";
 export {
   ProviderAuthError,
+  ProviderArtifactLimitError,
   ProviderBusyError,
   ProviderRequestRejectedError,
   ProviderDailyLimitError,
@@ -92,6 +93,7 @@ export {
   type CommandResult,
   type CommandRunner,
   type FetchedArtifact,
+  type ArtifactFetchOptions,
   type FetchLike,
   type PollResult,
   type PreparedAudioSource,

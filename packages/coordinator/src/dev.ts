@@ -20,7 +20,7 @@ import { nodeSetupDeps } from "./setup/node-deps.js";
 import { FsWorldProvider } from "./world/provider.js";
 import { UNDERSONG_RELEASE } from "./world/undersong-release.js";
 import { harnessTrace } from "./harness/trace.js";
-import { assembleHarness, describeClaudeAvailability, describeCodexAvailability, lazyCodexImageRunner } from "./harness/v2-launch.js";
+import { assembleHarness, managedStudioAssistant, describeClaudeAvailability, describeCodexAvailability, lazyCodexImageRunner } from "./harness/v2-launch.js";
 import { createNodeMediaHost } from "./media/node-media-host.js";
 
 /**
@@ -80,7 +80,7 @@ const savedHostSettings = await new AppSettingsFile(join(devRoot, "settings.json
 const storedHarness = savedHostSettings.harness;
 const ollamaEngine = new OllamaEngineService({ appRoot: devRoot, port: await allocateLoopbackPort(), deps: { ledger } });
 const comfy = createNodeComfyUiEngine(devRoot, { ledger });
-await ollamaEngine.applySettings(savedHostSettings.ollama);
+await ollamaEngine.applySettings(savedHostSettings.ollama, { deferManagedStart: true });
 const chosenHarness = effectiveHarnessEngine(storedHarness?.engine ?? "opencode", process.env["ARKE_HARNESS"]);
 
 const wiring = await assembleHarness({
@@ -185,14 +185,16 @@ const { coordinator, server } = createStudioHost({
   // What the packaged build reads out of its resources, dev reads out of the repo — so
   // Settings · Sample world is a working surface here and not a dead one (SPEC-016 R-6).
   sampleWorldDownload: UNDERSONG_RELEASE,
-  setup: { ...nodeSetupDeps(), ollama: ollamaEngine, externallyPresent: async id => id === "ollama-runtime" ? ollamaEngine.externallySelected() : id === "comfyui-runtime" && comfy.service.externallySelected() },
+  setup: { ...nodeSetupDeps({ ledger }), ollama: ollamaEngine, externallyPresent: async id => id === "ollama-runtime" ? ollamaEngine.externallySelected() : id === "comfyui-runtime" && comfy.service.externallySelected() },
   setupExtraEntries: comfy.weights,
   comfyui: { service: comfy.service },
   ollama: { service: ollamaEngine, reconfigureHarness: wiring.reconfigureOllama },
+  studioAssistant: managedStudioAssistant(wiring, ollamaEngine),
   ming: new MingProcess(ledger),
   authoring: { agentForPurpose, roster: ROSTER, skillFor },
   ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
   harnessLaunchEngine: chosenHarness,
+  harnessRecovery: wiring.recovery,
   ...(wiring.unavailableReason ? { harnessUnavailableReason: wiring.unavailableReason } : {}),
   ...(process.env["ARKE_HARNESS"] === chosenHarness ? { harnessEngineOverride: chosenHarness } : {}),
   relaunchHarness: wiring.relaunchHarness,

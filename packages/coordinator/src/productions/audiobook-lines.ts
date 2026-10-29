@@ -1,5 +1,5 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { z } from "zod";
 import {
   audiobookDirectionFor,
@@ -10,6 +10,7 @@ import {
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
+import type { ImportFileSpace, ImportFileLease } from "../storage/import-files.js";
 import { castRefusal, planAudiobook } from "./audiobook.js";
 import { narratorOf, RecordedTakeRefusal, stageRecording, type NarratorOf, type RecordedTakeDeps, type StagedRecording } from "./audiobook-recorded.js";
 import { writeScriptPdf, type ScriptRun } from "./script-pdf.js";
@@ -161,7 +162,7 @@ export async function exportScript(
   store: WorldStore,
   productionId: string,
   speaker: string,
-  input: { scope: "awaiting" | "all"; label: string; narrator: NarratorOf; exportId: string; now: () => string },
+  input: { scope: "awaiting" | "all"; label: string; narrator: NarratorOf; exportId: string; now: () => string; fileSpace?: ImportFileSpace },
 ): Promise<ScriptExport> {
   const found = await speakerLines(store, productionId, speaker, input.narrator);
   const lines = input.scope === "all" ? found.lines : found.lines.filter((line) => line.state !== "made");
@@ -189,8 +190,6 @@ export async function exportScript(
   const stageDir = join(store.dir, ".cache", "exports");
   const stage = join(stageDir, `${input.exportId}.pdf`);
   const finalDir = join(store.dir, "exports");
-  await mkdir(toExtendedLength(stageDir), { recursive: true });
-  await mkdir(toExtendedLength(finalDir), { recursive: true });
   const manifest: ScriptManifest = {
     schemaVersion: 1,
     speaker,
@@ -198,17 +197,35 @@ export async function exportScript(
     lines: Object.fromEntries(found.lines.map((line) => [line.id, { chapterId: line.chapterId, block: line.block, textHash: line.textHash, chapterVersion: line.chapterVersion }])),
   };
   const manifestPath = join(store.dir, fromPortable(scriptManifestPath(productionId, speaker)));
-  try {
-    await writeFile(toExtendedLength(stage), bytes);
-    await store.ownedWrite(async () => {
+  const manifestText = `${JSON.stringify(manifest, null, 2)}\n`, signal = store.closingSignal;
+  await store.ownedWrite(async () => {
+    const leases: ImportFileLease[] = []; let stageStarted = false;
+    try {
+      signal.throwIfAborted();
+      await mkdir(toExtendedLength(stageDir), { recursive: true });
+      await mkdir(toExtendedLength(finalDir), { recursive: true });
+      if (input.fileSpace) {
+        leases.push(await input.fileSpace.reserve(stageDir, bytes.byteLength, signal, "working-files"));
+        signal.throwIfAborted();
+        leases.push(await input.fileSpace.reserve(finalDir, 0, signal, "exports"));
+        signal.throwIfAborted();
+        // The old recording manifest remains in place until its replacement is published.
+        leases.push(await input.fileSpace.reserve(dirname(manifestPath), Buffer.byteLength(manifestText), signal, "exports"));
+      }
+      signal.throwIfAborted(); await store.assertOwnership();
+      stageStarted = true; await writeFile(toExtendedLength(stage), bytes);
+      await leases[0]?.consumed(bytes.byteLength);
+      signal.throwIfAborted();
       await rename(toExtendedLength(stage), toExtendedLength(join(finalDir, name)));
       await mkdir(toExtendedLength(join(manifestPath, "..")), { recursive: true });
-      await atomicWriteFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-    });
-  } catch (error) {
-    await rm(toExtendedLength(stage), { force: true }).catch(() => {});
-    throw error;
-  }
+      await atomicWriteFile(manifestPath, manifestText);
+      await leases[2]?.consumed(Buffer.byteLength(manifestText));
+    } catch (error) {
+      for (const lease of leases) lease.writeFailed();
+      if (stageStarted) await rm(toExtendedLength(stage), { force: true }).catch(() => {});
+      throw error;
+    } finally { await Promise.all(leases.map(lease => lease.settle())); }
+  });
   return { output: `exports/${name}`, lines: lines.length, chapters: found.chapters, notCast: found.notCast };
 }
 

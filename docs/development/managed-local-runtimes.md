@@ -1,26 +1,72 @@
 # Managed local runtimes
 
-Local setup queues Arke's managed ComfyUI and Ollama runtimes by default. Model weights remain
-optional downloads. Discovery never adopts an existing engine. In Settings → Providers,
-ComfyUI offers an explicitly selected install folder or URL; Ollama offers an explicitly
-selected loopback HTTP URL. **Use Arke-managed** clears the override. Existing overrides remain
-selected across upgrades; there is no silent migration of a personal model store.
+Local setup offers Arke's managed ComfyUI and Ollama runtimes, preset voice and dictation files
+until explicitly selected. Opening or reopening Studio does not download missing AI components.
+Discovery never adopts an existing engine. In Settings → Providers, ComfyUI offers an explicitly
+selected install folder or URL; Ollama offers an explicitly selected loopback HTTP URL.
+**Use Arke-managed** clears the override. Existing files and overrides remain across upgrades.
 
-Launch holds local AI setup until **both selected runtimes are installed, running and healthy**.
-Coordinator seeds `setup.localAi` before detection or transport startup and republishes it on
-installation and engine health changes. `running: false`, a finished transfer, Stop all, or a
-failed/skipped component cannot complete this gate. Runtime Skip is refused by the service.
-Pause/resume, retry, Downloads and Runtime settings remain reachable; explicit existing sources
-must pass the same checks. The setup surface opens only after Continue. Once the runtime gate
-passes, optional model downloads can continue in the background. Each launch rechecks health;
-there is no saved completion flag that can mask an unhealthy service. Health loss revokes
-readiness without ejecting an already open world. Managed engines and external ComfyUI retain
-their health loops; selected external Ollama is also rechecked every 15 seconds. Overlapping
-checks cannot publish an older result over a newer one, and disposal stops the polling timer.
-Hosts that do not configure both engine services cannot report local AI setup as complete.
+Manual authoring is available once the core connects, even while selected downloads continue or
+an AI service is unavailable. Continue in the background leaves those transfers and their health
+state intact. This implements the acquisition/entry foundation of approved design turns 242–244
+(SPEC-016 R-21–R-28); the new persona wizard and plan are still being implemented.
+
+Coordinator seeds and republishes `setup.localAi` independently: it reports the full local stack
+as ready only when both services are installed and healthy. File presence, Stop all or a skipped
+component cannot manufacture health. Downloads states selected transfers; Providers owns service
+readiness. Queued runtime downloads may be skipped. Active native installers still require the
+existing Pause/Stop and confirmed-cleanup path. Existing managed engines and external ComfyUI
+retain their health loops; external Ollama is rechecked every 15 seconds. Unknown or failed AI
+stays unavailable for use without trapping manual writing or ejecting an open world.
 Shutdown refuses late installation activation and quiesces an admitted Ollama startup before
 waiting for setup to drain. Healthy inference retains its owned child until normal job draining
 and confirmed process cleanup; quiescing does not discard the child or its exit backstop.
+Managed Ollama readiness allows sixty seconds for cold GPU discovery before its pinned version
+route becomes responsive. Readiness still does not establish model inference or output quality.
+The optional private Studio provider route additionally verifies the pinned executable/library
+tree before opening metadata/inference sockets. Same-process reuse checks current file identity,
+metadata and the fixed tree; an install, selection or owner change invalidates qualification.
+Missing/modified/unexpected code holds that private route without deleting files or reinstalling.
+Desktop, development and Node hosts supply the shared private Studio factory by default.
+Inference requires the qualified bundled Windows writer and Arke-managed local-only Ollama;
+configured/PATH writers, personal Ollama URLs, other providers and unsupported native ports
+remain unavailable to this private route. Explicit existing-service settings are unchanged.
+Private operational Ollama requests use its supported `max_tokens` cap and non-thinking
+default. Ordinary writing retains its own model/effort settings. Missing inference does not
+disable the model-free diagnostics, notifications or reviewed recovery controls.
+
+Setup commands also have an owned lifetime. An internal anchor starts the catalogue program only
+after native ownership is established; completion waits for its ordinary helpers as well as the
+program itself. Output and shutdown waits are bounded. Unknown cleanup retains the installation
+or file-mutation reservation, keeps staging intact, and blocks later setup writes until its owner
+confirms exit. It does not automatically rerun an installer or model command. Shutdown still drains
+other native owners after a setup cleanup failure and keeps minimum settlement available for retry.
+On qualified native ports, managed tree/tool installs now reserve their archive plus declared
+expansion on the actual staging volume. A bounded verified manifest must pass fresh admission
+before extraction; a larger expansion grows the plan first. Unknown metadata holds the operation.
+A verified archive retains one UUID checkpoint until confirmed extraction/marker verification,
+so explicit Resume can reuse it without HTTP. Publication/carry use rename rather than another
+payload copy. Native cleanup uncertainty retains the disk/install reservation. Shared runtime-pull
+space planning, other write owners and previous-host reconciliation remain unfinished.
+
+Settings → Diagnostics exposes Automatic recovery and Suggest only. Automatic recovery can
+restore a failed idle Arke-managed supervisor within its shared durable budget; personal engine
+installs retain their own lifecycle. Review and separate approval can retry an eligible confirmed-
+stopped managed service. Restored readiness does not replay a submitted job or prove its output.
+
+Automatic preset preview cleanup is a separate host-only opt-in, off by default. Its scope review
+names Arke's fixed local preset preview cache, a seven-day minimum age and at most eight files/
+2 GiB per run; each audition is already bounded to 12 MiB. It runs at most once every five minutes
+in Automatic recovery mode when fresh measurements show low space on that cache's volume.
+Another volume's pressure grants nothing, and Suggest only holds it. The same verified cleanup
+owner checks producer receipts, native identity and active readers, flushes intent before removal,
+and stops when measured warning headroom is restored. Models, cloned/paid/legacy previews and
+creative artifacts stay protected. Disabling fences further file admissions immediately; an
+admitted step may finish and completed deletions cannot be undone. Unconfirmed saves remain
+unconfirmed, and uncertain cleanup holds remain until their original owner can be verified.
+The latest automatic-run receipt reports confirmed counts and measured/unknown capacity without
+attributing all free-space improvement to Arke. This qualifies the fixed preview class on the
+measured Windows port; it does not implement every planned storage remedy or filesystem port.
 
 Ollama is a pinned, SHA-256-verified portable tree, not a system installer or PATH command.
 Arke owns its process, a private loopback port, `<appRoot>/models/ollama`, and
@@ -46,12 +92,48 @@ submitted independently to an explicitly selected service are outside Arke's sch
 
 `local-ai/ming.ts` owns a separate Python process for each batch. A batch can load once and
 read several chunks; its complete process exit releases that model's CUDA context and host
-memory. Cancellation kills the owned tree and waits for close. If exit cannot be confirmed,
-the GPU remains reserved and the next job is refused. A ledger and parent-lifetime leash
-provide orphan cleanup. The worker gets runtime environment variables, offline flags and
+memory. The existing native command executor gates Python behind its private ownership anchor;
+ordinary helper exit is part of batch completion. Cancellation stops that owned tree and waits
+for confirmed exit. If exit cannot be confirmed, the GPU remains reserved and later work stays
+held. Its exact lease remains reachable for a later cleanup confirmation; a new authorized Ming
+reading first confirms the old settled batch's cleanup without replaying it. Shutdown confirms
+that retained lease after native disposal. The ledger/private native job provide orphan cleanup.
+POSIX qualifies ordinary helpers inside the still-live anchor, not deliberate daemon escape.
+The speech service retains each batch's temporary input/output directory through that exact
+native owner. Cleanup after a failed cancellation removes its temporary copies once both
+native/log work and host file access finish. A queued batch cancelled before native admission
+can remove its own inputs while another batch runs. Failed settlement remains retryable and
+fences replacement. Restart reconciliation checks the old host's recorded process identity and
+the exact private global Windows job. A live/unknown host, live job or failed query keeps the
+reservation uncertain. A proven absent/empty job after the old host exits settles planning only;
+it does not delete old files or claim their bytes were reclaimed.
+The worker gets runtime environment variables, offline flags and
 private caches, without inherited provider credentials. It never installs into shared Python.
 The worker's working directory and bounded `worker.log` stay inside its private cache root;
-model diagnostics and source passages are not forwarded to the application log.
+model diagnostics and source passages are not forwarded to the application log. Streaming does
+not retain command output in memory; an aggregate 32 MiB limit bounds even a noisy worker while
+the existing rotating log owns its on-disk retention.
+
+The worker verifies and plans every dependency archive before extracting the first file.
+SDK filtering is included in the planned size; each extracted stream must match its declared
+length. The pinned 0.5B and 7.9B dependencies currently expand to 139,479,516 and 248,768,939 bytes
+respectively, verified against actual extraction. Audio, reference bytes and compiler caches are
+additional. The existing ten-minute/64-MiB audio limits are checked before writing the WAV,
+including silence between chunks. The lock records expansion bytes and entry count, and the
+worker checks both before extraction. `storage/ming-batches.ts` reserves the known input,
+expansion, per-entry allowance and maximum audio on staging's measured volume, plus a separate
+2-GiB additional compiler-cache growth estimate and bounded log allowance on the cache volume.
+Shared-volume demands join other write owners; existing cache bytes are already used space.
+Host input writes and closed worker expansion/audio receipts reduce remaining need. Capacity is checked again after GPU admission, before
+native launch. Uncertain native exit keeps affected disk admission held until original cleanup.
+
+Only the private cache is monitored, using bounded/yielding metadata reads every two seconds.
+CUDA and XDG cache locations join the existing private Torch/Triton/temp paths. Unavailable
+measurement or growth beyond the estimate cancels the original batch and retains its reservation
+until confirmed settlement. This is an estimate with polling, not a filesystem quota: a fast
+writer or external writer can overrun between observations. The cache estimate remains reserved
+until settlement because a changing directory scan is not a trustworthy consumption receipt.
+Model downloads, voice settings and ComfyUI dependencies are unchanged.
 
 Desktop, dev and the standalone Node host wire this owner into Coordinator. `generateMingBatch` is a **host-only** API
 accepting a qualified `MingBatchCommand`; paths and commands are never renderer-originated.
@@ -67,6 +149,17 @@ Failed-startup children remain owned until actual exit. An unhealthy ComfyUI wor
 confirm release even after its ready URL disappears; healthy sibling workers remain available.
 Ollama model readiness is rechecked against the selected store, including models downloaded
 earlier in the same session, and an old service's pull cannot mark a new service ready.
+
+When a settled Ming batch cannot confirm original-worker cleanup, Diagnostics now shows its
+retained graphics-card hold proactively. **Review Ming cleanup** shows impact; a separate
+approval retries only that original owned cleanup. It can terminate the original worker's
+remaining processes, starts no inference and repeats no narration. The GPU reservation is
+released only after confirmed exit. General recovery-audit degradation does not block this
+protective cleanup when its original child-ledger authority is intact. Missing original authority
+requires owned-process checks during shutdown/next startup; it grants no arbitrary process kill.
+Current-session incidents and outcome summaries distinguish unknown cleanup from confirmed
+release, and never claim a creative result succeeded. Cross-restart correlation of this
+ephemeral GPU hold remains unqualified.
 
 ## Ming qualification and delivery boundary
 
@@ -123,6 +216,14 @@ hash of every binary or an image/video workflow test.
 
 ## Validation
 
+Arke-managed Ollama runs with `OLLAMA_NO_CLOUD=1`. Its optional private Studio bridge also
+requires an environment-backed disabled state from the pinned runtime's bounded `/api/status`
+response over the captured original process connection. A configuration-file setting alone
+does not qualify this private route. Explicit existing Ollama services retain their own
+configuration and are unavailable to this managed private capability. This prevents a cloud
+model or remote alias from silently turning a managed local request into a cloud inference;
+it does not provide a general operating-system network sandbox.
+
 From `packages/coordinator`:
 
 ```powershell
@@ -144,7 +245,7 @@ separate. CI shard 1 also runs the standard-library checks on Windows and Linux.
 lock with `node scripts/update-ming-assets.mjs` only after deliberate
 pin/version edits and repeat native qualification; it fetches publisher metadata and archives.
 
-The first-run gate also uses contracts `test/local-ai-setup.test.ts`, coordinator
+Acquisition and service readiness use contracts `test/local-ai-setup.test.ts`, coordinator
 `test/setup/local-ai-readiness.test.ts`, and client `test/launch-lifecycle.test.tsx` /
 `test/downloads.test.tsx`. They cover missing detection, failed/paused/skipped installation,
 one healthy engine, recovery, health loss, explicit existing services and optional downloads.

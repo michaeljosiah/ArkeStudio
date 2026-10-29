@@ -72,10 +72,14 @@ for (const reason of ["cancel", "timeout", "error"] as const) test(`PDF ${reason
   const entered = new Promise<void>(resolve => { enter = resolve; });
   const gate = new Promise<void>(resolve => { release = resolve; });
   const controller = new AbortController();
-  const source = `import {parentPort} from 'node:worker_threads'; parentPort.postMessage({kind:'phase',phase:'Formatting pages'}); parentPort.postMessage({kind:'phase',phase:'Checking PDF'}); ${reason === "error" ? "parentPort.postMessage({kind:'error',error:'worker failed'});" : "setInterval(()=>{},1000);"}`;
+  // A queued phase may correctly be skipped after failure. Require the first callback to
+  // enter before the worker fails, so this exercises draining an actual admitted write.
+  const phaseStarted = new SharedArrayBuffer(4), handshake = new Int32Array(phaseStarted);
+  const workerOptions = { ...options, phaseStarted };
+  const source = `import {parentPort,workerData} from 'node:worker_threads'; parentPort.postMessage({kind:'phase',phase:'Formatting pages'}); Atomics.wait(new Int32Array(workerData.options.phaseStarted),0,0,5000); parentPort.postMessage({kind:'phase',phase:'Checking PDF'}); ${reason === "error" ? "parentPort.postMessage({kind:'error',error:'worker failed'});" : "setInterval(()=>{},1000);"}`;
   let receipt = "captured", settled = false, calls = 0;
-  const operation = createStoryPdfRunner({ workerPath: worker(source), timeoutMs: reason === "timeout" ? 2000 : 5000 })(document, options, {
-    signal: controller.signal, onPhase: async () => { calls++; enter(); await gate; receipt = "creating"; },
+  const operation = createStoryPdfRunner({ workerPath: worker(source), timeoutMs: reason === "timeout" ? 2000 : 5000 })(document, workerOptions, {
+    signal: controller.signal, onPhase: async () => { calls++; Atomics.store(handshake, 0, 1); Atomics.notify(handshake, 0); enter(); await gate; receipt = "creating"; },
   });
   const observed = operation.then(() => { settled = true; receipt = "ready"; }, error => { settled = true; receipt = "terminal"; throw error; });
   void observed.catch(() => {});

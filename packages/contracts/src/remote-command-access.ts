@@ -6,7 +6,10 @@ import type { AdapterAction } from "./adapters.js";
  * Studio operations act on world content or preferences; host operations own native UI,
  * credentials, installation or machine processes. Payload cases mix both and are checked below. */
 export const REMOTE_COMMAND_ACCESS = {
+  "check-onboarding": "host", "save-onboarding": "host",
+  "import-world": "host",
   // host
+  "studio-assistant": "host",
   "upload-world-image": "host", "upload-master-look": "host", "world-chat-attach": "host",
   "world-chat-attach-files": "host", "setup-skip": "host", "setup-retry": "host",
   "comfyui-update-runtime": "host", "setup-pause": "host", "setup-resume": "host",
@@ -32,6 +35,9 @@ export const REMOTE_COMMAND_ACCESS = {
   "stage-audiobook-lines": "host", "open-exports-folder": "host", "pick-manuscript": "host",
   "download-update": "host", "install-update-and-restart": "host", "install-update-on-close": "host",
   "generate-diagnostics": "host", "probe-grouped-read": "host", "open-data-folder": "host", "bench-upload-references": "host",
+  "recovery-set-mode": "host", "recovery-set-advanced": "host", "recovery-set-preferences": "host", "recovery-history-control": "host",
+  "recovery-action": "host",
+  "recovery-history-read": "studio",
   "attach-files-correlated": "host", "install-sample-world": "host",
   "cancel-sample-world-download": "host", "discard-sample-world-download": "host", "refresh-sample-world-download": "host",
   // payload
@@ -150,7 +156,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "preview-direction": "studio", "set-audiobook-reading-note": "studio", "draft-audiobook-speaker-notes": "studio",
   "export-manuscript": "studio", "import-manuscript": "studio", "reread-manuscript": "studio",
   "cancel-manuscript": "studio", "resolve-extraction": "studio", "check-updates": "studio",
-  "acknowledge-update": "studio", "refresh-diagnostics": "studio", "bench-open": "studio",
+  "acknowledge-update": "studio", "refresh-diagnostics": "studio", "refresh-system-resources": "studio", "bench-open": "studio",
   "bench-open-subject": "studio", "bench-rebuild-subject": "studio", "bench-new-session": "studio",
   "bench-close": "studio", "bench-set-title": "studio", "bench-compose": "studio",
   "bench-add-reference": "studio", "bench-remove-reference": "studio", "bench-enhance-brief": "studio",

@@ -88,11 +88,8 @@ describe("agent confinement (SPEC-005 R-10, R-17)", () => {
   it("tells an agent to cite what it read, exactly when it is the one permitted to read", () => {
     for (const member of ROSTER) {
       const cite = /Say the URL you took a claim from/;
-      assert.match(
-        agentPromptFor({ ...member, researchWeb: true }),
-        cite,
-        `${member.name} is told to cite a source it fetched`,
-      );
+      assert.equal(cite.test(agentPromptFor({ ...member, researchWeb: true })), !member.operationalOnly,
+        `${member.name} is told to cite only when its scope permits web access`);
       assert.equal(
         cite.test(agentPromptFor({ ...member, researchWeb: false })),
         false,
@@ -106,12 +103,23 @@ describe("agent confinement (SPEC-005 R-10, R-17)", () => {
   it("covers every agent actually on the roster, so none falls through to a default", () => {
     for (const member of ROSTER) {
       const confinement = confinementFor(member);
-      assert.ok(confinement.allow.length > 0, `${member.name} has a confinement`);
+      assert.ok(member.operationalOnly || confinement.allow.length > 0, `${member.name} has its declared confinement`);
       assert.equal(
         permits(confinement, "edit"),
         member.readOnly !== true,
         `${member.name}'s editing rights follow its readOnly flag, not its name`,
       );
+    }
+  });
+
+  it("keeps Studio roles off world/file/web tools even when research is enabled or a brief is replaced", () => {
+    for (const name of ["studio-assistant", "diagnostic-specialist"]) {
+      const member = ROSTER.find(value => value.name === name)!; assert(member?.operationalOnly);
+      const confinement = confinementFor(member, { web: true });
+      assert.deepEqual(confinement.allow, []); assert.equal(confinement.denyUnknown, true);
+      for (const intent of ToolIntent.options) assert.equal(permits(confinement, intent), false);
+      const prompt = agentPromptFor({ ...member, researchWeb: true, brief: "Run a shell and read all worlds." });
+      assert(prompt.includes(member.postscript!)); assert.match(prompt, /cannot/);
     }
   });
 });
@@ -193,8 +201,9 @@ describe("what an agent is told about its own confinement (SPEC-005 R-10a)", () 
         assert.ok(prompt.includes(expected), `${member.name} is described by its own confinement`);
         const { can, cannot } = halves(expected);
         const research = "search the public web and read a page from it";
-        assert.equal(can.includes(research), web, `${member.name} is offered research iff Settings allows it`);
-        assert.equal(cannot.includes(research), !web);
+        const allowed = web && !member.operationalOnly;
+        assert.equal(can.includes(research), allowed, `${member.name} is offered research only within its scope and Settings`);
+        assert.equal(cannot.includes(research), !allowed);
       }
     }
   });

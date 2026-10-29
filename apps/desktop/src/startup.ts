@@ -89,6 +89,14 @@ export async function launchDesktop(
   void controller.run();
 }
 
+/** Keep the window available for shutdown errors. app.quit's before-quit owner drains
+ * local work; only its later confirmed quit may destroy this window. */
+export function guardDesktopClose(event: { preventDefault(): void }, allowQuit: boolean, quit: () => void): void {
+  if (allowQuit) return;
+  event.preventDefault();
+  quit();
+}
+
 /** Remote unpublication has its own bounded operations. It must finish before the core
  * shutdown deadline begins, so a slow Serve call cannot abandon a still-running stop chain. */
 export async function drainDesktop(stopRemote: () => Promise<void>, stopCore: () => Promise<void>, deadlineMs = 15_000): Promise<void> {

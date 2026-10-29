@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { it } from "node:test";
 import { join } from "node:path";
-import { readFile } from "node:fs/promises";
-import { VOICE_PREVIEW_SCOPE, NARRATOR_PREVIEW_TEXT, type DomainEvent, type VoiceCandidate, type Job } from "@arke-studio/contracts";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { VOICE_PREVIEW_SCOPE, NARRATOR_PREVIEW_TEXT, voiceTargetKey, type DomainEvent, type VoiceCandidate, type Job } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { CataloguePreviewService, approvedVoiceSample } from "../../src/voice/catalogue-preview.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
@@ -102,6 +103,7 @@ it("a paid preview lands and replays with exactly one real queue ledger entry, w
     await service.request(request("01J8F3K2QW9VZX4N7M0RTYB6P2", { model: model.id, maxMicroUsd: 0 }));
     assert.equal(last(events).status, "ready"); assert.equal(ledger.length, 1);
     assert.equal(queue.listJobs().length, 1);
+    await assert.rejects(readFile(join(root, "local-presets-v1", "receipts.json")), { code: "ENOENT" });
   } finally { service.close(); queue.dispose(); }
 });
 
@@ -130,6 +132,37 @@ it("Settings local previews work without an open world and their media requires 
     await send({ kind: "catalogue-voice-preview", requestId: "01J8F3K2QW9VZX4N7M0RTYB6P2", provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", maxMicroUsd: 0 });
     assert.equal(syntheses, 1);
   } finally { await coordinator.stop(); }
+});
+
+it("records only the fixed local preset preview and preserves legacy bytes without adopting them", async () => {
+  const root = await tempDir("voice-browser-owned-local-"), events: DomainEvent[] = [];
+  const local = { ...voice, provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", local: true };
+  const hash = createHash("sha256").update(JSON.stringify([voiceTargetKey(local), NARRATOR_PREVIEW_TEXT, "wav", 1])).digest("hex");
+  await mkdir(join(root, "audio"));
+  const legacy = Buffer.from("legacy retained preview"); await writeFile(join(root, "audio", `${hash}.wav`), legacy);
+  const bytes = Buffer.alloc(60); bytes.write("RIFF"); bytes.writeUInt32LE(52, 4); bytes.write("WAVEfmt ", 8);
+  bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22); bytes.writeUInt32LE(24000, 24);
+  bytes.writeUInt32LE(48000, 28); bytes.writeUInt16LE(2, 32); bytes.writeUInt16LE(16, 34); bytes.write("data", 36); bytes.writeUInt32LE(16, 40);
+  let calls = 0;
+  const sidecar = { health: async () => ({ engineStatus: { kokoro: { ready: true } } }), listVoices: async () => [],
+    synthesize: async (input: { voiceId: string; text: string }) => {
+      calls++; assert.equal(input.voiceId, local.voiceId); assert.equal(input.text, NARRATOR_PREVIEW_TEXT); return bytes;
+    }, transcribe: async () => "" };
+  const service = new CataloguePreviewService({ root, sidecar, manifest: SHIPPED_MANIFEST, emit: e => events.push(e) });
+  service.catalogue([local]);
+  await service.request(request("owned-one", local));
+  assert.equal(last(events).status, "ready"); assert.equal(last(events).file, `local-${hash}.wav`);
+  assert.deepEqual(await readFile(join(root, "audio", `${hash}.wav`)), legacy);
+  assert.equal((await service.localPreviewInventory()).entries.length, 1);
+  const served = await service.serve(last(events).file!); assert(served?.release);
+  assert.equal((await service.localPreviewInventory()).entries[0]?.leased, true);
+  served.release(); assert.equal((await service.localPreviewInventory()).entries[0]?.leased, false);
+  service.close();
+  const restarted = new CataloguePreviewService({ root, sidecar, manifest: SHIPPED_MANIFEST, emit: e => events.push(e) });
+  restarted.catalogue([local]);
+  await restarted.request(request("owned-two", local));
+  assert.equal(last(events).status, "ready"); assert.equal(calls, 1);
+  restarted.close();
 });
 
 it("a filtered extended Gemini voice generates a priced WAV preview through the real queue", async () => {

@@ -11,6 +11,13 @@ import { COMFYUI_VERSION, SETUP_CATALOGUE } from "../../src/setup/catalogue.js";
  * range no engine satisfies, labelling every usable engine untested.
  */
 describe("catalogue invariants", () => {
+  it("every managed archive declares a simultaneous download and expansion estimate", () => {
+    for (const entry of SETUP_CATALOGUE) {
+      if (entry.spec.kind !== "tree" && entry.spec.kind !== "archive") continue;
+      const files = entry.spec.kind === "tree" ? [entry.spec.file, ...Object.values(entry.spec.byArch ?? {})] : Object.values(entry.spec.byArch);
+      assert.ok(entry.installedMb !== undefined && entry.installedMb > Math.max(...files.map(file => file!.sizeMb)), entry.id);
+    }
+  });
   it("Ollama downloads provide the exact model used by dispatch (SPEC-033 R-39)", () => {
     for (const entry of SETUP_CATALOGUE) {
       if (entry.engine !== "ollama" || entry.spec.kind !== "pull") continue;

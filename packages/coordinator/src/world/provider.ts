@@ -411,9 +411,10 @@ export class FsWorldProvider implements WorldProvider {
    * the same way it learns about a folder someone dropped in by hand — the next `listWorlds`
    * finds it and scans it, so its counts come from the world rather than from an assumption.
    */
-  async installSampleWorld(sourceDir: string): Promise<{ worldId: string; slug: string; name: string }> {
+  async installSampleWorld(sourceDir: string, signal?: AbortSignal): Promise<{ worldId: string; slug: string; name: string }> {
     await this.ensureAppRoot();
-    return installSampleWorld({ sourceDir, appRoot: this.appRoot });
+    return serializeFileMutation(join(this.appRoot, ".world-creations", "writer"), () =>
+      installSampleWorld({ sourceDir, appRoot: this.appRoot, ...(signal ? { signal } : {}) }));
   }
 
   async worldDir(worldId: string): Promise<string> {

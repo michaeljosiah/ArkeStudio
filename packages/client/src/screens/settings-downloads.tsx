@@ -3,14 +3,15 @@ import { isRemoteSession } from "../lib/remote-session.js";
 import { useNavigate } from "react-router";
 import {
   componentIsSettled,
-  isRequiredLocalRuntime,
   transferProgress,
   type SetupComponent,
   type TransferProgress,
 } from "@arke-studio/contracts";
 import { Button, cx } from "../components/ui.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
-import { setupCancel, setupRemove, setupRepair, setupRetry, setupSkip, useSetup, useStore } from "../lib/store.js";
+import { setupCancel, setupRetry, setupSkip, useSetup, useStore } from "../lib/store.js";
+import { SetupRemoveControl } from "../components/setup-remove-control.js";
+import { SetupRepairControl } from "../components/setup-repair-control.js";
 import { RuntimeHead, RuntimeSection, RuntimeStatus, sizeMb } from "./settings-parts.js";
 
 /**
@@ -67,33 +68,27 @@ function ProgressRow({ component, progress, sizeLabel }: { component: SetupCompo
         <SetupTransferControl component={component} />
         {/* Only what is still waiting can be skipped. Pause preserves one range-capable transfer;
             Stop all remains the destructive action for the whole setup run. */}
-        {component.state === "queued" && !isRequiredLocalRuntime(component.id) && (
+        {component.state === "queued" && (
           <button type="button" className="fy-set__link" onClick={() => setupSkip(component.id)}>
             Skip
           </button>
         )}
         {needsAttention(component) &&
           (component.repairRequired === true ? (
-            <button type="button" className="fy-set__link" onClick={() => setupRepair(component.id)}>
-              Repair
-            </button>
+            <SetupRepairControl component={component} />
           ) : (
             <button type="button" className="fy-set__link" onClick={() => setupRetry(component.id)}>
               Retry
             </button>
           ))}
         {componentIsSettled(component.state) && component.removable === true && (
-          <button type="button" className="fy-set__link" onClick={() => setupRemove(component.id)}>
-            Remove
-          </button>
+          <SetupRemoveControl component={component} />
         )}
         {/* Reclaim is Remove, tried again on what would not go the first time — the same
             best-effort deletion, which is why a survivor stays actionable rather than becoming
             a line of text about a file nobody can now do anything about (R-45, R-85). */}
         {(component.leftovers?.length ?? 0) > 0 && !componentIsSettled(component.state) && (
-          <button type="button" className="fy-set__link" onClick={() => setupRemove(component.id)}>
-            Reclaim
-          </button>
+          <SetupRemoveControl component={component} label="Reclaim" />
         )}
         </>}
       </div>
@@ -163,10 +158,6 @@ export function SettingsDownloadsScreen() {
 
   return (
     <div data-screen="settings-downloads" className="fy-set">
-      {setup?.localAi && <p role="status">
-        {setup.localAi.ready ? "Local AI ready · ComfyUI and Ollama are running and healthy."
-          : "Local AI setup is incomplete. ComfyUI and Ollama must be installed, running and healthy."}
-      </p>}
       <RuntimeHead
         title="Downloads"
         caps={setup?.diskFreeMb == null ? "" : `${sizeMb(setup.diskFreeMb)} FREE`}

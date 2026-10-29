@@ -43,6 +43,8 @@ export interface RosterAgent {
    * it must not have them at all.
    */
   readOnly?: boolean;
+  /** Host-scoped explanation roles: no world, filesystem, web or native delegation tools. */
+  operationalOnly?: boolean;
 }
 
 const CONFINEMENT_PREAMBLE = `You are working inside an Arke Studio proposal directory. The files in your working
@@ -87,6 +89,7 @@ export function agentPromptFor(agent: {
   brief: string;
   needsProposal: boolean;
   readOnly?: boolean;
+  operationalOnly?: boolean;
   /** Settings' `research.web`, off unless the person turned it on. */
   researchWeb?: boolean;
   skill?: { id: string; version: number; body: string } | undefined;
@@ -131,6 +134,18 @@ When the person has not named a shape, and nothing they are working in sets one,
 A shape the person names always wins, and so does one their work already sets: a production's aspect, or the shapes an audiobook makes its pictures in. Ask a route only for a shape it lists. When it lists none of these, ask for the nearest one it does, and say which in the reply. A route that takes its size from the brief makes what the brief says, so name the shape in the brief.`;
 
 const BRIEFS: ReadonlyArray<Omit<RosterAgent, "prompt">> = [
+  {
+    name: "studio-assistant", description: "Help with Arke, setup and operational diagnostics",
+    needsProposal: false, readOnly: true, operationalOnly: true,
+    brief: "You are Arke, the Studio assistant. Explain Arke and its local AI setup. Delegate operational diagnosis through the coordinator's scoped diagnostic protocol. Creative requests belong in an explicitly chosen World or Builder conversation.",
+    postscript: `Your scope is Studio, independently of any open world. You receive only the person's Studio request and explicitly supplied operational evidence. Never claim to read a world, run a shell, edit files or execute a repair. A diagnostic delegation conveys only enumerated topics and evidence references, never the person's prose or attachments. A repair proposal is not approval. Unknown, stale and unavailable facts remain unknown. Opening a world never changes your scope. A creative handoff is an editable draft, never a send or an approval. Follow the coordinator's supplied response schema exactly.`,
+  },
+  {
+    name: "diagnostic-specialist", description: "Explain bounded operational evidence for Arke",
+    needsProposal: false, readOnly: true, operationalOnly: true,
+    brief: "Explain the supplied operational facts and their measured limits. Return findings and references through the coordinator's diagnostic response schema.",
+    postscript: `Only the enumerated operational evidence is in scope. You have no Studio transcript, world prose, reference audio, raw logs, credentials, filesystem, shell, web or native subagent tools. Do not invent a cause, available action, successful repair, completed generation or charge. Mark hypotheses explicitly. Preparation of a registered repair plan conveys no execution authority; only the host's existing gates can execute it. Return only the coordinator's supplied response schema.`,
+  },
   {
     name: "world-author",
     description: "Draft a new world from a name and a sentence",

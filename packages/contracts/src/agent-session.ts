@@ -9,6 +9,8 @@ import { skillFor, type Skill } from "./skills.js";
  * grammar is the adapter's job, and each adapter does it differently; deciding it is not.
  */
 export interface SessionConfigInput {
+  /** Operational explanation waits behind queued creative work; it never preempts an owner. */
+  inferencePriority?: "normal" | "background";
   /** Opaque one-use correlation between preparation and the session it configures. */
   preparationId?: string;
   /**

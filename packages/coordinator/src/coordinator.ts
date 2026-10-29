@@ -1,4 +1,11 @@
 import { savedPicture, openSavedPicture, type SavedPicture } from "./productions/audiobook-picture-reuse.js";
+import { NEW_ONBOARDING, onboardingComponents, onboardingWritingReadiness, onboardingWritingModels, type OnboardingPlan } from "@arke-studio/contracts";
+import { checkOnboardingWorkspace, validateOnboardingPlan } from "./setup/onboarding.js";
+import { checkWorldImport } from "./world/import-world.js";
+import { createStudioAssistantHost, type StudioAssistantHost, type StudioAssistantHostOptions } from "./studio-assistant/host.js";
+import { RecoveryActionRegistry } from "./recovery/actions.js";
+import { restartActionHistory, reviewedActionHistory } from "./recovery/action-history.js";
+import { RECOVERY_POLICY, studioLocalNarrator, type RecoveryPolicySnapshot, type RecoveryRetryPlan, type MingCleanupSnapshot } from "@arke-studio/contracts";
 import { chapterReviewSummary } from "@arke-studio/contracts";
 import { rebuildBenchPrefill } from "@arke-studio/contracts";
 import { MUSIC_IMPORT_EXTENSIONS } from "@arke-studio/contracts";
@@ -48,6 +55,7 @@ import { referenceInputProblem, ollamaLlmAvailable } from "@arke-studio/contract
 import { LocalGpu } from "./local-ai/gpu.js";
 import type { MingBatchCommand } from "./local-ai/ming.js";
 import { MingSpeechService } from "./local-ai/ming-speech.js";
+import { MingBatchStorage } from "./storage/ming-batches.js";
 import type { MingSynthesis } from "@arke-studio/providers";
 import { withLocalGpu } from "./harness/local-gpu.js";
 import { withModelValidation } from "./harness/model-validation.js";
@@ -91,7 +99,7 @@ import { tmpdir } from "node:os";
 import type { SessionInput } from "./harness/session-files.js";
 import { existsSync, mkdirSync } from "node:fs";
 import { copyFile, mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { basename, extname, join, resolve, sep } from "node:path";
 import {
   DomainEventSchema,
@@ -272,6 +280,18 @@ import type { CredentialStore, Cipher } from "./credentials/store.js";
 import { CoalescedReads, ReadStalledError, type ReadTurn } from "./coalesced-reads.js";
 import { buildDiagnosticsBundle } from "./diagnostics.js";
 import { DiagnosticsSnapshotHolder } from "./diagnostics-snapshot.js";
+import type { SystemResourceService } from "./system-resources.js";
+import type { AppStorageService } from "./storage/service.js";
+import { SetupFileStorage } from "./storage/setup-files.js";
+import { SetupArchiveStorage } from "./storage/setup-archive.js";
+import { JobArtifactStorage } from "./storage/job-artifacts.js";
+import { ImportFileStorage, type ImportFileSpace } from "./storage/import-files.js";
+import { withBrowserImportBatch } from "./artifacts/browser-import-batch.js";
+import type { RecoveryControlService } from "./recovery/control.js";
+import type { RecoveryHistoryService } from "./recovery/history.js";
+import { recoveryCommand } from "./recovery/commands.js";
+import { SupervisorRecovery, type SupervisedRecoveryOwner } from "./recovery/supervisor.js";
+import type { HarnessRecoveryOwner } from "./harness/runtime-change.js";
 import {
   highestChapterRank,
   compileBoard,
@@ -355,6 +375,7 @@ import {
   fileArtifact,
   fileGeneratedArtifact,
   importFolder,
+  kindForFile,
   retireArtifact,
   restoreArtifact,
 } from "./artifacts/filing.js";
@@ -900,6 +921,7 @@ async function landUploadedImage(
 }
 
 export interface CoordinatorOptions {
+  harnessRecovery?: HarnessRecoveryOwner;
   /** Explicit local infrastructure, normally supplied by desktop/dev composition. */
   storage?: StudioStorage;
   /** Host-minted session capability. Omission creates a fresh capability, never an open socket. */
@@ -924,6 +946,15 @@ export interface CoordinatorOptions {
   sampleWorldDownload?: StoryDownload;
   /** App root for remembered grants (SPEC-005 R-16). Absent → grants are session-only. */
   appRoot?: string;
+  /** Host-owned scoped resource measurement and capacity planning. Direct fixtures may omit it. */
+  storageHealth?: AppStorageService | null;
+  /** Turn 240: on-demand, host-owned observations; never world or financial authority. */
+  systemResources?: SystemResourceService | null;
+  /** Persistent restart authority, separate from removable diagnostic history. */
+  recoveryControl?: RecoveryControlService | null;
+  recoveryHistory?: RecoveryHistoryService | null;
+  /** Private app conversation. Model routing must be proved by native host composition. */
+  studioAssistant?: StudioAssistantHostOptions | null;
   /**
    * The Arke account behind the chrome's control (design turn 151). Absent, Studio has no cloud
    * — `NoArkeCloud`, the local default — and the control says so when pressed.
@@ -1023,6 +1054,7 @@ export interface CoordinatorOptions {
   detectHarnesses?: (configuredPath: string | null, codexPath: string | null) => Promise<HarnessAvailability[]>;
   /** The host's native file dialog for pointing at a Claude Code PATH does not carry. */
   chooseClaudeExecutable?: () => Promise<string | null>;
+  chooseWorldFolder?: () => Promise<string | null>;
   chooseCodexExecutable?: () => Promise<string | null>;
   /**
    * The ComfyUI engine (SPEC-021): the service that discovers, supervises and verifies it,
@@ -1039,7 +1071,7 @@ export interface CoordinatorOptions {
     reconfigureHarness?: (apply?: () => Promise<void>) => Promise<void>;
   };
   /** Ming owns a separate process even when its interpreter belongs to ComfyUI. */
-  ming?: { readonly running?: boolean; run(command: MingBatchCommand, signal: AbortSignal): Promise<void>; unload(signal: AbortSignal): Promise<void>; dispose(): Promise<void> };
+  ming?: { readonly running?: boolean; readonly cleanupAuthorized?: boolean; readonly storageOwner?: string; run(command: MingBatchCommand, signal: AbortSignal): Promise<void>; unload(signal: AbortSignal): Promise<void>; dispose(): Promise<void> };
   /** Real filesystem worker path for a packaged host; never supplied by renderer commands. */
   mingWorkerPath?: string;
   /**
@@ -1128,6 +1160,7 @@ export interface CoordinatorOptions {
   nativeIndex?: { ok: boolean; reason?: string };
   /** SPEC-011: the Voxa sidecar and voice catalogue sources, injected from the desktop. */
   voice?: {
+    recovery?: SupervisedRecoveryOwner;
     sidecar: SidecarLike | null;
     /** Wait for recovered Kokoro work until Voxa can actually synthesize. */
     waitUntilReady?: () => Promise<boolean>;
@@ -1268,6 +1301,35 @@ export class Coordinator {
    * emit during construction; every hook guards, and it exists before the constructor returns.
    */
   private diagnosticsSnapshot: DiagnosticsSnapshotHolder | null = null;
+  private readonly storageWritingJobs = new Set<string>();
+  private readonly storageWritingExports = new Set<string>();
+
+  private syncStorageObservation(event?: DomainEvent): void {
+    const service = this.opts.storageHealth;
+    if (!service || this.stopping) return;
+    service.setWorld(this.opts.provider.openStore?.()?.dir ?? null);
+    const ollama = this.opts.ollama?.service;
+    const modelStore = ollama && !ollama.externallySelected() ? ollama.modelsDir() : null;
+    // Only the managed runtime's two known store subfolders, not an arbitrary selected
+    // parent or an external server's files. Nested default roots are counted once.
+    service.setManagedModelRoots(modelStore ? [join(modelStore, "blobs"), join(modelStore, "manifests")] : []);
+    const active = (job: Job) => job.status === "submitting" || job.status === "running" || job.finalization?.status === "pending";
+    if (!event) {
+      this.storageWritingJobs.clear();
+      for (const job of this.getState().app.jobs) if (active(job)) this.storageWritingJobs.add(job.id);
+    } else if (event.type === "job.updated") {
+      if (active(event.job)) this.storageWritingJobs.add(event.job.id); else this.storageWritingJobs.delete(event.job.id);
+    } else if (event.type === "export.progress") {
+      if (event.status === "running") this.storageWritingExports.add(event.exportId); else this.storageWritingExports.delete(event.exportId);
+    }
+    service.setWriting(this.storageWritingJobs.size > 0 || this.storageWritingExports.size > 0 || this.getState().app.setup?.running === true);
+  }
+
+  /** Trusted desktop/Node host wake callback. No renderer path or mutation authority. */
+  async wakeStorage(): Promise<void> {
+    if (this.stopping || !this.opts.storageHealth) return;
+    const work = this.opts.storageHealth.wake(); this.trackBackground(work); await work;
+  }
   /**
    * The bounded operational-log tail the derivation reads (SPEC-032 R-18), cached so a
    * derivation per event tick does not become a file read per event tick. Refreshed only when
@@ -3157,6 +3219,72 @@ export class Coordinator {
   }
 
   private readonly sessionInput: SessionInput;
+  private studioAssistantHost: StudioAssistantHost | null = null;
+  private readonly recoveryTargetObservers = new Map<string, () => void>();
+  private readonly mingObservationKey = randomBytes(32).toString("hex");
+  private mingConfirmation: { revision: number; at: number } | null = null;
+  private mingScope(revision: number): string { return createHash("sha256").update(JSON.stringify(["ming-original-cleanup", this.mingObservationKey, revision])).digest("hex"); }
+  private mingCleanupSnapshot(): MingCleanupSnapshot | undefined {
+    if (!this.opts.ming) return undefined;
+    const source = this.localGpu.mingCleanupState(), at = Date.parse(this.nowIso());
+    if (source.confirmed !== null && source.confirmed !== this.mingConfirmation?.revision) this.mingConfirmation = { revision: source.confirmed, at };
+    return { state: source.state, scope: source.state === "held" || source.state === "checking" ? this.mingScope(source.revision) : null,
+      authority: this.opts.ming.cleanupAuthorized === true ? "original-worker" : "unavailable",
+      available: source.state === "held" && this.opts.ming.cleanupAuthorized === true && this.recoveryActions.mingCleanupAvailable(),
+      waiting: source.waiting, measuredAt: at,
+      confirmation: this.mingConfirmation ? { scope: this.mingScope(this.mingConfirmation.revision), at: this.mingConfirmation.at } : null };
+  }
+  private readonly recoveryActions = new RecoveryActionRegistry({ now: () => Date.parse(this.nowIso()), publish: result => {
+    if (!this.stopping) {
+      this.opts.recoveryHistory?.observeActions(reviewedActionHistory(result, Date.parse(this.nowIso())));
+      this.emit({ type: "recovery.action-result", at: this.nowIso(), result }); this.publishRecoveryPolicy();
+    }
+  }, ownerSettled: () => this.publishRecoveryPolicy(), automaticAllowed: () => {
+    const policy = this.opts.recoveryControl?.policySnapshot();
+    return this.started && !this.stopping && policy?.accepting === true && policy.audit === "available" && policy.mode === "automatic";
+  } });
+  private recoveryPolicy(): RecoveryPolicySnapshot | null {
+    const policy = this.opts.recoveryControl?.policySnapshot(); if (!policy) return null;
+    const targets = new Map(policy.targets.map(target => [target.key, target]));
+    for (const target of this.recoveryActions.availability()) {
+      if (!targets.has(target.key) && targets.size >= RECOVERY_POLICY.maxTargets) continue;
+      targets.set(target.key, { stoppedByUser: false, circuitOpen: false, pendingOutcome: false, ...targets.get(target.key), ...target });
+    }
+    return { ...policy, targets: [...targets.values()], cleanup: this.recoveryActions.cleanupAvailability(),
+      ...(this.opts.ming ? { mingCleanup: this.mingCleanupSnapshot() } : {}) };
+  }
+  private publishRecoveryPolicy(reconstructed = false): void {
+    if (!this.started || this.stopping) return;
+    this.opts.recoveryHistory?.observeActions([
+      ...(this.opts.recoveryControl ? restartActionHistory(this.opts.recoveryControl.snapshot().control) : []),
+      ...(this.cataloguePreviews?.cleanupHistory() ?? []),
+    ], reconstructed);
+    const policy = this.recoveryPolicy(); if (policy) this.emit({ type: "recovery.policy", at: this.nowIso(), policy });
+  }
+  private registerRecoveryTarget(key: string, service: RecoveryRetryPlan["service"], supervisor: ChildSupervisor, current: () => boolean): void {
+    this.recoveryActions.register(key, { service, prepare: () => current() ? supervisor.prepareRecoveryRetry() : null });
+    this.recoveryTargetObservers.get(key)?.();
+    const changed = () => this.publishRecoveryPolicy(); supervisor.on("status", changed); supervisor.on("recovery-settled", changed);
+    this.recoveryTargetObservers.set(key, () => { supervisor.off("status", changed); supervisor.off("recovery-settled", changed); });
+  }
+  private studioConversation(): StudioAssistantHost | null {
+    if (this.stopping || !this.opts.appRoot || this.opts.studioAssistant === null) return null;
+    return this.studioAssistantHost ??= createStudioAssistantHost({ root: this.opts.appRoot,
+      adapter: () => this.opts.adapter ?? null, sessionInput: this.sessionInput, options: this.opts.studioAssistant,
+      transcribe: (audio, contentType, signal) => {
+        if (!this.voiceService) return Promise.reject(new Error("Local dictation is unavailable."));
+        return this.voiceService.transcribe(audio, contentType, signal);
+      },
+      readSpeech: async (text, expectedVoice, signal, current) => {
+        const voice = this.voiceService, selected = this.readModel.getState().app.narrator;
+        const voiceId = studioLocalNarrator(selected);
+        if (!voice || !voiceId || expectedVoice && voiceId !== expectedVoice) throw new Error("Private local speech is unavailable.");
+        const allowed = () => current() && !this.stopping && this.voiceService === voice && studioLocalNarrator(this.readModel.getState().app.narrator) === voiceId;
+        const audio = await voice.privateLocalSpeech(voiceId, text, signal, allowed); return { audio, voiceId };
+      },
+      now: () => Date.parse(this.nowIso()), evidence: () => ({ history: this.opts.recoveryHistory?.snapshot(),
+        policy: this.opts.recoveryControl?.policySnapshot(), storage: this.opts.storageHealth?.snapshot(), jobs: this.jobQueue?.listJobs() }) });
+  }
 
   /**
    * Put a clip somewhere the clone can read it, and say what is wrong with it if anything is.
@@ -3402,6 +3530,7 @@ export class Coordinator {
   private started = false;
   private stopping = false;
   private sampleInstallAbort: AbortController | null = null;
+  private worldImportAbort: AbortController | null = null;
   private engineClosed = false;
   /** Page reads told to stop (codex, PR 879): the narration loop checks between blocks. */
   private readonly stoppedReads = new Set<string>();
@@ -3424,7 +3553,11 @@ export class Coordinator {
   /** In-flight dispatch-scene-planned requestIds (SPEC-024 R-12): the same redelivery guard. */
   private readonly creatingPlans = new Set<string>();
   private readonly activeMessages = new Set<Promise<void>>();
-  private readonly browserMediaImports = new BrowserMediaImports();
+  private readonly browserMediaImports: BrowserMediaImports;
+  private readonly importFileSpace?: ImportFileStorage;
+  private readonly exportFileSpace?: ImportFileStorage;
+  /** Trusted host publication copies share setup/import/result reservations. */
+  get publicationFileSpace(): ImportFileSpace | undefined { return this.exportFileSpace; }
   private cataloguePreviews: CataloguePreviewService | null = null;
   private readonly backgroundWork = new Set<Promise<unknown>>();
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
@@ -3491,6 +3624,7 @@ export class Coordinator {
 
   private readonly localGpu: LocalGpu;
   private readonly mingSpeech: MingSpeechService | null;
+  private readonly mingBatchSpace: MingBatchStorage | undefined;
   mingSpeechStatus(model: string): Promise<{ready: boolean; reason?: string}> {
     return this.mingSpeech?.status(model) ?? Promise.resolve({ready: false, reason: "Ming is not configured on this host."});
   }
@@ -3525,8 +3659,11 @@ export class Coordinator {
   private readonly storyPublications: StoryPublicationService;
   private readonly dramaEditions: DramaEditionService;
   constructor(private readonly opts: CoordinatorOptions) {
+    this.importFileSpace = opts.storageHealth?.supportsAdmission ? new ImportFileStorage(opts.storageHealth) : undefined;
+    this.exportFileSpace = opts.storageHealth?.supportsAdmission ? new ImportFileStorage(opts.storageHealth, "export") : undefined;
+    this.browserMediaImports = new BrowserMediaImports(this.importFileSpace);
     this.dramaEditions = new DramaEditionService(opts.appRoot ? join(opts.appRoot, "drama-editions") : opts.changeLogPath + ".drama-editions", opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {});
-    this.storyPublications = new StoryPublicationService(opts.appRoot ? join(opts.appRoot, "story-publications") : opts.changeLogPath + ".story-publications", { ...(opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {}), ...(opts.mediaProbe ? { probe: opts.mediaProbe } : {}) });
+    this.storyPublications = new StoryPublicationService(opts.appRoot ? join(opts.appRoot, "story-publications") : opts.changeLogPath + ".story-publications", { ...(opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {}), ...(opts.mediaProbe ? { probe: opts.mediaProbe } : {}), fileSpace: this.exportFileSpace });
     this.effectAnalysis = new EditorEffectAnalysisService(opts.effectAudioAnalysisHost, (analysis, scope) => this.emit({
       at: this.nowIso(), type: "editor-effect.analysis", ...scope, analysis,
     }));
@@ -3550,7 +3687,7 @@ export class Coordinator {
       if (engine === "Ollama" && opts.ollama && opts.ollama.service.baseUrl() === null && !opts.ollama.service.externallySelected()) {
         // An uninstalled runtime owns no memory. A failed owned child must confirm exit;
         // a nullable endpoint by itself is not evidence that it released its allocations.
-        await opts.ollama.service.stopManaged();
+        await opts.ollama.service.prepareGpuHandover();
         this.clearLocalResidency("ollama");
         return;
       }
@@ -3561,7 +3698,46 @@ export class Coordinator {
       await opts.dispatchClients?.[engine === "Ollama" ? "ollama" : "comfyui"]?.unload?.(signal);
       this.clearLocalResidency(engine === "Ollama" ? "ollama" : "comfyui");
     }, ["Ollama", "ComfyUI", "Ming"]);
-    this.mingSpeech = opts.appRoot && opts.ming && opts.comfyui ? new MingSpeechService({ appRoot: opts.appRoot,
+    if (opts.ming) {
+      const owner = opts.ming;
+      this.recoveryActions.registerMingCleanup({ prepare: () => {
+        if (this.stopping || this.opts.ming !== owner || owner.cleanupAuthorized !== true) return null;
+        const prepared = this.localGpu.prepareMingCleanup(); if (!prepared) return null;
+        const current = () => !this.stopping && this.opts.ming === owner && owner.cleanupAuthorized === true && prepared.current();
+        return { scope: this.mingScope(prepared.revision), current,
+          run: (signal, allowed) => prepared.run(AbortSignal.any([signal, this.runtimeStop.signal]), () => allowed() && current()) };
+      } });
+      this.lifecycleDisposers.add(this.localGpu.subscribeMingCleanup(() => this.publishRecoveryPolicy()));
+    }
+    if (opts.recoveryControl && opts.ollama && opts.appRoot) {
+      const service = opts.ollama.service, control = opts.recoveryControl;
+      // The control file already belongs to this app root. Path spelling or a replacement
+      // supervisor must not mint a fresh budget for its one managed Ollama role.
+      const key = createHash("sha256").update("managed-ollama").digest("hex");
+      service.configureRecovery(supervisor => {
+        this.registerRecoveryTarget(key, "ollama", supervisor, () => !this.stopping && service.ownsSupervisor(supervisor));
+        return new SupervisorRecovery({ control, identity: { key, service: "ollama" },
+        current: () => !this.stopping && service.ownsSupervisor(supervisor), ownership: () => service.externallySelected() ? "external" : "managed",
+        componentDigest: () => createHash("sha256").update(JSON.stringify([SETUP_CATALOGUE.find(entry => entry.id === "ollama-runtime"), service.modelsDir()])).digest("hex"),
+        acquire: signal => this.localGpu.acquire("Ollama", signal),
+        });
+      });
+    }
+    if (opts.recoveryControl && opts.comfyui && opts.appRoot) {
+      const control = opts.recoveryControl;
+      opts.comfyui.service.configureRecovery((owner, supervisor) => {
+        const key = createHash("sha256").update(`managed-comfyui:${owner.recoveryTarget().role}`).digest("hex");
+        this.registerRecoveryTarget(key, "comfyui", supervisor, () => !this.stopping && owner.ownsSupervisor(supervisor));
+        return new SupervisorRecovery({ control, identity: { key, service: "comfyui" },
+          current: () => !this.stopping && owner.ownsSupervisor(supervisor), ownership: () => owner.recoveryTarget().ownership,
+          componentDigest: () => createHash("sha256").update(JSON.stringify([SETUP_CATALOGUE.find(entry => entry.id === "comfyui-runtime"), owner.recoveryTarget().configurationDigest])).digest("hex"),
+          acquire: signal => this.localGpu.acquire("ComfyUI", signal),
+        });
+      });
+    }
+    this.mingBatchSpace = opts.storageHealth?.supportsAdmission && opts.ming?.storageOwner
+      ? new MingBatchStorage(opts.storageHealth, opts.ming.storageOwner) : undefined;
+    this.mingSpeech = opts.appRoot && opts.ming && opts.comfyui ? new MingSpeechService({ appRoot: opts.appRoot, space: this.mingBatchSpace,
       python: () => opts.comfyui!.service.sharedMingPython(), run: (command, signal) => this.generateMingBatch(command, signal),
       processRunning: () => opts.ming!.running === true, ...(opts.mingWorkerPath ? {worker: opts.mingWorkerPath} : {}) }) : null;
     if (opts.adapter) opts.adapter = withModelValidation(
@@ -3671,6 +3847,9 @@ export class Coordinator {
                 ),
               append: (entry) => this.recordLedger(entry),
             },
+            artifactSpace: opts.storageHealth?.supportsAdmission ? new JobArtifactStorage(opts.storageHealth) : undefined,
+            checkStorageBeforeSubmission: () => opts.recoveryControl?.advancedSettings().checkStorageBeforeSubmission ?? true,
+            artifactTransferSettings: () => opts.recoveryControl?.advancedSettings().artifactTransfer,
             landInWorld: async (worldId, fn) => {
               try {
                 if (worldId === VOICE_PREVIEW_SCOPE && opts.appRoot) {
@@ -3687,13 +3866,13 @@ export class Coordinator {
                 }
                 if (this.opts.provider.withWorldStore) {
                   await this.opts.provider.withWorldStore(worldId, (store) =>
-                    store.ownedWrite(() => fn(store.dir)),
+                    store.ownedWrite(() => fn(store.dir, () => store.assertOwnership())),
                   );
                   return true;
                 }
                 const store = this.opts.provider.openStore?.();
                 if (!store || store.worldId !== worldId) return false;
-                await store.ownedWrite(() => fn(store.dir));
+                await store.ownedWrite(() => fn(store.dir, () => store.assertOwnership()));
                 return true;
               } catch {
                 return false;
@@ -3955,8 +4134,15 @@ export class Coordinator {
       : null;
     if (opts.appRoot && opts.voice) this.cataloguePreviews = new CataloguePreviewService({
       root: join(opts.appRoot, "voice-previews"), sidecar: opts.voice.sidecar, get manifest() { return opts.manifest; },
+      storage: opts.storageHealth ?? undefined, now: () => Date.parse(this.nowIso()), cleanupChanged: () => this.publishRecoveryPolicy(),
       ...(this.jobQueue ? { enqueue: input => this.jobQueue!.enqueue(input), cancel: id => this.jobQueue!.cancel(id) } : {}),
       emit: event => this.emit(event),
+    });
+    if (this.cataloguePreviews) this.recoveryActions.registerCleanup({
+      available: () => this.cataloguePreviews!.cleanupAvailability(), prepare: (signal, scope) => this.cataloguePreviews!.prepareCleanup(signal, scope),
+      reconcile: signal => this.cataloguePreviews!.reconcileCleanup(signal),
+      setMaintenance: enabled => this.cataloguePreviews!.setMaintenance(enabled), revokeMaintenance: () => this.cataloguePreviews!.revokeMaintenance(),
+      maintenanceReady: () => this.cataloguePreviews!.maintenanceReady(), runMaintenance: (id, signal, valid) => this.cataloguePreviews!.runMaintenance(id, signal, valid),
     });
     this.serverApplication = {
       attachTransport: sink => {
@@ -4040,8 +4226,21 @@ export class Coordinator {
         const conversationId = this.readModel.getState().worldChat?.conversationId;
         if (conversationId) await this.openWorldChat(store, conversationId, conversationId);
       },
-      onMessage: (msg) => {
+      onMessage: (msg, requester) => {
         if (this.stopping) return;
+        // Private Studio transport is separate from broadcast/world command handling.
+        if (msg.kind === "studio-assistant") {
+          const studio = requester && this.studioConversation();
+          if (!studio || !requester) requester?.reply(msg.requestId, { type: "result", status: "refused", reason: "unavailable", threadId: null, runId: null });
+          else {
+            const handling = studio.handle(msg, requester).catch(() => {
+              try { requester.reply(msg.requestId, { type: "result", status: "unconfirmed", reason: "unavailable", threadId: null, runId: null }); }
+              catch { /* Private presentation must not disable model-free diagnostics. */ }
+            }).finally(() => this.activeMessages.delete(handling));
+            this.activeMessages.add(handling);
+          }
+          return;
+        }
         const updateCommand =
           msg.kind === "install-update-and-restart" || msg.kind === "install-update-on-close";
         // Every handler answers its own failures; this is the backstop. One that throws instead
@@ -4076,7 +4275,7 @@ export class Coordinator {
         if (edition) return this.storyPublications.serve(edition[1]!, edition[2]!);
         const storyPreview = /^\/story-preview-media\/([a-f0-9-]+)\/(cover|illustration-\d+\.(?:png|jpg)|story\.(?:epub|m4b|pdf))$/.exec(urlPath);
         if (storyPreview) return this.storyPublications.previewMedia(storyPreview[1]!, storyPreview[2]!);
-        const preview = /^\/voice-preview-media\/([a-f0-9]{64}\.(?:wav|mp3|flac))$/.exec(urlPath);
+        const preview = /^\/voice-preview-media\/((?:local-[a-f0-9]{64}\.wav)|(?:[a-f0-9]{64}\.(?:wav|mp3|flac)))$/.exec(urlPath);
         if (preview) return this.cataloguePreviews?.serve(preview[1]!) ?? null;
         // GET /genesis-media/<genesis-id>/<sandbox-relative-file> — the look preview, which
         // exists before any world does (SPEC-031 R-50). A distinct prefix, not a magic slug:
@@ -4107,6 +4306,7 @@ export class Coordinator {
       // back in would re-trigger its own derivation, and journalling it would record to disk a
       // projection of state the change log already carries.
       onSnapshot: (snapshot) => {
+        if (!this.stopping) this.opts.recoveryHistory?.observeDiagnostics(snapshot);
         // The broadcast runs inside the holder's setImmediate; a snapshot the event schema
         // refuses must degrade to a logged line, never an uncaught exception (R-14's spirit,
         // carried to the wire).
@@ -4325,6 +4525,8 @@ export class Coordinator {
             },
             {
               appRoot: opts.appRoot,
+              fileSpace: opts.storageHealth?.supportsAdmission ? new SetupFileStorage(opts.storageHealth) : undefined,
+              archiveSpace: opts.storageHealth?.supportsAdmission ? new SetupArchiveStorage(opts.storageHealth) : undefined,
               // The static catalogue plus what the host derives from provider-owned data —
               // the per-recipe weight entries (SPEC-021 §2.4). One list, one service.
               catalogue: [...SETUP_CATALOGUE, ...(opts.setupExtraEntries ?? []), ...adapterSetupEntries(HEARMEMAN_ADAPTERS)],
@@ -4343,11 +4545,30 @@ export class Coordinator {
               beforeComponentInstall: async id => {
                 if (id.startsWith("adapter-")) await this.adapterLibrary?.guardInstall(id);
                 if (id.startsWith("ming-") && (this.mingSpeech?.busy || this.localGpu.isBusy("Ming"))) throw new Error("Wait for the current Ming reading to stop before changing its files.");
+                if (id === "ollama-runtime" && this.localGpu.isBusy("Ollama")) throw new Error("Wait for current local work before changing Ollama's files.");
               },
-              beginFileMutation: id => {
-                if (!id.startsWith("ming-")) return undefined;
-                if (this.localGpu.isBusy("Ming")) throw new Error("Stop the current Ming reading before changing its model files.");
-                return this.mingSpeech?.reserveFileChange();
+              beginComponentInstall: async (id, signal) => {
+                if (id !== "ollama-runtime" || !this.opts.ollama) return undefined;
+                // The earlier busy check is presentation, not an idle fence: a submission may
+                // have arrived since it ran. Drain that work under the ordinary inference lane
+                // before stopping the worker. The owner's file lease then keeps activation
+                // closed without holding the graphics card throughout the download.
+                const release = await this.localGpu.acquire("Ollama", signal);
+                try { signal.throwIfAborted(); } catch (error) { release(); throw error; }
+                return this.opts.ollama.service.reserveInstallation(release);
+              },
+              beginFileMutation: (id, entry, signal) => {
+                if (entry.spec.kind === "pull" && entry.engine === "ollama") return this.localGpu.reserveFileChange("Ollama");
+                if (id.startsWith("ming-")) {
+                  if (this.localGpu.isBusy("Ming")) throw new Error("Stop the current Ming reading before changing its model files.");
+                  return this.mingSpeech?.reserveFileChange();
+                }
+                if (entry.engine === "comfyui") return this.localGpu.reserveFileChange("ComfyUI");
+                if (entry.engine === "voxa") {
+                  if (!this.opts.voice?.sidecar?.reserveRuntime) throw new Error("Close the voice engine before repairing its model files; this host cannot hold its requests.");
+                  return this.opts.voice.sidecar.reserveRuntime(signal);
+                }
+                return undefined;
               },
               onFileInstalled: async (id, path) => { if (id.startsWith("adapter-")) await this.adapterLibrary?.recordInstalled(id, path); },
             },
@@ -4514,6 +4735,7 @@ export class Coordinator {
       this.exportReads.set(parsed.exportId, exportReadRecord(parsed, this.exportReads.get(parsed.exportId)));
     }
     this.readModel.apply(parsed);
+    if (parsed.type === "storage.health" || parsed.type === "comfyui.status" || parsed.type === "recovery.policy") this.opts.recoveryHistory?.observeAvailability(this.readModel.getState().app);
     if (parsed.type === "export.progress" && exportStatusChanged) {
       const state = this.readModel.getState();
       if (state.world?.meta.worldId === parsed.worldId && state.worldChat?.messages.some(m => m.productionPlan?.productionId === parsed.productionId)) {
@@ -4550,6 +4772,10 @@ export class Coordinator {
       // carries the findings — whose firstSeen bookkeeping R-35 says is never written to disk.
       // Journalling the event would have durably recorded both on every generate.
       parsed.type !== "diagnostics.ready" &&
+      // Resource readings are replaceable observations, not a second durable operation journal.
+      parsed.type !== "storage.health" &&
+      parsed.type !== "system.resources" &&
+      !parsed.type.startsWith("recovery.") &&
       // Several a second while a world opens, and over once it has (issue 1844).
       parsed.type !== "world.open-progress"
     ) {
@@ -4557,6 +4783,7 @@ export class Coordinator {
       void this.changeLog.append({ kind: "event", event: journalRecord(parsed) });
     }
     this.transport.broadcast(parsed);
+    this.syncStorageObservation(parsed);
     if (parsed.type === "proposal.resolved") {
       const store = this.opts.provider.openStore?.();
       if (store?.worldId === parsed.worldId && !this.stopping) {
@@ -4572,7 +4799,7 @@ export class Coordinator {
     // A tail read that failed transiently (an AV pass holding app.jsonl) would otherwise stick
     // as `unavailable` until the next append; retrying on the next event is still event-driven.
     if (this.diagnosticsLogTail === "unavailable") this.refreshDiagnosticsLogTail();
-    this.diagnosticsSnapshot?.schedule();
+    if (!parsed.type.startsWith("recovery.") || parsed.type === "recovery.policy") this.diagnosticsSnapshot?.schedule();
     try {
       this.opts.observeEvent?.(parsed);
     } catch {
@@ -4749,6 +4976,20 @@ export class Coordinator {
 
   /** Attach a supervised child and mirror its lifecycle into component health (R-6). */
   superviseAs(component: Exclude<HealthComponent, "coordinator">, supervisor: ChildSupervisor): void {
+    if (this.started || this.stopping || this.supervisors.has(component)) throw new Error("Attach each supervised service once before startup.");
+    const harness = this.opts.harnessRecovery;
+    const owner: SupervisedRecoveryOwner | undefined = component === "harness" && harness ? {
+      ownership: () => harness.ownership, componentDigest: () => harness.componentDigest(), reserve: signal => harness.reserve(signal),
+    } : component === "voice" ? this.opts.voice?.recovery : undefined;
+    if (owner && this.opts.recoveryControl && this.opts.appRoot) {
+      const recovery = new SupervisorRecovery({ control: this.opts.recoveryControl,
+        identity: { key: createHash("sha256").update(component === "harness" ? "managed-harness-v2" : "managed-voxa").digest("hex"), service: component },
+        current: () => !this.stopping && this.supervisors.get(component) === supervisor,
+        ownership: () => owner.ownership(), componentDigest: () => owner.componentDigest(), acquire: signal => owner.reserve(signal) });
+      supervisor.setRecoveryPort(recovery);
+      const key = createHash("sha256").update(component === "harness" ? "managed-harness-v2" : "managed-voxa").digest("hex");
+      this.registerRecoveryTarget(key, component, supervisor, () => !this.stopping && this.supervisors.get(component) === supervisor);
+    }
     this.supervisors.set(component, supervisor);
     supervisor.on("status", ({ status, reason }: { status: SupervisorStatus; reason?: string }) => {
       // A healthy harness process is probed before it counts (SPEC-005 R-2): the adapter asks
@@ -4830,7 +5071,48 @@ export class Coordinator {
 
     await this.seed();
     await this.adapterLibrary?.refresh();
+    if (this.opts.recoveryControl) {
+      const control = this.opts.recoveryControl;
+      this.lifecycleDisposers.add(control.subscribe(() => {
+        this.recoveryActions.invalidateReviews(); this.publishRecoveryPolicy();
+        if (!this.stopping) this.trackBackground(this.recoveryActions.maintainCleanup());
+      }));
+      await control.open();
+      await this.cataloguePreviews?.initializeCleanup();
+      await this.cataloguePreviews?.reconcileCleanup();
+      this.publishRecoveryPolicy();
+    }
+    if (this.opts.recoveryHistory) {
+      const history = this.opts.recoveryHistory;
+      this.lifecycleDisposers.add(history.subscribe(snapshot => {
+        if (!this.stopping) this.emit({ type: "recovery.history", at: this.nowIso(), history: snapshot });
+      }));
+      this.lifecycleDisposers.add(history.subscribeNotices(notice => {
+        if (!this.stopping) this.emit({ type: "recovery.notice", at: this.nowIso(), notice });
+      }));
+      await history.open();
+      history.observeDiagnostics(this.diagnosticsSnapshot!.currentSnapshot());
+      this.publishRecoveryPolicy(true);
+    }
     await this.seedAppConfig();
+    if (this.opts.systemResources) {
+      this.lifecycleDisposers.add(this.opts.systemResources.subscribe(resources => {
+        if (!this.stopping) this.emit({ type: "system.resources", at: this.nowIso(), resources });
+      }));
+    }
+    if (this.opts.storageHealth) {
+      this.lifecycleDisposers.add(this.opts.storageHealth.subscribe(health => {
+        if (!this.stopping) {
+          this.emit({ type: "storage.health", at: new Date().toISOString(), health });
+          if (this.cataloguePreviews) this.trackBackground(this.cataloguePreviews.refreshCleanupScope());
+          this.trackBackground(this.recoveryActions.maintainCleanup());
+        }
+      }));
+      this.syncStorageObservation();
+      this.trackBackground(this.importFileSpace?.reconcileIdleImports() ?? this.opts.storageHealth.start());
+      if (this.exportFileSpace) this.trackBackground(this.exportFileSpace.reconcileIdleImports());
+      if (this.mingBatchSpace) this.trackBackground(this.mingBatchSpace.reconcile(this.runtimeStop.signal));
+    }
     for (const run of (await this.audiobookActivity.load()).reverse()) this.readModel.apply({ type: "audiobook.activity", at: run.updatedAt, run });
     // The engine must be resolved BEFORE queue recovery, not after (SPEC-021 §2.11). Recovery
     // asks the service which engine is configured now, and a null answer means "no engine" —
@@ -4859,6 +5141,12 @@ export class Coordinator {
       this.readModel.seedJobs(this.jobQueue.listJobs());
     }
     this.readModel.setWorlds(await this.opts.provider.listWorlds());
+
+    // Existing libraries never acquire a first-run wizard just because their old settings
+    // file was absent. An explicitly started/saved journey still resumes normally.
+    if (this.readModel.getState().worlds.length && this.readModel.getState().app.onboarding?.plan.persona === null) {
+      this.readModel.seedAppConfig({ onboarding: null });
+    }
 
     // Founding builds survive the process (SPEC-031 R-32, R-33): every world's build record
     // is peeked at startup — files only, never a store open — so a run cut off mid-wave is
@@ -4936,8 +5224,8 @@ export class Coordinator {
       this.emit({ at: new Date().toISOString(), type: "env.check", ...envCheck });
     }
 
-    // Downloads run behind the interactive core. The launch gate separately requires both
-    // runtimes healthy; optional components can be skipped. Detection avoids repeat downloads.
+    // Detect existing files and retained downloads. The catalogue offers missing AI components
+    // until selected; model/service health never gates manual authoring (SPEC-016, turns 242–244).
     void this.setup?.run();
 
     // An external image login restores itself without holding the transport behind a slow
@@ -5881,6 +6169,7 @@ export class Coordinator {
     if (seededSpend && !seededSpend.ledgerUnavailable) this.spendAlerted = seededSpend.alerted;
     this.readModel.seedAppConfig({
       manifest,
+      onboarding: settings?.onboarding ? { plan: settings.onboarding, workspace: null, localModel: null } : null,
       providers: this.providerService.list(),
       providerTools: [...this.providerTools.values()].map((tool) => tool.current()),
       ...(settings && manifest
@@ -5930,7 +6219,10 @@ export class Coordinator {
     // State is captured AFTER the awaits: an event landing mid-wait would otherwise put the
     // old app section beside findings derived from the new one — the disagreement-in-one-
     // artifact R-13 exists to forbid.
-    return buildDiagnosticsBundle(this.getState(), this.appLog, this.secrets, findings);
+    const history = this.opts.recoveryHistory;
+    return buildDiagnosticsBundle(this.getState(), this.appLog, this.secrets, findings, {
+      history: history?.historyForExport() ?? null, audit: history?.snapshot() ?? null, policy: this.opts.recoveryControl?.policySnapshot() ?? null,
+    });
   }
 
   /** A credential failed mid-session: a provider fault naming the provider, never a work failure (R-4). */
@@ -7091,6 +7383,7 @@ export class Coordinator {
     genesisDecisionHeld = false,
     browserImportStore?: WorldStore,
     audiobookStore?: WorldStore,
+    browserImportSpace?: ImportFileSpace,
   ): Promise<void> {
     // A request owns its world independently of the renderer route. Use the same authenticated
     // commands and store, never a second coordinator or an unowned filesystem writer.
@@ -7100,7 +7393,7 @@ export class Coordinator {
       this.opts.provider.withBackgroundWorldStore) {
       if (this.stopping) return;
       return this.opts.provider.withBackgroundWorldStore(msg.worldId, store =>
-        this.handleClientMessage(msg, benchTakeActionHeld, benchDispatchHeld, genesisDecisionHeld, browserImportStore, store));
+        this.handleClientMessage(msg, benchTakeActionHeld, benchDispatchHeld, genesisDecisionHeld, browserImportStore, store, browserImportSpace));
     }
     if (!genesisDecisionHeld && (msg.kind === "genesis-propose-world" || msg.kind === "genesis-import-resolve" || msg.kind === "genesis-voice-generate" || msg.kind === "genesis-voice-decide" || msg.kind === "genesis-image-generate" || msg.kind === "genesis-image-decide" || msg.kind === "generate-look-preview" || msg.kind === "genesis-discard" || msg.kind === "genesis-chat" || msg.kind === "genesis-decide" || msg.kind === "genesis-review" || msg.kind === "genesis-readiness" || msg.kind === "genesis-readiness-leave" || msg.kind === "genesis-voices" || msg.kind === "genesis-images" || msg.kind === "genesis-imports" || msg.kind === "begin-founding-build" || msg.kind === "genesis-attach" || msg.kind === "genesis-attach-files" || msg.kind === "create-world") && msg.genesisId) {
       return serializeFileMutation(`founding-decisions:${msg.genesisId}`, () => this.handleClientMessage(msg, false, false, true));
@@ -7132,8 +7425,10 @@ export class Coordinator {
       const releaseId = msg.componentId.slice("adapter-".length);
       if (msg.kind === "setup-install" || msg.kind === "setup-retry" || msg.kind === "setup-resume") {
         await this.adapterLibrary?.handle({ action: "install", releaseIds: [releaseId] }).catch(() => {});
-      } else if (msg.kind === "setup-remove" || msg.kind === "setup-repair") {
+      } else if (msg.kind === "setup-remove") {
         await this.adapterLibrary?.handle({ action: "remove", releaseId, deleteOwnedFile: true }).catch(() => {});
+      } else if (msg.kind === "setup-repair") {
+        throw new Error("Use the adapter’s own removal and installation controls to replace it.");
       } else if (msg.kind === "setup-pause" || msg.kind === "setup-skip") {
         this.setup?.pause(msg.componentId);
       }
@@ -7189,6 +7484,8 @@ export class Coordinator {
       }
       case "hello":
         return; // handled inside the transport
+      case "studio-assistant":
+        return; // owner reply channel only; never entered through world/model commands
       case "open-world":
         try {
           await this.openWorld(msg.worldId);
@@ -7324,6 +7621,30 @@ export class Coordinator {
           await this.refreshStoryDownload();
           if (!this.stopping) this.transport.broadcastSnapshot();
         }
+        return;
+      }
+      case "import-world": {
+        const answer = (result: { worldId?: string; reason?: string; cancelled?: boolean }) => {
+          if (!this.stopping) this.emit({ at: this.nowIso(), type: "world.import-result", requestId: msg.requestId, ...result });
+        };
+        if (!this.opts.chooseWorldFolder || !this.opts.provider.installSampleWorld || !this.opts.appRoot) { answer({ reason: "Import a world from the desktop app on your computer." }); return; }
+        if (this.worldImportAbort || this.stopping) { answer({ reason: "A world import is already in progress." }); return; }
+        const control = new AbortController(); this.worldImportAbort = control;
+        const work = (async () => {
+          try {
+            const source = await this.opts.chooseWorldFolder!();
+            if (source === null) { answer({ cancelled: true }); return; }
+            const checked = await checkWorldImport(source, this.opts.appRoot!, control.signal);
+            const result = await this.opts.provider.installSampleWorld!(checked, control.signal);
+            if (this.stopping) return;
+            this.readModel.setWorlds(await this.opts.provider.listWorlds());
+            this.transport.broadcastSnapshot();
+            answer({ worldId: result.worldId });
+          } catch (error) { answer({ reason: describeCoordinatorError(error) }); }
+          finally { this.worldImportAbort = null; }
+        })();
+        this.backgroundWork.add(work);
+        try { await work; } finally { this.backgroundWork.delete(work); }
         return;
       }
       case "install-sample-world": {
@@ -8595,7 +8916,7 @@ export class Coordinator {
         const attachments = new WorldChatAttachmentStore(store.dir, () => this.nowIso());
         try {
           await attachments.promote(msg.conversationId, attachment, msg.requestId, async ({ sourcePath }) => {
-            const outcome = await fileArtifact(store, {
+            const outcome = await fileArtifact(store, { ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
               sourcePath,
               importedFrom: `world-chat:${msg.conversationId}/${msg.attachmentId}`,
               ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
@@ -8988,7 +9309,7 @@ export class Coordinator {
         // Only a completed deletion queues work. A held file remains a stated repair failure;
         // running detection there would otherwise bless the same corrupt bytes as present again.
         const setup = this.setup;
-        if (setup && await setup.repair(msg.componentId)) {
+        if (setup && await setup.repair(msg.componentId, msg.revision)) {
           await setup.run();
           // If Repair joined a pass that had already attempted this component, only a fresh pass
           // can collect the newly queued download. An ordinary completed repair makes this a
@@ -10389,9 +10710,14 @@ export class Coordinator {
         return;
       }
       case "ollama-refresh": {
+        const service = this.opts.ollama?.service;
+        if (!service) return;
+        // A health check loads no model. Opening Settings must not evict ComfyUI/Ming or
+        // wait behind creative work merely to read the selected service's version.
+        if (service.externallySelected() || service.status().state === "ready") { await service.refresh(); return; }
         if (this.localGpu.isBusy("Ollama")) return;
         const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
-        try { await this.opts.ollama?.service.refresh(); }
+        try { await service.refresh(); }
         finally { release(); }
         return;
       }
@@ -10400,11 +10726,11 @@ export class Coordinator {
         if (!service || !this.setup || !this.appSettings || this.localGpu.isBusy("Ollama")) return;
         // A selected user service is never stopped or modified by a managed-runtime update.
         const external = service.externallySelected();
-        const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
         try {
-          if (!external) await service.stopManaged();
+          // Setup's installation owner acquires/drains the lane and confirms stop. Taking an
+          // outer lease here would reject our own busy check, then deadlock on reacquisition.
           await this.setup.updateTree("ollama-runtime");
-        } finally { try { if (!external && !this.stopping) await service.refresh(); } finally { release(); } }
+        } finally { if (!external && !this.stopping) await service.refresh(); }
         return;
       }
       case "use-detected-comfyui": {
@@ -10436,6 +10762,7 @@ export class Coordinator {
       }
       case "setup-remove": {
         await this.setup?.remove(msg.componentId).catch(() => {});
+        await this.opts.storageHealth?.refresh().catch(() => {});
         return;
       }
       case "comfyui-restart": {
@@ -13462,13 +13789,14 @@ export class Coordinator {
       }
       case "export-world": {
         const store = this.opts.provider.openStore?.();
-        if (!store || !this.opts.appRoot) return;
+        if (!store || store.worldId !== msg.worldId || !this.opts.appRoot) return;
         const stamp = new Date()
           .toISOString()
           .replace(/[-:TZ.]/g, "")
           .slice(0, 14);
         const target = join(this.opts.appRoot, "exports", `${store.getBundle().meta.slug}-${stamp}`);
-        const exported = await exportWorld(store.dir, target).then(
+        const exported = await store.ownedRead(() => exportWorld(store.dir, target, { fileSpace: this.exportFileSpace,
+          signal: AbortSignal.any([store.closingSignal, this.runtimeStop.signal]) })).then(
           () => true,
           (err) => {
           void this.appLog?.append({
@@ -14470,6 +14798,35 @@ export class Coordinator {
         // Schedules only; the derivation runs on the next immediate, off this handler's path
         // (R-34), and reaches the asker as the ordinary broadcast.
         this.diagnosticsSnapshot?.refresh();
+        this.publishRecoveryPolicy();
+        if (this.opts.storageHealth) this.trackBackground(this.opts.storageHealth.refresh());
+        if (this.cataloguePreviews) this.trackBackground(this.cataloguePreviews.refreshCleanupScope());
+        return;
+      }
+      case "refresh-system-resources": {
+        if (this.opts.systemResources) this.trackBackground(this.opts.systemResources.refresh());
+        return;
+      }
+      case "recovery-history-read": {
+        const page = this.opts.recoveryHistory?.page(msg.query) ?? { status: "unavailable" as const, filter: msg.query.filter, pageSize: msg.query.pageSize, offset: 0,
+          ...(msg.query.view === "actions" ? { view: "actions" as const, actions: [] } : {}),
+          at: Date.now(), audit: "unavailable" as const, incidents: [], totalCount: 0, revision: null, nextCursor: null, previousCursor: null };
+        this.emit({ type: "recovery.history-page", at: this.nowIso(), requestId: msg.requestId, page });
+        return;
+      }
+      case "recovery-set-mode":
+      case "recovery-set-advanced":
+      case "recovery-set-preferences":
+      case "recovery-history-control": {
+        const oldTransfer = this.opts.recoveryControl?.advancedSettings().artifactTransfer;
+        const result = await recoveryCommand(msg, { control: this.opts.recoveryControl, history: this.opts.recoveryHistory });
+        if (msg.kind === "recovery-set-advanced" && result.status === "saved" && !this.stopping && JSON.stringify(oldTransfer) !== JSON.stringify(msg.settings.artifactTransfer)) this.jobQueue?.retryHeldArtifactTransfers();
+        if (!this.stopping) this.emit({ type: "recovery.command-result", at: this.nowIso(), result });
+        return;
+      }
+      case "recovery-action": {
+        await this.recoveryActions.handle(msg); this.publishRecoveryPolicy();
+        if (!this.stopping) this.trackBackground(this.recoveryActions.maintainCleanup());
         return;
       }
       case "probe-grouped-read": {
@@ -14893,6 +15250,7 @@ export class Coordinator {
           msg.sourcePath,
           this.opts.mediaProbe,
           () => !this.stillOpen(store) || this.stopping,
+          this.importFileSpace,
         ).catch(() => null);
         if (report) {
           this.emit({ at: new Date().toISOString(), type: "import.report", worldId: msg.worldId, ...report });
@@ -15147,6 +15505,7 @@ export class Coordinator {
             sourceFingerprint = productionExportFingerprint(store.getBundle(),production);
             const made = await exportManuscript(store, msg.productionId, msg.format, {
               exportId,
+              fileSpace: this.exportFileSpace,
               language: msg.language ?? "en",
               now: () => this.nowIso(),
               signal: control.signal,
@@ -15646,7 +16005,7 @@ export class Coordinator {
               recorded: found.lines.filter(line => line.recorded).length, awaiting: found.lines.filter(line => line.state !== "made").length });
             return;
           }
-          const made = await exportScript(store, msg.productionId, msg.speaker, { scope: msg.scope, label: msg.label, narrator, exportId: ulid(), now: () => store.now() });
+          const made = await exportScript(store, msg.productionId, msg.speaker, { scope: msg.scope, label: msg.label, narrator, exportId: ulid(), now: () => store.now(), fileSpace: this.exportFileSpace });
           answer({ output: made.output, lines: made.lines, chapters: made.chapters, notCast: made.notCast });
         } catch (err) {
           answer({ refused: err instanceof RecordedTakeRefusal ? err.message : describeCoordinatorError(err) });
@@ -18679,7 +19038,10 @@ export class Coordinator {
           if (browserFiles.length === 0) { this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true); return; }
           try {
             await this.browserMediaImports.run(browserFiles, () => !this.stillOpen(store) || this.stopping,
-              sourcePaths => this.handleClientMessage({ ...request, sourcePaths }, false, false, false, store));
+              (sourcePaths, payloads) => withBrowserImportBatch(store, payloads.filter((_payload, index) => msg.audioStudio
+                ? kindForFile(sourcePaths[index]!) === "audio"
+                : msg.music === undefined || (MUSIC_IMPORT_EXTENSIONS as readonly string[]).includes(extname(sourcePaths[index]!).slice(1).toLowerCase())), this.importFileSpace,
+                space => this.handleClientMessage({ ...request, sourcePaths }, false, false, false, store, undefined, space)), store.closingSignal);
           } catch (error) { this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error)); }
           return;
         }
@@ -18697,9 +19059,11 @@ export class Coordinator {
           this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
           return;
         }
+        const importSpace = browserImportSpace ?? this.importFileSpace;
         if (msg.audioStudio) {
           try {
             const failures = await importAudioStudioMedia(store, chosen, msg.audioStudio, {
+              ...(importSpace ? { importSpace } : {}),
               ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
               ...(this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
               ...(this.opts.confirmLargeMediaImport ? { confirmLarge: this.opts.confirmLargeMediaImport } : {}),
@@ -18724,7 +19088,7 @@ export class Coordinator {
             if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
             const name = basename(sourcePath);
             if (!(MUSIC_IMPORT_EXTENSIONS as readonly string[]).includes(extname(name).slice(1).toLowerCase())) { failures.push({ index, reason: `${name}: a track is WAV, MP3, M4A or FLAC` }); continue; }
-            const outcome = await fileArtifact(store, {
+            const outcome = await fileArtifact(store, { ...(importSpace ? { importSpace } : {}),
               sourcePath,
               ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
               abandoned: () => !this.stillOpen(store) || this.stopping,
@@ -18742,6 +19106,7 @@ export class Coordinator {
         if (msg.editor) {
           try {
             const failures = await importEditorMedia(store, chosen, msg.editor, {
+              ...(importSpace ? { importSpace } : {}),
               ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
               ...(this.opts.takePosterMaker ? { poster: this.opts.takePosterMaker } : {}),
               onPosterUnavailable: (artifactId, reason) => {
@@ -18764,7 +19129,7 @@ export class Coordinator {
         for (const [index, sourcePath] of chosen.entries()) {
           if (!this.stillOpen(store)) return;
           if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
-          const outcome = await fileArtifact(store, {
+          const outcome = await fileArtifact(store, { ...(importSpace ? { importSpace } : {}),
             sourcePath,
             // Measured as it is filed (#283): an artifact is immutable, so its length and whether
             // it carries audio are true once and true forever.
@@ -20669,6 +21034,91 @@ export class Coordinator {
         await this.emitHarnessStatus();
         return;
       }
+      case "check-onboarding": {
+        if (!this.appSettings || !this.opts.appRoot) return;
+        await this.emitHarnessStatus();
+        await this.measureRuntime();
+        await this.setup?.detect();
+        const workspace = await checkOnboardingWorkspace(this.opts.appRoot);
+        const settings = await this.appSettings.load();
+        if (this.stopping) return;
+        const plan = settings.onboarding ?? NEW_ONBOARDING;
+        let localModel: import("@arke-studio/contracts").OnboardingStatus["localModel"] = null;
+        if (plan.writing === "local" && plan.modelId && this.opts.ollama?.service.status().state === "ready") {
+          const model = this.opts.manifest?.models.find(m => m.id === plan.modelId);
+          const installed = onboardingComponents(plan, this.setup?.status().components ?? []).filter(c => c.engine === "ollama");
+          if (model && installed.length && installed.every(c => c.state === "ready" || c.state === "present")) {
+            const endpoint = this.opts.ollama.service.baseUrl();
+            localModel = { modelId: plan.modelId, endpoint, ready: false, detail: "Checking the downloaded writing model…" };
+            this.emit({ at: this.nowIso(), type: "onboarding.changed", onboarding: { plan, workspace, localModel } });
+            const check = (async () => {
+              const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
+              try { await this.opts.ollama!.service.checkLocalModel(model.providerModelId ?? model.id, this.runtimeStop.signal); }
+              finally { release(); }
+            })();
+            this.backgroundWork.add(check);
+            try { await check; localModel = { modelId: plan.modelId, endpoint, ready: true, detail: "The writing model responded successfully." }; }
+            catch (error) { localModel = { modelId: plan.modelId, endpoint, ready: false, detail: describeCoordinatorError(error) }; }
+            finally { this.backgroundWork.delete(check); }
+          }
+        }
+        if (this.stopping) return;
+        // A long model check must never move a newer choice back to an older step.
+        const current = (await this.appSettings.load()).onboarding ?? NEW_ONBOARDING;
+        if (current.modelId !== plan.modelId || current.writing !== plan.writing || current.harness !== plan.harness) return;
+        this.emit({ at: this.nowIso(), type: "onboarding.changed", onboarding: { plan: current, workspace, localModel } });
+        if (localModel?.ready && current.modelId) {
+          const model = this.opts.manifest?.models.find(m => m.id === current.modelId);
+          const selected = model && await this.validateLanguageModel(harnessModelReference({ provider: model.provider, id: model.providerModelId ?? model.id }));
+          if (selected?.sessionModel && !selected.reason) {
+            const updated = await this.appSettings.setOnboarding(current, selected.sessionModel);
+            this.agentOverrides = updated.agents; this.refreshAgents(updated.agents); this.transport.broadcastSnapshot();
+          }
+        }
+        return;
+      }
+      case "save-onboarding": {
+        if (!this.appSettings || !this.opts.appRoot || this.stopping) return;
+        const refuse = (reason: string) => this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason });
+        const plan: OnboardingPlan = { ...msg.plan, step: msg.action === "finish" ? "done" : msg.action === "install" ? "progress" : msg.plan.step };
+        if (msg.action !== "save" && plan.persona === null) return refuse("Choose how you want to set up Arke.");
+        if (msg.action === "save" && plan.step === "done") return refuse("Use Start using Arke to finish setup.");
+        const workspace = msg.action === "save" ? this.readModel.getState().app.onboarding?.workspace ?? null
+          : await checkOnboardingWorkspace(this.opts.appRoot);
+        if (msg.action !== "save" && !workspace?.ready) return refuse(workspace?.detail ?? "Check your Arke folder before continuing.");
+        if (msg.action === "install") {
+          const reason = validateOnboardingPlan(plan, this.readModel.getState().app);
+          if (reason) return refuse(reason);
+        }
+        if (plan.writing !== "none") {
+          const available = await this.harnessAvailability();
+          if (!available.some(h => h.id === plan.harness && h.installed)) return refuse("That assistant is no longer available. Choose another or set up writing later.");
+        }
+        if (this.stopping) return;
+        const app = this.readModel.getState().app;
+        let writingModel: string | undefined;
+        if (msg.action !== "save" && onboardingWritingReadiness(app, plan).ready && plan.modelId) {
+          const model = onboardingWritingModels(app, plan).find(m => harnessModelReference(m) === plan.modelId ||
+            this.opts.manifest?.models.some(entry => entry.id === plan.modelId && (entry.providerModelId ?? entry.id) === m.id));
+          if (model) {
+            const selected = await this.validateLanguageModel(harnessModelReference(model));
+            if (!selected.reason) writingModel = selected.sessionModel;
+          }
+        }
+        const settings = await this.appSettings.setOnboarding(plan, writingModel);
+        this.agentOverrides = settings.agents;
+        this.refreshAgents(settings.agents);
+        await this.emitHarnessStatus();
+        const localModel = app.onboarding?.localModel?.modelId === plan.modelId ? app.onboarding.localModel : null;
+        this.emit({ at: this.nowIso(), type: "onboarding.changed", onboarding: { plan, workspace, localModel } });
+        this.transport.broadcastSnapshot();
+        if (msg.action === "install" && this.setup) {
+          for (const component of onboardingComponents(plan, this.setup.status().components)) this.setup.installClosure(component.id);
+          await this.setup.run();
+          if (!this.stopping) await this.setup.run();
+        }
+        return;
+      }
       case "set-harness-engine": {
         if (!this.appSettings) return;
         const harnesses = await this.harnessAvailability();
@@ -20916,7 +21366,7 @@ export class Coordinator {
   private async fileGenesisAttachments(dir: string, store: WorldStore): Promise<void> {
     try {
       for (const sourcePath of await sandboxAttachments(dir)) {
-        const outcome = await fileArtifact(store, { sourcePath,
+        const outcome = await fileArtifact(store, { ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}), sourcePath,
           ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
           abandoned: () => this.stopping,
         });
@@ -21969,7 +22419,7 @@ export class Coordinator {
   ): Promise<string | null> {
     const store = this.opts.provider.openStore?.();
     if (!store || store.worldId !== worldId) return null;
-    const outcome = await fileArtifact(store, {
+    const outcome = await fileArtifact(store, { ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
       sourcePath,
       // Measured once, at the moment the bytes land, rather than by every reader afterwards (#283).
       ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
@@ -22743,6 +23193,7 @@ export class Coordinator {
       activePlans: (productionId) => this.activeScenePlans(store, productionId),
       ...(this.opts.pickFiles ? { pickFiles: this.opts.pickFiles } : {}),
       ...(this.opts.pickFolder ? { pickFolder: this.opts.pickFolder } : {}),
+      ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
       ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
       extractArtifact: (artifactId, mutation) =>
         this.extractArtifactForConversationAction(store, artifactId, mutation),
@@ -22764,7 +23215,8 @@ export class Coordinator {
             exportWorld: async (actionId) => {
               const exportId = `${store.getBundle().meta.slug}-${actionId}`;
               const target = join(this.opts.appRoot!, "exports", exportId);
-              await exportWorld(store.dir, target);
+              await store.ownedRead(() => exportWorld(store.dir, target, { fileSpace: this.exportFileSpace,
+                signal: AbortSignal.any([store.closingSignal, this.runtimeStop.signal]) }));
               void this.appLog?.append({ kind: "world-export.done", exportId });
               return { id: exportId };
             },
@@ -23396,7 +23848,18 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    this.recoveryActions.closeAdmission();
+    for (const detach of this.recoveryTargetObservers.values()) detach(); this.recoveryTargetObservers.clear();
+    const systemResourcesStopped = this.opts.systemResources?.stop();
+    this.opts.storageHealth?.closeAdmission();
+    this.opts.recoveryControl?.closeAdmission();
+    this.opts.recoveryHistory?.closeAdmission();
+    // Presentation handlers are part of activeMessages. Start their bounded drain now, before
+    // waiting for those handlers, so stalled nonessential I/O cannot prevent native cleanup.
+    const historyStopped = this.opts.recoveryHistory?.stop();
+    const studioStopped = this.studioAssistantHost?.stop();
     this.sampleInstallAbort?.abort();
+    this.worldImportAbort?.abort();
     const audioStudioStopped = this.audioStudioPreviews.stop();
     this.cataloguePreviews?.close();
     // A keyless command waiting on the catalogue would otherwise hold shutdown open: the
@@ -23406,6 +23869,8 @@ export class Coordinator {
     this.runtimeStop.abort(new Error("Local runtimes are stopping."));
     // Setup completion can be awaiting startup: cancel that wait before setup itself drains.
     this.opts.ollama?.service.beginShutdown();
+    this.opts.comfyui?.service.beginShutdown();
+    for (const supervisor of this.supervisors.values()) supervisor.quiesce();
     for (const controller of this.performanceGenerations.values()) controller.abort();
     for (const controller of this.keyArtPromptDrafts.values()) controller.abort();
     this.keyArtPromptReviews.clear();
@@ -23416,7 +23881,7 @@ export class Coordinator {
       await this.chapterReviewService?.stop();
       await audioStudioStopped;
       await this.effectAnalysis.stop();
-      const setupStopped = this.setup?.dispose();
+      const setupStopped = Promise.allSettled([this.setup?.dispose()]);
       await this.adapterLibrary?.dispose();
       for (const dispose of this.lifecycleDisposers) dispose();
       this.lifecycleDisposers.clear();
@@ -23459,24 +23924,32 @@ export class Coordinator {
       await connectionsClosed;
       await Promise.allSettled(this.activeMessages);
       await this.openWorldTail;
-      await setupStopped;
+      const setupStops = await setupStopped;
       await Promise.all([...this.stagedClips.keys()].map((clipId) => this.dropStagedClip(clipId)));
 
       // Message handlers have now either committed their queue rows or recorded their refusal.
       // Only now may queue disposal cancel execution and suppress further journal transitions.
       await this.jobQueue?.dispose();
       this.opts.voice?.dispose?.();
-      await this.opts.comfyui?.service.dispose().catch(() => {});
+      const comfyUiStops = await Promise.allSettled([this.opts.comfyui?.service.dispose()]);
       await Promise.allSettled(this.backgroundWork);
       await Promise.allSettled(this.carrying.values());
       await this.appearanceWrite;
       await this.jobQueue?.waitForIdle();
       await this.jobQueue?.drain();
       await this.audiobookActivity.drain();
-      await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
+      const supervisedStops = await Promise.allSettled([...this.supervisors.values()].map(supervisor => supervisor.stopAndConfirm()));
       await this.opts.adapter?.dispose?.().catch(() => {});
       await this.releaseOllama();
-      const runtimeStops = await Promise.allSettled([this.opts.ming?.dispose(), this.opts.ollama?.service.dispose()]);
+      const runtimeStops = await Promise.allSettled([
+        this.opts.ming?.dispose().then(() => this.localGpu.confirmMingCleanup(AbortSignal.timeout(30_000))),
+        this.opts.ollama?.service.dispose(),
+      ]);
+      // The captured transport checks BOTH original native owners itself. Failed cleanup of
+      // either owner cannot be replaced by a successful stop of a newer process or HTTP client.
+      const studioRetirementStops = await Promise.allSettled([Promise.resolve().then(() => this.studioAssistantHost?.reconcileRetirement())]);
+      await historyStopped;
+      await studioStopped;
       await this.worldQuery.stop();
       // Provider close is the critical gate: it saves pending state and releases the world lock.
       this.engineClosed = true;
@@ -23489,8 +23962,13 @@ export class Coordinator {
       // called, so a fault recorded in the last moments of a run — the kind most worth having,
       // because the run ended — could still be in the queue when the process left.
       await this.appLog?.drain();
-      const failedRuntimeStops = runtimeStops.filter(result => result.status === "rejected");
+      const failedRuntimeStops = [...setupStops, ...comfyUiStops, ...runtimeStops, ...supervisedStops, ...studioRetirementStops].filter(result => result.status === "rejected");
       if (failedRuntimeStops.length) throw new AggregateError(failedRuntimeStops.map(result => result.reason), "Local runtime cleanup did not confirm exit.");
+      await this.opts.storageHealth?.stop();
+      await systemResourcesStopped;
+      // Admission closed synchronously above; owner settlement must remain available across
+      // a failed native stop so a later confirmed cleanup can resolve its retained intent.
+      await this.opts.recoveryControl?.stop();
     })();
     try {
       await this.stopPromise;

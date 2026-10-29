@@ -1,12 +1,14 @@
 import { mkdir, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
-import type { HarnessEngine } from "@arke-studio/contracts";
+import type { HarnessEngine, PrivateSessionRequest, PrivateSessionWriter } from "@arke-studio/contracts";
 import {
   credentialEnvPatch,
   discoverPreferredHarness,
   OpenCodeV2Adapter,
   OPENCODE2_PINNED_VERSION,
   v2BasicAuth,
+  privateWireBody,
   type DiscoveredHarness,
   type DiscoveryOptions,
 } from "@arke-studio/adapter-opencode";
@@ -23,10 +25,16 @@ import {
 } from "@arke-studio/adapter-claude";
 import { CodexAdapter, codexCredentialEnv, discoverCodex, type CodexDiscoveryOptions, type DiscoveredCodex } from "@arke-studio/adapter-codex";
 import type { CodexImageRunner } from "@arke-studio/providers";
-import { ChildSupervisor, type SupervisorDeps } from "../supervisor.js";
+import { ChildSupervisor, type SupervisedSpec, type SupervisorDeps } from "../supervisor.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { ownedChildHooks } from "./owned-child.js";
-import { HarnessRuntimeChanges } from "./runtime-change.js";
+import { HarnessRuntimeChanges, type HarnessRecoveryOwner } from "./runtime-change.js";
+import { ManagedStudioWriterTransport } from "./managed-writer-transport.js";
+import { executableContentMatches } from "./executable-content.js";
+import privateWriterPin from "./private-writer-pin.json" with { type: "json" };
+import type { OllamaEngineService } from "../local-ai/ollama.js";
+import type { StudioAssistantHostOptions } from "../studio-assistant/host.js";
+import { ManagedStudioProviderBridge } from "../studio-assistant/managed-provider-bridge.js";
 
 // This package owns shared desktop/dev composition, so every adapter is a runtime dependency.
 // Keep concrete adapter imports here; Coordinator itself consumes the HarnessAdapter contract.
@@ -94,7 +102,7 @@ export class HarnessPasswordHolder {
 /**
  * The redirected-profile environment (issue 327 §2): the spawned server sees an Arke-owned
  * state directory as its home, so the user's personal OpenCode logins cannot leak in and
- * shadow the credentials Arke injects. All four variables travel together deliberately —
+ * shadow the credentials Arke injects. Home, config, data, state and cache travel together —
  * which one the binary reads is its business, and the measured behavior (stored connections
  * vanish, env keys win) was verified with the full set.
  */
@@ -104,6 +112,25 @@ export function v2ProfileEnv(profileDir: string): Record<string, string> {
     USERPROFILE: profileDir,
     XDG_CONFIG_HOME: join(profileDir, ".config"),
     XDG_DATA_HOME: join(profileDir, ".local", "share"),
+    XDG_STATE_HOME: join(profileDir, ".local", "state"),
+    XDG_CACHE_HOME: join(profileDir, ".cache"),
+  };
+}
+
+/**
+ * This is Arke's private server even when Settings selects an existing executable. Ambient
+ * OPENCODE_* controls can redirect its DB/config, suppress its password handshake, or activate
+ * simulation/plugins; OTEL_* can export its logs/spans. Neither belongs to the inherited host
+ * configuration. Provider keys are supplied separately by credentialEnvPatch before spawn.
+ * This is launch configuration isolation, not a process sandbox or native-log erasure.
+ */
+export function v2LaunchEnv(profileDir: string, inherited: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  return {
+    ...Object.fromEntries(Object.entries(inherited).filter((entry): entry is [string, string] => entry[1] !== undefined &&
+      !/^(OPENCODE_|OTEL_)/i.test(entry[0]))),
+    ...v2ProfileEnv(profileDir),
+    OPENCODE_DISABLE_AUTOUPDATE: "1",
+    OTEL_SDK_DISABLED: "true",
   };
 }
 
@@ -165,6 +192,8 @@ export interface AssembleHarnessOptions {
   engine?: HarnessEngine;
   /** Ledger for orphan sweeps; absent in bare test hosts. */
   deps?: SupervisorDeps;
+  /** Native owner seam used by lifecycle acceptance fixtures; production uses ChildSupervisor. */
+  createSupervisor?: (spec: SupervisedSpec, deps: SupervisorDeps) => ChildSupervisor;
   v2?: DiscoveryOptions;
   /**
    * The bring-your-own harness, off unless asked for, and never a fallback: OpenCode is the
@@ -190,6 +219,9 @@ export interface AssembleHarnessOptions {
 }
 
 export interface AssembledHarness {
+  /** Host-only original bundled writer. No existing-install ownership or model approval. */
+  createPrivateWriter?(request: PrivateSessionRequest, signal?: AbortSignal): Promise<(PrivateSessionWriter & { ownerStopped(): boolean }) | null>;
+  recovery?: HarnessRecoveryOwner;
   reconfigureOllama?: (apply?: () => Promise<void>) => Promise<void>;
   harness: DiscoveredHarness | null;
   isV2: boolean;
@@ -203,6 +235,44 @@ export interface AssembledHarness {
    * stated once here so desktop and dev can never describe the same discovery differently.
    */
   logLines: string[];
+}
+
+/** Shared desktop/dev/Node composition. Only the existing bundled writer and managed,
+ * local-only Ollama owner can enter this route; Settings names never attest ownership. */
+export function managedStudioAssistant(wiring: AssembledHarness, service: OllamaEngineService): StudioAssistantHostOptions {
+  const destination = (model: string, provider: string) => {
+    if (process.platform !== "win32" || provider !== "ollama" || !model.startsWith("ollama/") || model.length <= 7 || model.length > 512 ||
+      !wiring.isV2 || wiring.harness?.discovery.source !== "bundled" || !wiring.createPrivateWriter) return null;
+    const writer = wiring.supervisor?.captureProcessOrigin(), owner = service.captureManagedOrigin();
+    if (!writer?.current() || !owner?.current()) return null;
+    return { local: true, identity: createHash("sha256").update(JSON.stringify(["managed-studio-local-v1", model, writer.identity, owner.process.identity])).digest("hex") };
+  };
+  return { destination, privateTransport: async (request, signal) => {
+    const captured = Object.freeze({ model: request.model, system: request.system, prompt: request.prompt, outputTokenLimit: request.outputTokenLimit, ...(request.variant !== undefined ? { variant: request.variant } : {}) });
+    const original = destination(captured.model, "ollama"), body = privateWireBody(captured);
+    if (!original || signal.aborted) throw new Error("The managed Studio destination is unavailable.");
+    const writer = await wiring.createPrivateWriter!(captured, signal);
+    if (!writer) throw new Error("The bundled Studio writer could not be qualified.");
+    let bridge: ManagedStudioProviderBridge;
+    const current = () => !signal.aborted && writer.current() && destination(captured.model, "ollama")?.identity === original.identity;
+    try {
+      if (!current()) throw new Error("The managed Studio destination changed.");
+      bridge = new ManagedStudioProviderBridge(service, { model: body.model, requestBody: JSON.stringify(body) });
+    } catch (error) { writer.seal(); await writer.close(); throw error; }
+    let route: Awaited<ReturnType<ManagedStudioProviderBridge["start"]>> | undefined;
+    return {
+      writer,
+      async prepare(admission) {
+        if (!current()) throw new Error("The managed Studio destination changed.");
+        route = await bridge.start(AbortSignal.any([signal, admission]));
+        if (!current()) throw new Error("The managed Studio destination changed.");
+      },
+      get configuration() { if (!route) throw new Error("The managed Studio route is not ready."); return { baseURL: route.baseURL, apiKey: route.apiKey }; },
+      get identity() { if (!route) throw new Error("The managed Studio route is not ready."); return route.identity; },
+      approve: () => current() && bridge.approve(), seal: () => bridge.seal(), stop: () => bridge.stop(),
+      ownersStopped: () => writer.ownerStopped() && bridge.ownerStopped(),
+    };
+  } };
 }
 
 /**
@@ -259,7 +329,10 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
       logLines: [`Codex ${found.version}: ${found.source}, private app-server with confined Arke tools`],
     };
   }
-  const discovery = await discoverPreferredHarness(opts.v2 ? { v2: opts.v2 } : {});
+  const profileDir = harnessProfileDir(opts.appRoot);
+  // Even --version initializes native paths. Discovery must not touch the personal profile.
+  const launchEnv = v2LaunchEnv(profileDir);
+  const discovery = await discoverPreferredHarness({ v2: { ...opts.v2, env: launchEnv } });
   const harness = discovery.found;
   if (!harness && discovery.rejectedV2) {
     const rejected = discovery.rejectedV2;
@@ -272,7 +345,6 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
   }
   const isV2 = harness?.generation === "v2";
   const password = new HarnessPasswordHolder();
-  const profileDir = harnessProfileDir(opts.appRoot);
   if (isV2) {
     await mkdir(profileDir, { recursive: true });
     await retireGeneratedOllamaModels(profileDir);
@@ -297,22 +369,22 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
   };
   await configureOllama();
 
-  const supervisor = new ChildSupervisor(
+  const supervisor = (opts.createSupervisor ?? ((spec, deps) => new ChildSupervisor(spec, deps)))(
     {
       id: "opencode",
       command: harness?.discovery.command ?? null,
       args: ["serve", "--port", "{port}", "--hostname", "127.0.0.1"],
       // Real keys arrive via relaunchHarness before the first spawn (SPEC-005 D5); v2 also
       // gets the redirected profile so no personal OpenCode login can shadow them (§2).
-      // An inherited password suppresses the stdout handshake. This is Studio's private
-      // server, so personal server credentials must not determine its authentication.
+      // Runtime controls, telemetry exports and profile paths also belong to this launcher.
       inheritEnv: false,
-      env: {
-        ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined &&
-            !["OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME"].includes(entry[0].toUpperCase()))),
-        ...v2ProfileEnv(profileDir),
-      },
+      env: launchEnv,
       healthPath: "/api/info",
+      validateHealth: async response => {
+        const info = await response.json() as { version?: unknown; pid?: unknown };
+        return info.version === OPENCODE2_PINNED_VERSION && typeof info.pid === "number" && Number.isSafeInteger(info.pid) && info.pid > 0
+          ? true : { ok: false, reason: "OpenCode did not report the supported server protocol. Review its installation." };
+      },
       readyTimeoutMs: 30_000,
       healthHeaders: password.healthHeaders, onStdoutLine: password.onStdoutLine,
     },
@@ -329,6 +401,11 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
       })
     : null;
   const adapter = rawAdapter === null ? null : runtimeChanges.wrap(rawAdapter);
+  let adapterGeneration = supervisor.spawnEpoch;
+  supervisor.on("status", event => { if (event.status === "starting") adapterGeneration = supervisor.spawnEpoch; });
+  supervisor.on("process-exit", ({ generation }: { generation: number }) => {
+    if (generation === adapterGeneration) rawAdapter?.runtimeExited();
+  });
 
   const logLines: string[] = [];
   if (harness) {
@@ -344,6 +421,20 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     isV2,
     supervisor,
     adapter,
+    createPrivateWriter: async (request, signal = AbortSignal.timeout(10_000)) => {
+      if (process.platform !== "win32" || !harness || harness.discovery.source !== "bundled") return null;
+      const captured = Object.freeze({ model: request.model, system: request.system, prompt: request.prompt, outputTokenLimit: request.outputTokenLimit, ...(request.variant !== undefined ? { variant: request.variant } : {}) });
+      const origin = supervisor.captureProcessOrigin(), secret = password.current();
+      if (!origin || !secret || origin.executable !== harness.discovery.command || baseUrl() !== `http://127.0.0.1:${origin.port}`) return null;
+      const current = () => origin.current() && password.current() === secret && baseUrl() === `http://127.0.0.1:${origin.port}`;
+      if (privateWriterPin.version !== OPENCODE2_PINNED_VERSION || privateWriterPin.arch !== "x64" ||
+        !await executableContentMatches(origin.executable, privateWriterPin, signal, current).catch(() => false) || signal.aborted || !current()) return null;
+      return new ManagedStudioWriterTransport({ origin, current,
+        authorization: v2BasicAuth(secret), request: captured });
+    },
+    ...(harness ? { recovery: { ownership: harness.discovery.source === "bundled" ? "managed" as const : "external" as const,
+      componentDigest: () => createHash("sha256").update(JSON.stringify([harness.generation, harness.discovery.command, harness.discovery.version, opts.ollamaEndpoint?.()])).digest("hex"),
+      reserve: (signal: AbortSignal) => runtimeChanges.reserveRecovery(signal) } } : {}),
     ...(harness ? { harnessInfo: harnessInfoFrom(harness) } : {}),
     // The PATCH form, deliberately: it names every managed variable, so a cleared key is a
     // deletion the merge honours rather than an omission it preserves.

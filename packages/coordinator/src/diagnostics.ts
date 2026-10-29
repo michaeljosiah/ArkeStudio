@@ -1,9 +1,17 @@
 import {
   CONTROL_REGISTRY,
   remedyAbsenceStatement,
+  RECOVERY_FACT_NAMES,
+  RECOVERY_HISTORY_LIMITS,
+  RECOVERY_POLICY,
+  RecoveryOutcomeSummarySchema,
+  RecoveryActionSummarySchema, RECOVERY_ACTION_HISTORY_LIMITS, type RecoveryActionSummary,
   type ClientState,
   type DiagnosticsSnapshot,
   type Finding,
+  type RecoveryHistory,
+  type RecoveryHistorySnapshot,
+  type RecoveryPolicySnapshot,
 } from "@arke-studio/contracts";
 import type { AppLog } from "./app-log.js";
 import { redactDeep, scrubAbsolutePaths, type SecretRegistry } from "./redact.js";
@@ -33,6 +41,7 @@ export async function buildDiagnosticsBundle(
   log: AppLog | null,
   registry: SecretRegistry,
   findings: DiagnosticsSnapshot | null = null,
+  recovery: { history: RecoveryHistory | null; audit: Pick<RecoveryHistorySnapshot, "audit" | "reason"> | null; policy: RecoveryPolicySnapshot | null } | null = null,
 ): Promise<Record<string, unknown>> {
   const bundle = {
     generatedAt: new Date().toISOString(),
@@ -54,6 +63,7 @@ export async function buildDiagnosticsBundle(
       ledgerUnavailable: state.app.ledgerUnavailable,
     },
     findings: findings === null ? null : exportedFindings(findings),
+    recovery: recovery === null ? null : exportedRecovery(recovery),
     // Deliberately absent: worlds, world names, sheets, canon, productions, file paths.
     recentLog: log ? await log.tail(100) : [],
   };
@@ -61,6 +71,47 @@ export async function buildDiagnosticsBundle(
   // rule this bundle used to satisfy by construction alone): subsystem text in the log tail
   // routinely embeds the install's own paths, and every one carries the account name.
   return scrubPathsDeep(redactDeep(bundle, registry)) as Record<string, unknown>;
+}
+
+/** SPEC-061 R-27: named operational fields only, then the same redaction/path boundary.
+ * Intent capabilities, local target mappings, session tokens and future fields stay private. */
+function exportedRecovery(input: NonNullable<Parameters<typeof buildDiagnosticsBundle>[4]>) {
+  const history = input.history, policy = input.policy;
+  return {
+    history: history === null ? null : {
+      audit: input.audit?.audit ?? "unavailable", ...(input.audit?.reason ? { reason: input.audit.reason } : {}),
+      version: history.version, lastObservedAt: history.lastObservedAt,
+      preferences: { transientMuted: history.preferences.transientMuted, desktopOptIn: history.preferences.desktopOptIn },
+      overflow: { coalescedObservations: history.overflow.coalescedObservations, prunedSummaries: history.overflow.prunedSummaries, lostDetail: history.overflow.lostDetail },
+      actionsAvailable: history.actions !== undefined,
+      actions: (history.actions ?? []).slice(0, RECOVERY_ACTION_HISTORY_LIMITS.maxActions).map(exportedAction),
+      incidents: history.incidents.slice(0, RECOVERY_HISTORY_LIMITS.maxIncidents).map(incident => ({
+        id: incident.id, resourceId: incident.key, kind: incident.kind, ...(incident.previousId ? { previousId: incident.previousId } : {}),
+        firstObservedAt: incident.firstObservedAt, lastObservedAt: incident.lastObservedAt, evidenceRevision: incident.evidenceRevision,
+        severity: incident.severity, phase: incident.phase, evidence: incident.evidence, ...(incident.resolution ? { resolution: incident.resolution } : {}),
+        everHeldWork: incident.everHeldWork, acknowledgedAt: incident.acknowledgedAt,
+        facts: incident.facts.filter(fact => RECOVERY_FACT_NAMES.includes(fact.name)).slice(0, 24).map(fact => ({ name: fact.name, value: fact.value, measuredAt: fact.measuredAt })),
+        notification: { lastAt: incident.delivery.lastAt, lastSeverity: incident.delivery.lastSeverity, lastPhase: incident.delivery.lastPhase, snoozedUntil: incident.delivery.snoozedUntil },
+      })),
+    },
+    policy: policy === null ? null : { audit: policy.audit, accepting: policy.accepting, mode: policy.mode, ...(policy.reason ? { reason: policy.reason } : {}),
+      targets: policy.targets.slice(0, RECOVERY_POLICY.maxTargets).map(target => ({ resourceId: target.key, service: target.service, stoppedByUser: target.stoppedByUser, circuitOpen: target.circuitOpen, pendingOutcome: target.pendingOutcome,
+        ...(target.lastOutcome ? { lastOutcome: exportedOutcome(target.lastOutcome) } : {}) })) },
+  };
+}
+
+function exportedOutcome(value: NonNullable<RecoveryPolicySnapshot["targets"][number]["lastOutcome"]>) {
+  const parsed = RecoveryOutcomeSummarySchema.safeParse({ action: value.action, automatic: value.automatic,
+    authorizedAt: value.authorizedAt, settledAt: value.settledAt, outcome: value.outcome });
+  return parsed.success ? parsed.data : { unavailable: true };
+}
+function exportedAction(row: RecoveryActionSummary) {
+  const parsed = RecoveryActionSummarySchema.safeParse({ id: row.id, resourceId: row.resourceId, action: row.action,
+    ...(row.service ? { service: row.service } : {}), automatic: row.automatic, authorizedAt: row.authorizedAt,
+    outcomeAt: row.outcomeAt, outcome: row.outcome, evidence: row.evidence,
+    ...(row.cleanup ? { cleanup: { removedFiles: row.cleanup.removedFiles, logicalBytes: row.cleanup.logicalBytes,
+      availableBefore: row.cleanup.availableBefore, availableAfter: row.cleanup.availableAfter, reclaimedBytes: row.cleanup.reclaimedBytes } } : {}) });
+  return parsed.success ? parsed.data : { unavailable: true };
 }
 
 /**

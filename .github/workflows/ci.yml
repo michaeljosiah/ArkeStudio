@@ -3,7 +3,7 @@
 # formatting check yet: 111 files predate the `format` script, and reformatting them is its own
 # decision.
 #
-# Coordinator tests run in four shards per platform; other workspaces have a separate job.
+# Coordinator tests run in eight shards per platform; other workspaces have a separate job.
 # See scripts/ci-test.mjs for measurements and the automatic discovery that preserves coverage.
 # The effect benchmarks (effects.yml) and the engine's package check (engine.yml) run in their own
 # workflows, on main and on pull requests that touch what they measure.
@@ -60,7 +60,7 @@ jobs:
         run: node --test scripts/ci-test-plan.test.mjs
 
   gate:
-    name: ${{ matrix.os }} · ${{ matrix.shard }}/4
+    name: ${{ matrix.os }} · ${{ matrix.shard }}/8
     runs-on: ${{ matrix.os }}
     # The script kills steps silent for ten minutes; this ceiling also bounds suites that
     # keep printing forever. Keep enough room for setup, healthy work and the silence guard.
@@ -72,7 +72,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: 1
     steps:
@@ -100,7 +100,7 @@ jobs:
         run: python -I -B scripts/test-ming-worker.py
 
       - name: Test
-        run: node scripts/ci-test.mjs ${{ matrix.shard }}/4
+        run: node scripts/ci-test.mjs ${{ matrix.shard }}/8
 
   workspaces:
     name: ${{ matrix.os }} · Other workspaces

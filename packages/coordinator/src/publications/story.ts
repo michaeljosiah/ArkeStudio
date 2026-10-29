@@ -19,6 +19,7 @@ import { checkedPublicationPath, readPublicationFile, requirePublicationDigest }
 import { applyStoryStyleChange, readStoryPublication, STORY_COMPILER, storyCompiler, storyDigest, type StoryAudioStudio } from "./story-review.js";
 import { renderStoryPdfBounded } from "./story-pdf-runner.js";
 import type { STORY_PDF_IDENTITY } from "./story-pdf.js";
+import type { ImportFileSpace } from "../storage/import-files.js";
 
 import { writeIllustratedEpub, readEpubPreview } from "./story-epub.js";
 import { illustrationName, type StoryIllustration } from "./story-illustrations.js";
@@ -49,7 +50,7 @@ export class StoryPublicationService {
   private readonly pdfWork = new Set<Promise<unknown>>();
   private stopping = false;
   private readonly verified = new Map<string, { expected: string; path: string; assertUnchanged(): Promise<void> }>();
-  constructor(private readonly root: string, private readonly options: { ffmpeg?: FfmpegRunner; probe?: MediaProbe } = {}) {}
+  constructor(private readonly root: string, private readonly options: { ffmpeg?: FfmpegRunner; probe?: MediaProbe; fileSpace?: ImportFileSpace } = {}) {}
   async stop(): Promise<void> {
     this.stopping = true;
     for (const controller of this.active.values()) controller.abort();
@@ -255,20 +256,24 @@ export class StoryPublicationService {
           const next = await readStoryPublication(store, productionId, settings, new Set(draft?.kept));
           if (next.identity !== identity) throw new Error("The source changed while it was being captured. Recheck and preview again.");
         } };
-      }, directory, { signal });
+      }, directory, { signal, fileSpace: this.options.fileSpace });
       try {
         const inputRoot = join(directory, "inputs");
         await mkdir(join(inputRoot, "artifacts"), { recursive: true });
         const paths = new Map<string, string>();
         const media: FrozenStory["media"] = [];
-        for (const [index, entry] of captured.receipt.media.entries()) {
-          const file = "artifacts/source-" + index + extname(entry.key).toLowerCase();
-          paths.set(entry.key, file);
-          await copyFile(captured.media[entry.key]!, join(inputRoot, file));
-          const handle = await open(join(inputRoot, file), "r+"); try { await handle.sync(); } finally { await handle.close(); }
-          requirePublicationDigest(await readPublicationFile(inputRoot, file, LIMIT, signal), entry);
-          media.push({ file, sha256: entry.sha256, byteLength: entry.byteLength });
-        }
+        const lease = await this.options.fileSpace?.reserve(inputRoot, captured.receipt.media.reduce((sum, entry) => sum + entry.byteLength + 64 * 1024, 0), signal, "exports");
+        try {
+          for (const [index, entry] of captured.receipt.media.entries()) {
+            const file = "artifacts/source-" + index + extname(entry.key).toLowerCase();
+            paths.set(entry.key, file);
+            await copyFile(captured.media[entry.key]!, join(inputRoot, file));
+            const handle = await open(join(inputRoot, file), "r+"); try { await handle.sync(); } finally { await handle.close(); }
+            await lease?.consumed(entry.byteLength);
+            requirePublicationDigest(await readPublicationFile(inputRoot, file, LIMIT, signal), entry);
+            media.push({ file, sha256: entry.sha256, byteLength: entry.byteLength });
+          }
+        } catch (error) { lease?.writeFailed(); throw error; } finally { await lease?.settle(); }
         let cover: FrozenStory["cover"] = null;
         if (settings.cover) {
           const file = paths.get(settings.cover)!;

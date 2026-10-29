@@ -214,6 +214,7 @@ describe("the gate hears the engine, not the provider flag (SPEC-033 R-9, R-13)"
       reverify: async () => {},
       subscribe: () => () => {},
       dispose: async () => {},
+      beginShutdown: () => {},
     } as unknown as ComfyUiEngineService;
     return { service, state };
   }
