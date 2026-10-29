@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
-import { Link } from "react-router";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { Link, useLocation } from "react-router";
 import type { ClientState, StudioAssistantThread, StudioCloudShare } from "@arke-studio/contracts";
 import { STUDIO_ASSISTANT_LIMITS, studioInterruptionMessage, privateSessionVariants } from "@arke-studio/contracts";
 import { StudioConversationClient, type StudioConversationView } from "../lib/studio-assistant.js";
@@ -9,6 +9,7 @@ import { useMediaQuery } from "../lib/media-query.js";
 import { useKeyboardInset } from "../lib/keyboard-inset.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { closeSystemPanel } from "../lib/system-panel.js";
+import { useActivityPanel } from "../lib/activity-panel.js";
 import { chatSurfaceForPage } from "../lib/global-chat.js";
 import { StudioAssistantContext } from "./studio-assistant-context.js";
 import { useGlobalChat } from "./global-chat-context.js";
@@ -43,16 +44,43 @@ export function StudioAssistantProvider({ children }: { children: ReactNode }) {
   useEffect(() => { client.setConnected(connection === "open" && !isRemoteSession()); }, [client, connection]);
   useEffect(() => { if (contextualView?.open) client.close(); }, [client, contextualView?.open]);
   useEffect(() => { if (view.open) closeSystemPanel(); }, [view.open]);
+  // The page Activity opened over: closed there, it gives the dialog back; closed by leaving, it does
+  // not. The page is read when Activity opens and closes, not watched: Activity closes itself after
+  // the page changes, and taking the new page then would hand Studio back over it.
+  const { pathname, search } = useLocation(), page = pathname + search, activity = useActivityPanel().open;
+  const activityOver = useRef(page);
+  useEffect(() => { if (activity) activityOver.current = page; else client.comeBack(activityOver.current === page); }, [client, activity]);
   return <StudioAssistantContext.Provider value={client}>
     {children}
+    {/* Back to its one way in. Handed back by Activity, the dialog reopens with nothing focused
+        behind it — Activity's Close has gone — and its own record of the opener is the page. */}
     <PageSheet open={view.open} onClose={client.close} title="Arke — Studio assistant" headless modeless={!compact} preserveReturnFocus className="fy-studio-assistant"
-      style={{ "--studio-keyboard": `${keyboard}px` } as CSSProperties}>
+      returnFocus={() => document.querySelector<HTMLElement>("[data-studio-chat-trigger]")} style={{ "--studio-keyboard": `${keyboard}px` } as CSSProperties}>
       <div className="fy-studio-dialog"
-        onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); client.close(); } }}>
+        onKeyDown={event => {
+          if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); client.close(); }
+          else if (event.key === "Tab" && compact && !event.defaultPrevented) wrapTab(event);
+        }}>
         <StudioAssistantView view={view} client={client} appState={state} model={model} modelSet={view.model !== undefined} pickModel={client.pickModel} />
       </div>
     </PageSheet>
   </StudioAssistantContext.Provider>;
+}
+
+/** The native modal let Shift+Tab from the first control leave for the document once before coming
+ * back (turn 239 check); 239's fixture wraps at both ends. The heading the dialog opens on is out of
+ * the sequence, so Shift+Tab from it wraps too. A menu portaled beside this body handles its own Tab. */
+function wrapTab(event: KeyboardEvent<HTMLDivElement>): void {
+  const body = event.currentTarget, at = body.ownerDocument.activeElement;
+  if (!(at instanceof HTMLElement) || !body.contains(at)) return;
+  const order = [...body.querySelectorAll<HTMLElement>("*")], here = order.indexOf(at);
+  const stops = order.flatMap((element, index) => element.matches("a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [contenteditable=true], [tabindex]:not([tabindex='-1'])")
+    && element.closest("[hidden]") === null && (typeof element.checkVisibility !== "function" || element.checkVisibility()) ? [index] : []);
+  if (!stops.length) return;
+  const to = event.shiftKey ? here <= stops[0]! && order[stops.at(-1)!] : here >= stops.at(-1)! && order[stops[0]!];
+  if (!to) return;
+  event.preventDefault();
+  to.focus();
 }
 
 export function StudioAssistantView({ view, client, appState, model, modelSet = false, pickModel }: {

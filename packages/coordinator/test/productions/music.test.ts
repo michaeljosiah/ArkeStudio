@@ -357,10 +357,14 @@ describe("the render and Export → Arke Player (238h, R-8, R-15 – R-17)", () 
       await h.send({ kind: "music-track-update", worldId: WORLD_ID, productionId: slug, trackId: "harbour-bells", title: "Saltmouth Bells", lyrics: "Ring them low" });
       await h.send({ kind: "music-set-cover", worldId: WORLD_ID, productionId: slug, artifactId: BOARD });
       const exportId = "ap_01J9M000000000000000000001";
+      // Export uses the real clock, independently of the fixture world's clock. Allow midnight
+      // during the export without pinning this integration check to the day it was written.
+      const exportDay = new Date().toISOString().slice(0, 10);
       await h.send({ kind: "export-arke-player", worldId: WORLD_ID, productionId: slug, requestId: requestId(), exportId, options: { book: false, motion: false } });
       const answer = h.events.find((event): event is Exported => event.type === "arke-player.exported" && event.exportId === exportId);
       assert.ok(answer?.result.ok, JSON.stringify(answer?.result));
-      assert.equal(answer.result.file, `exports/the-undersong-${slug}-2026-10-25.zip`);
+      assert.ok([exportDay, new Date().toISOString().slice(0, 10)].includes(answer.result.edition));
+      assert.equal(answer.result.file, `exports/the-undersong-${slug}-${answer.result.edition}.zip`);
       assert.equal(answer.result.tracks, 1);
       const zip = join(h.worldDir, answer.result.file);
       assert.ok((await checkWorldPackageZip(zip)).ok);

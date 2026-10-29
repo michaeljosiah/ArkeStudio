@@ -29,7 +29,7 @@ export function productionPages(shape: { hasChapters: boolean; isEpisodic: boole
   // A graphic novel (SPEC-064 R-43): its pictures are its pages, so it has no audiobook to read.
   if (shape?.hasPages) return [
     ["", "Dashboard"], ["cast", "Cast"], ["story", "Develop"], ["overview", "Overview"],
-    ["story/chapters", "Chapters"], ["artifacts", "Artifacts"],
+    ["story/chapters", "Chapters"], ["story/pages", "Pages"], ["artifacts", "Artifacts"],
   ] as const;
   if (shape?.hasChapters) return [
     ["", "Dashboard"], ["cast", "Cast"], ["story", "Develop"], ["overview", "Overview"],

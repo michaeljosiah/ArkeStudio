@@ -42,6 +42,7 @@ import {
   WorldChatProductionOverviewActionSchema,
   WorldChatProductionProseStyleActionSchema,
   WorldChatProductionEpisodeScriptActionSchema,
+  WorldChatProductionComicScriptActionSchema,
   WorldChatProductionSceneActionSchema,
   WorldChatProductionSceneDeleteActionSchema,
   WorldChatProductionSceneOrderActionSchema,
@@ -1247,6 +1248,11 @@ const WORLD_CHAT_ACTION_REGISTRY = {
   "world-chat-production-episode-script": {
     kind: "world-chat-production-episode-script",
     schema: WorldChatProductionEpisodeScriptActionSchema,
+    ...action("production", "authored-diff", "proposal-manager", "authored-change", ["production-metadata"]),
+  },
+  "world-chat-production-comic-script": {
+    kind: "world-chat-production-comic-script",
+    schema: WorldChatProductionComicScriptActionSchema,
     ...action("production", "authored-diff", "proposal-manager", "authored-change", ["production-metadata"]),
   },
   "world-chat-production-season": {

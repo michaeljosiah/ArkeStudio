@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ulid, type ComicPage, type DomainEvent, type ManifestModel } from "@arke-studio/contracts";
+import { comicPageHash, ulid, type ComicPage, type DomainEvent, type ManifestModel } from "@arke-studio/contracts";
 import { createChapter, createProduction } from "../../src/productions/ops.js";
 import { changeComicPage, saveComicScript } from "../../src/productions/graphic-novel.js";
 import { IMAGE, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
@@ -53,6 +53,28 @@ describe("a comic page made (SPEC-064 R-22 – R-27)", () => {
       assert.equal(record.takes[0]!.id, made.take);
       assert.equal(record.making.length, 0);
       assert.deepEqual(record.accepted, {}, "made is not accepted");
+    }, { model: LETTERER }));
+
+  it("briefs the world's look in words, then the book's style, which a change only moves forward (R-18, R-21a)", () =>
+    withHarness(async (h) => {
+      const { production, page } = await book(h);
+      const brief = async () => {
+        await h.send({ kind: "quote-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id });
+        const quote = last(h.events, "comic.page-quote") as Quote;
+        assert.ok(quote.quote.ok, !quote.quote.ok ? quote.quote.reason : "");
+        return quote.quote;
+      };
+      const before = await brief();
+      const look = h.store()!.getBundle().artDirection.description;
+      assert.ok(before.brief.includes(`Look: ${look.replace(/\s+/g, " ").trim()}`), "the look's words, not its picture's path");
+      assert.doesNotMatch(before.brief, /\.png|Style:/);
+      await h.send({ kind: "set-comic-settings", worldId: WORLD_ID, productionId: production, settings: { style: { words: "Crime noir comic: solid black shapes and stark white.", preset: "noir" } } });
+      const after = await brief();
+      assert.match(after.brief, /Look: [^\n]+\n\nStyle: Crime noir comic: solid black shapes and stark white\./);
+      // A style is not the page's picture: a take made before it is still the page's (R-21a).
+      const settings = h.store()!.getBundle().productions.find((p) => p.meta.id === production)!.comic!;
+      const { style: _style, ...unstyled } = settings;
+      assert.equal(comicPageHash(page, settings, "baked"), comicPageHash(page, unstyled, "baked"));
     }, { model: LETTERER }));
 
   it("refuses baked lettering on a model that does not letter, and a price that moved", () =>

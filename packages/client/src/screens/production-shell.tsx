@@ -752,7 +752,10 @@ export function ProductionLayout() {
                   {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0), undefined, undefined, undefined, undefined, audioStudioRoute ? false : undefined)}
                   {compact && chapterRoute && <div className="fy-prodrail__chapters">{production?.chapters.filter(chapter => !chapter.retired).map(chapter => <NavLink key={chapter.id} to={`${base}/story/chapters/${encodeURIComponent(chapter.id)}`} className="fy-prodrail__chapter">{String(chapter.order).padStart(2,"0")} · {chapter.title}</NavLink>)}</div>}
                   {/* The reading (turn 146, SPEC-047 R-29): chapters read of those with prose, from the door's last answer. */}
-                  {shape?.hasPages ? null : item("story/audiobook", "Audiobook", audiobookCount, undefined, audioStudioRoute)}
+                  {/* A graphic novel's pictures are its pages (design turn 247): Pages in place of Audiobook. */}
+                  {shape?.hasPages
+                    ? item("story/pages", "Pages", String(production?.comicScripts?.reduce((count, entry) => count + entry.script.pages.length, 0) ?? 0))
+                    : item("story/audiobook", "Audiobook", audiobookCount, undefined, audioStudioRoute)}
                   <span className="fy-prodrail__section-divider" aria-hidden="true" />
                   {item("artifacts", "Artifacts", String(artifactCount))}
                 </>

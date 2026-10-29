@@ -459,13 +459,11 @@ describe("the book read while a long run goes on (2026-10-24)", () => {
     });
   });
 
-  it("answers a read whose world never comes as stalled, within the deadline, and says where it stuck", async (t) => {
+  it("answers a read whose world never comes as stalled, within the deadline, and says where it stuck", () => {
     let abandoned = false;
-    // CoalescedReads deliberately unrefs its deadline. The fake world below owns no I/O,
-    // so keep this test alive until both deadline replies arrive, as its unit test does.
-    const alive = setInterval(() => {}, 1_000);
-    t.after(() => clearInterval(alive));
-    await withHarness(async ({ root, events, send }) => {
+    // No keep-alive: the fake world below owns no I/O, so the stalled read's deadline is all that
+    // holds the loop open, and must (CoalescedReads keeps it ref'd).
+    return withHarness(async ({ root, events, send }) => {
       await ask(send, REQUEST);
       const answer = answers(events).at(-1);
       assert.equal(answer?.requestId, REQUEST);

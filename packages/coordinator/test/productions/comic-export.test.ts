@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { copyFile, readFile, writeFile } from "node:fs/promises";
+import { readComic, readWorldManifest } from "@arke-studio/contracts";
+import { exportArkePlayer } from "../../src/productions/arke-player-export.js";
+import { checkWorldPackageZip } from "../../src/productions/world-package.js";
+import type { FfmpegRunner } from "../../src/takes/export.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -78,9 +82,33 @@ describe("a graphic novel as a book (SPEC-064 R-41, R-47, R-49)", () => {
             await writeFile(join(h.worldDir, "artifacts", artifact.file), encodePng(solidImage(40, 60, [200, 190, 170, 255])));
           }
         }
-        await h.send({ kind: "export-comic", requestId: rid(), worldId: WORLD_ID, productionId: production, formats: ["cbz", "pdf"] });
+        await h.send({ kind: "export-comic", requestId: rid(), worldId: WORLD_ID, productionId: production, formats: ["cbz", "pdf", "epub"] });
         const answer = last(h.events, "comic.exported")!.result;
         assert.ok(answer.ok, !answer.ok ? answer.reason : "");
+        // A fixed-layout EPUB: mimetype first, pre-paginated, read right to left, each page's alt text.
+        const epub = await openPromise(join(h.worldDir, answer.files.find((file) => file.format === "epub")!.file), { lazyEntries: true });
+        const read: Record<string, string> = {};
+        const order: string[] = [];
+        epub.readEntry();
+        await new Promise<void>((resolve, reject) => {
+          epub.on("entry", (entry) => {
+            order.push(entry.fileName);
+            epub.openReadStream(entry, (err, stream) => {
+              if (err) return reject(err);
+              const chunks: Buffer[] = [];
+              stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+              stream.on("end", () => { read[entry.fileName] = Buffer.concat(chunks).toString("utf8"); epub.readEntry(); });
+            });
+          });
+          epub.on("end", resolve);
+        });
+        epub.close();
+        assert.equal(order[0], "mimetype");
+        assert.equal(read["mimetype"], "application/epub+zip");
+        assert.match(read["OEBPS/content.opf"]!, /rendition:layout">pre-paginated/);
+        assert.match(read["OEBPS/content.opf"]!, /page-progression-direction="rtl"/);
+        assert.match(read["OEBPS/pages/0001.xhtml"]!, /alt="Maren on the rail\. Where are you\?"/);
+        assert.match(read["OEBPS/pages/0001.xhtml"]!, /width=40, height=60/);
         const cbz = answer.files.find((file) => file.format === "cbz")!.file;
         const zip = await openPromise(join(h.worldDir, cbz), { lazyEntries: true });
         const names: string[] = [];
@@ -91,6 +119,54 @@ describe("a graphic novel as a book (SPEC-064 R-41, R-47, R-49)", () => {
         const pdf = await readFile(join(h.worldDir, answer.files.find((file) => file.format === "pdf")!.file));
         assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
         assert.match(pdf.toString("latin1"), /\/Direction \/R2L/);
+      } finally { restore(); }
+    }, { model: LETTERER }));
+
+  it("makes an Arke Player package of its own: schema 7, a comic document, read back (SPEC-064 R-50)", () =>
+    withHarness(async (h) => {
+      const restore = reading([{ text: "WHERE ARE YOU?" }]);
+      try {
+        const { store, production, script, accept } = await book(h);
+        await setComicSettings(store, production, { reading: "rtl" });
+        for (const page of script) await accept(page);
+        for (const entry of store.getBundle().productions.find((p) => p.meta.id === production)!.comicPages ?? []) {
+          for (const take of entry.record.takes) {
+            const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === take.artifact)!;
+            await writeFile(join(h.worldDir, "artifacts", artifact.file), encodePng(solidImage(40, 60, [200, 190, 170, 255])));
+          }
+        }
+        // Fitting is ffmpeg's; here it copies the picture, as a picture already small enough is.
+        const ffmpeg = { run: async (args: string[]) => { await copyFile(args[args.indexOf("-i") + 1]!, args.at(-1)!); } } as unknown as FfmpegRunner;
+        const result = await exportArkePlayer(store, production, { clock: () => "2026-10-29T10:00:00.000Z", ffmpeg, exportId: "ap_01J00000000000000000000001", include: { book: false, motion: false }, studioVersion: "test" });
+        assert.ok(result.ok, result.ok ? "" : result.blockers.join("; "));
+        assert.equal(result.file, "exports/low-water-drawn-comic-2026-10-29.zip");
+        const checked = await checkWorldPackageZip(join(h.worldDir, result.file));
+        assert.ok(checked.ok, checked.ok ? "" : checked.problems.join("; "));
+        assert.equal(checked.manifest.schemaVersion, 7);
+        assert.equal(checked.manifest.productions[0]!.comic, "comic");
+        const json = await openPromise(join(h.worldDir, result.file), { lazyEntries: true });
+        const texts: Record<string, string> = {};
+        json.readEntry();
+        await new Promise<void>((resolve, reject) => {
+          json.on("entry", (entry) => {
+            if (!entry.fileName.endsWith(".json")) { json.readEntry(); return; }
+            json.openReadStream(entry, (err, stream) => {
+              if (err) return reject(err);
+              const chunks: Buffer[] = [];
+              stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+              stream.on("end", () => { texts[entry.fileName] = Buffer.concat(chunks).toString("utf8"); json.readEntry(); });
+            });
+          });
+          json.on("end", resolve);
+        });
+        json.close();
+        const manifest = readWorldManifest(texts["world.json"]!);
+        assert.ok(manifest.ok);
+        const comic = readComic(texts["comic.json"]!, manifest.manifest.assets);
+        assert.ok(comic.ok, comic.ok ? "" : comic.reason);
+        assert.equal(comic.document.reading, "rtl");
+        assert.deepEqual(comic.document.chapters.map((chapter) => [chapter.title, chapter.pages.length]), [["The tide", 2]]);
+        assert.equal(comic.document.chapters[0]!.pages[0]!.alt, "Maren on the rail. Where are you?");
       } finally { restore(); }
     }, { model: LETTERER }));
 });
