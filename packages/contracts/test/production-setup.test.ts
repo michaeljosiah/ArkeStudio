@@ -206,7 +206,7 @@ describe("conversational production setup (SPEC-012 §4)", () => {
   it("names a source on the wrong format, or one no longer in the world, as a problem", () => {
     const sourced = { ...draft(), source: { productionId: "juju" } };
     assert.deepEqual(productionSetupProblems(sourced, [], productions), []);
-    assert.match(productionSetupProblems({ ...sourced, kind: "music-video" }, [], productions).join(" "), /Adapt from is for a micro drama, a film or an audio drama/);
+    assert.match(productionSetupProblems({ ...sourced, kind: "music-video" }, [], productions).join(" "), /Adapt from is for a micro drama, a film, an audio drama or a graphic novel/);
     assert.deepEqual(productionSetupProblems({ ...sourced, kind: "audio-drama", scenes: [] }, [], productions), [], "an audio drama adapts a story too (SPEC-057 R-2)");
     assert.match(productionSetupProblems({ ...sourced, source: { productionId: "empty-book" } }, [], productions).join(" "), /no longer in this world/);
     // Without the world's productions only the format is checked: the client may not hold them yet.

@@ -156,3 +156,25 @@
 .fy-comic__side .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-comic__draftbar b { white-space: nowrap; }
 .fy-comic__draftbar > span:not(.grow) { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted-foreground); }
+/* A graphic novel's setup (design turn 249b): the question's example cards, and the one plan. */
+.fy-comic-ask { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 12px; }
+.fy-comic-ask__card { width: 132px; display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--foreground); text-align: left; cursor: pointer; font: var(--type-label); }
+.fy-comic-ask__card:hover:not(:disabled) { border-color: var(--foreground); }
+.fy-comic-ask__card:disabled { opacity: .5; cursor: default; }
+.fy-comic-ask__card span { font: var(--type-meta); color: var(--muted-foreground); }
+.fy-comic-ask__mini { position: relative; display: block; width: 60px; height: 84px; margin: 0 auto 4px; border-radius: 4px; background: var(--secondary); }
+.fy-comic-ask__mini u { position: absolute; border: 1.5px solid var(--neutral-400); border-radius: 2px; display: grid; place-items: center; font: var(--type-mono); font-size: 9px; text-decoration: none; color: var(--muted-foreground); }
+.fy-comic-plan { display: flex; flex-direction: column; gap: 10px; margin: 8px 0; }
+.fy-comic-plan__sub { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic-plan__facts { display: flex; flex-wrap: wrap; gap: 6px; }
+.fy-comic-plan__facts span { height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; display: inline-flex; align-items: center; gap: 6px; font: var(--type-label); }
+.fy-comic-plan__facts img { width: 14px; height: 21px; border-radius: 2px; object-fit: cover; }
+.fy-comic-plan__rows { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.fy-comic-plan__rows li { display: grid; grid-template-columns: 22px minmax(0, 1fr) 72px 64px; gap: 10px; align-items: center; min-height: 40px; padding: 4px 12px; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+.fy-comic-plan__rows li:first-child { border-top: 0; }
+.fy-comic-plan__rows li.is-pilot { background: color-mix(in srgb, var(--foreground) 4%, transparent); }
+.fy-comic-plan__rows small { display: block; font: var(--type-meta); color: var(--muted-foreground); }
+.fy-comic-plan__rows .n { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic-plan__rows .pg { font: var(--type-mono); font-size: var(--text-xs); text-align: right; }
+.fy-comic-plan__rows .lay { font: var(--type-meta); color: var(--muted-foreground); text-align: right; }
+.fy-comic-plan__note { margin: 0; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }

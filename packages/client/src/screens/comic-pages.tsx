@@ -193,9 +193,15 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const draftPage = draftPages?.find((candidate) => candidate.id === draftPageId) ?? draftPages?.[0];
   const [draftPanelId, setDraftPanelId] = useState<string | null>(null);
   const draftPanel = draftPage?.panels.find((candidate) => candidate.id === draftPanelId) ?? draftPage?.panels[0];
+  // An adapted book's chapter is drawn from the story's chapter it maps to (turn 249c), not its own empty prose.
+  const adaptedFrom = chapter ? settings.adapts?.chapters.find((entry) => entry.chapter === chapter.id) : undefined;
+  const sourceStory = adaptedFrom ? world.productions.find((candidate) => candidate.meta.id === settings.adapts!.story) : undefined;
+  const sourceChapter = adaptedFrom ? sourceStory?.chapters.find((candidate) => candidate.id === adaptedFrom.from) : undefined;
   const draftWithArke = () => {
     if (!chat || !chatSurface || !chapter) return;
-    chat.setValue(chatSurface.key, "draft", `Turn chapter ${chapter.order}, ${chapter.title}, into pages.`);
+    chat.setValue(chatSurface.key, "draft", sourceStory && sourceChapter
+      ? `Turn chapter ${chapter.order}, ${chapter.title}, into pages from chapter ${sourceChapter.order} of ${sourceStory.meta.title}.`
+      : `Turn chapter ${chapter.order}, ${chapter.title}, into pages.`);
     chat.open(chatSurface);
   };
 
@@ -279,7 +285,9 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
             // A chapter with no pages (turn 249c): Arke turns its prose into pages, or one is started by hand.
             <div className="fy-comic__empty">
               <h3>{chapter?.order} · {chapter?.title} has no pages</h3>
-              {chapter?.words !== undefined && <span className="m">{chapter.words.toLocaleString("en-GB")} words</span>}
+              {sourceStory && sourceChapter
+                ? <span className="m">From {sourceStory.meta.title} · chapter {sourceChapter.order}{sourceChapter.words !== undefined ? ` · ${sourceChapter.words.toLocaleString("en-GB")} words` : ""}</span>
+                : chapter?.words !== undefined && <span className="m">{chapter.words.toLocaleString("en-GB")} words</span>}
               <div className="fy-comic__emptyacts">
                 {chatSurface && <Button variant="primary" onClick={draftWithArke}><Sparkle size={14} />Draft with Arke</Button>}
                 <Button onClick={() => { const next = newPage(); edit([next]); setPageId(next.id); }}>+ Page</Button>

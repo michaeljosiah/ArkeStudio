@@ -10,7 +10,7 @@ import { GenesisBlueprintSchema } from "./genesis.js";
 import { GenesisDecisionSchema } from "./genesis-review.js";
 import { GenesisImageCandidateSchema, GenesisImageTargetSchema } from "./genesis-images.js";
 import { GenesisVoiceCandidateSchema } from "./genesis-voices.js";
-import { ProductionSetupStateSchema, ProductionSetupUpdateSchema } from "./production-setup.js";
+import { ProductionSetupStateSchema, ProductionSetupStatusSchema, ProductionSetupUpdateSchema } from "./production-setup.js";
 import {
   WorldChatInputConstraintsSchema, WorldChatInputEventSchemas, WorldChatInputPromotionSchema, WorldChatInputQueueViewSchema,
 } from "./world-chat-input.js";
@@ -1458,7 +1458,7 @@ export type WorldChatEventEnvelope = z.infer<typeof WorldChatEventEnvelopeSchema
  */
 export const WorldChatSummarySchema = z
   .object({
-    setupStatus: ProductionSetupStateSchema.shape.status.optional(),
+    setupStatus: ProductionSetupStatusSchema.optional(),
     id: ConversationIdSchema,
     title: z.string().min(1).max(200),
     status: WorldChatStatusSchema,
