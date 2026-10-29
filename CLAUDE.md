@@ -298,6 +298,14 @@ to the world's story release, pin it with ArkePlayer's `pin_world`, paste the pi
 as `story` — never `package`: a Player of revision 11 installs every production `package` and would
 fetch a story it cannot read — raise the `serial`, and publish the list.
 
+**A graphic novel as a package of its own** (SPEC-064 R-50, R-51; Player P20): the same four
+steps, made from the Pages screen's Export → Arke Player (or `exportArkePlayer` on the production).
+It makes `exports/<production-id>-comic-<UTC date>.zip`, schema 7 and alone: one `arke-comic`
+document and each accepted page, read back before it is named, and refused while any page is not
+accepted or its lettering not cleared. Upload it under that name, pin it with ArkePlayer's
+`pin_world`, paste the pin on the production as `comic` — never `package` or `story`: an older
+Player would fetch what it cannot read — raise the `serial`, and publish the list.
+
 **A picture comes with the list** (SPEC-058 R-63 – R-67): a world's key art, a story's wide cover
 (16:9) or its upright cover (2:3), new or changed, needs no app release.
 1. Upload it under a name of its own, `<world id>-<keyArt|picture|tall>-<yyyymmdd>.<ext>`, to the
