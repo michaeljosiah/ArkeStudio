@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { RoutingSchema, routingFindings } from "../src/routing.js";
-import { exploreStory, storyReplay, storyIdentity, storyEnding, storyVisibleBeats } from "../src/story-state.js";
+import { exploreStory, storyReplay, storyIdentity, storyEnding, storyLinkSteps, storyLinks, storyLoneChoice, storyVisibleBeats } from "../src/story-state.js";
 
 const routing = () => RoutingSchema.parse({
   schemaVersion: 2, version: 1, start: "sc_bore", facts: [{ id: "elsie", label: "Elsie Ward", type: "enum", values: ["Alive", "Lost"], default: "Alive" }],
@@ -104,5 +104,83 @@ describe("remembered story rules (SPEC-063)", () => {
     assert.notDeepEqual(storyReplay(r,uncovered.witnessPrefix).state,before.state,"the witness represents the other pre-state");
     const stale = { ...r, version: 2 };
     assert.equal(routingFindings(stale, [], [evidence]).filter(f => f.kind === "untraversed-edge" && f.choiceIds.includes("ch_manual")).length, 2);
+  });
+});
+
+/**
+ * A lone way (SPEC-063 R-11a, turn 246): a state with exactly one open choice and no closed choice
+ * shown with its reason. The routing below is First Contact's shape in small — scenes that run on
+ * by one way each, a crew member's fate decided at a choice of two, and a later scene whose second
+ * way opens only while that crew member lives — with First Contact's own words for its ways on.
+ */
+const firstContact = () => RoutingSchema.parse({
+  schemaVersion: 2, version: 4, start: "sc_fc-01", facts: [{ id: "elsie", label: "Elsie Ward", type: "enum", values: ["Alive", "Lost"], default: "Alive" }],
+  choices: [
+    { id: "ch_markers", from: "sc_fc-01", to: "sc_fc-02", label: "Go to the landing markers" },
+    { id: "ch_weeks", from: "sc_fc-02", to: "sc_fc-03", label: "Several weeks later" },
+    { id: "ch_wall", from: "sc_fc-03", to: "sc_fc-04", label: "Check the lower inspection wall" },
+    { id: "ch_landing", from: "sc_fc-04", to: "sc_fc-05", label: "Reach the evacuation landing" },
+    { id: "ch_return", from: "sc_fc-05", to: "sc_fc-06", label: "Return with Ana for Elsie" },
+    { id: "ch_seal", from: "sc_fc-05", to: "sc_fc-06", label: "Seal the shaft and leave Elsie", effects: [{ fact: "elsie", value: "Lost" }] },
+    { id: "ch_cage", from: "sc_fc-06", to: "sc_fc-07", label: "Check the jammed cage" },
+    { id: "ch_ask", from: "sc_fc-07", to: "sc_fc-08", label: "Ask Elsie for the bypass", when: { op: "eq", fact: "elsie", value: "Alive" } },
+    { id: "ch_board", from: "sc_fc-07", to: "sc_fc-08", label: "Reach the emergency control board" },
+  ],
+  endings: [{ sceneId: "sc_fc-08", title: "Above the Quiet" }], excluded: [], groups: [],
+});
+
+describe("a lone way plays through (SPEC-063 R-11a)", () => {
+  it("is the one open choice, unless a closed one is shown with its reason", () => {
+    const r = firstContact();
+    const alive = storyReplay(r).state, lost = storyReplay(r, ["ch_markers", "ch_weeks", "ch_wall", "ch_landing", "ch_seal"]).state;
+    assert.equal(storyLoneChoice(r.choices, "sc_fc-02", alive)?.id, "ch_weeks", "Several weeks later is the only way on");
+    assert.equal(storyLoneChoice(r.choices, "sc_fc-05", alive), undefined, "a choice of two is a decision");
+    assert.equal(storyLoneChoice(r.choices, "sc_fc-07", alive), undefined, "two open while Elsie lives");
+    assert.equal(storyLoneChoice(r.choices, "sc_fc-07", lost)?.id, "ch_board", "one open, the other hidden: a lone way");
+    const shown = r.choices.map(c => c.id === "ch_ask" ? { ...c, unavailable: { reason: "Elsie is lost." } } : c);
+    assert.equal(storyLoneChoice(shown, "sc_fc-07", lost), undefined, "a closed choice shown with its reason counts as one of the two");
+    assert.equal(storyLoneChoice(r.choices, "sc_fc-08", alive), undefined, "an ending has none");
+  });
+
+  it("names the links: lone in every state is a link; lone on some routes keeps its pill", () => {
+    const links = storyLinks(firstContact());
+    assert.deepEqual(Object.fromEntries([...links].sort()), {
+      ch_board: "sometimes", ch_cage: "always", ch_landing: "always", ch_markers: "always", ch_wall: "always", ch_weeks: "always",
+    });
+    const legacy = RoutingSchema.parse({ version: 1, start: "sc_a", choices: [
+      { id: "ch_on", from: "sc_a", to: "sc_b", label: "On" },
+      { id: "ch_left", from: "sc_b", to: "sc_c", label: "Left" }, { id: "ch_right", from: "sc_b", to: "sc_c", label: "Right" },
+    ], endings: [{ sceneId: "sc_c", title: "End" }], excluded: [], groups: [] });
+    assert.deepEqual([...storyLinks(legacy)], [["ch_on", "always"]], "a routing without story rules has links too");
+    const graph = exploreStory(firstContact(), { states: 3 });
+    assert.equal(graph.complete, false);
+    assert.ok(![...storyLinks(firstContact(), graph).values()].includes("always"), "an exploration cut short never vouches for every state");
+  });
+
+  it("tells a route's links from its choices in one walk, however long the route (codex on PR 2228)", () => {
+    const r = firstContact();
+    assert.deepEqual(storyLinkSteps(r, ["ch_markers", "ch_weeks", "ch_wall", "ch_landing", "ch_seal", "ch_cage", "ch_board"]), [true, true, true, true, false, true, true]);
+    assert.deepEqual(storyLinkSteps(r, ["ch_markers", "ch_weeks", "ch_wall", "ch_landing", "ch_return", "ch_cage", "ch_board"]).slice(-1), [false], "while Elsie lives the board is a choice");
+    assert.throws(() => storyLinkSteps(r, ["ch_weeks"]), /Invalid route/);
+    const n = 2000;
+    const chain = RoutingSchema.parse({ version: 1, start: "sc_c-0", choices: Array.from({ length: n }, (_, i) => ({ id: `ch_c-${i}`, from: `sc_c-${i}`, to: `sc_c-${i + 1}`, label: "On" })), endings: [{ sceneId: `sc_c-${n}`, title: "End" }], excluded: [], groups: [] });
+    const started = performance.now();
+    const steps = storyLinkSteps(chain, chain.choices.map((choice) => choice.id));
+    assert.equal(steps.length, n);
+    assert.ok(steps.every(Boolean));
+    assert.ok(performance.now() - started < 2000, "a 2,000-step route does not freeze an ending");
+  });
+
+  it("stays a step of the route: a link with effects replays, and its walk counts as a press's", () => {
+    const r = firstContact();
+    const prefix = ["ch_markers", "ch_weeks", "ch_wall", "ch_landing", "ch_seal", "ch_cage", "ch_board"];
+    assert.equal(storyReplay(r, prefix).sceneId, "sc_fc-08", "played-through links replay as steps");
+    const before = storyReplay(r, ["ch_markers"]), after = storyReplay(r, ["ch_markers", "ch_weeks"]);
+    const evidence = { ts: "2026-10-28T12:00:00.000Z", routingVersion: 4, choiceId: "ch_weeks", from: "sc_fc-02", to: "sc_fc-03", route: ["sc_fc-01", "sc_fc-02"], story: { identity: storyIdentity(r), prefix: ["ch_markers"], before: storyIdentity(before.state), after: storyIdentity(after.state), provenance: "human" as const } };
+    const scenes = Array.from({ length: 8 }, (_, i) => ({ id: `sc_fc-0${i + 1}` }));
+    const walked = routingFindings(r, scenes, [evidence]);
+    assert.ok(!walked.some(f => f.kind === "untraversed-edge" && f.choiceIds.includes("ch_weeks")), "Several weeks later, played through, is walked");
+    assert.ok(routingFindings(r, scenes).some(f => f.kind === "untraversed-edge" && f.choiceIds.includes("ch_weeks")), "and not before");
+    assert.ok(!walked.some(f => /lone|only one/i.test(f.detail)), "a lone way is not a finding");
   });
 });

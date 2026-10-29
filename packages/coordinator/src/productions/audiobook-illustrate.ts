@@ -80,6 +80,10 @@ export type RawIllustration = z.infer<typeof RawIllustrationSchema>;
 
 export interface IllustrateDeriverInput {
   title: string;
+  /** The end of the chapter's clock, including the final picture's hold. */
+  seconds: number;
+  /** Sentence positions remain estimates even when every take has a recorded length. */
+  estimated: boolean;
   /** The chapter's Mood line: light, colour and grain only (design turn 193, rule 9). */
   mood?: string;
   synopsis?: string;
@@ -113,12 +117,18 @@ export function buildIllustratePrompt(input: IllustrateDeriverInput, retryNote?:
   return `Choose where pictures go in the audiobook chapter below, and write each one's prompt. Each picture is shown from the sentence it starts at until the next picture: a still taken from those words, what they describe, seen by one camera. Answer with ONLY this JSON object:
 {"pictures": [{"at": "<the id of the sentence the picture starts at, as listed: p3.0#2>", "reason": "<place | arrives | leaves | action | object | time | feeling>", "title": "<two to five words naming it>", "frame": "<shot size and subject>", "inFrame": ["<key>", ...], "expressions": {"<key>": "<expression and gaze, in the words the prompt uses>"}, "details": [{"of": "<key>", "part": "<hands | forearm | ...>", "state": "<ease or tension>"}], "notInFrame": ["<key>", ...], "place": "<place key, or null>", "prompt": "<the picture>"}], "summary": "<one sentence on how you chose>"}
 
-WHERE THE PICTURES GO. Each is enforced mechanically after you answer.
+WHERE THE PICTURES GO. The cap, spacing and occupied sentences are enforced mechanically after you answer.
 - A picture goes wherever what we would see changes: a new place (place), someone arriving (arrives) or leaving (leaves), an action, an object that matters (object), a jump in time (time), a change of feeling (feeling). Name that reason in "reason".
 - It can start at any sentence, inside a block as well as at its start: a long block that moves from one thing to another can have several.
-- Fewer is better than a weak one. A conversation that holds still in one place may need none, and no picture illustrates a line of talk for its own sake.
+- Choose meaningful coverage rather than a fixed count or regular slideshow. In a long conversation, a reaction, gesture, consequential object or change in emotional power may warrant a new picture even without a change of place. Never invent an event just to fill time.
 - At most ${input.cap} pictures, in reading order. That is a ceiling, never an aim.
 - Pictures are at least ${PICTURE_PROPOSAL_GAP_SEC} seconds apart, and at least that from the ones that already stand${input.standing.length > 0 ? ` (at ${input.standing.map(mmss).join(", ")})` : ""}. A sentence with a picture on it is left alone.
+
+REVIEW THE HOLDS BEFORE ANSWERING. The chapter ends at ${mmss(input.seconds)} (${input.estimated ? "estimated duration where narration is missing" : "recorded narration duration"}); sentence positions on this clock are estimated. Combine your proposed starts with the pictures already standing, and check every interval, including the opening and the last picture through the chapter's end. An average or total count can conceal a long static stretch.
+- Infer the story's tone and the passage's pace from the words and reading note. As an editorial starting point, consider 30–60 seconds for a still; review every hold over 75 seconds and either add a meaningful view or retain it deliberately. These are review guides, not enforced limits or a quota.
+- Follow changing action in adventure; preserve setup and reveal in mystery and horror; allow anticipation and deliberate stillness in suspense; follow emotional turns in romance and drama; preserve the setup and timing of comedy; allow a clear tableau to breathe in contemplative writing. Let the actual passage override genre shorthand. Never show a discovery before its words reveal it.
+- Vary establishing views, character reactions and relevant details when the text supports them. A new angle must add meaning; a near duplicate does not solve a long hold. Do not assume camera movement, animation or portrait variants provide a new story moment.
+- Use the summary to explain the pacing choice and identify any deliberately retained hold over 75 seconds. If the cap or existing placements prevent better coverage, say so rather than claiming the count proves it is sufficient.
 
 EACH PICTURE is written to the rules below, for its own words: the sentence named in "at" and those after it until the next picture are the block the rules speak of, and the words around them are only where you are.
 ${briefRules(input.maxChars, input.never)}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
@@ -171,6 +181,8 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
   const raw = await deriver(
     {
       title: plan.chapter.title,
+      seconds: clock.total,
+      estimated: clock.estimated,
       ...(room.mood !== undefined ? { mood: room.mood } : {}),
       ...(room.synopsis !== undefined ? { synopsis: room.synopsis } : {}),
       blocks: plan.blocks.map((planned, index) => {

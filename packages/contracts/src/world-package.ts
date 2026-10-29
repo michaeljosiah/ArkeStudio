@@ -26,7 +26,7 @@ import { validateStoryProgram, type StoryProgram } from "./story-state.js";
 
 export const WORLD_MANIFEST_FILE = "world.json";
 export const WORLD_PACKAGE_FORMAT = "arke-world-package";
-export const WORLD_SCHEMA_VERSION = 6;
+export const WORLD_SCHEMA_VERSION = 7;
 export const LISTENING_MEDIA_TYPE = "application/vnd.arke.listening+json";
 export const LISTENING_FORMAT = "arke-listening";
 export const LISTENING_VERSION = 1;
@@ -43,6 +43,10 @@ export const MAX_MUSIC_TRACK_MS = 15 * 60_000;
 export const STORY_MEDIA_TYPE = "application/vnd.arke.story+json";
 export const STORY_FORMAT = "arke-story";
 export const STORY_VERSION = 1;
+/** A graphic novel's pages (SPEC-064 R-50): schema 7, published alone, read a page at a time. */
+export const COMIC_MEDIA_TYPE = "application/vnd.arke.comic+json";
+export const COMIC_FORMAT = "arke-comic";
+export const COMIC_VERSION = 1;
 
 /** A world's media, by the role it plays. */
 export const WORLD_BOOK_MEDIA_TYPES: readonly string[] = ["application/epub+zip"];
@@ -104,7 +108,9 @@ const ProductionV5Schema = z.object({ ...productionShape, listening: z.string().
 // Schema 6 lets a production be an interactive story: its story document in place of the others,
 // and its Tall cover beside its wide one (R-79).
 const ProductionV6Schema = ProductionV5Schema.extend({ story: z.string().optional(), tall: z.string().optional() }).strict();
-export type WorldProduction = z.infer<typeof ProductionV6Schema>;
+// Schema 7 lets a production be a graphic novel: its comic document in place of the others (SPEC-064 R-50).
+const ProductionV7Schema = ProductionV6Schema.extend({ comic: z.string().optional() }).strict();
+export type WorldProduction = z.infer<typeof ProductionV7Schema>;
 
 const manifestFields = {
   format: z.literal(WORLD_PACKAGE_FORMAT),
@@ -159,6 +165,7 @@ const ManifestV5Schema = z.object({
   alone: z.boolean().optional(),
 }).strict();
 const ManifestV6Schema = ManifestV5Schema.extend({ productions: z.array(ProductionV6Schema).max(64) }).strict();
+const ManifestV7Schema = ManifestV5Schema.extend({ productions: z.array(ProductionV7Schema).max(64) }).strict();
 
 export interface WorldManifest {
   schemaVersion: number;
@@ -207,10 +214,10 @@ export function readWorldManifest(source: string): WorldManifestRead {
   if (!Array.isArray(requires)) return notAPackage("requires is not a list");
   if (requires.length > 0) return newer(`requires ${requires.join(", ")}`);
 
-  const parsed = (version >= 6 ? ManifestV6Schema : version === 5 ? ManifestV5Schema : version === 4 ? ManifestV4Schema : version === 3 ? ManifestV3Schema : version === 2 ? ManifestV2Schema : ManifestV1Schema).safeParse(raw);
+  const parsed = (version >= 7 ? ManifestV7Schema : version === 6 ? ManifestV6Schema : version === 5 ? ManifestV5Schema : version === 4 ? ManifestV4Schema : version === 3 ? ManifestV3Schema : version === 2 ? ManifestV2Schema : ManifestV1Schema).safeParse(raw);
   if (!parsed.success) return refusedBy(parsed.error, "world.json");
-  // Every older manifest is a schema 6 one with less in it.
-  const manifest: z.infer<typeof ManifestV6Schema> = parsed.data;
+  // Every older manifest is a schema 7 one with less in it.
+  const manifest: z.infer<typeof ManifestV7Schema> = parsed.data;
   const guide = manifest.guide;
   if (manifest.productions.length === 0 && guide === undefined) return notAPackage("productions");
   if (version === 4) {
@@ -232,7 +239,9 @@ export function readWorldManifest(source: string): WorldManifestRead {
   }
   // Schema 6 exists for stories (R-79), as 5 does for production packages: music is still made at 5,
   // so a Player that reads 5 and not 6 is never kept from a package it could play.
-  if (version >= 6 && manifest.productions[0]!.story === undefined) return notAPackage("a schema 6 package is a story published alone");
+  if (version === 6 && manifest.productions[0]!.story === undefined) return notAPackage("a schema 6 package is a story published alone");
+  // Schema 7 exists for graphic novels (SPEC-064 R-50), so a Player that reads 6 is never kept from a story.
+  if (version >= 7 && manifest.productions[0]!.comic === undefined) return notAPackage("a schema 7 package is a comic published alone");
 
   const assetIds = Object.keys(manifest.assets);
   if (assetIds.length === 0 || assetIds.length > MAX_WORLD_ASSETS) return notAPackage("assets");
@@ -258,7 +267,7 @@ export function readWorldManifest(source: string): WorldManifestRead {
   for (const production of manifest.productions) {
     if (productionIds.has(production.id)) return notAPackage("production id or title");
     productionIds.add(production.id);
-    const { listening, music, story, tall } = production;
+    const { listening, music, story, tall, comic } = production;
     if (
       !role(production.picture, WORLD_PICTURE_MEDIA_TYPES) ||
       !role(tall, WORLD_PICTURE_MEDIA_TYPES) ||
@@ -266,7 +275,8 @@ export function readWorldManifest(source: string): WorldManifestRead {
       !role(production.narration, WORLD_NARRATION_MEDIA_TYPES) ||
       !role(listening, [LISTENING_MEDIA_TYPE]) ||
       !role(music, [MUSIC_MEDIA_TYPE]) ||
-      !role(story, [STORY_MEDIA_TYPE])
+      !role(story, [STORY_MEDIA_TYPE]) ||
+      !role(comic, [COMIC_MEDIA_TYPE])
     ) {
       return notAPackage(`production ${production.id} names an asset it cannot use`);
     }
@@ -275,12 +285,14 @@ export function readWorldManifest(source: string): WorldManifestRead {
     if (music !== undefined && (production.book !== undefined || production.narration !== undefined || listening !== undefined)) return notAPackage(`production ${production.id} names music beside a book or a narration`);
     // And a story is played on its own (R-79): its document in place of all of them.
     if (story !== undefined && (production.book !== undefined || production.narration !== undefined || listening !== undefined || music !== undefined)) return notAPackage(`production ${production.id} names a story beside a book, a narration or music`);
-    if (production.book === undefined && production.narration === undefined && listening === undefined && music === undefined && story === undefined) return notAPackage(`production ${production.id} has nothing to play`);
+    // A comic is read on its own (SPEC-064 R-50): its document in place of everything else.
+    if (comic !== undefined && (production.book !== undefined || production.narration !== undefined || listening !== undefined || music !== undefined || story !== undefined)) return notAPackage(`production ${production.id} names a comic beside something else`);
+    if (production.book === undefined && production.narration === undefined && listening === undefined && music === undefined && story === undefined && comic === undefined) return notAPackage(`production ${production.id} has nothing to play`);
   }
   // Every file is one the world uses (SPEC-048 R-13). A listening document's, a music document's, a
   // story's or a guide's files are known only once it is read, so with one the package check makes
   // this check instead.
-  if (guide === undefined && manifest.productions.every((production) => production.listening === undefined && production.music === undefined && production.story === undefined)) {
+  if (guide === undefined && manifest.productions.every((production) => production.listening === undefined && production.music === undefined && production.story === undefined && production.comic === undefined)) {
     const unused = assetIds.filter((assetId) => !used.has(assetId));
     if (unused.length > 0) return notAPackage(`unused assets ${unused.join(", ")}`);
   }
@@ -1036,4 +1048,66 @@ export function guideAssetIds(guide: GuideDocument): Set<string> {
 export function guideChapterNumber(guide: GuideDocument, place: GuideAfter | null | undefined): number | null {
   if (place == null) return null;
   return guide.productions.find((production) => production.id === place.production)?.chapters.find((chapter) => chapter.id === place.chapter)?.number ?? null;
+}
+
+// ---- The comic document (SPEC-064 R-50) -----------------------------------------------------------
+
+export const COMIC_PACKAGE_LIMITS = { chapters: 500, pages: 5000 } as const;
+const ComicDocumentPageSchema = z.object({ picture: SlugSchema, alt: text(4000), metadata: Ignorable }).strict();
+const ComicDocumentChapterSchema = z.object({ title: text(200), pages: z.array(ComicDocumentPageSchema).min(1).max(COMIC_PACKAGE_LIMITS.pages), metadata: Ignorable }).strict();
+export const ComicDocumentSchema = z.object({
+  format: z.literal(COMIC_FORMAT),
+  version: z.literal(COMIC_VERSION),
+  /** Page-turn either way, or one vertical scroll (SPEC-064 R-12, R-52). */
+  reading: z.enum(["ltr", "rtl", "scroll"]),
+  /** The page shape, as `2:3`. */
+  aspect: z.string().regex(/^[0-9]+(?:\.[0-9]+)?:[0-9]+(?:\.[0-9]+)?$/),
+  language: z.string().min(2).max(35),
+  chapters: z.array(ComicDocumentChapterSchema).min(1).max(COMIC_PACKAGE_LIMITS.chapters),
+  requires: z.array(z.unknown()).max(0).optional(),
+  metadata: Ignorable,
+}).strict();
+export type ComicDocument = z.infer<typeof ComicDocumentSchema>;
+export type ComicRead = { ok: true; document: ComicDocument } | { ok: false; refusal: WorldRefusal; reason: string };
+
+/**
+ * Reads a comic document (SPEC-064 R-50, R-51). A newer version, or one that requires what this
+ * reader does not know, is newer; a page whose picture is not a picture asset, or more pages than
+ * the limit, is not an Arke package. Panel boundaries are not carried: guided view is not built
+ * (R-52), and no field claims to supply them.
+ */
+export function readComic(source: string, assets: Readonly<Record<string, WorldAsset>>): ComicRead {
+  const notAPackage = (reason: string) => ({ ok: false as const, refusal: "not-a-package" as const, reason });
+  let json: unknown;
+  try {
+    json = JSON.parse(source);
+  } catch {
+    return notAPackage("the comic document is not JSON");
+  }
+  if (typeof json !== "object" || json === null || Array.isArray(json) || (json as Record<string, unknown>)["format"] !== COMIC_FORMAT) return notAPackage(`not an ${COMIC_FORMAT}`);
+  const raw = json as Record<string, unknown>;
+  const version = raw["version"];
+  if (typeof version !== "number" || !Number.isInteger(version)) return notAPackage("no version");
+  if (version > COMIC_VERSION) return { ok: false, refusal: "newer-arke", reason: `comic version ${version}` };
+  if (version !== COMIC_VERSION) return notAPackage(`comic version ${version}`);
+  const requires = raw["requires"] ?? [];
+  if (!Array.isArray(requires)) return notAPackage("requires is not a list");
+  if (requires.length > 0) return { ok: false, refusal: "newer-arke", reason: `requires ${requires.join(", ")}` };
+  const parsed = ComicDocumentSchema.safeParse(raw);
+  if (!parsed.success) return refusedBy(parsed.error, "the comic document");
+  let pages = 0;
+  for (const chapter of parsed.data.chapters) {
+    for (const page of chapter.pages) {
+      pages += 1;
+      const asset = assets[page.picture];
+      if (asset === undefined || !WORLD_PICTURE_MEDIA_TYPES.includes(asset.mediaType)) return notAPackage(`page ${pages} names a picture it cannot show`);
+    }
+  }
+  if (pages > COMIC_PACKAGE_LIMITS.pages) return notAPackage("pages");
+  return { ok: true, document: parsed.data };
+}
+
+/** Every asset a comic document names, so a package can be checked for files nothing uses. */
+export function comicAssetIds(document: ComicDocument): Set<string> {
+  return new Set(document.chapters.flatMap((chapter) => chapter.pages.map((page) => page.picture)));
 }

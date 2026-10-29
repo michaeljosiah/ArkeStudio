@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { formatMicroUsd, routingFindings, sceneBeats, type ProductionBundle, type RoutingFinding, type SceneBeat, type Sheet, type TableReadPlan, type WorldBundle } from "@arke-studio/contracts";
 import { InteractivePlayerView } from "../../components/interactive-player.js";
-import { unwalkedChoices } from "../../lib/branch-map.js";
+import { previewUnwalked, routingLinks, unwalkedChoices } from "../../lib/branch-map.js";
 import { listRoutingFindings, recordTraversal, subscribeRoutingFindings } from "../../lib/store.js";
 import { beatPreviewOptions } from "../branch-map.js";
 import { useProductionVoiceFiles, type LineVoice } from "./table-read.js";
@@ -113,9 +113,9 @@ export function VoiceLinesControl({
   );
 }
 
-/** How a beat moves on, as the row's chip says it. */
-export function advanceWord(advance: "voice" | "tap" | "hold", holdSec: number): string {
-  return advance === "voice" ? "after the voice" : advance === "tap" ? "on tap" : `hold ${holdSec}s`;
+/** How a beat moves on, as the row's chip says it: after the line or hold, never on tap (turn 246). */
+export function advanceWord(advance: "voice" | "hold", holdSec: number): string {
+  return advance === "hold" ? `hold ${holdSec}s` : "after the line";
 }
 
 /**
@@ -152,9 +152,11 @@ export function SceneBeatPreview({
     listRoutingFindings(worldId, productionId);
     return off;
   }, [worldId, productionId]);
+  // Choices, not links: a link is walked by playing through it (turn 246e).
   const unwalked = useMemo(() => {
-    if (served !== null) return [...unwalkedChoices(served)].sort();
-    return production.routing ? [...unwalkedChoices(routingFindings(production.routing, production.scenes, []))].sort() : [];
+    if (!production.routing) return [];
+    const links = routingLinks(production.routing);
+    return previewUnwalked(unwalkedChoices(served ?? routingFindings(production.routing, production.scenes, [])), links);
   }, [served, production.routing, production.scenes]);
   // The player's beats are the scene's beats in order, so a shot's first beat is its index there.
   const at = useMemo(() => {
