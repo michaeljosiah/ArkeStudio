@@ -35,7 +35,11 @@ export async function exportComicPlayer(store: WorldStore, productionId: string,
   if (blockers.length > 0) return { ok: false, blockers: blockers.slice(0, 500) };
   const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
   const book = comicBook(production);
-  const before = JSON.stringify([production.comic ?? null, production.comicScripts ?? null, production.comicPages ?? null]);
+  // What the book is made of, chapters' order and retirement included: comicBook picks and orders
+  // the pages by them, and a chapter moved meanwhile would ship in the old order (codex on PR 2229).
+  const state = (entry: typeof production) => JSON.stringify([entry.comic ?? null, entry.comicScripts ?? null, entry.comicPages ?? null,
+    entry.chapters.map((chapter) => [chapter.id, chapter.order, chapter.retired ?? false, chapter.title])]);
+  const before = state(production);
   const names = (sheet: string) => bundle.sheets.find((candidate) => candidate.id === sheet)?.name ?? sheet;
   const title = (options.publish?.title ?? production.meta.title).trim() || production.meta.title;
   const own = packageSlug(productionId);
@@ -115,7 +119,7 @@ export async function exportComicPlayer(store: WorldStore, productionId: string,
     // package rather than shipping the book as it was.
     return await store.gateOp(async () => {
       const now = store.getBundle().productions.find((entry) => entry.meta.id === productionId);
-      if (now === undefined || JSON.stringify([now.comic ?? null, now.comicScripts ?? null, now.comicPages ?? null]) !== before) {
+      if (now === undefined || state(now) !== before) {
         return { ok: false as const, blockers: ["the book changed while the package was made · make it again"] };
       }
       const destination = join(store.dir, "exports", name);
