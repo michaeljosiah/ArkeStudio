@@ -1,6 +1,9 @@
 /* A graphic novel's Pages (design turn 247, SPEC-064): the page strip, the page editor, the page
    with its takes and findings, the reader and Export. Type through the tokens only. */
-.fy-comic { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+/* Pages has the whole content area (turn 251a), as an audio drama's script does: not the 1,080
+   column `Screen` gives a page of reading. */
+.fy-comic-screen { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.fy-comic { display: flex; flex-direction: column; flex: 1; height: 100%; min-height: 0; }
 .fy-comic .grow { flex: 1; }
 .fy-comic .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-comic__head { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 20px; border-bottom: 1px solid var(--border); flex: none; }
@@ -16,6 +19,16 @@
 .fy-comic__strip { border-right: 1px solid var(--border); padding: 14px 12px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
 .fy-comic__thumb { position: relative; width: 100%; aspect-ratio: 2 / 3; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--secondary); padding: 0; cursor: pointer; flex: none; }
 .fy-comic__thumb.on { outline: 2px solid var(--foreground); outline-offset: 1px; }
+/* Making and Checking (turn 251b, 251c): a spinner on the page, on its thumbnail and in its button. */
+.fy-comic__spin { flex: none; display: inline-grid; place-items: center; animation: fy-comic-spin 900ms linear infinite; }
+@keyframes fy-comic-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .fy-comic__spin { animation: none; } }
+.fy-comic__thumb.busy { display: grid; place-items: center; }
+.fy-comic__thumb.busy img { position: absolute; inset: 0; opacity: .45; }
+.fy-comic__thumb.busy .fy-comic__spin { position: relative; color: var(--foreground); }
+.fy-comic__over { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: color-mix(in srgb, var(--background) 72%, transparent); font: var(--type-label); color: var(--foreground); }
+.fy-comic__over b { font-weight: 600; font-size: var(--text-sm); }
+.fy-comic__band { position: absolute; z-index: 3; left: 0; right: 0; bottom: 0; height: 30px; display: flex; align-items: center; justify-content: center; gap: 8px; background: color-mix(in srgb, var(--background) 86%, transparent); font: var(--type-label); color: var(--foreground); }
 .fy-comic__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .fy-comic__thumb .n { position: absolute; left: 5px; bottom: 4px; font: var(--type-mono); font-size: var(--text-2xs); color: var(--foreground); background: var(--background); border-radius: 4px; padding: 0 4px; }
 .fy-comic__thumb .s { position: absolute; right: 5px; top: 4px; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; background: var(--background); color: var(--success); }

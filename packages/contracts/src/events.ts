@@ -549,7 +549,10 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       ]),
     })
     .strict(),
-  /** A page being made (R-25): making, then made with its take, or failed by name. */
+  /**
+   * A page being made (R-25): making, then checking with the take that landed while its lettering is
+   * read (design turn 251c), then made with its take, or failed by name.
+   */
   z
     .object({
       ...base,
@@ -558,7 +561,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       page: UlidSchema,
-      state: z.enum(["making", "made", "failed"]),
+      state: z.enum(["making", "checking", "made", "failed"]),
       /** Which try of Try until it passes this is, from 1 (R-27). */
       attempt: z.number().int().min(1).optional(),
       /** Whether the take's lettering passed its check, once checked. */

@@ -56,6 +56,19 @@ describe("a page's lettering checked (SPEC-064 R-29 – R-33)", () => {
       assert.equal(record().takes[0]!.override?.reason, "Read it myself.");
     }, { model: LETTERER }));
 
+  it("says making, then checking with the landed take, then made (design turn 251)", () =>
+    withHarness(async (h) => {
+      const restore = readerAnswering([GOOD]);
+      try {
+        const { production, page, record } = await book(h);
+        await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, confirmedMicroUsd: 1_000_000 });
+        const states = h.events.filter((event): event is Extract<DomainEvent, { type: "comic.page-made" }> => event.type === "comic.page-made");
+        assert.deepEqual(states.map((event) => event.state), ["making", "checking", "made"]);
+        assert.equal(states[1]!.take, record().takes[0]!.id, "the take Pages shows while it is read");
+        assert.deepEqual(record().making, []);
+      } finally { restore(); }
+    }, { model: LETTERER }));
+
   it("accepts a passing take as it stands, and refuses one the script has moved past", () =>
     withHarness(async (h) => {
       const restore = readerAnswering([GOOD]);
