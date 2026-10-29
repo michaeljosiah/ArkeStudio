@@ -1,36 +1,50 @@
 import { lstat, mkdir, mkdtemp, realpath, rmdir, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BrowserMediaFilesSchema, type BrowserMediaFile } from "@arke-studio/contracts";
+import { BrowserMediaFilesSchema, browserMediaDecodedSize, type BrowserMediaFile } from "@arke-studio/contracts";
+import type { ImportFileLease, ImportFileSpace } from "../storage/import-files.js";
+import { createHash } from "node:crypto";
+
+export interface BrowserImportPayload { readonly digest: string; readonly bytes: number }
 
 /** One bounded batch per host. Authored filing still belongs to the existing world service. */
 export class BrowserMediaImports {
   private busy = false;
+  constructor(private readonly space?: ImportFileSpace) {}
 
-  async run<T>(files: readonly BrowserMediaFile[], abandoned: () => boolean, consume: (paths: string[]) => Promise<T>): Promise<T> {
+  async run<T>(files: readonly BrowserMediaFile[], abandoned: () => boolean, consume: (paths: string[], payloads: readonly BrowserImportPayload[]) => Promise<T>, signal?: AbortSignal): Promise<T> {
     if (this.busy) throw new Error("Another browser import is running. Wait for it to finish.");
     this.busy = true;
     let directory: string | undefined;
     let identity: Awaited<ReturnType<typeof lstat>> | undefined;
+    let lease: ImportFileLease | undefined;
     const paths: string[] = [], children: string[] = [];
+    const payloads: BrowserImportPayload[] = [];
     try {
       const checked = BrowserMediaFilesSchema.parse(files);
+      signal?.throwIfAborted();
       if (abandoned()) throw new Error("The world closed during import.");
       const base = await realpath(tmpdir());
       directory = await mkdtemp(join(base, "arke-browser-import-"));
       identity = await lstat(directory);
+      lease = await this.space?.reserve(directory, checked.reduce((sum, file) => sum + browserMediaDecodedSize(file.data), 0),
+        signal ?? new AbortController().signal, "working-files");
       for (const [index, file] of checked.entries()) {
+        signal?.throwIfAborted();
         if (abandoned()) throw new Error("The world closed during import.");
         const child = join(directory, String(index));
         await mkdir(child); children.push(child);
         const path = join(child, file.name);
         const bytes = Buffer.from(file.data, "base64");
         if (bytes.toString("base64") !== file.data) throw new Error(`${file.name}: invalid file bytes.`);
-        paths.push(path); await writeFile(path, bytes, { flag: "wx", mode: 0o600 });
+        signal?.throwIfAborted(); if (abandoned()) throw new Error("The world closed during import.");
+        paths.push(path); await writeFile(path, bytes, { flag: "wx", mode: 0o600 }); await lease?.consumed(bytes.length);
+        payloads.push(Object.freeze({ digest: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length }));
       }
-      if (abandoned()) throw new Error("The world closed during import.");
-      return await consume(paths);
-    } finally {
+      signal?.throwIfAborted(); if (abandoned()) throw new Error("The world closed during import.");
+      return await consume(paths, Object.freeze(payloads));
+    } catch (error) { lease?.writeFailed(); throw error; }
+    finally {
       try {
         if (directory && identity) {
           const current = await lstat(directory);
@@ -44,7 +58,7 @@ export class BrowserMediaImports {
           }
         }
       } catch { /* An externally replaced or inaccessible spool is no longer safe to remove. */ }
-      finally { this.busy = false; }
+      finally { try { await lease?.settle(); } finally { this.busy = false; } }
     }
   }
 }

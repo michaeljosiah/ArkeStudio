@@ -16,6 +16,7 @@ import { VOICE_PREVIEW_SCOPE } from "./voice.js";
 import { orderedShots } from "./scene-flow.js";
 import { PerformanceTargetSchema } from "./performance.js";
 import { clockTime, roughTime, type AudiobookVideoProgress } from "./audiobook-video.js";
+import { recoveryIncidentSummary } from "./recovery-incidents.js";
 import { audiobookActivityLive, audiobookJobRun, type AudiobookActivity } from "./audiobook-activity.js";
 
 /** The same names for running and completed work, resolved only inside its owning world (#1005). */
@@ -84,6 +85,7 @@ export type NeedsYouAction =
   | "open-proposal"
   | "open-world"
   | "review-extraction"
+  | "diagnostics"
   | "spend";
 
 export interface NeedsYouEntry {
@@ -97,7 +99,8 @@ export interface NeedsYouEntry {
     | "unreviewed-take"
     | "open-proposal"
     | "extraction-batch"
-    | "closed-world-attention";
+    | "closed-world-attention"
+    | "local-ai-incident";
   title: string;
   detail: string;
   /** Recency for within-class ordering. */
@@ -145,6 +148,19 @@ function shotLabel(scenes: readonly Parameters<typeof orderedShots>[0][], shotId
 
 export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
   const entries: NeedsYouEntry[] = [];
+
+  // These application-global facts remain visible when transient notices are muted. Existing
+  // job/credential entries keep their own controls; no incident click resumes or repairs work.
+  const history = state.app.recoveryHistory;
+  if (history?.audit === "unavailable") entries.push({ urgency: 2, kind: "local-ai-incident", title: "Recovery history is unavailable",
+    detail: "Current diagnostics remain available. Review storage and access before changing recovery settings.",
+    at: new Date(history.at).toISOString(), actions: ["diagnostics"], ref: "audit" });
+  for (const incident of history?.incidents ?? []) {
+    if (!["storage-pressure", "storage-control-unavailable", "component-disk-short", "comfyui-engine-unavailable"].includes(incident.kind) ||
+      incident.phase === "recovered" || ["recovering", "verifying"].includes(incident.phase) || ["unmeasured", "unknown"].includes(incident.severity)) continue;
+    entries.push({ urgency: incident.severity === "advisory" ? 3 : 2, kind: "local-ai-incident", ...recoveryIncidentSummary(incident),
+      at: new Date(incident.lastObservedAt).toISOString(), actions: ["diagnostics"], ref: incident.id });
+  }
 
   // Class 1 — unresolved spend: only the user can decide (D3). Global and precise (R-6).
   for (const job of state.app.jobs) {

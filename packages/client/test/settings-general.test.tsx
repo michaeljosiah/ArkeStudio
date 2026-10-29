@@ -175,11 +175,11 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
     const rows = [...screen.querySelectorAll(".fy-fact")];
     assert.deepEqual(
       rows.map((row) => row.querySelector(".fy-fact__what")?.textContent),
-      ["Images", "Video", "Text-to-Speech", "Music", "Language", "Narrator"],
+      ["Studio setup", "Images", "Video", "Text-to-Speech", "Music", "Language", "Narrator"],
     );
     // The select carries the source's mark in front of the value, and the state follows it in
     // the same cell rather than under it.
-    const video = rows[1]!;
+    const video = rows.find(row => row.querySelector(".fy-fact__what")?.textContent === "Video")!;
     assert.ok(video.querySelector(".ui-select--marked .fy-mark"), "the default's mark");
     assert.equal(video.querySelector(".fy-fact__is > .ui-select + .fy-fact__state")?.textContent, "this machine");
     // The capability copy — refs, frames, seconds — is the tile's on AI models, not this row's.

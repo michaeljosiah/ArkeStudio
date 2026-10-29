@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ZipFile } from "yazl";
 import { it } from "node:test";
 import type { VideoPublicationManifest } from "@arke-studio/contracts";
 import { writeZip, type ZipEntry } from "../../src/productions/zip.js";
-import { extractPublicationZip, writePublicationZip } from "../../src/publications/archive.js";
+import { copyPublicationDirectory, extractPublicationZip, writePublicationZip } from "../../src/publications/archive.js";
+import { AppStorageService } from "../../src/storage/service.js";
+import { ImportFileStorage, ImportStorageHeld } from "../../src/storage/import-files.js";
+import { JobArtifactStorage } from "../../src/storage/job-artifacts.js";
+import { toExtendedLength } from "../../src/world/paths.js";
 import { PublicationFileError } from "../../src/publications/files.js";
 import { publishPublication, type PublicationDeliveryRequest } from "../../src/publications/publish.js";
 import { verifyPublicationDirectory } from "../../src/publications/verify.js";
@@ -45,6 +49,69 @@ async function packageDirectory(root: string) {
 function request(format: PublicationDeliveryRequest["format"] = "directory"): PublicationDeliveryRequest {
   return { operationId: randomUUID(), publicationId, format, requestFingerprint: hash("request") };
 }
+
+it("publication copies share destination reservations with jobs and preserve existing creative output on a hold", { timeout: 30_000 }, async () => {
+  const root = await tempDir("arke-publication-capacity-"), destination = join(root, "destination"); await mkdir(destination);
+  const source = await packageDirectory(root), retained = join(destination, "previous-edition.zip"); await writeFile(retained, "KEEP PREVIOUS EDITION");
+  let now = Date.now(), roots: readonly { rootId: string; path: string }[] = [];
+  const GiB = 1024 ** 3, MiB = 1024 ** 2;
+  const storage = new AppStorageService({ appRoot: root, now: () => now, native: {
+    setRoots(value) { roots = value; }, async stop() {}, async probe(rootId) {
+      const exporting = roots.find(row => row.rootId === rootId)!.path.startsWith(destination);
+      return { state: "measured", source: "host-provided", limitations: [], capacity: { volumeId: exporting ? "export-volume" : "app-volume", mappingRevision: rootId,
+        measuredAt: ++now, availableBytes: exporting ? GiB + 3 * MiB : 100 * GiB, totalBytes: 200 * GiB } };
+    },
+  } });
+  const fileSpace = new ImportFileStorage(storage, "export"), jobs = new JobArtifactStorage(storage), signal = new AbortController().signal;
+  let competing: Awaited<ReturnType<JobArtifactStorage["reserve"]>> | undefined;
+  try {
+    competing = await jobs.reserve("another_job", [{ directory: destination, role: "generated-media", remainingBytes: 2 * MiB }], signal);
+    await assert.rejects(copyPublicationDirectory(source.directory, join(destination, "new-edition"), { fileSpace, signal }), error => error instanceof ImportStorageHeld && /Export is waiting/.test(error.message));
+    assert.deepEqual(await readdir(destination), ["previous-edition.zip"]);
+    assert.equal(storage.reservations.snapshot().records.length, 1, "export reconciliation does not settle a competing job");
+    assert.equal(await readFile(retained, "utf8"), "KEEP PREVIOUS EDITION");
+    await competing.settle(); now += 5001;
+    const copied = await copyPublicationDirectory(source.directory, join(destination, "new-edition"), { fileSpace, signal });
+    assert.equal(copied.manifestSha256, source.manifestSha256); assert.equal(storage.reservations.snapshot().records.length, 0);
+    assert.equal(await readFile(retained, "utf8"), "KEEP PREVIOUS EDITION");
+    assert.equal((await verifyPublicationDirectory(source.directory)).manifestSha256, source.manifestSha256);
+  } finally { await competing?.settle(); await storage.stop(); }
+});
+
+it("ZIP extraction admits its pinned input and expanded extent on the actual scratch volume", { timeout: 30_000 }, async () => {
+  const root = await tempDir("arke-publication-extraction-space-"), scratch = join(root, "scratch"), target = join(root, "scratch-target");
+  await mkdir(target); await symlink(target, scratch, process.platform === "win32" ? "junction" : "dir");
+  const scratchPhysical = toExtendedLength(await realpath(scratch));
+  const source = await packageDirectory(root), archive = join(root, "edition.zip"); await writePublicationZip(source.directory, archive);
+  const original = hash(await readFile(archive)), GiB = 1024 ** 3;
+  let now = Date.now(), free = GiB + 3 * 1024 ** 2, roots: readonly { rootId: string; path: string }[] = [];
+  const storage = new AppStorageService({ appRoot: root, now: () => now, native: {
+    setRoots(value) { roots = value; }, async stop() {}, async probe(rootId) {
+      // CI's TEMP may use RUNNER~1 while extraction resolves the long/extended path.
+      // Classify the real destination, including this explicit alias regression.
+      const path = toExtendedLength(await realpath(roots.find(row => row.rootId === rootId)!.path));
+      const extracting = path === scratchPhysical || path.startsWith(scratchPhysical + sep);
+      return { state: "measured", source: "host-provided", limitations: [], capacity: { volumeId: extracting ? "scratch-volume" : "source-volume", mappingRevision: rootId,
+        measuredAt: ++now, availableBytes: extracting ? free : 100 * GiB, totalBytes: 200 * GiB } };
+    },
+  } });
+  const space = new ImportFileStorage(storage, "export"); let admitted = 0;
+  const fileSpace = { async reserve(...args: Parameters<ImportFileStorage["reserve"]>) {
+    // The pinned ZIP closes first. Simulate another writer taking the remaining scratch
+    // headroom before expanded files are admitted; no real volume is exhausted.
+    if (++admitted === 2) { free = 0; now += 5001; }
+    return space.reserve(...args);
+  } };
+  try {
+    await assert.rejects(extractPublicationZip(archive, scratch, { fileSpace }), ImportStorageHeld);
+    assert.equal(admitted, 2); assert.deepEqual(await readdir(scratch), []); assert.equal(hash(await readFile(archive)), original);
+    assert.equal(storage.reservations.snapshot().records.length, 0);
+    free = 100 * GiB; now += 5001;
+    const extracted = await extractPublicationZip(archive, scratch, { fileSpace: space });
+    assert.equal(extracted.manifestSha256, source.manifestSha256); assert.equal(storage.reservations.snapshot().records.length, 0);
+    await extracted.dispose(); assert.deepEqual(await readdir(scratch), []); assert.equal(hash(await readFile(archive)), original);
+  } finally { await storage.stop(); }
+});
 
 it("writes a streamed portable ZIP and verifies it after moving away from the source", async () => {
   const root = await tempDir("arke-publication-zip-");

@@ -3,12 +3,13 @@ import { describe, it } from "node:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./tmp.js";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import {
   assembleHarness,
   HarnessPasswordHolder,
   harnessProfileDir,
   passwordFromLine,
+  v2LaunchEnv,
   v2ProfileEnv,
 } from "../src/harness/v2-launch.js";
 import { ChildSupervisor, type SupervisorStatusEvent } from "../src/supervisor.js";
@@ -106,18 +107,25 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
     skip: !process.env["ARKE_TEST_OPENCODE2"], timeout: 75_000,
   }, async () => {
     const appRoot = await tempDir("v2-native-launch-");
+    const personal = await tempDir("v2-synthetic-personal-");
+    const personalDatabase = join(personal, "personal.db");
+    await writeFile(personalDatabase, "SYNTHETIC_PERSONAL_DATABASE_DO_NOT_OPEN");
     const configDir = join(harnessProfileDir(appRoot), ".config", "opencode");
     await mkdir(configDir, { recursive: true });
     await writeFile(join(configDir, "opencode.json"), JSON.stringify({ providers: { ollama: {
       name: "Ollama", package: "aisdk:@ai-sdk/openai-compatible", settings: { baseURL: "http://127.0.0.1:1/v1", apiKey: "ollama" },
       models: { "deleted-inventory-model": { name: "deleted-inventory-model", capabilities: { tools: true, input: ["text"], output: ["text"] }, cost: { input: 0, output: 0 } } },
     } } }));
-    const inherited = Object.fromEntries(["opencode_password", "OpenCode_Server_Password", "opencode_server_username"].map(key => [key, process.env[key]]));
+    const poison = {
+      opencode_password: "synthetic-personal-password", OpenCode_Server_Password: "synthetic-legacy-password",
+      opencode_server_username: "personal-user", OPENCODE_DB: personalDatabase,
+      OPENCODE_CONFIG_CONTENT: "invalid synthetic personal configuration",
+      OPENCODE_CONFIG_DIR: personal, XDG_STATE_HOME: join(personal, "state"), XDG_CACHE_HOME: join(personal, "cache"),
+    };
+    const inherited = Object.fromEntries(Object.keys(poison).map(key => [key, process.env[key]]));
     let wiring: Awaited<ReturnType<typeof assembleHarness>>;
     try {
-      process.env["opencode_password"] = "synthetic-personal-password";
-      process.env["OpenCode_Server_Password"] = "synthetic-legacy-password";
-      process.env["opencode_server_username"] = "personal-user";
+      Object.assign(process.env, poison);
       wiring = await assembleHarness({
         appRoot,
         v2: { configuredPath: process.env["ARKE_TEST_OPENCODE2"]! },
@@ -141,6 +149,11 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
       assert.ok(!(await wiring.adapter.listModels?.())?.some(model => model.provider === "ollama" && model.id === "deleted-inventory-model"),
         "the real server cannot offer a stale row from Studio's retired generated inventory");
       assert.ok(!wiring.logLines.some(line => line.includes("[beta]")));
+      await access(join(harnessProfileDir(appRoot), ".local", "share", "opencode", "opencode.db"));
+      assert.equal(await readFile(personalDatabase, "utf8"), "SYNTHETIC_PERSONAL_DATABASE_DO_NOT_OPEN");
+      for (const path of ["state", "cache", "personal.db-wal", "personal.db-shm"]) {
+        await assert.rejects(access(join(personal, path)), { code: "ENOENT" });
+      }
     } finally {
       await wiring.adapter.dispose?.(); await wiring.supervisor.stop();
     }
@@ -168,13 +181,27 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
     assert.equal(holder.current(), "pw_2");
   });
 
-  it("redirects the whole profile, all four variables together (issue 327 §2)", () => {
+  it("redirects home, configuration, data, state and cache together (issue 327 §2)", () => {
     const env = v2ProfileEnv("C:\\root\\harness\\profile");
     assert.equal(env["HOME"], "C:\\root\\harness\\profile");
     assert.equal(env["USERPROFILE"], "C:\\root\\harness\\profile");
     assert.equal(env["XDG_CONFIG_HOME"], join("C:\\root\\harness\\profile", ".config"));
     assert.equal(env["XDG_DATA_HOME"], join("C:\\root\\harness\\profile", ".local", "share"));
+    assert.equal(env["XDG_STATE_HOME"], join("C:\\root\\harness\\profile", ".local", "state"));
+    assert.equal(env["XDG_CACHE_HOME"], join("C:\\root\\harness\\profile", ".cache"));
     assert.equal(harnessProfileDir("C:\\root"), join("C:\\root", "harness", "profile"));
+  });
+
+  it("does not inherit native DB/config/simulation, authentication or telemetry controls", () => {
+    const inherited = { PATH: "synthetic-bin", SystemRoot: "synthetic-os", ANTHROPIC_API_KEY: "synthetic-key",
+      OpEnCoDe_Db: "personal.db", OPENCODE_CONFIG_CONTENT: "personal configuration", OPENCODE_SIMULATE: "1",
+      opencode_server_password: "personal password", OTEL_EXPORTER_OTLP_ENDPOINT: "https://synthetic.invalid",
+      otel_resource_attributes: "private=value", OPENCODE_DISABLE_AUTOUPDATE: "0", OTEL_SDK_DISABLED: "false",
+      XDG_CACHE_HOME: "personal cache", XDG_STATE_HOME: "personal state", EMPTY: undefined };
+    const original = { ...inherited };
+    assert.deepEqual(v2LaunchEnv("profile", inherited), { PATH: "synthetic-bin", SystemRoot: "synthetic-os", ANTHROPIC_API_KEY: "synthetic-key",
+      ...v2ProfileEnv("profile"), OPENCODE_DISABLE_AUTOUPDATE: "1", OTEL_SDK_DISABLED: "true" });
+    assert.deepEqual(inherited, original, "launch isolation never changes the parent environment");
   });
 
 

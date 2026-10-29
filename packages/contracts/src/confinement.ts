@@ -62,6 +62,8 @@ export type ToolIntent = z.infer<typeof ToolIntent>;
 export interface AgentConfinement {
   /** Permitted. Every other KNOWN intent is refused. */
   readonly allow: readonly ToolIntent[];
+  /** Operational roles refuse even future native tools instead of opening a permission ask. */
+  readonly denyUnknown?: boolean;
 }
 
 /**
@@ -130,7 +132,7 @@ export function confinementStatement(confinement: AgentConfinement): string {
 whole of what you have here — not a summary of it, and not the set you may have had elsewhere.
 
 What you can do:
-${say(can)}
+${can.length ? say(can) : "- answer using only the information supplied by the application; no native tools are available."}
 
 What you cannot do:
 ${cannot.length > 0 ? `${say(cannot)}\n` : ""}- run a shell command. There is no Bash, no PowerShell, no terminal, no way to start a process.
@@ -169,6 +171,10 @@ const READ_ONLY: AgentConfinement = {
   allow: ["read", "search", "list", "todo", "world-query"],
 };
 
+/** Studio operations are supplied as enumerated coordinator evidence, never world/filesystem
+ * tools. Delegation is an application protocol, not an unrestricted native subagent tool. */
+const OPERATIONAL: AgentConfinement = { allow: [], denyUnknown: true };
+
 /**
  * Neither role may delegate, which reconciles a disagreement rather than preserving one: v2 denies
  * `subagent` to read-only agents and never grants it to authoring ones, while v1 left `task`
@@ -199,9 +205,10 @@ export interface ConfinementOptions {
  * the agent's model and skill are chosen on. Switching it off reaches the next session.
  */
 export function confinementFor(
-  agent: { readOnly?: boolean },
+  agent: { readOnly?: boolean; operationalOnly?: boolean },
   opts: ConfinementOptions = {},
 ): AgentConfinement {
+  if (agent.operationalOnly) return OPERATIONAL;
   const base = agent.readOnly ? READ_ONLY : AUTHORING;
   return opts.web === true ? { allow: [...base.allow, "web"] } : base;
 }

@@ -246,6 +246,7 @@ export function ModelChip({
   readOnly = false,
   variant,
   onVariant,
+  variantLabels,
 }: {
   state: ClientState | null;
   /** The model in force: this chat's, the agent's, the production's, else the harness's own. */
@@ -268,6 +269,8 @@ export function ModelChip({
   variant?: string;
   /** Present when the effort can be chosen; the effort chip is drawn only then, and only for a model that offers one. */
   onVariant?: (variant: string) => void;
+  /** A scoped protocol may give a variant a more precise meaning than the shared plain label. */
+  variantLabels?: Readonly<Record<string, string>>;
 }) {
   /** Which layer is open and where it is drawn; null while both are closed. */
   const [menu, setMenu] = useState<{ kind: MenuKind; host: HTMLElement } | null>(null);
@@ -373,8 +376,8 @@ export function ModelChip({
   const variants = current?.variants;
   const effortShown = variants !== undefined && onVariant !== undefined;
   const inForce = variant !== undefined && variants?.names.includes(variant) ? variant : variants?.default;
-  const effortLabel = variants === undefined ? "" : inForce === undefined ? "Effort" : (harnessEffortLabel(variants, inForce) ?? titleCaseVariant(inForce));
-  const efforts = variants === undefined ? [] : harnessEffortLabels(variants.names);
+  const effortLabel = variants === undefined ? "" : inForce === undefined ? "Effort" : (variantLabels?.[inForce] ?? harnessEffortLabel(variants, inForce) ?? titleCaseVariant(inForce));
+  const efforts = variants === undefined ? [] : harnessEffortLabels(variants.names).map((label, index) => variantLabels?.[variants.names[index]!] ?? label);
 
   /** The effort menu's keys, for whichever panel holds it. */
   const onEffortKey = (panelRef: RefObject<HTMLDivElement | null>, close: (refocus: boolean) => void) => (event: ReactKeyboardEvent<HTMLDivElement>) => {

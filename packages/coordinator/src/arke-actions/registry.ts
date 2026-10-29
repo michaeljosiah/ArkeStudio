@@ -206,6 +206,9 @@ const COMPLETE_TIMELINE_READ = AVAILABLE;
  * honest answer is that it is read-only, global, or reserved for the person at the controls.
  */
 const CLIENT_COMMAND_METADATA = {
+  "check-onboarding": globalOnly(GLOBAL_OPERATION),
+  "import-world": globalOnly(GLOBAL_OPERATION),
+  "save-onboarding": globalOnly(GLOBAL_OPERATION),
   "chapter-review-start": action("production", "command", "production-store", "external-network-action", ["chapters"]),
   "chapter-review-read": readOnly("Reads retained chapter review findings."),
   "chapter-review-cancel": humanOnly("Stopping specialist work belongs to the person."),
@@ -233,6 +236,7 @@ const CLIENT_COMMAND_METADATA = {
   "discard-master-look": action("world", "destructive", "world-store", "destructive-change", ["art-direction", "references"]),
   "archive-world": action("world", "destructive", "world-store", "world-administration", ["world-metadata", "jobs"]),
   "install-sample-world": globalOnly(GLOBAL_OPERATION),
+  "studio-assistant": globalOnly("Studio conversations require a separate authenticated owner reply channel; world tools cannot invoke them."),
   "cancel-sample-world-download": globalOnly(GLOBAL_OPERATION),
   "discard-sample-world-download": globalOnly(GLOBAL_OPERATION),
   "refresh-sample-world-download": globalOnly(GLOBAL_OPERATION),
@@ -460,6 +464,8 @@ const CLIENT_COMMAND_METADATA = {
   "save-episode-script": humanOnly("A direct episode script save is the author's editor; Arke's script changes are reviewed proposals."),
   "save-comic-script": humanOnly("A direct comic script save is the author's editor; Arke's script changes are reviewed proposals."),
   "set-comic-settings": humanOnly("How a graphic novel reads and is checked is the author's setting."),
+  "quote-comic-page": readOnly(QUERY),
+  "make-comic-page": humanOnly("A comic page is made on the price its press showed the author."),
   "save-chapter": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   // The chapter workspace's own commands (turn 126): a read, and an undo shaped like the bible's.
   "open-chapter": readOnly(QUERY),
@@ -708,9 +714,16 @@ const CLIENT_COMMAND_METADATA = {
   "install-update-on-close": globalOnly(GLOBAL_OPERATION),
   "acknowledge-update": globalOnly(GLOBAL_OPERATION),
   "generate-diagnostics": globalOnly(GLOBAL_OPERATION),
+  "recovery-set-mode": humanOnly(HUMAN_DECISION),
+  "recovery-set-advanced": humanOnly(HUMAN_DECISION),
+  "recovery-set-preferences": humanOnly(HUMAN_DECISION),
+  "recovery-history-control": humanOnly(HUMAN_DECISION),
+  "recovery-action": humanOnly("A host owner reviews the exact service retry before approving it."),
+  "recovery-history-read": globalOnly(GLOBAL_OPERATION),
   // One real, priced request to learn whether a reader can group (design turn 185): a person runs it.
   "probe-grouped-read": humanOnly("The grouped-read probe spends one request so a person can listen to it."),
   "refresh-diagnostics": readOnly(QUERY),
+  "refresh-system-resources": humanOnly("The System overview samples local host resources as a bounded UI observation."),
   "open-data-folder": globalOnly(GLOBAL_OPERATION),
   "bench-open": humanOnly("Opening or implicitly creating a Bench session is a human workspace control."),
   "bench-open-subject": humanOnly("Opening a subject in Bench is a human handoff control, not an action on that subject."),

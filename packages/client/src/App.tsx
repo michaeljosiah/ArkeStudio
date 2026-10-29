@@ -82,6 +82,7 @@ import { StoryStructureScreen } from "./screens/development.js";
 import { BranchMapScreen } from "./screens/branch-map.js";
 import { QueueToaster } from "./components/queue-toaster.js";
 import { ActivityPanel } from "./components/activity-panel.js";
+import { SystemPanel } from "./components/system-panel.js";
 import { openActivityPanel, openActivityPanelOnArrival } from "./lib/activity-panel.js";
 import { ImageContextMenu } from "./components/image-context-menu.js";
 import { UpdateAnnouncement } from "./components/update-announcement.js";
@@ -263,6 +264,7 @@ function AppRoutes() {
       <SessionRefusal />
       <QueueToaster />
       <ActivityPanel />
+      <SystemPanel />
       {/* Right-click any picture, anywhere, and copy it. One listener rather than a control on
           each of the twenty-odd frames that draw one. */}
       <ImageContextMenu />
@@ -281,6 +283,7 @@ function AppRoutes() {
       <Routes location={inSettings ? settingsReturnPath() : location}>
         <Route path="/" element={<StartupScreen />} />
         <Route path="/starting" element={<StartupScreen />} />
+        <Route path="/setup" element={<OnboardingScreen />} />
         {/* The founding build's watch surface (SPEC-031 §1.8): full-bleed, no world chrome —
             the run needs its world open, and this screen is what keeps it that way. */}
         <Route path="/building/:worldId" element={<BuildingScreen />} />
@@ -396,3 +399,4 @@ function AppRoutes() {
   );
 }
 import { SettingsAdaptersScreen } from "./screens/settings-adapters.js";
+import { OnboardingScreen } from "./screens/onboarding.js";

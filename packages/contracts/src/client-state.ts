@@ -20,6 +20,7 @@ import { ProductionNarrativeSchema } from "./production-narrative.js";
 import { AudiobookBookSchema } from "./audiobook.js";
 import { HarnessStatusSchema } from "./harness.js";
 import { ModelInfoSchema } from "./adapter.js";
+import { OnboardingStatusSchema } from "./onboarding.js";
 import { HarnessModelStatusSchema } from "./harness-models.js";
 import { ProductionSpineSchema } from "./spine.js";
 import { TakeMediaInfoRecordSchema } from "./media.js";
@@ -38,6 +39,10 @@ import { EMPTY_BIBLE, WorldBibleSchema } from "./bible.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
 import { OllamaRuntimeStatusSchema } from "./ollama.js";
+import { StorageHealthSnapshotSchema } from "./storage-health.js";
+import { SystemResourcesSchema } from "./system-resources.js";
+import { RecoveryHistorySnapshotSchema } from "./recovery-incidents.js";
+import { RecoveryPolicySnapshotSchema } from "./recovery-settings.js";
 import { LocalSamplingSettingsSchema } from "./local-sampling.js";
 import { FoundingBuildStateSchema } from "./founding-build.js";
 import { FrameRunStateSchema } from "./frame-run.js";
@@ -440,6 +445,7 @@ export const ClientStateSchema = valueSchema(z
     app: z
       .object({
         version: z.string(),
+        onboarding: OnboardingStatusSchema.nullable().optional(),
         health: AppHealthSchema,
         jobs: z.array(JobSummarySchema),
         audiobookActivity: z.array(AudiobookActivitySchema).optional(),
@@ -569,6 +575,10 @@ export const ClientStateSchema = valueSchema(z
         /** The ComfyUI engine and its recipes (SPEC-021 §2.12) — one result, read everywhere. */
         comfyui: ComfyUiStatusSchema.nullable().default(null),
         ollama: OllamaRuntimeStatusSchema.nullable().optional(),
+        storageHealth: StorageHealthSnapshotSchema.nullable().optional(),
+        systemResources: SystemResourcesSchema.nullable().optional(),
+        recoveryHistory: RecoveryHistorySnapshotSchema.nullable().optional(),
+        recoveryPolicy: RecoveryPolicySnapshotSchema.nullable().optional(),
         /** Sampling per local recipe and its measured times (design turn 177); absent before the host seeds it. */
         localSampling: LocalSamplingSettingsSchema.optional(),
         adapters: AdapterLibraryStateSchema.nullable().optional(),

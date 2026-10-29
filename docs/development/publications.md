@@ -213,6 +213,14 @@ before return, but this is temporary input storage, not a durable completion rec
 protocol. The optional `onCopied` progress callback runs inside the world gate: it must not await
 another operation needing that gate, including `store.close()`.
 
+Production hosts supply `fileSpace` for measured publication capture, directory copying, ZIP
+output and pinned input/extraction. These phases share setup/import/result reservations on their
+actual destinations, include retained copies and bounded metadata, report consumed payloads and
+settle after their file handles close. A hold preserves source media and completed editions;
+desktop guidance opens Diagnostics or suggests another destination. Standalone file-service
+callers may provide the same port. This does not estimate native rendering or guarantee that an
+external writer cannot exhaust the disk.
+
 `verifyPublicationDirectory(directory, options?)` in `src/publications/verify.ts` runs without a
 world. It reads bounded UTF-8 JSON, rejects duplicate object keys (including escaped aliases),
 negotiates compatibility, checks the directory's exact file

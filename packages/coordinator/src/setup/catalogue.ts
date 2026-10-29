@@ -2,9 +2,9 @@ import type { EngineId, ProviderId } from "@arke-studio/contracts";
 import { mingCatalogue } from "../local-ai/ming-catalogue.js";
 
 /**
- * What setup fetches onto this machine, and where from. The engine ships; the language model
- * it runs does not — that is a choice about quality and disk that belongs to the person whose
- * disk it is, so it is made in Settings · Providers rather than assumed here.
+ * What setup offers for this machine, and where from. Runtime and model acquisition follows
+ * an explicit choice in setup or Settings; merely opening Arke must not spend the disk or
+ * bandwidth of someone choosing manual or hosted writing (SPEC-016, approved turns 242–244).
  *
  * Sizes are the published figures, used for arithmetic *before* anything starts — the
  * free-disk guard and the totals on screen — so they are stated here rather than discovered
@@ -115,6 +115,8 @@ export interface CatalogueEntry {
    * someone asks for it. Big models belong here — the disk is the user's to spend.
    */
   optional?: boolean;
+  /** Offering a download does not grant removal of an installed runtime or its live files. */
+  removable?: false;
   /** Never replace a file that appeared while a managed optional download was running. */
   preserveExistingFiles?: boolean;
   /**
@@ -181,6 +183,8 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   ...mingCatalogue(),
   {
     id: "ollama-runtime",
+    optional: true,
+    removable: false,
     engine: "ollama",
     displayName: "Ollama",
     purpose: "Runs language models here",
@@ -204,6 +208,8 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   },
   {
     id: VOXA_SETUP_COMPONENT_IDS.kokoro,
+    optional: true,
+    removable: false,
     engine: "voxa",
     displayName: "Kokoro 82M · voice",
     purpose: "Speaks lines · six preset voices",
@@ -227,6 +233,8 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   },
   {
     id: VOXA_SETUP_COMPONENT_IDS.whisper,
+    optional: true,
+    removable: false,
     engine: "voxa",
     displayName: "Whisper base.en · dictation",
     purpose: "Speech to text · on this machine",
@@ -257,6 +265,10 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     displayName: "Higgsfield CLI",
     purpose: "Images and video · Higgsfield account",
     sizeMb: 7,
+    // Both pinned archives inspected with the numeric-owner manifest reader (2026-10-26):
+    // amd64 19,051,008 and arm64 17,610,752 expansion bytes including entry allowance.
+    // Keep the 7 MiB declared download plus 19 MiB expansion simultaneously.
+    installedMb: 26,
     optional: true,
     spec: {
       kind: "archive",
@@ -280,13 +292,15 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
       },
     },
   },
-  // The ComfyUI engine (SPEC-021 §2.4, D10). Queued by default and selection-first: a source the user
+  // The ComfyUI engine (SPEC-021 §2.4, D10). Offered until selected: a source the user
   // deliberately selected is reused, while mere detection remains an offer and does not suppress
   // this managed option. Pinned to a release with the release's own published sha256; the
   // NVIDIA build only, said on the row (§1.4). The archive is 7z, which the resolved System32
   // bsdtar reads (verified on the supported platform — see systemTar in local-setup.ts).
   {
     id: "comfyui-runtime",
+    optional: true,
+    removable: false,
     engine: "comfyui",
     displayName: "ComfyUI",
     purpose: "Runs image and video recipes",

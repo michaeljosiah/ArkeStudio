@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  COMIC_PROMPT_MAX, ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema, DEFAULT_COMIC_SETTINGS, EMPTY_COMIC_PAGE_RECORD,
+  COMIC_LIMITS, COMIC_PROMPT_MAX, ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema, DEFAULT_COMIC_SETTINGS, EMPTY_COMIC_PAGE_RECORD,
   comicPageHash, comicPagePrompt, makesShape, pageAspect, pictureQuote, productionShape,
   type ComicCited, type ComicMode, type ComicPage, type ComicPageRecord, type ComicSettings, type ManifestModel, type PictureWho, type ProductionBundle,
 } from "@arke-studio/contracts";
@@ -80,6 +80,11 @@ export async function setComicSettings(store: WorldStore, productionId: string, 
 // Pages and their takes (R-22 – R-27)
 // ---------------------------------------------------------------------------
 
+/** The take a page's admission reserved in its Bench session, by the request the Bench planned it under. */
+export function comicPageTake<T extends { requestId: string }>(bench: { session: { takes: readonly T[] } } | null, requestId: string): T | undefined {
+  return bench?.session.takes.find((take) => take.requestId === `pic:${requestId}` || take.requestId.startsWith(`pic:${requestId}/`));
+}
+
 export const comicPagePath = (productionId: string, pageId: string) => `productions/${productionId}/comic-pages/${pageId}.json`;
 
 /** Where a page stands in the book (D-2): its chapter, and its number counted through every chapter. */
@@ -133,6 +138,9 @@ export function comicPageRequest(store: WorldStore, productionId: string, pageId
   const mode = wanted ?? settings.mode;
   const { page } = found;
   if (page.panels.length === 0) return { ok: false, reason: "the page has no panels" };
+  // Refused before anything is spent: a take the record cannot hold would be paid for and lost (codex on PR 2222).
+  const held = comicPageRecord(production, pageId);
+  if (held.takes.length + held.making.length >= COMIC_LIMITS.takesPerPage) return { ok: false, reason: `this page has ${COMIC_LIMITS.takesPerPage} takes, the most it keeps` };
   // Baked lettering only on a model whose vendor says it letters (R-24); overlay art takes any.
   if (mode === "baked" && model.limits.lettering !== true) return { ok: false, reason: `${model.displayName} does not letter pages; make it without lettering` };
   const aspect = pageAspect(page, settings);

@@ -31,6 +31,7 @@ import "./domain/domain.css";
 import "./screens/screens.css";
 import "./screens/fidelity.css";
 import "./screens/launch.css";
+import "./screens/onboarding.css";
 import "./screens/home.css";
 import "./screens/world.css";
 import "./screens/character-pages.css";
@@ -72,10 +73,12 @@ import "./screens/quiet.css";
 import "./components/production-card-body.css";
 import "./components/production-studio.css";
 import "./components/global-chat.css";
+import "./components/studio-assistant.css";
 import "./components/conversation-reply.css";
 // After fidelity.css: the panel re-dresses the provider-call inspector with a rule of equal
 // specificity, and the later sheet wins.
 import "./components/activity-panel.css";
+import "./components/system-panel.css";
 import "./components/audiobook-activity.css";
 import "./components/account-menu.css";
 import "./components/model-chip.css";

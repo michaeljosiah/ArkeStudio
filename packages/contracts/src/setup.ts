@@ -4,9 +4,8 @@ import { EngineIdSchema } from "./local-ai.js";
 import { ProviderIdSchema } from "./provider.js";
 
 /**
- * Local runtimes and model downloads. ComfyUI and Ollama must be installed and healthy before
- * local AI setup completes; optional components can be skipped. Transfers run behind the
- * interactive core, with runtime health reported separately from file presence.
+ * Local runtimes and model downloads are offered until selected. Runtime health is reported
+ * separately from file presence and from access to manual authoring (SPEC-016, turns 242–244).
  *
  * A component is a *thing that must be on this machine*, not a thing we generate. Presence is
  * detected before anything is fetched, so a second launch downloads nothing.
@@ -33,6 +32,15 @@ export const SetupComponentStateSchema = z.enum([
   "failed",
 ]);
 export type SetupComponentState = z.infer<typeof SetupComponentStateSchema>;
+
+/** Host-issued review of the currently selected component; no renderer-supplied paths. */
+export const SetupRepairReviewSchema = z.object({
+  revision: z.string().regex(/^[a-f0-9]{64}$/),
+  componentDigest: z.string().regex(/^[a-f0-9]{64}$/), policyRevision: z.literal(1),
+  downloadBytes: z.number().int().nonnegative().safe(), peakBytes: z.number().int().nonnegative().safe(),
+  interruptsWork: z.literal(false),
+}).strict();
+export type SetupRepairReview = z.infer<typeof SetupRepairReviewSchema>;
 
 export const SetupComponentSchema = z
   .object({
@@ -63,6 +71,8 @@ export const SetupComponentSchema = z
     detail: z.string().optional(),
     /** Persistent catalogue requirements, visible before install and independent of progress. */
     caveat: z.string().optional(),
+    /** Not a starter recommendation; requires a deliberate model choice in Settings. */
+    explicitChoiceOnly: z.boolean().optional(),
     /**
      * Which guard blocked it (SPEC-032 R-20.3, R-20.4). The detail sentence carries the figures
      * for a person; a correlation that needs to know *disk* from *waiting on a dependency* must
@@ -89,6 +99,7 @@ export const SetupComponentSchema = z
     blockedAt: IsoDateTimeSchema.optional(),
     /** The failed action must be tried again; an ordinary retry would trust the surviving file. */
     repairRequired: z.boolean().optional(),
+    repairReview: SetupRepairReviewSchema.optional(),
     /**
      * Managed-runtime currency for a `tree` component (SPEC-021 R-20; issue 592): the version the
      * installed tree itself records, the version this release pins, and how they compare. `unknown`
@@ -159,9 +170,6 @@ export const SetupComponentSchema = z
 export type SetupComponent = z.infer<typeof SetupComponentSchema>;
 
 export const LOCAL_AI_RUNTIMES = { comfyui: "comfyui-runtime", ollama: "ollama-runtime" } as const;
-export function isRequiredLocalRuntime(componentId: string): boolean {
-  return Object.values(LOCAL_AI_RUNTIMES).some(id => id === componentId);
-}
 
 const LocalAiEngineCheckSchema = z.object({
   installed: z.boolean(),
@@ -174,7 +182,7 @@ export const LocalAiSetupReadinessSchema = z.object({
 }).strict();
 export type LocalAiSetupReadiness = z.infer<typeof LocalAiSetupReadinessSchema>;
 
-/** SPEC-033: installation and a healthy selected service are separate, mandatory checks. */
+/** SPEC-033: report the full local stack honestly; this is not a gate on entering the app. */
 export function localAiSetupReadiness(
   components: readonly SetupComponent[],
   comfyui?: { state: string; source: string; detail: string | null },
@@ -296,7 +304,7 @@ export const SetupStatusSchema = z
     components: z.array(SetupComponentSchema),
     /** True while any component is downloading or installing. */
     running: z.boolean(),
-    /** Coordinator-owned runtime health gate; absent on hosts without local setup support. */
+    /** Coordinator-owned runtime health status; absent on hosts without local setup support. */
     localAi: LocalAiSetupReadinessSchema.optional(),
     /** Free disk at the last check — the guard's evidence, shown rather than assumed. */
     diskFreeMb: z.number().int().min(0).nullable(),

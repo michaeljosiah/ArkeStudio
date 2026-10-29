@@ -125,7 +125,21 @@ await access(chrome);
 // step with exit 137, and main timed out at the same step the day before; the image was the same on
 // passing runs. A CI machine has no GPU and a shared /dev/shm, so Chrome is told to use neither,
 // and each step logs the memory left, so the next failure says whether it was memory.
-const child = spawn(chrome, ["--headless=new", "--disable-gpu", "--disable-dev-shm-usage", "--no-first-run", "--no-default-browser-check", "--remote-debugging-port=0", `--user-data-dir=${join(directory, "profile")}`, "about:blank"], { windowsHide: true, stdio: "ignore" });
+const child = spawn(chrome, ["--headless=new", "--disable-gpu", "--disable-dev-shm-usage", "--no-first-run", "--no-default-browser-check", "--remote-debugging-port=0", `--user-data-dir=${join(directory, "profile")}`, "about:blank"], { windowsHide: true, stdio: ["ignore", "ignore", "pipe"] });
+let chromeErrors = "", closing = false;
+child.stderr.on("data", chunk => { chromeErrors = (chromeErrors + String(chunk)).slice(-32 * 1024); });
+child.on("exit", (code, signal) => { if (!closing) console.error("[effect-preview] unexpected browser exit", JSON.stringify({ code, signal, stderr: chromeErrors })); });
+// Two consecutive Linux runners stopped 20s into the decoder stage despite reporting 14GB
+// host RAM free. Host freemem does not expose a container's limit. Capture cgroup counters
+// while the page is busy; no timeout, decoder assertion or platform gate is relaxed.
+const linuxMemory = async label => {
+  if (process.platform !== "linux") return;
+  const read = name => readFile(`/sys/fs/cgroup/${name}`, "utf8").then(text => text.trim()).catch(() => "unavailable");
+  const [current, limit, events] = await Promise.all([read("memory.current"), read("memory.max"), read("memory.events")]);
+  console.log("[effect-preview] resource sample", JSON.stringify({ label, hostFreeMiB: Math.round(freemem() / 2 ** 20), nodeRssMiB: Math.round(process.memoryUsage().rss / 2 ** 20), cgroup: { current, limit, events } }));
+};
+const memoryWatch = process.platform === "linux" ? setInterval(() => { void linuxMemory("heartbeat"); }, 5000) : undefined;
+memoryWatch?.unref();
 let socket;
 const step = (message) => console.log(`[effect-preview] ${message} · ${Math.round(freemem() / 2 ** 20)} MB free`);
 const until = async fn => { const deadline = Date.now() + 20000; while (Date.now() < deadline) { const value = await fn().catch(() => null); if (value) return value; await new Promise(resolve => setTimeout(resolve, 50)); } throw new Error("Effect preview fixture timed out"); };
@@ -144,6 +158,9 @@ try {
   });
   const js = async expression => { const response = await cdp("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }); if (response.exceptionDetails) throw new Error(JSON.stringify(response.exceptionDetails)); return response.result.value; };
   step("browser connected; verifying target alpha");
+  const browserVersion = await cdp("Browser.getVersion");
+  console.log("[effect-preview] browser version", JSON.stringify(browserVersion));
+  if (process.env.ARKE_EFFECT_CHROME_VERSION) assert.equal(browserVersion.product, `Chrome/${process.env.ARKE_EFFECT_CHROME_VERSION}`, "CI must exercise the qualified decoder version");
   await cdp("Page.navigate", { url: origin });
   await until(() => js("window.preview?.frame()==='120'"));
   assert.equal(await js("window.preview.error()"), undefined);
@@ -193,6 +210,7 @@ try {
     records: reactionRecords, staleEpochRejected: true, baseEpoch: epochs.baseEpoch };
   for (const sourceRate of [24, 30]) {
   step(`${sourceRate}fps decoder and source-end holds`);
+  await linuxMemory(`before-${sourceRate}fps-decoder`);
   await js(`window.preview.mount('smoke','video${sourceRate}')`);
   try { assert.equal(await until(() => js("window.preview.frame() || window.preview.error()")), "120"); }
   catch (error) {
@@ -239,4 +257,8 @@ try {
     for (const name of ["parity.json", "preview.png"]) await copyFile(join(directory, name), join(process.env.ARKE_EFFECT_EVIDENCE_DIR, name));
   }
   console.log(JSON.stringify({ directory, checks: "source-alpha, contain, full stack, occlusion, all six presets, two bound speed reactions, absolute-frame seek races, stale analysis epoch, adjacent video frames, source-end hold", parity: "zero differing RGBA bytes" }));
-} finally { socket?.close(); child.kill(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+} catch (error) {
+  console.error("[effect-preview] browser stderr tail", chromeErrors);
+  await linuxMemory("failed");
+  throw error;
+} finally { closing = true; clearInterval(memoryWatch); socket?.close(); child.kill(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }

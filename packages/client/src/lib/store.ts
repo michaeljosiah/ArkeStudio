@@ -28,6 +28,7 @@ import {
   type DramaRole,
   type EpisodeScriptBlock,
   type ComicPage,
+  type ComicMode,
   type Delivery,
   type Frame,
   type HarnessEngine,
@@ -236,6 +237,9 @@ interface StoreState {
    * not a part of it — folding it in would make the read model carry its own derivative.
    */
   diagnostics: import("@arke-studio/contracts").DiagnosticsSnapshot | null;
+  recoveryCommandResults: Record<string, import("@arke-studio/contracts").RecoveryCommandResult>;
+  recoveryActionResults: Record<string, import("@arke-studio/contracts").RecoveryActionResult>;
+  recoveryHistoryPages: Record<string, import("@arke-studio/contracts").RecoveryHistoryPage>;
   /** Build reviews by conversation and request, so a late response cannot erase a newer answer. */
   buildPlans: Record<
     string,
@@ -642,6 +646,9 @@ let current: StoreState = {
   keyArtPlans: {},
   setupStatus: null,
   diagnostics: null,
+  recoveryCommandResults: {},
+  recoveryActionResults: {},
+  recoveryHistoryPages: {},
   reading: {},
   deriving: {},
   casting: {},
@@ -1108,6 +1115,13 @@ export type ProductionCreateResult = Extract<DomainEvent, { type: "production.cr
 /** Refused direct scene writes (review 2026-08-22), delivered to the storyboard that sent them. */
 type CommandFailure = Extract<DomainEvent, { type: "command.failed" }>;
 const commandFailureListeners = new Set<(event: CommandFailure) => void>();
+const worldImportListeners = new Set<(event: Extract<DomainEvent, { type: "world.import-result" }>) => void>();
+export function subscribeWorldImport(listener: (event: Extract<DomainEvent, { type: "world.import-result" }>) => void): () => void {
+  worldImportListeners.add(listener); return () => { worldImportListeners.delete(listener); };
+}
+export function importWorld(): string | null {
+  const requestId = ulid(); return send({ kind: "import-world", requestId }) ? requestId : null;
+}
 export function subscribeCommandFailures(listener: (event: CommandFailure) => void): () => void {
   commandFailureListeners.add(listener);
   return () => commandFailureListeners.delete(listener);
@@ -1198,6 +1212,15 @@ const comicScriptSaveListeners = new Set<(result: ComicScriptSaveResult) => void
 export function subscribeComicScriptSaveResults(listener: (result: ComicScriptSaveResult) => void): () => void {
   comicScriptSaveListeners.add(listener);
   return () => comicScriptSaveListeners.delete(listener);
+}
+
+/** A page's price and brief (SPEC-064 R-19, R-23), and a page being made (R-25). */
+export type ComicPageQuote = Extract<DomainEvent, { type: "comic.page-quote" }>;
+export type ComicPageMade = Extract<DomainEvent, { type: "comic.page-made" }>;
+const comicPageListeners = new Set<(event: ComicPageQuote | ComicPageMade) => void>();
+export function subscribeComicPages(listener: (event: ComicPageQuote | ComicPageMade) => void): () => void {
+  comicPageListeners.add(listener);
+  return () => comicPageListeners.delete(listener);
 }
 
 /** What became of one episode script save (SPEC-057 R-83): the new base, or a refusal by name. */
@@ -1407,6 +1430,12 @@ export function subscribeJobReady(listener: (job: Job) => void): () => void {
   return () => jobReadyListeners.delete(listener);
 }
 
+const recoveryNoticeListeners = new Set<(notice: import("@arke-studio/contracts").RecoveryNotice, history: import("@arke-studio/contracts").RecoveryHistorySnapshot) => void>();
+const seenRecoveryNotices = new Set<string>();
+export function subscribeRecoveryNotices(listener: (notice: import("@arke-studio/contracts").RecoveryNotice, history: import("@arke-studio/contracts").RecoveryHistorySnapshot) => void): () => void {
+  recoveryNoticeListeners.add(listener); return () => recoveryNoticeListeners.delete(listener);
+}
+
 function queueRequest(command: QueueCommand, characterName?: string): string {
   const requestId = ulid();
   if (current.connection === "open") {
@@ -1499,6 +1528,8 @@ export function __applyForTest(state: ClientState, event: DomainEvent): ClientSt
 
 function fold(state: ClientState, event: DomainEvent): ClientState {
   switch (event.type) {
+    case "onboarding.changed":
+      return { ...state, app: { ...state.app, onboarding: event.onboarding } };
     case "health.changed":
       return {
         ...state,
@@ -1589,6 +1620,17 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, comfyui: event.comfyui } };
     case "ollama.status":
       return { ...state, app: { ...state.app, ollama: event.ollama } };
+    case "storage.health":
+      return { ...state, app: { ...state.app, storageHealth: event.health } };
+    case "system.resources":
+      return { ...state, app: { ...state.app, systemResources: event.resources } };
+    case "recovery.history":
+      return { ...state, app: { ...state.app, recoveryHistory: event.history } };
+    case "recovery.policy": return { ...state, app: { ...state.app, recoveryPolicy: event.policy } };
+    case "recovery.notice":
+    case "recovery.history-page":
+    case "recovery.command-result": return state;
+    case "recovery.action-result": return state;
     case "adapters.changed":
       return { ...state, app: { ...state.app, adapters: event.adapters } };
     case "harness.status":
@@ -1696,6 +1738,12 @@ function handleFrame(json: string): void {
     return;
   }
   lastSeq = frame.seq;
+  if (frame.kind === "studio-assistant") {
+    for (const listener of studioAssistantReplyListeners) {
+      try { listener(frame); } catch { /* A private panel cannot interrupt shared state folding. */ }
+    }
+    return;
+  }
   if (frame.kind === "snapshot") {
     if (frame.retainedHistory?.length) {
       if (!current.state || rejoining) { send({ kind: "hello", lastSeq, retainHistory: true }); return; }
@@ -1869,6 +1917,7 @@ function handleFrame(json: string): void {
     let setupStatus = current.setupStatus;
     let permissions = current.permissions;
     const event = frame.event;
+    if (event.type === "world.import-result") for (const listener of worldImportListeners) listener(event);
     let frameRunQuotes = current.frameRunQuotes;
     let frameRunStartResults = current.frameRunStartResults;
     if (event.type === "command.failed") {
@@ -1914,6 +1963,17 @@ function handleFrame(json: string): void {
     if (event.type === "job.ready") {
       for (const listener of jobReadyListeners) listener(event.job);
     }
+    if (event.type === "recovery.notice") {
+      const key = `${event.notice.incidentId}:${event.notice.at}:${event.notice.reason}`;
+      if (!seenRecoveryNotices.has(key)) {
+        seenRecoveryNotices.add(key);
+        if (seenRecoveryNotices.size > 256) seenRecoveryNotices.delete(seenRecoveryNotices.values().next().value!);
+        const history = current.state?.app.recoveryHistory;
+        if (history?.audit === "available" && !history.preferences.transientMuted) {
+          for (const listener of recoveryNoticeListeners) try { listener(event.notice, history); } catch { /* Alert delivery cannot interrupt state folding. */ }
+        }
+      }
+    }
     if (event.type === "production.create-result") {
       for (const listener of productionCreateListeners) listener(event);
     }
@@ -1941,6 +2001,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "episode-script.save-result") {
       for (const listener of episodeScriptSaveListeners) listener(event);
+    }
+    if (event.type === "comic.page-quote" || event.type === "comic.page-made") {
+      for (const listener of comicPageListeners) listener(event);
     }
     if (event.type === "comic-script.save-result") {
       for (const listener of comicScriptSaveListeners) listener(event);
@@ -2905,6 +2968,15 @@ function handleFrame(json: string): void {
     let envCheck = current.envCheck;
     let diagnosticsBundle = current.diagnosticsBundle;
     let diagnostics = current.diagnostics;
+    const recoveryCommandResults = event.type === "recovery.command-result"
+      ? Object.fromEntries([...Object.entries(current.recoveryCommandResults).filter(([id]) => id !== event.result.requestId), [event.result.requestId, event.result] as const].slice(-32))
+      : current.recoveryCommandResults;
+    const recoveryActionResults = event.type === "recovery.action-result"
+      ? Object.fromEntries([...Object.entries(current.recoveryActionResults).filter(([id]) => id !== event.result.requestId), [event.result.requestId, event.result] as const].slice(-32))
+      : current.recoveryActionResults;
+    const recoveryHistoryPages = event.type === "recovery.history-page"
+      ? Object.fromEntries([...Object.entries(current.recoveryHistoryPages).filter(([id]) => id !== event.requestId), [event.requestId, event.page] as const].slice(-4))
+      : current.recoveryHistoryPages;
     let providerCallsByJob = current.providerCallsByJob;
     if (event.type === "diagnostics.snapshot") {
       diagnostics = event.snapshot;
@@ -3057,6 +3129,9 @@ function handleFrame(json: string): void {
       envCheck,
       diagnosticsBundle,
       diagnostics,
+      recoveryCommandResults,
+      recoveryActionResults,
+      recoveryHistoryPages,
       providerCallsByJob,
       frameRunQuotes,
       frameRunStartResults,
@@ -3636,8 +3711,8 @@ export function setupRetry(componentId: string): void {
   send({ kind: "setup-retry", componentId });
 }
 
-export function setupRepair(componentId: string): void {
-  send({ kind: "setup-repair", componentId });
+export function setupRepair(componentId: string, revision: string): void {
+  send({ kind: "setup-repair", componentId, revision });
 }
 
 export function setupPause(componentId: string): void {
@@ -3666,6 +3741,9 @@ export function useDiagnostics(): import("@arke-studio/contracts").DiagnosticsSn
 /** Ask for a fresh derivation — R-33's on-demand half, sent when the Diagnostics view opens. */
 export function refreshDiagnostics(): void {
   send({ kind: "refresh-diagnostics" });
+}
+export function refreshSystemResources(): void {
+  send({ kind: "refresh-system-resources" });
 }
 
 function genesisChatBusy(genesisId: string): boolean {
@@ -4188,6 +4266,11 @@ export function setSpendThreshold(thresholdMicroUsd: number, periodDays: number,
 
 export function detectRuntimes(): void {
   send({ kind: "detect-runtimes" });
+}
+
+export function checkOnboarding(): void { send({ kind: "check-onboarding" }); }
+export function saveOnboarding(plan: import("@arke-studio/contracts").OnboardingPlan, action: "save" | "install" | "finish" = "save"): void {
+  send({ kind: "save-onboarding", plan, action });
 }
 
 /** Look for the harnesses this machine has. Cheap — discovery only, never a live turn. */
@@ -5372,6 +5455,18 @@ export function saveChapter(
 export function saveComicScript(worldId: string, productionId: string, chapter: string, pages: ComicPage[], baseHash: string | null): string | null {
   const requestId = ulid();
   return send({ kind: "save-comic-script", requestId, worldId, productionId, chapter, pages, baseHash }) ? requestId : null;
+}
+
+/** Ask what a page would cost and send; also files a page that landed while the app was closed (SPEC-064 R-25). */
+export function quoteComicPage(worldId: string, productionId: string, page: string, mode?: ComicMode): string | null {
+  const requestId = ulid();
+  return send({ kind: "quote-comic-page", requestId, worldId, productionId, page, ...(mode !== undefined ? { mode } : {}) }) ? requestId : null;
+}
+
+/** Make a page on the price its press showed (SPEC-064 R-27). */
+export function makeComicPage(worldId: string, productionId: string, page: string, confirmedMicroUsd: number, mode?: ComicMode): string | null {
+  const requestId = ulid();
+  return send({ kind: "make-comic-page", requestId, worldId, productionId, page, confirmedMicroUsd, ...(mode !== undefined ? { mode } : {}) }) ? requestId : null;
 }
 
 /** How a graphic novel reads and how its pages are checked (SPEC-064 R-12). */
@@ -6841,6 +6936,26 @@ export function generateDiagnostics(): void {
   send({ kind: "generate-diagnostics" });
 }
 
+/** The returned ID correlates a flushed receipt; sending does not establish persistence. */
+export function setRecoveryMode(mode: import("@arke-studio/contracts").RecoveryMode): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-set-mode", requestId, mode }) ? requestId : null;
+}
+export function setRecoveryAdvanced(settings: import("@arke-studio/contracts").RecoveryAdvancedSettings): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-set-advanced", requestId, settings }) ? requestId : null;
+}
+export function reviewRecoveryAction(command: import("@arke-studio/contracts").RecoveryActionCommand["command"]): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-action", requestId, command }) ? requestId : null;
+}
+export function setRecoveryPreferences(preferences: { transientMuted?: boolean; desktopOptIn?: boolean }): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-set-preferences", requestId, preferences }) ? requestId : null;
+}
+export function controlRecoveryHistory(command: Extract<ClientMessage, { kind: "recovery-history-control" }>["command"]): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-history-control", requestId, command }) ? requestId : null;
+}
+export function readRecoveryHistory(query: import("@arke-studio/contracts").RecoveryHistoryQuery): string | null {
+  const requestId = ulid(); return send({ kind: "recovery-history-read", requestId, query }) ? requestId : null;
+}
+
 export function listProviderCalls(jobId: string | null): void {
   send({ kind: "list-provider-calls", jobId });
 }
@@ -6947,6 +7062,9 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     keyArtPlans: {},
     setupStatus: null,
     diagnostics: null,
+    recoveryCommandResults: {},
+    recoveryActionResults: {},
+    recoveryHistoryPages: {},
     reading: {},
   deriving: {},
     casting: {},
@@ -7749,6 +7867,11 @@ export function generatePerformance(input: Omit<Extract<ClientMessage, { kind: "
 }
 
 const remoteRefusalListeners = new Set<(refusal: RemoteCommandRefusal) => void>();
+const studioAssistantReplyListeners = new Set<(frame: Extract<Frame, { kind: "studio-assistant" }>) => void>();
+/** Private panel subscription only: no transcript is folded into app/world state. */
+export function onStudioAssistantReply(listener: (frame: Extract<Frame, { kind: "studio-assistant" }>) => void): () => void {
+  studioAssistantReplyListeners.add(listener); return () => studioAssistantReplyListeners.delete(listener);
+}
 export function subscribeRemoteRefusals(listener: (refusal: RemoteCommandRefusal) => void): () => void {
   remoteRefusalListeners.add(listener);
   return () => remoteRefusalListeners.delete(listener);

@@ -50,12 +50,15 @@ it("shutdown cancels setup activation before waiting for the setup drain, and re
   } finally { if (admitted) finish(); await coordinator.stop(); }
 });
 
-it("never skips a mandatory runtime, while optional models remain skippable", async () => {
-  const service = new LocalSetupService(setupDeps, () => {}, { appRoot: await tempDir("required-local-ai-"), catalogue: SETUP_CATALOGUE });
+it("offers missing runtimes and allows skipping a selected runtime before it starts", async () => {
+  const service = new LocalSetupService(setupDeps, () => {}, { appRoot: await tempDir("selected-local-ai-"), catalogue: SETUP_CATALOGUE });
   try {
     for (const id of ["comfyui-runtime", "ollama-runtime"]) {
-      service.skip(id);
+      assert.equal(service.status().components.find(c => c.id === id)?.state, "available");
+      service.installClosure(id);
       assert.equal(service.status().components.find(c => c.id === id)?.state, "queued");
+      service.skip(id);
+      assert.equal(service.status().components.find(c => c.id === id)?.state, "skipped");
     }
     const optional = SETUP_CATALOGUE.find(c => c.optional)!;
     service.skip(optional.id);
@@ -63,7 +66,7 @@ it("never skips a mandatory runtime, while optional models remain skippable", as
   } finally { await service.dispose(); }
 });
 
-it("seeds the gate before detection and publishes completion only after both selected services recover", { timeout: 60000 }, async () => {
+it("reports the local stack before detection and marks it healthy only after both selected services recover", { timeout: 60000 }, async () => {
   const root = await tempDir("local-ai-readiness-");
   const settings = new AppSettingsFile(join(root, "settings.json"));
   await settings.setComfyUi({ engineUrl: "http://127.0.0.1:28101" });

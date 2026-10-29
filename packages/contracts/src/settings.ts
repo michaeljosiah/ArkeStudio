@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OnboardingPlanSchema } from "./onboarding.js";
 import { ImageInspectionSettingsSchema } from "./world-chat-images.js";
 import { BenchPresetSchema } from "./bench.js";
 import { IsoDateTimeSchema } from "./ids.js";
@@ -259,6 +260,8 @@ export const PAID_PLANS: ProviderPlans = { google: "paid", mistral: "paid", goog
 
 const AppSettingsObjectSchema = z
   .object({
+    /** Null preserves pre-journey installations. New files explicitly receive the welcome plan. */
+    onboarding: OnboardingPlanSchema.nullable().optional(),
     /**
      * Whether the studio may go online when asked to research (2026-08-22, widened 2026-08-23).
      *

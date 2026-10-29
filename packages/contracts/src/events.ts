@@ -1,9 +1,11 @@
 import { GuideVoiceLineSchema } from "./world-guide.js";
+import { OnboardingStatusSchema } from "./onboarding.js";
 import { ArkePlayerReleaseSchema } from "./arke-player-release.js";
 import { StoryExportBlockerSchema, StoryExportMadeSchema, StoryExportStateSchema } from "./story-export.js";
 import { DramaEditionSchema } from "./audio-drama-edition.js";
 import { ChapterReviewSchema } from "./chapter-review.js";
 import { DramaRequestSchema } from "./audio-drama.js";
+import { ComicModeSchema } from "./graphic-novel.js";
 import { StoryEditionSchema, StoryPublishResultSchema } from "./story-publication.js";
 import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { valueSchema } from "./value-schema.js";
@@ -43,6 +45,11 @@ import { MusicHeardRowSchema, MusicTakeViewSchema, MusicWaveformSchema } from ".
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
 import { OllamaRuntimeStatusSchema } from "./ollama.js";
+import { StorageHealthSnapshotSchema } from "./storage-health.js";
+import { SystemResourcesSchema } from "./system-resources.js";
+import { RecoveryHistorySnapshotSchema, RecoveryNoticeSchema } from "./recovery-incidents.js";
+import { RecoveryPolicySnapshotSchema, RecoveryCommandResultSchema, RecoveryHistoryPageSchema } from "./recovery-settings.js";
+import { RecoveryActionResultSchema } from "./recovery-actions.js";
 import { DiagnosticsSnapshotSchema } from "./diagnostics.js";
 import { BuildReviewSchema, FoundingBuildStateSchema } from "./founding-build.js";
 import { GenesisBlueprintSchema } from "./genesis.js";
@@ -172,6 +179,8 @@ export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 // (SPEC-031 §1.3); the domain event below is what still ties them to this file.
 
 export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
+  z.object({ ...base, type: z.literal("world.import-result"), requestId: z.string(), worldId: z.string().optional(), reason: z.string().optional(), cancelled: z.boolean().optional() }).strict(),
+  z.object({ ...base, type: z.literal("onboarding.changed"), onboarding: OnboardingStatusSchema }).strict(),
   z.object({ ...base, type: z.literal("reference.look-renamed"), worldId: UlidSchema, sheetId: SlugSchema,
     lookId: z.string().min(1), requestId: UlidSchema, error: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal("production-narrative.saved"), worldId: UlidSchema,
@@ -514,6 +523,47 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /** `quote-comic-page` answered: the price, the brief as it is sent, and who rides (SPEC-064 R-19, R-23). */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic.page-quote"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      quote: z.discriminatedUnion("ok", [
+        z.object({
+          ok: z.literal(true),
+          model: z.string().min(1),
+          modelName: z.string().min(1),
+          mode: ComicModeSchema,
+          aspect: z.string().min(1),
+          microUsd: z.number().int().min(0),
+          brief: z.string(),
+          riding: z.array(z.string().min(1)),
+          /** Named on the page with no picture that rides (R-19). */
+          missing: z.array(z.string().min(1)),
+        }).strict(),
+        z.object({ ok: z.literal(false), reason: z.string().min(1) }).strict(),
+      ]),
+    })
+    .strict(),
+  /** A page being made (R-25): making, then made with its take, or failed by name. */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic.page-made"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      state: z.enum(["making", "made", "failed"]),
+      take: UlidSchema.optional(),
+      sessionId: z.string().min(1).optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
   /** `save-comic-script` answered: the new base on success, the reason on refusal (SPEC-064 R-10). */
   z
     .object({
@@ -2468,6 +2518,14 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   /** The ComfyUI engine and its recipes, whole each time (SPEC-021 §2.12). */
   z.object({ ...base, type: z.literal("comfyui.status"), comfyui: ComfyUiStatusSchema }).strict(),
   z.object({ ...base, type: z.literal("ollama.status"), ollama: OllamaRuntimeStatusSchema }).strict(),
+  z.object({ ...base, type: z.literal("storage.health"), health: StorageHealthSnapshotSchema }).strict(),
+  z.object({ ...base, type: z.literal("system.resources"), resources: SystemResourcesSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.history"), history: RecoveryHistorySnapshotSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.notice"), notice: RecoveryNoticeSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.policy"), policy: RecoveryPolicySnapshotSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.command-result"), result: RecoveryCommandResultSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.action-result"), result: RecoveryActionResultSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.history-page"), requestId: UlidSchema, page: RecoveryHistoryPageSchema }).strict(),
   /** Estimate-versus-actual divergence crossed the drift threshold (SPEC-008 R-13, §2.11). */
   z.object({ ...base, type: z.literal("manifest.drift"), reports: z.array(ManifestDriftSchema) }).strict(),
 

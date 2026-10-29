@@ -1,4 +1,4 @@
-import { ClientMessageSchema } from "@arke-studio/contracts";
+import { ClientMessageSchema, NEW_ONBOARDING } from "@arke-studio/contracts";
 /** Valid wire messages, shared by the live-gateway test and the real Chrome pairing check. */
 export function hostOnlyCommandFixtures(sourcePath: string) {
     const worldId = "01ARZ3NDEKTSV4RRFFQ69G5FAV", conversationId = "cv_" + worldId;
@@ -21,7 +21,16 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
     ];
 
     const payloads: Record<string, Record<string, unknown>> = {
+      "check-onboarding": {},
+      "save-onboarding": { plan: { ...NEW_ONBOARDING, persona: "lightweight" }, action: "save" },
+      "import-world": { requestId: worldId },
+      "studio-assistant": { requestId: "12345678-1234-4234-8234-123456789abc", command: { action: "watch" } },
       "account-open": { page: "account" }, "set-background-notifications": { preference: "off" },
+      "recovery-set-mode": { requestId: worldId, mode: "suggest-only" },
+      "recovery-set-advanced": { requestId: worldId, settings: {} },
+      "recovery-action": { requestId: worldId, command: { action: "preview-retry", resourceKey: "a".repeat(64) } },
+      "recovery-set-preferences": { requestId: worldId, preferences: { desktopOptIn: true } },
+      "recovery-history-control": { requestId: worldId, command: { action: "clear-resolved" } },
       "set-credential": { provider: "openai", key: "test-secret-only" },
       "set-provider-plan": { provider: "google", plan: "free" },
       "clear-credential": { provider: "openai" },
@@ -46,7 +55,7 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
       "comfyui-update-runtime": {},
       "setup-pause": {"componentId":"kokoro-82m"},
       "setup-resume": {"componentId":"kokoro-82m"},
-      "setup-repair": {"componentId":"kokoro-82m"},
+      "setup-repair": {"componentId":"kokoro-82m", "revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
       "setup-cancel": {},
       "cancel-vendor-sign-in": {},
       "choose-claude-executable": {},

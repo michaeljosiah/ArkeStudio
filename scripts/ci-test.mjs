@@ -16,6 +16,9 @@
 // took 15m54s and the client alone took 7m55s; stacking all workspaces on shard 2 exhausted
 // the 30-minute ceiling with no failed tests. Keep discovery automatic in both jobs. The two
 // exceptions are named in ci-test-plan.mjs, each with the workflow that runs it instead.
+// On 2026-10-27 four-way Windows shard 2 again reached thirty minutes while tests kept passing
+// (run 40577520866). Eight automatically discovered shards reduce that workload without dropping
+// tests or extending either the thirty-minute job ceiling or the ten-minute silence guard.
 //
 // The other half of the job is telling a hung shard from a slow one. That is why the child's
 // output is relayed here rather than inherited — see SILENCE_LIMIT_MS.
