@@ -12,7 +12,15 @@ import { toExtendedLength } from "../world/paths.js";
  */
 export interface ComicEpubPage { entry: ComicBookPage; bytes: Buffer; extension: string; width: number; height: number; alt: string }
 
-const xml = (text: string) => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+/** XML's five entities, and the control characters it forbids dropped, as the manuscript EPUB does (codex on PR 2227). */
+const xml = (text: string) =>
+  [...text]
+    .filter((char) => {
+      const code = char.codePointAt(0)!;
+      return (code >= 0x20 || code === 0x09 || code === 0x0a || code === 0x0d) && code !== 0xfffe && code !== 0xffff;
+    })
+    .join("")
+    .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 const MEDIA: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" };
 
 export function comicEpubEntries(input: { id: string; title: string; language: string; rtl: boolean; modified: string; pages: readonly ComicEpubPage[]; chapterTitle: (id: string) => string }): Array<[string, Buffer]> {
@@ -89,8 +97,18 @@ export async function writeComicEpub(target: string, entries: ReadonlyArray<[str
   await pipeline(zip.outputStream, createWriteStream(toExtendedLength(target)), { signal });
 }
 
-/** A PNG's or JPEG's pixel size from its header, so each page's viewport is the picture's own. */
+/** A PNG's, JPEG's or WebP's pixel size from its header, so each page's viewport is the picture's own. */
 export function imageSize(bytes: Buffer): { width: number; height: number } | null {
+  // WebP is a provider's output as often as PNG (codex on PR 2227): lossy VP8, lossless VP8L, or VP8X.
+  if (bytes.length > 30 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP") {
+    const chunk = bytes.toString("ascii", 12, 16);
+    if (chunk === "VP8 ") return { width: bytes.readUInt16LE(26) & 0x3fff, height: bytes.readUInt16LE(28) & 0x3fff };
+    if (chunk === "VP8L") {
+      const bits = bytes.readUInt32LE(21);
+      return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+    }
+    if (chunk === "VP8X") return { width: 1 + bytes.readUIntLE(24, 3), height: 1 + bytes.readUIntLE(27, 3) };
+  }
   if (bytes.length > 24 && bytes.readUInt32BE(0) === 0x89504e47) return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
   if (bytes.length > 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
     let at = 2;
