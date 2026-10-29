@@ -1212,6 +1212,14 @@ export function subscribeComicPages(listener: (event: ComicPageEvent) => void): 
   return () => comicPageListeners.delete(listener);
 }
 
+/** What became of a book's export (SPEC-064 R-47, R-49). */
+export type ComicExported = Extract<DomainEvent, { type: "comic.exported" }>;
+const comicExportListeners = new Set<(event: ComicExported) => void>();
+export function subscribeComicExported(listener: (event: ComicExported) => void): () => void {
+  comicExportListeners.add(listener);
+  return () => comicExportListeners.delete(listener);
+}
+
 /** What became of one episode script save (SPEC-057 R-83): the new base, or a refusal by name. */
 export type EpisodeScriptSaveResult = Extract<DomainEvent, { type: "episode-script.save-result" }>;
 const episodeScriptSaveListeners = new Set<(result: EpisodeScriptSaveResult) => void>();
@@ -1956,6 +1964,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "comic.page-quote" || event.type === "comic.page-made" || event.type === "comic.take-result") {
       for (const listener of comicPageListeners) listener(event);
+    }
+    if (event.type === "comic.exported") {
+      for (const listener of comicExportListeners) listener(event);
     }
     if (event.type === "comic-script.save-result") {
       for (const listener of comicScriptSaveListeners) listener(event);
@@ -5399,6 +5410,12 @@ export function quoteComicPage(worldId: string, productionId: string, page: stri
 export function makeComicPage(worldId: string, productionId: string, page: string, confirmedMicroUsd: number, mode?: ComicMode, untilPasses?: boolean): string | null {
   const requestId = ulid();
   return send({ kind: "make-comic-page", requestId, worldId, productionId, page, confirmedMicroUsd, ...(mode !== undefined ? { mode } : {}), ...(untilPasses ? { untilPasses: true as const } : {}) }) ? requestId : null;
+}
+
+/** The book as CBZ and/or PDF from its accepted pages (SPEC-064 R-47). */
+export function exportComic(worldId: string, productionId: string, formats: Array<"cbz" | "pdf">): string | null {
+  const requestId = ulid();
+  return send({ kind: "export-comic", requestId, worldId, productionId, formats }) ? requestId : null;
 }
 
 /** Read a take back and check its lettering again (SPEC-064 R-29). */
