@@ -1,6 +1,6 @@
 # Turn 248 · A graphic novel's comic style
 
-Proposed 29 October 2026.
+Proposed 29 October 2026. Approved by the owner the same day ("approved"), calls 1 – 5 as drawn.
 
 ## Why this turn
 

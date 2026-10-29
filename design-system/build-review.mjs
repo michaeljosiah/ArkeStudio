@@ -29,8 +29,8 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  */
 const SCREENS = [
   // BEGIN COMIC STYLE 248
-  { group: "Comic style · turn 248", screen: "Tell a story: a graphic novel’s style, picked by its page", frame: "248a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Proposed 29 October 2026."] },
-  { group: "Comic style · turn 248", screen: "Pages: Style, changed for the pages made next", frame: "248b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Proposed 29 October 2026."] },
+  { group: "Comic style · turn 248", screen: "Tell a story: a graphic novel’s style, picked by its page", frame: "248a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },
+  { group: "Comic style · turn 248", screen: "Pages: Style, changed for the pages made next", frame: "248b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },
   // END COMIC STYLE 248
 
   // BEGIN GRAPHIC NOVEL 247
@@ -995,7 +995,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
-  { file: "comic-style-248.review.html", what: "Turn 248: a graphic novel’s comic style — ten styles and your own, each shown as the same page drawn in it, picked in Tell a story and changed in Pages.", state: "proposed 29 October 2026; not built" },
+  { file: "comic-style-248.review.html", what: "Turn 248: a graphic novel’s comic style — ten styles and your own, each shown as the same page drawn in it, picked in Tell a story and changed in Pages.", state: "approved 29 October 2026; not built" },
   { file: "graphic-novel-247.review.html", what: "Turn 247: the graphic novel — Graphic novel under Tell a story, the Pages screen and its page editor, a take’s lettering check drawn on the page, a take that passes, a check that could not run, the reader, and Export.", state: "approved 29 October 2026; not built" },
   { file: "story-plays-itself-246.review.html", what: "Turn 246: A story plays itself — a visual novel plays like a film in Preview and the web package, stops only for a choice of two or more, and plays through a lone way on, drawn on the Branch Map as a link.", state: "approved 28 October 2026; not built" },
   { file: "story-export-245.review.html", what: "Turn 245: Export → Arke Player for an interactive story — the Export sheet with Web package and Arke Player for an interactive movie and a visual novel, its blockers, and the package made and read back beside the world’s releases.", state: "approved 28 October 2026; not built" },
