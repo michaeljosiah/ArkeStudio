@@ -371,3 +371,59 @@ export const ComicPageRecordSchema = z.object({
 });
 export type ComicPageRecord = z.infer<typeof ComicPageRecordSchema>;
 export const EMPTY_COMIC_PAGE_RECORD: ComicPageRecord = { version: 1, takes: [], accepted: {}, lettering: {}, acknowledged: {}, making: [] };
+
+// ---------------------------------------------------------------------------
+// The book as it stands (R-40, R-41, R-47)
+// ---------------------------------------------------------------------------
+
+export interface ComicBookPage {
+  id: string;
+  chapter: string;
+  number: number;
+  page: ComicPage;
+  /** The accepted take in the book's language, if any. */
+  take?: ComicPageTake;
+  /** Accepted, but made from words or panels the script no longer says (R-25). */
+  outOfDate: boolean;
+  /** Its lettering passed, or the author overrode what was found (R-33). */
+  cleared: boolean;
+  /** Kept with an override rather than a pass. */
+  overridden: boolean;
+}
+
+/**
+ * Every page of the book in reading order with what its accepted take is (R-9, R-41). A retired
+ * chapter's pages are in no book. Shared by readiness, review and export, so the three never
+ * disagree about which pages are done.
+ */
+export function comicBook(production: {
+  chapters: ReadonlyArray<{ id: string; order: number; retired?: boolean | undefined }>;
+  comic?: ComicSettings | null | undefined;
+  comicScripts?: ReadonlyArray<{ chapter: string; script: ComicScript }> | undefined;
+  comicPages?: ReadonlyArray<{ page: string; record: ComicPageRecord }> | undefined;
+}): ComicBookPage[] {
+  const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
+  const order = new Map(production.chapters.filter((chapter) => !chapter.retired).map((chapter) => [chapter.id, chapter.order]));
+  const records = new Map((production.comicPages ?? []).map((entry) => [entry.page, entry.record]));
+  const pages: ComicBookPage[] = [];
+  for (const entry of [...(production.comicScripts ?? [])].filter((candidate) => order.has(candidate.chapter)).sort((a, b) => order.get(a.chapter)! - order.get(b.chapter)!)) {
+    for (const page of entry.script.pages) {
+      const record = records.get(page.id);
+      const accepted = record?.accepted[settings.language];
+      const take = accepted === undefined ? undefined : record!.takes.find((candidate) => candidate.id === accepted);
+      const blocking = take?.verification?.status === "compared" ? take.verification.findings.filter((finding) => BLOCKING_FINDINGS.has(finding.kind)).map((finding) => finding.id) : [];
+      const passed = take?.verification?.status === "compared" && blocking.length === 0;
+      // An override clears only the findings it names: one made before a re-check that found more
+      // covers nothing new (codex on PR 2225).
+      const covered = take?.override !== undefined && blocking.every((id) => take.override!.findings.includes(id));
+      pages.push({
+        id: page.id, chapter: entry.chapter, number: pages.length + 1, page,
+        ...(take ? { take } : {}),
+        outOfDate: take !== undefined && take.hash !== comicPageHash(page, settings, take.mode),
+        cleared: take !== undefined && (passed || covered),
+        overridden: take !== undefined && !passed && covered,
+      });
+    }
+  }
+  return pages;
+}

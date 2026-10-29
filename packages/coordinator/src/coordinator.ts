@@ -40,6 +40,7 @@ import { DramaEditionService } from "./publications/drama.js";
 import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
 import { acceptComicTake, changeComicPage, comicPageRecord, comicPageRequest, comicPageTake, saveComicScript, setComicSettings, verifyComicTake } from "./productions/graphic-novel.js";
 import { harnessPageReader, type PageReader } from "./productions/graphic-novel-reader.js";
+import { ComicExportBlocked, exportComic } from "./productions/comic-export.js";
 import { makeImageJsonRunner } from "./harness/review-task.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
@@ -1441,6 +1442,8 @@ export class Coordinator {
   private readonly makingComicPages = new Map<string, AbortController>();
   /** Page reads in flight, stopped with the app as a review is (codex on PR 2223). */
   private readonly readingComicPages = new Set<AbortController>();
+  /** Book exports in flight, stopped with the app (SPEC-064 R-47). */
+  private readonly exportingComics = new Set<AbortController>();
   /**
    * A book's `Make 290 tall` run (design turn 235a), by world and production: one at a time,
    * stoppable, and its last progress replayed to a window that connects, so a paid run going on
@@ -11386,6 +11389,27 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         await this.makeAndCheckComicPage(store, msg);
+        return;
+      }
+      case "export-comic": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const answer = (result: Extract<DomainEvent, { type: "comic.exported" }>["result"]) =>
+          this.emit({ at: new Date().toISOString(), type: "comic.exported", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, result });
+        // Stopped by the world closing and by the app stopping, as a manuscript export is (codex on PR 2225).
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        this.exportingComics.add(control);
+        try {
+          answer({ ok: true, files: await exportComic(store, msg.productionId, msg.formats, new Date(this.nowIso()), control.signal, msg.requestId) });
+        } catch (err) {
+          // Bounded as the event is: a book of many pages names its first holds, which is enough to act on.
+          answer({ ok: false, reason: describeCoordinatorError(err), blockers: err instanceof ComicExportBlocked ? err.blockers.slice(0, 500) : [] });
+        } finally {
+          this.exportingComics.delete(control);
+          store.closingSignal.removeEventListener("abort", onClose);
+        }
         return;
       }
       case "check-comic-take":
@@ -23879,6 +23903,7 @@ export class Coordinator {
       // A page waiting on its picture would hold the drain below for the picture's whole wait (codex on PR 2222).
       for (const control of this.makingComicPages.values()) control.abort();
       for (const control of this.readingComicPages) control.abort();
+      for (const control of this.exportingComics) control.abort();
       for (const control of this.makingMotion.values()) control.abort();
       for (const control of this.preparingWordTiming.values()) control.abort();
       for (const run of this.checkingAudiobookWords.values()) run.control.abort();
