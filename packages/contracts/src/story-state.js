@@ -190,6 +190,58 @@ export function exploreStory(program, limits = {}) {
   return { complete: true, points: queue, transitions, problems };
 }
 
+/**
+ * A lone way (SPEC-063 R-11a; turn 246, Player P19): in this state the scene offers exactly one open
+ * choice, and no closed choice is shown with its reason — a reason shown is one of the two a listener
+ * must have before anything is offered. It is never shown: playback follows it. Returns that choice,
+ * or undefined where the listener has a decision (or none at all). The web player, Preview, the
+ * Branch map and Arke Player's Dart port all ask this one question, so they cannot disagree.
+ */
+export function storyLoneChoice(choices, sceneId, state) {
+  let open;
+  for (const choice of choices) {
+    if (choice.from !== sceneId) continue;
+    if (storyPredicate(choice.when, state)) {
+      if (open) return undefined;
+      open = choice;
+    } else if (choice.unavailable) return undefined;
+  }
+  return open;
+}
+
+/**
+ * Which steps of a route were lone ways played through rather than choices made, in one walk of
+ * the route: replaying every prefix afresh froze an ending reached by a long route (codex on PR 2228).
+ */
+export function storyLinkSteps(program, prefix) {
+  validateStoryProgram(program);
+  let point = { sceneId: program.start, state: storyDefaults(program), origins: {} };
+  return prefix.map((id) => {
+    const lone = storyLoneChoice(program.choices, point.sceneId, point.state)?.id === id;
+    point = storyAdvance(program, point, id);
+    return lone;
+  });
+}
+
+/**
+ * Which choices are links on the map (turn 246 rule 11, call 7): "always" for one lone in every
+ * reachable state that offers it, drawn as a plain line with its label as the author's note;
+ * "sometimes" for one lone on some routes only, which keeps its pill because the others read its
+ * label. A choice no explored state offers, or an exploration cut short, never earns "always".
+ */
+export function storyLinks(program, graph) {
+  const explored = graph || exploreStory(program);
+  const offered = new Map(), lone = new Map();
+  for (const edge of explored.transitions) {
+    const point = explored.points[edge.from];
+    offered.set(edge.choiceId, (offered.get(edge.choiceId) || 0) + 1);
+    if (storyLoneChoice(program.choices, point.sceneId, point.state)?.id === edge.choiceId) lone.set(edge.choiceId, (lone.get(edge.choiceId) || 0) + 1);
+  }
+  const links = new Map();
+  for (const [id, count] of lone) links.set(id, explored.complete && count === offered.get(id) ? "always" : "sometimes");
+  return links;
+}
+
 /** Stable authoring references, so a fact can be renamed without silently changing its identity. */
 export function storyFactReferences(program, id) {
   const uses = [];

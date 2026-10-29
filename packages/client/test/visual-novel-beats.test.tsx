@@ -119,7 +119,8 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
       ["narration", "Narrator", "They hung the washing out the morning the water came."],
       ["dialogue", "Maren Kest", "The verse, under the water."],
     ]);
-    assert.match(first.textContent ?? "", /on tap/, "a beat nobody has set moves on with a tap");
+    assert.match(first.textContent ?? "", /after the line/, "a beat nobody has set moves on by itself after its line (turn 246)");
+    assert.doesNotMatch(first.textContent ?? "", /on tap/, "never on tap");
 
     const second = q(mounted, '[data-testid="workspace-row-sh_13"]')!;
     assert.match(second.querySelector(".fy-swrow__same")?.textContent ?? "", /Same picture/);
@@ -305,7 +306,8 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     await act(async () => { __connectionStatusForTest("closed"); });
     const player = q(mounted, ".bm-player")!;
     assert.ok(player, "the player opens");
-    assert.equal(player.querySelectorAll(".aip-ticks > i.done").length, 3, "sh_12's two beats behind it, on sh_13's");
+    assert.equal(player.querySelectorAll(".aip-ticks > i.done").length, 2, "sh_12's two beats behind it");
+    assert.equal(player.querySelectorAll(".aip-ticks > i:nth-child(3) > b").length, 1, "and sh_13's tick filling as it plays (turn 246)");
     assert.equal((player.querySelector(".aip-box") as HTMLElement | null)?.hidden, true, "sh_13 is the picture alone");
   });
 
@@ -583,8 +585,24 @@ describe("the Beat card on a visual novel's shot page (turn 174, 174c)", () => {
     assert.equal(all(mounted, ".fy-shot__section")[0], card, "before the Script");
     assert.equal(card.querySelectorAll(".fy-swbeat__line").length, 2);
 
+    // A beat's Advance (246h): After the line or Hold; On tap is gone, and a beat nobody set plays after its line.
     const advance = [...card.querySelectorAll('[aria-label="Advance"] button')] as unknown as HTMLButtonElement[];
-    assert.deepEqual(advance.map((button) => [button.textContent, button.getAttribute("aria-pressed")]), [["After the voice", "false"], ["On tap", "true"], ["Hold", "false"]]);
+    assert.deepEqual(advance.map((button) => [button.textContent, button.getAttribute("aria-pressed")]), [["After the line", "true"], ["Hold 4s", "false"]]);
+    await click(advance[1]!);
+    assert.deepEqual(commands(sent), [{ kind: "edit-shot", shotId: "sh_12", change: { beat: { advance: "hold" } } }]);
+  });
+
+  it("reads a beat saved On tap as After the line, and rewrites it only when pressed (turn 246)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    __connectionStatusForTest("open");
+    const state = visualNovel();
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")! as unknown as { shots: Array<{ beat?: unknown }> };
+    scene.shots[0]!.beat = { advance: "tap" };
+    const mounted = await mountState(state, `${SCENE_PATH}/shots/sh_12`);
+    const advance = [...q(mounted, 'section[aria-label="Beat"]')!.querySelectorAll('[aria-label="Advance"] button')] as unknown as HTMLButtonElement[];
+    assert.deepEqual(advance.map((button) => [button.textContent, button.getAttribute("aria-pressed")]), [["After the line", "true"], ["Hold 4s", "false"]]);
+    assert.deepEqual(commands(sent), [], "nothing in the world is rewritten for it");
     await click(advance[0]!);
     assert.deepEqual(commands(sent), [{ kind: "edit-shot", shotId: "sh_12", change: { beat: { advance: "voice" } } }]);
   });
