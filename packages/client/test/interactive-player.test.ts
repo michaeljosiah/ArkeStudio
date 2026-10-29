@@ -759,6 +759,33 @@ describe("the player reading beats (turns 174 and 246)", () => {
     assert.equal(silent.button("Narration")?.hidden, true, "no Narration in a story without voices (246f)");
   });
 
+  it("stops a line heard again from the Log when Narration comes back on: one voice at a time (codex on PR 2228)", () => {
+    const run = (pauseFirst: boolean) => {
+      const p = mount({ ...TWO_VOICES, autoplay: true });
+      const voice = p.all("audio")[0]! as unknown as HTMLMediaElement;
+      const logVoice = p.all("audio")[1]! as unknown as HTMLMediaElement;
+      const calls: string[] = [];
+      Object.assign(voice, { play: () => { calls.push("voice play"); return Promise.resolve(); }, pause: () => calls.push("voice pause") });
+      Object.assign(logVoice, { paused: true, play: () => { calls.push("log play"); Object.assign(logVoice, { paused: false }); return Promise.resolve(); }, pause: () => { calls.push("log pause"); Object.assign(logVoice, { paused: true }); } });
+      p.key("n");
+      p.key("l");
+      p.click(p.q('[aria-label="Log"] [data-line="0"]') as unknown as HTMLElement);
+      if (pauseFirst) p.key(" ");
+      calls.length = 0;
+      p.key("n");
+      assert.equal(calls[0], "log pause", "the line heard again stops first");
+      if (pauseFirst) {
+        assert.ok(!calls.includes("voice play"), "paused, the beat's voice waits for Play");
+        p.key(" ");
+        assert.ok(!calls.includes("log play"), "and Play brings back the beat's voice, not the Log's");
+      }
+      assert.ok(calls.includes("voice play"), "then the beat's own voice reads");
+      assert.equal(voice.getAttribute("src"), "media/one.mp3");
+    };
+    run(false);
+    run(true);
+  });
+
   it("opens Log and Route over a playing story without pausing it", () => {
     const p = mount({ ...NOVEL, autoplay: true });
     onward(p);

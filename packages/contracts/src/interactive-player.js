@@ -734,6 +734,9 @@ export function mountInteractivePlayer(root, options) {
           schedule(false);
         }
       } else if (narration && voiceDone && !voiceHeard) {
+        // One voice at a time: a line heard again from the Log, sounding or held by Pause, gives
+        // way to the beat's own (codex on PR 2228).
+        stopLog();
         if (b.advance !== "hold") stopHold();
         voiceDone = false;
         voiceFailed = false;
