@@ -533,3 +533,19 @@ Opening Activity closes Studio, keeping its draft, but closing Activity does not
 prototype does. Reviewing cleanup sent only a preview request; the handoff staged an edited draft in
 World Chat and sent nothing. Physical-device keyboards and the packaged Electron surface were not
 checked: this checkout has no Electron install and the installed app predates the fixes.
+
+## Turn 239 keyboard and Activity follow-up — 29 October 2026
+
+The two behavioural gaps above are corrected to the prototype. Where Studio is modal, Tab and
+Shift+Tab wrap between its first and last controls, including Shift+Tab from the heading it opens
+on; beside the page on desktop, Tab still carries on into the page. Activity opened from the bell or
+from the storage card's Open Activity puts Studio aside, and closing Activity over the same page —
+its Close, Escape, the bell again or a press outside — hands Studio back with its draft and its
+selected conversation. Leaving through one of Activity's links goes to that page without Studio,
+Chat pressed while Activity is open takes Activity's place, and a Studio that was closed stays
+closed. Closing Studio afterwards returns focus to the titlebar Chat control: handed back, the
+dialog had recorded the page body as its opener, because Activity's Close had gone.
+
+Checked in the dev client with real CDP keys and mouse at 834×900, 390×844, 390×550 and 1360×820:
+37 of 37, with no model request sent. The packaged Electron surface and physical keyboards remain
+unchecked.

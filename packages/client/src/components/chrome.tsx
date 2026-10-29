@@ -150,7 +150,7 @@ export function AppChrome({
           <>
             <button type="button" className={cx("fy-iconbtn", studioView?.open && "fy-iconbtn--current")} title="Chat" aria-label="Chat"
               aria-haspopup="dialog" aria-expanded={studioView?.open ?? false} data-studio-chat-trigger=""
-              onClick={() => { closeSystemPanel(); if (studioView?.open) studio?.close(); else { chat?.close(); studio?.open(); } }}>
+              onClick={() => { closeSystemPanel(); if (studioView?.open) studio?.close(); else { chat?.close(); closeActivityPanel(); studio?.open(); } }}>
               <Message size={13} />{chatRunning && <span className="fy-iconbtn__dot fy-iconbtn__dot--new" />}
             </button>
             {/* Turn 240 replaces the shortcut only. Proposal routes and review remain intact. */}
@@ -171,7 +171,7 @@ export function AppChrome({
               aria-label={attention ? "Activity — something needs you" : fresh ? "Activity — something new" : "Activity"}
               aria-expanded={panel.open}
               data-activity-bell=""
-              onClick={() => { closeSystemPanel(); studio?.close(); panel.open ? closeActivityPanel() : openActivityPanel(attention ? "inbox" : "new"); }}
+              onClick={() => { closeSystemPanel(); if (panel.open) closeActivityPanel(); else { studio?.stepAside(); openActivityPanel(attention ? "inbox" : "new"); } }}
             >
               <Bell size={13} />
               {attention ? (
