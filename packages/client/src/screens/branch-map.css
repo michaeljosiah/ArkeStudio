@@ -84,6 +84,20 @@
 }
 .bm-label--unwalked { border-style: dashed; border-color: color-mix(in srgb, var(--foreground) 45%, transparent); color: var(--muted-foreground); }
 .bm-label--selected { background: var(--foreground); color: var(--background); border-color: var(--foreground); border-style: solid; }
+/* A link (turn 246g) plays straight through, so it is the line alone: its note sits just above it
+   in small muted words, with no pill. Walked and not walked stay the line's, solid or dashed. */
+.bm-label--link,
+.bm-label--link.bm-label--unwalked { transform: translate(-50%, calc(-100% - 4px)); max-width: 140px; padding: 0 2px; border: 0; border-radius: 4px; background: none; box-shadow: none; color: var(--muted-foreground); }
+.bm-label--link.bm-label--selected { background: none; color: var(--foreground); font-weight: var(--weight-medium); }
+.bm-label--link:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.bm-plays { align-self: flex-start; height: 28px; padding: 0 11px 0 9px; border-radius: 999px; display: inline-flex; align-items: center; gap: 6px; background: var(--muted); color: var(--foreground); font: var(--type-label); }
+.bm-rule { width: 100%; margin: 2px 0; border: 0; border-top: 1px solid var(--border); }
+.bm-link-from { font: var(--type-label); color: var(--muted-foreground); }
+.bm-insp[aria-label="Link"] .bm-field__label { font: var(--type-ui); font-weight: var(--weight-semibold); color: var(--foreground); }
+.bm-link-facts .bm-kv__k { flex: 1; width: auto; font: var(--type-ui); }
+.bm-link-facts .bm-kv__v { flex: none; }
+.bm-link-edit { width: 100%; }
+.bm-goes--link .bm-goes__label { color: var(--muted-foreground); }
 
 /* A scene card: its frame at 16:9, its title, one meta line. 148 wide, as the layout pitches. */
 .bm-node {

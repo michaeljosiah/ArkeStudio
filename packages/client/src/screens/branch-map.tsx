@@ -31,7 +31,7 @@ import { ResponsiveSheet } from "../components/responsive-sheet.js";
 import { ProductionConversation } from "../components/conversation.js";
 import { InteractivePlayerView } from "../components/interactive-player.js";
 import { useMediaQuery } from "../lib/media-query.js";
-import { More, Expand, EyeOff, Flag, Minus, Play, Plus, Trash, TriangleAlert, X } from "../components/icons.js";
+import { ArrowRight, More, Expand, EyeOff, Flag, Minus, Play, Plus, Trash, TriangleAlert, X } from "../components/icons.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, Input, Select, Switch, cx } from "../components/ui.js";
 import {
@@ -42,7 +42,9 @@ import {
   mapGeometry,
   outPort,
   inPort,
+  previewUnwalked,
   removalConsequences,
+  routingLinks,
   unwalkedChoices,
   type FindingRow,
   type PlacedNode,
@@ -372,6 +374,8 @@ export function BranchMapScreen() {
   }, [served, routing, scenes]);
   const layout = useMemo(() => (routing ? layoutRouting(routing, scenes) : null), [routing, scenes]);
   const geometry = useMemo(() => (routing && layout ? mapGeometry(routing, scenes, layout, compact) : null), [routing, scenes, layout, compact]);
+  // Links (turn 246): lone in every state, drawn as a plain line and played straight through.
+  const links = useMemo(() => (routing ? routingLinks(routing) : new Map<string, "always" | "sometimes">()), [routing]);
 
   const fit = useCallback(() => {
     const el = viewportRef.current;
@@ -453,6 +457,10 @@ export function BranchMapScreen() {
   const rows = findingRows(findings, titleOf, labelOf);
   const counts = findingCounts(findings);
   const blockers = findings.filter((finding) => finding.severity === "blocks");
+  // The map's count names links apart from choices (246g): 15 scenes · 31 choices · 8 links.
+  const linkCount = [...links.values()].filter((kind) => kind === "always").length;
+  const choiceCount = (routing?.choices.length ?? 0) - linkCount;
+  const isLink = (id: string) => links.get(id) === "always";
   const frameOf = (id: string) => {
     const scene = scenes.find((candidate) => candidate.id === id);
     return scene ? sceneFrame(production, world.artifacts, world.meta.slug, scene) : null;
@@ -465,7 +473,7 @@ export function BranchMapScreen() {
         <div className="bm-head__meta">
           {scenes.length} scene{scenes.length === 1 ? "" : "s"}
           {routing
-            ? ` · ${routing.choices.length} choice${routing.choices.length === 1 ? "" : "s"} · ${routing.endings.length} ending${routing.endings.length === 1 ? "" : "s"} · v${routing.version}`
+            ? ` · ${choiceCount} choice${choiceCount === 1 ? "" : "s"}${linkCount > 0 ? ` · ${linkCount} link${linkCount === 1 ? "" : "s"}` : ""} · ${routing.endings.length} ending${routing.endings.length === 1 ? "" : "s"} · v${routing.version}`
             : " · no routing yet"}
         </div>
       </div>
@@ -921,14 +929,15 @@ export function BranchMapScreen() {
                       data-choice-row={choice.id}
                       className={cx(
                         "bm-goes",
+                        isLink(choice.id) && "bm-goes--link",
                         unwalked.has(choice.id) && "bm-goes--unwalked",
                         selectedChoice?.id === choice.id && "bm-goes--selected",
                       )}
-                      aria-label={`${choice.label}: goes to ${titleOf(choice.to)}${unwalked.has(choice.id) ? ", not walked" : ""}`}
+                      aria-label={`${choice.label}: ${isLink(choice.id) ? "plays through to" : "goes to"} ${titleOf(choice.to)}${unwalked.has(choice.id) ? ", not walked" : ""}`}
                       onClick={() => setSelection({ kind: "choice", id: choice.id })}
                     >
                       <span className="bm-goes__label">{choice.label}</span>
-                      <span className="bm-muted">goes to</span>
+                      <span className="bm-muted">{isLink(choice.id) ? "plays through to" : "goes to"}</span>
                       <span className="bm-goes__to">{titleOf(choice.to)}</span>
                     </button>
                   ))}
@@ -1015,17 +1024,19 @@ export function BranchMapScreen() {
             onKeyDown={walkKeys(`c:${edge.id}`)}
             className={cx(
               "bm-label",
+              // A link is drawn plainly (turn 246g): its note in small muted words beside the line, no pill.
+              isLink(edge.id) && "bm-label--link",
               unwalked.has(edge.id) && "bm-label--unwalked",
               selectedChoice?.id === edge.id && "bm-label--selected",
             )}
             style={{ left: edge.lx, top: edge.ly }}
-            aria-label={`${edge.label}: ${titleOf(edge.from)} to ${titleOf(edge.to)}${unwalked.has(edge.id) ? ", not walked" : ""}`}
+            aria-label={`${edge.label}: ${isLink(edge.id) ? "link, plays through, " : ""}${titleOf(edge.from)} to ${titleOf(edge.to)}${unwalked.has(edge.id) ? ", not walked" : ""}`}
             onClick={() => {
               setSelection({ kind: "choice", id: edge.id });
               setHighlight(new Set());
             }}
           >
-            {edge.label}{routing.choices.find(choice => choice.id === edge.id)?.when && <span className="story-map-badge" title="Conditional choice">Conditional</span>}{!!routing.choices.find(choice => choice.id === edge.id)?.effects?.length && <span className="story-map-badge" title="Remembers values">Remembers</span>}
+            {edge.label}{!isLink(edge.id) && routing.choices.find(choice => choice.id === edge.id)?.when && <span className="story-map-badge" title="Conditional choice">Conditional</span>}{!isLink(edge.id) && !!routing.choices.find(choice => choice.id === edge.id)?.effects?.length && <span className="story-map-badge" title="Remembers values">Remembers</span>}
           </button>
         ))}
         {pending && <div className="bm-label story-draft-label" style={{ left:(outPort(pending.from).x + inPort(pending.to).x)/2, top:(outPort(pending.from).y + inPort(pending.to).y)/2 + 30 }}><span>{connector?.label || "New choice"}</span><small>Draft</small></div>}
@@ -1100,10 +1111,100 @@ export function BranchMapScreen() {
     if (selection.kind === "choice") {
       if (!selectedChoice) return null;
       const walked = !unwalked.has(selectedChoice.id);
+      const editConnector = () => { setConnectorEditing(true); setConnector(selectedChoice); setMapDestination(null); };
+      const removal = selection.removing && (
+        <div
+          className="bm-confirm"
+          role="alertdialog"
+          aria-label={`Remove ${selectedChoice.label}?`}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.stopPropagation();
+            cancelRemoval(selectedChoice.id);
+          }}
+        >
+          <div className="bm-confirm__title">Remove “{selectedChoice.label}”?</div>
+          {consequences.length > 0 ? (
+            <>
+              <span className="bm-eyebrow">What breaks</span>
+              {consequences.map((line) => (
+                <div key={line} className="bm-confirm__line">
+                  <span className="bm-dot bm-dot--blocks" />
+                  {line}
+                </div>
+              ))}
+            </>
+          ) : (
+            <div className="bm-muted">Nothing else breaks.</div>
+          )}
+          <div className="bm-actions bm-actions--end">
+            {/* Delete on a focused label opens this; focus comes here, not left on the label,
+                where Enter selected the choice again and closed the question unanswered. */}
+            <Button size="sm" autoFocus onClick={() => cancelRemoval(selectedChoice.id)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => {
+                command({ operation: "remove-choice", choiceId: selectedChoice.id });
+                setSelection(null);
+              }}
+            >
+              {isLink(selectedChoice.id) ? "Remove link" : "Remove choice"}
+            </Button>
+          </div>
+        </div>
+      );
+      if (isLink(selectedChoice.id)) {
+        // A link (246g): the only way out of its scene in every state, played straight through.
+        // Its label is the author's note, never shown to a listener, so the field is Note.
+        const facts = routing.facts ?? [];
+        const effects = selectedChoice.effects ?? [];
+        return (
+          <Inspector title="Link" onClose={() => setSelection(null)} footer={<Button className="bm-link-edit" onClick={editConnector}>Edit link</Button>}>
+            <span className="bm-link-from">{titleOf(selectedChoice.from)}</span>
+            <h2 className="story-choice-title">{selectedChoice.label}</h2>
+            <p className="bm-muted">{titleOf(selectedChoice.from)} → {titleOf(selectedChoice.to)}</p>
+            <span className="bm-plays" data-testid="plays-through"><ArrowRight size={14} />Plays through</span>
+            <hr className="bm-rule" />
+            <CommitField
+              key={`${selectedChoice.id}-${selectedChoice.label}`}
+              label="Note"
+              value={selectedChoice.label}
+              onCommit={(label) => command({ operation: "edit-choice", choiceId: selectedChoice.id, changes: { label } })}
+            />
+            <hr className="bm-rule" />
+            <div className="bm-link-facts">
+            <div className="bm-kv"><span className="bm-kv__k">Available when</span><span className="bm-kv__v">{selectedChoice.when ? "Conditional" : "Always"}</span></div>
+            <div className="bm-kv"><span className="bm-kv__k">Remember</span><span className="bm-kv__v">{effects.length === 0 ? "Nothing" : effects.map((effect) => `${facts.find((fact) => fact.id === effect.fact)?.label ?? effect.fact} → ${String(effect.value)}`).join(", ")}</span></div>
+            <div className="bm-kv">
+              <span className="bm-kv__k">Preview</span>
+              <span className="bm-kv__v">{walked ? "Walked" : <><span className="bm-dot bm-dot--blocks" />Not walked</>}</span>
+              {!walked && (
+                <Button size="sm" onClick={() => setPreview({ from: selectedChoice.from, at: Date.now() })}>
+                  <Play size={10} />
+                  Walk it
+                </Button>
+              )}
+            </div>
+            </div>
+            <div className="bm-actions">
+              <Button size="sm" variant="ghost" className="bm-danger" onClick={() => setSelection({ kind: "choice", id: selectedChoice.id, removing: true })}>
+                <Trash size={13} />
+                Remove link
+              </Button>
+            </div>
+            {removal}
+          </Inspector>
+        );
+      }
       if (addedChoice === selectedChoice.id && !selection.removing) return <Inspector title="Choice" onClose={() => setSelection(null)}><span className="bm-eyebrow">{choiceSavedLabel} · {walked ? "walked" : "not walked"}</span><h2 className="story-choice-title">{selectedChoice.label}</h2><p className="bm-muted">{titleOf(selectedChoice.from)} → {titleOf(selectedChoice.to)}</p><StoryRuleSummary routing={routing} when={selectedChoice.when} effects={selectedChoice.effects ?? []}/><p className="story-consequence">The connection is saved with its text, conditions and values in one change. {walked ? "Walked in preview." : "Preview is still needed."}</p><Button className="story-review-action" onClick={() => { setConnectorEditing(true); setConnector(selectedChoice); setMapDestination(null); }}>Edit choice</Button><Button onClick={()=>setAddedChoice(null)}>More choice settings</Button></Inspector>;
       return (
         <Inspector title="Choice" sub={routing.schemaVersion === 2 ? undefined : selectedChoice.id} onClose={() => setSelection(null)} footer={routing.schemaVersion === 2 ? <div ref={setRuleActionHost}/> : undefined}>
           {routing.schemaVersion === 2 && <><span className="bm-eyebrow">{titleOf(selectedChoice.from)}</span><h2 className="story-choice-title">{selectedChoice.label}</h2><p className="bm-muted">{titleOf(selectedChoice.from)} → {titleOf(selectedChoice.to)}</p></>}
+          {/* Alone on some routes only (turn 246 call 7): a choice on the others, so it keeps its label. */}
+          {links.get(selectedChoice.id) === "sometimes" && <span className="bm-plays" data-testid="plays-through"><ArrowRight size={14} />Sometimes plays through</span>}
           <details className={cx("story-choice-settings",routing.schemaVersion !== 2 && "story-choice-settings--legacy")} {...(routing.schemaVersion === 2 ? {} : {open:true})}><summary>Choice settings</summary>
           {routing.schemaVersion !== 2 && <Button onClick={() => { setConnectorEditing(true); setConnector(selectedChoice); setMapDestination(null); }}>Edit connector</Button>}
           <CommitField
@@ -1151,50 +1252,7 @@ export function BranchMapScreen() {
               Remove choice
             </Button>
           </div>
-          {selection.removing && (
-            <div
-              className="bm-confirm"
-              role="alertdialog"
-              aria-label={`Remove ${selectedChoice.label}?`}
-              onKeyDown={(event) => {
-                if (event.key !== "Escape") return;
-                event.stopPropagation();
-                cancelRemoval(selectedChoice.id);
-              }}
-            >
-              <div className="bm-confirm__title">Remove “{selectedChoice.label}”?</div>
-              {consequences.length > 0 ? (
-                <>
-                  <span className="bm-eyebrow">What breaks</span>
-                  {consequences.map((line) => (
-                    <div key={line} className="bm-confirm__line">
-                      <span className="bm-dot bm-dot--blocks" />
-                      {line}
-                    </div>
-                  ))}
-                </>
-              ) : (
-                <div className="bm-muted">Nothing else breaks.</div>
-              )}
-              <div className="bm-actions bm-actions--end">
-                {/* Delete on a focused label opens this; focus comes here, not left on the label,
-                    where Enter selected the choice again and closed the question unanswered. */}
-                <Button size="sm" autoFocus onClick={() => cancelRemoval(selectedChoice.id)}>
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() => {
-                    command({ operation: "remove-choice", choiceId: selectedChoice.id });
-                    setSelection(null);
-                  }}
-                >
-                  Remove choice
-                </Button>
-              </div>
-            </div>
-          )}
+          {removal}
         </Inspector>
       );
     }
@@ -1360,9 +1418,11 @@ export function BranchMapScreen() {
   /*
    * The preview (turn 156g): the exported package's own player, over the whole window, with the
    * author's strip. It plays each scene's cut — its accepted clips in shot order — records walk
-   * evidence as choices are pressed, and marks the choices nobody has walked.
+   * evidence as choices are pressed and links played through, and marks the choices nobody has
+   * walked — choices, not links (turn 246e).
    */
-  const previewCut = preview === null ? new Map<string, CutEntry>() : new Map(deriveCut(production).entries.map((entry) => [entry.shot.id, entry]));
+  const stripUnwalked = previewUnwalked(unwalked, links);
+  const previewCut =preview === null ? new Map<string, CutEntry>() : new Map(deriveCut(production).entries.map((entry) => [entry.shot.id, entry]));
   const previewOptions: InteractivePlayerOptions | null =
     preview === null
       ? null
@@ -1373,7 +1433,7 @@ export function BranchMapScreen() {
             voices: previewVoices.files,
             from: preview.from,
             prefix: preview.prefix,
-            unwalked: [...unwalked],
+            unwalked: stripUnwalked,
             onChoice: (choice, walked, story) => {
               if (worldId && prodId) recordTraversal(worldId, prodId, choice.id, choice.from, choice.to, walked, story);
             },
@@ -1395,7 +1455,7 @@ export function BranchMapScreen() {
           endings: routing.endings,
           storageKey: null,
           author: {
-            unwalked: [...unwalked],
+            unwalked: stripUnwalked,
             onChoice: (choice, walked, story) => {
               if (worldId && prodId) recordTraversal(worldId, prodId, choice.id, choice.from, choice.to, walked, story);
             },
@@ -1419,7 +1479,7 @@ export function BranchMapScreen() {
             className="bm-player"
             label="Preview"
             options={previewOptions}
-            unwalked={[...unwalked].sort()}
+            unwalked={stripUnwalked}
           />
         )}
       </div>
@@ -1447,7 +1507,7 @@ export function BranchMapScreen() {
         setConnectorSave({ choice: { ...choice, id }, version: routing.version, ids: routing.choices.map(c => c.id) });
       }} />}
       <aside className="bm-side" inert={mapPick || undefined}>
-        <ResponsiveSheet sheet={compact || narrow} open={factsOpen || !!sceneRules || selection !== null && selection.kind !== "new"} onClose={() => { setSelection(null); setFactsOpen(false); setSceneRules(null); }} title={sceneRules ? "Dialogue" : factsOpen ? "Story facts" : selection?.kind === "new" && selection.from ? `New choice from ${titleOf(selection.from)}` : selection?.kind === "findings" ? "Findings" : selection?.kind === "choice" ? "Choice" : "Scene settings"} className={`bm-inspector-sheet${routing?.schemaVersion === 2 ? " bm-story-inspector" : ""}`}>{routing && sceneRules && scenes.find(scene => scene.id === sceneRules) ? <StorySceneDialog inline key={sceneRules} routing={routing} scene={scenes.find(scene => scene.id === sceneRules)!} blockId={ruleBlock} onClose={() => setSceneRules(null)} onSave={(presentation,baseVersion) => command({ operation:"set-presentation",presentation,baseVersion })}/> : routing && factsOpen ? <StoryFactsInspector routing={routing} onClose={() => setFactsOpen(false)} onSave={(facts,baseVersion) => command({ operation:"set-facts", facts,baseVersion })}/> : inspector}</ResponsiveSheet>
+        <ResponsiveSheet sheet={compact || narrow} open={factsOpen || !!sceneRules || selection !== null && selection.kind !== "new"} onClose={() => { setSelection(null); setFactsOpen(false); setSceneRules(null); }} title={sceneRules ? "Dialogue" : factsOpen ? "Story facts" : selection?.kind === "new" && selection.from ? `New choice from ${titleOf(selection.from)}` : selection?.kind === "findings" ? "Findings" : selection?.kind === "choice" ? (isLink(selection.id) ? "Link" : "Choice") : "Scene settings"} className={`bm-inspector-sheet${routing?.schemaVersion === 2 ? " bm-story-inspector" : ""}`}>{routing && sceneRules && scenes.find(scene => scene.id === sceneRules) ? <StorySceneDialog inline key={sceneRules} routing={routing} scene={scenes.find(scene => scene.id === sceneRules)!} blockId={ruleBlock} onClose={() => setSceneRules(null)} onSave={(presentation,baseVersion) => command({ operation:"set-presentation",presentation,baseVersion })}/> : routing && factsOpen ? <StoryFactsInspector routing={routing} onClose={() => setFactsOpen(false)} onSave={(facts,baseVersion) => command({ operation:"set-facts", facts,baseVersion })}/> : inspector}</ResponsiveSheet>
         <ArkeEdge>{putAway => arke(putAway)}</ArkeEdge>
       </aside>
     </div>

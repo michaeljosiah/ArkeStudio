@@ -219,6 +219,49 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.match(text(card(item, "sc_undertow")!), /unreachable/);
   });
 
+  it("draws a lone way as a plain link with its note, and its inspector says it plays through (turn 246g)", async () => {
+    const item = await mount();
+    // Let it sleep and Climb to the lamp are each the only way out of their scene, in every state.
+    assert.deepEqual(all(item, ".bm-label--link").map(text).sort(), ["Climb to the lamp", "Let it sleep"], "a link: its note beside the line, no pill");
+    assert.equal(all(item, ".bm-label:not(.bm-label--link)").length, 4, "the choices keep their pills");
+    assert.match(text(all(item, ".bm-head__meta")[0]!), /6 scenes · 4 choices · 2 links · 1 ending · v12/, "the count names links apart");
+    assert.equal(all(item, "path.bm-edge").length, 6, "every way on is still a line, walked solid or dashed");
+    await click(all(item, ".bm-label--link").find((el) => text(el) === "Let it sleep"));
+    const inspector = all(item, '.bm-insp[aria-label="Link"]')[0];
+    assert.ok(inspector, "the inspector is titled Link");
+    assert.match(text(inspector!), /The bell towers\s*Let it sleep\s*The bell towers → The pier at dusk\s*Plays through/);
+    assert.match(text(inspector!), /Note/, "its label is the author's note");
+    assert.doesNotMatch(text(inspector!), /\bLabel\b/);
+    assert.match(text(inspector!), /Available when\s*Always\s*Remember\s*Nothing\s*Preview\s*Not walked/);
+    assert.ok(button(item, "Edit link"), "and one way to edit it");
+    assert.match(text(all(item, ".aip-strip")[0] ?? null), /^$/, "nothing previews until asked");
+    await click(button(item, "Preview"));
+    assert.match(text(all(item, ".aip-strip")[0]!), /4 choices not walked/, "the preview counts choices, not links (246e)");
+  });
+
+  it("keeps the pill of a choice lone on only some routes, and says it sometimes plays through (call 7)", async () => {
+    const story: Routing = {
+      ...ROUTING,
+      schemaVersion: 2,
+      facts: [{ id: "lamp", label: "Lamp lit", type: "boolean", default: false }],
+      choices: [
+        { id: "ch_follow", from: "sc_quarter", label: "Follow the lantern", to: "sc_causeway", effects: [{ fact: "lamp", value: true }] },
+        { id: "ch_stay", from: "sc_quarter", label: "Stay with the boat", to: "sc_causeway" },
+        { id: "ch_cross", from: "sc_causeway", label: "Cross before the tide", to: "sc_towers", when: { op: "eq", fact: "lamp", value: true } },
+        { id: "ch_wait", from: "sc_causeway", label: "Wait for low water", to: "sc_vigil" },
+        { id: "ch_sleep", from: "sc_towers", label: "Let it sleep", to: "sc_pier" },
+        { id: "ch_climb", from: "sc_vigil", label: "Climb to the lamp", to: "sc_pier" },
+      ],
+    };
+    const item = await mount(story);
+    const wait = all(item, ".bm-label").find((el) => /Wait for low water/.test(text(el)));
+    assert.ok(wait && !wait.classList.contains("bm-label--link"), "alone only while the lamp is dark: a listener reads its label on the other route");
+    assert.deepEqual(all(item, ".bm-label--link").map(text).sort(), ["Climb to the lamp", "Let it sleep"]);
+    await click(wait);
+    const inspector = all(item, '.bm-insp[aria-label="Choice"]')[0];
+    assert.match(text(inspector!), /Sometimes plays through/);
+  });
+
   it("counts the findings in the header and lists them by name when the count is pressed", async () => {
     const item = await mount();
     const count = all(item, ".bm-count")[0];
@@ -650,7 +693,8 @@ describe("the branch map canvas (design turn 157)", () => {
     await click(button(item, "Preview"));
     const player = all(item, ".bm-player.aip")[0];
     assert.ok(player, "the package's own player, mounted by the map (turn 156g)");
-    assert.match(text(all(item, ".aip-strip")[0]!), /Preview\s*from The drowned quarter\s*6 choices not walked/);
+    // Six ways on, two of them links: the strip counts the four choices (turn 246e).
+    assert.match(text(all(item, ".aip-strip")[0]!), /Preview\s*from The drowned quarter\s*4 choices not walked/);
     await act(async () => {
       player!.querySelector("video")!.dispatchEvent(new dom.Event("ended") as unknown as Event);
     });

@@ -1,5 +1,5 @@
 import type { ProductionBundle, WorldBundle } from "@arke-studio/contracts";
-import { orderedShots, productionShape } from "@arke-studio/contracts";
+import { comicBook, orderedShots, productionShape } from "@arke-studio/contracts";
 import { musicRecordFence } from "../productions/music.js";
 
 /**
@@ -37,6 +37,15 @@ export function productionRecord(bundle: WorldBundle, productionId: string): Rec
     // Its episode scripts, by episode (SPEC-057 R-83): blocks carry the ids an edit names.
     // With the hash a whole-script proposal is fenced on (codex on PR 1874).
     ...(production.episodeScripts?.length ? { episodeScripts: production.episodeScripts.map((entry) => ({ ...entry.script, baseHash: entry.hash })) } : {}),
+    // A graphic novel (SPEC-064 R-56): how it reads, each chapter's comic script with the ids an
+    // edit names, and each page's takes as data — which is accepted, and what its lettering check
+    // found. Reading only: making, accepting and overriding stay the author's.
+    ...(shape.hasPages ? {
+      comic: production.comic ?? null,
+      comicScripts: (production.comicScripts ?? []).map((entry) => ({ chapter: entry.chapter, ...entry.script, baseHash: entry.hash })),
+      comicPages: comicBook(production).map((entry) => ({ page: entry.id, number: entry.number, chapter: entry.chapter, accepted: entry.take?.id ?? null,
+        outOfDate: entry.outOfDate, cleared: entry.cleared, findings: entry.take?.verification?.status === "compared" ? entry.take.verification.findings.map((finding) => ({ kind: finding.kind, expected: finding.expected, found: finding.found })) : null })),
+    } : {}),
     // The planned episodes with no script yet (issue 1883): read as an empty `episodes` list, a
     // new drama told Arke it had no saved episodes to write, and Plan with Arke stalled there.
     ...(shape.isAudioDrama ? { unwrittenEpisodes: unwritten(production) } : {}),

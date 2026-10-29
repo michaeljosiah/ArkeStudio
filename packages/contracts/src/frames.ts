@@ -46,7 +46,7 @@ import { CharacterAliasesInputSchema } from "./world.js";
 import { RoutingCommandSchema } from "./world-chat-actions.js";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { MusicSequenceSchema, MusicTrackEditSchema } from "./music.js";
-import { ClientStateSchema } from "./client-state.js";
+import { ClientStateSchema, type ClientState } from "./client-state.js";
 import { AdapterActionSchema } from "./adapters.js";
 import { MAX_CLIP_LANE } from "./cut.js";
 import {
@@ -61,10 +61,10 @@ import { EffectReviewCommandSchema } from "./editor-effect-review.js";
 import { TransitionReviewCommandSchema } from "./editor-transition-proposal.js";
 import { PictureReviewCommandSchema } from "./editor-picture-proposal.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
-import { DomainEventSchema } from "./events.js";
+import { DomainEventSchema, type DomainEvent } from "./events.js";
 import { DramaDeliverySchema } from "./audio-drama-edition.js";
 import { DramaChapterDecisionSchema, DramaReviewDecisionSchema, DramaRoleKeySchema, DramaRoleSchema, EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
-import { COMIC_LIMITS, ComicAttemptCapSchema, ComicModeSchema, ComicPageSchema, ComicReadingSchema, LetteringThresholdsSchema } from "./graphic-novel.js";
+import { COMIC_LIMITS, ComicAttemptCapSchema, ComicModeSchema, ComicPageSchema, ComicReadingSchema, ComicStyleSchema, LetteringThresholdsSchema } from "./graphic-novel.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema, PropStateSelectionSchema } from "./prop.js";
 import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
@@ -83,7 +83,7 @@ import { ProductionSetupCommandSchema } from "./production-setup.js";
 import { NarrativeFieldsSchema } from "./production-narrative.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
 import { DecideConversationActionSchema, PrepareConversationTakeReviewSchema } from "./arke-actions.js";
-import { StudioAssistantCommandSchema, StudioAssistantResponseSchema } from "./studio-assistant.js";
+import { StudioAssistantCommandSchema, StudioAssistantResponseSchema, type StudioAssistantResponse } from "./studio-assistant.js";
 
 /**
  * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then events and requester-only
@@ -100,12 +100,22 @@ import { StudioAssistantCommandSchema, StudioAssistantResponseSchema } from "./s
 export const PASSAGE_SPAN_MAX = 20_000;
 export const PASSAGE_KEPT_MAX = 2_400;
 
-export const FrameSchema = valueSchema(z.discriminatedUnion("kind", [
+/**
+ * Named rather than inferred: the snapshot carries the whole client state and the event every
+ * domain event, and inferred together they outgrew what the compiler will write into the engine's
+ * bundled declarations (TS7056, once the graphic novel's events joined the studio assistant's
+ * frame). Naming the parts keeps the declaration a reference to them.
+ */
+export type Frame =
+  | { kind: "snapshot"; seq: number; state: ClientState; retainedHistory?: ("jobs" | "ledger")[] | undefined }
+  | { kind: "event"; seq: number; event: DomainEvent }
+  | { kind: "studio-assistant"; seq: number; requestId: string; response: StudioAssistantResponse };
+
+export const FrameSchema: z.ZodType<Frame, z.ZodTypeDef, unknown> = valueSchema(z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema, retainedHistory: z.array(z.enum(["jobs", "ledger"])).optional() }).strict(),
   z.object({ kind: z.literal("event"), seq: z.number().int().min(1), event: DomainEventSchema }).strict(),
   z.object({ kind: z.literal("studio-assistant"), seq: z.number().int().min(1), requestId: z.string().uuid(), response: StudioAssistantResponseSchema }).strict(),
 ]));
-export type Frame = z.infer<typeof FrameSchema>;
 
 /** What a client may send up. Commands arrive with their owning specs. */
 /** A staged-reference key, as strictly as the coordinator needs it to be — it becomes a folder. */
@@ -2511,7 +2521,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /** The book as CBZ and/or PDF from the accepted pages (SPEC-064 R-47, R-49). */
-  z.object({ kind: z.literal("export-comic"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, formats: z.array(z.enum(["cbz", "pdf"])).min(1).max(2) }).strict(),
+  z.object({ kind: z.literal("export-comic"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, formats: z.array(z.enum(["cbz", "pdf", "epub"])).min(1).max(3) }).strict(),
   /** Read a take back and check its lettering again (R-29). */
   z.object({ kind: z.literal("check-comic-take"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, page: UlidSchema, take: UlidSchema }).strict(),
   /** Keep a take as the page (R-26); past findings or an unchecked take only with an override (R-33). */
@@ -2538,6 +2548,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         mode: ComicModeSchema.optional(),
         thresholds: LetteringThresholdsSchema.optional(),
         cap: ComicAttemptCapSchema.optional(),
+        /** The book's style (R-21a); `null` is World look, the world's art direction alone. */
+        style: ComicStyleSchema.nullable().optional(),
       }).strict(),
     })
     .strict(),

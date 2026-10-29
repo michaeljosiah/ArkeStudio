@@ -468,7 +468,9 @@ export function storyFixtures(): Map<string, string> {
     value.productions[0] = { id: "songs-of-the-drowned-quarter", title: "Songs of the Drowned Quarter", picture: "cover", tall: "cover-tall", music: "music" };
     value.assets = { music: asset("songs-of-the-drowned-quarter/music.json", "application/vnd.arke.music+json"), cover: ASSETS["cover"]!, "cover-tall": ASSETS["cover-tall"]! };
   });
-  manifest("world-schema-7.json", "newerArke", (value) => void (value["schemaVersion"] = 7));
+  // Schema 7 is a graphic novel (SPEC-064 R-50): a story at 7 is not one, and 8 is the newer one.
+  manifest("world-story-in-schema-7.json", "notAPackage", (value) => void (value["schemaVersion"] = 7));
+  manifest("world-schema-8.json", "newerArke", (value) => void (value["schemaVersion"] = 8));
 
   files.set(
     "cases.json",

@@ -29,6 +29,8 @@ export function comicPagePrompt(input: {
   mode: ComicMode;
   /** The world's look in words; absent leaves the style to the references. */
   look?: string;
+  /** The book's comic style in words (R-21a); after the look, so it is the last word on drawing. */
+  style?: string;
   /** Sheet id → the name the page calls them, for speakers and panel casts. */
   names: (sheet: string) => string;
   cited: readonly ComicCited[];
@@ -39,6 +41,7 @@ export function comicPagePrompt(input: {
   const lines: string[] = [];
   lines.push(`A single finished comic book page, ${pageAspect(page, input.settings)}, ${template?.describe ?? `${page.panels.length} panels`}. ${READING_WORDS[reading]} Clean panel borders and gutters.`);
   if (input.look) lines.push(`Look: ${input.look.replace(/\s+/g, " ").trim()}`);
+  if (input.style?.trim()) lines.push(`Style: ${input.style.replace(/\s+/g, " ").trim()}`);
   page.panels.forEach((panel, index) => {
     const who = panel.characters.map(input.names);
     const parts = [
