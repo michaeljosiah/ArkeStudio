@@ -31,11 +31,13 @@ import { useProduction } from "../lib/selectors.js";
 import {
   acceptComicTake,
   checkComicTake,
+  exportArkePlayer,
   exportComic,
   makeComicPage,
   quoteComicPage,
   saveComicScript,
   setComicSettings,
+  subscribeArkePlayerExported,
   subscribeComicExported,
   subscribeComicPages,
   subscribeComicScriptSaveResults,
@@ -457,15 +459,25 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
   const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
   const book = comicBook(production);
   const [formats, setFormats] = useState<Array<"cbz" | "pdf" | "epub">>(["cbz", "pdf"]);
+  const [player, setPlayer] = useState(false);
   const [asked, setAsked] = useState<string | null>(null);
+  const [packing, setPacking] = useState<string | null>(null);
   const [done, setDone] = useState<string[] | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   useEffect(() => subscribeComicExported((event) => {
     if (event.requestId !== asked) return;
     setAsked(null);
-    if (event.result.ok) setDone(event.result.files.map((file) => file.file));
+    if (event.result.ok) setDone((made) => [...(made ?? []), ...(event.result.ok ? event.result.files.map((file) => file.file) : [])]);
     else setRefused(event.result.reason);
   }), [asked]);
+  // Arke Player (Player P20): the book as a package of its own, made by Export → Arke Player's press.
+  useEffect(() => subscribeArkePlayerExported((answer) => {
+    if (answer.exportId !== packing) return;
+    setPacking(null);
+    if (answer.result.ok) { const file = answer.result.file; setDone((made) => [...(made ?? []), file]); }
+    else setRefused(answer.result.blockers[0] ?? "not made");
+  }), [packing]);
+  const busy = asked !== null || packing !== null;
   const accepted = book.filter((entry) => entry.take !== undefined && !entry.outOfDate).length;
   const checked = book.filter((entry) => entry.cleared && !entry.overridden).length;
   const anyway = book.filter((entry) => entry.overridden).length;
@@ -482,7 +494,9 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
               <input type="checkbox" readOnly checked={formats.includes(id)} tabIndex={-1} aria-hidden="true" /><div><b>{label}</b><span>{sub}</span></div>
             </button>
           ))}
-          <button type="button" className="fy-comic-kind" disabled title="not built yet"><input type="checkbox" readOnly checked={false} tabIndex={-1} aria-hidden="true" /><div><b>Arke Player</b><span>phone · offline</span></div></button>
+          <button type="button" aria-pressed={player} className={cx("fy-comic-kind", player && "on")} onClick={() => setPlayer(!player)}>
+            <input type="checkbox" readOnly checked={player} tabIndex={-1} aria-hidden="true" /><div><b>Arke Player</b><span>phone · offline</span></div>
+          </button>
         </div>
         <div className="fy-comic-opts">
           <div className="fy-comic-opt"><b>Pages</b><span>{accepted} of {book.length} accepted</span><span className="grow" />{blockers.length > 0 && <i>{blockers.length} to clear</i>}</div>
@@ -501,8 +515,15 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
         <div className="fy-comic-foot">
           <span className="grow" />
           <Button onClick={onClose}>{done !== null ? "Done" : "Cancel"}</Button>
-          <Button variant="primary" disabled={blockers.length > 0 || formats.length === 0 || asked !== null}
-            onClick={() => { setRefused(null); setDone(null); setAsked(exportComic(worldId, production.meta.id, formats)); }}>{asked !== null ? "Exporting…" : "Export"}</Button>
+          <Button variant="primary" disabled={blockers.length > 0 || (formats.length === 0 && !player) || busy}
+            onClick={() => {
+              setRefused(null); setDone(null);
+              if (formats.length > 0) setAsked(exportComic(worldId, production.meta.id, formats));
+              if (player) {
+                const id = `ap_${ulid()}`;
+                if (exportArkePlayer(worldId, production.meta.id, id, { book: false, motion: false }) !== null) setPacking(id);
+              }
+            }}>{busy ? "Exporting…" : "Export"}</Button>
         </div>
       </div>
     </EditorDialog>

@@ -452,7 +452,12 @@
       "expect": "newerArke"
     },
     {
-      "file": "world-schema-7.json",
+      "file": "world-story-in-schema-7.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-schema-8.json",
       "reader": "manifest",
       "expect": "newerArke"
     }
