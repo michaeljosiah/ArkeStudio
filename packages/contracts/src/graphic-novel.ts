@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ArtifactIdSchema, IsoDateTimeSchema, JobIdSchema, SlugSchema, UlidSchema } from "./ids.js";
+import { ArtifactIdSchema, IsoDateTimeSchema, JobIdSchema, SlugSchema, UlidSchema, ulid } from "./ids.js";
 import { normalizeAspect } from "./manifest.js";
 import { textDigest } from "./subtitles.js";
 
@@ -45,6 +45,23 @@ export type LetteringItem = z.infer<typeof LetteringItemSchema>;
 export const PanelSizeSchema = z.enum(["small", "normal", "large"]);
 
 /**
+ * Where a panel came from (R-13, turn 249d): one version of one chapter, and its paragraphs by
+ * number, as an episode's scene pins its source (SPEC-052 R-29). The story is the book's own when
+ * its chapters hold the prose, or the story it adapts. Not part of a page's picture: a cited
+ * passage never makes a take out of date.
+ */
+export const ComicSourceSchema = z.object({
+  story: SlugSchema,
+  chapter: z.string().min(1).max(200),
+  version: z.number().int().min(1),
+  /** The chapter file's hash when pinned: a direct save keeps the version, so only the hash shows the prose moved. */
+  hash: z.string().min(1).max(200).optional(),
+  /** 1-based paragraph numbers in the pinned version, never text. */
+  paragraphs: z.array(z.number().int().min(1).max(100_000)).min(1).max(200),
+}).strict();
+export type ComicSource = z.infer<typeof ComicSourceSchema>;
+
+/**
  * What one panel shows (R-7). Order is the panel's place in its page's array: a stored `order`
  * beside the array would be a second answer to the same question, and the two could disagree.
  */
@@ -56,6 +73,7 @@ export const ComicPanelSchema = z.object({
   location: SlugSchema.optional(),
   size: PanelSizeSchema.optional(),
   lettering: z.array(LetteringItemSchema).max(COMIC_LIMITS.letteringPerPage).default([]),
+  source: ComicSourceSchema.optional(),
 }).strict();
 export type ComicPanel = z.infer<typeof ComicPanelSchema>;
 
@@ -107,6 +125,63 @@ export const ComicScriptSchema = z.object({
   });
 });
 export type ComicScript = z.infer<typeof ComicScriptSchema>;
+
+/**
+ * A chapter's pages as Arke drafts them (R-13, turn 249d): the script's shapes with every id
+ * optional, since a new page, panel or line has none until it is kept. `settleComicDraft` gives
+ * them ids; the script's own schema then judges the whole.
+ */
+const DraftId = z.string().min(1).max(40);
+export const DraftLetteringSchema = z.object({
+  id: DraftId.optional(),
+  kind: LetteringKindSchema,
+  speaker: SlugSchema.optional(),
+  text: z.string().trim().min(1).max(COMIC_LIMITS.textMax),
+}).strict();
+export const DraftComicPanelSchema = z.object({
+  id: DraftId.optional(),
+  description: z.string().trim().min(1).max(COMIC_LIMITS.descriptionMax),
+  shot: z.string().trim().min(1).max(120).optional(),
+  characters: z.array(SlugSchema).max(8).default([]),
+  location: SlugSchema.optional(),
+  size: PanelSizeSchema.optional(),
+  lettering: z.array(DraftLetteringSchema).max(COMIC_LIMITS.letteringPerPage).default([]),
+  source: ComicSourceSchema.extend({ version: z.number().int().min(1).optional() }).optional(),
+}).strict();
+export const DraftComicPageSchema = z.object({
+  id: DraftId.optional(),
+  layout: z.string().min(1).max(60),
+  notes: z.string().trim().min(1).max(2000).optional(),
+  reading: ComicReadingSchema.optional(),
+  aspect: z.string().min(3).max(12).optional(),
+  panels: z.array(DraftComicPanelSchema).min(1).max(COMIC_LIMITS.panelsPerPage),
+  alt: z.string().trim().min(1).max(4000).optional(),
+}).strict();
+export type DraftComicPage = z.infer<typeof DraftComicPageSchema>;
+
+/**
+ * Arke's pages as the script's: an id the chapter's script already holds is kept, once; any other
+ * id, or none, becomes a new ULID, so a draft can never claim another page's takes by guessing its
+ * id. A source with no version is left for the caller to pin to the chapter as it stands.
+ */
+export function settleComicDraft(draft: readonly DraftComicPage[], current: readonly ComicPage[]): Array<Omit<ComicPage, "panels"> & { panels: Array<Omit<ComicPanel, "source"> & { source?: DraftComicPage["panels"][number]["source"] }> }> {
+  const known = new Set(current.flatMap((page) => [page.id, ...page.panels.flatMap((panel) => [panel.id, ...panel.lettering.map((item) => item.id)])]));
+  const used = new Set<string>();
+  const settle = (id: string | undefined) => {
+    if (id !== undefined && known.has(id) && !used.has(id)) { used.add(id); return id; }
+    return ulid();
+  };
+  return draft.map((page) => ({
+    ...page,
+    id: settle(page.id),
+    status: "draft" as const,
+    panels: page.panels.map((panel) => ({
+      ...panel,
+      id: settle(panel.id),
+      lettering: panel.lettering.map((item) => ({ ...item, id: settle(item.id) })),
+    })),
+  }));
+}
 export const EMPTY_COMIC_SCRIPT: ComicScript = { version: 1, pages: [] };
 
 /** The checks' numbers (D-7), kept on each take as they stood when it was checked (R-31). */

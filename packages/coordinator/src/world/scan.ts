@@ -1322,9 +1322,24 @@ export async function scanWorld(
       }
     }
 
+    // Arke's chapter of comic pages, whole, so Pages can show it as a draft (SPEC-064 R-13).
+    const proposedComics: Record<string, ComicScript> = {};
+    if (proposal.kind === "comic-script") {
+      for (const target of proposal.targets) {
+        const raw = proposedByPath.get(target.path);
+        if (raw === null || raw === undefined) continue;
+        let json: unknown = null;
+        try { json = JSON.parse(raw); } catch { /* reported below as unreadable */ }
+        const parsed = ComicScriptSchema.safeParse(json);
+        if (parsed.success) proposedComics[target.path] = parsed.data;
+        else problems.push({ path: `.proposals/${pid}/${target.path}`, message: parsed.error.issues[0]?.message ?? "unreadable pages" });
+      }
+    }
+
     proposals.push({
       proposal,
       ripple,
+      ...(Object.keys(proposedComics).length > 0 ? { comicScripts: proposedComics } : {}),
       ...(proposedArtDirection ? { artDirection: proposedArtDirection } : {}),
       ...(Object.keys(proposedScenes).length > 0 ? { scenes: proposedScenes } : {}),
       ...(Object.keys(proposedScripts).length > 0 ? { episodeScripts: proposedScripts } : {}),

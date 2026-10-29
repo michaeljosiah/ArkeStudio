@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   BLOCKING_FINDINGS,
+  chapterParagraphs,
   ComicScriptSchema,
   DEFAULT_COMIC_SETTINGS,
   LAYOUT_TEMPLATES,
@@ -17,6 +18,8 @@ import {
   type ComicPageTake,
   type ComicPanel,
   type ComicReading,
+  type ComicSettings,
+  type ComicSource,
   type ComicStyle,
   type LetteringFinding,
   type LetteringItem,
@@ -30,10 +33,17 @@ import { EmptyState, Screen } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
 import { mediaUrl } from "../lib/media.js";
 import { ComicStylePicker } from "../components/comic-style-picker.js";
+import { useGlobalChat } from "../components/global-chat-context.js";
+import { paragraphLabel } from "../lib/episode-script.js";
 import { comicStylePicture, comicStylePreset, draftFromStyle, styleFromDraft, type ComicStyleDraft } from "../lib/comic-styles.js";
 import { useProduction } from "../lib/selectors.js";
 import {
   acceptComicTake,
+  acceptProposal,
+  discardProposal,
+  openChapter,
+  readChapterVersion,
+  subscribeChapterOpenResults,
   checkComicTake,
   exportArkePlayer,
   exportComic,
@@ -172,6 +182,23 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const firstNumber = book.find((entry) => entry.chapter === chapter?.id)?.number ?? 1;
   const record = (id: string) => production.comicPages?.find((entry) => entry.page === id)?.record;
 
+  // Arke drafts in the chat beside the page (turn 249c); its pages arrive here as a draft the author
+  // keeps or discards whole (249d). While one waits, the chapter shows the draft, not its pages.
+  const chat = useGlobalChat();
+  const chatSurface = chat?.forPage() ?? null;
+  const draftPath = chapter ? `productions/${productionId}/comic/${chapter.id}.json` : null;
+  const drafted = draftPath === null ? undefined : world.proposals.find((staged) => staged.proposal.kind === "comic-script" && staged.comicScripts?.[draftPath] !== undefined);
+  const draftPages = drafted && draftPath ? drafted.comicScripts![draftPath]!.pages : null;
+  const [draftPageId, setDraftPageId] = useState<string | null>(null);
+  const draftPage = draftPages?.find((candidate) => candidate.id === draftPageId) ?? draftPages?.[0];
+  const [draftPanelId, setDraftPanelId] = useState<string | null>(null);
+  const draftPanel = draftPage?.panels.find((candidate) => candidate.id === draftPanelId) ?? draftPage?.panels[0];
+  const draftWithArke = () => {
+    if (!chat || !chatSurface || !chapter) return;
+    chat.setValue(chatSurface.key, "draft", `Turn chapter ${chapter.order}, ${chapter.title}, into pages.`);
+    chat.open(chatSurface);
+  };
+
   const [reading, setReading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [styling, setStyling] = useState(false);
@@ -206,6 +233,30 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
           {/* The book exports as saved: an edit still waiting would ship the words before it (codex on PR 2226). */}
           <Button disabled={unsaved} onClick={() => { send(); setExporting(true); }}>Export</Button>
         </div>
+        {draftPages !== null && drafted !== undefined ? (
+          <div className="fy-comic__body">
+            <div className="fy-comic__strip">
+              {draftPages.map((candidate, index) => (
+                <button key={candidate.id} type="button" className={cx("fy-comic__thumb fy-comic__thumb--draft", candidate.id === draftPage?.id && "on")} aria-label={`Draft page ${firstNumber + index}`} onClick={() => setDraftPageId(candidate.id)}>
+                  <span className="d">draft</span>
+                  <span className="n">{firstNumber + index}</span>
+                </button>
+              ))}
+            </div>
+            <div className="fy-comic__edit">
+              <div className="fy-comic__draftbar">
+                <Sparkle size={15} />
+                <b>Arke’s draft</b>
+                <span>{draftPages.length} {draftPages.length === 1 ? "page" : "pages"} from chapter {chapter?.order}</span>
+                <span className="grow" />
+                <Button size="sm" onClick={() => discardProposal(worldId, drafted.proposal.id)}>Discard</Button>
+                <Button size="sm" variant="primary" onClick={() => acceptProposal(worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision)}>Keep</Button>
+              </div>
+              {draftPage !== undefined && <DraftPage world={world} page={draftPage} number={firstNumber + draftPages.indexOf(draftPage)} selected={draftPanel?.id ?? null} pick={setDraftPanelId} />}
+            </div>
+            {draftPage === undefined ? <div className="fy-comic__side" /> : <DraftSide key={draftPage.id} world={world} page={draftPage} panel={draftPanel} settings={settings} />}
+          </div>
+        ) : (
         <div className="fy-comic__body">
           <div className="fy-comic__strip">
             {pages.map((candidate, index) => {
@@ -225,16 +276,25 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
             <button type="button" className="fy-comic__add" onClick={() => { const next = newPage(); edit([...pages, next]); setPageId(next.id); }}>+ Page</button>
           </div>
           {page === undefined ? (
-            <div className="fy-comic__edit"><EmptyState title="No pages yet" /></div>
+            // A chapter with no pages (turn 249c): Arke turns its prose into pages, or one is started by hand.
+            <div className="fy-comic__empty">
+              <h3>{chapter?.order} · {chapter?.title} has no pages</h3>
+              {chapter?.words !== undefined && <span className="m">{chapter.words.toLocaleString("en-GB")} words</span>}
+              <div className="fy-comic__emptyacts">
+                {chatSurface && <Button variant="primary" onClick={draftWithArke}><Sparkle size={14} />Draft with Arke</Button>}
+                <Button onClick={() => { const next = newPage(); edit([next]); setPageId(next.id); }}>+ Page</Button>
+              </div>
+            </div>
           ) : (
             <PageEditor world={world} page={page} number={firstNumber + pages.indexOf(page)} change={setPage}
               remove={() => { edit(pages.filter((candidate) => candidate.id !== page.id)); setPageId(null); }} />
           )}
-          {page === undefined ? <div className="fy-comic__side" /> : (
+          {page === undefined ? null : (
             <PageSide key={page.id} world={world} production={production} page={page} saving={unsaved} connected={connection === "open"}
               problem={problem} onSettings={() => navigate("/settings")} />
           )}
         </div>
+        )}
       </div>
       {styling && <ComicStyleSheet world={world} production={production} made={book.filter((entry) => entry.take !== undefined).length} onClose={() => setStyling(false)} />}
       {reading && <ComicReader world={world} production={production} onClose={() => setReading(false)} />}
@@ -494,6 +554,90 @@ export function ComicReader({ world, production, onClose }: { world: WorldBundle
       )}
     </div>
   );
+}
+
+const KIND_LABEL: Record<LetteringKind, string> = { speech: "Speech", thought: "Thought", shout: "Shout", whisper: "Whisper", caption: "Caption", sfx: "Sound" };
+
+/**
+ * A page of Arke's draft (turn 249d), read only: nothing in a draft is edited or made until it is
+ * kept. Each panel names the passage it was drawn from.
+ */
+function DraftPage({ world, page, number, selected, pick }: { world: WorldBundle; page: ComicPage; number: number; selected: string | null; pick: (panel: string) => void }) {
+  const name = (id: string) => world.sheets.find((sheet) => sheet.id === id)?.name ?? id;
+  return (
+    <>
+      <h3>Page {number} <span className="m">{LAYOUT_LABEL[page.layout] ?? page.layout}</span></h3>
+      {page.panels.map((panel, index) => (
+        <div key={panel.id} className={cx("fy-comic__panel fy-comic__panel--draft", panel.id === selected && "on")} role="button" tabIndex={0} aria-pressed={panel.id === selected}
+          onClick={() => pick(panel.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") pick(panel.id); }}>
+          <div className="fy-comic__ph"><b>Panel {index + 1}</b><span className="grow" />{panel.source && <span className="fy-comic__src">{paragraphLabel(panel.source.paragraphs)}</span>}</div>
+          <div className="fy-comic__desc">{panel.description}</div>
+          {(panel.characters.length > 0 || panel.location) && (
+            <div className="fy-comic__row"><b>Shows</b>{[...panel.characters, ...(panel.location ? [panel.location] : [])].map((id) => <span key={id} className="fy-comic__chip">{name(id)}</span>)}</div>
+          )}
+          {panel.lettering.map((item) => (
+            <div key={item.id} className="fy-comic__row"><span className="kind">{KIND_LABEL[item.kind]}</span><span className="who">{item.speaker ? name(item.speaker) : "—"}</span><span className="words">{item.text}</span></div>
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** The draft page's layout and the passage its selected panel came from; Make waits for Keep. */
+function DraftSide({ world, page, panel, settings }: { world: WorldBundle; page: ComicPage; panel: ComicPanel | undefined; settings: ComicSettings }) {
+  const rects = panelRects(page, pageReading(page, settings));
+  const passage = usePassage(world, panel?.source);
+  const index = panel ? page.panels.indexOf(panel) : -1;
+  const story = panel?.source ? world.productions.find((candidate) => candidate.meta.id === panel.source!.story) : undefined;
+  const chapter = panel?.source ? story?.chapters.find((candidate) => candidate.id === panel.source!.chapter) : undefined;
+  return (
+    <div className="fy-comic__side">
+      <div className="fy-comic__page" style={{ aspectRatio: pageAspect(page, settings).replace(":", " / ") }}>
+        {rects.map((rect, i) => (
+          <div key={i} className={cx("fy-comic__wire", i === index && "on")} style={{ left: `calc(${rect.x * 100}% + 6px)`, top: `calc(${rect.y * 100}% + 6px)`, width: `calc(${rect.w * 100}% - 12px)`, height: `calc(${rect.h * 100}% - 12px)` }}>{i + 1}</div>
+        ))}
+      </div>
+      {panel?.source && (
+        <>
+          {passage === null ? <span className="m">Reading…</span> : "failure" in passage ? <span className="m" role="alert">{passage.failure}</span> : <blockquote className="fy-comic__quote">{passage.text}</blockquote>}
+          <span className="m">Panel {index + 1} · {chapter ? `chapter ${chapter.order}` : panel.source.chapter}, {paragraphLabel(panel.source.paragraphs)}</span>
+        </>
+      )}
+      <div className="fy-comic__make"><Button variant="primary" disabled><Sparkle size={14} />Make page</Button><span className="m">Keep the draft first</span></div>
+    </div>
+  );
+}
+
+/** The cited paragraphs of a pinned chapter version, read as the episode script reads its source. */
+function usePassage(world: WorldBundle, source: ComicSource | undefined): { text: string } | { failure: string } | null {
+  const story = source ? world.productions.find((candidate) => candidate.meta.id === source.story) : undefined;
+  const chapter = source ? story?.chapters.find((candidate) => candidate.id === source.chapter) : undefined;
+  const key = source && story && chapter ? `${story.meta.id}:${chapter.id}:${source.version}:${source.paragraphs.join(",")}` : null;
+  const [held, setHeld] = useState<{ key: string; value: { text: string } | { failure: string } } | null>(null);
+  useEffect(() => {
+    if (key === null || !source || !story || !chapter) return;
+    let live = true;
+    const done = (body: string) => {
+      const paragraphs = chapterParagraphs(body);
+      if (live) setHeld({ key, value: { text: source.paragraphs.map((n) => paragraphs[n - 1]).filter((paragraph): paragraph is string => paragraph !== undefined).join(" ") } });
+    };
+    const fail = (failure: string) => { if (live) setHeld({ key, value: { failure } }); };
+    readChapterVersion(world.meta.worldId, story.meta.id, chapter.file, source.version).then(done, (error: Error) => {
+      // A chapter that never went through a kept save has no snapshot of its current version.
+      if ((chapter.version ?? 1) !== source.version) { fail(error.message); return; }
+      const requestId = openChapter(world.meta.worldId, story.meta.id, chapter.id);
+      if (!requestId) { fail("Not connected."); return; }
+      const stop = subscribeChapterOpenResults((result) => {
+        if (result.requestId !== requestId) return;
+        stop();
+        if (result.disposition === "opened") done(result.body ?? ""); else fail("The chapter could not be read.");
+      });
+    });
+    return () => { live = false; };
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (key === null) return { failure: "That chapter is not in this world." };
+  return held && held.key === key ? held.value : null;
 }
 
 /** What the head says the style is: World look, a preset's name, or Your own. */

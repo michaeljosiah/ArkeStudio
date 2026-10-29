@@ -137,3 +137,22 @@
 .fy-comic-style-sheet { max-height: calc(100vh - 120px); overflow-y: auto; }
 @media (max-width: 720px) { .fy-comic-styles__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .fy-comic-foot .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+/* Arke turns prose into pages (design turn 249): an empty chapter, and a draft kept or discarded whole. */
+.fy-comic__empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; grid-column: 2 / 4; padding: 24px; }
+.fy-comic__empty h3 { margin: 0; font: var(--type-ui); font-weight: 600; font-size: var(--text-md); }
+.fy-comic__empty .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic__emptyacts { display: flex; gap: 8px; justify-content: center; }
+.fy-comic__thumb--draft { border-style: dashed; background: var(--background); }
+.fy-comic__thumb--draft .d { position: absolute; inset: 0; display: grid; place-items: center; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic__draftbar { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 12px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--foreground) 4%, transparent); font-size: var(--text-sm); }
+.fy-comic__draftbar b { font-weight: 600; }
+.fy-comic__panel--draft { cursor: pointer; }
+.fy-comic__panel--draft.on { border-color: var(--foreground); }
+.fy-comic__panel--draft .fy-comic__desc { min-height: 0; }
+.fy-comic__panel--draft .fy-comic__row .kind, .fy-comic__panel--draft .fy-comic__row .who { font: var(--type-label); font-size: var(--text-xs); color: var(--muted-foreground); }
+.fy-comic__src { height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; display: inline-flex; align-items: center; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); background: var(--background); }
+.fy-comic__wire.on { border-color: var(--foreground); color: var(--foreground); }
+.fy-comic__quote { margin: 0; border-left: 2px solid var(--border); padding: 2px 0 2px 10px; font-size: var(--text-sm); color: var(--muted-foreground); font-style: italic; }
+.fy-comic__side .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic__draftbar b { white-space: nowrap; }
+.fy-comic__draftbar > span:not(.grow) { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted-foreground); }
