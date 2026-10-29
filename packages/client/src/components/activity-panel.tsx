@@ -144,7 +144,9 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   }, [path]);
 
   // An outside press or Escape closes it. The bell is not outside: it is the toggle, and taking
-  // its press here would close the panel a beat before the bell's own handler reopened it.
+  // its press here would close the panel a beat before the bell's own handler reopened it. Nor is
+  // Chat, which closes Activity itself: closed here first, Activity would hand back a Studio it had
+  // put aside (turn 239), and Chat's own press would then toggle that Studio shut.
   useEffect(() => {
     if (phone) return;
     const opener = document.activeElement;
@@ -156,7 +158,7 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
     const press = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node) || root.current?.contains(target)) return;
-      if (target instanceof Element && target.closest("[data-activity-bell]")) return;
+      if (target instanceof Element && target.closest("[data-activity-bell], [data-studio-chat-trigger]")) return;
       if (coarse) outside = { id: event.pointerId, x: event.clientX, y: event.clientY };
       else closeActivityPanel();
     };

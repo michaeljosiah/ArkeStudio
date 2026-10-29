@@ -25,6 +25,7 @@ export class StudioConversationClient {
   private watchId: string | null = null;
   private selectingNew = false;
   private connectionEpoch = 0;
+  private aside = false;
   private dictation: { id: string; resolve(text: string | null): void; timer: ReturnType<typeof setTimeout> } | null = null;
   private speech: { id: string; finish(value: Extract<StudioAssistantResponse, { type: "speech" }> | null): void; timer: ReturnType<typeof setTimeout> } | null = null;
   private readonly pending = new Map<string, { resolve(reply: Reply): void; timer: ReturnType<typeof setTimeout> }>();
@@ -41,14 +42,20 @@ export class StudioConversationClient {
     if (!connected) { for (const request of this.pending.values()) { clearTimeout(request.timer); request.resolve(uncertain()); } this.pending.clear(); }
     this.change({ connected, fresh: false }); if (connected && this.view.open) this.watch();
   }
-  open = (): void => { this.change({ open: true }); if (this.view.connected) this.watch(); };
+  open = (): void => { this.aside = false; this.change({ open: true }); if (this.view.connected) this.watch(); };
   close = (): void => {
+    this.aside = false;
     this.stopSpeech();
     this.connectionEpoch++;
     if (this.dictation) { clearTimeout(this.dictation.timer); this.dictation.resolve(null); this.dictation = null; }
     if (this.watchId && this.view.connected) this.wire.send({ kind: "studio-assistant", requestId: this.wire.id(), command: { action: "unwatch" } });
     this.watchId = null; this.change({ open: false, fresh: false });
   };
+  /** Activity takes the dialog's place for a moment (turn 239's fixture): the dialog closes for it and
+   * comes back, draft and all, when Activity closes over the same page. Opening or closing Studio
+   * meanwhile, or leaving through one of Activity's links, ends the return. */
+  stepAside = (): void => { if (!this.view.open) return; this.close(); this.aside = true; };
+  comeBack = (samePage: boolean): void => { if (this.aside && samePage) this.open(); this.aside = false; };
   private watch(): void {
     const requestId = this.wire.id(); this.watchId = requestId;
     if (!this.wire.send({ kind: "studio-assistant", requestId, command: { action: "watch" } })) { this.watchId = null; this.change({ fresh: false, trouble: "Studio is disconnected. Your draft is retained." }); }
