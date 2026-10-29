@@ -382,7 +382,8 @@ export function episodeScriptDraft(store: WorldStore, action: Pick<WorldChatProd
 export function comicScriptDraft(store: WorldStore, action: Pick<WorldChatProductionComicScriptAction["action"], "productionId" | "chapter" | "baseHash" | "pages">): ComicScript {
   const production = requireProduction(store, action.productionId);
   if (!productionShape(production.meta).hasPages) throw refuse(`${production.meta.title} is not a graphic novel`);
-  const chapter = production.chapters.find((candidate) => candidate.id === action.chapter && candidate.status !== "retired");
+  // Retirement is the flag, not the status: a retired chapter keeps the status it had (codex on PR 2246).
+  const chapter = production.chapters.find((candidate) => candidate.id === action.chapter && candidate.retired !== true);
   if (!chapter) throw refuse(`${production.meta.title} has no chapter ${action.chapter}. Read get_production for its chapters.`);
   const stored = production.comicScripts?.find((entry) => entry.chapter === chapter.id);
   // Fenced on the script Arke read: an edit since is never written over, and a new chapter is named
@@ -552,7 +553,9 @@ export async function stageWorldChatProductionAuthoredAction(
       kind: "comic-script",
       summary: `${chapter.title} pages: ${production.meta.title}`,
       ...context,
-      targets: [{ path: `productions/${production.meta.id}/comic/${chapter.id}.json`, content: `${JSON.stringify(record, null, 2)}\n` }],
+      // Fenced on the script Arke read, not whatever is on disk when the gate runs: a save queued
+      // between the check and the stage would otherwise be kept over (codex on PR 2246).
+      targets: [{ path: `productions/${production.meta.id}/comic/${chapter.id}.json`, content: `${JSON.stringify(record, null, 2)}\n`, expectedBaseHash: payload.action.baseHash }],
     }, precondition);
   }
 
