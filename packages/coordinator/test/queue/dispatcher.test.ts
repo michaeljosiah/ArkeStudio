@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { appendFile, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as realDelay } from "node:timers/promises";
 import type { DomainEvent, Job, LedgerEntry } from "@arke-studio/contracts";
 import { spendSummary } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
@@ -2206,37 +2207,54 @@ describe("retry classification (R-7, R-9, D5)", () => {
     h.queue.dispose();
   });
 
-  it("places a retry whose backoff ends between two gates ahead of the FIFO behind it", async () => {
+  it("places a retry whose backoff ends between two gates ahead of the FIFO behind it", async (t) => {
     // The pump dispatches one job per lane interval and re-reads eligibility at each gate. A
     // one-off split into ready and waiting reported B, C, A here; the pump takes B, then finds
     // A's backoff over at the next gate and takes A before C.
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.submitError = new Error("HTTP 503 unavailable");
     fake.submitErrorTimes = 1;
-    // Same clock as the test above: the second job has to be enqueued before the first gate,
-    // and the retry's backoff has to end between the first gate and the second with room on
-    // both sides. At 600/900 a loaded runner passed the first gate before the enqueue and
-    // dispatched the second job outright (CI run 34024294005), so the gates are widened to
-    // dwarf the fsync'd appends between the failure and the read, keeping the same ratio.
-    // At 2000/3000 a Windows runner still passed the first gate before the enqueue (CI run
-    // 34415278836); doubled, at the same ratio, and still well inside FOLD_MS.
+    // Real journal flushes can move the retry's eligibility past the second gate even when
+    // both siblings enqueue before the first (Windows CI 40484168015). Widening the intervals
+    // only moves that race. Advance scheduling time explicitly while real filesystem work
+    // settles, so the test proves ordering at the gates rather than the speed of fsync.
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: new Date("2026-10-27T10:00:00Z") });
+    const settled = async (condition: () => boolean, what: string): Promise<void> => {
+      const deadline = performance.now() + FOLD_MS;
+      while (!condition()) {
+        assert.ok(performance.now() < deadline, `timed out waiting for ${what}`);
+        await realDelay(5);
+      }
+    };
     const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 4000, backoffBaseMs: 6000, backoffCapMs: 6000, rng: () => 1 });
-    await h.queue.start();
-    const first = await h.queue.enqueue(INPUT);
-    await until(
-      () => foldedJob(h, first.id)?.status === "queued" && foldedJob(h, first.id)?.attempt === 1,
-      "the first job to be requeued on its backoff",
-      FOLD_MS,
-    );
-    const second = await h.queue.enqueue(INPUT);
-    const third = await h.queue.enqueue(INPUT);
-    assert.equal(h.queue.queuePosition(second.id), 0, "goes out at the next gate, while the retry is still backing off");
-    assert.equal(h.queue.queuePosition(first.id), 1, "its backoff is over by the gate after that, and it precedes the third job in the FIFO");
-    assert.equal(h.queue.queuePosition(third.id), 2);
-    await until(() => [first.id, second.id, third.id].every((id) => foldedJob(h, id)?.status === "succeeded"), "all three to succeed", FOLD_MS);
-    const [a, b, aAgain, c] = fake.submittedKeys;
-    assert.ok(b !== a && aAgain === a && c !== a && c !== b, "the pump took them in the order it reported");
-    h.queue.dispose();
+    try {
+      await h.queue.start();
+      const first = await h.queue.enqueue(INPUT);
+      await settled(
+        () => foldedJob(h, first.id)?.status === "queued" && foldedJob(h, first.id)?.attempt === 1 && h.queue.queuePosition(first.id) === 0,
+        "the first job to finish requeueing on its backoff",
+      );
+      const second = await h.queue.enqueue(INPUT);
+      const third = await h.queue.enqueue(INPUT);
+      assert.equal(h.queue.queuePosition(second.id), 0, "goes out at the next gate, while the retry is still backing off");
+      assert.equal(h.queue.queuePosition(first.id), 1, "its backoff is over by the gate after that, and it precedes the third job in the FIFO");
+      assert.equal(h.queue.queuePosition(third.id), 2);
+      t.mock.timers.tick(3999);
+      assert.equal(fake.submitCount, 1, "no sibling leaves before the first gate");
+      t.mock.timers.tick(1);
+      await settled(() => foldedJob(h, second.id)?.status === "succeeded", "the second job to succeed at the first gate");
+      assert.equal(fake.submitCount, 2);
+      t.mock.timers.tick(4000);
+      await settled(() => foldedJob(h, first.id)?.status === "succeeded", "the retry to succeed at the second gate");
+      assert.equal(fake.submitCount, 3);
+      t.mock.timers.tick(4000);
+      await settled(() => foldedJob(h, third.id)?.status === "succeeded", "the third job to succeed at the third gate");
+      const [a, b, aAgain, c] = fake.submittedKeys;
+      assert.ok(b !== a && aAgain === a && c !== a && c !== b, "the pump took them in the order it reported");
+    } finally {
+      h.queue.dispose();
+      t.mock.timers.reset();
+    }
   });
 });
 

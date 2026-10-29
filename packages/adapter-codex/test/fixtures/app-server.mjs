@@ -2,6 +2,8 @@ import { createInterface } from 'node:readline';
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 let sequence = 0;
 let imageStarts = 0;
+let uncertainImageThread;
+let releasePeerImage;
 const scenario = process.env.ARKE_CODEX_TEST_CASE;
 const uncertainScenarios = new Set(['timeout-once', 'announced-timeout-once', 'reject-once', 'recovery-init-fails', 'recovery-exits-after-init']);
 const recovered = !!process.env.ARKE_CODEX_TEST_STATE && existsSync(process.env.ARKE_CODEX_TEST_STATE);
@@ -44,7 +46,10 @@ createInterface({ input: process.stdin }).on('line', line => {
     const respond = () => result(id, { thread, model: scenario === 'substitute' ? 'wrong-model' : params.model, modelProvider: scenario === 'substitute-provider' ? 'wrong-provider' : params.modelProvider, instructionSources: scenario === 'instructions' ? ['private-instructions'] : [] });
     if (scenario === 'slow-create') setTimeout(respond, 150); else respond();
   } else if (method === 'thread/archive') result(id, {});
-  else if (method === 'thread/unsubscribe') result(id, {});
+  else if (method === 'thread/unsubscribe') {
+    result(id, {});
+    if (scenario === 'image-gen-hang-first' && params.threadId === uncertainImageThread) { releasePeerImage?.(); releasePeerImage = undefined; }
+  }
   else if (method === 'turn/start') {
     const thread = threads.get(params.threadId); thread.turn = `turn-${++sequence}`;
     if (uncertainScenarios.has(scenario) && !recovered) {
@@ -57,7 +62,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     const base = { threadId: thread.id, turnId: thread.turn };
     if (scenario.startsWith('image-gen')) {
       // The first start is never answered and never announced; a later one proceeds normally.
-      if (scenario === 'image-gen-hang-first' && ++imageStarts === 1) return;
+      if (scenario === 'image-gen-hang-first' && ++imageStarts === 1) { uncertainImageThread = thread.id; return; }
       if (scenario === 'image-gen-hang-all') return;
       notify('turn/started', { threadId: thread.id, turn: { id: thread.turn } });
         result(id, { turn: { id: thread.turn } });
@@ -78,12 +83,16 @@ createInterface({ input: process.stdin }).on('line', line => {
       const item = scenario === 'image-gen-limit' ? { id: 'img', type: 'imageGeneration', status: 'failed', result: '', failure: { type: 'usageLimitExceeded', limitId: 'images', resetsAt: 1900000000 } }
         : scenario === 'image-gen-junk' ? { id: 'img', type: 'imageGeneration', status: 'completed', result: Buffer.from('not an image at all').toString('base64'), savedPath: '/etc/passwd' }
         : { id: 'img', type: 'imageGeneration', status: 'completed', result: png, revisedPrompt: 'revised', savedPath: '/etc/passwd' };
-      setTimeout(() => {
+      const completeImage = () => {
           notify('item/completed', { ...base, item });
           if (scenario === 'image-gen-picture-hang') return;
         if (scenario === 'image-gen-late-failure') notify('turn/completed', { threadId: thread.id, turn: { id: thread.turn, status: 'failed', items: [] } });
         else finish(thread.id, thread.turn);
-      }, 20);
+      };
+      // The cancellation-sharing fixture requires a genuinely active peer when the first
+      // turn is cancelled. A wall-clock completion races its parent under Windows CI load.
+      if (scenario === 'image-gen-hang-first') releasePeerImage = completeImage;
+      else setTimeout(completeImage, 20);
       return;
     }
     if (scenario === 'wrong-callback') write({ id: 'wrong-request', method: 'item/tool/call', params: { threadId: thread.id, turnId: 'unsolicited-turn', callId: 'wrong-call', namespace: 'arke', tool: 'write', arguments: { path: 'should-not-exist.txt', content: 'wrong turn' } } });

@@ -9,6 +9,35 @@ const production = chatSurfaceForPage(state, `${root}/p/saltlight/story`)!;
 const cut = chatSurfaceForPage(state, `${root}/p/saltlight/cut`)!;
 const worldChat = chatSurfaceForPage(state, root)!;
 
+describe("Studio stages a request without sending or replacing an unreviewed contextual draft", () => {
+  it("opens a new destination composer with only the editable request", () => {
+    const owner = new GlobalChatController();
+    assert.equal(owner.stageDraft(worldChat, "Reviewed request"), "ready");
+    assert.equal(owner.getSnapshot().selected?.worldId, world.meta.worldId);
+    assert.equal(owner.getSnapshot().selected?.newThread, true);
+    assert.equal(owner.getSnapshot().selected?.conversationId, undefined);
+    assert.equal(owner.value(worldChat.key, "draft", ""), "Reviewed request");
+    assert.equal(owner.getSnapshot().open, true);
+  });
+  it("requires replacement consent for the exact existing thread draft and protects later typing", () => {
+    const owner = new GlobalChatController(); owner.select(production); owner.reportConversation(production.key, CHAT_ID);
+    owner.setValue(production.key, "draft", "Existing draft");
+    assert.equal(owner.stageDraft(production, "New request"), "replace-required"); assert.equal(owner.getSnapshot().open, false);
+    owner.setValue(production.key, "draft", "Later typing");
+    assert.equal(owner.stageDraft(production, "New request", "Existing draft"), "replace-required");
+    assert.equal(owner.value(production.key, "draft", ""), "Later typing");
+    assert.equal(owner.stageDraft(production, "New request", "Later typing"), "ready");
+    assert.equal(owner.getSnapshot().selected?.conversationId, CHAT_ID);
+    assert.equal(owner.value(production.key, "draft", ""), "New request");
+  });
+  it("does not stage while capture, thread creation or a deferred switch owns the destination", () => {
+    const owner = new GlobalChatController(); owner.select(production); owner.phase("listening");
+    assert.equal(owner.stageDraft(worldChat, "Request"), "busy"); assert.equal(owner.value(worldChat.key, "draft", ""), "");
+    owner.phase("idle"); owner.holdOpening(production.key, true);
+    assert.equal(owner.stageDraft(worldChat, "Request"), "busy"); assert.equal(owner.value(worldChat.key, "draft", ""), "");
+  });
+});
+
 describe("global Chat keeps presentation separate from conversation authority (224)", () => {
   it("returns to the list without restoring a remembered thread or deleting its draft", () => {
     const owner = new GlobalChatController(); owner.select(worldChat);

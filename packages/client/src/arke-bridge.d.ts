@@ -12,6 +12,8 @@ export interface ArkeBridge {
   onStartupState?(listener: (state: StartupState) => void): () => void;
   retryStartup?(): void;
   openDataFolder?(): void;
+  restartForSetup?(): Promise<{ reason?: string }>;
+  chooseWorkspaceFolder?(): Promise<{ reason?: string }>;
   quit?(): void;
   connect(): void;
   send(json: string): void;

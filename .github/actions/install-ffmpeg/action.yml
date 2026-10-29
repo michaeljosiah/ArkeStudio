@@ -7,8 +7,17 @@ runs:
       if: runner.os == 'Linux'
       shell: bash
       run: |
-        sudo apt-get update
-        sudo apt-get install --yes ffmpeg
+        if command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null; then
+          exit 0
+        fi
+        # Two film jobs reached their fifteen-minute ceiling downloading from the first
+        # Azure mirror before any test ran (40376796933 / 40380720937). Keep Ubuntu's
+        # signed packages and release; select its ordinary archive in the runner mirrorlist.
+        if [ -f /etc/apt/apt-mirrors.txt ]; then
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/apt-mirrors.txt
+        fi
+        sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+        sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --yes --no-install-recommends ffmpeg
     # The community feed answers 503 for hours at a time (2026-10-19: refused at 08:19 and 16:59,
     # fine at 11:13), and `choco` still exits 0 having installed nothing. So whether FFmpeg is on
     # the PATH is the test: try the feed three times, then take gyan.dev's release build directly.

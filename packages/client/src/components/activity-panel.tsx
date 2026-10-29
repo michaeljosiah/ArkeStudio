@@ -505,6 +505,11 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
               </Button>
             </>
           )}
+          {entry.actions.includes("diagnostics") && (
+            <Button size="sm" variant="ghost" onClick={() => navigate("/settings/diagnostics")}>
+              Review Diagnostics
+            </Button>
+          )}
           {entry.actions.includes("reconcile") && entry.worldId && (
             <Button size="sm" onClick={() => navigate(`/w/${entry.worldId}`)}>
               Open world

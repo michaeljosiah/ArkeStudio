@@ -1,14 +1,411 @@
 # Running and validating changes
 
+Known storage shortfalls (SPEC-062 R-13/R-21) use coordinator `test/storage/reservations.test.ts`,
+`storage/service.test.ts`, `storage/application.test.ts` and `recovery/history.test.ts`; contracts
+`test/storage-diagnostics.test.ts` and `recovery-incidents.test.ts`; and client
+`test/studio-storage.test.tsx`, `studio-assistant-view.test.tsx` and `storage-health.test.ts`.
+These cover per-drive arithmetic, anonymous authenticated projection, bounded check retention,
+freshness, grouped warnings and current-status separation. The check is historical evidence:
+it does not prove that an operation is still waiting or authorize a retry. Client tests run from
+their package; coordinator tests need native temporary-file access. Browser component evidence
+uses synthetic capacity and must not be described as an installed/native or matched-master test.
+
+Current storage waits additionally use contracts `test/storage-work.test.ts` and
+`job-summary.test.ts`, coordinator `test/queue/submission-storage.test.ts` and
+`queue/result-storage.test.ts`, and the Studio storage view test above. Check that cancellation,
+successful filing and host restart remove/reacquire observations without persisting them as
+dispatch authority. Unknown capacity must say verification, not a measured shortage.
+Coordinator `test/setup/process.test.ts` checks that the standard Windows `ProgramFiles`
+variable reaches owned workers while unrelated credentials do not. The real NVIDIA probe
+requires separate hardware qualification; a parser fixture cannot establish working counters.
+
+Scoped logical inventory (SPEC-062 R-2/R-4/R-23) uses coordinator
+`test/storage/inventory.test.ts`, `storage/service.test.ts`, the existing authenticated preview
+cleanup/maintenance host cases, and client `test/studio-storage.test.tsx`. Check scope, nested
+receipt exclusions, protected media, hard links, yields/cancellation, discarded old-world results,
+and stalled versus progressing metadata calls. Inventory never establishes allocated/reclaimable
+bytes or cleanup authority. Real runtime scans are read-only metadata checks, not media reads.
+
+Model-removal review (SPEC-062 R-19/T-11) uses client `test/setup-remove-control.test.tsx`,
+`downloads.test.tsx`, `local-models.test.tsx` and the Studio storage test; coordinator
+`test/setup/local-setup.test.ts`, `setup/install-closure.test.ts`, `setup/comfyui-setup.test.ts`
+and `local-gpu.test.ts`. Check Cancel/Escape, changed-installation refusal, one confirmation,
+busy inference, queued inference during deletion, duplicate commands and shutdown drain.
+Runtime deletion does not establish reclaimed bytes; the capacity collector refreshes afterward.
+
+Installation journeys (SPEC-016 R-21–R-28, approved turns 242–244): coordinator
+`test/setup/onboarding.test.ts`, `test/setup/onboarding-wire.test.ts`,
+`test/world/import-world.test.ts`, `test/world/sample-world.test.ts`, and
+`test/ollama-engine.test.ts`; desktop `test/workspace-location.test.ts`; client
+`test/onboarding.test.tsx`, `test/launch-lifecycle.test.tsx`, and `test/launch-remote.test.tsx`.
+Run client tests from `packages/client`. The wire test exercises the authenticated coordinator
+and filesystem across restart, including manual entry without any AI service. The response
+test uses a protocol fixture; it makes no paid request or download. Browser acceptance compares
+the actual `/setup` and empty Worlds screens with approved turns 242–244, including narrow
+widths and unavailable choices. Desktop folder selection/relaunch and provider sign-in remain
+distinct native acceptance checks.
+
+Install journeys 242–244 begin with optional acquisition and manual startup. From
+`packages/coordinator`, run `node --import tsx --test --test-concurrency=1
+test/setup/local-setup.test.ts test/setup/local-ai-readiness.test.ts
+test/setup/catalogue-invariants.test.ts test/setup/comfyui-setup.test.ts` with native temporary-file
+access. These fixtures verify no unselected startup downloads, selected-file reuse after restart,
+queued Skip, active installer ownership and unchanged service health. From `packages/client`, run
+`node --import tsx --test test/launch-lifecycle.test.tsx test/launch-remote.test.tsx
+test/downloads.test.tsx test/engine-panes.test.tsx` for manual entry, background transfers and the
+retained disconnected-core barrier. Pair these acquisition checks with the onboarding tests above;
+provider account/model qualification and native installed acceptance are distinct checks.
+
+Managed writing recovery (#2194) uses coordinator `test/recovery/harness.test.ts`,
+`test/harness-runtime-change.test.ts` and `test/v2-launch.test.ts`. The native fixture assembles
+the actual launcher with a protocol stand-in, starts the production host, crashes its child,
+waits behind an admitted turn and reads flushed recovery control. It verifies no turn replay,
+Suggest only, personal-path refusal with a retained circuit, cancellation before shutdown drain,
+retained failed health/native-stop retry and runtime protocol refusal despite discovery metadata.
+These tests need native filesystem/process access and make no paid request. The optional pinned
+runtime check in `v2-launch.test.ts` is separate; a fixture is not a live-model qualification.
+`test/harness/model-routing.test.ts`, `test/supervisor.test.ts` and
+`test/application/studio-lifecycle.test.ts` cover the existing routing and lifecycle contracts.
+
+Recovery `test/recovery/supervisor.test.ts` additionally injects early timer wakes and frozen/
+reversed clocks. Recovery waits out the existing flushed intent's minimum deadline, with at most
+eight wake checks, without creating another attempt or weakening `begin()` validation. The native
+ComfyUI profile test exercises the same handover/restart path that exposed an early-wake CI failure.
+
+The native writing fixture also accepts a prompt through the real adapter and exits without
+emitting a terminal stream event. Confirm the local unknown-outcome event releases its turn wait
+before automatic replacement, including Suggest only without replacement, with exactly one
+persisted prompt marker. Credential rotation during replacement startup must confirm the old
+child's exit and settle retained recovery before starting again; it cannot strand the writing fence.
+`test/recovery/voxa.test.ts` uses the production host, actual Voxa client and a native protocol
+stand-in to verify cancellation without replay, policy/personal ownership, compatible running
+health and failed reconfiguration retaining its native handle/reservation until confirmed cleanup.
+Voice package `test/recovery.test.ts` additionally drains queued synthesis, transcription and body
+reads, checks reservation cancellation/disposal, and prevents WAV preprocessing from crossing a
+cancelled request generation. These fixtures qualify lifecycle/protocol behavior, not live model
+quality or real Voxa model loading. Run package typechecks after the final test edit.
+
+Proactive storage service checks (#2194) use contracts `test/storage-health.test.ts` and coordinator
+`test/storage/*.test.ts`. Run coordinator checks with native Windows process/filesystem access:
+the volume fixture exercises a real directory/junction pair through the kernel-leashed reader,
+and reservation persistence uses flushed atomic replacement. Capacity, quota, ENOSPC, forecast,
+concurrency and shutdown faults are injected; no test fills a real volume or removes creative media.
+The Windows native fixture is skipped on other operating systems. `test/storage/linux-volume.test.ts`
+checks device sharing across bind aliases, escaped mount points, identity/remount changes,
+unsupported/read-only filesystems, unsafe capacities, bounded metadata, coalescing and slow-read
+abandonment without overlap. Its real directory/symlink fixture runs only on Linux and explicitly
+reports unsupported filesystems; synthetic tests on Windows do not establish Linux qualification.
+The Linux port qualifies ext2/3/4, XFS and tmpfs, with user/project quota limits disclosed as unknown.
+Native filesystem syscalls may outlive the four-second observation deadline; one retained chain
+blocks replacement until actual settlement and cannot publish late. Shutdown abandons observation
+without creating a child process. macOS and other Linux filesystem ports remain outstanding.
+`test/storage/application.test.ts` additionally starts the actual host/coordinator,
+opens a disposable world, wakes collection and checks the authenticated reconnect snapshot and
+journal exclusion. Client `test/storage-health.test.ts` checks the matching fold; contracts
+`test/storage-diagnostics.test.ts` covers pure findings, stale/unknown facts and typed failures.
+These checks establish observation and Diagnostics composition; write-path protection, recovery
+and visual parity with approved turn 239 require separate end-to-end acceptance.
+`monitor.test.ts` separately reproduces a performed probe completing at exactly its admission
+fence timestamp. It must remain pending until a later eligible reading, without publishing
+same-tick fit or treating it as failed native I/O. The matching frozen-clock case retains the
+eight-wake bound; existing failed/stale probe, one-second floor and cancellation checks still apply.
+`test/storage/setup-files.test.ts` now runs two real streamed file installers against one shared
+volume, verifies the second makes no request while held, and sends authenticated production-host
+Install/Retry commands against a competing owner's intent. It checks known-length growth before
+body reads, transport cancellation, bounded unknown-length responses, valid-prefix retention and
+explicit ranged Resume with only the remaining byte reserved. Unavailable qualified native capacity
+cannot start a transfer. `monitor.test.ts` covers post-report admission through the one-second
+coalescing floor, early timer wakes within one clock tick, bounded frozen/reversed-clock refusal
+and cancellation on stop. `reservations.test.ts` bounds stalled read/save shutdown
+and refuses late grants while retaining uncertain intent on reopen. Runtime-owned pull phases, other
+landing/scratch/export/import owners and restart reconciliation still need their own acceptance.
+`test/queue/submission-storage.test.ts` covers the unsent operational-headroom check: a full
+world cannot borrow capacity from a roomy app volume; unsent identity/attempt survive restart;
+another destination in the same provider lane can progress; reference preparation is followed
+by a fresh check; cancellation and Stop refuse late provider I/O. Hold observations require no
+additional journal append on the full app disk. `reservations.test.ts` checks
+read-only assessment against shared commitments without audit writes, grants or consumption.
+`queue/result-storage.test.ts` separately exhausts synthetic capacity after provider acceptance
+and verifies exact-result filing/restart without regeneration. Run these with native filesystem
+access because sandbox-denied atomic renames cannot establish persistence behavior. No fixture
+fills a real disk or calls a paid provider. Headroom checks do not qualify complete provider
+output/scratch estimates or pre-dispatch peak reservations; those remain separate requirements.
+Shared bounded retrieval uses providers `test/artifact-transfer.test.ts`,
+`shared-artifact-transfer.test.ts`, `clients.test.ts`, `comfyui.test.ts` and `capture.test.ts`,
+desktop `test/provider-transport.test.ts`, plus contracts `test/artifact-result-limits.test.ts`. They cover declared and
+chunked/encoded length bounds, malformed/short bodies, excessive empty fragments, metadata/file
+counts, HTTP-error rejection, cancellation and lossless successful reads. Large-limit tests use
+headers or the pure aggregate calculation rather than allocating GiB buffers. Capture checks
+keep host signals out of recorded context. Coordinator `queue/result-storage.test.ts` retains
+the accepted identity/reported cost across a transfer-limit hold/restart, makes no repeated
+download in that session and no second submission, and refuses late filing after cancel/Stop.
+An oversized result remains a provider review case; no fixture promises indefinite remote
+retention or a local resumable prefix. The shared matrix covers FAL/ComfyUI/Higgsfield file
+limits, selected deadlines, cancellation and refusal of late CLI-result downloads. Desktop
+checks prove selected long/short operation deadlines reach transport without changing
+generation or connection/inactivity policy. Synchronous clients have no separate download;
+their receipt admission uses the shared limits. Complete output/scratch reservation needs
+separate implementation and acceptance.
+The production-host file fixture additionally stalls progress-accounting persistence while a real
+partial-file handle is admitted, quits with that save still blocked, verifies bounded shutdown and
+the exact retained checkpoint, and refuses late grants after the old write finishes. Completed
+existing files in a partly missing component must remain exact and consume no second reservation.
+The mounted-destination fixture keeps a published file on a full volume while downloading a missing
+file to a different volume. Reservation/replan fixtures invalidate another owner's capacity during
+a blocked flush, refresh it, then verify the old grant stays revoked and its intent remains uncertain.
+
+Known import admission uses `test/storage/import-files.test.ts`, `storage/service.test.ts`,
+`artifacts/browser-media-import.test.ts` and `artifacts/artifacts.test.ts`, with editor import
+and `productions/audio-studio.test.ts` regressions. Run with native filesystem/process access
+and bounded concurrency. Synthetic capacity protects the real small source/result files; tests
+never fill a volume. The production browser path checks healthy destinations, full spool/full
+mounted artifact volumes, a shared-volume shortfall, source/path privacy and stable warning
+scope after refusal. Other cases cover competing result reservations, dedup/retirement retention,
+unknown capacity, failed post-write accounting and cancellation without late payload. A disposable
+Node host exits with flushed import intents; reconciliation settles only this finite port and
+leaves valid files/unrelated intents intact. Another service instance cannot release a live owner.
+`storage/import-batch.test.ts` and `artifacts/browser-import-batch.test.ts` additionally cover
+whole known browser world-copy admission before the first copy, exact-fit shared budgeting,
+duplicate/retired reuse, mixed Audio Studio filtering and changed zero-copy plans. Batch close
+retains unfinished child writes and admission flushes; cancellation cannot grant a late child.
+Delayed filing tests preserve a destination created during admission and refuse changed mutation
+preconditions. These checks qualify per-file copies, bounded browser spool and known browser
+world-copy batches, not complete metadata peaks or other batch/import owners,
+provider pre-dispatch/scratch, remaining import/export owners or all native platforms. Run the
+coordinator typecheck after the final test edit; optional FFmpeg cases report explicit skips.
+
+Ming cleanup recovery uses coordinator `test/recovery/ming-cleanup.test.ts` and
+`test/recovery/ming-host.test.ts`, contracts `test/ming-recovery.test.ts` and the extended
+diagnostics/incident/action-history suites, plus client `test/recovery-ming-cleanup.test.tsx`
+and Diagnostics navigation checks. The production host fixture uses the real Ming batch owner
+with a tiny Node worker, flushed child ledger, native kernel ownership and authenticated socket.
+It injects failed termination, checks a competing GPU waiter remains held, previews without
+acting, then approves original cleanup and verifies process exit before release. Narration runs
+once and unrelated creative bytes remain intact. Runner tests withhold the ledger flush and
+refuse a later record to verify cleanup authority cannot be fabricated or reused by a new worker.
+Use native process/filesystem/loopback permissions and bounded concurrency (for example two
+files); no model download or actual GPU is required. These are lifecycle checks, not Python/model
+quality, GPU allocation or cross-restart incident-correlation qualification. Run typecheck after
+the final test edit. The full epic and actual matched turn-239 visual acceptance remain separate.
+
+Setup native ownership checks use `test/setup/process.test.ts` and
+`test/setup/host-process-cleanup.test.ts`, with native process/loopback/filesystem access. They run
+literal disposable commands, hold the ownership gate, observe a helper surviving its command's exit,
+bound output, cancel and confirm exit, retain an unconfirmed process, then confirm it without replay.
+Windows additionally force-kills a disposable host and verifies kernel cleanup of its command/helper.
+The production host test refuses setup cleanup, verifies other native owners still stop, and keeps
+minimum storage/control settlement open until the cleanup retry. `local-setup.test.ts` checks held
+leases/staging, silent/interactive installer refusal, Stop/dispose, read-only listing and removal.
+Ordinary POSIX process-group behavior still requires Linux CI; deliberate daemon escape and complete
+runtime-owned pull space planning are outside these checks. Run affected typechecks after the last test edit.
+
+`test/storage/setup-archive.test.ts` runs the actual owned tar reader/extractor with tiny pinned
+archives through tree and single-tool setup. It checks shared expansion reservations against a
+competing file owner, changed expansion before native writes, unknown metadata, held native cleanup,
+and one complete UUID checkpoint reused only by explicit Resume without HTTP. Activation occurs
+after process and reservation settlement. `test/setup/archive-manifest.test.ts` covers supported
+numeric GNU/BSD prefixes, unknown/device records, arithmetic/line bounds and native metadata without
+extraction. Metadata mode retains no member output and has separate total-byte/entry/time bounds.
+Already-cached checksum-pinned Windows ComfyUI/Ollama archives have also been read without extracting
+them or downloading another runtime: expansion estimates were 4,910,957,043 and 2,231,700,495 bytes.
+Both pinned CLI architectures were checksum-verified and inspected, establishing its 26 MiB peak
+declaration. These estimates do not guarantee available space throughout extraction. Linux CI and
+first-run native application acceptance remain distinct; other write owners and reconciliation remain.
+Observation regressions also change mapping/capacity or fail a native read during a pending flush,
+without calling explicit invalidation, and verify the grant is revoked with uncertain intent retained.
+
+Media ownership uses `test/media-read-leases.test.ts` with the real authenticated HTTP transport.
+It checks full/ranged reads, failed opens, late resolver results, backpressured disconnect/shutdown
+and injected pending/failed descriptor closure. `test/transport.test.ts` and
+`test/voice/catalogue-preview.test.ts` preserve existing authentication/range/paid-preview behavior.
+These tests establish read-lease settlement, not disposable cache ownership or deletion.
+
+`test/storage/local-preview-cache.test.ts` exercises the fixed local catalogue producer's bounded
+receipts, restart replay, reader/writer exclusion across service instances, retained unknown native
+close/storage ownership, changed identities/bytes, hard links, root junctions/symlinks, unrecorded
+files, corrupt/oversized metadata, audio/directory bounds and cancelled late output. Shared storage
+fixtures refuse inference when the bounded peak cannot fit, prevent competing producers from
+spending the same volume twice, and require fresh capacity after inference before output opens.
+`test/voice/catalogue-preview.test.ts` proves fixed audition text, legacy-file retention and opaque
+local-token playback through the actual coordinator's authenticated range route. These do not
+qualify generic cache deletion, reclaimed allocation, cross-process exclusion or native cleanup plans.
+
+`test/storage/windows-cache-file.test.ts` runs the host-only Windows file primitive on generated
+temporary files. It checks producer/native identity binding, content hash and allocation facts,
+exact-handle removal, protected sibling bytes, changed content/identity/allocation, open readers,
+hard links, pending deletion held by a metadata-only native handle, replaced roots, root/leaf
+reparse points, path punctuation as stdin data, oversized
+files, bounded batches, cancelled reader drain and strict input refusal. The native cases skip
+outside Windows; input refusal still runs. These fixtures do not grant cleanup permission, qualify
+other filesystems/platforms, establish actual reclaimed capacity or replace action-level approval,
+intent persistence, lease/lifecycle, crash-reconciliation and UI acceptance.
+
+Reviewed fixed-preview cleanup adds `test/storage/cache-cleanup-control.test.ts`,
+`cache-cleanup.test.ts` and `cache-cleanup-host.test.ts`. Run these with native filesystem,
+Windows helper and loopback access. Generated fixtures cover flushed intent before mutation,
+unknown restart/save holds, bounded shutdown, the seven-day/eight-file scope, changed proofs,
+active readers, partial cancellation, fresh post-action capacity and early headroom stop.
+The host test uses the actual authenticated coordinator and native removal port: preview leaves
+bytes intact, approval removes only the eligible audition, duplicate approval refuses and no
+inference is replayed. Contracts `test/recovery-actions.test.ts` checks closed/enumerated plans;
+client `test/recovery-cache-cleanup.test.tsx` covers separate approval, cancellation, disconnect
+without replay and remote refusal. Run client tests from `packages/client`. These establish
+reviewed cleanup for this fixed Windows class, not complete inventory, arbitrary cache deletion
+or creative-media removal. Standing maintenance has additional checks below.
+Reconciliation additionally checks retained/absent/changed targets, protected successors,
+live/reused/missing original process identities, probe refusal, rejected audit writes and an
+unfinished original control chain. The actual Windows helper receives no input until its PID
+is flushed. `cache-cleanup-crash-fixture.ts` exits at that exact gate in a disposable child;
+the host test verifies owner/helper exit and new-coordinator settlement without deletion or
+synthesis replay. Native reconciliation preserves deletion-pending uncertainty until the last
+metadata handle closes. The authenticated cleanup fixture bounds its read-only readiness wait
+on loaded Windows runners; approval/removal is never automatically retried. Client checks
+correlated manual reconciliation, held wording and paired-browser refusal. Legacy unknowns
+without the admission witness remain held and do not qualify an arbitrary override.
+
+Standing cache maintenance uses `test/storage/cache-maintenance-host.test.ts` with actual
+authenticated commands/native removal and injected capacity, never a full system volume. Low
+space alone grants nothing; explicit opt-in in Suggest only still performs no removal. A
+healthy cache volume is protected when another registered volume is low. Automatic mode plus
+fresh pressure on the opted-in cache volume admits the existing cleanup owner, measures its
+headroom and reports only confirmed counts with unknown causal reclaimed space. Control tests
+check root/attempt binding, persisted cooldown and disable across restart, blocked input-flush
+withdrawal and retained file-control ownership through abandoned writes. Cleanup tests withdraw
+between files and retain the later audition. Broker tests preserve the single executor and
+allow withdrawal even with an invalid clock. Client `test/recovery-cache-maintenance.test.tsx`
+requires review before opt-in, lets withdrawal overtake enable, refuses duplicate clicks and
+never resubmits after reconnect. This qualifies only the fixed preset class; broader classes,
+inventory and process/driver/platform acceptance remain separate.
+
+The fixed-preview incident remedy additionally uses contracts storage/diagnostics/recovery tests
+for exact volume/mapping, capacity/inventory freshness, restored headroom, pending control,
+closed source projection and generic approval-required notices. The authenticated cleanup host
+injects capacity while using the real native file owner: a wrong scope is refused, a mapping
+change after review preserves the audition, a same-path root replacement preserves both original
+and successor bytes, and a new scoped review still requires separate one-use approval.
+This is measured capacity injection, not a real disk-full experiment or proof
+of reclaimable allocation. Client cleanup tests open without sending work, withdraw an unadmitted
+review when its warning changes, ignore its late response and preserve an approval already sent.
+
+Recovery control tests (#2194) use contracts `test/recovery-policy.test.ts` and coordinator
+`test/recovery/control.test.ts`. They inject crash/unknown writes, competing attempts, rolling
+budgets, clock reversal, deliberate Stop/Suggest only, target changes during flush and shutdown.
+Native filesystem access is needed for atomic control-file replacement. These establish the
+durable gate. `test/recovery/commands.test.ts` checks flushed policy/presentation receipts,
+held retry controls and failed persistence. `history-application.test.ts` sends the commands
+over the authenticated host socket and verifies disk state and journal exclusion;
+`remote-access.test.ts` refuses them through the real paired-device gateway. Contracts
+`test/recovery-settings.test.ts` closes their argument schemas. Client `test/recovery-controls.test.tsx`
+checks receipt correlation and the summary-clear confirmation, while `recovery-history.test.tsx`
+checks notice mute/replay and read-only Activity navigation. Desktop `background-notifications.test.ts`
+checks the separate opt-in, generic copy, focus, shutdown and Activity-only click.
+`recovery/history.test.ts` traverses all 1,000 retained incidents with non-dividing page sizes,
+checks stale filter/source/page-size cursors and labels failed persistence in memory. Client
+`recovery-history-browser.test.tsx` checks pagination, stale reads, correlated snooze and remote
+read-only controls. `recovery/export.test.ts` exports all retained summaries and poisons future
+fields to verify enumeration plus the existing secret/path boundary. The authenticated host
+fixture stalls a preference save while an actual owned child is running, then verifies bounded
+shutdown confirms native exit without acknowledging an unconfirmed save. The supervisor fixture
+ages attempts across a long live session, then exhausts the actual rolling window.
+
+Chronological action history adds contracts `test/recovery-action-history.test.ts`, coordinator
+`test/recovery/action-history.test.ts` and client `test/recovery-action-history.test.tsx`. Check
+repeated outcomes for one service, same-action settlement, owner-receipt precedence, future/stale
+observations, the shared 10 MiB maximum with 1,000 incidents/actions, retained unconfirmed rows,
+revision/view/filter-bound pagination and clear/restart suppression without losing a new
+same-millisecond action. Whole cleanup-run receipts remain bounded within the existing 64 KiB
+control; failed saves retain unavailable audit and cannot grant replay. Existing actual restart
+and authenticated native-cleanup fixtures verify action rows in the production composition.
+Export enumerates all 1,000 action rows while excluding poisoned paths/intent/plan fields.
+The Actions view issues read-only queries, keeps failures distinct from unconfirmed outcomes,
+rejects stale pages and grants no repair permission. Review fixtures capture one timestamp for
+preparation and expiry; a second clock read can make a nominal five-minute plan invalid on CI.
+The host fixture repeats a blocked mode save: the authenticated command must end unconfirmed,
+native exit must complete while the file write stays blocked, and no late saved receipt may appear.
+Control faults cover a stalled read/authority write, bounded owner settlement behind that write,
+no subsequent queued mutation, and unknown intent/attempt retention across reopen. A recovery-port
+check releases a retained lease only after its owner confirms native cleanup, even if the control
+writer remains unavailable; it does not turn that cleanup into fresh startup permission.
+`test/recovery/supervisor.test.ts` additionally uses real native children to check
+GPU waiting, verified replacement, queued startup exits, cancellation, policy/ownership refusal
+and retained unhealthy processes. `test/recovery/application.test.ts` starts the actual host and
+managed Ollama owner with a protocol fixture, verifying its flushed outcome and persisted policy.
+It also updates an installed runtime through the real command with a tiny pinned archive, proving
+setup owns the inference reservation and activation. `test/recovery/comfyui.test.ts` exercises
+production-host recovery, isolated profile budgets, queued handover, personal-path refusal,
+early shutdown fencing and failed native cleanup/reporting/retry. A blocked authorization flush
+checks that clean shutdown settles its unstarted intent while preserving the spent attempt.
+`test/setup/local-setup.test.ts` checks the file-change lease through writes/rechecks, failure and
+release before activation. `test/ollama-engine.test.ts` checks retained installation reservations
+after unconfirmed cleanup and release only after owner-confirmed stop. These establish the Ollama/ComfyUI paths, not other recovery owners, reviewed
+interruption actions or successful inference. `test/job-leash.test.ts`
+also verifies shared storage-reader job reuse and kernel cleanup on forced parent death on Windows.
+Latest repair receipts are checked in contracts `test/recovery-policy.test.ts` and coordinator
+`test/recovery/control.test.ts`: exact settled identity, restart/unknown reconciliation,
+uncertain writes, retained attempts, legacy files and maximum receipts within the existing
+256 KiB cap. The native supervisor case verifies its replacement produces the receipt for
+the original failed generation. `test/recovery/export.test.ts` rejects injected/free-form
+receipt fields and excludes execution identity; client `test/recovery-controls.test.tsx`
+checks unconfirmed outcome wording without treating a past receipt as present health.
+Reviewed retries add contracts `test/recovery-actions.test.ts`, coordinator
+`test/recovery/actions.test.ts` and client `test/recovery-retry.test.tsx`. They cover separate
+preview/approval, one-use IDs, bounded expiry, policy/target invalidation, cancellation and no
+replay. Coordinator `test/recovery/supervisor.test.ts` uses the actual native supervisor in
+Suggest only, checks GPU waiting and retained unknown cleanup, and `test/recovery/control.test.ts`
+checks authority revalidation after queued writes. The production-host application fixture
+retries a stopped managed Ollama over an authenticated socket, verifies readiness and rejects
+duplicate approval; gateway fixtures include `recovery-action` in every host-only refusal.
+Run the existing ComfyUI/harness/Voxa recovery suites alongside these because the executor is
+shared. These are service-restoration checks, not model-quality, full storage admission or
+turn-239 visual acceptance evidence.
+
+Incident checks (#2194) use contracts `test/recovery-incidents.test.ts`, coordinator
+`test/recovery/history.test.ts` / `history-application.test.ts`, and client
+`test/recovery-history.test.tsx`. Faults cover notification admission before delivery, a newer
+observation/mute during a write, restart identity and budget, lost scope/stale measurements,
+two-reading capacity recovery with remounts, current engine identity, history caps, disk-full,
+malformed/oversized files and shutdown drain. Stalled diagnostic reads/writes bound shutdown waiting and
+report unavailable audit state; an already-issued atomic replacement may finish, with no further
+batch or notification admitted. The native application fixture demonstrates a disk
+warning before opening a world, one persistent incident and an authenticated reconnect snapshot;
+history/notices never enter the world journal. Client checks prove muted warnings stay visible
+and Review only navigates without a mutation command. These checks do not establish OS/toast
+delivery, all lifecycle adapters, host policy commands, or final Studio visual parity.
+
 Managed local runtime checks are listed in [Managed local runtimes](managed-local-runtimes.md#validation).
 Use native Windows process/loopback access for the supervisor, Ming cancellation and file-handle
 fixtures; sandbox IPC refusals do not establish an application regression. Model qualification
 is offline and separate from these lightweight native lifecycle tests.
 The [Ming integration checks](managed-local-runtimes.md#validation) cover complete model installation,
 voice reference words, queue identity, chunking, controlled refusal and packaged worker resources.
-The standard-library worker checks run with `python -B scripts/test-ming-worker.py`; CI's Node tests
-exercise the host seams without model downloads. Native tests must also check confirmed process
+The standard-library worker checks run with `python -I -B scripts/test-ming-worker.py`, including
+whole-batch dependency planning, declared stream sizes and audio refused before writing. These
+run on both CI platforms without a model or GPU; Node tests exercise the host seams without
+model downloads. Native tests must also check confirmed process
 exit and GPU-lane release; a returned WAV alone does not prove a complete reading.
+`test/ming-process.test.ts` uses the real gated native executor with a lightweight Node fixture:
+the same Python command preparation, stripped environment, private working directory and log,
+ordinary helper surviving parent exit, failed cleanup retention and later GPU confirmation.
+It also checks failed batch settlement refuses replacement until an owner retry succeeds.
+`test/ming-speech.test.ts` checks exact batch retention, cancellation before native admission,
+host access after native exit, and a real worker whose failed termination leaves its private
+inputs intact until later confirmed cleanup. Original voice files and model files are not targets.
+`test/local-gpu.test.ts` also proves a newly authorized reading confirms retained cleanup before
+submission, never replays the old reading, and stays held after another failed confirmation.
+These fixtures require no model download and do not establish narration/inference quality.
+
+Ming storage admission adds `test/storage/ming-batches.test.ts` and `test/ming-owner.test.ts`.
+Run with native filesystem/process access. Tests cover shared/separate destination volumes,
+fresh admission after the GPU wait, known input consumption, uncertain native writes, cache
+growth cancellation of a real bounded worker, an abandoned metadata read retaining its lease,
+and original-host/job reconciliation after force-closing a disposable Windows host. Inspection
+must not create a missing job, accept a session-local alias or clear a live/unknown owner.
+`test/ming-speech.test.ts` checks low-space rejection before input copying and an actual worker
+whose failed cleanup retains its disk reservation until confirmed exit. Python worker tests
+also reject an expanded byte/entry count beyond the admitted lock before any extraction.
+Windows job reconciliation tests skip elsewhere; the managed Ming reader remains Windows x64.
+These tests do not qualify every native generation owner or guarantee a polling estimate cannot
+be overrun. Actual-model checks must separately verify reservations, cache growth and cleanup.
 
 Baseline regression checks (#2079) use client `test/art-direction-step.test.tsx` and
 `test/one-register.test.tsx`, contracts `test/world-chat-shape.test.ts`, and coordinator
@@ -361,6 +758,16 @@ stills, video, scoped alpha and composition alpha at exact
 half-open intervals after gaps, at 24/25/30 fps and inside nonzero export windows. Run
 `node --import tsx scripts/smoke-editor-effects-preview.mjs` for real Chrome decoding, source
 alpha, contained targets, multiple picture layers, all six presets and seek/worker checks.
+The Effects workflow installs Chrome for Testing 156.0.8078.47 through a commit-pinned setup
+action and passes its exact binary through `ARKE_CHROME`; `ARKE_EFFECT_CHROME_VERSION`
+asserts the version actually exercised. Runner-provided Chrome varied between green and
+terminated jobs on the same Ubuntu image. This pins the previously passing decoder rather
+than relaxing assertions, deadlines or Linux coverage. Local runs can still choose their own
+`ARKE_CHROME`; a different browser is a separate qualification result.
+Ubuntu CI grants user-namespace access only to that exact installed fixture binary using a
+root-owned AppArmor profile, following Chromium's documented per-binary approach. The downloaded
+testing browser does not inherit Ubuntu's packaged-Chrome profile. The workflow preserves
+Chrome's sandbox and the system-wide namespace restriction; it changes no end-user installation.
 `node --import tsx scripts/benchmark-editor-effects.ts --output <report.json>` records the
 runtime, hardware, capability profile, frame digests, near/far seek times, worst overlap raster
 times and process memory. The native production acceptance CI job repeats these measurements
@@ -516,6 +923,9 @@ coordinator `test/harness/codex-image-runner.test.ts`, `test/spec008/codex-image
 picture/illustration suites. Client coverage includes `test/dispatch-bar.test.tsx`,
 `test/providers.test.tsx`, `test/queue-toaster.test.ts`, Bench, founding-build and audiobook
 picture tests. The ordinary suites use fixtures and consume no account allowance.
+The shared-connection cancellation fixture keeps its second image pending until the first thread
+is unsubscribed. This establishes a live peer at cancellation without relying on a 20 ms timer;
+it preserves both the second-image result and connection-readiness assertions under Windows load.
 Startup coverage holds the Codex probe pending while the transport opens, then verifies that
 the real founding-service wiring accepts validated external sign-in without a stored API key.
 For a live check, use an installed Codex with ChatGPT sign-in and a synthetic one-image reference;
@@ -780,7 +1190,9 @@ when cleanup fails, preservation of damaged records, and first launch without Ta
 Publication tests verify that ownership is committed before Serve runs, both initially and
 after Disable, and that a failed ownership write prevents publication.
 Desktop `test/startup.test.ts` covers cleanup retries without a second host and slow remote
-unpublication before the core shutdown deadline.
+unpublication before the core shutdown deadline. It also checks that ordinary window Close
+is deferred through failed/delayed cleanup and only the confirmed quit destroys the window;
+run `test/updates.test.ts` alongside it to retain install-on-close behavior.
 After building, an opt-in real HTTPS check is:
 
 ```powershell
@@ -1107,7 +1519,7 @@ inspection and removes its temporary profile/package. The same variables enable 
 real encode/ZIP/decode test. The smoke requires a desktop display (or an appropriate Linux display
 environment); ordinary CI unit tests do not replace it.
 
-[ci.yml](../../.github/workflows/ci.yml) runs on Windows and Linux with four coordinator shards and a separate other-workspaces job per platform. Shard 1 runs lint, typecheck, build and the CI planner tests. [ci-test.mjs](../../scripts/ci-test.mjs) partitions coordinator tests using Node's discovered file list and discovers every other workspace with a test script. To inspect a shard locally, run `node scripts/ci-test.mjs 1/4` from the root; this is only that coordinator shard, not the complete CI gate. Run `node scripts/ci-test.mjs workspaces` for the other workspaces, or omit the selector for the complete unsharded test run. `node --test scripts/ci-test-plan.test.mjs` checks that the job plans cover every discovered workspace without duplication or omission.
+[ci.yml](../../.github/workflows/ci.yml) runs on Windows and Linux with eight coordinator shards and a separate other-workspaces job per platform. A separate Ubuntu job runs lint, typecheck, build and CI planner tests. [ci-test.mjs](../../scripts/ci-test.mjs) partitions coordinator tests using Node's discovered file list and discovers every other workspace with a test script. To inspect a shard locally, run `node scripts/ci-test.mjs 1/8` from the root; this is only that coordinator shard, not the complete CI gate. Run `node scripts/ci-test.mjs workspaces` for the other workspaces, or omit the selector for the complete unsharded test run. `node --test scripts/ci-test-plan.test.mjs` checks workflow coverage and runs Node's actual discovered-file sharding over a disposable fixture to catch omission or duplication. The expanded split follows Windows shard 2 exhausting thirty minutes with passing output in run 40577520866; the thirty-minute ceiling and ten-minute silence guard remain unchanged.
 
 The runner uses a silence guard as well as a workflow timeout. Diagnose leaked resources before treating a silent run as merely slow. Local Windows success cannot establish Linux path/case correctness. Packaging/release workflows perform additional delivery work beyond CI's build.
 
@@ -1366,6 +1778,480 @@ and witnessed terminal errors remain separate. Compare the existing turn-206 Act
 wording at phone, tablet and desktop widths. Synthetic component screenshots do not establish
 native provider recovery; report any controlled live interruption separately.
 
+## Completed result storage
+
+Run coordinator `test/queue/artifact-files.test.ts`, `result-storage.test.ts`,
+`dispatcher.test.ts`, `speech-pricing.test.ts` and `test/storage/job-artifacts.test.ts`, plus
+the shared storage regression directory. These require ordinary native filesystem access for
+atomic temporary-file rename; a restricted sandbox's denied rename is not a disk-full fault.
+The tests inject capacity/accounting failures with small synthetic bytes, never fill a disk,
+contact a provider, run inference or delete source media. They cover exact result recovery after
+provider expiry, rejected accepted-facts appends, ownership loss before publication, complete
+prefix reuse, repeated legacy receipt recovery, partial publication and all-published adoption
+without another payload grant, cancellation, accounting reconciliation and unchanged charge identities. Run all
+affected types after final test edits. Full CI remains necessary for Windows/Linux differences.
+The result-storage tests also hold checkpoint/world writes after completed inline/remote output,
+then admit another engine through the real shared GPU scheduler. Retrieval must finish first;
+handover must settle before the next inference, and later job settlement cannot release that
+other owner's reservation. No submit, poll, fetch or charge is repeated during local storage retries.
+
+Regeneration also covers a larger ordinary destination being replaced by a smaller valid result
+after normal capacity admission. Different-sized staging/destination files are cache misses;
+private receipt blobs retain strict bounds/digest validation. The Linux production-factory test
+requires its actual `linux-mountinfo` source and measured/quota-limited or explicitly unsupported
+facts, rather than the historical unsupported-only expectation.
+
+## Studio operational session boundary
+
+Run contracts `test/confinement.test.ts` and coordinator `test/harness/operational-confinement.test.ts`,
+`test/harness/session-files.test.ts` and `test/local-gpu.test.ts`. Native filesystem access is needed
+for role-root identity, preparation writes and the existing host/queue cleanup cases. Operational
+tool refusals are exercised through the actual OpenCode v2, Claude and Codex gates, including
+research enabled and rewritten briefs. Configuration tests inspect what reaches adapter preparation
+and pin the same operational role at creation, excluding world/author notes, query URLs, skills
+and other-role overrides. GPU tests verify background sessions wait behind normal creative work,
+preserve FIFO within each priority and cancel without releasing the admitted owner's lane.
+These tests make no model call and do not qualify the production Studio integration, repair
+registry, cloud/spend authorization or matched turn-239 visual gate.
+
+Run coordinator `test/studio-assistant/*.test.ts` for the conversation core and private owner. Its native
+file-backed/protocol fixtures verify bounded private history, interrupted phase reconciliation,
+closed evidence and delegation, one-use nonlocal payload approval, route/generation fences,
+late shutdown suppression, retained unknown model ownership and explicit draft-only handoff.
+The composition case joins the actual conversation store, service, session runner and shared
+GPU wrapper behind admitted creative work. It uses a synthetic protocol adapter, not a live
+model. Native filesystem access is required for flushed atomic replacement. These tests establish
+the core boundaries; they do not prove production model-route/spend or UI integration, provider spend
+approval, live explanation quality, reviewed repair execution or visual parity.
+Review regressions run through model validation, shared GPU and runtime-change wrappers in
+production order: changing the route/locality or process generation during the GPU wait must
+prevent the native send, and cancelling a queued turn must permit a new independent request
+without releasing admitted creative work. Missing lifecycle revisions are refused. OpenCode
+`test/v2-adapter.test.ts` verifies the concrete revision changes on confirmed exit/disposal;
+`test/harness-runtime-change.test.ts` checks guarded sends cannot bypass runtime replacement/
+recovery admission and that a rejecting final fence makes no native call.
+
+Private-channel checks use coordinator `test/studio-assistant/transport.test.ts`, the existing
+`test/transport.test.ts`/`test/remote-access.test.ts`, contracts `test/studio-assistant.test.ts`
+and client `test/studio-assistant-transport.test.ts` (run client tests from that package).
+They check two authenticated sockets, per-connection sequencing, initial reconciliation,
+closed/refused reply capabilities, host-only paired-browser refusal, strict command bounds
+and exclusion from common client state. Reconnect sends no private history automatically.
+Client `test/studio-assistant.test.ts` covers retained drafts/model choices, repeated send
+presses, correlated create/send, late receipts and observation-only reconnect. The component
+suite `test/studio-assistant-view.test.tsx` mounts the production provider and titlebar to check
+lazy private watch/unwatch, focus return, prompt-only draft changes and disclosure-specific
+cloud consent. `test/global-chat.test.ts` checks named draft staging, exact replacement review
+and capture/creation holds. Run from `packages/client`, then run the client typecheck after the
+last test edit. These DOM/protocol checks do not establish native model operation or rendered
+turn-239 parity. Do not replace required visual evidence with source/CSS assertions.
+Private dictation adds contracts bounds to `test/studio-assistant.test.ts`, real two-socket
+coordinator/sidecar composition and single-flight/disconnect checks to coordinator
+`test/studio-assistant/host.test.ts`, and captured-draft/late-transcript checks to the client
+`test/studio-assistant.test.ts`. Client `test/studio-dictation.test.tsx` exercises the actual
+capture component with a synthetic MediaRecorder, including permission after close, stopped
+tracks, oversized recordings and its measured one-minute timer. It makes no microphone/model
+request. The ordinary Chrome `test/composer-row-layout.test.tsx` checks the shared microphone
+presentation at narrow widths; it neither reads the approved master nor establishes parity.
+Adapter `test/v2-private-sessions.test.ts` uses a native loopback protocol server to check
+prepared-role admission, one-use exact-session observation, exclusion from shared events/trace,
+private backend error echoes and native rejection of unexpected permissions (including attempted
+grants). The Studio runner suite refuses missing isolation/observer capabilities; its actual GPU
+wrapper composition excludes both private native responses and synthesized waiting activity.
+Run alongside the existing v2, Studio, GPU, model-routing and runtime-change suites with native
+loopback/filesystem access. These fixtures make no live-model or paid request and do not prove
+complete route/spend or unknown-inference cleanup qualification. Client Bench/chapter/Generate/
+scene regression suites check contextual access independently from Studio. The real-browser
+`audiobook-show-layout.test.tsx` checks titlebar separation and 44px touch targets with long titles.
+Private ownership regressions use coordinator `test/local-gpu.test.ts` (at the test root),
+`test/harness-runtime-change.test.ts` and `test/studio-assistant/*.test.ts`, plus the adapter's
+v2 suites. `studio-assistant/native-owner.test.ts` drives actual v2 HTTP/SSE and the production
+model-validation/GPU/runtime wrapper order: an echoed send error and Stop acknowledgement
+must keep ownership; a late native completion retires the original turn, then the next engine
+still waits for normal unload. Other cases cover exact trusted cleanup, prototype capability
+receivers, stale-generation interrupts, missing proof, single-prompt private sessions and
+private late-settlement notification without transcript replay. Combine with model-routing,
+recovery/harness and v2-launch tests for the native gate. These use scripted local providers,
+not physical model-memory measurements; the optional pinned-native launch case is separate.
+Set `ARKE_TEST_OPENCODE2` to the staged or installed **2.0.26** executable and run adapter
+`test/v2-operational-protocol.test.ts` alongside `test/v2-operational-config.test.ts` for the
+actual native operational policy. It launches a fresh credential-free temporary profile and a
+scripted loopback provider, counts every model request (including automatic helpers), checks
+zero tool schemas and probes direct native read/unknown-tool denials without the adapter's
+permission backstop. It makes no paid or real inference request. Run the existing
+`test/v2-input-protocol.test.ts` with the same executable to retain ordinary writing/tool-loop
+qualification. The pinned 2.0.26 installed executable passes both; production Studio destination,
+full payload/persistence and spend qualification remain separate gates.
+Adapter `test/v2-private-destination.test.ts` uses native HTTP/SSE plus a scripted model-metadata
+server. It checks session/variant/role/location and scoped catalogue agreement, opaque frozen
+proofs, matching metadata authentication, cloud forwarding, final dispatch fencing, changes
+during metadata I/O, unknown transports/options, redirects, bounded responses, cancellation and
+generation loss. A failed proof must send no prompt and must not cross the admitted dispatch
+fence. The exact-binary operational test also verifies the pinned native session/default variant,
+actual Ollama settings shape and route proof before a single zero-tool request per role.
+Prepared-session tests preserve prototype capability receivers. These checks qualify the native
+capability. Coordinator `test/studio-assistant/native-route.test.ts` combines actual native
+HTTP/SSE, model metadata, the runner and production wrappers: native proof precedes approval,
+both identities enter its digest, either nonlocal verdict requires consent, and a route change
+while queued refuses before dispatch without retaining unsent GPU/runtime admission. Missing
+native proof/fence cannot fall back to the host claim. Opt-in `pinned-native.test.ts` runs the
+same runner through the shared actual 2.0.26 launcher, a credential-free profile and scripted
+provider, checking one approved zero-tool completion, settlement and private trace exclusion.
+An earlier unguarded 2.0.26 probe measured three provider requests after two HTTP 503/429 failures
+despite one application approval/dispatch. The fixed Arke control now refuses native retries:
+success, HTTP 503/429/400 and an uncertain dropped socket each produce exactly one request.
+The scoped transient plugin must be active at its expected source before dispatch and after its
+API result. Sealed private requests use `/generate`, leaving no native user/assistant rows even
+on failure. The runner retains unknown GPU/runtime ownership through Stop without application
+replay. Success also verifies the exact control/config files and empty turn directory
+are retired. Other SDK transports, production spend/payload and physical cleanup remain gates.
+Set `ARKE_TEST_OPENCODE2` for that test; it makes no real inference or paid request. Production
+host attestation still defaults to refusal. These checks do not prove complete cloud payload,
+spend, native transcript retention or physical backing-inference cleanup requirements.
+The separate opt-in `test/v2-launch.test.ts` native case poisons inherited OpenCode authentication,
+DB/config and XDG cache/state controls using a second disposable synthetic profile. It requires
+healthy launch, the DB under Arke's profile, unchanged synthetic personal bytes and no cache/state
+or DB sidecars in that second profile. A server-only fix is insufficient: the real `--version`
+discovery probe also initializes native paths. Adapter discovery tests cover environment delivery
+through configured, PATH and bundled candidates. Pure launcher tests cover mixed-case native/
+telemetry controls, pin-owned update/SDK-telemetry flags and preserving the parent environment.
+These checks do not establish all native log/telemetry behavior or private transport trace isolation.
+Adapter `test/v2-private-retirement.test.ts` verifies completed/unsent exact-session retirement,
+refusal of unknown inference/Stop acknowledgements, original server/authentication binding,
+changed owner fields/generation, both native absence checks, idempotent retry, finite private
+admission and late-event/cache/trace exclusion. The pinned operational fixture verifies actual
+2.0.26 session and message endpoints return 404 after the capability succeeds. The pinned runner
+fixture also runs bounded native retirement before settling private admission. Coordinator
+`native-route.test.ts` retains the durable Studio request/reply and unrelated creative bytes
+through failed native deletion, blocks further inference without holding GPU memory, then
+reconciles only that retired copy without another prompt. Prepared-session tests preserve the
+retirement capability's native receiver. These are logical API-retention checks, not secure
+database/WAL/log erasure, cross-restart cleanup or financial/payload qualification.
+
+Adapter `test/sse.test.ts` checks per-frame UTF-8 limits across arbitrary chunk/delimiter
+boundaries, many valid frames in one chunk, malformed input, sanitized size errors and abort
+without waiting for an uncooperative cancellation callback. `test/v2-private-payload.test.ts`
+checks the 192 KiB decoded private response limit, split surrogate pairs, delta coalescing,
+64-event/control bounds, metadata limits, native error/end redaction, unscoped-error exclusion
+and refusal of missing/oversized final retrieval without accepting partial text on the unsealed
+comparison protocol. The native-route composition holds unknown GPU/runtime ownership after
+an invalid transient result, ignores native SSE/cache completion and requires matched trusted
+physical cleanup before release. These make no model/paid
+request and do not establish complete native payload disclosure, spend or subprocess persistence.
+The same suite checks cached rows after an observed private error cannot become completion
+proof during reconnect, and private unknown event names cannot reach common dead-letter
+diagnostics. Neither a refused response nor a Stop acknowledgement releases unknown inference.
+Missed-failure reconnect cases require the newest assistant's error-free `finish: "stop"` before
+publishing private text, even when a failed row has a completed timestamp and plausible JSON.
+Truncation, native tool requests, inconsistent error metadata and missing finish refuse; a newer
+unfinished assistant cannot reveal an older complete row. Ordinary authoring keeps its prior path.
+
+`test/v2-private-control.test.ts` checks the fixed control code, literal integration policy,
+ordinary-file compatibility and refusal of glob-bearing paths. Native-destination cases reject
+missing/failed/duplicate/extra/wrong-source/oversized or unscoped plugin metadata, control loss
+during metadata I/O, and direct private sends without active control. Coordinator
+`test/harness/private-files.test.ts` verifies exact captured-byte retirement, changed/creative
+file preservation, successor generations, unsent failure, traversal refusal, directory links and
+uncertain unlink/reconciliation. No generic scratch/history deletion is exercised or authorized.
+
+The pinned Studio runner now compares the complete provider JSON to its reviewed system/prompt,
+4,096-token cap and closed stream/storage fields, and checks native directory/session identifiers
+are absent. A changed config manifest fails its digest before approval or provider traffic.
+An injected HTTP-hook refusal produces zero requests and no native user/assistant transcript
+while the unknown owner remains retained. `runner.test.ts` additionally reproduces caller mutation
+across authorization and verifies immutable capture; native destination support without the
+explicit payload or transient capability refuses before creation. Control tests cover prompt-as-data/code
+separation and manifest bounds. Contracts and client approval tests verify bounded system/cap
+disclosure inside the existing private review. Full client tests still use the client cwd.
+These checks qualify the pinned body enforcement, not arbitrary SDKs or native metadata:
+the native transport adds `b3`/`traceparent` after the HTTP hook. Managed-origin, remaining
+network metadata, spend, raw persistence and physical/durable cleanup stay separate gates.
+
+Run adapter `test/v2-transient-control.test.ts` for the separately identified transient control.
+It executes the exact emitted code and checks canonical response/header reconstruction, closed
+finish/tool/refusal/model policy, UTF-8/body/text/frame/read bounds, unknown missing usage,
+options mutation, one transmission/response, generic failures and nonblocking cancellation.
+With `ARKE_TEST_OPENCODE2` set, coordinator `test/studio-assistant/transient-native.test.ts` runs
+eleven direct `/generate` scenarios through the shared pinned launcher and a scripted provider.
+Unguarded truncation returns HTTP success; guarded truncation/tools/missing termination/wrong
+model/oversize/400/429/503/socket loss refuse without retry. Messages stay unchanged. Scans of
+the complete bounded synthetic profile before and after native exit find no transient system,
+prompt, reply or provider-error markers; retired prompt-path markers in WAL prove the detector
+is live. This is finite Windows profile evidence, not secure erasure or arbitrary-platform proof.
+Sealed private adapter dispatch now uses that guarded API. `v2-private-transient.test.ts` checks
+strict result/HTTP/text/deadline bounds, post-result control loss, one dispatch, SSE/cache exclusion
+through reconnect, Stop-before-send, retained unknown faults and late qualified completion after
+Stop. An ordinary-session sentinel proves injected native SSE was consumed. `native-owner.test.ts`
+checks actual wrapper-order GPU/runtime handover: fake SSE cannot release a stopped owner; its
+late guarded API result permits normal handover without publishing a late reply. Pinned runner
+fixtures measure that behavior after a real interruption acknowledgement and scan the bounded
+native profile for system/prompt/reply/error copies through native exit. Ordinary writing and
+unsealed comparison ports retain their existing prompt path. Production host attestation remains
+closed; native HTTP bridge allocation precedes the response hook, so passing its admission
+bounds does not prove bounded upstream native memory, full financial policy or all platforms.
+
+The Effects browser fixture logs its actual browser version, a bounded stderr tail on failure
+and Linux cgroup memory counters every five seconds and before each decoder stage. Two Linux
+runs stopped after the same decoder stage despite ample host `freemem`; the cgroup samples
+distinguish host RAM from a possible container limit. These diagnostics retain all pixel,
+source-frame and timeout assertions. A green Windows reproduction does not qualify Linux.
+After building, `node --import tsx apps/desktop/scripts/smoke-transport-flow.mjs` checks a real
+hidden sandboxed Electron file page and built preload, including a correlated private reply,
+history negotiation/reset, hidden capability and authenticated media range. No model, paid
+request or approved design-master rendering is involved.
+`host.test.ts` additionally runs the production coordinator with a synthetic host model: private
+history survives world opening/restart, wrong/duplicate cloud approvals cannot dispatch, and
+non-requesting sockets/common state receive no transcript. Held history I/O returns unconfirmed,
+keeps its pending admission, permits cancellation and cannot start late work after stop.
+`store.test.ts` holds an actual atomic write through bounded shutdown, then verifies replacement
+history waits for its settlement before reading/saving. The same-path barrier is not a multi-host
+lock. These tests do not qualify real model-route/spend/trace privacy integration or the dialog.
+
+Private Studio reply playback uses contracts `test/studio-speech.test.ts`, voice
+`test/private-speech.test.ts`, coordinator `test/studio-assistant/speech.test.ts` and
+`speech-host.test.ts`, `test/voice/private-speech.test.ts`, and client `studio-read-replies`
+and extended Studio conversation tests. The production host fixture uses its actual private
+RPC and Voxa client with a tiny synthetic HTTP voice server, without opening a world. It checks
+authoritative reply-only resolution, 450-character parts, exact source/voice binding, no model
+replay, unchanged chat history, no audio cache file, no common voice event and no data to the
+second authenticated socket. It requires native filesystem/loopback access; it does not run
+Kokoro, prove voice quality, physical cleanup or private sidecar profile erasure.
+Streaming client faults cover declared/actual size, fragment bounds, redirect refusal, literal
+loopback pinning and cancelled body cleanup retaining the original synthesis/runtime ownership.
+Host tests cover requester-bound cancellation, a retained unconfirmed producer after timeout,
+archive revocation and late-audio suppression. Client tests exercise the shared app player,
+sequential pull, one latest unsent reply waiting behind the current read, history/visibility/reconnect baselines, different playback taking over, local
+narrator changes before the first part, and refusal of cloud/world-bound voices. Read replies
+and explicit Listen are currently qualified for the app's selected local Kokoro narrator;
+they do not silently substitute another reader. Other private speech engines/nonlocal consent,
+remaining dialog controls, native inference qualification and matched turn-239 visual acceptance
+remain separate work. Run typecheck after the final test edits.
+
+Studio text documents use contracts `test/studio-assistant.test.ts`, client
+`test/studio-documents.test.ts` and the extended Studio conversation/view suites. They cover
+UTF-8/binary refusal, bounded slices/aggregate encoded bytes, original draft ownership,
+close/reconnect/timeout suppressing late insertion and later file reads, explicit immutable Send,
+private preview/removal, and unconfirmed requests without replay. Run client tests from
+`packages/client`. Coordinator `test/studio-assistant/service.test.ts` and `host.test.ts` cover
+complete per-phase cloud disclosure, specialist exclusion, authenticated two-socket isolation,
+shared-state/journal exclusion and private history across actual host/world reopen/restart.
+The host uses a synthetic model port, so these tests do not qualify native model activation or
+multimodal/Office extraction. No arbitrary file is opened by the coordinator. Run full typecheck
+after final test edits; production build and sandboxed file-page transport smoke remain required.
+
+`test/story-pdf-runner.test.ts` uses an explicit worker/phase-callback handshake in the terminal
+drain fixtures. A worker error cannot race ahead of the write the test intends to hold open;
+the assertion still requires draining an admitted write and skipping later queued phases.
+
+Candidate private provider transport uses coordinator `test/studio-assistant/provider-bridge.test.ts`
+and runner/native-route/host regressions, plus adapter `test/v2-private-control.test.ts` and
+private destination/payload/transient/retirement tests. The loopback fixtures require native
+filesystem/socket access and cover one exact approved body, private authentication, metadata
+stripping, declared/actual/fragment bounds, failed body cancellation, startup/shutdown and original
+cleanup capability retention. A bridge factory cannot replace absent host-origin proof.
+With `ARKE_TEST_OPENCODE2` explicitly set to the pinned 2.0.26 executable, run coordinator
+`test/studio-assistant/provider-bridge-native.test.ts` and `pinned-native.test.ts` with bounded
+concurrency. They use disposable native profiles and a synthetic Ollama HTTP endpoint, not an
+installed model or personal profile. The new cases exercise actual runner/configuration transport,
+one native request, success versus upstream overflow, preserved unknown GPU ownership and bounded
+full-profile marker/capability scans before/after owned native exit. The original transient suite
+remains a separate regression. Missing binary skips these optional native cases; synthetic tests
+or Windows-only native results do not qualify other platforms, managed socket/process identity,
+live-model memory, full tracing/spend/result persistence or default production activation.
+
+Managed provider origin uses coordinator `test/local-ai/connection-origin.test.ts`,
+`managed-ollama-transport.test.ts` and `managed-provider-bridge.test.ts`, plus `ollama-engine.test.ts`
+and supervisor lifecycle/recovery regressions. Run with native process/socket/filesystem access
+and bounded file concurrency (two). The real Windows reader checks the established socket before
+any HTTP bytes and refuses a healthy impostor on the managed port. HTTP tests confirm the same
+client port reaches the provider, bounded response reconstruction, closed destinations/headers,
+no retry, Stop/timeout/late-proof retention and actual request/response/socket drain. The managed
+service fixture copies one disposable Node executable to its temporary runtime path and exercises
+the real supervisor, version gate, private bridge approval, installation/replacement and explicit
+personal override. It downloads no model, uses no personal profile and allocates no GPU. On
+non-Windows hosts, composition/protocol tests explicitly inject proof; the default native port
+still refuses and Windows native cases skip. These tests are not actual OpenCode-plus-managed-
+provider, binary integrity, live Ollama, physical GPU or cross-restart qualification. The real
+managed qualification below and actual turn-239 matched visual acceptance remain separate. Run coordinator
+typecheck after the final test edit.
+
+
+
+Private writer qualification uses coordinator `test/harness/managed-writer-transport.test.ts`,
+`test/studio-assistant/runner.test.ts`, `test/harness/session-files.test.ts` and adapter
+`test/v2-private-writer.test.ts`, alongside existing private route/payload/transient/retirement
+checks. They cover directory/session/auth/prompt confinement, no ordinary-session adoption,
+captured method receivers, stale owner refusal, native 204/404 handling without raw errors,
+Stop before transmission versus retained completion, and original files after failed creation.
+Provider transport tests additionally check two prepared unwritten sockets, exact one-use port
+identity, fresh later metadata, idle closure and retained cancelled preparation. The native
+one-second discovery deadline is checked against the actual pinned binary's embedded source;
+preparation moves process proof outside that window without caching metadata or retrying.
+With `ARKE_TEST_OPENCODE2` set, `test/studio-assistant/provider-bridge-native.test.ts` includes
+real bundled-writer and bundled-writer plus managed-provider cases. They isolate the native
+profile and use one disposable Node image for the provider, checking one exact request after
+approval, stripped native headers and full bounded marker/capability scans before/after exit.
+Run these native cases with file concurrency one. Qualified writer creation is bounded at
+sixty seconds; scoped metadata and retirement at thirty seconds. Its independent generation
+observation defaults to five minutes (at most fifteen), separate from requester Stop; provider
+HTTP retains its three-minute ceiling. Ordinary/unqualified ports keep their prior bounds.
+These fixtures do not qualify live model/GPU output or release, binary provenance or
+cross-restart cleanup. Real-model/normal-host qualification below is separate, and actual
+master parity remains open. Run affected workspace typechecks after the final test edit.
+
+Advanced recovery settings add contracts `test/recovery-advanced.test.ts`, providers
+`test/artifact-transfer-preferences.test.ts`, coordinator `test/recovery/advanced.test.ts` and
+`test/queue/artifact-preferences.test.ts`, and client `test/recovery-advanced.test.tsx`.
+Run the existing recovery controls, remote host-command, submission/result-storage and receipt
+suites alongside them. They cover default and raised limits, actual aggregate bytes, failed
+settings writes, retained stop/retry holds, same-identity retrieval after a policy change,
+unchanged result filing checks, requester correlation and receipts after lowering a preference.
+The Windows connected-process reader now allows thirty seconds including parent-leash startup;
+the original native identity, cancellation and cleanup checks remain required. Run client tests
+from the client package and typecheck consumers after the final test edit.
+
+Recovery end-to-end/user experience checks: follow [the user-journey acceptance record](recovery-acceptance.md)
+and `scripts/qualify-recovery-ui.mjs`. Use actual UI actions against its authenticated coordinator,
+then inspect the saved control and restart with a fresh session. Do not substitute an injected
+client snapshot or an in-memory command recorder. Coordinator `test/recovery/refresh-health.test.ts`
+checks that external-service health observation does not wait for or evict creative inference;
+client `providers.test.tsx` and `recovery-advanced.test.tsx` retain empty-catalogue readiness,
+clear/retype and unsaved-default regressions. The record distinguishes native model results,
+synthetic faults, browser/device limits and still-open acceptance.
+
+Private bridge Stop/retirement checks additionally exercise a real bound HTTP address: seal
+refuses new work while a competing listener cannot bind that port, retains an already-sent
+completion, and prevents a partially received body or proof-waiting provider request from
+dispatching after Stop. Runner tests retain the original captured refusal/cleanup methods,
+private files and address through unknown inference, failed native retirement and failed
+creation/HTTP cleanup. A successful native retirement is not repeated through an already
+closed writer when bridge cleanup needs another attempt. These protocol/lifetime checks and
+normal pinned-binary completion are finite evidence. The additional pinned Stop scenario holds
+a managed synthetic provider response, cancels the requester, refuses a replacement listener,
+and confirms that actual writer exit alone releases neither the address nor the GPU reservation.
+After original provider process cleanup, the existing host-only confirmation retires captured
+local native state without querying a dead or replacement writer; the test verifies port/lane
+release, exact private-file retirement, one upstream request and private profile scans.
+Adapter retirement regressions separately cover exited versus disposed owners and a healthy
+replacement receiving no request. Runner tests retain pending creation/files until the late
+original owner receives the captured cleanup confirmation. This finite Windows synthetic
+qualification does not establish live-model GPU cleanup, cross-restart or other-platform acceptance.
+`test/supervisor-origin-cleanup.test.ts` verifies native confirmed Stop versus ordinary Stop,
+failed cleanup/retry, forged origin refusal and replacement-generation isolation. Runner checks
+bind immutable original writer/provider cleanup proof, retaining unknown or incomplete outcomes.
+The pinned Stop scenario now uses those actual captured witnesses rather than a manual combined
+confirmation. `test/studio-assistant/owner-shutdown.test.ts` opens an authenticated production
+host and active world with two native stand-ins, verifies retirement reconciliation after both
+native stops, and checks durable world closure before reporting a retirement error. Run these
+with native process/socket access, then coordinator typecheck after the last test edit. Synthetic
+stand-ins do not establish binary provenance, live model/GPU or remaining activation gates.
+`test/harness/executable-content.test.ts` and `private-writer-pin.test.ts` add bounded byte,
+size, metadata/identity, owner, cancellation and path-alias checks, including a healthy bundled
+protocol stand-in refused by the private writer factory. Desktop `runtime-sources.test.mjs`
+checks the private executable pin against the bundled version/archive; `runtime-support.test.mjs`
+retains the packaging regression checks. With `ARKE_TEST_OPENCODE2`, the six real bundled bridge
+scenarios now await executable byte qualification before creating a private writer. No build
+manifest, generic protocol reply or test stand-in can replace the committed expected digest.
+This qualifies the pinned writer content within Arke's existing owned local desktop trust model.
+Managed provider dependencies and remaining activation/native acceptance are separate requirements;
+no protection against compromise of the local user/OS is claimed.
+The `production managed effort selection` case first refuses a choice absent from the native
+catalogue, then verifies one explicitly defaulted request and session retirement. Nondefault
+efforts use synthetic catalogue/provider coverage in runner, service, private-control and
+managed-writer tests; this native fixture does not qualify their model behavior. Client Studio
+and model-chip tests cover offered choices, accurate Default/Off labels and draft ownership.
+`test/local-ai/runtime-content.test.ts` covers fixed runtime/library pins, changed and unexpected
+code, missing files, bounded metadata exceptions, path escapes/aliases, owner/cancellation and
+single verification ownership. `managed-provider-bridge.test.ts` refuses a healthy unqualified
+stand-in before metadata HTTP and retains an unfinished content check across Stop. Native
+synthetic providers explicitly pin their own Node image; they do not claim Ollama provenance.
+An actual isolated pinned 0.40.11 tree also qualified all 75 files (2.23 GB), withheld inference
+before approval and confirmed native cleanup. Cold GPU discovery exceeded the old thirty-second
+startup budget; the managed service now allows sixty seconds without changing protocol validation.
+Canonical-path fixtures avoid DOS-short-path aliases in positive checksum cases while preserving
+explicit alias refusal. The authenticated cleanup fixture observes terminal preview outcomes for
+up to twenty seconds (storage admission itself can observe for sixteen), reporting a failed
+outcome directly. Job/CI silence and timeout guards are unchanged.
+The managed-provider bridge tests also refuse enabled, config-only and malformed cloud status
+before metadata or inference. Managed launch tests assert `OLLAMA_NO_CLOUD=1`. Native acceptance
+with the pinned 0.40.11 runtime confirms environment-backed cloud disablement, cloud-shaped
+request refusal and zero mock upstream requests. A separate cloud-enabled control refuses
+private admission while exactly one synthetic inference reaches a loopback mock, confirming
+the request exercises the proxy path. Both cases confirm native cleanup; no real cloud endpoint
+or model inference is used. Repeat this native check when changing the Ollama release or its
+cloud policy; protocol stand-ins alone do not establish the release's proxy behavior.
+The actual pinned managed writer/provider scenarios now use the shared `managedStudioAssistant`
+factory instead of duplicating its composition in the fixture. They cover exact payload,
+withheld approval, metadata exclusion, normal retirement, retained listener/GPU ownership after
+writer exit, and release after both captured native owners confirm cleanup. Runner tests retain
+original cleanup methods before asynchronous route preparation and never read configuration
+after cancelled qualification. The factory refuses a healthy personal endpoint. These checks
+exercise the same factory now supplied by normal hosts. They do not replace real-model,
+application/persistence/restart/platform and matched visual acceptance.
+
+Real local-model qualification is an explicit maintainer operation, outside CI:
+
+```powershell
+node --import tsx scripts/qualify-studio-local.mjs --root "<new-test-directory>" --ollama-archive "<pinned-x64-zip>" --model-store "<existing-Ollama-model-store>" --model "<installed-model-name>" --opencode "<pinned-bundled-executable>"
+```
+
+Use Windows x64 and a separately owned test directory. The command verifies runtime archive,
+all fixed runtime files and writer bytes before execution; copies and hashes at most sixteen
+declared model blobs (under 12 GiB total); and requires model size plus 4 GiB runtime allowance
+and 5 GiB headroom. It downloads nothing and never points an inference service at the personal
+model store. Existing directories need its exact qualification marker; copied files must match
+their original manifest. Reusing a qualified directory may omit the archive argument. Retained
+test files are left for review, with no automatic model or directory deletion.
+
+The shared factory runs one main-assistant turn, then a specialist turn after both native owners
+restart against the same profile. It checks no startup inference replay, one explicit dispatch
+per turn, bounded complete profile/home/log marker scans, a positive scanner control and native
+cleanup, then rehashes the original model blobs. Output reports phases/counts without prompts,
+answers or credentials. Only a complete successful run qualifies this procedure; a healthy
+endpoint, model load or failed partial run does not. This is finite owned-desktop evidence,
+not a general OS sandbox or secure-erasure claim. The private parser discards Ollama's bounded
+string `reasoning` deltas while reconstructing answer text and usage; malformed/unknown fields,
+tools, truncation, bad finish/usage and existing byte/frame limits still refuse.
+
+After preparing that owned directory, verify the normal application path:
+
+```powershell
+node --import tsx scripts/qualify-studio-host.mjs --root "<owned-test-directory>" --model "<copied-installed-model-name>" --opencode "<pinned-bundled-executable>"
+```
+
+This command verifies runtime/writer content before startup and keeps the same exclusive
+qualification lock. It uses normal Coordinator services, provider readiness/model validation,
+published picker inventory, authenticated requester-only RPC, native launcher controls and
+the shared factory. A real request delegates main → storage specialist → main, with exactly
+three provider completions. The specialist receives no user-message or author-note canary.
+Canonical private history persists across normal host restart; shared state, the other socket
+and operational logs exclude the user marker, and restart issues no inference. Existing setup
+and model-admission guards remain in force. The command does not complete local-AI setup,
+install ComfyUI, execute a repair, prove diagnostic accuracy or replace broader fault/platform/
+visual acceptance. Tests leave their private fixture history for review rather than replaying
+or deleting it. Ollama operational requests use its supported `max_tokens` cap and non-thinking
+default; truncated or unsupported responses still fail without an automatic resend.
+
+## System status (master turn 241; System 240 review)
+
+Run contracts/coordinator/desktop `system-resources.test.ts`, coordinator
+`system-resources-application.test.ts`, and client `system-panel.test.tsx`, `chrome.test.tsx`
+and `settings-diagnostics-refresh.test.tsx`. Run client tests with `packages/client` as cwd.
+The transport fixture needs ordinary native filesystem/loopback access for atomic temporary
+world writes and authenticated WebSockets. The resource unit tests inject missing, reversed,
+future/stale and uncooperative measurements, plus retained cleanup failure. They run no models
+and fill no disk. Existing owned-process lifecycle tests qualify the reused GPU reader's job,
+parent-lifetime and native cleanup boundary. Typecheck affected consumers after final test edits.
+
+The deterministic actual-component review is built by
+`node design-system/system-status-240.native-build.mjs` and served by
+`node design-system/system-status-240.serve.mjs`. Compare native SystemPanel/AppChrome/PageSheet
+against approved System master turn 241 at desktop/tablet/phone/reduced height in light/dark.
+Its `system-status-240.*` URLs remain stable after the Branch Map 240 identifier collision. Verify fixed
+header/footer, independent body scroll, native modal Tab/Escape/focus return, unavailable/stale
+readings, no refresh-time future-clock flicker and the existing Diagnostics handoff. This fixture
+is separate from live-host collection and packaged Electron/physical-device keyboard acceptance;
+see [system status](system-status.md).
 
 Remembered story state (SPEC-063, turn 240) uses contracts `test/story-state.test.ts`, coordinator `test/productions/story-state.test.ts`, `test/productions/interactive.test.ts`, `test/productions/routing-command.test.ts`, and client `test/interactive-player.test.ts`, `test/branch-map-canvas.test.tsx`, `test/season-layout.test.tsx` and `test/visual-novel-beats.test.tsx`. Check distinct states after reconvergence, unavailable choices, inactive text/voice/pictures, ending selection, rewind, corrupted/changed saves, state-specific coverage, stale replacement refusal, native save/reopen and the older-reader fence. Compile the actual exported HTML script, not only the player module. After changing either shared JavaScript module run `node scripts/interactive-player-source.mjs` and commit the generated copy. Native UI checks cover click/keyboard +, map-pick draft retention, Escape/cancel, focus return, backdrop behavior and rounded phone dialogs with fixed footer actions. The private First Contact parity fixture lives with SPEC-063 and must exercise all 104 routes in both native and inlined players without rewriting the original world. It is not a public manuscript fixture.
 

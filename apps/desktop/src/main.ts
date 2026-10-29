@@ -1,5 +1,7 @@
 import { createWindowsCommitProbe } from "./windows-commit.js";
+import { createDesktopGpuProbe } from "./system-resources.js";
 import { StartupRuntimeOwners } from "./startup-runtime-owners.js";
+import { workspaceRoot, prepareWorkspace, rememberWorkspace } from "./workspace-location.js";
 import { pathToFileURL } from "node:url";
 import { webWindowOpenHandler } from "./external-links.js";
 import { storyPublicationFileFilter } from "./story-publication-file.js";
@@ -11,7 +13,7 @@ import { audioMediaOptions, createMediaProcessRunner } from "./media-tools.js";
 import { PublicationHost } from "./publication-host.js";
 import { publicationMedia } from "./publication-media.js";
 import { authenticatedMediaHeaders, desktopTransportOrigins } from "./transport-auth.js";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { createComfyUiFetch } from "./comfyui-transport.js";
 import { ComfyUiDigestCache } from "./comfyui-digest-cache.js";
@@ -21,10 +23,11 @@ import { appendFileSync, existsSync } from "node:fs";
 import { copyFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, safeStorage, shell, Tray } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, safeStorage, shell, Tray } from "electron";
 import electronUpdater from "electron-updater";
 import {
   assembleHarness,
+  managedStudioAssistant,
   describeClaudeAvailability,
   describeCodexAvailability,
   ChildLedger,
@@ -36,6 +39,8 @@ import {
   Coordinator,
   UNDERSONG_RELEASE,
   createStudioHost,
+  SystemResourceService,
+  createNodeSystemResourceProbe,
   localAudioListenerOptions,
   createNodeEffectRasterHost,
   createNodeEffectAudioAnalysisHost,
@@ -85,7 +90,7 @@ import {
   type SidecarHealth,
 } from "@arke-studio/voice";
 import { BackgroundNotificationController } from "./background-notifications.js";
-import { drainDesktop, isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "./startup.js";
+import { drainDesktop, guardDesktopClose, isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "./startup.js";
 import { boundaryFrameOptions, takePosterOptions, takeQcOptions } from "./take-qc.js";
 import { createExportFfmpegRunner } from "./export-ffmpeg.js";
 import { saveMediaHandler, revealMediaHandler } from "./save-media.js";
@@ -146,7 +151,8 @@ const clientIndex = isDev
 const appIcon = join(__dirname, "../assets/arke-studio.ico");
 
 /** The real on-disk app root (SPEC-002 §2.2): %USERPROFILE%\ArkeStudio, env-overridable. */
-const appRoot = defaultAppRoot();
+const workspacePreference = join(app.getPath("userData"), "workspace-location.json");
+const appRoot = workspaceRoot(workspacePreference, defaultAppRoot(), process.env.ARKE_STUDIO_ROOT);
 const desktopLog = join(appRoot, "logs", "desktop.jsonl");
 
 function traceDesktop(kind: string, detail: Record<string, unknown> = {}): void {
@@ -356,6 +362,7 @@ function registerHostIpc(): void {
     return publicationMedia(createMediaProcessRunner({ ffmpeg: ffmpeg ?? "", ffprobe }));
   };
   publicationHost = new PublicationHost({
+    fileSpace: () => coordinator?.publicationFileSpace,
     root: join(appRoot, "publications"), origins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL),
     providers: () => ({ starting: startupProvider, live: coordinator?.worldProvider ?? null }),
     compiler: signal => media().compiler(signal), probe: (path, type, signal) => media().playback(path, type, signal),
@@ -556,6 +563,25 @@ function registerHostIpc(): void {
     if (!window || event.sender !== window.webContents) return;
     void shell.openPath(appRoot);
   });
+  ipcMain.handle("arke:restart-for-setup", async (event) => {
+    if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) return { reason: "Open setup in the main Arke window." };
+    return restartForSetup();
+  });
+  ipcMain.handle("arke:choose-workspace-folder", async (event) => {
+    if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || shuttingDown) return { reason: "Arke is not ready to change folders." };
+    if (process.env.ARKE_STUDIO_ROOT) return { reason: "This installation’s folder is set by ARKE_STUDIO_ROOT. Change that launch setting to use another folder." };
+    const result = await dialog.showOpenDialog(window, { title: "Choose your Arke folder", properties: ["openDirectory", "createDirectory"], defaultPath: appRoot });
+    const path = result.filePaths[0];
+    if (result.canceled || !path || resolve(path) === resolve(appRoot)) return {};
+    const confirmed = await dialog.showMessageBox(window, { type: "question", title: "Use another Arke folder?",
+      message: "Arke will restart using this folder.", detail: `${path}\n\nYour current worlds stay where they are. No files are moved. Account connections and downloads belong to each folder.`, buttons: ["Use this folder", "Cancel"], defaultId: 0, cancelId: 1 });
+    if (confirmed.response !== 0) return {};
+    try {
+      const current = await new AppSettingsFile(join(appRoot, "settings.json")).load();
+      await prepareWorkspace(path, current.onboarding ?? { version: 1, persona: null, step: "choose", writing: "none", harness: "opencode", account: null, modelId: null, media: false, voice: false });
+      return await restartForSetup(() => rememberWorkspace(workspacePreference, path));
+    } catch (error) { return { reason: `Could not use that folder: ${error instanceof Error ? error.message : String(error)}` }; }
+  });
   ipcMain.on("arke:quit", (event) => {
     if (!window || event.sender !== window.webContents) return;
     app.quit();
@@ -680,7 +706,10 @@ async function createWindow(): Promise<void> {
     if (!allowQuit && !shuttingDown && remoteAccess?.status().running && !updateController?.shouldKeepWindowVisible()) {
       event.preventDefault(); window?.hide(); return;
     }
-    if (allowQuit || !updateController?.shouldKeepWindowVisible()) return;
+    if (allowQuit || !updateController?.shouldKeepWindowVisible()) {
+      guardDesktopClose(event, allowQuit, () => app.quit());
+      return;
+    }
     event.preventDefault();
     if (!updateController.isInstallOnCloseArmed() || closeForUpdate) return;
     closeForUpdate = updateController.prepareInstallOnClose().then((ready) => {
@@ -718,6 +747,9 @@ async function initialize(): Promise<{ port: number }> {
   const childLedger = new ChildLedger(join(appRoot, "run", "children.json"));
   const mingProcess = new MingProcess(childLedger);
   const transferMing = startupRuntimeOwners.own(mingProcess);
+  const systemGpuProbe = createDesktopGpuProbe({ ledger: childLedger });
+  // Keep this observation reader owned through normal quit, startup failure and cleanup retry.
+  startupRuntimeOwners.own(systemGpuProbe);
   const swept = await childLedger.reapStale();
   if (swept.reaped.length > 0) {
     const named = swept.reaped.map((r) => `${r.id} (pid ${r.pid})`).join(", ");
@@ -731,7 +763,7 @@ async function initialize(): Promise<{ port: number }> {
   const storedHarness = savedHostSettings.harness;
   const ollamaEngine = new OllamaEngineService({ appRoot, port: await allocateLoopbackPort(), deps: { ledger: childLedger } });
   const transferOllama = startupRuntimeOwners.own(ollamaEngine);
-  await ollamaEngine.applySettings(savedHostSettings.ollama);
+  await ollamaEngine.applySettings(savedHostSettings.ollama, { deferManagedStart: true });
   const chosenHarness = effectiveHarnessEngine(storedHarness?.engine ?? "opencode", process.env["ARKE_HARNESS"]);
 
   const wiring = await assembleHarness({
@@ -1222,12 +1254,14 @@ async function initialize(): Promise<{ port: number }> {
     jobsSeedPath: join(appRoot, "queue", "jobs.jsonl"),
     ledgerSeedPath: join(appRoot, "ledger.jsonl"),
     appRoot,
+    systemResources: new SystemResourceService(createNodeSystemResourceProbe({ gpu: systemGpuProbe, mingRunning: () => mingProcess.running })),
     // The full story is an explicit, integrity-pinned download (SPEC-016 R-6, R-8).
     // Test fixtures are never installer resources.
     sampleWorldDownload: UNDERSONG_RELEASE,
     authoring: { agentForPurpose, roster: ROSTER, skillFor },
     ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
     harnessLaunchEngine: chosenHarness,
+    harnessRecovery: wiring.recovery,
     ...(wiring.unavailableReason ? { harnessUnavailableReason: wiring.unavailableReason } : {}),
     ...(process.env["ARKE_HARNESS"] === chosenHarness ? { harnessEngineOverride: chosenHarness } : {}),
     // Stored LLM keys reach the harness as spawn environment (SPEC-005 D5) — under v2's
@@ -1273,6 +1307,13 @@ async function initialize(): Promise<{ port: number }> {
         ],
       });
       return result.canceled ? null : (result.filePaths[0] ?? null);
+    },
+    chooseWorldFolder: async () => {
+      if (!window) return null;
+      const result = await dialog.showOpenDialog(window, {
+        title: "Import an Arke world folder", buttonLabel: "Copy world into Arke", properties: ["openDirectory"],
+      });
+      return result.canceled ? null : result.filePaths[0] ?? null;
     },
     // Only the harnesses that can be absent — OpenCode is in the installer beside this process.
     chooseCodexExecutable: async () => {
@@ -1383,7 +1424,7 @@ async function initialize(): Promise<{ port: number }> {
     // The ComfyUI runtime entry asks whether an external source was deliberately selected
     // (SPEC-021 D10). A detected install remains an offer and does not suppress managed Download.
     setup: {
-      ...nodeSetupDeps(),
+      ...nodeSetupDeps({ ledger: childLedger }),
       externallyPresent: async (entryId) =>
         entryId === "comfyui-runtime" ? comfyUiEngine.externallySelected() : entryId === "ollama-runtime" ? ollamaEngine.externallySelected() : false,
       ollama: ollamaEngine,
@@ -1413,6 +1454,7 @@ async function initialize(): Promise<{ port: number }> {
       },
     },
     ollama: { service: ollamaEngine, reconfigureHarness: wiring.reconfigureOllama },
+    studioAssistant: managedStudioAssistant(wiring, ollamaEngine),
     ming: mingProcess,
     ...(app.isPackaged ? { mingWorkerPath: join(process.resourcesPath, "ming", "ming-worker.py") } : {}),
     comfyui: {
@@ -1452,6 +1494,11 @@ async function initialize(): Promise<{ port: number }> {
           reason: "the native index binding did not load — search and counts degrade; authoring still works",
         },
     voice: {
+      recovery: {
+        ownership: () => voxaSelection.source === "bundled" ? "managed" : "external",
+        componentDigest: () => createHash("sha256").update(JSON.stringify([expectedArchitecture, voxaSelection.source, voxaLaunch(voxaSelection, voxaSettings)])).digest("hex"),
+        reserve: signal => voxaClient.reserveRuntime(signal),
+      },
       sidecar: voxaSidecar,
       waitUntilReady: waitForKokoroReady,
       sidecarHealth: async () => {
@@ -1570,6 +1617,22 @@ async function shutdownConfirmed(): Promise<void> {
   }
 }
 
+async function restartForSetup(beforeRestart?: () => Promise<void>): Promise<{ reason?: string }> {
+  if (shuttingDown || normalShutdown || closeForUpdate || updateController?.isInstallOnCloseArmed()) return { reason: "Finish the current shutdown or update before restarting setup." };
+  updateController?.beginShutdown();
+  try {
+    normalShutdown = shutdownConfirmed();
+    await normalShutdown;
+    await beforeRestart?.();
+    allowQuit = true;
+    app.relaunch(); app.quit();
+    return {};
+  } catch (error) {
+    normalShutdown = null; updateController?.failShutdown();
+    return { reason: `Arke could not restart safely. Try again after local work stops. ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
 function updateRemoteTray(): void {
   if (!remoteAccess?.status().enabled) { remoteTray?.destroy(); remoteTray = null; return; }
   if (!remoteTray) {
@@ -1603,6 +1666,7 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    powerMonitor.on("resume", () => { void coordinator?.wakeStorage().catch(() => {}); });
     backgroundLogin = isBackgroundLogin(process.platform, process.argv,
       process.platform === "darwin" ? app.getLoginItemSettings() : undefined);
     if (process.platform === "win32") app.setAppUserModelId("studio.arke.app");

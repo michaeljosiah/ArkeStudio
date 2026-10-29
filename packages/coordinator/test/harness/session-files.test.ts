@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { CreateSessionInput, HarnessAdapter, SessionConfigInput } from "@arke-studio/contracts";
-import { createPreparedSession, writeSessionFiles } from "../../src/harness/session-files.js";
+import { createPreparedSession, scopeSessionInput, writeSessionFiles } from "../../src/harness/session-files.js";
 import { tempDir } from "../tmp.js";
 
 function adapterWithFileFailure(): Pick<
@@ -24,6 +24,36 @@ function adapterWithFileFailure(): Pick<
 }
 
 describe("session preparation lifetime", () => {
+  it("preserves the private destination capability's native prototype receiver", async () => {
+    const proof = Object.freeze({ model: "ollama/model", provider: "ollama", local: true, identity: "a".repeat(64) });
+    const native = Object.create({ async privateDestination(signal: AbortSignal) { assert.equal(this, native); signal.throwIfAborted(); return proof; },
+      async privateRetire(signal: AbortSignal) { assert.equal(this, native); signal.throwIfAborted(); return true; } });
+    Object.defineProperty(native, "sessionId", { value: "prototype-route", enumerable: true });
+    const adapter = { createSession: async () => native } as unknown as HarnessAdapter;
+    const session = await createPreparedSession(adapter, await tempDir("arke-session-route-"), {}, { purpose: "ask" });
+    assert.equal(await session.privateDestination!(new AbortController().signal), proof);
+    assert.equal(await session.privateRetire!(new AbortController().signal), true);
+  });
+  it("isolates Studio roles after world/Settings enrichment and pins the same role at creation", async () => {
+    for (const agent of ["studio-assistant", "diagnostic-specialist"]) {
+      const input = { agent, model: "ollama/local", researchWeb: true, inferencePriority: "normal" as const,
+        worldQueryUrl: "http://private-world-token.invalid", memoryDir: "PRIVATE_WORLD_NOTES", authorNotesFile: "PRIVATE_AUTHOR_NOTES",
+        skillBodies: { "private-skill": "PRIVATE_WORLD_PROSE" }, skillFamily: "private-world", skillModelId: "private-world-model",
+        agents: { [agent]: { model: "ollama/role" }, "world-builder": { brief: "PRIVATE_WORLD_OVERRIDE" } } };
+      let prepared: SessionConfigInput | undefined, created: CreateSessionInput | undefined;
+      const adapter = { prepareSession: (value: SessionConfigInput) => { prepared = value; }, sessionFiles: (value: SessionConfigInput) => {
+        assert.equal(value.worldQueryUrl, undefined); assert.equal(value.memoryDir, undefined); return [];
+      }, createSession: async (value: CreateSessionInput) => { created = value; return { sessionId: agent }; } } as unknown as HarnessAdapter;
+      await createPreparedSession(adapter, await tempDir("arke-studio-isolation-"), input, { purpose: "ask" });
+      assert.equal(created!.agent, agent); assert.equal(prepared!.inferencePriority, "background"); assert.equal(prepared!.researchWeb, false);
+      assert.deepEqual(prepared!.agents, { [agent]: { model: "ollama/role" } });
+      assert(!JSON.stringify(prepared).includes("PRIVATE_")); assert(!JSON.stringify(prepared).includes("private-world"));
+      assert.equal(input.worldQueryUrl, "http://private-world-token.invalid", "The ordinary world's source configuration remains untouched");
+    }
+    const ordinary = { agent: "world-builder", memoryDir: "world-notes", researchWeb: true };
+    assert.equal(scopeSessionInput(ordinary), ordinary, "Existing World/Builder sessions keep their normal scope");
+  });
+
   it("returns the prepared model using the session choice before its named agent choice", async () => {
     const adapter = { createSession: async () => ({ sessionId: "prepared" }) } as unknown as HarnessAdapter;
     const dir = await tempDir("arke-session-model-");

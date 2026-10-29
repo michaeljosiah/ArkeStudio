@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { recipeWithAdapters } from "../comfyui/adapters.js";
 import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
-import { COMFYUI_VERSION_FLOOR, JobSamplingSchema, UPSCALE_DIMENSIONS, compareComfyUiVersions, meetsComfyUiVersion } from "@arke-studio/contracts";
+import { ARTIFACT_RESULT_LIMITS, artifactResultReadLimit, artifactTransferLimits, COMFYUI_VERSION_FLOOR, JobSamplingSchema, UPSCALE_DIMENSIONS, compareComfyUiVersions, meetsComfyUiVersion } from "@arke-studio/contracts";
 import {
   callerParamNames,
   comfyUiRecipeById,
@@ -19,7 +19,10 @@ import {
 import { scrubPaths } from "../comfyui/redact.js";
 import { multimediaInputs } from "../comfyui/reference-inputs.js";
 import { jsonRequest } from "./http.js";
+import { readArtifactBody } from "./artifact-body.js";
+import { withArtifactTransfer } from "./artifact-transfer.js";
 import type {
+  ArtifactFetchOptions,
   FetchedArtifact,
   FetchLike,
   PollResult,
@@ -28,7 +31,7 @@ import type {
   SubmitRequest,
   SubmitResult,
 } from "../types.js";
-import { ProviderRequestRejectedError } from "../types.js";
+import { ProviderArtifactLimitError, ProviderRequestRejectedError } from "../types.js";
 
 /** Where the engine is listening right now, or null when none is configured and healthy. */
 export type EngineBaseUrl = (model?: string) => string | null;
@@ -967,7 +970,12 @@ export class ComfyUiClient implements ProviderClient {
    * Only the recipe's declared output node is fetched (§2.6) — never every file the history
    * names, because "whatever else the graph touched" is exactly the surface R-1 closed.
    */
-  async fetchArtifacts(_key: string, remoteId: string, context?: ProviderCallContext): Promise<FetchedArtifact[]> {
+  async fetchArtifacts(_key: string, remoteId: string, context?: ProviderCallContext, options?: ArtifactFetchOptions): Promise<FetchedArtifact[]> {
+    return withArtifactTransfer(options, (signal, limits) => this.fetchResult(remoteId, context, signal, limits));
+  }
+
+  private async fetchResult(remoteId: string, context: ProviderCallContext | undefined, signal: AbortSignal,
+    limits: ReturnType<typeof artifactTransferLimits>): Promise<FetchedArtifact[]> {
     if (this.disposed) throw new Error("comfyui: the provider client is disposed");
     const model = context?.model;
     const recipe = model !== undefined ? comfyUiRecipeById(model) : null;
@@ -976,8 +984,9 @@ export class ComfyUiClient implements ProviderClient {
     }
     const base = this.require(model);
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${base}/history/${remoteId}`, {
-      redirect: "manual",
-    });
+      redirect: "manual", signal,
+    }, ARTIFACT_RESULT_LIMITS.maxRemoteMetadataBytes);
+    signal.throwIfAborted();
     if (isRedirect(status)) {
       throw new Error(
         `comfyui: the engine redirected output history (HTTP ${status}); Arke refused to follow it`,
@@ -1004,24 +1013,32 @@ export class ComfyUiClient implements ProviderClient {
           // Where the node can also list its input's preview, only what it saved under the
           // recipe's own prefix is this run's result (design turn 178).
           if (recipe.outputPrefix !== undefined && !file.filename.split(/[\\/]/).pop()!.startsWith(recipe.outputPrefix)) continue;
+          if (files.length >= limits.maxFiles) throw new ProviderArtifactLimitError();
           files.push({ filename: file.filename, subfolder: file.subfolder ?? "", type: file.type ?? "output" });
         }
       }
     }
     if (files.length === 0) throw new Error("comfyui: the output node produced no files");
     const artifacts: FetchedArtifact[] = [];
+    let received = 0;
     for (const [index, file] of files.entries()) {
+      signal.throwIfAborted();
       const url =
         `${base}/view?filename=${encodeURIComponent(file.filename)}` +
         `&subfolder=${encodeURIComponent(file.subfolder)}&type=${encodeURIComponent(file.type)}`;
-      const res = await this.fetchImpl(url, { redirect: "manual" });
+      const res = await this.fetchImpl(url, { redirect: "manual", signal });
       if (isRedirect(res.status)) {
+        void res.body?.cancel().catch(() => {});
         throw new Error(
           `comfyui: the engine redirected the download for "${file.filename}" (HTTP ${res.status}); Arke refused to follow it`,
         );
       }
-      if (res.status >= 400) throw new Error(`comfyui: fetching "${file.filename}" answered HTTP ${res.status}`);
-      const data = new Uint8Array(await res.arrayBuffer());
+      if (res.status >= 400) {
+        void res.body?.cancel().catch(() => {});
+        throw new Error(`comfyui: fetching "${file.filename}" answered HTTP ${res.status}`);
+      }
+      const data = await readArtifactBody(res, artifactResultReadLimit(received, limits), signal);
+      received += data.byteLength;
       const ext = (file.filename.split(".").pop() ?? "bin").toLowerCase();
       const contentType =
         ext === "png" ? "image/png"

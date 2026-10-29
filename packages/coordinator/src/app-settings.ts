@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { NEW_ONBOARDING, ROSTER, type OnboardingPlan } from "@arke-studio/contracts";
 import {
   AppSettingsSchema,
   newId,
@@ -71,7 +72,7 @@ export class AppSettingsFile {
     try {
       raw = await readFile(this.path, "utf8");
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return AppSettingsSchema.parse({});
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return AppSettingsSchema.parse({ onboarding: NEW_ONBOARDING });
       throw err;
     }
     let value: unknown;
@@ -94,6 +95,21 @@ export class AppSettingsFile {
 
   private async persist(settings: AppSettings): Promise<void> {
     await atomicWriteFile(this.path, JSON.stringify(settings, null, 2) + "\n");
+  }
+
+  async setOnboarding(onboarding: OnboardingPlan, writingModel?: string): Promise<AppSettings> {
+    return this.mutate(current => {
+      // Use the existing agent settings. Keep custom choices and private operational agents.
+      const agents = { ...current.agents };
+      if (writingModel) for (const member of ROSTER) {
+        if (!member.operationalOnly && !["stage-designer", "chapter-visual-reviewer"].includes(member.name) && !agents[member.name]?.model) {
+          agents[member.name] = { ...agents[member.name], model: writingModel };
+        }
+      }
+      const settings: AppSettings = { ...current, onboarding, agents,
+        harness: onboarding.writing === "none" ? current.harness : { ...current.harness, engine: onboarding.harness } };
+      return { settings, value: settings };
+    });
   }
 
   private async mutate<T>(change: (current: AppSettings) => SettingsMutation<T>): Promise<T> {

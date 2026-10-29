@@ -1,4 +1,5 @@
 export const COORDINATOR = "@arke-studio/coordinator";
+export const COORDINATOR_SHARDS = 8;
 
 /**
  * Workspaces whose suite runs in a workflow of its own rather than in CI's other-workspaces job,

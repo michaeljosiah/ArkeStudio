@@ -7,8 +7,9 @@ import { parseHTML } from "linkedom";
 import { StartupScreen } from "../src/screens/launch.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+import type { LocalAiSetupReadiness } from "@arke-studio/contracts";
 
-const localAi = { ready: true, engines: {
+const localAi: LocalAiSetupReadiness = { ready: true, engines: {
   comfyui: { installed: true, healthy: true, detail: null },
   ollama: { installed: true, healthy: true, detail: null },
 } };
@@ -78,38 +79,72 @@ it("skips the setup panel when its running flag has no fetching components", asy
 });
 
 for (const engine of ["comfyui", "ollama"] as const) {
-  it("holds local setup with installed files until " + engine + " becomes healthy", async () => {
+  it("enters manual authoring when " + engine + " is unhealthy without claiming AI readiness", async () => {
     const state = structuredClone(FIXTURE_STATE);
     const checks = structuredClone(localAi);
     checks.ready = false;
-    checks.engines[engine] = { installed: true, healthy: false, detail: null };
+    checks.engines[engine] = { installed: true, healthy: false, detail: "Not answering." };
     state.app.setup = { localAi: checks, running: false, diskFreeMb: 100000, diskCheckedAt: null, components: [] };
     __setStateForTest(state);
     const { element, unmount } = await mount();
     try {
       await act(async () => { element.querySelector<HTMLButtonElement>(".fy-launch__action")!.click(); await flush(); });
-      assert.equal(where, "/starting");
-      assert.ok(element.textContent?.includes("Setting up your studio"));
-      assert.ok(!element.textContent?.includes("100%"));
-      assert.equal(element.querySelector<HTMLButtonElement>(".fy-launch__once button")!.disabled, true);
-      assert.ok(element.textContent?.includes("Runtime settings"));
-      await act(async () => {
-        state.app.setup!.localAi = localAi;
-        __setStateForTest(state); await flush();
-      });
       assert.equal(where, "/worlds");
+      assert.equal(state.app.setup.localAi!.ready, false);
+      assert.ok(!element.textContent?.includes("Setting up your studio"));
     } finally { await unmount(); }
   });
 }
 
-it("fails closed while runtime checks are missing, even when no download is running", async () => {
+it("does not require local runtime checks before manual authoring", async () => {
   const state = structuredClone(FIXTURE_STATE);
   state.app.setup = { running: false, diskFreeMb: 100000, diskCheckedAt: null, components: [] };
   __setStateForTest(state);
   const { element, unmount } = await mount();
   try {
     await act(async () => { element.querySelector<HTMLButtonElement>(".fy-launch__action")!.click(); await flush(); });
+    assert.equal(where, "/worlds");
+  } finally { await unmount(); }
+});
+
+it("keeps entry disabled until the core connects, even with a selected download in flight", async () => {
+  const state = structuredClone(FIXTURE_STATE);
+  state.app.setup = { running: true, diskFreeMb: 100000, diskCheckedAt: null, components: [{
+    id: "comfyui-runtime", displayName: "ComfyUI", state: "downloading", purpose: "Local media", sizeMb: 100,
+    installLocation: "runtime", bytesDone: 20, bytesTotal: 100, bytesPerSecond: null, pauseSupported: true,
+  }] };
+  __setStateForTest(state, { connection: "connecting" });
+  const { element, unmount } = await mount();
+  try {
+    await act(async () => { element.querySelector<HTMLButtonElement>(".fy-launch__action")!.click(); await flush(); });
     assert.equal(where, "/starting");
     assert.equal(element.querySelector<HTMLButtonElement>(".fy-launch__once button")!.disabled, true);
+    await act(async () => { __setStateForTest(state); await flush(); });
+    assert.equal(element.querySelector<HTMLButtonElement>(".fy-launch__once button")!.disabled, false);
+    await act(async () => { element.querySelector<HTMLButtonElement>(".fy-launch__once button")!.click(); await flush(); });
+    assert.equal(where, "/worlds");
+    assert.equal(state.app.setup.components[0]!.state, "downloading", "entering does not cancel or complete a transfer");
+  } finally { await unmount(); }
+});
+
+it("reports the active transfer without counting unselected catalogue sizes as downloaded or completed setup", async () => {
+  const MiB = 1024 ** 2, state = structuredClone(FIXTURE_STATE);
+  state.app.setup = { localAi: { ...localAi, ready: false }, running: false, diskFreeMb: 100000, diskCheckedAt: null, components: [{
+    id: "comfyui-runtime", displayName: "ComfyUI", state: "paused", purpose: "Local AI", sizeMb: 100,
+    installLocation: "runtime", bytesDone: 50 * MiB, bytesTotal: 100 * MiB, bytesPerSecond: null, pauseSupported: true,
+  }] };
+  __setStateForTest(state); const { element, unmount } = await mount();
+  try {
+    await act(async () => { element.querySelector<HTMLButtonElement>(".fy-launch__action")!.click(); await flush(); });
+    const progress = element.querySelector(".fy-launch__pct")!.textContent, transfer = element.querySelector(".fy-launch__meta")!.textContent;
+    assert.match(transfer!, /50 MB of 100 MB/);
+    for (const status of ["available", "skipped", "blocked", "failed", "present", "ready"] as const) {
+      state.app.setup!.components.push({ id: `unselected-${status}`, displayName: "Unrelated model", state: status, purpose: "Optional model", sizeMb: 200000,
+        installLocation: "models", bytesDone: status === "present" ? 200000 * MiB : 0, bytesTotal: 200000 * MiB, bytesPerSecond: null, pauseSupported: false });
+    }
+    await act(async () => { __setStateForTest(state); await flush(); });
+    assert.equal(element.querySelector(".fy-launch__meta")!.textContent, transfer);
+    assert.equal(element.querySelector(".fy-launch__pct")!.textContent, progress);
+    assert.equal(element.querySelector<HTMLButtonElement>(".fy-launch__once button")!.disabled, false);
   } finally { await unmount(); }
 });

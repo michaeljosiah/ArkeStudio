@@ -126,6 +126,8 @@ describe("Settings · Diagnostics (R-36, R-37, turn 111)", () => {
     // The cause and the count.
     assert.match(text, /ComfyUI engine · failed/);
     assert.match(text, /EXPLAINS 2/);
+    assert.match(html, /<details class="fy-diag__explains"><summary/);
+    assert(!html.includes('<details class="fy-diag__explains" open'));
     assert.match(text, /Local · Draft Image · disabled/);
     // Not a peer: consequence rows carry their own testid, and none renders as a finding row.
     const peers = html.match(/data-testid="diag-finding" data-kind="comfyui-recipe-disabled"/g) ?? [];

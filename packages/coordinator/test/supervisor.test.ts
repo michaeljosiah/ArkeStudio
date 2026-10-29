@@ -18,6 +18,23 @@ const SHIM = join(here, "fixtures", "shim.cmd");
 const SHIM_DETACH = join(here, "fixtures", "shim-detach.cmd");
 const isWin = process.platform === "win32";
 
+it("confirms the original child exit when Windows tree kill returns without terminating it", { skip: !isWin, timeout: 30000 }, async () => {
+  let attempted = 0;
+  const supervisor = new ChildSupervisor({ id: "tree-kill-noop", command: process.execPath, args: [CHILD],
+    readyTimeoutMs: 10000, probeIntervalMs: 1000, maxRestarts: 0, backoffMs: 1 }, {
+    kill: async () => { attempted++; }, listDescendants: async () => [],
+  });
+  try {
+    await supervisor.start(); assert.equal(supervisor.status, "healthy"); assert(supervisor.pid);
+    await supervisor.stopAndConfirm();
+    assert.equal(attempted, 1); assert.equal(supervisor.pid, null);
+  } finally {
+    // If the assertion fails on the old implementation, terminate only this captured child.
+    const pid = supervisor.pid; if (pid) await killTree(pid);
+    await supervisor.stopAndConfirm();
+  }
+});
+
 function collect(sup: ChildSupervisor): SupervisorStatusEvent[] {
   const events: SupervisorStatusEvent[] = [];
   sup.on("status", (e: SupervisorStatusEvent) => events.push(e));
@@ -87,7 +104,10 @@ describe("ChildSupervisor", () => {
     let refuse = true;
     const sup = new ChildSupervisor({ id: "failed-start", command: process.execPath, args: [CHILD],
       env: { MODE: "ignore-stop" }, readyTimeoutMs: 10_000, validateHealth: async () => ({ ok: false, reason: "incompatible test runtime" }),
-    }, { kill: async pid => { if (!refuse) await killTree(pid); } });
+    });
+    // Refuse the complete native termination owner, including its direct-handle fallback.
+    const owner = sup as unknown as { forceStop(child: unknown): Promise<void> }, forceStop = owner.forceStop.bind(sup);
+    owner.forceStop = async child => { if (!refuse) await forceStop(child); };
     try {
       await sup.start();
       assert.equal(sup.status, "failed");
@@ -418,6 +438,7 @@ describe("ChildSupervisor", () => {
       await waitForStatus(sup, "healthy", HEALTHY_WAIT_MS);
       const wrapperPid = sup.pid;
       assert.ok(wrapperPid !== null);
+      assert.equal(sup.captureProcessOrigin(), null, "a shell wrapper cannot attest the worker's connected socket");
       const res = await fetch(`http://127.0.0.1:${sup.port}/health`);
       grandchild = (JSON.parse(await res.text()) as { pid: number }).pid;
       assert.notEqual(grandchild, wrapperPid, "the worker must be a grandchild, not the wrapper");

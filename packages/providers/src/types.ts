@@ -1,3 +1,4 @@
+import { ARTIFACT_RETRIEVAL_HELD_MESSAGE } from "@arke-studio/contracts";
 import type {
   PreparedAudioInput,
   SpeechUsage,
@@ -154,6 +155,18 @@ export interface FetchedArtifact {
   contentType: string;
   data: Uint8Array;
 }
+
+/** The remote operation already exists. This refuses local retrieval, never a new submit. */
+export class ProviderArtifactLimitError extends Error {
+  readonly artifactRetrievalHeld = true;
+  constructor() {
+    super(ARTIFACT_RETRIEVAL_HELD_MESSAGE);
+    this.name = "ProviderArtifactLimitError";
+  }
+}
+
+/** Ephemeral host controls, separate from serializable transport/diagnostic context. */
+export interface ArtifactFetchOptions { signal?: AbortSignal; transferSettings?: import("@arke-studio/contracts").ArtifactTransferSettings }
 
 /** A credential failure is a provider fault, never a work failure (R-4). */
 export class ProviderAuthError extends Error {
@@ -331,6 +344,8 @@ export interface ProviderTransportScope extends ProviderCallContext {
   provider: ProviderId;
   operation: ProviderOperation;
   capability?: Capability;
+  /** Ephemeral host policy for result retrieval; never part of recorded call context. */
+  artifactTransferSettings?: import("@arke-studio/contracts").ArtifactTransferSettings;
 }
 
 /** Host-owned operation policy. Provider clients continue to receive an ordinary FetchLike. */
@@ -436,7 +451,7 @@ export interface ProviderClient {
 
   submit(key: string, request: SubmitRequest, context?: ProviderCallContext): Promise<SubmitResult>;
   poll(key: string, remoteId: string, context?: ProviderCallContext): Promise<PollResult>;
-  fetchArtifacts(key: string, remoteId: string, context?: ProviderCallContext): Promise<FetchedArtifact[]>;
+  fetchArtifacts(key: string, remoteId: string, context?: ProviderCallContext, options?: ArtifactFetchOptions): Promise<FetchedArtifact[]>;
   cancel(key: string, remoteId: string, context?: ProviderCallContext): Promise<void>;
   /** Drop source-bound optional transports while keeping the client reusable. */
   resetTransport?(): void;
