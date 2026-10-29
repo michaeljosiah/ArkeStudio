@@ -999,6 +999,16 @@ The generic commit boundary raises the world minimum reader to 113 when any rout
 
 Focused coverage: contracts `test/story-state.test.ts`; client `test/branch-map-canvas.test.tsx`, `test/interactive-player.test.ts`, `test/season-layout.test.tsx`; coordinator `test/productions/story-state.test.ts`, `test/productions/interactive.test.ts` and `test/world/schema-version.test.ts`.
 
+A story plays itself (SPEC-063 R-11a, turn 246). `story-state.js` `storyLoneChoice` is the one
+definition of a lone way — exactly one open choice and no closed choice shown with its reason — and
+`storyLinks` names the choices lone in every reachable state (`always`, drawn as links) or in some
+(`sometimes`, which keep their pill). The shared player asks `storyLoneChoice` at a scene's end and
+plays straight through a lone way as a step of the route, with its evidence; a beat moves on by
+itself (its voice, its reading time or its hold, each a CSS animation), and a click shows 156a's film
+bar rather than moving on. Client `lib/branch-map.ts` `routingLinks` and `previewUnwalked` serve the
+map's link drawing and inspector and the preview strip's count of choices, not links; Arke Player's
+Dart port implements the same definition (SPEC-058 R-87).
+
 Turn 240's visual alignment adds the Story facts Inspector and individual fact dialog, compact
 is/is-not condition rows, an unsaved draft path and atomic Review/Keep in the choice and dialogue
 Inspectors. Optional `choice.unavailable` carries an authored disabled label/reason; omitted

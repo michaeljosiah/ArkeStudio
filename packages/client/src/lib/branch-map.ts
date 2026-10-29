@@ -1,4 +1,4 @@
-import { routingFindings, type Routing, type RoutingFinding, type RoutingLayout } from "@arke-studio/contracts";
+import { routingFindings, storyLinks, type Routing, type RoutingFinding, type RoutingLayout } from "@arke-studio/contracts";
 
 /**
  * The branch map's geometry and words (design turn 157), kept out of the screen so the picture
@@ -182,6 +182,29 @@ function mapGeometryAt(routing: Routing, scenes: ReadonlyArray<{ id: string }>, 
 /** Choices nobody has walked in preview at their current ends, read off the served findings. */
 export function unwalkedChoices(findings: readonly RoutingFinding[]): Set<string> {
   return new Set(findings.filter((finding) => finding.kind === "untraversed-edge").flatMap((finding) => finding.choiceIds));
+}
+
+/**
+ * Which choices are links (turn 246 rule 11, SPEC-063 R-11a): a choice lone in every reachable
+ * state plays straight through and is drawn as a plain line, its label the author's note
+ * ("always"); one lone on some routes only keeps its pill ("sometimes"). The shared rule decides,
+ * as the player does, so the map cannot draw a link the preview stops at. Rules that do not read
+ * draw no links; their finding says why.
+ */
+export function routingLinks(routing: Routing): Map<string, "always" | "sometimes"> {
+  try {
+    return storyLinks(routing);
+  } catch {
+    return new Map();
+  }
+}
+
+/**
+ * What the preview's strip counts as not walked (246e): choices, not links. A link is walked by
+ * playing through it, never by a press, so it is never one a listener has still to try.
+ */
+export function previewUnwalked(unwalked: ReadonlySet<string>, links: ReadonlyMap<string, "always" | "sometimes">): string[] {
+  return [...unwalked].filter((id) => links.get(id) !== "always").sort();
 }
 
 /** The scale that fits the whole map inside the viewport, never above actual size. */

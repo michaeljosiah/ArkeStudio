@@ -1,4 +1,4 @@
-import { storyReplay, storyPredicate, storyIdentity, storyEnding, storyVisibleBeats, validateStoryProgram } from "./story-state.js";
+import { storyReplay, storyPredicate, storyIdentity, storyEnding, storyVisibleBeats, storyLoneChoice, validateStoryProgram } from "./story-state.js";
 /*
  * The interactive video player (design turn 156): one player for the preview in the app and the
  * exported package. The app imports this module and mounts it over the window; the exporter
@@ -12,9 +12,11 @@ import { storyReplay, storyPredicate, storyIdentity, storyEnding, storyVisibleBe
  * playback state that is the viewer's place and nothing more.
  *
  * A scene is clips (an interactive movie) or beats (a visual novel, turn 174): a picture and a
- * line each, read at the viewer's pace. The same rule holds for beats — what moves a beat on by
- * itself is a voice ending or a CSS animation ending, never a timer — and a beat scene's place is
- * the beat's index, kept in the same four fields.
+ * line each. A story plays itself (turn 246, SPEC-063 R-11a): a beat moves on once heard — after
+ * its voice, its reading time or its hold — and no tap moves it on; a tap shows the controls, as a
+ * film's do. It stops only for a choice of two or more, and a lone way on plays straight through,
+ * still a step of the route. What moves a beat on is a voice ending or a CSS animation ending,
+ * never a timer, and a beat scene's place is the beat's index, kept in the same four fields.
  */
 
 /**
@@ -110,27 +112,31 @@ export function mountInteractivePlayer(root, options) {
   let routeOpen = false;
   let clipIndex = 0;
   const durations = [];
-  // A beat scene's reading: which beat, whether its line has finished typing on, whether its
-  // voice has finished, and whether the viewer asked the beats to move on by themselves (Auto).
-  // None of it is kept: the place is the beat's index in `state.positionSec`.
+  // A beat scene's reading: which beat, whether its line has finished typing on, and whether its
+  // voice has finished. None of it is kept: the place is the beat's index in `state.positionSec`.
   let beatIndex = 0;
   let typed = false;
   let voiceDone = true;
-  // A voice that would not play is not a voice heard: the beat reads as text and waits for the
-  // reader, rather than moving on after a breath as if the line had been spoken.
+  // A voice that would not play is not a voice heard: the beat reads as text for its reading
+  // time, rather than moving on after a breath as if the line had been spoken. That includes a
+  // voice the browser will not start before a gesture: it never waits for a tap (turn 246).
   let voiceFailed = false;
+  // Heard to its end on this beat: Narration turned on again does not read it a second time.
+  let voiceHeard = false;
   // Which play the failure belongs to: a start refused after the reader has moved on belongs to a
   // beat already gone, and must not mark the next beat's voice as lost.
   let voiceToken = 0;
-  // A voice the browser would not start without a gesture — the preview mounts after its voices
-  // are gathered, when the press that opened it may no longer count — waits for the reader's next
-  // tap rather than being read as text for good (codex round 12).
-  let voiceBlocked = false;
-  let voiceRetried = false;
-  // Whether the running hold is Auto's, which turning Auto off takes back; an authored hold, or the
-  // breath after a voice on an after-the-voice beat, stays.
-  let holdByAuto = false;
-  let auto = false;
+  // Turn 246: a visual novel is paused or playing, as a film is; paused, its voice, its hold, its
+  // tick and its picture's movement all wait where they are.
+  let paused = false;
+  // Narration is on where the story carries voices, and the listener may turn it off (rule 5).
+  const voiced = Object.keys(scenes).some((id) => (scenes[id].beats || []).some((b) => b.audio));
+  let narration = true;
+  // The controls were shown by a press rather than by the pointer passing: the next press on the
+  // picture hides them. A mouse moving to click had already shown them, and that click hid them.
+  let pinned = false;
+  /** The ticks as last drawn: redrawn, the current beat's filling tick would start over. */
+  let ticksDrawn = "";
   let logOpen = false;
   /** The markup the log last drew — compared as written, since a browser reserializes innerHTML. */
   let logDrawn = "";
@@ -146,6 +152,28 @@ export function mountInteractivePlayer(root, options) {
   const choiceById = (id) => choices.find((c) => c.id === id);
   /** The scenes walked, origin first: the route's vocabulary for evidence (brief §4). */
   const walked = () => [origin].concat(state.route.map((id) => (choiceById(id) || { to: origin }).to));
+  /**
+   * The one way on where the listener has no decision (turn 246 rule 4), else nothing. A story asks
+   * the shared rule, with its closed choices shown by their reasons; a routing without story rules
+   * has no closed choices, so its lone way is the scene's only one.
+   */
+  const loneWay = (id, before) => {
+    if (story) return storyLoneChoice(choices, id, before || facts);
+    const ways = outOf(id);
+    return ways.length === 1 ? ways[0] : undefined;
+  };
+  /** Which steps of the route were links played through rather than choices made. */
+  function linkSteps() {
+    return state.route.map((id, i) => {
+      const c = choiceById(id);
+      if (!c) return false;
+      try {
+        return loneWay(c.from, story ? storyReplay(story, state.route.slice(0, i)).state : undefined)?.id === c.id;
+      } catch {
+        return false;
+      }
+    });
+  }
 
   const icon = (d, size) =>
     '<svg width="' + (size || 18) + '" height="' + (size || 18) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + "</svg>";
@@ -160,9 +188,12 @@ export function mountInteractivePlayer(root, options) {
     x: '<path d="M18 6 6 18"></path><path d="m6 6 12 12"></path>',
     undo: '<path d="M9 14 4 9l5-5"></path><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"></path>',
     map: '<rect width="7" height="7" x="3" y="3" rx="1"></rect><rect width="7" height="7" x="14" y="14" rx="1"></rect><path d="M10 6.5h4a3 3 0 0 1 3 3V14"></path>',
-    auto: '<path d="m6 17 5-5-5-5"></path><path d="m13 17 5-5-5-5"></path>',
     log: '<path d="M3 12h.01"></path><path d="M3 18h.01"></path><path d="M3 6h.01"></path><path d="M8 12h13"></path><path d="M8 18h13"></path><path d="M8 6h13"></path>',
-    next: '<path d="m9 18 6-6-6-6"></path>',
+    // Turn 246's bar for a visual novel: Back is the previous beat, and Narration a voice on or off.
+    prev: '<path d="M18.5 19.2 9.6 12.6a.75.75 0 0 1 0-1.2l8.9-6.6a.75.75 0 0 1 1.2.6v13.2a.75.75 0 0 1-1.2.6z"></path><path d="M5 5v14"></path>',
+    narration: '<path d="M8.8 20v-4.1l1.9.2a2.3 2.3 0 0 0 2.164-2.1V8.3A5.37 5.37 0 0 0 2 8.25c0 2.8.656 3.054 1 4.55a5.77 5.77 0 0 1 .029 2.758L2 20"></path><path d="M19.8 17.8a7.5 7.5 0 0 0 .003-10.603"></path><path d="M17 15a3.5 3.5 0 0 0-.025-4.975"></path>',
+    narrationOff: '<path d="M8.8 20v-4.1l1.9.2a2.3 2.3 0 0 0 2.164-2.1V8.3A5.37 5.37 0 0 0 2 8.25c0 2.8.656 3.054 1 4.55a5.77 5.77 0 0 1 .029 2.758L2 20"></path><path d="m15.5 9 6 6"></path><path d="m21.5 9-6 6"></path>',
+    dot: '<circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"></circle>',
   };
 
   // The picture is the page (turn 156): always dark, whatever the app's theme; the media tokens
@@ -174,6 +205,7 @@ export function mountInteractivePlayer(root, options) {
 .aip [hidden]{display:none!important}
 .aip-strip{flex:none;height:56px;display:flex;align-items:center;gap:12px;padding:0 16px 0 20px;border-bottom:1px solid color-mix(in srgb,var(--aip-fg) 12%,transparent)}
 .aip-strip b{font-weight:500;font-size:15px}
+.aip-unwalked{display:inline-flex;align-items:center;gap:6px;color:color-mix(in srgb,var(--aip-fg) 82%,transparent)}
 .aip-muted{color:color-mix(in srgb,var(--aip-fg) 62%,transparent)}
 .aip-spacer{flex:1}
 .aip-stage{position:relative;flex:1;min-height:0;overflow:hidden}
@@ -216,11 +248,10 @@ export function mountInteractivePlayer(root, options) {
 .aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-choices{position:relative;left:auto;right:auto;bottom:auto;grid-column:2;grid-row:1;padding:0;max-height:100%;min-height:0}
 .aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-box{position:relative;left:auto;right:auto;bottom:auto;transform:none;flex-shrink:0;width:100%;max-width:410px;min-height:0;padding:0;background:none;border:0;border-radius:0;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
 .aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-who{position:static;display:block;height:auto;padding:0;margin-bottom:12px;background:none;color:color-mix(in srgb,var(--aip-fg) 72%,transparent);border-radius:0;font-size:11px}
-.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-more{display:none}
 .aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"] .aip-under{position:relative;left:auto;right:auto;bottom:auto;justify-content:flex-start;flex-shrink:0}
 .aip-choice>.k{width:26px;height:26px;flex:none;border-radius:7px;border:1px solid currentColor;opacity:.6;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:500}
 .aip-choice>.l{flex:1;min-width:0;white-space:normal;overflow-wrap:anywhere}
-.aip-chip{position:absolute;top:-11px;right:16px;height:22px;padding:0 9px;border-radius:99px;display:inline-flex;align-items:center;font-size:11px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;background:var(--aip-bg);color:var(--aip-fg);border:1px solid color-mix(in srgb,var(--aip-fg) 30%,transparent)}
+.aip-chip{position:absolute;top:-11px;right:16px;height:22px;padding:0 9px;border-radius:99px;display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;background:var(--aip-bg);color:var(--aip-fg);border:1px solid color-mix(in srgb,var(--aip-fg) 30%,transparent)}
 @keyframes aip-rise{from{opacity:0;transform:translateY(14px)}}
 .aip-under{position:absolute;left:0;right:0;bottom:36px;display:flex;justify-content:center}
 .aip-ghost{height:36px;padding:0 14px!important;border-radius:999px;display:inline-flex!important;align-items:center;gap:7px;font-weight:500;color:color-mix(in srgb,var(--aip-fg) 80%,transparent)!important}
@@ -264,12 +295,26 @@ export function mountInteractivePlayer(root, options) {
 .aip-pic>img.m-drift{animation:aip-drift 16s ease-in-out both}
 @keyframes aip-push{from{transform:scale(1)}to{transform:scale(1.08)}}
 @keyframes aip-drift{from{transform:scale(1.06) translateX(-2%)}to{transform:scale(1.06) translateX(2%)}}
-.aip-beatbar{display:none;align-items:center;gap:2px}
+/* A visual novel's controls (turn 246) are 156a's film bar at the foot: Play/Pause, Back and
+   Narration, the beat ticks at its centre, then Log, Route and Full screen. They rest as a film's
+   do while the story plays, at a choice too; paused, they stay. While they show, the line box sits
+   above them as a film's subtitles do. */
+.aip-beatbar{display:none;position:absolute;left:24px;right:24px;bottom:16px;height:44px;align-items:center;gap:4px}
 .aip[data-kind="beats"] .aip-beatbar{display:flex}
-.aip[data-kind="beats"] .aip-bar{display:none}
-.aip-pill{height:40px;padding:0 14px 0 12px!important;border-radius:999px;display:inline-flex!important;align-items:center;gap:7px;font-weight:500}
-.aip-pill:hover,.aip-pill:focus-visible,.aip-pill[aria-pressed="true"]{background:color-mix(in srgb,var(--aip-fg) 14%,transparent)!important}
-.aip-box{position:absolute;left:50%;transform:translateX(-50%);bottom:40px;width:880px;max-width:calc(100% - 48px);min-height:128px;padding:26px 34px;border-radius:18px;background:color-mix(in srgb,var(--aip-bg) 52%,transparent);backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);border:1px solid color-mix(in srgb,var(--aip-fg) 20%,transparent);box-shadow:0 20px 50px color-mix(in srgb,var(--aip-bg) 40%,transparent)}
+.aip[data-kind="beats"] .aip-bar,.aip[data-mode="ending"] .aip-beatbar,.aip[data-mode="poster"] .aip-beatbar{display:none}
+.aip.aip-wake[data-mode="choice"] .aip-beatbar{animation:aip-rest .35s ease 2.5s forwards}
+.aip[data-mode="choice"]:not(.aip-wake) .aip-beatbar{opacity:0}
+.aip[data-kind="beats"] .aip-scrim-bot{height:340px;opacity:1!important;animation:none!important}
+.aip-pill{height:36px;padding:0 14px 0 11px!important;border-radius:999px;display:inline-flex!important;align-items:center;gap:7px;font-weight:500;white-space:nowrap}
+.aip-pill:hover,.aip-pill:focus-visible,.aip-pill[aria-pressed="true"]{background:color-mix(in srgb,var(--aip-fg) 16%,transparent)!important}
+.aip-pill[data-act="narration"][aria-pressed="false"]{color:color-mix(in srgb,var(--aip-fg) 58%,transparent)!important}
+.aip-ib:disabled{opacity:.4;cursor:default}
+.aip-big{position:absolute;left:50%;top:44%;width:76px;height:76px;margin:-38px 0 0 -38px;border-radius:999px;display:flex!important;align-items:center;justify-content:center;background:color-mix(in srgb,var(--aip-bg) 42%,transparent)!important;backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%);border:1px solid color-mix(in srgb,var(--aip-fg) 20%,transparent)!important}
+.aip[data-kind="beats"][data-mode="playing"][data-paused] .aip-dim{opacity:1;background:color-mix(in srgb,var(--aip-bg) 48%,transparent)}
+/* Paused, everything that moves the beat on or moves at all waits where it is — by CSS, as it runs. */
+.aip[data-kind="beats"][data-paused] .aip-hold,.aip[data-kind="beats"][data-paused] .aip-ticks b,.aip[data-kind="beats"][data-paused] .aip-pic>img,.aip[data-kind="beats"][data-paused] .aip-line>span{animation-play-state:paused!important}
+.aip-box{position:absolute;left:50%;transform:translateX(-50%);bottom:40px;width:880px;max-width:calc(100% - 48px);min-height:128px;padding:26px 34px;border-radius:18px;background:color-mix(in srgb,var(--aip-bg) 52%,transparent);backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);border:1px solid color-mix(in srgb,var(--aip-fg) 20%,transparent);box-shadow:0 20px 50px color-mix(in srgb,var(--aip-bg) 40%,transparent);transition:bottom .35s ease}
+.aip[data-kind="beats"].aip-shown .aip-box,.aip[data-kind="beats"][data-paused] .aip-box{bottom:84px}
 .aip[data-mode="ending"] .aip-box,.aip[data-mode="poster"] .aip-box{display:none}
 .aip-who{position:absolute;left:28px;top:-15px;height:30px;padding:0 14px;border-radius:999px;display:inline-flex;align-items:center;font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;background:var(--aip-fg);color:var(--aip-bg)}
 .aip-line{font-size:24px;line-height:1.45;letter-spacing:-.01em;text-wrap:pretty}
@@ -277,14 +322,22 @@ export function mountInteractivePlayer(root, options) {
 .aip-line>span{animation:aip-word .2s ease both}
 .aip-box[data-typed] .aip-line>span{animation:none}
 @keyframes aip-word{from{opacity:0}}
-.aip-more{position:absolute;right:22px;bottom:14px;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:color-mix(in srgb,var(--aip-fg) 70%,transparent)}
-.aip-ticks{position:absolute;left:50%;transform:translateX(-50%);bottom:14px;display:flex;gap:5px}
-.aip-ticks>i{width:18px;height:3px;border-radius:99px;background:color-mix(in srgb,var(--aip-fg) 24%,transparent)}
+/* The beat ticks (174d): the current beat's fills as it plays, over its voice or its reading time
+   (turn 246 call 9). While the bar shows they sit at its centre. */
+.aip-ticks{position:absolute;left:50%;transform:translateX(-50%);bottom:16px;display:flex;gap:5px;pointer-events:none;transition:bottom .35s ease}
+.aip-ticks>i{position:relative;overflow:hidden;width:18px;height:3px;border-radius:99px;background:color-mix(in srgb,var(--aip-fg) 24%,transparent)}
 .aip-ticks>i.done{background:var(--aip-fg)}
+.aip-ticks>i>b{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:99px;background:var(--aip-fg)}
+@keyframes aip-fill{from{width:0}to{width:100%}}
+.aip[data-kind="beats"].aip-shown .aip-ticks,.aip[data-kind="beats"][data-paused] .aip-ticks{bottom:37px}
 .aip[data-mode="ending"] .aip-ticks,.aip[data-mode="poster"] .aip-ticks{display:none}
 .aip-hold{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 @keyframes aip-hold{from{opacity:0}to{opacity:.01}}
-.aip[data-kind="beats"] .aip-choices{bottom:250px;max-height:calc(100% - 330px)}
+/* Two ways on over the last line (246e): the cards' foot 200 from the stage's, 392 wide. */
+.aip[data-kind="beats"] .aip-choices{bottom:192px;max-height:calc(100% - 272px);transition:bottom .35s ease}
+.aip[data-kind="beats"].aip-shown .aip-choices{bottom:236px}
+@media (min-width:641px) and (pointer:fine){.aip[data-kind="beats"] .aip-choices[data-layout="cards"] .aip-choice{width:392px}}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"].aip-shown .aip-decision{bottom:70px}
 .aip[data-kind="beats"] .aip-under{bottom:198px}
 .aip-log-line{position:relative;padding:10px 44px 10px 12px;border-radius:12px}
 .aip-log-line.now{background:color-mix(in srgb,var(--aip-fg) 12%,transparent)}
@@ -295,6 +348,7 @@ export function mountInteractivePlayer(root, options) {
 @media (pointer:coarse){
 .aip-scrub{height:44px;touch-action:none}
 .aip .aip-ib,.aip .aip-btn,.aip .aip-log-line>button{min-width:44px;min-height:44px}
+.aip .aip-pill{min-height:44px}
 .aip .aip-choices{flex-direction:column;flex-wrap:nowrap;align-items:stretch}
 .aip .aip-choice{width:100%;min-height:58px;flex:none}
 .aip .aip-kbd,.aip .aip-choice>.k{display:none}
@@ -327,6 +381,10 @@ export function mountInteractivePlayer(root, options) {
 .aip-who{left:18px}
 .aip-line{font-size:18px}
 .aip-ticks{bottom:24px}
+/* A phone's bar has no room between its buttons for the ticks: they sit just above it instead. */
+.aip-beatbar{left:12px;right:12px}
+.aip[data-kind="beats"].aip-shown .aip-ticks,.aip[data-kind="beats"][data-paused] .aip-ticks{bottom:68px}
+.aip[data-kind="beats"].aip-shown .aip-box,.aip[data-kind="beats"][data-paused] .aip-box{bottom:86px}
 .aip-top{flex-wrap:wrap;row-gap:6px}
 .aip[data-kind="beats"] .aip-top>div:first-child{flex:1 1 100%!important}
 .aip-beatbar .t{display:none}
@@ -347,14 +405,7 @@ export function mountInteractivePlayer(root, options) {
     '<div class="aip-slate" data-ref="slate" hidden></div>' +
     '<div class="aip-dim"></div>' +
     '<div class="aip-scrim-top aip-chrome"></div>' +
-    '<div class="aip-top aip-chrome"><div style="flex:1;min-width:0"><div class="aip-eyebrow" data-ref="eyebrow"></div><div class="aip-scene" data-ref="scene"></div></div>' +
-    '<div class="aip-beatbar">' +
-    '<button type="button" class="aip-pill" data-act="auto" data-ref="autoBtn" aria-pressed="false">' + icon(I.auto, 16) + '<span class="t">Auto</span></button>' +
-    '<button type="button" class="aip-pill" data-act="log" data-ref="logBtn" aria-pressed="false">' + icon(I.log, 16) + '<span class="t">Log</span></button>' +
-    '<button type="button" class="aip-pill" data-act="route" aria-label="Route">' + icon(I.route, 16) + '<span class="t">Route</span></button>' +
-    '<button type="button" class="aip-ib" data-act="mute" data-ref="beatMute" aria-label="Mute"></button>' +
-    '<button type="button" class="aip-ib" data-act="full" aria-label="Full screen">' + icon(I.full) + "</button>" +
-    "</div></div>" +
+    '<div class="aip-top aip-chrome"><div style="flex:1;min-width:0"><div class="aip-eyebrow" data-ref="eyebrow"></div><div class="aip-scene" data-ref="scene"></div></div></div>' +
     '<div class="aip-scrim-bot aip-chrome"></div>' +
     '<div class="aip-bar aip-chrome" data-ref="bar">' +
     '<div class="aip-scrub" data-ref="scrub" role="slider" tabindex="0" aria-label="Position in this scene" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>' +
@@ -366,10 +417,20 @@ export function mountInteractivePlayer(root, options) {
     '<button type="button" class="aip-ib" data-act="route" data-ref="routeBtn" aria-label="Route"></button>' +
     '<button type="button" class="aip-ib" data-act="full" aria-label="Full screen">' + icon(I.full) + "</button>" +
     "</div></div>" +
-    '<div class="aip-decision"><div class="aip-copy"><div class="aip-box" data-ref="box" hidden><span class="aip-who" data-ref="who" hidden></span><div class="aip-line" data-ref="line" aria-live="polite"></div><span class="aip-more" data-ref="more"></span></div>' +
+    '<button type="button" class="aip-big" data-act="toggle" data-ref="big" aria-label="Play" hidden>' + icon(I.play, 30) + "</button>" +
+    '<div class="aip-decision"><div class="aip-copy"><div class="aip-box" data-ref="box" hidden><span class="aip-who" data-ref="who" hidden></span><div class="aip-line" data-ref="line" aria-live="polite"></div></div>' +
     '<div class="aip-under" data-ref="under"></div></div>' +
     '<div class="aip-choices" data-ref="choices" role="group" aria-label="Choices"></div></div>' +
     '<div class="aip-ticks" data-ref="ticks"></div><div class="aip-hold" data-ref="hold"></div>' +
+    '<div class="aip-beatbar aip-chrome" data-ref="beatbar">' +
+    '<button type="button" class="aip-ib" data-act="toggle" data-ref="beatToggle" aria-label="Pause"></button>' +
+    '<button type="button" class="aip-ib" data-act="prev" data-ref="beatBack" aria-label="Back">' + icon(I.prev, 20) + "</button>" +
+    '<button type="button" class="aip-pill" data-act="narration" data-ref="narrationBtn" aria-pressed="true"' + (voiced ? "" : " hidden") + "></button>" +
+    '<span class="aip-spacer"></span>' +
+    '<button type="button" class="aip-pill" data-act="log" data-ref="logBtn" aria-pressed="false">' + icon(I.log, 16) + '<span class="t">Log</span></button>' +
+    '<button type="button" class="aip-pill" data-act="route" aria-label="Route">' + icon(I.route, 16) + '<span class="t">Route</span></button>' +
+    '<button type="button" class="aip-ib" data-act="full" aria-label="Full screen">' + icon(I.full) + "</button>" +
+    "</div>" +
     '<div data-ref="hero"></div>' +
     '<div class="aip-panel" data-ref="panel" role="dialog" aria-label="Route" hidden></div>' +
     '<div class="aip-panel" data-ref="log" role="dialog" aria-label="Log" hidden></div>' +
@@ -382,8 +443,9 @@ export function mountInteractivePlayer(root, options) {
     strip: ref("strip"), slate: ref("slate"), eyebrow: ref("eyebrow"), scene: ref("scene"), scrub: ref("scrub"),
     toggle: ref("toggle"), mute: ref("mute"), time: ref("time"), routeBtn: ref("routeBtn"), under: ref("under"),
     hero: ref("hero"), panel: ref("panel"),
-    pic: ref("pic"), img: ref("img"), box: ref("box"), who: ref("who"), line: ref("line"), more: ref("more"),
-    ticks: ref("ticks"), hold: ref("hold"), log: ref("log"), autoBtn: ref("autoBtn"), logBtn: ref("logBtn"), beatMute: ref("beatMute"),
+    pic: ref("pic"), img: ref("img"), box: ref("box"), who: ref("who"), line: ref("line"),
+    ticks: ref("ticks"), hold: ref("hold"), log: ref("log"), logBtn: ref("logBtn"),
+    beatToggle: ref("beatToggle"), beatBack: ref("beatBack"), narrationBtn: ref("narrationBtn"), big: ref("big"),
   };
   const voice = ref("voice");
   const logVoice = ref("logVoice");
@@ -399,12 +461,23 @@ export function mountInteractivePlayer(root, options) {
     }
   }
 
-  /** Chrome shows on any movement and rests after stillness, by CSS alone — no timer here. */
+  /**
+   * Chrome shows on any movement and rests after stillness, by CSS alone — no timer here. While it
+   * shows, `aip-shown` lifts a visual novel's line above the bar; the rest's own animation ending
+   * takes it away again.
+   */
   function wake() {
     root.classList.remove("aip-wake");
     void root.offsetWidth;
-    root.classList.add("aip-wake");
+    root.classList.add("aip-wake", "aip-shown");
   }
+  /** A press on the picture while a press had shown the controls: they go at once (turn 246). */
+  function rest() {
+    pinned = false;
+    root.classList.remove("aip-wake", "aip-shown");
+  }
+  /** Whether a visual novel's controls are on screen now: shown and not yet rested, or held by a pause. */
+  const chromeShown = () => root.classList.contains("aip-shown") || (paused && mode === "playing") || root.hasAttribute("data-held");
 
   const heldPointers = new Set();
   const holdChrome = (event) => { if(event.pointerType !== "touch") return; heldPointers.add(event.pointerId);root.setAttribute("data-held","");wake(); };
@@ -509,13 +582,13 @@ export function mountInteractivePlayer(root, options) {
     else el.box.removeAttribute("data-typed");
     voice.pause && voice.pause();
     voiceFailed = false;
-    voiceBlocked = false;
-    voiceRetried = false;
+    voiceHeard = false;
     const token = ++voiceToken;
-    if (b.audio && !quiet) {
+    if (b.audio && !quiet && narration) {
       voiceDone = false;
       voice.setAttribute("src", b.audio);
-      startVoice(token);
+      // Paused, the beat is shown and its voice waits for Play.
+      if (!paused) startVoice(token);
     } else {
       voiceDone = true;
       voice.removeAttribute("src");
@@ -524,41 +597,52 @@ export function mountInteractivePlayer(root, options) {
     schedule(true);
   }
 
+  /** A line's reading time, as turn 174's Auto had it: 1.5 s and 0.3 s a word, at most 12 s. */
+  const readingSec = (b) => Math.min(12, 1.5 + String(b.text || "").split(/\s+/).filter(Boolean).length * 0.3);
   /**
-   * What moves this beat on by itself, if anything: a hold, from when it shows; after its voice, a
-   * beat's breath once the voice ends; and with Auto on, the same breath, or a reading time for a
-   * line with no voice. Otherwise it waits for the reader. Each is a CSS animation on one hidden
-   * element whose end is the signal — the player keeps no timer.
+   * What moves this beat on by itself (turn 246 rule 1): a Hold beat after its own seconds, from
+   * when it shows; any other beat once heard — 1.2 s after its voice ends, or, unvoiced, with
+   * Narration off, or with a voice that would not play, after its reading time. A beat saved "On
+   * tap" plays as after the line. Each is a CSS animation on one hidden element whose end is the
+   * signal — the player keeps no timer — and the current tick fills with it.
    */
   function schedule(shown) {
     if (mode !== "playing" || !isBeats(state.sceneId)) return;
     const b = beat();
-    const advance = b.advance || "tap";
-    if (advance === "hold") {
-      if (shown) startHold(b.holdSec || 4, false);
+    if (b.advance === "hold") {
+      if (shown) startHold(b.holdSec || 4, true);
       return;
     }
     if (!voiceDone) return;
-    const heard = Boolean(b.audio) && !voiceFailed;
-    if (heard && advance === "voice") startHold(1.2, false);
-    else if (heard && auto) startHold(1.2, true);
-    else if (auto) startHold(Math.min(12, 1.5 + String(b.text || "").split(/\s+/).filter(Boolean).length * 0.3), true);
+    if (Boolean(b.audio) && narration && voiceHeard) startHold(1.2, false);
+    else startHold(readingSec(b), true);
   }
-  function startHold(sec, byAuto) {
-    holdByAuto = byAuto;
+  /** The current beat's tick, or nothing when the scene has one beat and so shows none. */
+  const fillOf = () => el.ticks.querySelector("b");
+  /** `key` names a hold that is not a beat's — a slate's — and so fills no tick. */
+  function startHold(sec, fills, key) {
     el.hold.style.animation = "none";
     void el.hold.offsetWidth;
-    el.hold.setAttribute("data-beat", state.sceneId + "#" + beatIndex);
+    el.hold.setAttribute("data-beat", key || state.sceneId + "#" + beatIndex);
     el.hold.style.animation = "aip-hold " + sec + "s linear forwards";
+    const fill = fillOf();
+    if (!fill || key) return;
+    fill.style.animation = "none";
+    void fill.offsetWidth;
+    // A voice's breath keeps the tick full; a reading time or a hold fills it as it runs.
+    if (fills) {
+      fill.style.width = "";
+      fill.style.animation = "aip-fill " + sec + "s linear forwards";
+    } else fill.style.width = "100%";
   }
   function stopHold() {
-    holdByAuto = false;
     el.hold.style.animation = "none";
     el.hold.removeAttribute("data-beat");
   }
   function voiceEnded() {
     if (voiceDone) return;
     voiceDone = true;
+    if (!voiceFailed) voiceHeard = true;
     schedule(false);
   }
   function voiceLost() {
@@ -567,45 +651,71 @@ export function mountInteractivePlayer(root, options) {
     voiceEnded();
   }
   /**
-   * Start this beat's voice. One the browser refuses for want of a gesture waits for the next tap;
-   * one that cannot play at all (a missing file) is read as text.
+   * Start this beat's voice. One that will not play — a missing file, or one the browser refuses
+   * before a gesture — is read as text for its reading time: it never waits for a tap (turn 246).
+   * A start that a pause interrupted is not a voice lost: Play starts it again.
    */
   function startVoice(token) {
     const p = voice.play && voice.play();
     if (p && p.catch) {
       p.catch((error) => {
-        if (token !== voiceToken) return;
-        if (error && error.name === "NotAllowedError" && !voiceRetried) voiceBlocked = true;
-        else voiceLost();
+        if (token !== voiceToken || (paused && error && error.name === "AbortError")) return;
+        voiceLost();
       });
     }
   }
+  /** The tick fills over a voice as it is heard, on a beat that waits for its line. */
+  function voiceProgress() {
+    const fill = fillOf();
+    if (!fill || voiceDone || beat().advance === "hold" || !voice.duration) return;
+    fill.style.animation = "none";
+    fill.style.width = Math.min(100, (100 * (voice.currentTime || 0)) / voice.duration) + "%";
+  }
 
-  /** Auto on moves beats on by themselves; off takes back only the holds Auto started. */
-  function toggleAuto() {
-    auto = !auto;
+  /**
+   * Play and Pause (turn 246 rule 2, call 1), as a film's: paused, the beat's voice, hold, tick and
+   * picture wait where they are, and the controls stay. A clip scene's is the video's own.
+   */
+  function toggle() {
+    if (!isBeats(state.sceneId)) {
+      toggleVideo();
+      return;
+    }
+    if (mode !== "playing") return;
+    paused = !paused;
+    if (paused) voice.pause && voice.pause();
+    else if (!voiceDone) startVoice(voiceToken);
+    renderBar();
     renderBeat();
-    if (auto && mode === "playing") schedule(false);
-    else if (!auto && holdByAuto) stopHold();
+    holdFocus();
+  }
+  /**
+   * Narration on or off (rule 5). Off, the voice stops and the beat holds for its reading time; on
+   * again, a line not yet heard is read out. A Hold beat keeps its own seconds either way.
+   */
+  function toggleNarration() {
+    if (!voiced) return;
+    narration = !narration;
+    const b = beat();
+    if (mode === "playing" && isBeats(state.sceneId) && b.audio) {
+      if (!narration && !voiceDone) {
+        voice.pause && voice.pause();
+        voiceDone = true;
+        if (b.advance !== "hold") {
+          stopHold();
+          schedule(false);
+        }
+      } else if (narration && voiceDone && !voiceHeard) {
+        if (b.advance !== "hold") stopHold();
+        voiceDone = false;
+        voiceFailed = false;
+        voice.setAttribute("src", b.audio);
+        if (!paused) startVoice(voiceToken);
+      }
+    }
+    renderBeat();
   }
 
-  /** A tap, a key: the voice the browser held back, else the rest of the line, else the next beat. */
-  function advanceBeat() {
-    if (voiceBlocked && !voiceDone) {
-      // Inside the gesture now, once: a second refusal is a voice that will not play, read as text.
-      voiceBlocked = false;
-      voiceRetried = true;
-      startVoice(voiceToken);
-      return;
-    }
-    if (!typed) {
-      typed = true;
-      el.box.setAttribute("data-typed", "");
-      renderBeat();
-      return;
-    }
-    nextBeat();
-  }
   function nextBeat() {
     const beats = beatsOf(state.sceneId);
     if (beatIndex < beats.length - 1) {
@@ -619,13 +729,34 @@ export function mountInteractivePlayer(root, options) {
     logVoice.pause && logVoice.pause();
     finishScene();
   }
-  /** Back one beat, within the scene: a choice already made is changed from the route, not here. */
+  /**
+   * Back one beat, within the scene: a choice already made is changed from the route, not here.
+   * At a choice, Back is the beat the choice was offered over, played again.
+   */
   function previousBeat() {
-    if (beatIndex > 0) showBeat(beatIndex - 1);
+    if (!isBeats(state.sceneId)) return;
+    if (mode === "choice") {
+      mode = "playing";
+      showBeat(beatsOf(state.sceneId).length - 1);
+      render();
+      holdFocus();
+      return;
+    }
+    if (mode === "playing" && beatIndex > 0) showBeat(beatIndex - 1);
+  }
+
+  /** The ticks: beats read are full, the current one fills as it plays, the rest wait; at a choice, all are read. */
+  function renderTicks() {
+    const beats = beatsOf(state.sceneId);
+    const key = mode + " " + state.sceneId + " " + beats.length + " " + beatIndex;
+    if (key === ticksDrawn) return;
+    ticksDrawn = key;
+    el.ticks.innerHTML = beats.length > 1
+      ? beats.map((_, i) => (i < beatIndex || (i === beatIndex && mode !== "playing") ? '<i class="done"></i>' : i === beatIndex ? "<i><b></b></i>" : "<i></i>")).join("")
+      : "";
   }
 
   function renderBeat() {
-    const beats = beatsOf(state.sceneId);
     const b = beat();
     const who = b.speaker ? String(b.speaker) : "";
     el.who.hidden = who === "";
@@ -634,12 +765,16 @@ export function mountInteractivePlayer(root, options) {
     el.box.setAttribute("data-kind", b.text ? (who || b.dialogue ? "dialogue" : "narration") : "picture");
     // A beat with no line is the picture alone: the box steps aside for it.
     el.box.hidden = !isBeats(state.sceneId) || !b.text;
-    el.more.innerHTML = mode === "playing" && typed ? "tap " + icon(I.next, 14) : "";
-    el.ticks.innerHTML = beats.length > 1 ? beats.map((_, i) => '<i class="' + (i <= beatIndex ? "done" : "") + '"></i>').join("") : "";
-    el.autoBtn.setAttribute("aria-pressed", auto ? "true" : "false");
+    renderTicks();
+    // At a choice there is nothing to play until a way is chosen (turn 246 rule 9).
+    const playing = mode === "playing" && !paused;
+    el.beatToggle.innerHTML = icon(playing ? I.pause : I.play, 20);
+    el.beatToggle.setAttribute("aria-label", playing ? "Pause" : "Play");
+    el.beatToggle.disabled = mode !== "playing";
+    el.big.hidden = !(isBeats(state.sceneId) && mode === "playing" && paused);
+    el.narrationBtn.innerHTML = icon(narration ? I.narration : I.narrationOff, 17) + '<span class="t">Narration</span>';
+    el.narrationBtn.setAttribute("aria-pressed", narration ? "true" : "false");
     el.logBtn.setAttribute("aria-pressed", logOpen ? "true" : "false");
-    el.beatMute.innerHTML = icon(voice.muted ? I.muted : I.volume);
-    el.beatMute.setAttribute("aria-label", voice.muted ? "Unmute" : "Mute");
     renderLog();
   }
 
@@ -706,9 +841,27 @@ export function mountInteractivePlayer(root, options) {
     if (started && started.catch) started.catch(() => render());
   }
 
-  /** The scene has ended: its choices, or its ending, or a dead end the preview names. */
+  /**
+   * The scene has ended: its choices, or its ending, or a dead end the preview names — or, where
+   * only one way on is open, that way, played straight through with no pause and no label (turn
+   * 246 rule 4). A scene with nothing to play holds its title card for a breath first, so a run
+   * of them never spins through without a frame between.
+   */
   function finishScene() {
+    const lone = loneWay(state.sceneId);
+    if (lone) {
+      if (!isBeats(state.sceneId) && (media[state.sceneId] || []).length === 0) {
+        mode = "playing";
+        render();
+        startHold(1.5, false, state.sceneId + "#slate");
+        return;
+      }
+      choose(lone);
+      return;
+    }
     const options = outOf(state.sceneId);
+    // Nothing plays at a choice or an ending, so nothing there is paused either.
+    paused = false;
     mode = options.length > 0 ? "choice" : "ending";
     // Saved as "over" (-1), so a return visit reopens this choice or ending rather than replaying
     // the scene from its start.
@@ -719,6 +872,10 @@ export function mountInteractivePlayer(root, options) {
     else root.focus();
   }
 
+  /**
+   * A way on taken: pressed at a choice, or a link played through. Either is a step of the route
+   * with its effects, so routes replay, and either records its walk in preview (SPEC-063 R-11a).
+   */
   function choose(choice) {
     if (!outOf(state.sceneId).some(c => c.id === choice.id)) return;
     let evidence;
@@ -742,6 +899,7 @@ export function mountInteractivePlayer(root, options) {
     if (story) facts = storyReplay(story, state.route).state;
     state.sceneId = choice.from;
     routeOpen = false;
+    paused = false;
     video.pause && video.pause();
     // The choice point is shown over its own scene's last frame, not the later scene's.
     const clips = media[choice.from] || [];
@@ -752,12 +910,19 @@ export function mountInteractivePlayer(root, options) {
     else video.removeAttribute("src");
     finishScene();
   }
+  /** The last step of the route that was a choice made, not a link played through; -1 if none. */
+  function lastChoiceIndex() {
+    const links = linkSteps();
+    for (let i = links.length - 1; i >= 0; i--) if (!links[i]) return i;
+    return -1;
+  }
 
   function startAgain() {
     state.route = [];
     if (story) { facts = storyReplay(story).state; state.playthroughId = newPlaythrough(); }
     resumeProblem = "";
     routeOpen = false;
+    paused = false;
     play(origin, 0);
   }
 
@@ -772,10 +937,12 @@ export function mountInteractivePlayer(root, options) {
       .map(c => {
         const index = available.findIndex(a => a.id === c.id), disabled = index < 0;
         return '<button type="button" class="aip-choice" data-choice="' + esc(c.id) + '"' + (disabled ? ' disabled aria-describedby="aip-reason-' + esc(c.id) + '"' : '') + '><span class="k">' + (disabled ? '—' : index + 1) + '</span><span class="l">' + esc(disabled ? c.unavailable.label || c.label : c.label) + (disabled ? '<small class="aip-choice-reason" id="aip-reason-' + esc(c.id) + '">' + esc(c.unavailable.reason) + '</small>' : '') + "</span>" +
-        (!disabled && author && unwalked.has(c.id) ? '<span class="aip-chip">not walked</span>' : "") + "</button>";
+        (!disabled && author && unwalked.has(c.id) ? '<span class="aip-chip">' + icon(I.dot, 10) + "not walked</span>" : "") + "</button>";
       })
       .join("");
-    el.under.innerHTML = mode === "choice" && ((media[state.sceneId] || []).length > 0 || isBeats(state.sceneId))
+    // A visual novel's bar has Back to the beat the choice is offered over (turn 246); a film's
+    // choice keeps 156's Replay scene.
+    el.under.innerHTML = mode === "choice" && (media[state.sceneId] || []).length > 0 && !isBeats(state.sceneId)
       ? '<button type="button" class="aip-ghost" data-act="replay">' + icon(I.back, 15) + "Replay scene</button>"
       : "";
   }
@@ -813,16 +980,19 @@ export function mountInteractivePlayer(root, options) {
       try { if (story) { variant = storyEnding(story, state.sceneId, facts); ending = variant?.title; } }
       catch (error) { ending = error.message; }
       const trail = walked();
+      // A link's label is the author's note, never shown to a listener (turn 246 rule 11).
+      const links = linkSteps();
+      const last = lastChoiceIndex();
       el.hero.innerHTML =
         '<div class="aip-poster-back"></div><div class="aip-hero">' +
         '<div class="aip-eyebrow">' + (ending !== undefined ? "Ending" : "No choices from here") + "</div>" +
         '<div class="aip-hero-title">' + esc(ending !== undefined ? ending : titleOf(state.sceneId)) + "</div>" +
         (variant?.text ? '<div class="aip-ending-text">' + esc(variant.text) + "</div>" : "") +
         (trail.length > 1
-          ? '<div class="aip-trail">' + trail.map((id, i) => (i > 0 ? "<span>→ " + esc((choiceById(state.route[i - 1]) || { label: "" }).label) + " →</span>" : "") + "<b>" + esc(titleOf(id)) + "</b>").join("") + "</div>"
+          ? '<div class="aip-trail">' + trail.map((id, i) => (i > 0 ? "<span>" + (links[i - 1] ? "→" : "→ " + esc((choiceById(state.route[i - 1]) || { label: "" }).label) + " →") + "</span>" : "") + "<b>" + esc(titleOf(id)) + "</b>").join("") + "</div>"
           : "") +
         '<div class="aip-hero-actions"><button type="button" class="aip-btn primary" data-act="restart">' + icon(I.back, 16) + "Start again</button>" +
-        (state.route.length > 0 ? '<button type="button" class="aip-btn" data-act="last">' + icon(I.undo, 16) + "Back to last choice</button>" : "") +
+        (last >= 0 ? '<button type="button" class="aip-btn" data-act="last">' + icon(I.undo, 16) + "Back to last choice</button>" : "") +
         "</div></div>";
       return;
     }
@@ -839,11 +1009,14 @@ export function mountInteractivePlayer(root, options) {
       return;
     }
     const trail = walked();
+    // A link played through is a step between two scenes, not a choice to make again: it has no
+    // row of its own, and its label, the author's note, is never shown (turn 246 rule 4).
+    const links = linkSteps();
     let list = "";
     trail.forEach((id, i) => {
       const now = i === trail.length - 1;
       list += '<div class="aip-stop' + (now ? " now" : "") + '"><span class="n">' + (i + 1) + '</span><span class="t">' + esc(titleOf(id)) + "</span>" + (now ? '<span class="aip-tag">Playing</span>' : "") + "</div>";
-      if (i < state.route.length) {
+      if (i < state.route.length && !links[i]) {
         const c = choiceById(state.route[i]);
         list += '<div class="aip-way">' + icon(I.route, 14) + "<span>" + esc(c ? c.label : "") + '</span><button type="button" class="aip-btn small" data-again="' + i + '">Choose again</button></div>';
       }
@@ -852,16 +1025,18 @@ export function mountInteractivePlayer(root, options) {
       '<div class="aip-panel-head"><span style="flex:1">' + (story && author ? "Preview facts" : "Route") + '</span><button type="button" class="aip-ib" data-act="route" aria-label="Close">' + icon(I.x) + "</button></div>" +
       '<div class="aip-panel-list">' + (story && author ? '<section aria-label="Preview facts"><p class="aip-facts-note">This route · values as this scene begins</p>' + (story.facts || []).map(fact => {
         const origin = storyReplay(story, state.route).origins[fact.id];
-        return '<div class="aip-fact-row"><span class="initials" aria-hidden="true">' + esc(fact.label.split(/\s+/).map(word => word[0]).slice(0,2).join("")) + '</span><div><b>' + esc(fact.label) + '</b><small>' + esc(origin ? (choiceById(origin)?.label || origin) : "Starting value") + '</small></div><span class="value">' + esc(facts[fact.id]) + '</span>' + (origin ? '<button type="button" class="aip-btn small" data-again="' + state.route.lastIndexOf(origin) + '">Choose again at ' + esc(titleOf(choiceById(origin)?.from)) + '</button>' : "") + '</div>';
+        const at = origin ? state.route.lastIndexOf(origin) : -1;
+        return '<div class="aip-fact-row"><span class="initials" aria-hidden="true">' + esc(fact.label.split(/\s+/).map(word => word[0]).slice(0,2).join("")) + '</span><div><b>' + esc(fact.label) + '</b><small>' + esc(origin ? (choiceById(origin)?.label || origin) : "Starting value") + '</small></div><span class="value">' + esc(facts[fact.id]) + '</span>' + (origin && !links[at] ? '<button type="button" class="aip-btn small" data-again="' + at + '">Choose again at ' + esc(titleOf(choiceById(origin)?.from)) + '</button>' : "") + '</div>';
       }).join("") + '<p class="aip-facts-note">Preview facts follow this route, not the authored defaults.</p></section><details class="aip-route-history"><summary>Route history</summary>' + list + '</details>' : list) + "</div>" +
       '<div class="aip-panel-foot"><button type="button" class="aip-btn small" data-act="restart">' + icon(I.back, 15) + "Start over</button>" + (story && author?.onTestRoute && state.sceneId !== options.start ? '<button type="button" class="aip-btn small" data-act="test-route">Test another route</button>' : '') + '</div>';
   }
 
   function renderStrip() {
     if (!el.strip) return;
+    // It counts choices, not links: the author leaves out the links a route plays through (246e).
     el.strip.innerHTML =
       "<b>Preview</b><span class=\"aip-muted\">from " + esc(titleOf(initial ? initial.sceneId : origin)) + '</span><span class="aip-spacer"></span>' +
-      (unwalked.size > 0 ? "<span>" + unwalked.size + " choice" + (unwalked.size === 1 ? "" : "s") + " not walked</span>" : '<span class="aip-muted">every choice walked</span>') +
+      (unwalked.size > 0 ? '<span class="aip-unwalked">' + icon(I.dot, 14) + unwalked.size + " choice" + (unwalked.size === 1 ? "" : "s") + " not walked</span>" : '<span class="aip-muted">every choice walked</span>') +
       (story ? '<button type="button" class="aip-btn small" data-act="route">Preview facts</button>' : "") +
       (author.onBranchMap ? '<button type="button" class="aip-btn small" data-act="map" aria-label="Branch map">' + icon(I.map, 15) + '<span class="t">Branch map</span></button>' : "") +
       (author.onClose ? '<button type="button" class="aip-btn small" data-act="close" aria-label="Close preview">' + icon(I.x, 15) + '<span class="t">Close preview</span> <span class="aip-kbd">Esc</span></button>' : "");
@@ -869,9 +1044,9 @@ export function mountInteractivePlayer(root, options) {
 
   function renderBar() {
     const clips = media[state.sceneId] || [];
-    const paused = video.paused !== false;
-    el.toggle.innerHTML = icon(paused ? I.play : I.pause, 20);
-    el.toggle.setAttribute("aria-label", paused ? "Play" : "Pause");
+    const stopped = video.paused !== false;
+    el.toggle.innerHTML = icon(stopped ? I.play : I.pause, 20);
+    el.toggle.setAttribute("aria-label", stopped ? "Play" : "Pause");
     el.mute.innerHTML = icon(video.muted ? I.muted : I.volume);
     el.mute.setAttribute("aria-label", video.muted ? "Unmute" : "Mute");
     el.routeBtn.innerHTML = icon(I.route) + (state.route.length > 0 ? '<span class="n">' + (state.route.length + 1) + "</span>" : "");
@@ -880,13 +1055,14 @@ export function mountInteractivePlayer(root, options) {
     const ratio = d > 0 ? Math.min(1, at / d) : 0;
     el.scrub.innerHTML =
       clips.map((_, i) => '<span class="aip-seg"><i style="width:' + (i < clipIndex ? 100 : i === clipIndex ? ratio * 100 : 0) + '%"></i></span>').join("") +
-      (outOf(state.sceneId).length > 0 ? '<span class="aip-fork" title="Choices at the end">' + icon(I.route, 16) + "</span>" : "");
+      (outOf(state.sceneId).length > 0 && !loneWay(state.sceneId) ? '<span class="aip-fork" title="Choices at the end">' + icon(I.route, 16) + "</span>" : "");
     // The slider is the whole scene, its shots in turn — not the one shot loaded, which read as
     // the scene starting over at every cut.
     el.scrub.setAttribute("aria-valuenow", String(Math.round((100 * (clipIndex + ratio)) / Math.max(1, clips.length))));
     el.scrub.setAttribute("aria-valuetext", (clips.length > 1 ? "Shot " + (clipIndex + 1) + " of " + clips.length + ", " : "") + time(at) + " of " + time(d));
     el.time.textContent = (clips.length > 1 ? "Shot " + (clipIndex + 1) + " of " + clips.length + " · " : "") + time(at) + " / " + time(d);
-    if (paused) root.setAttribute("data-paused", "");
+    // A visual novel is paused when its reader paused it; a film when its video is.
+    if (isBeats(state.sceneId) ? paused && mode === "playing" : stopped) root.setAttribute("data-paused", "");
     else root.removeAttribute("data-paused");
   }
 
@@ -958,7 +1134,7 @@ export function mountInteractivePlayer(root, options) {
   };
   const onPlayState = () => renderBar();
 
-  function toggle() {
+  function toggleVideo() {
     if (mode !== "playing") return;
     if (video.paused) {
       const p = video.play && video.play();
@@ -1028,6 +1204,20 @@ export function mountInteractivePlayer(root, options) {
   const onClick = (event) => {
     const target = event.target.closest ? event.target : null;
     if (!target) return;
+    // A visual novel's picture (turn 246 rule 2): a press shows the controls, a second hides them,
+    // and neither moves the story on. A press where the resting bar was shows it rather than
+    // pressing a control nobody could see.
+    if (isBeats(state.sceneId) && (mode === "playing" || mode === "choice")) {
+      const onPicture = !target.closest("button, .aip-panel, .aip-strip");
+      if (onPicture || (target.closest(".aip-beatbar") && !chromeShown())) {
+        if (onPicture && pinned && chromeShown() && !(paused && mode === "playing")) rest();
+        else {
+          wake();
+          pinned = true;
+        }
+        return;
+      }
+    }
     wake();
     const pick = target.closest("[data-choice]");
     if (pick) {
@@ -1044,7 +1234,7 @@ export function mountInteractivePlayer(root, options) {
     if (heard) {
       // Heard again from the log, on its own player. One voice at a time: the beat's own stops,
       // as a line read rather than heard (codex round 15) — but no failure schedules anything:
-      // Auto waits for the line heard again to end before it reads on (codex round 17).
+      // the story waits for the line heard again to end before it reads on (codex round 17).
       const b = beatsOf(state.sceneId)[Number(heard.getAttribute("data-line"))];
       if (b && b.audio) {
         if (!voiceDone) {
@@ -1052,20 +1242,15 @@ export function mountInteractivePlayer(root, options) {
           voiceDone = true;
           voiceFailed = true;
         }
-        // Any hold waits too — an authored one as much as Auto's: it would read on over the line
-        // and cut it off (codex round 19). It starts over when the line has been heard.
+        // Any hold waits too — an authored one as much as a reading time: it would read on over
+        // the line and cut it off (codex round 19). It starts over when the line has been heard.
         stopHold();
         logVoice.setAttribute("src", b.audio);
         const p = logVoice.play && logVoice.play();
         // A line that cannot be heard again hands the beat back at once, as one heard out would:
-        // Auto was held for it, and nothing else would release it (codex round 18).
+        // the story was held for it, and nothing else would release it (codex round 18).
         if (p && p.catch) p.catch(replayDone);
       }
-      return;
-    }
-    // A tap anywhere on the picture reads on; the chrome, the panels and the choices keep theirs.
-    if (mode === "playing" && isBeats(state.sceneId) && !target.closest("button, .aip-panel, .aip-strip, .aip-top")) {
-      advanceBeat();
       return;
     }
     const scrub = target.closest('[data-ref="scrub"]');
@@ -1088,15 +1273,16 @@ export function mountInteractivePlayer(root, options) {
     switch (act.getAttribute("data-act")) {
       case "toggle": toggle(); break;
       case "back": nudge(-10); break;
+      case "prev": previousBeat(); break;
+      case "narration": toggleNarration(); break;
       case "mute": video.muted = !video.muted; voice.muted = video.muted; logVoice.muted = video.muted; renderBar(); renderBeat(); break;
       case "route": routeOpen = !routeOpen; if (routeOpen) logOpen = false; renderPanel(); renderBeat(); break;
       case "log": logOpen = !logOpen; if (logOpen) routeOpen = false; renderPanel(); renderBeat(); break;
-      case "auto": toggleAuto(); break;
       case "full": full(); break;
       case "replay": play(state.sceneId, 0); break;
       case "continue": saved = null; play(state.sceneId, state.positionSec); break;
       case "restart": saved = null; startAgain(); break;
-      case "last": chooseAgain(state.route.length - 1); break;
+      case "last": if (lastChoiceIndex() >= 0) chooseAgain(lastChoiceIndex()); break;
       case "map": author && author.onBranchMap && author.onBranchMap(); break;
       case "test-route": if (author?.onTestRoute) author.onTestRoute(state.sceneId); break;
       case "close": author && author.onClose && author.onClose(); break;
@@ -1126,11 +1312,13 @@ export function mountInteractivePlayer(root, options) {
       }
       return;
     }
-    if (mode === "playing" && isBeats(state.sceneId)) {
-      // A beat scene reads on with the keys a reader expects; a focused button keeps its own.
-      if (((key === " " || key === "Enter") && !onButton) || key === "ArrowRight") {
+    if ((mode === "playing" || mode === "choice") && isBeats(state.sceneId)) {
+      // A visual novel's keys are a film's (turn 246): Space or K plays and pauses, ← is Back,
+      // and → the next beat — the author's, never needed. Enter no longer moves on, and a focused
+      // button keeps its own Space.
+      if ((key === " " && !onButton) || key === "k" || key === "K") {
         event.preventDefault();
-        advanceBeat();
+        toggle();
         return;
       }
       if (key === "ArrowLeft") {
@@ -1138,10 +1326,19 @@ export function mountInteractivePlayer(root, options) {
         previousBeat();
         return;
       }
-      if (key === "a" || key === "A") {
-        toggleAuto();
+      if (key === "ArrowRight") {
+        if (author && mode === "playing") {
+          event.preventDefault();
+          nextBeat();
+        }
         return;
       }
+      if (key === "n" || key === "N") {
+        toggleNarration();
+        return;
+      }
+      // Narration, not Mute, is a visual novel's (call 4).
+      if (key === "m" || key === "M") return;
       if (key === "l" || key === "L") {
         logOpen = !logOpen;
         if (logOpen) routeOpen = false;
@@ -1204,9 +1401,24 @@ export function mountInteractivePlayer(root, options) {
   const onVoiceError = () => voiceLost();
   const onAnimationEnd = (event) => {
     if (event.target === el.hold) {
-      if (mode === "playing" && el.hold.getAttribute("data-beat") === state.sceneId + "#" + beatIndex) {
+      const held = el.hold.getAttribute("data-beat");
+      if (mode === "playing" && held === state.sceneId + "#slate") {
+        // A title card held for its breath, on its way through its one way on.
+        stopHold();
+        const lone = loneWay(state.sceneId);
+        if (lone) choose(lone);
+        else finishScene();
+      } else if (mode === "playing" && held === state.sceneId + "#" + beatIndex) {
         stopHold();
         nextBeat();
+      }
+      return;
+    }
+    if (event.animationName === "aip-rest") {
+      // The controls have rested: a visual novel's line drops back, and the next press shows them.
+      if (!(paused && mode === "playing")) {
+        root.classList.remove("aip-shown");
+        pinned = false;
       }
       return;
     }
@@ -1217,7 +1429,8 @@ export function mountInteractivePlayer(root, options) {
     }
   };
   voice.addEventListener("ended", onVoiceEnded);
-  // A line heard again from the log hands the beat back to Auto when it ends — or fails to play.
+  voice.addEventListener("timeupdate", voiceProgress);
+  // A line heard again from the log hands the beat back when it ends — or fails to play.
   function replayDone() {
     if (mode === "playing" && isBeats(state.sceneId)) schedule(true);
   }
@@ -1267,6 +1480,7 @@ export function mountInteractivePlayer(root, options) {
       win.removeEventListener("pointerup", releaseChrome);
       win.removeEventListener("pointercancel", releaseChrome);
       voice.removeEventListener("ended", onVoiceEnded);
+      voice.removeEventListener("timeupdate", voiceProgress);
       voice.removeEventListener("error", onVoiceError);
       root.removeEventListener("animationend", onAnimationEnd);
       voice.pause && voice.pause();

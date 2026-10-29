@@ -21,4 +21,8 @@ export function exploreStory(program: StoryProgram, limits?: { states?: number; 
   complete: boolean; limit?: "witness"; points: StoryPoint[]; transitions: Array<{from: number; to: number; choiceId: string}>; problems: Array<StoryPoint & {detail: string}>;
 };
 
+/** A lone way (SPEC-063 R-11a): the one open choice when nothing else is open or shown closed with a reason. */
+export function storyLoneChoice<C extends { id: string; from: string; when?: StoryPredicate; unavailable?: { label?: string; reason: string } }>(choices: ReadonlyArray<C>, sceneId: string, state: StoryState): C | undefined;
+/** Choices lone in every reachable state that offers them ("always") or in some ("sometimes"). */
+export function storyLinks(program: StoryProgram, graph?: ReturnType<typeof exploreStory>): Map<string, "always" | "sometimes">;
 export function storyFactReferences(program: StoryProgram, id: string): Array<{kind: string; id: string; label: string}>;

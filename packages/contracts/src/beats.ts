@@ -29,16 +29,23 @@ export interface SceneBeat {
   text: string;
 }
 
+/**
+ * A beat moves on by itself (turn 246): after its line — its voice, or its reading time — unless
+ * it holds its own seconds. There is no "On tap" any more.
+ */
 export const BEAT_DEFAULTS = {
-  advance: "tap",
+  advance: "voice",
   holdSec: 4,
   motion: "push",
-} as const satisfies { advance: "voice" | "tap" | "hold"; holdSec: number; motion: "push" | "drift" | "none" };
+} as const satisfies { advance: "voice" | "hold"; holdSec: number; motion: "push" | "drift" | "none" };
 
-/** The advance and motion a shot plays with: its own where set, the defaults otherwise. */
-export function beatPlayback(shot: Pick<Shot, "beat">): { advance: "voice" | "tap" | "hold"; holdSec: number; motion: "push" | "drift" | "none" } {
+/**
+ * The advance and motion a shot plays with: its own where set, the defaults otherwise. A shot saved
+ * "On tap" plays as after the line; the world is read as it is and never rewritten for it.
+ */
+export function beatPlayback(shot: Pick<Shot, "beat">): { advance: "voice" | "hold"; holdSec: number; motion: "push" | "drift" | "none" } {
   return {
-    advance: shot.beat?.advance ?? BEAT_DEFAULTS.advance,
+    advance: shot.beat?.advance === "hold" ? "hold" : BEAT_DEFAULTS.advance,
     holdSec: shot.beat?.holdSec ?? BEAT_DEFAULTS.holdSec,
     motion: shot.beat?.motion ?? BEAT_DEFAULTS.motion,
   };
@@ -108,7 +115,7 @@ export interface PlayerBeat {
   text?: string;
   speaker?: string;
   audio?: string;
-  advance: "voice" | "tap" | "hold";
+  advance: "voice" | "hold";
   holdSec: number;
   motion: "push" | "drift" | "none";
   /** It keeps the beat before's picture (the same shot's, or one it asked to keep), still moving. */
