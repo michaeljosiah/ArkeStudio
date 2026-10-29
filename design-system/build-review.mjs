@@ -28,6 +28,15 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN ARKE HEARS 250
+  { group: "Arke hears a read · turn 250", screen: "Design voices for the miners: six in one card, Imani open · new: the voices card · beside today’s world home", frame: "250a", route: "World Chat", status: "drawn", checked: "2026-10-29", controls: ["Use A","Use B","Designed"], notes: ["Proposed 29 October 2026, revised the same day: cards in the chat, no other UI. Corrected the same day: the page beside the chat is a picture of today's app; the panel is the shipped one."] },
+  { group: "Arke hears a read · turn 250", screen: "Lin Wei: briefed a tenor, reads lower; Use B waits for a play · new: the voices card · beside today’s world home", frame: "250b", route: "World Chat", status: "drawn", checked: "2026-10-29", controls: ["Use A","Use B","play first"], notes: ["Proposed 29 October 2026, revised the same day: cards in the chat, no other UI. Corrected the same day: the page beside the chat is a picture of today's app; the panel is the shipped one."] },
+  { group: "Arke hears a read · turn 250", screen: "Different enough? A judgement, then its evidence · new: the evidence card and ✓ Read 4 measures · beside today’s world home", frame: "250c", route: "World Chat", status: "drawn", checked: "2026-10-29", controls: ["Pitch and pace"], notes: ["Proposed 29 October 2026, revised the same day: cards in the chat, no other UI. Corrected the same day: the page beside the chat is a picture of today's app; the panel is the shipped one."] },
+  { group: "Arke hears a read · turn 250", screen: "What Arke cannot hear: accent · new: the not-measured card and ✓ Read 2 measures · beside today’s world home", frame: "250d", route: "World Chat", status: "drawn", checked: "2026-10-29", controls: ["Not measured"], notes: ["Proposed 29 October 2026, revised the same day: cards in the chat, no other UI. Corrected the same day: the page beside the chat is a picture of today's app; the panel is the shipped one."] },
+  { group: "Arke hears a read · turn 250", screen: "After a table read: one card, three to check · new: Arke’s post and its card · beside today’s scene 1", frame: "250e", route: "Builder Chat / Scene", status: "drawn", checked: "2026-10-29", controls: ["Redo","Keep"], notes: ["Proposed 29 October 2026, revised the same day: cards in the chat, no other UI. Corrected the same day: the page beside the chat is a picture of today's app; the panel is the shipped one."] },
+  { group: "Arke hears a read · turn 250", screen: "Check this take: one read’s measure · new: the one-read card and ✓ Read 1 measure · beside today’s scene 2, at shot 2", frame: "250f", route: "Builder Chat / Scene", status: "drawn", checked: "2026-10-29", controls: ["Redo"], notes: ["Proposed 29 October 2026, revised the same day: cards in the chat, no other UI. Corrected the same day: the page beside the chat is a picture of today's app; the panel is the shipped one."] },
+  // END ARKE HEARS 250
+
   // BEGIN PROSE PAGES 249
   { group: "Prose into pages · turn 249", screen: "Setup: three questions by example, then one plan", frame: "249b", route: "Graphic novel / Setup and Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },
   { group: "Prose into pages · turn 249", screen: "Pages: a chapter with no pages, drafted by Arke from its prose", frame: "249c", route: "Graphic novel / Setup and Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },
@@ -1001,6 +1010,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "arke-hears-250.review.html", what: "Turn 250: Arke hears a read — every read carries a measure of pace, stops, words, pitch and loudness; Arke reads it with measure_read and answers in the chat with cards, and no other UI.", state: "proposed 29 October 2026, revised and corrected the same day; not built" },
   { file: "prose-pages-249.review.html", what: "Turn 249: Arke turns prose into pages — Plan with Arke from a story, and a chapter drafted as pages to keep or discard.", state: "approved 29 October 2026; not built" },
   { file: "comic-style-248.review.html", what: "Turn 248: a graphic novel’s comic style — ten styles and your own, each shown as the same page drawn in it, picked in Tell a story and changed in Pages.", state: "approved 29 October 2026; not built" },
   { file: "graphic-novel-247.review.html", what: "Turn 247: the graphic novel — Graphic novel under Tell a story, the Pages screen and its page editor, a take’s lettering check drawn on the page, a take that passes, a check that could not run, the reader, and Export.", state: "approved 29 October 2026; not built" },
@@ -1203,6 +1213,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="graphic-novel-247.css">
 <link rel="stylesheet" href="comic-style-248.css">
 <link rel="stylesheet" href="prose-pages-249.css">
+<link rel="stylesheet" href="arke-hears-250.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">
