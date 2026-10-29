@@ -1,0 +1,26 @@
+{
+  "format": "arke-comic",
+  "version": 1,
+  "reading": "ltr",
+  "aspect": "2:3",
+  "language": "en",
+  "chapters": [
+    {
+      "title": "The tide",
+      "pages": [
+        {
+          "picture": "p-0001",
+          "alt": "Maren alone on the flooded pier at dawn. The tide came in grey."
+        },
+        {
+          "picture": "p-0002",
+          "alt": "Maren calling over the water. Maren: Where are you?"
+        }
+      ]
+    },
+    {
+      "title": "Salt",
+      "pages": []
+    }
+  ]
+}

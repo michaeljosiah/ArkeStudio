@@ -1,3 +1,4 @@
+import { exportComicPlayer } from "./comic-player-export.js";
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -169,6 +170,8 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
   // is an interactive movie or a visual novel (SPEC-058 R-89).
   if (productionShape(production.meta).isMusic) return exportMusicPlayer(store, productionId, options);
   if (productionShape(production.meta).isBranching) return exportStoryPlayer(store, productionId, options);
+  // A graphic novel is its own package too, schema 7 (SPEC-064 R-50; Player P20).
+  if (productionShape(production.meta).hasPages) return exportComicPlayer(store, productionId, options);
   const step = options.onStep ?? (() => {});
 
   if (signal.aborted) return cancelled();

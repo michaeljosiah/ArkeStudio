@@ -5,7 +5,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { openPromise, type Entry } from "yauzl";
 import { ZipFile } from "yazl";
-import { guideAssetIds, listeningAssetIds, musicAssetIds, readGuide, readListening, readMusic, readStory, readWorldManifest, storyAssetIds, WORLD_MANIFEST_FILE, type StoryDocument, type WorldManifest } from "@arke-studio/contracts";
+import { comicAssetIds, readComic, guideAssetIds, listeningAssetIds, musicAssetIds, readGuide, readListening, readMusic, readStory, readWorldManifest, storyAssetIds, WORLD_MANIFEST_FILE, type StoryDocument, type WorldManifest } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
 
 /**
@@ -133,7 +133,16 @@ export async function checkWorldPackageZip(file: string, signal?: AbortSignal): 
       else for (const assetId of guideAssetIds(guide.guide)) used.add(assetId);
     }
     for (const production of manifest.productions) {
-      for (const assetId of [production.picture, production.tall, production.book, production.narration, production.listening, production.music, production.story]) if (assetId !== undefined) used.add(assetId);
+      for (const assetId of [production.picture, production.tall, production.book, production.narration, production.listening, production.music, production.story, production.comic]) if (assetId !== undefined) used.add(assetId);
+      // A graphic novel (SPEC-064 R-50): its pages are known once its comic document is read.
+      if (production.comic !== undefined) {
+        const entry = entries.get(manifest.assets[production.comic]!.path.toLowerCase());
+        if (entry === undefined) continue;
+        const comic = readComic((await bytesOf(entry)).toString("utf8"), manifest.assets);
+        if (!comic.ok) problems.push(`${production.id} comic: ${comic.reason}`);
+        else for (const assetId of comicAssetIds(comic.document)) used.add(assetId);
+        continue;
+      }
       if (production.story !== undefined) {
         const entry = entries.get(manifest.assets[production.story]!.path.toLowerCase());
         if (entry === undefined) continue;

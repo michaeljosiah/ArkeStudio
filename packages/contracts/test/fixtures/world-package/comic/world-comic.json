@@ -1,0 +1,31 @@
+{
+  "format": "arke-world-package",
+  "schemaVersion": 7,
+  "id": "the-undersong",
+  "edition": "2026-10-29",
+  "name": "The Undersong",
+  "logline": "A drowned god still sings beneath the harbour of Saltmouth.",
+  "alone": true,
+  "productions": [
+    {
+      "id": "low-water-drawn",
+      "title": "Low Water, drawn",
+      "picture": "cover",
+      "comic": "comic"
+    }
+  ],
+  "assets": {
+    "comic": {
+      "path": "low-water-drawn/comic.json",
+      "mediaType": "application/vnd.arke.comic+json",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "cover": {
+      "path": "low-water-drawn/cover.jpg",
+      "mediaType": "image/jpeg",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}
