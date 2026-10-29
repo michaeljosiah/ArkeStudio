@@ -27,6 +27,7 @@ import {
   type DramaChapterDecision,
   type DramaRole,
   type EpisodeScriptBlock,
+  type ComicPage,
   type Delivery,
   type Frame,
   type HarnessEngine,
@@ -1204,6 +1205,14 @@ export function subscribeDramaSound(listener: (result: DramaSound) => void): () 
   return () => dramaSoundListeners.delete(listener);
 }
 
+/** What became of one comic script save (SPEC-064 R-10): the new base, or a refusal by name. */
+export type ComicScriptSaveResult = Extract<DomainEvent, { type: "comic-script.save-result" }>;
+const comicScriptSaveListeners = new Set<(result: ComicScriptSaveResult) => void>();
+export function subscribeComicScriptSaveResults(listener: (result: ComicScriptSaveResult) => void): () => void {
+  comicScriptSaveListeners.add(listener);
+  return () => comicScriptSaveListeners.delete(listener);
+}
+
 /** What became of one episode script save (SPEC-057 R-83): the new base, or a refusal by name. */
 export type EpisodeScriptSaveResult = Extract<DomainEvent, { type: "episode-script.save-result" }>;
 const episodeScriptSaveListeners = new Set<(result: EpisodeScriptSaveResult) => void>();
@@ -1982,6 +1991,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "episode-script.save-result") {
       for (const listener of episodeScriptSaveListeners) listener(event);
+    }
+    if (event.type === "comic-script.save-result") {
+      for (const listener of comicScriptSaveListeners) listener(event);
     }
     if (event.type === "drama.source") {
       for (const listener of dramaSourceListeners) listener(event);
@@ -5421,6 +5433,20 @@ export function saveChapter(
     return null;
   }
   return requestId;
+}
+
+/**
+ * Save a graphic novel chapter's comic script whole (SPEC-064 R-10). `baseHash` is the file the
+ * editor read, null for a chapter with no script yet; the answer, by requestId, carries the next base.
+ */
+export function saveComicScript(worldId: string, productionId: string, chapter: string, pages: ComicPage[], baseHash: string | null): string | null {
+  const requestId = ulid();
+  return send({ kind: "save-comic-script", requestId, worldId, productionId, chapter, pages, baseHash }) ? requestId : null;
+}
+
+/** How a graphic novel reads and how its pages are checked (SPEC-064 R-12). */
+export function setComicSettings(worldId: string, productionId: string, settings: Extract<ClientMessage, { kind: "set-comic-settings" }>["settings"]): boolean {
+  return send({ kind: "set-comic-settings", worldId, productionId, settings });
 }
 
 /**

@@ -12,6 +12,7 @@ import {
   CharacterAliasesInputSchema,
   MICRODRAMA_DEFAULTS,
   AUDIO_DRAMA_KIND,
+  GRAPHIC_NOVEL_KIND,
   adaptableStories,
   newId,
   deriveCut,
@@ -4673,7 +4674,7 @@ export const DOOR_CHOICES = [
     id: "write",
     eyebrow: "WRITE",
     label: "Tell a story",
-    body: "Novel, novella, episodic fiction, audio drama or audiobook",
+    body: "Novel, novella, episodic fiction, graphic novel, audio drama or audiobook",
     affordance: "Begin with words",
     medium: "story",
   },
@@ -4761,6 +4762,8 @@ export const INTERACTIVE_KIND_CHOICES = [
 export const STORY_KIND_CHOICES = [
   { id: "book", label: "Novel", body: "Chapters, to read." },
   { id: AUDIO_DRAMA_KIND, label: "Audio drama", body: "Episodes, for the ear." },
+  // A graphic novel (SPEC-064 R-3): chapters of pages, each page a picture made from its script.
+  { id: GRAPHIC_NOVEL_KIND, label: "Graphic novel", body: "Pages, to look at." },
   { id: "other", label: "Other", body: "Nothing assumed." },
 ] as const;
 
@@ -4781,7 +4784,7 @@ type KindChoice = { id: string; label: string; body: string; aspect?: string };
  * `interactive` is still one of them and still reads back the same way — it just arrives from
  * the door now rather than from the kind row (turn 113a).
  */
-const STORED_KINDS = new Set(["microdrama", "music-video", "interactive", "visual-novel", AUDIO_DRAMA_KIND, "album", "single", "soundtrack"]);
+const STORED_KINDS = new Set(["microdrama", "music-video", "interactive", "visual-novel", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, "album", "single", "soundtrack"]);
 
 /*
  * The kinds with a plate in `public/video-kinds`. Other is deliberately absent: an image of

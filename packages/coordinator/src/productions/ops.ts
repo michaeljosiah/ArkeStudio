@@ -52,6 +52,7 @@ import {
   MUSIC_RECORD_FILE,
   MusicRecordSchema,
   musicKindOf,
+  DEFAULT_COMIC_SETTINGS,
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
 import { posterNameFor } from "../takes/poster.js";
@@ -237,6 +238,10 @@ export async function createProductionFromPlan(
       baseHash: null,
     });
   }
+  // A graphic novel starts with how it reads (SPEC-064 R-12); the committer raises the world for it.
+  if (shape.hasPages) {
+    files.push({ path: `productions/${plan.production.id}/comic.json`, action: "create", content: `${JSON.stringify(DEFAULT_COMIC_SETTINGS, null, 2)}\n`, baseHash: null });
+  }
   // Music starts with its record (SPEC-060 R-4), a soundtrack's `for` fixed in the plan. A plan
   // prepared before plans carried one starts as the empty album its first change writes.
   if (plan.music !== undefined) {
@@ -391,6 +396,10 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
       content: JSON.stringify(AudioDramaRecordSchema.parse({ version: 1, plan: DEFAULT_AUDIO_DRAMA_PLAN }), null, 2) + "\n",
       baseHash: null,
     });
+  }
+  // A graphic novel reads left to right on 2:3 pages until the author says otherwise (SPEC-064 D-3, D-4).
+  if (shape.hasPages) {
+    files.push({ path: `productions/${slug}/comic.json`, action: "create", content: JSON.stringify(DEFAULT_COMIC_SETTINGS, null, 2) + "\n", baseHash: null });
   }
   // Music starts with no tracks and the album's loudness (SPEC-060 R-4); a soundtrack names its production.
   if (shape.isMusic) {

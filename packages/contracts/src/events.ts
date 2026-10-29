@@ -522,6 +522,22 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /** `save-comic-script` answered: the new base on success, the reason on refusal (SPEC-064 R-10). */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic-script.save-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapter: SlugSchema,
+      disposition: z.enum(["saved", "refused"]),
+      version: z.number().int().min(1).optional(),
+      hash: z.string().min(1).optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+
   /** A revision- or source-fenced timeline command was refused and no timeline bytes changed. */
   EffectReviewResultSchema,
   TransitionReviewResultSchema,

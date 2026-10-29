@@ -130,6 +130,12 @@ export const ModelLimitsSchema = z
   .object({
     /** The provider chooses dimensions; absence of aspect limits must not imply control. */
     providerSelectedSize: z.literal(true).optional(),
+    /**
+     * The vendor says the model letters legible words inside the picture (SPEC-064 R-24): a comic
+     * page with its balloons baked in is offered only on a model that says so. A claim, not a
+     * guarantee — every page is still read back and checked.
+     */
+    lettering: z.literal(true).optional(),
     maxDurationSec: z.number().int().min(1).optional(),
     /**
      * Seconds → the provider's own word for that length. Video routes do not take a number of

@@ -2,6 +2,7 @@ import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { EMPTY_GUIDE_RECORD, GuideRecordSchema } from "./world-guide.js";
 import { valueSchema } from "./value-schema.js";
 import { AudioDramaRecordSchema, EpisodeScriptSchema, EpisodeTakesSchema } from "./audio-drama.js";
+import { ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema } from "./graphic-novel.js";
 import { MusicRecordSchema } from "./music.js";
 import { DesignedVoiceSchema } from "./designed-voice.js";
 import { StageReviewSchema } from "./human-decision.js";
@@ -187,6 +188,12 @@ export const ProductionBundleSchema = valueSchema(z
     episodeScripts: z.array(z.object({ file: z.string().min(1), hash: z.string().min(1), script: EpisodeScriptSchema }).strict()).optional(),
     /** Each episode's takes (SPEC-057 R-29): the kept take and any waiting, by script block. */
     episodeTakes: z.array(EpisodeTakesSchema).optional(),
+    /** comic.json — a graphic novel's reading, page shape and checks (SPEC-064 R-12), or null. */
+    comic: ComicSettingsSchema.nullable().optional(),
+    /** Each chapter's comic script (SPEC-064 R-10), with the hash its next save is fenced on. */
+    comicScripts: z.array(z.object({ chapter: z.string().min(1), hash: z.string().min(1), script: ComicScriptSchema }).strict()).optional(),
+    /** Each page's takes and what the author chose (SPEC-064 R-26), by page id. */
+    comicPages: z.array(z.object({ page: z.string().min(1), hash: z.string().min(1), record: ComicPageRecordSchema }).strict()).optional(),
     /**
      * prose-style.json — the style the book is written in, or null when none (turn 128).
      * Optional rather than defaulted so a bundle from before it existed still types as one.

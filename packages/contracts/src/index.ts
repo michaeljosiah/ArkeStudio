@@ -4,6 +4,9 @@ export { ReferenceMediaBindingsSchema, referenceInputProblem, type ReferenceMedi
 export * from "./world.js";
 export * from "./production-shape.js";
 export * from "./audio-drama.js";
+export * from "./graphic-novel.js";
+export * from "./graphic-novel-check.js";
+export * from "./graphic-novel-prompt.js";
 export * from "./scene-findings.js";
 export * from "./season-findings.js";
 export * from "./bible.js";
