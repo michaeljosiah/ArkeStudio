@@ -56,7 +56,8 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     assert.equal(characterImageEstimateIsUsable(codex, 1), false);
     assert.match(modelPriceCopy(codex), /ChatGPT plan.*Codex allowance/);
     assert.equal(modelCapabilityCopy(codex), "refs ×4");
-    assert.deepEqual(codex.limits, { providerSelectedSize: true });
+    // Lettering is a declared ability, not an output control: GPT Image letters on this route too (issue 2249).
+    assert.deepEqual(codex.limits, { providerSelectedSize: true, lettering: true });
     assert.deepEqual(offeredAspects(codex), []);
     assert.deepEqual(offeredAspects({ ...codex, limits: { ...codex.limits, aspects: ["16:9"] } }), []);
     assert.deepEqual(aspectSupport(codex, "16:9"), { ok: false, supported: [] });
@@ -1331,5 +1332,12 @@ describe("the unconfigured default", () => {
     // different size highlights a control whose estimate prices something else.
     const model = SHIPPED_MANIFEST.models.find((m) => m.id === "seedance-2.5")!;
     assert.equal(model.limits.resolutions?.[0], "720p");
+  });
+});
+
+describe("graphic novel lettering (SPEC-064 R-24)", () => {
+  it("lets the GPT Image routes and Nano Banana Pro letter a page, Codex Image on the ChatGPT plan among them (issue 2249)", () => {
+    const letters = SHIPPED_MANIFEST.models.filter((model) => model.capability === "image" && model.limits.lettering === true).map((model) => model.id).sort();
+    assert.deepEqual(letters, ["codex-image", "gpt-image-2", "gpt-image-2-fal", "nano-banana-pro"]);
   });
 });
