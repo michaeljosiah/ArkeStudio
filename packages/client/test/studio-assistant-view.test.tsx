@@ -126,6 +126,32 @@ it("offers current storage review inside Studio, requires separate approval and 
     assert(h.sent.every(message => message.command.action === "watch"), "the repair follows existing host controls without a model request");
   } finally { await act(async () => root.unmount()); h.client.dispose(); container.remove(); __setBridgeForTest(null); }
 });
+it("names the World Chat handoff and stages its edited draft there without sending; a diagnosis states its explanation once", async () => {
+  __setStateForTest(FIXTURE_STATE, { connection: "open" });
+  const h = fixture(), world = new GlobalChatController(), container = document.createElement("div"); document.body.append(container);
+  const draft = "Help me rewrite the opening in The Undersong.", explanation = "The media drive needs more space before your export can continue.";
+  const evidence = { version: 1 as const, at: 1, topic: "storage" as const, audit: { history: "available" as const, recovery: "available" as const, storage: "available" as const },
+    incidents: [], storage: [], jobs: [], limited: { incidents: false, storage: false, jobs: false } };
+  const state = initial();
+  state.threads = [{ id: threadId, createdAt: 1, updatedAt: 1, archived: false, pending: null, messages: [
+    { id: threadId, role: "arke", text: explanation, at: 1, diagnostic: { evidence, answer: { explanation, evidenceRefs: [], hypotheses: [] } } },
+    { id: runId, role: "arke", text: "Let’s take that to your world’s conversation.", at: 2, handoff: { destination: "world", draft } },
+  ] }]; h.deliver(state); h.client.select(threadId);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<MemoryRouter><GlobalChatContext.Provider value={world}><View client={h.client} /></GlobalChatContext.Provider></MemoryRouter>));
+    assert.equal(container.textContent!.split(explanation).length - 1, 1, "the saved explanation is not repeated inside Operational findings");
+    const card = container.querySelector<HTMLTextAreaElement>(".fy-studio-handoff-draft")!.closest(".fy-studio-fact-card")!;
+    assert.equal(card.querySelector(".fy-studio-fact-head")?.textContent, "World Chat");
+    assert.equal(card.querySelector(".fy-studio-meta")?.textContent, "The Undersong");
+    await act(async () => [...card.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Open World Chat")!.click());
+    const target = chatSurfaceForPage(FIXTURE_STATE, `/w/${FIXTURE_STATE.world!.meta.worldId}/chat`)!;
+    assert.equal(world.getSnapshot().open, true); assert.equal(world.value(world.getSnapshot().selected!.key, "draft", ""), draft);
+    assert.equal(world.getSnapshot().selected?.entry.kind, target.entry.kind);
+    assert.equal(h.client.getSnapshot().open, false);
+    assert.deepEqual([...new Set(h.sent.map(message => message.command.action))], ["watch", "unwatch"], "closing for the handoff only stops observing; nothing is sent");
+  } finally { await act(async () => root.unmount()); h.client.dispose(); container.remove(); }
+});
 it("explains an invalid diagnostic answer and acknowledges it without resending", async () => {
   const h = fixture(), container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
   const state = initial();

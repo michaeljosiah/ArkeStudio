@@ -498,3 +498,38 @@ explicit review, without replay. Existing ComfyUI/Ming/Ollama and voice-client l
 changes. Focused regression runs passed 91 setup/GPU cases, 44 client cases, 54 final repair/host
 authorization cases and three review interaction cases. Lint passes with seven existing warnings.
 Final CI is not a prerequisite for this owner-directed merge and must not be described as passed.
+
+## Turn 239 matched visual comparison — 29 October 2026
+
+The approved review (`design-system/global-chat-239.review.html`, revision 2) was served over
+HTTP and rendered unscaled; the current client ran from source against the dev coordinator. Both
+were captured in headless Chrome 156 at DPR 1, 100% zoom, Geist Sans, with animations off,
+at 1360×820 (239b–e), 390×844 (239f), 834×900 (239g) and 390×550 (239h), light and dark. The real
+titlebar Chat control opened the real dialog. Synthetic facts came through the store's test hooks:
+a configured Studio model, a ready local narrator, a 6 GiB media drive with a held export check and
+a preview-cleanup scope, plus diagnosis and handoff threads. Outgoing model, dictation and
+recovery-action frames were held in the page, so no model call, cleanup or file change occurred.
+
+The first pass was invalid: the worktree could not serve `@fontsource`, so the client rendered in
+Segoe UI. Local font copies fixed the environment before any comparison was recorded.
+
+Corrected against the master: an 8px-taller header (inline subtitle on a body-text strut), the
+composer toolbar (26/28px tools with 8px corners → 32px with 6px; Read replies named; chip takes the
+free width; 16px glyphs; editor and placeholder padding and type), 1.7 → 1.6 reply line-height,
+warning-coloured 15px storage-card icons, the handoff card's heading, named world and primary
+Open World Chat, and a diagnosis explanation printed twice. A phone regression in 44px composer
+targets introduced during this pass was caught and corrected. After the fixes every measured shell
+part (dialog, header, scope, transcript, welcome, composer, tools and glyphs) matches within
+0.6px in all 14 captures; the only offsets are phone Read replies at −5px, from the model name's width.
+
+Remaining differences, not changed here: the diagnosis renders Operational findings, the export
+space check, live readings and Current remedies instead of 239c's single storage card; cleanup
+review reuses the Settings cleanup controls instead of 239d's approval card; the handoff card keeps
+its editable draft field and its own note; the composer is focused on open; phone model chips are
+44px, per the design's touch-target rule, where the drawing draws 32px. Text in the top-layer dialog
+anti-aliases differently from the drawing. On modal sizes Shift+Tab from the first control
+reaches the document root before re-entering the dialog; no background control is reachable.
+Opening Activity closes Studio, keeping its draft, but closing Activity does not reopen it as the
+prototype does. Reviewing cleanup sent only a preview request; the handoff staged an edited draft in
+World Chat and sent nothing. Physical-device keyboards and the packaged Electron surface were not
+checked: this checkout has no Electron install and the installed app predates the fixes.

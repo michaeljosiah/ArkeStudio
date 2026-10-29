@@ -150,7 +150,9 @@ function StudioMessage({ message, appState, close, actions, currentDiagnostic = 
     {message.role === "arke" && <div className="fy-studio-answer-label">Arke</div>}
     <ConversationReply text={message.text} />
     {message.attachments?.map(row => <details className="fy-studio-fact-card" key={row.id}><summary>{row.name}</summary><pre>{row.text}</pre></details>)}
-    {message.diagnostic && <div className="fy-studio-fact-card"><div className="fy-studio-fact-head">Operational findings</div><ConversationReply text={message.diagnostic.answer.explanation} />
+    {/* The host saves the explanation as the reply's own text; 239c shows it once, above the findings. */}
+    {message.diagnostic && <div className="fy-studio-fact-card"><div className="fy-studio-fact-head">Operational findings</div>
+      {message.diagnostic.answer.explanation !== message.text && <ConversationReply text={message.diagnostic.answer.explanation} />}
       <p className="fy-studio-note">Observed {new Date(message.diagnostic.evidence.at).toLocaleString()}. Findings describe that observation.</p>
       {message.diagnostic.answer.hypotheses.length > 0 && <><b>Possible causes</b><ul>{message.diagnostic.answer.hypotheses.map((hypothesis, index) => <li key={index}>{hypothesis}</li>)}</ul></>}
     </div>}
@@ -177,21 +179,21 @@ function StudioHandoff({ handoff, appState, close }: { handoff: NonNullable<Stud
   const target = path && (handoff.destination === "world" || production) ? chatSurfaceForPage(appState, path) : null;
   const replace = replacement?.key === target?.key ? replacement : null;
   const title = handoff.destination === "world" ? "World Chat" : "Builder Chat";
-  return <div className="fy-studio-fact-card"><b>Continue in {title}</b>
+  return <div className="fy-studio-fact-card"><div className="fy-studio-fact-head">{title}</div>
+    {world ? <div className="fy-studio-meta">{world.meta.name}</div> : <p className="fy-studio-note">Open a world, then choose its conversation here.</p>}
     <p className="fy-studio-note">Only this editable request draft moves. Review and send it in the destination conversation.</p>
-    {world ? <p className="fy-studio-note">World: {world.meta.name}</p> : <p className="fy-studio-note">Open a world, then choose its conversation here.</p>}
     {world && handoff.destination === "builder" && <label className="fy-studio-target">Production<select aria-label="Handoff production" value={productionId} onChange={event => { setSelection({ worldId: world.meta.worldId, productionId: event.target.value }); setReplacement(null); setTrouble(null); }}>
       <option value="">Choose a production</option>{world.productions.map(row => <option key={row.meta.id} value={row.meta.id}>{row.meta.title}</option>)}</select></label>}
     <textarea className="fy-studio-handoff-draft" aria-label="Request draft for destination" value={draft} maxLength={STUDIO_ASSISTANT_LIMITS.requestChars} onChange={event => { setDraft(event.target.value); setReplacement(null); }} />
     {trouble && <p className="fy-studio-note" role="status">{trouble}</p>}
     {replace && <><p className="fy-studio-note">This destination already has an unsent draft. Replace it with the request above?</p><details><summary>Existing draft</summary><pre>{replace.draft}</pre></details></>}
-    <button type="button" className="fy-studio-button" disabled={!target || !owner || !draft.trim()} onClick={() => {
+    <button type="button" className="fy-studio-button fy-studio-button--primary" disabled={!target || !owner || !draft.trim()} onClick={() => {
       if (!target || !owner) return;
       const outcome = owner.stageDraft(target, draft, replace?.draft);
       if (outcome === "replace-required") { setReplacement({ key: target.key, draft: owner.value(target.key, "draft", "") }); return; }
       if (outcome === "busy") { setTrouble("Finish the destination’s current capture or request before moving this draft."); return; }
       close();
-    }}>{replace ? "Replace draft and open " : "Open "}{title}{production ? ` · ${production.meta.title}` : world ? ` · ${world.meta.name}` : ""}</button>
+    }}>{replace ? "Replace draft and open " : "Open "}{title}{production ? ` · ${production.meta.title}` : ""}</button>
     {replace && <button type="button" className="fy-studio-button" onClick={() => setReplacement(null)}>Keep existing draft</button>}
   </div>;
 }
