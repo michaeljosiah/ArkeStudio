@@ -70,12 +70,15 @@ export function productionRecord(bundle: WorldBundle, productionId: string): Rec
   };
 }
 
-function unpaged(production: ProductionBundle): { chapters: string[]; baseHash: null; howToWrite: string } {
-  const paged = new Set((production.comicScripts ?? []).filter((entry) => entry.script.pages.length > 0).map((entry) => entry.chapter));
+function unpaged(production: ProductionBundle): { chapters: Array<{ chapter: string; baseHash: string | null }>; howToWrite: string } {
+  // A chapter whose pages were all removed has a saved, empty script: its base is that file's hash,
+  // not null, or the draft would be refused as a guess (codex on PR 2246).
+  const scripts = new Map((production.comicScripts ?? []).map((entry) => [entry.chapter, entry]));
   return {
-    chapters: production.chapters.filter((chapter) => chapter.status !== "retired" && !paged.has(chapter.id)).map((chapter) => chapter.id),
-    baseHash: null,
-    howToWrite: "Each of these has no pages yet. Read the chapter's prose with get_chapter (or the chapter it adapts), then write its pages with production-comic-script, baseHash null, citing each panel's source paragraphs and your get_production_metadata receipt.",
+    chapters: production.chapters
+      .filter((chapter) => chapter.retired !== true && (scripts.get(chapter.id)?.script.pages.length ?? 0) === 0)
+      .map((chapter) => ({ chapter: chapter.id, baseHash: scripts.get(chapter.id)?.hash ?? null })),
+    howToWrite: "Each of these has no pages yet. Read the chapter's prose with get_chapter (or the chapter it adapts), then write its pages with production-comic-script, naming the baseHash given here, citing each panel's source paragraphs and your get_production_metadata receipt.",
   };
 }
 

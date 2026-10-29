@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ModelWorldChatActionSchema, comicPageHash, newId, ulid, type ComicPage, type ConversationId } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
-import { createChapter, createProduction } from "../../src/productions/ops.js";
+import { createChapter, createProduction, setChapterRetired } from "../../src/productions/ops.js";
 import { saveComicScript } from "../../src/productions/graphic-novel.js";
 import { stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
 import { productionRecord } from "../../src/world-chat/production-record.js";
@@ -41,8 +41,8 @@ describe("Arke's pages (SPEC-064 R-13, turn 249)", () => {
 
   it("lists a chapter with no pages for Arke, and stages its pages as a draft, citing the chapter as it stands", async () => {
     const { store, id, chapter, gate, intent } = await book();
-    const read = productionRecord(store.getBundle(), id) as { unpagedChapters?: { chapters: string[] } };
-    assert.deepEqual(read.unpagedChapters?.chapters, [chapter]);
+    const read = productionRecord(store.getBundle(), id) as { unpagedChapters?: { chapters: Array<{ chapter: string; baseHash: string | null }> } };
+    assert.deepEqual(read.unpagedChapters?.chapters, [{ chapter, baseHash: null }]);
     const run = action(id, chapter, null, [{ layout: "feature", panels: [
       { description: "Maren walks the hard with her lantern.", characters: ["maren-kest"], lettering: [{ kind: "caption", text: "Salt was in everything that week." }], source: { story: id, chapter, paragraphs: [1, 2] } },
       { description: "Bray at the weigh house door.", characters: ["bray-half-hitch"], lettering: [{ kind: "speech", speaker: "bray-half-hitch", text: "You walked the hard again." }] },
@@ -82,6 +82,18 @@ describe("Arke's pages (SPEC-064 R-13, turn 249)", () => {
     const again = action(id, chapter, baseHash, [{ layout: "splash", panels: [{ description: "The bell." }] }]);
     again.worldId = store.worldId;
     await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, again), /is waiting/);
+  });
+
+  it("names an emptied chapter's own base, and drafts no pages for a retired chapter (codex on PR 2246)", async () => {
+    const { store, id, chapter, gate, intent } = await book();
+    const saved = await saveComicScript(store, id, { chapter, pages: [], baseHash: null });
+    const read = productionRecord(store.getBundle(), id) as { unpagedChapters?: { chapters: Array<{ chapter: string; baseHash: string | null }> } };
+    assert.deepEqual(read.unpagedChapters?.chapters, [{ chapter, baseHash: saved.hash }], "a saved empty script is drafted on its own hash, not null");
+    await setChapterRetired(store, id, production(store, id).chapters.find((c) => c.id === chapter)!.file, true);
+    assert.deepEqual((productionRecord(store.getBundle(), id) as { unpagedChapters?: { chapters: unknown[] } }).unpagedChapters?.chapters, []);
+    const retired = action(id, chapter, saved.hash, [{ layout: "splash", panels: [{ description: "x" }] }]);
+    retired.worldId = store.worldId;
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, retired), /has no chapter/);
   });
 
   it("refuses a sheet that is not in the world, a passage in a chapter that is not, and a book that is not a graphic novel", async () => {
