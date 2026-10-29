@@ -46,7 +46,7 @@ import { CharacterAliasesInputSchema } from "./world.js";
 import { RoutingCommandSchema } from "./world-chat-actions.js";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { MusicSequenceSchema, MusicTrackEditSchema } from "./music.js";
-import { ClientStateSchema } from "./client-state.js";
+import { ClientStateSchema, type ClientState } from "./client-state.js";
 import { AdapterActionSchema } from "./adapters.js";
 import { MAX_CLIP_LANE } from "./cut.js";
 import {
@@ -61,7 +61,7 @@ import { EffectReviewCommandSchema } from "./editor-effect-review.js";
 import { TransitionReviewCommandSchema } from "./editor-transition-proposal.js";
 import { PictureReviewCommandSchema } from "./editor-picture-proposal.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
-import { DomainEventSchema } from "./events.js";
+import { DomainEventSchema, type DomainEvent } from "./events.js";
 import { DramaDeliverySchema } from "./audio-drama-edition.js";
 import { DramaChapterDecisionSchema, DramaReviewDecisionSchema, DramaRoleKeySchema, DramaRoleSchema, EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
 import { COMIC_LIMITS, ComicAttemptCapSchema, ComicModeSchema, ComicPageSchema, ComicReadingSchema, LetteringThresholdsSchema } from "./graphic-novel.js";
@@ -83,7 +83,7 @@ import { ProductionSetupCommandSchema } from "./production-setup.js";
 import { NarrativeFieldsSchema } from "./production-narrative.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
 import { DecideConversationActionSchema, PrepareConversationTakeReviewSchema } from "./arke-actions.js";
-import { StudioAssistantCommandSchema, StudioAssistantResponseSchema } from "./studio-assistant.js";
+import { StudioAssistantCommandSchema, StudioAssistantResponseSchema, type StudioAssistantResponse } from "./studio-assistant.js";
 
 /**
  * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then events and requester-only
@@ -100,12 +100,22 @@ import { StudioAssistantCommandSchema, StudioAssistantResponseSchema } from "./s
 export const PASSAGE_SPAN_MAX = 20_000;
 export const PASSAGE_KEPT_MAX = 2_400;
 
-export const FrameSchema = valueSchema(z.discriminatedUnion("kind", [
+/**
+ * Written out rather than inferred: the inferred type spelled ClientState and DomainEvent out in
+ * full, and once the graphic novel and the Studio assistant both landed (bef8feac3) it passed the
+ * compiler's serialization limit (TS7056), so the engine's declaration bundle, and with it the root
+ * build and every installer, failed. Naming the three member types keeps the declaration small.
+ */
+export type Frame =
+  | { kind: "snapshot"; seq: number; state: ClientState; retainedHistory?: Array<"jobs" | "ledger"> }
+  | { kind: "event"; seq: number; event: DomainEvent }
+  | { kind: "studio-assistant"; seq: number; requestId: string; response: StudioAssistantResponse };
+
+export const FrameSchema: z.ZodType<Frame, z.ZodTypeDef, unknown> = valueSchema(z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema, retainedHistory: z.array(z.enum(["jobs", "ledger"])).optional() }).strict(),
   z.object({ kind: z.literal("event"), seq: z.number().int().min(1), event: DomainEventSchema }).strict(),
   z.object({ kind: z.literal("studio-assistant"), seq: z.number().int().min(1), requestId: z.string().uuid(), response: StudioAssistantResponseSchema }).strict(),
 ]));
-export type Frame = z.infer<typeof FrameSchema>;
 
 /** What a client may send up. Commands arrive with their owning specs. */
 /** A staged-reference key, as strictly as the coordinator needs it to be — it becomes a folder. */
