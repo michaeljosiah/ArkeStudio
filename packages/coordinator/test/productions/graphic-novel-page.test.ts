@@ -71,15 +71,13 @@ describe("a comic page made (SPEC-064 R-22 – R-27)", () => {
       assert.equal(h.enqueued.length, 0);
     }, { model: LETTERER }));
 
-  it("makes art without lettering on any model, leaving space for the balloons", () =>
+  it("refuses art without lettering: this version letters every page in the picture (turn 247)", () =>
     withHarness(async (h) => {
       const { production, page } = await book(h);
       await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, mode: "overlay", confirmedMicroUsd: 1_000_000 });
-      assert.equal((last(h.events, "comic.page-made") as Made).state, "made");
-      const prompt = String((h.enqueued.at(-1)!.params as { prompt?: string }).prompt);
-      assert.doesNotMatch(prompt, /Where are you/);
-      assert.match(prompt, /Draw no lettering/);
-    }, { model: { ...LETTERER, limits: { aspects: ["2:3"] } } }));
+      assert.equal((last(h.events, "comic.page-made") as Made).reason, "pages are lettered in the picture");
+      assert.equal(h.enqueued.length, 0);
+    }, { model: LETTERER }));
 
   it("files a page that landed while nobody waited, once, when the page is next opened", () =>
     withHarness(async (h) => {

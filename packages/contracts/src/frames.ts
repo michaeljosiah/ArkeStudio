@@ -2499,7 +2499,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /** The book as CBZ and/or PDF from the accepted pages (SPEC-064 R-47, R-49). */
-  z.object({ kind: z.literal("export-comic"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, formats: z.array(z.enum(["cbz", "pdf"])).min(1).max(2) }).strict(),
+  z.object({ kind: z.literal("export-comic"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, formats: z.array(z.enum(["cbz", "pdf", "epub"])).min(1).max(3) }).strict(),
   /** Read a take back and check its lettering again (R-29). */
   z.object({ kind: z.literal("check-comic-take"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, page: UlidSchema, take: UlidSchema }).strict(),
   /** Keep a take as the page (R-26); past findings or an unchecked take only with an override (R-33). */

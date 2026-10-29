@@ -78,9 +78,33 @@ describe("a graphic novel as a book (SPEC-064 R-41, R-47, R-49)", () => {
             await writeFile(join(h.worldDir, "artifacts", artifact.file), encodePng(solidImage(40, 60, [200, 190, 170, 255])));
           }
         }
-        await h.send({ kind: "export-comic", requestId: rid(), worldId: WORLD_ID, productionId: production, formats: ["cbz", "pdf"] });
+        await h.send({ kind: "export-comic", requestId: rid(), worldId: WORLD_ID, productionId: production, formats: ["cbz", "pdf", "epub"] });
         const answer = last(h.events, "comic.exported")!.result;
         assert.ok(answer.ok, !answer.ok ? answer.reason : "");
+        // A fixed-layout EPUB: mimetype first, pre-paginated, read right to left, each page's alt text.
+        const epub = await openPromise(join(h.worldDir, answer.files.find((file) => file.format === "epub")!.file), { lazyEntries: true });
+        const read: Record<string, string> = {};
+        const order: string[] = [];
+        epub.readEntry();
+        await new Promise<void>((resolve, reject) => {
+          epub.on("entry", (entry) => {
+            order.push(entry.fileName);
+            epub.openReadStream(entry, (err, stream) => {
+              if (err) return reject(err);
+              const chunks: Buffer[] = [];
+              stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+              stream.on("end", () => { read[entry.fileName] = Buffer.concat(chunks).toString("utf8"); epub.readEntry(); });
+            });
+          });
+          epub.on("end", resolve);
+        });
+        epub.close();
+        assert.equal(order[0], "mimetype");
+        assert.equal(read["mimetype"], "application/epub+zip");
+        assert.match(read["OEBPS/content.opf"]!, /rendition:layout">pre-paginated/);
+        assert.match(read["OEBPS/content.opf"]!, /page-progression-direction="rtl"/);
+        assert.match(read["OEBPS/pages/0001.xhtml"]!, /alt="Maren on the rail\. Where are you\?"/);
+        assert.match(read["OEBPS/pages/0001.xhtml"]!, /width=40, height=60/);
         const cbz = answer.files.find((file) => file.format === "cbz")!.file;
         const zip = await openPromise(join(h.worldDir, cbz), { lazyEntries: true });
         const names: string[] = [];

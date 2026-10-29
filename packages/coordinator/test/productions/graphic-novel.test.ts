@@ -6,6 +6,7 @@ import { ComicSettingsSchema, productionShape, ulid, type ComicPage } from "@ark
 import { createChapter, createProduction } from "../../src/productions/ops.js";
 import { saveComicScript, setComicSettings } from "../../src/productions/graphic-novel.js";
 import { GRAPHIC_NOVEL_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { productionRecord } from "../../src/world-chat/production-record.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -49,6 +50,9 @@ describe("a graphic novel on disk (SPEC-064 R-1, R-10, R-12)", () => {
     assert.equal(bundled.comicScripts?.[0]?.chapter, chapter);
     assert.equal(bundled.comicScripts?.[0]?.hash, second.hash, "the scan carries the next save's base");
     await assert.rejects(saveComicScript(store, id, { chapter, pages, baseHash: first.hash }), /base|stale|changed/i);
+    // Arke reads what Pages shows (R-56): the script with its ids and the base an edit is fenced on.
+    const read = productionRecord(store.getBundle(), id) as { comicScripts?: Array<{ chapter: string; baseHash: string; pages: unknown[] }> };
+    assert.deepEqual(read.comicScripts?.map((entry) => [entry.chapter, entry.baseHash, entry.pages.length]), [[chapter, second.hash, 2]]);
   });
 
   it("refuses a chapter the book does not have, and a production that is not a graphic novel", async () => {

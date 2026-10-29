@@ -138,13 +138,16 @@ export function comicPageRequest(store: WorldStore, productionId: string, pageId
   if (!found) return { ok: false, reason: "that page is no longer in the script" };
   const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
   const mode = wanted ?? settings.mode;
+  // This version letters every page in the picture (owner, turn 247): art without words would have
+  // nothing to letter it with.
+  if (mode === "overlay") return { ok: false, reason: "pages are lettered in the picture" };
   const { page } = found;
   if (page.panels.length === 0) return { ok: false, reason: "the page has no panels" };
   // Refused before anything is spent: a take the record cannot hold would be paid for and lost (codex on PR 2222).
   const held = comicPageRecord(production, pageId);
   if (held.takes.length + held.making.length >= COMIC_LIMITS.takesPerPage) return { ok: false, reason: `this page has ${COMIC_LIMITS.takesPerPage} takes, the most it keeps` };
   // Baked lettering only on a model whose vendor says it letters (R-24); overlay art takes any.
-  if (mode === "baked" && model.limits.lettering !== true) return { ok: false, reason: `${model.displayName} does not letter pages; make it without lettering` };
+  if (mode === "baked" && model.limits.lettering !== true) return { ok: false, reason: `${model.displayName} does not letter pages` };
   const aspect = pageAspect(page, settings);
   if (!makesShape(model, aspect)) return { ok: false, reason: `${model.displayName} makes no ${aspect} page` };
   const bundle = store.getBundle();
@@ -212,7 +215,12 @@ export async function verifyComicTake(store: WorldStore, productionId: string, p
     }
   }
   await changeComicPage(store, productionId, pageId, (record) => ({ ...record,
-    takes: record.takes.map((candidate) => candidate.id === takeId ? { ...candidate, verification } : candidate) }));
+    // A new read is a new verdict: an override the author gave the old one does not carry to it.
+    takes: record.takes.map((candidate) => {
+      if (candidate.id !== takeId) return candidate;
+      const { override: _old, ...rest } = candidate;
+      return { ...rest, verification };
+    }) }));
   return verification;
 }
 
