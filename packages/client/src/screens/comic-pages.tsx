@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   BLOCKING_FINDINGS,
+  ComicScriptSchema,
   DEFAULT_COMIC_SETTINGS,
   LAYOUT_TEMPLATES,
   comicBook,
@@ -106,10 +107,20 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
     const next = draft.current;
     if (next === null) return;
     if (pending.current !== null) { timer.current = setTimeout(send, 150); return; }
+    // A new panel or line is empty until written: the coordinator would refuse the whole script, and
+    // a refused message is never answered. It stays here, unsaved, until it is whole (codex on PR 2226).
+    if (!ComicScriptSchema.safeParse({ version: 1, pages: next.pages }).success) return;
     draft.current = null;
     const requestId = saveComicScript(worldId, productionId, next.chapter, next.pages, baseFor(next.chapter));
     if (requestId === null) { draft.current = next; setProblem("not connected"); return; }
     pending.current = { requestId, chapter: next.chapter };
+    // A save never answered — a dropped socket — frees the queue rather than holding it for good.
+    setTimeout(() => {
+      if (pending.current?.requestId !== requestId) return;
+      pending.current = null;
+      draft.current ??= next;
+      setProblem("not saved");
+    }, 15_000);
   };
   useEffect(() => {
     // Another window's save, or a chapter change: the stored script wins when nothing is unsaved here.
@@ -168,7 +179,8 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
             </select>
           </label>
           <Button onClick={() => setReading(true)}>Read</Button>
-          <Button onClick={() => setExporting(true)}>Export</Button>
+          {/* The book exports as saved: an edit still waiting would ship the words before it (codex on PR 2226). */}
+          <Button disabled={unsaved} onClick={() => { send(); setExporting(true); }}>Export</Button>
         </div>
         <div className="fy-comic__body">
           <div className="fy-comic__strip">
