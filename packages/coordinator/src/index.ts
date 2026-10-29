@@ -1,4 +1,6 @@
 export { AppLog } from "./app-log.js";
+export { SystemResourceService, createNodeSystemResourceProbe } from "./system-resources.js";
+export { SetupProcessRunner } from "./setup/process.js";
 export { OllamaEngineService } from "./local-ai/ollama.js";
 export { MingProcess, type MingBatchCommand } from "./local-ai/ming.js";
 export { RemoteDevices, writeRemotePrivate } from "./remote-access/devices.js";
@@ -7,6 +9,7 @@ export { AppSettingsFile, routingFaults } from "./app-settings.js";
 export { ChangeLog, WriteQueue, type LogRecord } from "./change-log.js";
 export { Coordinator, type CoordinatorOptions } from "./coordinator.js";
 export { createStudioCoordinator, createStudioHost } from "./application/studio-host.js";
+export { ImportStorageHeld, type ImportFileSpace } from "./storage/import-files.js";
 export { StudioServer, type StudioServerApplication, type StudioEventSink } from "./studio-server.js";
 export { createNodeStudioHost, type NodeStudioHostOptions } from "./node-studio-host.js";
 export { createNodeEffectRasterHost, type EffectRasterHost, type EffectAlphaRequest } from "./media/node-effect-renderer.js";
@@ -50,6 +53,7 @@ export {
 export { CredentialStore, type Cipher } from "./credentials/store.js";
 export {
   assembleHarness,
+  managedStudioAssistant,
   describeClaudeAvailability,
   describeCodexAvailability,
   HarnessPasswordHolder,
@@ -291,6 +295,7 @@ export { leashChildToParent, type LeashResult } from "./job-leash.js";
 export { Transport, type TransportOptions } from "./transport.js";
 export { type WorldProvider } from "./world-provider.js";
 export { atomicWriteFile, renameWithRetry } from "./world/atomic.js";
+export { checkOnboardingWorkspace } from "./setup/onboarding.js";
 export { appendChanges, changesForEntity, readChanges } from "./world/change-writer.js";
 export {
   classify,

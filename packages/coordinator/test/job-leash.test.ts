@@ -29,12 +29,13 @@ function processGone(pid: number): boolean {
 }
 
 describe("job leash", () => {
+  for (const shared of [false, true]) {
   it(
-    "the kernel kills a leashed child when its parent is force-killed (R-5)",
-    { skip: !onWindows, timeout: LEASH_CEILING_MS + 60_000 },
+    `the kernel kills a ${shared ? "shared-reader" : "leashed"} child when its parent is force-killed (R-5)`,
+    { skip: !onWindows, timeout: (shared ? 4 : 1) * LEASH_CEILING_MS + 60_000 },
     async () => {
       // The host process plays the coordinator: spawn, leash, idle. tsx resolves its TS import.
-      const host = spawn(process.execPath, ["--import", "tsx", HOST], {
+      const host = spawn(process.execPath, ["--import", "tsx", HOST, ...(shared ? ["--shared-readers"] : [])], {
         cwd: pkgRoot,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
@@ -47,7 +48,7 @@ describe("job leash", () => {
           let out = "";
           const timer = setTimeout(
             () => reject(new Error(`host never leashed; stderr: ${stderr.trim()}`)),
-            LEASH_CEILING_MS,
+            (shared ? 4 : 1) * LEASH_CEILING_MS,
           );
           host.stdout.on("data", (c: Buffer) => {
             out += c.toString();
@@ -88,6 +89,7 @@ describe("job leash", () => {
       }
     },
   );
+  }
 
   it("states its reason when the child does not exist", { skip: !onWindows, timeout: 60_000 }, async () => {
     // Near the top of the pid space and even — valid form, never a live process in practice.

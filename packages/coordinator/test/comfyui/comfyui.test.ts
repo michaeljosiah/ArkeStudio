@@ -421,6 +421,7 @@ function engineDeps(
         start: async () => {},
         stop: async () => {},
         stopAndConfirm: async () => {},
+        quiesce: () => {},
       };
       return fake as unknown as ChildSupervisor;
     },
@@ -772,6 +773,7 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
           status = "healthy";
           emitStatus?.();
         },
+        quiesce: () => {},
         stop: async () => {},
         stopAndConfirm: async () => {},
       };
@@ -816,6 +818,7 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
         stop: async () => {
           calls.push("stop");
         },
+        quiesce: () => {},
         stopAndConfirm: async () => {},
       };
       return fake as unknown as ChildSupervisor;
@@ -903,6 +906,7 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
         start: async () => {
           starts += 1;
         },
+        quiesce: () => {},
         stop: async () => {},
         stopAndConfirm: async () => {},
       };

@@ -38,6 +38,8 @@ export interface ComposerProps {
   /** The model chip, in the tool row beside attach and voice (design turn 190e). */
   modelControl?: ReactNode;
   onAttach?: () => void;
+  attachmentLabel?: string;
+  removeAttachmentTitle?: string;
   /**
    * Present → the microphone appears, and what is heard lands here as text.
    *
@@ -46,6 +48,8 @@ export interface ComposerProps {
    * never submitted — see components/dictation.tsx for why that is the whole safety story.
    */
   onDictate?: (text: string) => void;
+  /** A separately owned capture control, e.g. Studio's private requester-only dictation. */
+  dictationControl?: ReactNode;
   /**
    * Present → the whole composer becomes a drop target and pasted files are taken. Resolves
    * with whatever could not be taken, so the refusal can be shown on a chip.
@@ -134,7 +138,10 @@ export function Composer(props: ComposerProps) {
     focusRequest,
     modelControl,
     onAttach,
+    attachmentLabel = "Attach images, documents and audio",
+    removeAttachmentTitle = "Stop referring to this — it stays filed in the world",
     onDictate,
+    dictationControl,
     onAttachFiles,
     onAttachText,
     attachments = [],
@@ -297,7 +304,7 @@ export function Composer(props: ComposerProps) {
                   type="button"
                   className="fy-cx__chipx"
                   aria-label={`Stop referring to ${a.file}`}
-                  title="Stop referring to this — it stays filed in the world"
+                  title={removeAttachmentTitle}
                   onClick={() => onRemoveAttachment(a.id)}
                 >
                   ×
@@ -360,8 +367,8 @@ export function Composer(props: ComposerProps) {
               type="button"
               className="fy-cx__attach"
               disabled={locked}
-              aria-label="Attach images, documents and audio"
-              title="Attach images, documents and audio"
+              aria-label={attachmentLabel}
+              title={attachmentLabel}
               onClick={() => { if (remote && onAttachFiles) picker.current?.click(); else onAttach?.(); }}
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
@@ -372,7 +379,7 @@ export function Composer(props: ComposerProps) {
           )}
           {/* Mounted only when asked for, which is what keeps this component free of the store:
               the capture state machine lives inside the child, not here. */}
-          {onDictate && <ComposerMic onText={onDictate} disabled={locked} onListen={stopReplyRead} />}
+          {dictationControl ?? (onDictate && <ComposerMic onText={onDictate} disabled={locked} onListen={stopReplyRead} />)}
           {modelControl}
           {readReplies?.offered === true && (
             <button

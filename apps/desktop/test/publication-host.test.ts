@@ -6,7 +6,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it, type TestContext } from "node:test";
-import { publishPublication, verifyPublicationDirectory, PublicationFileError, VIDEO_PUBLICATION_COMPILER_VERSION, type VideoPublicationCompilerOptions, type WorldProvider } from "@arke-studio/coordinator";
+import { publishPublication, verifyPublicationDirectory, PublicationFileError, ImportStorageHeld, VIDEO_PUBLICATION_COMPILER_VERSION, type VideoPublicationCompilerOptions, type WorldProvider } from "@arke-studio/coordinator";
 import { VideoPublicationRequestSchema, type VideoPublicationRequest } from "@arke-studio/contracts";
 import { PublicationHost } from "../src/publication-host.js";
 import { publicationMedia } from "../src/publication-media.js";
@@ -32,6 +32,17 @@ async function fixture(t: TestContext) {
     reveal: (_path: string) => {}, compiler: async () => compiler, probe: async () => ({ duration: 1, mediaType: "video/mp4" }) };
   return { root, source, output, ports };
 }
+it("explains a scratch-storage hold without exposing paths or changing the selected edition", async t => {
+  const f = await fixture(t); let probes = 0, admissions = 0;
+  const host = new PublicationHost({ ...f.ports, fileSpace: () => ({ async reserve() { admissions++; throw new ImportStorageHeld(undefined, "Export"); } }),
+    probe: async () => { probes++; return { duration: 1, mediaType: "video/mp4" }; } }); t.after(() => host.stop());
+  const before = await readFile(join(f.source, "movie.mp4")), result = await host.open("directory");
+  assert.equal(result.ok, false); if (result.ok) return;
+  assert.match(result.reason, /waiting for fresh destination capacity/); assert.match(result.reason, /Open Diagnostics or choose another destination/);
+  assert(!result.reason.includes(f.root)); assert.equal(admissions, 1); assert.equal(probes, 0);
+  assert.deepEqual(await readFile(join(f.source, "movie.mp4")), before);
+  assert.deepEqual(await readdir(join(f.ports.root, "playback")), []);
+});
 it("serves only pinned inventory IDs with private authorization, origin checks and seek ranges", async t => {
   const f = await fixture(t); const host = new PublicationHost(f.ports); t.after(() => host.stop());
   const result = await host.open("directory"); assert.ok(result.ok);

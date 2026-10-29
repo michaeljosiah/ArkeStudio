@@ -2,10 +2,11 @@ import { AudiobookActivityReceipts } from "./audiobook-activity.js";
 import { memo, useEffect, useMemo, useRef, type CSSProperties } from "react";
 import { useNavigate } from "react-router";
 import { toast, Toaster } from "sonner";
-import type { Job, ModelManifest } from "@arke-studio/contracts";
+import { recoveryIncidentSummary, type Job, type ModelManifest } from "@arke-studio/contracts";
 import {
   acknowledgeUpdate,
   subscribeJobReady,
+  subscribeRecoveryNotices,
   isOwnSceneCreate,
   subscribeQueueResults,
   subscribeCommandFailures,
@@ -145,6 +146,15 @@ function LiveNote({
 
 export function QueueToaster() {
   const navigate = useNavigate();
+  useEffect(() => subscribeRecoveryNotices((notice, history) => {
+    const incident = history.incidents.find(value => value.id === notice.incidentId);
+    if (incident && (incident.evidence !== "fresh" || incident.delivery.lastAt !== notice.at)) return;
+    const copy = incident ? recoveryIncidentSummary(incident) : { title: "Studio needs attention", detail: "Review the current local service or storage condition in Diagnostics." };
+    const note: QueueNote = { id: `recovery:${notice.incidentId}`, tone: notice.reason === "recovered" ? "back" : "warning", title: copy.title,
+      meta: "Studio", reason: copy.detail, action: { label: "Review Diagnostics", to: "/settings/diagnostics" } };
+    toast.custom(id => <ToastNote note={note} onAct={() => { followLink(navigate, "/settings/diagnostics"); toast.dismiss(id); }} onDismiss={() => toast.dismiss(id)} />,
+      { id: note.id, duration: 8000 });
+  }), [navigate]);
   useEffect(() => subscribeRemoteRefusals(() => toast("On your PC", { description: "This action is available in Studio on your PC." })), []);
   useEffect(() => subscribeCommandFailures((event) => {
     toast.custom((id) => (

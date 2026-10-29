@@ -170,6 +170,8 @@ const bridge = {
   openDataFolder(): void {
     ipcRenderer.send("arke:open-data-folder");
   },
+  restartForSetup(): Promise<{ reason?: string }> { return ipcRenderer.invoke("arke:restart-for-setup"); },
+  chooseWorkspaceFolder(): Promise<{ reason?: string }> { return ipcRenderer.invoke("arke:choose-workspace-folder"); },
   quit(): void {
     ipcRenderer.send("arke:quit");
   },

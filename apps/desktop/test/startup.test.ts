@@ -1,8 +1,29 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { drainDesktop, isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "../src/startup.js";
+import { drainDesktop, guardDesktopClose, isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "../src/startup.js";
 
 describe("desktop startup", () => {
+  it("retains the window through delayed or failed cleanup, then permits the owner's confirmed quit", async () => {
+    let allowQuit = false, destroyed = false, pending: Promise<void> | undefined;
+    let fail!: (error: Error) => void;
+    const cleanup = new Promise<void>((_resolve, reject) => { fail = reject; });
+    const requestClose = (stop: () => Promise<void>) => {
+      let prevented = false;
+      guardDesktopClose({ preventDefault: () => { prevented = true; } }, allowQuit, () => {
+        assert(prevented, "the close must be cancelled before requesting application quit");
+        pending = stop().then(() => { allowQuit = true; }, () => { assert(!destroyed, "shutdown errors still have a window"); });
+      });
+      if (!prevented) destroyed = true;
+    };
+    requestClose(() => cleanup);
+    assert(!destroyed); assert(!allowQuit);
+    fail(new Error("original worker cleanup is unconfirmed")); await pending;
+    assert(!destroyed); assert(!allowQuit);
+    requestClose(async () => {}); await pending;
+    assert(!destroyed); assert(allowQuit);
+    requestClose(async () => { assert.fail("confirmed quit must not start cleanup again"); });
+    assert(destroyed);
+  });
   it("keeps slow remote cleanup in the shutdown promise before starting the core deadline", async t => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     let release!: () => void, stoppedCore = false, settled = false;

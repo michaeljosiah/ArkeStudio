@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import type { ProviderTransportPolicy } from "@arke-studio/contracts";
+import { ArtifactTransferSettingsSchema, type ProviderTransportPolicy } from "@arke-studio/contracts";
 import {
   captureProviderClient,
   ProviderTransportError,
@@ -37,6 +37,39 @@ function waitsForAbort(): FetchLike {
 }
 
 describe("desktop cloud provider HTTP policy (issue 95)", () => {
+  it("honours shared result-download deadlines without changing submission or inactivity policy", async () => {
+    const policies: ProviderTransportPolicy[] = [];
+    const transport = new CloudProviderTransport({ dispatcher: policy => { policies.push(policy); return { close: async () => {} }; }, fetch: async () => new Response("done") });
+    const settings = ArtifactTransferSettingsSchema.parse({ timeoutMinutes: 90 });
+    try {
+      for (const provider of ["fal", "higgsfield"] as const) {
+        await transport.run(scope({ provider, operation: "fetch-artifacts", artifactTransferSettings: settings }), fetch => fetch("https://assets.test/file"));
+      }
+      await transport.run(scope({ operation: "submit", artifactTransferSettings: settings }), fetch => fetch("https://api.test/submit"));
+      assert.equal(PROVIDER_HTTP_DEADLINES.artifact.operationMs, 30 * 60_000);
+      assert.equal(policies[0]!.operationMs, 90 * 60_000);
+      assert.equal(policies[0]!.bodyMs, PROVIDER_HTTP_DEADLINES.artifact.bodyMs);
+      assert.equal(policies[1]!.operationMs, PROVIDER_HTTP_DEADLINES.synchronous.operationMs);
+    } finally { await transport.close(); }
+  });
+  it("does not cut off a selected long download at the old host deadline, and applies later shorter preferences", async context => {
+    context.mock.timers.enable({ apis: ["setTimeout"] });
+    let signal: AbortSignal | undefined;
+    const wait = waitsForAbort();
+    const transport = new CloudProviderTransport({ dispatcher: () => ({ close: async () => {} }), fetch: (url, init) => { signal = init?.signal ?? undefined; return wait(url, init); } });
+    try {
+      for (const minutes of [90, 1]) {
+        const pending = transport.run(scope({ operation: "fetch-artifacts", artifactTransferSettings: ArtifactTransferSettingsSchema.parse({ timeoutMinutes: minutes }) }), fetch => fetch("https://assets.test/file"));
+        const outcome = assert.rejects(pending, (error: unknown) => {
+          assert(error instanceof ProviderTransportError);
+          assert.equal(error.diagnostic.deadline?.ms, minutes * 60_000); return true;
+        });
+        if (minutes === 90) { context.mock.timers.tick(15 * 60_000); assert.equal(signal?.aborted, false); }
+        context.mock.timers.tick((minutes === 90 ? 75 : 1) * 60_000);
+        await outcome;
+      }
+    } finally { await transport.close(); }
+  });
   it("selects distinct validation, control, enqueue, synchronous, and artifact profiles", () => {
     assert.equal(providerHttpProfile(scope({ operation: "validate" })), "validation");
     assert.equal(providerHttpProfile(scope({ operation: "poll" })), "control");
