@@ -372,12 +372,16 @@ describe("Export → Arke Player through the coordinator (245c, 245d)", () => {
       await send({ kind: "list-web-packages", worldId: WORLD_ID, requestId: "01J00000000000000000000004" });
       const listed = events.find((event): event is Extract<DomainEvent, { type: "web-packages.listed" }> => event.type === "web-packages.listed");
       const story = listed?.packages.find((entry) => entry.kind === "arke-player" && entry.story !== undefined);
-      assert.equal(story?.file, "exports/low-water-story-2026-10-28.zip");
+      // The export is named for the day it is made, which the coordinator reads from the real clock:
+      // a date written here failed the run the day after it was written.
+      const file = exported.result.ok ? exported.result.file : "";
+      assert.match(file, /^exports\/low-water-story-\d{4}-\d{2}-\d{2}\.zip$/);
+      assert.equal(story?.file, file);
       assert.deepEqual(story?.story, { kind: "movie", scenes: 4, routes: 4, complete: true, endings: 2 });
       assert.deepEqual(listed?.running, [], "nothing is still being made, so a window that lost an answer knows it ended");
       // A paired phone downloads it through the media route (233f), as it does the world's edition (codex on PR 2205).
-      assert.equal((await provider.serveMedia("the-undersong", "exports/low-water-story-2026-10-28.zip"))?.contentType, "application/zip");
-      assert.equal(await provider.serveMedia("the-undersong", "exports/low-water-story-2026-10-28.zip.json"), null, "its record is not served");
+      assert.equal((await provider.serveMedia("the-undersong", file))?.contentType, "application/zip");
+      assert.equal(await provider.serveMedia("the-undersong", `${file}.json`), null, "its record is not served");
     } finally {
       await provider.close();
     }
