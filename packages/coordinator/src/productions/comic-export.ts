@@ -49,12 +49,15 @@ interface Picture { entry: ComicBookPage; bytes: Buffer; extension: string }
 
 async function pictures(store: WorldStore, book: readonly ComicBookPage[]): Promise<Picture[]> {
   const artifacts = store.getBundle().artifacts;
-  return Promise.all(book.map(async (entry) => {
+  // One at a time: a book of a thousand pages read at once runs out of file handles (codex on PR 2225).
+  const read: Picture[] = [];
+  for (const entry of book) {
     const artifact = artifacts.find((candidate) => candidate.id === entry.take!.artifact);
     if (!artifact) throw new ComicExportBlocked([`page ${entry.number} · its picture is not in the world`]);
     const bytes = await readFile(toExtendedLength(join(store.dir, "artifacts", fromPortable(artifact.file))));
-    return { entry, bytes, extension: (artifact.file.split(".").at(-1) ?? "png").toLowerCase() };
-  }));
+    read.push({ entry, bytes, extension: (artifact.file.split(".").at(-1) ?? "png").toLowerCase() });
+  }
+  return read;
 }
 
 function comicInfo(input: { title: string; author: string; language: string; pages: number; rtl: boolean; summary?: string }): string {
