@@ -6,6 +6,7 @@ import PDFDocument from "pdfkit";
 import { ZipFile } from "yazl";
 import { DEFAULT_COMIC_SETTINGS, comicBook, letteringInOrder, productionShape, type ComicBookPage, type ProductionBundle } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
+import { comicEpubEntries, imageSize, writeComicEpub } from "./comic-epub.js";
 import type { WorldStore } from "../world/store.js";
 
 /**
@@ -14,7 +15,7 @@ import type { WorldStore } from "../world/store.js";
  * field. Refused while any page has no accepted, current take or its lettering is neither passed
  * nor accepted anyway — the same projection readiness reads, so the two never disagree.
  */
-export const COMIC_EXPORT_FORMATS = ["cbz", "pdf"] as const;
+export const COMIC_EXPORT_FORMATS = ["cbz", "pdf", "epub"] as const;
 export type ComicExportFormat = (typeof COMIC_EXPORT_FORMATS)[number];
 
 export class ComicExportBlocked extends Error {
@@ -160,8 +161,17 @@ export async function exportComic(store: WorldStore, productionId: string, forma
     const partial = `${target}.${requestId}.partial`;
     try {
       if (format === "cbz") await writeCbz(partial, pages, comicInfo({ title, author, language: settings.language, pages: pages.length, rtl, ...(production.meta.logline ? { summary: production.meta.logline } : {}) }), signal);
-      else await writePdf(partial, pages, { title, author, language: settings.language, rtl, alt: (entry) => comicPageAlt(entry, names),
+      else if (format === "pdf") await writePdf(partial, pages, { title, author, language: settings.language, rtl, alt: (entry) => comicPageAlt(entry, names),
         chapterTitle: (id) => production.chapters.find((chapter) => chapter.id === id)?.title ?? id }, signal);
+      else await writeComicEpub(partial, comicEpubEntries({
+        id: `${productionId}-${date}`, title, language: settings.language, rtl, modified: `${at.toISOString().slice(0, 19)}Z`,
+        chapterTitle: (id) => production.chapters.find((chapter) => chapter.id === id)?.title ?? id,
+        pages: pages.map((page) => {
+          const size = imageSize(page.bytes);
+          if (size === null) throw new ComicExportBlocked([`page ${page.entry.number} · its picture's size cannot be read`]);
+          return { ...page, ...size, alt: comicPageAlt(page.entry, names) };
+        }),
+      }), signal);
       // A finished file only: a reader never opens half a book under the real name.
       await store.ownedWrite(async () => {
         signal.throwIfAborted();
