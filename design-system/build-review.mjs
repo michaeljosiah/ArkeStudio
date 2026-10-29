@@ -28,6 +28,16 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN GRAPHIC NOVEL 247
+  { group: "Graphic novel · turn 247", screen: "Tell a story: Graphic novel, a kind of its own", frame: "247a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 29 October 2026."] },
+  { group: "Graphic novel · turn 247", screen: "Pages: a page’s panels and lines, priced before it is made", frame: "247b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 29 October 2026."] },
+  { group: "Graphic novel · turn 247", screen: "A take checked: words that are not the script’s", frame: "247c", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 29 October 2026."] },
+  { group: "Graphic novel · turn 247", screen: "A take that passes, accepted", frame: "247d", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 29 October 2026."] },
+  { group: "Graphic novel · turn 247", screen: "Not checked: never a pass", frame: "247e", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 29 October 2026."] },
+  { group: "Graphic novel · turn 247", screen: "Read: the book as it will be read", frame: "247f", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 29 October 2026."] },
+  { group: "Graphic novel · turn 247", screen: "Export: a book of pages, and what holds it", frame: "247g", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 29 October 2026."] },
+  // END GRAPHIC NOVEL 247
+
   // BEGIN STORY PLAYS ITSELF 246
   { group: "Story plays itself · turn 246", screen: "Preview plays: the controls hidden", frame: "246a", route: "Interactive / Preview", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 28 October 2026 with Player P19."] },
   { group: "Story plays itself · turn 246", screen: "A click shows the controls", frame: "246b", route: "Interactive / Preview", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 28 October 2026 with Player P19."] },
@@ -947,6 +957,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "graphic-novel-247.review.html", what: "Turn 247: the graphic novel — Graphic novel under Tell a story, the Pages screen and its page editor, a take’s lettering check drawn on the page, a take that passes, a check that could not run, the reader, and Export.", state: "approved 29 October 2026; not built" },
   { file: "story-plays-itself-246.review.html", what: "Turn 246: A story plays itself — a visual novel plays like a film in Preview and the web package, stops only for a choice of two or more, and plays through a lone way on, drawn on the Branch Map as a link.", state: "approved 28 October 2026; not built" },
   { file: "story-export-245.review.html", what: "Turn 245: Export → Arke Player for an interactive story — the Export sheet with Web package and Arke Player for an interactive movie and a visual novel, its blockers, and the package made and read back beside the world’s releases.", state: "approved 28 October 2026; not built" },
   { file: "branch-map-state-240.review.html", what: "Turn 240: remembered values, conditional choices and dialogue in First Contact, plus the click-connector creation flow; local interactive prototype.", state: "proposed 27 October 2026; not built" },
@@ -1136,6 +1147,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="branch-map-state-240.css">
 <link rel="stylesheet" href="story-export-245.css">
 <link rel="stylesheet" href="story-plays-itself-246.css">
+<link rel="stylesheet" href="graphic-novel-247.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">
