@@ -13,7 +13,7 @@ const write = (name, content) => fs.writeFileSync(path.join(here, name), content
 const esc = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
 const tokens = '_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens';
 const STYLE = '<link rel="stylesheet" href="graphic-novel-247.css"><link rel="stylesheet" href="pages-room-251.css">';
-const STATUS = 'proposed';
+const STATUS = 'approved';
 const frames = FRAMES.map(([letter, title, width, height, draw]) => ({ id: '251' + letter, title, width, height, markup: draw() }));
 for (const f of frames) if (!f.markup.startsWith('<div class="gn247 gn251"')) throw new Error(`${f.id}: frame root is not .gn251`);
 
@@ -25,7 +25,7 @@ ${frames.map(f => `<section id="${f.id}"><h2><a href="#${f.id}">${f.id}</a> ${f.
 if (process.argv.includes('--preview')) { console.log(`Wrote pages-room-251.review.html: ${frames.length} frames.`); process.exit(0); }
 
 export const rules = [
-  ['Review status', '29 October 2026, proposed. From a person’s run making Legend of Dumah’s chapter 1 in installed 0.5.70 and 0.5.71: Pages sat in a column about 1,075 px wide in a 2,700 px window, the made page about 400 px wide, the script’s lines cut off (issue 2260); and nothing on the page said it was being made or checked, a second press answered “making this page already”, a remade take hid behind the old one and a check that could not run said only “the read failed” (issue 2259). Nothing here is built.'],
+  ['Review status', '29 October 2026. Approved by the owner the same day (“Approved”), calls 1 – 5 as drawn. From a person’s run making Legend of Dumah’s chapter 1 in installed 0.5.70 and 0.5.71: Pages sat in a column about 1,075 px wide in a 2,700 px window, the made page about 400 px wide, the script’s lines cut off (issue 2260); and nothing on the page said it was being made or checked, a second press answered “making this page already”, a remade take hid behind the old one and a check that could not run said only “the read failed” (issue 2259). Nothing here is built.'],
   ['Pages fills the window', 'Pages takes the whole content area at any window size, with no centred column (251a). The strip stays 136. The page column is exactly as wide as the page needs to stand at full height above its verdict, takes and actions. The script column takes the rest, never under 440. At 1360 × 850 that is 247b’s 420 side; at 1920 × 1080 the page stands about 800 tall.'],
   ['Accept is always in view', 'The verdict, the takes and Accept or Make again sit directly under the page, inside the window, without scrolling (251a). Findings, when there are any, follow them; the page shrinks before the actions leave the window.'],
   ['Making shows on the page and in the strip', 'While a page is being made, the page shows Making with the take and the time so far, its thumbnail spins, and Make page reads Making and cannot be pressed again (251b). The press itself is the only start; no message answers a second press.'],
@@ -55,9 +55,9 @@ write('Arke Studio.dc.html', master);
 
 let build = read('build-review.mjs').replace(/\r?\n  \/\/ BEGIN PAGES ROOM 251[\s\S]*?  \/\/ END PAGES ROOM 251(?:\r?\n)*/g, '\n');
 const plain = title => title.replaceAll('&#8217;', '’').replaceAll('&#183;', '·');
-const entries = frames.map(f => `  { group: "Pages uses the window · turn 251", screen: ${JSON.stringify(plain(f.title))}, frame: "${f.id}", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Proposed 29 October 2026."] },`);
+const entries = frames.map(f => `  { group: "Pages uses the window · turn 251", screen: ${JSON.stringify(plain(f.title))}, frame: "${f.id}", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },`);
 build = build.replace('const SCREENS = [', 'const SCREENS = [\n  // BEGIN PAGES ROOM 251\n' + entries.join('\n') + '\n  // END PAGES ROOM 251\n');
-const pageEntry = '{ file: "pages-room-251.review.html", what: "Turn 251: Pages uses the window, and says what it is doing — the page at full height, Making and Checking, a reason for Not checked.", state: "proposed 29 October 2026; not built" }';
+const pageEntry = '{ file: "pages-room-251.review.html", what: "Turn 251: Pages uses the window, and says what it is doing — the page at full height, Making and Checking, a reason for Not checked.", state: "approved 29 October 2026; not built" }';
 if (build.includes('file: "pages-room-251.review.html"')) build = build.replace(/\{ file: "pages-room-251\.review\.html",[^\n]+?\}/, pageEntry);
 else build = build.replace('const PAGES = [', 'const PAGES = [\n  ' + pageEntry + ',');
 if (!build.includes(LINK)) build = build.replace('<link rel="stylesheet" href="${TOKENS}/fonts.css">', LINK + '\n<link rel="stylesheet" href="${TOKENS}/fonts.css">');

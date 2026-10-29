@@ -1,6 +1,6 @@
 # Turn 251 · Pages uses the window, and says what it is doing
 
-Proposed 29 October 2026. Issues 2259 and 2260.
+Proposed 29 October 2026. Approved by the owner the same day ("Approved"), calls 1 – 5 as drawn. Issues 2259 and 2260.
 
 ## Why this turn
 
