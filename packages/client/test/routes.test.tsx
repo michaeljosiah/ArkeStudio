@@ -61,8 +61,9 @@ describe("screen inventory", () => {
     // Publications is independent of any open world (SPEC-048).
     // Remote access adds desktop-only owner controls for phone pairing (issue #1311).
     // The compact Cast kind header exposes faction authoring (design turn 161).
-    assert.equal(SCREENS.length, 68);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 68, "screen ids are unique");
+    // A graphic novel's Pages (design turn 247).
+    assert.equal(SCREENS.length, 69);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 69, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {

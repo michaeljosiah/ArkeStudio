@@ -125,9 +125,9 @@ describe("the production column's scroll", () => {
     // be audited by a test that never renders it. 20 with the production's own artifacts page,
     // which arrived carrying the scroll column and is what named it; 21 with the audiobook's
     // door (design turn 146), a page of rows on .fy-prodmain; 22 with an audio drama's episode
-    // script (SPEC-057 R-11).
-    assert.equal(UNDER_PRODUCTION.length, 23);
-    assert.equal(new Set(UNDER_PRODUCTION.map((s) => s.id)).size, 23, "one entry per screen");
+    // script (SPEC-057 R-11); 24 with a graphic novel's Pages (design turn 247).
+    assert.equal(UNDER_PRODUCTION.length, 24);
+    assert.equal(new Set(UNDER_PRODUCTION.map((s) => s.id)).size, 24, "one entry per screen");
   });
 
   it("never leaves a screen with no scroll and no scrolling panes", () => {
