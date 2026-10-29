@@ -142,8 +142,8 @@ it("plans a visual novel's narration in the narrator's voice, and leaves a film'
 /**
  * The Arke Player export script has no Settings to read the narrator from, so `--narrator` names
  * one of the world's designed voices by its target. Resolved here, it must plan the very files the
- * app's table read prepared in that voice — its own model, not a default — or a voiced novel's
- * narration would go out as text.
+ * app's table read prepared in that voice — in the model the narrator read it in, which may not be
+ * the one it was made in (codex on PR 2236) — or a voiced novel's narration would go out as text.
  */
 it("resolves a designed narrator from the world and finds the narration prepared in it", async t => {
   const store = await WorldStore.open(await makeTempWorld()); t.after(() => store.close());
@@ -162,15 +162,19 @@ it("resolves a designed narrator from the world and finds the narration prepared
 
   assert.equal(designedTableReadNarrator(bundle.designedVoices, "designed:dv_01M5M1FXVPAGEC8FXAHMK8YS86:1"), null, "another revision is another voice");
   assert.equal(designedTableReadNarrator(bundle.designedVoices, "Charon"), null, "a catalogue voice is not resolved here");
-  const narrator = designedTableReadNarrator(bundle.designedVoices, "designed:dv_01M5M1FXVPAGEC8FXAHMK8YS86:2");
-  assert.deepEqual(narrator, { provider: "google", model: "gemini-3.8-flash-lite-tts", voiceId: "designed:dv_01M5M1FXVPAGEC8FXAHMK8YS86:2", label: "Ines Marr" });
+  const target = "designed:dv_01M5M1FXVPAGEC8FXAHMK8YS86:2";
+  assert.deepEqual(designedTableReadNarrator(bundle.designedVoices, target), { provider: "google", model: "gemini-3.8-flash-lite-tts", voiceId: target, label: "Ines Marr" },
+    "with no model named, the one the voice was made in");
+  // Made in Lite, read by the app's narrator in Flash: the catalogue offers it under both.
+  const narrator = designedTableReadNarrator(bundle.designedVoices, target, "gemini-3.8-flash-tts");
+  assert.deepEqual(narrator, { provider: "google", model: "gemini-3.8-flash-tts", voiceId: target, label: "Ines Marr" });
 
-  // Planned as the app plans it, the line is a Gemini read in the voice's own model …
+  // Planned as the app plans it, the line is a Gemini read in the narrator's model …
   const providers: ProviderStatus[] = [{ id: "google", configured: true, validation: "valid", fault: null, probes: [{ capability: "voice-tts", available: true }] }];
   const priced = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], providers, undefined, narrator);
   const line = priced.plan.items.find(i => i.narration)!;
   const job = priced.cloud.find(input => input.target.id === line.lineId)!;
-  assert.equal(job.model, "gemini-3.8-flash-lite-tts");
+  assert.equal(job.model, "gemini-3.8-flash-tts");
   const bytes = Buffer.alloc(52);
   bytes.write("RIFF"); bytes.writeUInt32LE(44, 4); bytes.write("WAVE", 8); bytes.write("fmt ", 12);
   bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22);
@@ -178,8 +182,12 @@ it("resolves a designed narrator from the world and finds the narration prepared
   bytes.write("data", 36); bytes.writeUInt32LE(8, 40);
   const file = String(job.params.tableReadCacheFile);
   await store.ownedWrite(async () => writeFile(await audioWorldPath(store.dir, file, true), bytes));
-  // … and planned as the script plans it — no jobs, no providers, nothing made — that read is found.
+  // … and planned as the script plans it — no jobs, no providers, nothing made — that read is found,
+  // in the narrator's model and not in the one the voice was made in.
   const found = (await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], [], undefined, narrator)).plan.items.find(i => i.lineId === line.lineId)!;
   assert.equal(found.route, "cached");
   assert.equal(found.file, file);
+  const madeIn = designedTableReadNarrator(bundle.designedVoices, target);
+  const missed = (await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], [], undefined, madeIn)).plan.items.find(i => i.lineId === line.lineId)!;
+  assert.equal(missed.file, undefined, "the cache is keyed by the model that read it");
 });
