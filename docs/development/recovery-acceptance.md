@@ -482,3 +482,19 @@ focus, Escape returns focus to Remove, and confirmation reaches the synthetic co
 No installed model was removed by this browser test. Screenshot:
 `.dev/studio-239-check/model-removal-phone-dark.png`. This is component evidence, not the
 still-required matched-master acceptance or proof about requests from other applications.
+
+## Owner-directed delivery and handover — 29 October 2026
+
+The owner requested immediate push/merge and epic closure without waiting for CI or another
+Codex review. Visual acceptance is delegated to Claude using
+[the handover prompt](visual-handoff-2194.md). The browser again rejected the approved file URL
+after explicit permission; no master comparison passed. Earlier unqualified items in this record,
+including remaining native generation/scratch admission coverage, are not thereby verified.
+
+The final repair change adds one review before replacement, with download/peak estimates and
+disruption. The command carries the host-issued revision; setup revalidates it under its owner
+fence and flushes a bounded intent before deleting. Restart retains an unfinished repair for
+explicit review, without replay. Existing ComfyUI/Ming/Ollama and voice-client lanes fence file
+changes. Focused regression runs passed 91 setup/GPU cases, 44 client cases, 54 final repair/host
+authorization cases and three review interaction cases. Lint passes with seven existing warnings.
+Final CI is not a prerequisite for this owner-directed merge and must not be described as passed.

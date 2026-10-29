@@ -1,5 +1,11 @@
 # Code map
 
+Setup file repair uses the host-issued `SetupRepairReview` and shared client
+`components/setup-repair-control.tsx`. `setup/repair-review.ts` binds the selected component
+and destination, records bounded flushed intent, and retains interrupted repairs for explicit
+review after restart. `LocalSetupService` revalidates under the existing runtime/file owner.
+The visual acceptance handover for epic #2194 is [here](visual-handoff-2194.md).
+
 Proactive storage services (epic #2194): contracts `storage-health.ts` defines opaque volume facts,
 fresh peak-space admission, qualified forecasts and warning hysteresis. Coordinator
 `storage/monitor.ts` owns bounded polling, wake/failure invalidation and probe coalescing;

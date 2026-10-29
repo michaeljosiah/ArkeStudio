@@ -47,6 +47,8 @@ import { splitForSpeech } from "./split.js";
 
 /** The sidecar slice this service needs; @arke-studio/voice's VoxaClient satisfies it. */
 export interface SidecarLike {
+  /** Existing client lane drains requests and holds new inference during host file changes. */
+  reserveRuntime?(signal: AbortSignal): Promise<() => void>;
   /**
    * Whether each engine can actually do its job — asked before the catalogue offers a voice.
    *

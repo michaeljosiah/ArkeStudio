@@ -964,7 +964,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * there — presence is completion — so it is no answer to a file that arrived intact and is
    * the wrong bytes. Repair is the answer to a digest that did not match.
    */
-  z.object({ kind: z.literal("setup-repair"), componentId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("setup-repair"), componentId: z.string().min(1), revision: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
   z.object({ kind: z.literal("setup-cancel") }).strict(),
   /** Genesis conversation: shape a world that does not exist yet, in a sandbox session. */
   z

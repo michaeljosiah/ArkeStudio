@@ -20,6 +20,41 @@ import {
 
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const;
 
+it("reviewed repair refuses a changed mapping and revalidates after its owner fence", async () => {
+  const appRoot = await root(), first = join(appRoot, "first"), second = join(appRoot, "second");
+  let selected = first, changeUnderFence = false;
+  const entry: CatalogueEntry = { id: "review-fixture", displayName: "Fixture", purpose: "Fixture", sizeMb: 1, optional: true,
+    spec: { kind: "files", dir: "weights", externalRoot: "models", files: [{ file: "model.bin", url: "https://example.test/model", sizeMb: 1 }] } };
+  for (const target of [first, second]) { await mkdir(join(target, "weights"), { recursive: true }); await writeFile(join(target, "weights", "model.bin"), "original"); }
+  const setup = new LocalSetupService(deps(), () => {}, { appRoot, catalogue: [entry], externalDirs: { models: () => selected },
+    beginFileMutation() { if (changeUnderFence) selected = first; return () => {}; } });
+  try {
+    const initial = SetupStatusSchema.parse(setup.status()).components[0]!.repairReview!;
+    selected = second; assert.equal(await setup.repair(entry.id, initial.revision), false);
+    const current = setup.status().components[0]!.repairReview!; changeUnderFence = true;
+    assert.equal(await setup.repair(entry.id, current.revision), false);
+    assert.equal(await readFile(join(first, "weights", "model.bin"), "utf8"), "original");
+    assert.equal(await readFile(join(second, "weights", "model.bin"), "utf8"), "original");
+    changeUnderFence = false;
+    assert.equal(await setup.repair(entry.id, setup.status().components[0]!.repairReview!.revision), true);
+    assert.equal(existsSync(join(first, "weights", "model.bin")), false);
+    assert.equal(await readFile(join(second, "weights", "model.bin"), "utf8"), "original");
+  } finally { await setup.dispose(); }
+});
+
+it("a repair intent that cannot be saved leaves the model untouched", async () => {
+  const appRoot = await root(), model = join(appRoot, "models", "fixture", "model.bin");
+  const entry: CatalogueEntry = { id: "review-fixture", displayName: "Fixture", purpose: "Fixture", sizeMb: 1, optional: true,
+    spec: { kind: "files", dir: "fixture", files: [{ file: "model.bin", url: "https://example.test/model", sizeMb: 1 }] } };
+  await mkdir(join(appRoot, "models", "fixture"), { recursive: true }); await writeFile(model, "original");
+  await writeFile(join(appRoot, "operations"), "not a directory");
+  const setup = new LocalSetupService(deps(), () => {}, { appRoot, catalogue: [entry] });
+  try {
+    assert.equal(await setup.repair(entry.id, setup.status().components[0]!.repairReview!.revision), false);
+    assert.equal(await readFile(model, "utf8"), "original");
+  } finally { await setup.dispose(); }
+});
+
 it("removal refuses a held model and shutdown drains an admitted removal without a duplicate command", async () => {
   const entry: CatalogueEntry = { ...catalogue()[1]!, requires: [], optional: true, engine: "ollama" };
   let busy = true, calls = 0, released = 0, entered!: () => void, finish!: () => void;

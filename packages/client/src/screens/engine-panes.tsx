@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { SetupRepairControl } from "../components/setup-repair-control.js";
 import {
   FIT_LABEL,
   ENGINE_LABEL,
@@ -41,7 +42,6 @@ import {
   repairVoiceModels,
   restartVoxa,
   setComfyUiUrl,
-  setupRepair,
   setupRetry,
   setupSkip,
   testLocalVoice,
@@ -130,9 +130,7 @@ export function ComponentRows({ components }: { components: readonly SetupCompon
                 </button>
               )}
               {c.repairRequired === true && (
-                <button type="button" className="fy-set__link" onClick={() => setupRepair(c.id)}>
-                  Repair
-                </button>
+                <SetupRepairControl component={c} />
               )}
             </div>
             {/* Paused bytes remain visible because they are retained for the resume. */}

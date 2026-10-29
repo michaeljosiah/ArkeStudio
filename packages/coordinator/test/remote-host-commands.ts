@@ -55,7 +55,7 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
       "comfyui-update-runtime": {},
       "setup-pause": {"componentId":"kokoro-82m"},
       "setup-resume": {"componentId":"kokoro-82m"},
-      "setup-repair": {"componentId":"kokoro-82m"},
+      "setup-repair": {"componentId":"kokoro-82m", "revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
       "setup-cancel": {},
       "cancel-vendor-sign-in": {},
       "choose-claude-executable": {},

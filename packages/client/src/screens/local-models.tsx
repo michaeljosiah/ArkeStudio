@@ -22,7 +22,8 @@ import {
 import { Button, cx } from "../components/ui.js";
 import { ChevronDown, ChevronRight, Play, RefreshCw } from "../components/icons.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
-import { detectRuntimes, setupInstall, setupRepair, useStore } from "../lib/store.js";
+import { detectRuntimes, setupInstall, useStore } from "../lib/store.js";
+import { SetupRepairControl } from "../components/setup-repair-control.js";
 import { SetupRemoveControl } from "../components/setup-remove-control.js";
 import { strandReason, usableModels } from "../components/dispatch-bar.js";
 import { ActionButton, RuntimeStatus, sizeMb, type RuntimeTone } from "./settings-parts.js";
@@ -363,17 +364,8 @@ export function LocalModelRow({
             the runtime that failed, with no way to reach that runtime from this row — the same
             failure the Install button was widened to a closure to avoid. */}
         {!elsewhere && state === "needs-attention" && entry.component !== undefined && (
-          <button
-            type="button"
-            className="fy-set__link"
-            onClick={() =>
-              entry.component!.repairRequired === true
-                ? setupRepair(entry.component!.id)
-                : setupInstall(entry.component!.id)
-            }
-          >
-            {entry.component.repairRequired === true ? "Repair" : "Retry"}
-          </button>
+          entry.component.repairRequired === true ? <SetupRepairControl component={entry.component} /> :
+          <button type="button" className="fy-set__link" onClick={() => setupInstall(entry.component!.id)}>Retry</button>
         )}
         {/* Remove is offered wherever a size on disk is stated (R-43): a screen that only ever
             grows is a screen that eventually costs somebody their disk. */}

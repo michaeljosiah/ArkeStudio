@@ -33,6 +33,15 @@ export const SetupComponentStateSchema = z.enum([
 ]);
 export type SetupComponentState = z.infer<typeof SetupComponentStateSchema>;
 
+/** Host-issued review of the currently selected component; no renderer-supplied paths. */
+export const SetupRepairReviewSchema = z.object({
+  revision: z.string().regex(/^[a-f0-9]{64}$/),
+  componentDigest: z.string().regex(/^[a-f0-9]{64}$/), policyRevision: z.literal(1),
+  downloadBytes: z.number().int().nonnegative().safe(), peakBytes: z.number().int().nonnegative().safe(),
+  interruptsWork: z.literal(false),
+}).strict();
+export type SetupRepairReview = z.infer<typeof SetupRepairReviewSchema>;
+
 export const SetupComponentSchema = z
   .object({
     id: z.string().min(1),
@@ -90,6 +99,7 @@ export const SetupComponentSchema = z
     blockedAt: IsoDateTimeSchema.optional(),
     /** The failed action must be tried again; an ordinary retry would trust the surviving file. */
     repairRequired: z.boolean().optional(),
+    repairReview: SetupRepairReviewSchema.optional(),
     /**
      * Managed-runtime currency for a `tree` component (SPEC-021 R-20; issue 592): the version the
      * installed tree itself records, the version this release pins, and how they compare. `unknown`

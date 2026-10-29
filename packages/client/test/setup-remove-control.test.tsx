@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import type { SetupComponent } from "@arke-studio/contracts";
 import { SetupRemoveControl } from "../src/components/setup-remove-control.js";
+import { SetupRepairControl } from "../src/components/setup-repair-control.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node, Element: dom.Element, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });
@@ -14,6 +15,22 @@ const component: SetupComponent = { id: "fixture-model", displayName: "Fixture n
   installLocation: "PRIVATE_MODEL_LOCATION", state: "present", bytesDone: 0, bytesTotal: 0, bytesPerSecond: null, pauseSupported: false, removable: true };
 const dialog = () => document.querySelector('[role="dialog"]')!;
 const button = (text: string) => [...dialog().querySelectorAll<HTMLButtonElement>("button")].find(row => row.textContent === text)!;
+
+it("repair explains replacement and cost, rejects a changed review, and sends the host revision only after confirmation", async () => {
+  const container = document.createElement("div"); document.body.append(container); const root = createRoot(container), repairs: unknown[] = [];
+  const review = { revision: "a".repeat(64), componentDigest: "b".repeat(64), policyRevision: 1 as const, downloadBytes: 1024 ** 3, peakBytes: 2 * 1024 ** 3, interruptsWork: false as const };
+  const render = (revision: string) => root.render(<SetupRepairControl component={{ ...component, repairReview: { ...review, revision } }} repair={(...args) => repairs.push(args)} />);
+  try {
+    await act(async () => render(review.revision)); await act(async () => container.querySelector<HTMLButtonElement>("button")!.click());
+    assert.match(dialog().textContent!, /1 GiB.*2 GiB.*work must finish.*cannot be undone/);
+    assert.equal(document.activeElement, button("Cancel")); assert.deepEqual(repairs, []);
+    await act(async () => render("c".repeat(64))); assert(button("Repair and download").disabled);
+    await act(async () => button("Cancel").click()); assert.deepEqual(repairs, []);
+    await act(async () => container.querySelector<HTMLButtonElement>("button")!.click()); const approve = button("Repair and download");
+    await act(async () => { approve.click(); approve.click(); });
+    assert.deepEqual(repairs, [[component.id, "c".repeat(64)]]);
+  } finally { await act(async () => root.unmount()); container.remove(); }
+});
 
 it("reviews consequences before removal; Cancel and Escape send nothing, confirmation sends once", async () => {
   const container = document.createElement("div"); document.body.append(container); const root = createRoot(container), removed: string[] = [];

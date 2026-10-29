@@ -17,6 +17,7 @@ import { compareComfyUiVersions } from "@arke-studio/contracts";
 import { SetupSpaceHeldError, type SetupFileSpace, type SetupFileSpaceLease } from "../storage/setup-files.js";
 import { SetupProcessCleanupPending } from "./process.js";
 import type { SetupArchiveSpace, SetupArchiveSpaceLease } from "../storage/setup-archive.js";
+import { SetupRepairReviews } from "./repair-review.js";
 
 type TreeSpec = Extract<CatalogueEntry["spec"], { kind: "tree" }>;
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -107,8 +108,8 @@ export interface SetupOptions {
   /** One owner lease spans writes/extraction; released before ready activation or on failure.
    * Unlike beforeComponentInstall's policy recheck, this is acquired only once per install. */
   beginComponentInstall?: (componentId: string, signal: AbortSignal) => Promise<(() => void) | undefined>;
-  /** Synchronous admission fence for destructive repair/removal; always released after the operation. */
-  beginFileMutation?: (componentId: string, entry: CatalogueEntry) => (() => void) | undefined;
+  /** Admission fence for destructive repair/removal; always released after the operation. */
+  beginFileMutation?: (componentId: string, entry: CatalogueEntry, signal: AbortSignal) => (() => void) | undefined | Promise<(() => void) | undefined>;
   /** Invoked only for bytes this service actually downloaded and verified. */
   onFileInstalled?: (componentId: string, path: string) => Promise<void>;
 }
@@ -184,6 +185,7 @@ export function systemTar(): string {
 }
 
 export class LocalSetupService {
+  private readonly repairReviews: SetupRepairReviews;
   private fileSpaceLease: SetupFileSpaceLease | null = null;
   private readonly heldNative = new Map<string, { releaseInstall?: () => void; space: SetupFileSpaceLease | null }>();
   private readonly blockedByNativeCleanup = new Set<string>();
@@ -245,6 +247,7 @@ export class LocalSetupService {
     private readonly emit: (event: DomainEvent) => void,
     private readonly opts: SetupOptions,
   ) {
+    this.repairReviews = new SetupRepairReviews(opts.appRoot);
     for (const declared of opts.catalogue ?? SETUP_CATALOGUE) {
       const arch = opts.arch ?? (process.arch === "arm64" ? "arm64" : "x64");
       const file = declared.spec.kind === "tree" ? declared.spec.byArch?.[arch] : undefined;
@@ -287,6 +290,7 @@ export class LocalSetupService {
         // Resolved at publication time because a newly activated or remapped engine can change
         // where dependent weights land without rebuilding the setup service.
         installLocation: location,
+        repairReview: this.repairReviews.review(entry, c, location),
         files: entry.spec.kind === "files" && location ? entry.spec.files.map((file) => {
           const target = join(location, file.file);
           return { key: createHash("sha256").update(JSON.stringify([target, file.sha256 ?? file.url, file.sizeMb])).digest("hex"), sizeMb: file.sizeMb,
@@ -309,6 +313,7 @@ export class LocalSetupService {
     if (!current) return;
     if (patch.state !== undefined) this.blockedByNativeCleanup.delete(id);
     const next = { ...current, ...patch };
+    if (JSON.stringify(current) !== JSON.stringify(next)) this.repairReviews.changed(id);
     // A blocked cause describes the blocked state alone. Merging patches would otherwise leave
     // "disk" on a component that has moved on to downloading, and a diagnostics join reading it
     // would report a shortage the screen no longer shows (SPEC-032 R-13).
@@ -617,6 +622,11 @@ export class LocalSetupService {
     const recoveredClosures: Array<{ pausedId: string; componentIds: readonly string[] }> = [];
     for (const [id, c] of this.components) {
       if (c.state === "skipped") continue;
+      if (this.fileMutations.has(id)) continue;
+      if (c.entry.spec.kind === "files" && !this.repairBlocks.has(id) && await this.repairReviews.pending(id)) {
+        this.set(id, { state: "failed", repairRequired: true, detail: "A previous repair did not finish confirming its file changes. Review Repair to continue; nothing was restarted." });
+        continue;
+      }
       const repairBlock = this.repairBlocks.get(id);
       if (repairBlock !== undefined) {
         const spec = c.entry.spec;
@@ -1855,7 +1865,7 @@ export class LocalSetupService {
     if (this.disposed) return { freedMb: 0, leftovers: [] };
     if (this.heldNative.size) throw new SetupProcessCleanupPending();
     let release: (() => void) | undefined;
-    try { signal.throwIfAborted(); release = this.opts.beginFileMutation?.(componentId, this.components.get(componentId)!.entry); return await this.removeOnce(componentId, signal); }
+    try { signal.throwIfAborted(); release = await this.opts.beginFileMutation?.(componentId, this.components.get(componentId)!.entry, signal); signal.throwIfAborted(); return await this.removeOnce(componentId, signal); }
     catch (error) {
       if (error instanceof SetupProcessCleanupPending) { this.heldNative.set(componentId, { releaseInstall: release, space: null }); release = undefined; }
       if (this.components.has(componentId)) { this.set(componentId, {detail: errorText(error)}); this.publish(); }
@@ -1948,22 +1958,36 @@ export class LocalSetupService {
   }
 
   /** Remove Arke-managed model files so a repair re-download cannot trust corrupt presence. */
-  repair(componentId: string): Promise<boolean> {
-    return this.changeFiles(componentId, signal => this.repairWithLease(componentId, signal), false);
+  repair(componentId: string, revision?: string): Promise<boolean> {
+    return this.changeFiles(componentId, signal => this.repairWithLease(componentId, signal, revision), false);
   }
 
-  private async repairWithLease(componentId: string, signal: AbortSignal): Promise<boolean> {
+  private async repairWithLease(componentId: string, signal: AbortSignal, revision?: string): Promise<boolean> {
     if (this.disposed) return false;
     if (this.heldNative.size) throw new SetupProcessCleanupPending();
     let release: (() => void) | undefined;
-    try { signal.throwIfAborted(); release = this.opts.beginFileMutation?.(componentId, this.components.get(componentId)!.entry); return await this.repairOnce(componentId, signal); }
+    try {
+      signal.throwIfAborted();
+      release = await this.opts.beginFileMutation?.(componentId, this.components.get(componentId)!.entry, signal);
+      signal.throwIfAborted();
+      const current = () => {
+        const c = this.components.get(componentId)!;
+        return this.repairReviews.review(c.entry, c, this.installLocationOf(c.entry));
+      };
+      const review = current();
+      if (!review || revision !== undefined && review.revision !== revision) throw new Error("Installation details changed. Review Repair again before continuing.");
+      await this.repairReviews.record(componentId, review, "intended");
+      signal.throwIfAborted();
+      if (current()?.revision !== review.revision) throw new Error("Installation details changed. Review Repair again before continuing.");
+      return await this.repairOnce(componentId, signal, review);
+    }
     catch (error) {
       if (this.components.has(componentId)) { this.set(componentId, {detail: errorText(error)}); this.publish(); }
       return false;
     } finally { release?.(); }
   }
 
-  private async repairOnce(componentId: string, signal: AbortSignal): Promise<boolean> {
+  private async repairOnce(componentId: string, signal: AbortSignal, review: import("@arke-studio/contracts").SetupRepairReview): Promise<boolean> {
     const c = this.components.get(componentId);
     if (!c || c.entry.spec.kind !== "files") return false;
     const spec = c.entry.spec;
@@ -2018,6 +2042,8 @@ export class LocalSetupService {
       return false;
     }
     this.repairBlocks.delete(componentId);
+    await this.repairReviews.record(componentId, review, "files-removed");
+    signal.throwIfAborted();
     this.set(componentId, {
       state: "queued",
       bytesDone: 0,

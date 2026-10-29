@@ -3698,8 +3698,8 @@ export function setupRetry(componentId: string): void {
   send({ kind: "setup-retry", componentId });
 }
 
-export function setupRepair(componentId: string): void {
-  send({ kind: "setup-repair", componentId });
+export function setupRepair(componentId: string, revision: string): void {
+  send({ kind: "setup-repair", componentId, revision });
 }
 
 export function setupPause(componentId: string): void {

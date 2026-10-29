@@ -9,8 +9,9 @@ import {
 } from "@arke-studio/contracts";
 import { Button, cx } from "../components/ui.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
-import { setupCancel, setupRepair, setupRetry, setupSkip, useSetup, useStore } from "../lib/store.js";
+import { setupCancel, setupRetry, setupSkip, useSetup, useStore } from "../lib/store.js";
 import { SetupRemoveControl } from "../components/setup-remove-control.js";
+import { SetupRepairControl } from "../components/setup-repair-control.js";
 import { RuntimeHead, RuntimeSection, RuntimeStatus, sizeMb } from "./settings-parts.js";
 
 /**
@@ -74,9 +75,7 @@ function ProgressRow({ component, progress, sizeLabel }: { component: SetupCompo
         )}
         {needsAttention(component) &&
           (component.repairRequired === true ? (
-            <button type="button" className="fy-set__link" onClick={() => setupRepair(component.id)}>
-              Repair
-            </button>
+            <SetupRepairControl component={component} />
           ) : (
             <button type="button" className="fy-set__link" onClick={() => setupRetry(component.id)}>
               Retry

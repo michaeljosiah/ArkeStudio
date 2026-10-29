@@ -4546,11 +4546,18 @@ export class Coordinator {
                 try { signal.throwIfAborted(); } catch (error) { release(); throw error; }
                 return this.opts.ollama.service.reserveInstallation(release);
               },
-              beginFileMutation: (id, entry) => {
+              beginFileMutation: (id, entry, signal) => {
                 if (entry.spec.kind === "pull" && entry.engine === "ollama") return this.localGpu.reserveFileChange("Ollama");
-                if (!id.startsWith("ming-")) return undefined;
-                if (this.localGpu.isBusy("Ming")) throw new Error("Stop the current Ming reading before changing its model files.");
-                return this.mingSpeech?.reserveFileChange();
+                if (id.startsWith("ming-")) {
+                  if (this.localGpu.isBusy("Ming")) throw new Error("Stop the current Ming reading before changing its model files.");
+                  return this.mingSpeech?.reserveFileChange();
+                }
+                if (entry.engine === "comfyui") return this.localGpu.reserveFileChange("ComfyUI");
+                if (entry.engine === "voxa") {
+                  if (!this.opts.voice?.sidecar?.reserveRuntime) throw new Error("Close the voice engine before repairing its model files; this host cannot hold its requests.");
+                  return this.opts.voice.sidecar.reserveRuntime(signal);
+                }
+                return undefined;
               },
               onFileInstalled: async (id, path) => { if (id.startsWith("adapter-")) await this.adapterLibrary?.recordInstalled(id, path); },
             },
@@ -7407,8 +7414,10 @@ export class Coordinator {
       const releaseId = msg.componentId.slice("adapter-".length);
       if (msg.kind === "setup-install" || msg.kind === "setup-retry" || msg.kind === "setup-resume") {
         await this.adapterLibrary?.handle({ action: "install", releaseIds: [releaseId] }).catch(() => {});
-      } else if (msg.kind === "setup-remove" || msg.kind === "setup-repair") {
+      } else if (msg.kind === "setup-remove") {
         await this.adapterLibrary?.handle({ action: "remove", releaseId, deleteOwnedFile: true }).catch(() => {});
+      } else if (msg.kind === "setup-repair") {
+        throw new Error("Use the adapter’s own removal and installation controls to replace it.");
       } else if (msg.kind === "setup-pause" || msg.kind === "setup-skip") {
         this.setup?.pause(msg.componentId);
       }
@@ -9289,7 +9298,7 @@ export class Coordinator {
         // Only a completed deletion queues work. A held file remains a stated repair failure;
         // running detection there would otherwise bless the same corrupt bytes as present again.
         const setup = this.setup;
-        if (setup && await setup.repair(msg.componentId)) {
+        if (setup && await setup.repair(msg.componentId, msg.revision)) {
           await setup.run();
           // If Repair joined a pass that had already attempted this component, only a fresh pass
           // can collect the newly queued download. An ordinary completed repair makes this a
