@@ -28,6 +28,13 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN PAGES ROOM 251
+  { group: "Pages uses the window · turn 251", screen: "Pages uses the window: the page at full height, the script takes the rest", frame: "251a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },
+  { group: "Pages uses the window · turn 251", screen: "Making: the page and its thumbnail say so", frame: "251b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },
+  { group: "Pages uses the window · turn 251", screen: "A take lands: shown at once, then checked", frame: "251c", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },
+  { group: "Pages uses the window · turn 251", screen: "Not checked, in plain words, with the way out", frame: "251d", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },
+  // END PAGES ROOM 251
+
   // BEGIN PROSE PAGES 249
   { group: "Prose into pages · turn 249", screen: "Setup: three questions by example, then one plan", frame: "249b", route: "Graphic novel / Setup and Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },
   { group: "Prose into pages · turn 249", screen: "Pages: a chapter with no pages, drafted by Arke from its prose", frame: "249c", route: "Graphic novel / Setup and Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },
@@ -1001,6 +1008,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "pages-room-251.review.html", what: "Turn 251: Pages uses the window, and says what it is doing — the page at full height, Making and Checking, a reason for Not checked.", state: "approved 29 October 2026; not built" },
   { file: "prose-pages-249.review.html", what: "Turn 249: Arke turns prose into pages — Plan with Arke from a story, and a chapter drafted as pages to keep or discard.", state: "approved 29 October 2026; not built" },
   { file: "comic-style-248.review.html", what: "Turn 248: a graphic novel’s comic style — ten styles and your own, each shown as the same page drawn in it, picked in Tell a story and changed in Pages.", state: "approved 29 October 2026; not built" },
   { file: "graphic-novel-247.review.html", what: "Turn 247: the graphic novel — Graphic novel under Tell a story, the Pages screen and its page editor, a take’s lettering check drawn on the page, a take that passes, a check that could not run, the reader, and Export.", state: "approved 29 October 2026; not built" },
@@ -1203,6 +1211,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="graphic-novel-247.css">
 <link rel="stylesheet" href="comic-style-248.css">
 <link rel="stylesheet" href="prose-pages-249.css">
+<link rel="stylesheet" href="pages-room-251.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">
