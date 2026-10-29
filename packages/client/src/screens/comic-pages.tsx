@@ -487,7 +487,7 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
   const worldId = world.meta.worldId;
   const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
   const book = comicBook(production);
-  const [formats, setFormats] = useState<Array<"cbz" | "pdf">>(["cbz", "pdf"]);
+  const [formats, setFormats] = useState<Array<"cbz" | "pdf" | "epub">>(["cbz", "pdf"]);
   const [asked, setAsked] = useState<string | null>(null);
   const [done, setDone] = useState<string[] | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
@@ -501,19 +501,18 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
   const checked = book.filter((entry) => entry.cleared && !entry.overridden).length;
   const anyway = book.filter((entry) => entry.overridden).length;
   const blockers = book.filter((entry) => entry.take === undefined || entry.outOfDate || !entry.cleared);
-  const toggle = (format: "cbz" | "pdf") => setFormats(formats.includes(format) ? formats.filter((f) => f !== format) : [...formats, format]);
+  const toggle = (format: "cbz" | "pdf" | "epub") => setFormats(formats.includes(format) ? formats.filter((f) => f !== format) : [...formats, format]);
   const chapters = production.chapters.filter((chapter) => !chapter.retired).length;
   return (
     <EditorDialog open onClose={onClose} width={760} title={`Export · ${production.meta.title}`}>
       <div className="fy-comic-sheet">
         <div className="sub">Graphic novel · {chapters} {chapters === 1 ? "chapter" : "chapters"} · {book.length} {book.length === 1 ? "page" : "pages"} · {settings.aspect}</div>
         <div className="fy-comic-kinds">
-          {([["cbz", "CBZ", "comic readers"], ["pdf", "PDF", "print · share"]] as const).map(([id, label, sub]) => (
+          {([["cbz", "CBZ", "comic readers"], ["pdf", "PDF", "print · share"], ["epub", "EPUB", "fixed layout"]] as const).map(([id, label, sub]) => (
             <button key={id} type="button" aria-pressed={formats.includes(id)} className={cx("fy-comic-kind", formats.includes(id) && "on")} onClick={() => toggle(id)}>
               <input type="checkbox" readOnly checked={formats.includes(id)} tabIndex={-1} aria-hidden="true" /><div><b>{label}</b><span>{sub}</span></div>
             </button>
           ))}
-          <button type="button" className="fy-comic-kind" disabled title="not built yet"><input type="checkbox" readOnly checked={false} tabIndex={-1} aria-hidden="true" /><div><b>EPUB</b><span>fixed layout</span></div></button>
           <button type="button" className="fy-comic-kind" disabled title="not built yet"><input type="checkbox" readOnly checked={false} tabIndex={-1} aria-hidden="true" /><div><b>Arke Player</b><span>phone · offline</span></div></button>
         </div>
         <div className="fy-comic-opts">

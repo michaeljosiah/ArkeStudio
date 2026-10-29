@@ -577,7 +577,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       result: z.discriminatedUnion("ok", [
-        z.object({ ok: z.literal(true), files: z.array(z.object({ format: z.enum(["cbz", "pdf"]), file: z.string().min(1) }).strict()) }).strict(),
+        z.object({ ok: z.literal(true), files: z.array(z.object({ format: z.enum(["cbz", "pdf", "epub"]), file: z.string().min(1) }).strict()) }).strict(),
         z.object({ ok: z.literal(false), reason: z.string().min(1), blockers: z.array(z.string().min(1)).max(500).default([]) }).strict(),
       ]),
     })

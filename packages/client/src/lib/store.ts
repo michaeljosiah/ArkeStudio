@@ -5483,7 +5483,7 @@ export function makeComicPage(worldId: string, productionId: string, page: strin
 }
 
 /** The book as CBZ and/or PDF from its accepted pages (SPEC-064 R-47). */
-export function exportComic(worldId: string, productionId: string, formats: Array<"cbz" | "pdf">): string | null {
+export function exportComic(worldId: string, productionId: string, formats: Array<"cbz" | "pdf" | "epub">): string | null {
   const requestId = ulid();
   return send({ kind: "export-comic", requestId, worldId, productionId, formats }) ? requestId : null;
 }
