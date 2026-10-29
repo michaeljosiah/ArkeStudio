@@ -2479,6 +2479,32 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       baseHash: z.string().min(1).nullable(),
     })
     .strict(),
+  /**
+   * What a page would cost and send, before anything is spent (SPEC-064 R-19, R-23, R-27). Asking
+   * also files a page that landed while the app was closed (R-25).
+   */
+  z
+    .object({
+      kind: z.literal("quote-comic-page"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      mode: ComicModeSchema.optional(),
+    })
+    .strict(),
+  /** One page made on the price its press showed (R-22, R-25, R-27). */
+  z
+    .object({
+      kind: z.literal("make-comic-page"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      mode: ComicModeSchema.optional(),
+      confirmedMicroUsd: z.number().int().min(0),
+    })
+    .strict(),
   /** How a graphic novel reads and how its pages are checked (SPEC-064 R-12, R-31). */
   z
     .object({

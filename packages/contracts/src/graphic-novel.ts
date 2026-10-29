@@ -24,7 +24,7 @@ export type LetteringKind = z.infer<typeof LetteringKindSchema>;
 /** Kinds nobody says: a caption is the book's voice, a sound effect is the world's (R-8). */
 const UNSPOKEN: ReadonlySet<LetteringKind> = new Set(["caption", "sfx"]);
 
-export const COMIC_LIMITS = { pagesPerChapter: 200, panelsPerPage: 12, letteringPerPage: 40, textMax: 400, descriptionMax: 2000 } as const;
+export const COMIC_LIMITS = { pagesPerChapter: 200, panelsPerPage: 12, letteringPerPage: 40, textMax: 400, descriptionMax: 2000, takesPerPage: 100 } as const;
 
 /**
  * One balloon, caption or sound (R-8). `text` is stored exactly as authored: setting it in capitals
@@ -346,7 +346,7 @@ export type ComicPageMaking = z.infer<typeof ComicPageMakingSchema>;
 /** `productions/<id>/comic-pages/<page>.json`: a page's takes and what the author chose. */
 export const ComicPageRecordSchema = z.object({
   version: z.literal(1),
-  takes: z.array(ComicPageTakeSchema).max(100).default([]),
+  takes: z.array(ComicPageTakeSchema).max(COMIC_LIMITS.takesPerPage).default([]),
   /** Accepted take id by language (R-26). */
   accepted: z.record(z.string().min(2).max(35), UlidSchema).default({}),
   /** The overlay layer, by take id (R-38). */
