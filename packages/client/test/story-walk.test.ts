@@ -198,4 +198,35 @@ describe("every stop of every shared story shows two choices or more (SPEC-063 R
       assert.ok(walked.endings > 0 && walked.backs === walked.endings);
     });
   }
+
+  // R-11: a scene with nothing to play on this route goes straight to its choices, or through its one way.
+  it("a scene that plays nothing on the route", () => {
+    const dark = { op: "eq" as const, fact: "lit", value: true };
+    const walked = walk({
+      start: "sc_door",
+      kind: "novel",
+      facts: [{ id: "lit", type: "boolean", default: false }],
+      scenes: [
+        { id: "sc_door", title: "The door", beats: [{ picture: "door", line: "It is dark." }] },
+        { id: "sc_hall", title: "The hall", beats: [{ picture: "hall", line: "The lamp shows the hall." }] },
+        { id: "sc_stair", title: "The stair", beats: [{ picture: "stair", line: "Up or down." }] },
+        { id: "sc_cellar", title: "The cellar", beats: [{ picture: "cellar", line: "The lamp finds two doors." }] },
+        { id: "sc_out", title: "Out", beats: [{ picture: "out" }] },
+        { id: "sc_up", title: "Up", beats: [{ picture: "up" }] },
+      ],
+      presentation: [{ scene: "sc_hall", index: 0, when: dark }, { scene: "sc_cellar", index: 0, when: dark }],
+      choices: [
+        { id: "ch_dark", from: "sc_door", to: "sc_hall", label: "Go in", effects: [] },
+        { id: "ch_light", from: "sc_door", to: "sc_hall", label: "Light the lamp", effects: [{ fact: "lit", value: true }] },
+        { id: "ch_on", from: "sc_hall", to: "sc_stair", label: "On", effects: [] },
+        { id: "ch_down", from: "sc_stair", to: "sc_cellar", label: "Down", effects: [] },
+        { id: "ch_up", from: "sc_stair", to: "sc_up", label: "Up", effects: [] },
+        { id: "ch_left", from: "sc_cellar", to: "sc_out", label: "The left door", effects: [] },
+        { id: "ch_right", from: "sc_cellar", to: "sc_up", label: "The right door", effects: [] },
+      ],
+      endings: [{ scene: "sc_out", title: "Out" }, { scene: "sc_up", title: "Up" }],
+    });
+    // The door, the stair and the cellar, lit and dark; the hall is never a stop.
+    assert.equal(walked.stops.size, 5);
+  });
 });
