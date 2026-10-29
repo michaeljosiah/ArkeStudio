@@ -1,4 +1,5 @@
 import { TraversalEvidenceSchema } from "./routing.js";
+import { OnboardingPlanSchema } from "./onboarding.js";
 import { GuideVoiceLinesRequestSchema, SetGuideEntrySchema, SetGuideTeasersSchema } from "./world-guide.js";
 import { ARKE_PLAYER_PICTURE_SIZES } from "./world-package.js";
 import { ArkePlayerPartRequestSchema } from "./arke-player-release.js";
@@ -38,6 +39,9 @@ import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX, CadencePlanSchema } from "./cad
 import { PerformanceIdSchema } from "./performance.js";
 import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
+import { RecoveryModeSchema, RecoveryAdvancedSettingsSchema } from "./recovery-policy.js";
+import { RecoveryHistoryCommandSchema, RecoveryHistoryQuerySchema } from "./recovery-settings.js";
+import { RecoveryActionCommandSchema } from "./recovery-actions.js";
 import { CharacterAliasesInputSchema } from "./world.js";
 import { RoutingCommandSchema } from "./world-chat-actions.js";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
@@ -79,9 +83,11 @@ import { ProductionSetupCommandSchema } from "./production-setup.js";
 import { NarrativeFieldsSchema } from "./production-narrative.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
 import { DecideConversationActionSchema, PrepareConversationTakeReviewSchema } from "./arke-actions.js";
+import { StudioAssistantCommandSchema, StudioAssistantResponseSchema } from "./studio-assistant.js";
 
 /**
- * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then `event` frames, sequence
+ * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then events and requester-only
+ * Studio replies. Private replies never enter shared app/world state. Sequence
  * numbers monotonic per connection. A reconnecting client sends its last-seen sequence and
  * receives a fresh snapshot — partial replay is deliberately not offered (D4).
  */
@@ -97,6 +103,7 @@ export const PASSAGE_KEPT_MAX = 2_400;
 export const FrameSchema = valueSchema(z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema, retainedHistory: z.array(z.enum(["jobs", "ledger"])).optional() }).strict(),
   z.object({ kind: z.literal("event"), seq: z.number().int().min(1), event: DomainEventSchema }).strict(),
+  z.object({ kind: z.literal("studio-assistant"), seq: z.number().int().min(1), requestId: z.string().uuid(), response: StudioAssistantResponseSchema }).strict(),
 ]));
 export type Frame = z.infer<typeof FrameSchema>;
 
@@ -134,6 +141,11 @@ export const MusicImportSchema = z.object({ productionId: SlugSchema, makeAlbum:
 export type MusicImport = z.infer<typeof MusicImportSchema>;
 
 export const ClientMessageSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("import-world"), requestId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("check-onboarding") }).strict(),
+  z.object({ kind: z.literal("save-onboarding"), plan: OnboardingPlanSchema,
+    action: z.enum(["save", "install", "finish"]).default("save") }).strict(),
+  StudioAssistantCommandSchema,
   ProductionSetupCommandSchema,
   z.object({ kind: z.literal("save-production-narrative"), worldId: UlidSchema, productionId: SlugSchema,
     requestId: UlidSchema, expectedVersion: z.number().int().min(1).nullable(), narrative: NarrativeFieldsSchema }).strict(),
@@ -952,7 +964,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * there — presence is completion — so it is no answer to a file that arrived intact and is
    * the wrong bytes. Repair is the answer to a digest that did not match.
    */
-  z.object({ kind: z.literal("setup-repair"), componentId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("setup-repair"), componentId: z.string().min(1), revision: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
   z.object({ kind: z.literal("setup-cancel") }).strict(),
   /** Genesis conversation: shape a world that does not exist yet, in a sandbox session. */
   z
@@ -4210,6 +4222,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * finally looks. Coalesced like any other trigger; never a timer.
    */
   z.object({ kind: z.literal("refresh-diagnostics") }).strict(),
+  /** Turn 240: resource-only UI observations never accelerate storage or provider probing. */
+  z.object({ kind: z.literal("refresh-system-resources") }).strict(),
+  /** Host presentation/policy controls; opening an incident never invokes these. */
+  z.object({ kind: z.literal("recovery-set-mode"), requestId: UlidSchema, mode: RecoveryModeSchema }).strict(),
+  z.object({ kind: z.literal("recovery-set-advanced"), requestId: UlidSchema, settings: RecoveryAdvancedSettingsSchema }).strict(),
+  z.object({ kind: z.literal("recovery-set-preferences"), requestId: UlidSchema,
+    preferences: z.object({ transientMuted: z.boolean().optional(), desktopOptIn: z.boolean().optional() }).strict() }).strict(),
+  z.object({ kind: z.literal("recovery-history-control"), requestId: UlidSchema, command: RecoveryHistoryCommandSchema }).strict(),
+  z.object({ kind: z.literal("recovery-history-read"), requestId: UlidSchema, query: RecoveryHistoryQuerySchema }).strict(),
+  RecoveryActionCommandSchema,
   /**
    * The grouped-read probe (design turn 185): the same few consecutive blocks of a chapter read
    * as one request three ways — every turn its whole style, the notes once with each later turn

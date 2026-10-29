@@ -8,7 +8,7 @@ import { createStudioHost } from "./application/studio-host.js";
 import { AppSettingsFile } from "./app-settings.js";
 import { ChildLedger } from "./child-ledger.js";
 import type { Cipher } from "./credentials/store.js";
-import { assembleHarness, lazyCodexImageRunner, type AssembledHarness } from "./harness/v2-launch.js";
+import { assembleHarness, managedStudioAssistant, lazyCodexImageRunner, type AssembledHarness } from "./harness/v2-launch.js";
 import { harnessTrace } from "./harness/trace.js";
 import { ProviderCallStore } from "./providers/call-store.js";
 import { SecretRegistry } from "./redact.js";
@@ -53,7 +53,7 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
     ollama = new OllamaEngineService({ appRoot: options.appRoot, port: await allocateLoopbackPort(), deps: { ledger } });
     ming = new MingProcess(ledger);
     comfy = createNodeComfyUiEngine(options.appRoot, { ledger });
-    await ollama.applySettings(settings.ollama);
+    await ollama.applySettings(settings.ollama, { deferManagedStart: true });
     const chosen = effectiveHarnessEngine(settings.harness.engine, process.env["ARKE_HARNESS"]);
     if (options.adapter === undefined) {
       wiring = await assembleHarness({
@@ -85,12 +85,14 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
       jobsSeedPath: join(options.appRoot, "queue", "jobs.jsonl"), ledgerSeedPath: join(options.appRoot, "ledger.jsonl"),
       secretRegistry: secrets, providerCalls: calls, validators: clients, dispatchClients: clients, manifest: SHIPPED_MANIFEST,
       voice: { sidecar: null, localPresets: [], cloudSources: cloudVoiceSources(clients) },
-      setup: { ...nodeSetupDeps(), ollama, externallyPresent: async id => id === "ollama-runtime" ? ollama!.externallySelected() : id === "comfyui-runtime" && comfy!.service.externallySelected() },
+      setup: { ...nodeSetupDeps({ ledger }), ollama, externallyPresent: async id => id === "ollama-runtime" ? ollama!.externallySelected() : id === "comfyui-runtime" && comfy!.service.externallySelected() },
       setupExtraEntries: comfy.weights,
       comfyui: { service: comfy.service },
       ollama: { service: ollama, reconfigureHarness: wiring?.reconfigureOllama }, ming,
+      ...(wiring ? { studioAssistant: managedStudioAssistant(wiring, ollama) } : {}),
       authoring: { agentForPurpose, roster: ROSTER, skillFor },
       harnessLaunchEngine: chosen, relaunchHarness: wiring?.relaunchHarness,
+      harnessRecovery: wiring?.recovery,
       ...(wiring?.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
       harnessUnavailableReason: wiring?.unavailableReason ?? (options.adapter === null ? "AI is disabled for this server." : undefined),
     });

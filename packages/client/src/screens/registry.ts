@@ -19,6 +19,7 @@ export const SCREENS: ScreenEntry[] = [
   // Shell
 
   { id: "startup", samplePath: "/" },
+  { id: "onboarding", samplePath: "/setup" },
   { id: "first-run", samplePath: "/first-run" },
   { id: "world-picker", samplePath: "/worlds" },
   { id: "publications", samplePath: "/publications" },

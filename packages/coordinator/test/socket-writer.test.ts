@@ -50,15 +50,20 @@ it("refuses a single frame larger than the receiver's payload limit before writi
   assert.equal(f.logs[0]!.localCloseReason, "outbound frame limit"); f.writer.dispose();
 });
 
-it("records a stalled sender, bounds the close wait and cancels timers during disposal", async () => {
+it("records a stalled sender, bounds the close wait and cancels timers during disposal", context => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
   const f = fixture({ sendTimeoutMs: 10, closeTimeoutMs: 10 });
   f.writer.send("stalled");
-  await new Promise(resolve => setTimeout(resolve, 40));
+  context.mock.timers.tick(9); assert.deepEqual(f.closed, []);
+  context.mock.timers.tick(1);
   assert.equal(f.logs[0]!.localCloseReason, "outbound send timeout");
+  assert.equal(f.closed.length, 1); assert.equal(f.terminated(), false);
+  context.mock.timers.tick(9); assert.equal(f.terminated(), false);
+  context.mock.timers.tick(1);
   assert.equal(f.terminated(), true); f.writer.dispose();
   const g = fixture({ sendTimeoutMs: 10 });
   g.writer.send("stop"); g.writer.dispose(); g.callbacks.shift()!();
-  await new Promise(resolve => setTimeout(resolve, 20));
+  context.mock.timers.tick(20);
   assert.deepEqual(g.logs, []); assert.deepEqual(g.closed, []);
 });
 
@@ -69,18 +74,20 @@ it("handles failed sends without pumping queued frames", () => {
   assert.ok(!JSON.stringify(f.logs).includes("private")); f.writer.dispose();
 });
 
-it("preserves the bounded forced close while the coordinator drains a stalled peer", async () => {
+it("preserves the bounded forced close while the coordinator drains a stalled peer", context => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
   const f = fixture({ maxFrameBytes: 1, closeTimeoutMs: 10 });
   f.writer.send("oversized");
   f.writer.dispose({ preserveCloseTimeout: true });
-  await new Promise(resolve => setTimeout(resolve, 30));
+  context.mock.timers.tick(9); assert.equal(f.terminated(), false);
+  context.mock.timers.tick(1);
   assert.equal(f.terminated(), true, "shutdown must not cancel the forced-close deadline");
   f.writer.dispose();
   const g = fixture({ maxFrameBytes: 1, closeTimeoutMs: 10 });
   g.writer.send("oversized");
   g.writer.dispose({ preserveCloseTimeout: true });
   g.writer.dispose(); // Peer completed its close handshake before the deadline.
-  await new Promise(resolve => setTimeout(resolve, 30));
+  context.mock.timers.tick(30);
   assert.equal(g.terminated(), false, "the close event still cancels the deadline");
 });
 

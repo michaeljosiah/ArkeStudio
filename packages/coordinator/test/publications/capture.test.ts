@@ -9,9 +9,20 @@ import { WorldStore } from "../../src/world/store.js";
 import { WorldLockDeposedError } from "../../src/world/lock.js";
 import { capturePublicationInputs, type PublicationCaptureRequest } from "../../src/publications/capture.js";
 import { PublicationFileError } from "../../src/publications/files.js";
+import { ImportStorageHeld } from "../../src/storage/import-files.js";
 
 const digest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 const changed = (error: unknown) => error instanceof PublicationFileError && error.code === "source-changed";
+
+it("refuses capture before payload writes when its scratch plan is held and keeps source media", async t => {
+  const f = await fixture(t), original = await readFile(join(f.world, ".cache/source.mp4")); let attempted = 0;
+  await assert.rejects(capturePublicationInputs(f.store, f.request, f.scratch, { fileSpace: { async reserve(_directory, bytes, signal, role) {
+    attempted++; assert(bytes >= original.length); assert(bytes < original.length + 1024 ** 2);
+    assert.equal(role, "working-files"); assert.equal(signal.aborted, false); throw new ImportStorageHeld(undefined, "Export");
+  } } }), ImportStorageHeld);
+  assert.equal(attempted, 1); assert.deepEqual(await readdir(f.scratch), []);
+  assert.deepEqual(await readFile(join(f.world, ".cache/source.mp4")), original);
+});
 
 async function fixture(t: TestContext) {
   const world = await makeTempWorld();

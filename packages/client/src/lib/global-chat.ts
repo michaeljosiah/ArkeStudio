@@ -241,6 +241,19 @@ export class GlobalChatController {
     if (surface) this.select(surface);
     this.changed({ open: true });
   }
+  /** Explicit Studio handoff: stage only the reviewed request in the named destination.
+   * Preserve an existing draft unless replacement was separately chosen. No create/send. */
+  stageDraft(surface: ChatSurface, text: string, replaceDraft?: string): "ready" | "replace-required" | "busy" {
+    if (surface.conversationId || surface.newThread || !["world", "production"].includes(surface.entry.kind) ||
+      this.snapshot.phase !== "idle" || this.opening() || this.snapshot.switching) return "busy";
+    const existing = this.value(surface.key, "draft", "");
+    if (existing && existing !== replaceDraft) return "replace-required";
+    this.open({ ...surface, newThread: false });
+    // A destination without a thread opens its new-conversation composer, not its history list.
+    if (!this.snapshot.selected?.conversationId) this.startNew(surface);
+    this.setValue(this.snapshot.selected!.key, "draft", text);
+    return "ready";
+  }
   close() { this.pending = null; this.changed({ open: false, stopCapture: this.snapshot.stopCapture + 1, switching: false }); }
   stopDictation() { this.changed({ stopCapture: this.snapshot.stopCapture + 1 }); }
   reconcileConversations(worldId: string, ids: ReadonlySet<string>, loadedId?: string | null) {

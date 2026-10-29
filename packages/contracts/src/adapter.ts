@@ -19,16 +19,81 @@ export const HarnessCapability = z.enum([
 ]);
 export type HarnessCapability = z.infer<typeof HarnessCapability>;
 
+/** Host-only, opaque destination evidence. URLs, credentials and model metadata stay native. */
+export interface PrivateSessionDestination {
+  readonly model: string;
+  readonly provider: string;
+  readonly local: boolean;
+  readonly identity: string;
+}
+
 export interface SessionRef {
   sessionId: string;
+  /** Host-only, one-use observer for this exact private operational session. Its events
+   * SHALL be excluded from streamEvents and ordinary traces; never serialize this capability. */
+  privateEvents?(signal: AbortSignal): AsyncIterable<HarnessEvent>;
+  /** Host-only proof for the private session's single model turn. Resolves only on confirmed
+   * native completion or the owning host's confirmed backing-inference cleanup, never on a
+   * send error, interrupt acknowledgement or writing-process exit. A pending proof retains
+   * inference ownership. Never serialize this promise. */
+  privateTurnSettled?: Promise<void>;
+  /** Opaque host-only capability for this exact private owner. Invoke only after BOTH its
+   * backing inference and writing owner have confirmed native cleanup/no further dispatch.
+   * A local writer exiting cannot confirm remote inference. Never expose this to a model,
+   * renderer, log, persisted plan or wire command. It also retires the native session. */
+  privateOwnerStopped?(): void;
+  /** Read-only scoped route verification. Reading it pins the first proved destination;
+   * the adapter SHALL reverify that same route before native dispatch and before calling
+   * the final dispatch fence. Null/changed/aborted evidence cannot dispatch. This capability
+   * grants no cloud/spend approval and must never be serialized or exposed as a model tool. */
+  privateDestination?(signal: AbortSignal): Promise<PrivateSessionDestination | null>;
+  /** Retire only this ephemeral native session after confirmed completion, or before any
+   * dispatch. True requires native session/message absence, established by scoped retirement
+   * or trusted confirmation of BOTH original owners' physical cleanup. It cannot settle unknown model
+   * work, delete canonical Studio/World history, or target a replacement writing generation.
+   * Host-only capability; never serialize it or expose a general session-delete command. */
+  privateRetire?(signal: AbortSignal): Promise<boolean>;
 }
 
 /** What a session is for — selects the agent configuration and the confinement posture (§17.1). */
 export const SessionPurpose = z.enum(["authoring", "drafting", "extraction", "ask", "art-prompt", "world-chat"]);
 export type SessionPurpose = z.infer<typeof SessionPurpose>;
 
+/** Host-reviewed single private inference input. Never a renderer/tool authority or a
+ * credential container; concrete adapters render their measured provider grammar. */
+export const PrivateSessionVariantSchema = z.enum(["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+export type PrivateSessionVariant = z.infer<typeof PrivateSessionVariantSchema>;
+export interface PrivateSessionRequest { model: string; system: string; prompt: string; outputTokenLimit: number; variant?: PrivateSessionVariant }
+/** The private completion protocol carries named reasoning effort, not arbitrary model presets. */
+export function privateSessionVariants(model: Pick<ModelInfo, "variants">): ModelInfo["variants"] {
+  const names = model.variants?.names.filter(name => name !== "default" && PrivateSessionVariantSchema.safeParse(name).success);
+  return names?.length ? { names: ["default", ...names], default: "default" } : undefined;
+}
+/** Host-only ephemeral loopback bridge capability. Separate from the reviewed model input;
+ * never a provider credential, renderer/model argument or ordinary session setting. */
+export interface PrivateSessionTransport { baseURL: string; apiKey: string }
+/** Host-only original writing connection. These closures never enter configuration, wire
+ * commands, model input or logs. The caller retains close/drain ownership even when native
+ * creation fails. Sealing blocks new generation without cancelling a completion observation. */
+export interface PrivateSessionWriter {
+  readonly identity: string;
+  bindDirectory(directory: string, agent: string): boolean;
+  bindSession(sessionId: string): boolean;
+  current(): boolean;
+  fetch: typeof fetch;
+  seal(): void;
+  busy(): boolean;
+  close(): Promise<boolean>;
+}
+
 export interface CreateSessionInput {
   purpose: SessionPurpose;
+  /** Host-only isolation request, accepted only for a prepared operational role. No fallback
+   * to the shared event stream. A supporting adapter returns the private observer on SessionRef. */
+  visibility?: "private";
+  privateRequest?: PrivateSessionRequest;
+  privateTransport?: PrivateSessionTransport;
+  privateWriter?: PrivateSessionWriter;
   /** The one-use preparation returned by the coordinator's session-file step. */
   preparationId?: string;
   /** Bounds session creation; adapters SHALL pass it to every request on the creation path. */
@@ -293,6 +358,20 @@ export type VendorOAuthAttemptState =
  * adapter reports.
  */
 export interface HarnessAdapter {
+  /** True only after private operational sessions, event exclusion and trace privacy are
+   * implemented by this adapter. A private caller refuses an absent guarantee. */
+  readonly privateSessions?: true;
+  /** Qualifies scoped private destination proof plus native revalidation before the final
+   * dispatch fence. A supporting adapter must return SessionRef.privateDestination and
+   * implement sendMessageWithFence; this is separate from event/trace isolation. */
+  readonly privateDestinations?: true;
+  /** Seals a supplied PrivateSessionRequest into native destination proof and provider
+   * dispatch. Native defaults/ambient context cannot expand the reviewed request body. */
+  readonly privatePayloads?: true;
+  /** Sealed private requests use qualified transient generation, without native transcript
+   * persistence or message/SSE completion fallback. This does not qualify upstream allocation,
+   * monetary receipts, physical cleanup or arbitrary native/plugin versions. */
+  readonly privateTransient?: true;
   /** Transport support alone is insufficient: the pinned session must also accept images. */
   readonly imageInput?: boolean;
   imageInputForSession?(sessionId: string): boolean;
@@ -327,7 +406,9 @@ export interface HarnessAdapter {
    * paths and atomic replacement are solved once in the coordinator, and an adapter that had to
    * solve them again would solve them differently.
    */
-  sessionFiles?(input: SessionConfigInput): ReadonlyArray<SessionFile>;
+  /** The host supplies the resolved directory when a native control needs a literal path.
+   * File contents remain adapter output; filesystem writes remain with the host. */
+  sessionFiles?(input: SessionConfigInput, directory?: string, request?: PrivateSessionRequest, transport?: PrivateSessionTransport): ReadonlyArray<SessionFile>;
   /**
    * The same settings, for a harness that takes them as call options rather than as a file.
    *
@@ -367,6 +448,10 @@ export interface HarnessAdapter {
   promptReserveTokens?(agent: string, window: number): number | undefined;
   /** Synchronous send: resolves when the turn completes. */
   sendMessage(input: SendMessageInput): Promise<SendReceipt>;
+  /** Host-only send with a synchronous last-admission fence. Wrappers that queue work
+   * propagate it through every wait; a throwing fence prevents native dispatch. Calling it
+   * confirms dispatch admission, so cancellation before it is a known not-dispatched result. */
+  sendMessageWithFence?(input: SendMessageInput, beforeDispatch: () => void): Promise<SendReceipt>;
   /** Fire-and-watch: must not block while the turn runs. */
   dispatchAsync(input: SendMessageInput): Promise<SendReceipt>;
   usageTokens?(sessionId: string): number;

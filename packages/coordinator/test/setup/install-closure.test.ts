@@ -227,26 +227,27 @@ describe("remove answers for what Arke owns, and nothing else (R-43)", () => {
     );
     const result = await svc.remove(pulled.id);
     assert.deepEqual(asked, [["ollama", "rm", "gemma4:12b"]]);
-    assert.equal(result.freedMb, 7600);
+    assert.equal(result.freedMb, 0, "the runtime did not measure released allocation");
+    assert.match(svc.status().components[0]!.detail!, /shared model files may remain/);
     await svc.dispose();
   });
 });
 
 describe("remove gives the disk back, and says what would not go (R-43, R-45)", () => {
-  it("removes the files it declared and reports what it freed", async () => {
+  it("removes only declared files after an earlier Stop all and reports logical bytes", async () => {
     const root = await tempDir("arke-setup-");
     await mkdir(join(root, "models", "small"), { recursive: true });
     await writeFile(join(root, "models", "small", "s.bin"), Buffer.alloc(2 * 1024 * 1024));
     const { svc, status } = service([RUNTIME, SIBLING], root);
     await svc.detect();
     assert.equal(status().components.find((c) => c.id === SIBLING.id)?.state, "present");
-
+    await svc.cancel();
     const result = await svc.remove(SIBLING.id);
     assert.deepEqual(result.leftovers, [], "nothing was held open");
     assert.equal(result.freedMb, 2);
     const after = status().components.find((c) => c.id === SIBLING.id)!;
     assert.equal(after.state, "available");
-    assert.match(after.detail ?? "", /removed · 2 MB free/);
+    assert.match(after.detail ?? "", /removed · 2 MB of files/);
     await svc.dispose();
   });
 

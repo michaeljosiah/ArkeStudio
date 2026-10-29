@@ -14,6 +14,26 @@ licence source in `apps/desktop/runtime-sources.json`, and rerun the real-binary
 `@opencode/cli-windows-x64` and extracts `package/bin/opencode.exe`; staging renames it to
 `opencode2.exe` to preserve Studio's installed paths. PATH discovery checks both command names
 and accepts only the pinned v2 release. OpenCode v1 has no adapter, fallback or launch override.
+Private Studio writer qualification also embeds the verified executable size/hash in coordinator
+`harness/private-writer-pin.json`, tied to that source archive and architecture. After verifying
+the new archive against `runtime-sources.json`, stream/hash its exact executable member and
+update this pin with the version change. `prepare-opencode2.mjs` refuses incoherent pins or
+mismatched extracted bytes before its version probe/stage. A staged runtime's own manifest does
+not supply this expected digest. Repeat content-reader and actual bundled private-writer checks;
+the content check alone does not qualify the full managed stack or activate Studio model calls.
+Managed Ollama's private provider additionally pins every runtime file in coordinator
+`local-ai/ollama-private-pin-x64.json`. With the catalogue's exact archive available locally,
+`node --import tsx scripts/update-ollama-private-pin.mjs <archive.zip>` verifies its archive
+digest and streams its fixed members to compare the committed pin. Add `--write` only when
+intentionally updating that pin. It neither downloads, extracts nor executes runtime code.
+Repeat actual managed readiness/content/cleanup and private bridge checks after changing it.
+`scripts/qualify-studio-local.mjs` repeats live local-model, private-profile and restart checks
+using these pins and independently copied existing weights in an owned test directory. It
+downloads nothing, refuses unowned existing directories and leaves test data for review. See
+the exact invocation and evidence limits in [testing](testing.md#writing-engines-and-model-control).
+`scripts/qualify-studio-host.mjs` reuses that owned directory to verify the full authenticated
+conversation/delegation/history/restart path through normal Coordinator services and launcher
+controls. Both commands require explicit input paths and perform no downloads or repairs.
 OpenCode remains the bundled default while the
 Arke replacement in [issue #1698](https://github.com/michaeljosiah/ArkeStudio/issues/1698) is deferred.
 

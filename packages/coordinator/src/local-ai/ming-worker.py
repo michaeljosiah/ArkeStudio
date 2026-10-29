@@ -4,13 +4,13 @@ All paths come from the host. Dependencies are immutable, hash-locked archives e
 this disposable batch, never into ComfyUI. One model instance serves every chunk in the batch.
 """
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
 import math
 import os
 from pathlib import Path, PurePosixPath
 import random
-import shutil
 import sys
 import types
 import zipfile
@@ -19,6 +19,7 @@ import zipfile
 LANGUAGES = {"en": "English", "zh": "Chinese", "ja": "Japanese", "ko": "Korean",
              "fr": "French", "de": "German", "es": "Spanish", "it": "Italian",
              "pt": "Portuguese", "ru": "Russian"}
+MAX_AUDIO_BYTES = 64 * 1024 * 1024
 
 
 class MingWorkerRefusal(ValueError):
@@ -30,38 +31,86 @@ def sha256(path):
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
-def extract_verified(archive, expected, target, prefix="", sdk=False):
-    if archive.stat().st_size != expected["bytes"] or sha256(archive) != expected["sha256"]:
-        raise MingWorkerRefusal("Ming dependency verification failed: " + archive.name)
+def archive_entries(source, prefix="", sdk=False):
+    """Plan the complete archive before any entry is written; sizes exclude filtered SDK files."""
     total = 0
-    with zipfile.ZipFile(archive) as source:
-        members = source.infolist()
-        if len(members) > 40000:
-            raise MingWorkerRefusal("Ming archive has too many entries")
-        for member in members:
-            name = member.filename
-            if "\\" in name or ":" in name or "\0" in name:
-                raise MingWorkerRefusal("Unsafe Ming archive path")
-            path = PurePosixPath(name)
-            if path.is_absolute() or ".." in path.parts or (member.external_attr >> 16) & 0o170000 == 0o120000:
-                raise MingWorkerRefusal("Unsafe Ming archive entry")
-            if prefix:
-                if not name.startswith(prefix):
-                    raise MingWorkerRefusal("Ming source root does not match its revision")
-                name = name[len(prefix):]
-            if sdk:
-                if not name.startswith(("tools/include/", "tools/libs/")):
-                    continue
-                name = name[len("tools/"):]
-            if not name or member.is_dir():
+    entries = []
+    members = source.infolist()
+    if len(members) > 40000:
+        raise MingWorkerRefusal("Ming archive has too many entries")
+    for member in members:
+        name = member.filename
+        if "\\" in name or ":" in name or "\0" in name:
+            raise MingWorkerRefusal("Unsafe Ming archive path")
+        path = PurePosixPath(name)
+        if path.is_absolute() or ".." in path.parts or (member.external_attr >> 16) & 0o170000 == 0o120000:
+            raise MingWorkerRefusal("Unsafe Ming archive entry")
+        if prefix:
+            if not name.startswith(prefix):
+                raise MingWorkerRefusal("Ming source root does not match its revision")
+            name = name[len(prefix):]
+        if sdk:
+            if not name.startswith(("tools/include/", "tools/libs/")):
                 continue
-            total += member.file_size
-            if member.file_size > 512 * 1024 * 1024 or total > 2 * 1024 * 1024 * 1024:
-                raise MingWorkerRefusal("Ming archive exceeds its extraction limit")
-            destination = target / name
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            with source.open(member) as data, open(destination, "xb") as output:
-                shutil.copyfileobj(data, output, 1024 * 1024)
+            name = name[len("tools/"):]
+        if not name or member.is_dir():
+            continue
+        total += member.file_size
+        if member.file_size < 0 or member.file_size > 512 * 1024 * 1024 or total > 2 * 1024 * 1024 * 1024:
+            raise MingWorkerRefusal("Ming archive exceeds its extraction limit")
+        entries.append((member, name))
+    return entries, total
+
+
+def extract_planned(source, entries, target):
+    for member, name in entries:
+        destination = target / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with source.open(member) as data, open(destination, "xb") as output:
+            written = 0
+            while chunk := data.read(1024 * 1024):
+                if len(chunk) > member.file_size - written:
+                    raise MingWorkerRefusal("Ming archive entry exceeds its planned size")
+                output.write(chunk)
+                written += len(chunk)
+            if written != member.file_size:
+                raise MingWorkerRefusal("Ming archive entry did not match its planned size")
+
+
+def extract_dependencies(dependencies, byte_limit=None, entry_limit=None):
+    """All dependencies coexist with the audio. Validate the whole set before extraction starts."""
+    with ExitStack() as stack:
+        plans = []
+        total = 0
+        for archive, expected, target, prefix, sdk in dependencies:
+            if archive.stat().st_size != expected["bytes"] or sha256(archive) != expected["sha256"]:
+                raise MingWorkerRefusal("Ming dependency verification failed: " + archive.name)
+            source = stack.enter_context(zipfile.ZipFile(archive))
+            entries, size = archive_entries(source, prefix, sdk)
+            plans.append((source, entries, target))
+            total += size
+        if byte_limit is not None and total > byte_limit:
+            raise MingWorkerRefusal("Ming dependencies exceed their admitted expansion")
+        if entry_limit is not None and sum(len(entries) for _, entries, _ in plans) > entry_limit:
+            raise MingWorkerRefusal("Ming dependencies exceed their admitted entry count")
+        for source, entries, target in plans:
+            extract_planned(source, entries, target)
+        return total
+
+
+def extract_verified(archive, expected, target, prefix="", sdk=False):
+    return extract_dependencies([(archive, expected, target, prefix, sdk)])
+
+
+def validate_audio_budget(sample_count, sample_rate):
+    # Mono PCM16 WAV has a 44-byte header. Reserve another 4 KiB for library metadata;
+    # the host still checks the actual file size before returning any bytes.
+    if not math.isfinite(sample_rate) or sample_rate <= 0 or sample_count < 0:
+        raise MingWorkerRefusal("Ming returned an invalid audio size")
+    if sample_count > sample_rate * 600:
+        raise MingWorkerRefusal("Ming output exceeds ten minutes")
+    if sample_count * 2 + 4096 > MAX_AUDIO_BYTES:
+        raise MingWorkerRefusal("Ming output exceeds its audio file limit")
 
 
 def task_request(variant, text, reference, transcript, language, instruction, seed):
@@ -142,15 +191,18 @@ def main(request, assets):
     variant = request["variant"]
     source = batch / "source"
     overlay = batch / "overlay"
-    extract_verified(runtime / assets["source"]["file"], assets["source"], source,
-                     prefix="Ming-3.0-tts-" + assets["sourceRevision"] + "/")
-    for wheel in assets["variants"][variant]["wheels"]:
-        extract_verified(runtime / wheel["file"], wheel, overlay)
+    dependencies = [(runtime / assets["source"]["file"], assets["source"], source,
+                     "Ming-3.0-tts-" + assets["sourceRevision"] + "/", False)]
+    dependencies.extend((runtime / wheel["file"], wheel, overlay, "", False)
+                        for wheel in assets["variants"][variant]["wheels"])
+    sdk = batch / "sdk"
+    if variant == "tiny":
+        dependencies.append((runtime / assets["sdk"]["file"], assets["sdk"], sdk, "", True))
+    lock = assets["variants"][variant]
+    expanded_bytes = extract_dependencies(dependencies, lock["expandedBytes"], lock["expandedEntries"])
     sys.path.insert(0, str(source))
     sys.path.insert(0, str(overlay))
     if variant == "tiny":
-        sdk = batch / "sdk"
-        extract_verified(runtime / assets["sdk"]["file"], assets["sdk"], sdk, sdk=True)
         import triton.windows_utils as triton_windows
         triton_windows.find_python = lambda: [str(sdk / "libs")]
         os.environ["TRITON_CUDACRT_PATH"] = str(sdk / "include")
@@ -171,6 +223,7 @@ def main(request, assets):
         from ming_tiny import MingTinyTTS
         model = MingTinyTTS.from_pretrained(request["weights"], device="cuda:0")
     audio = []
+    sample_count = 0
     for index, text in enumerate(chunks):
         seed = request["seed"]
         random.seed(seed)
@@ -192,14 +245,16 @@ def main(request, assets):
         if not samples.size or not np.isfinite(samples).all():
             raise MingWorkerRefusal("Ming returned empty or non-finite audio")
         validate_audio_length(text, samples.size, model.sample_rate)
-        if sum(part.size for part in audio) + samples.size > model.sample_rate * 600:
-            raise MingWorkerRefusal("Ming output exceeds ten minutes")
+        gap = round(model.sample_rate * 0.08) if index else 0
+        validate_audio_budget(sample_count + samples.size + gap, model.sample_rate)
         if index:
-            audio.append(np.zeros(round(model.sample_rate * 0.08), dtype=np.float32))
+            audio.append(np.zeros(gap, dtype=np.float32))
         audio.append(samples)
+        sample_count += samples.size + gap
         print(f"Ming chunk {index + 1}/{len(chunks)} complete", flush=True)
     sf.write(request["output"], np.concatenate(audio), model.sample_rate, subtype="PCM_16")
-    (batch / "result.json").write_text(json.dumps({"completedChunks": len(chunks), "sampleRate": model.sample_rate}), encoding="utf8")
+    (batch / "result.json").write_text(json.dumps({"completedChunks": len(chunks), "sampleRate": model.sample_rate,
+                                                "expandedBytes": expanded_bytes}), encoding="utf8")
 
 
 if __name__ == "__main__":

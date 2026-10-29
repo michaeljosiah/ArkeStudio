@@ -8,6 +8,8 @@ import { ComfyUiDigestCache } from "../comfyui/digest-cache.js";
 import { splitForSpeech } from "../voice/split.js";
 import { MING_ASSETS } from "./ming-catalogue.js";
 import type { MingBatchCommand } from "./ming.js";
+import { MING_BATCH_AUDIO_BYTES, type MingBatchSpace, type MingBatchSpaceLease } from "../storage/ming-batches.js";
+import { ImportStorageHeld } from "../storage/import-files.js";
 
 /** Retain the sentence split used by Arke, with the auditioned forty-word ceiling as well. */
 export function mingSpeechChunks(text: string): string[] {
@@ -43,12 +45,14 @@ export interface MingSpeechDeps {
   arch?: string;
   /** Host/test seam; production uses the checked-in immutable publisher lock. */
   assets?: typeof MING_ASSETS;
+  space?: MingBatchSpace;
 }
 
 /** Host-owned paths and verified bytes. No model download or Python installation during inference. */
 export class MingSpeechService implements MingSynthesis {
   private active = 0;
   private fileChanges = 0;
+  private readonly retainedCleanup = new Set<() => Promise<void>>();
   get busy(): boolean { return this.active > 0; }
   reserveFileChange(): () => void {
     if (this.active || this.deps.processRunning()) throw new Error("Stop the current Ming reading before changing its model files.");
@@ -81,7 +85,10 @@ export class MingSpeechService implements MingSynthesis {
   async synthesize(input: Parameters<MingSynthesis["synthesize"]>[0], signal: AbortSignal): Promise<Uint8Array> {
     if (this.fileChanges) throw new Error("Ming's model files are being changed. Wait for setup to finish.");
     this.active++;
-    try { return await this.synthesizeOnce(input, signal); }
+    try {
+      for (const cleanup of this.retainedCleanup) { signal.throwIfAborted(); await cleanup(); }
+      return await this.synthesizeOnce(input, signal);
+    }
     finally { this.active--; }
   }
   private async synthesizeOnce(input: Parameters<MingSynthesis["synthesize"]>[0], signal: AbortSignal): Promise<Uint8Array> {
@@ -98,36 +105,66 @@ export class MingSpeechService implements MingSynthesis {
     const staging = join(this.deps.appRoot, ".staging", "ming");
     await mkdir(staging, {recursive: true});
     const batch = await mkdtemp(join(staging, "batch-"));
+    const cacheRoot = join(this.deps.appRoot, "runtime-cache", "ming");
+    let space: MingBatchSpaceLease | undefined;
+    let nativeHeld = false, nativeClaimed = false, hostSettled = false, cleanup: Promise<void> | undefined;
+    const settle = async () => {
+      if (nativeHeld || !hostSettled) return;
+      // Only this batch's original owners can release it. Another queued/running batch
+      // must neither strand these inputs nor authorize deleting its neighbour's files.
+      this.retainedCleanup.add(settle);
+      cleanup ??= (async () => { await space?.stop(); await rm(batch, {recursive: true, force: true}); await space?.settle(); })();
+      try { await cleanup; this.retainedCleanup.delete(settle); } catch (error) { cleanup = undefined; throw error; }
+    };
     try {
       const reference = join(batch, input.reference.contentType === "audio/wav" ? "reference.wav" : "reference.mp3");
-      await writeFile(reference, input.reference.data, {flag: "wx"});
       const request = { schemaVersion: 1, variant: files.variant, runtime: files.runtime, weights: files.weights,
         chunks: mingSpeechChunks(input.text), language: input.language, instructions: input.instructions ?? null,
         reference, transcript: input.reference.transcript, output: join(batch, "speech.wav"), seed: 1895 };
-      await writeFile(join(batch, "request.json"), JSON.stringify(request), {flag: "wx"});
-      await writeFile(join(batch, "assets.json"), JSON.stringify(this.deps.assets ?? MING_ASSETS), {flag: "wx"});
+      const requestBytes = JSON.stringify(request), assetsBytes = JSON.stringify(this.deps.assets ?? MING_ASSETS);
+      const inputs = input.reference.data.byteLength + Buffer.byteLength(requestBytes) + Buffer.byteLength(assetsBytes);
+      space = await this.deps.space?.reserve(staging, cacheRoot,
+        inputs + files.lock.expandedBytes + files.lock.expandedEntries * 8192 + MING_BATCH_AUDIO_BYTES + 65536, signal);
+      signal.throwIfAborted();
+      await writeFile(reference, input.reference.data, {flag: "wx"}); await space?.consumed(input.reference.data.byteLength);
+      await writeFile(join(batch, "request.json"), requestBytes, {flag: "wx"}); await space?.consumed(Buffer.byteLength(requestBytes));
+      await writeFile(join(batch, "assets.json"), assetsBytes, {flag: "wx"}); await space?.consumed(Buffer.byteLength(assetsBytes));
       try {
         await this.deps.run({ python, worker: this.deps.worker ?? join(dirname(fileURLToPath(import.meta.url)), "ming-worker.py"),
           args: ["--request", join(batch, "request.json"), "--assets", join(batch, "assets.json")],
-          cacheRoot: join(this.deps.appRoot, "runtime-cache", "ming") }, signal);
+          cacheRoot, storage: space,
+          retain: () => {
+            if (nativeClaimed || hostSettled) throw new Error("Ming batch ownership changed before launch.");
+            nativeClaimed = true; nativeHeld = true;
+            return async () => { await space?.stop(); nativeHeld = false; await settle(); };
+          } }, signal);
       } catch (error) {
         const failure = join(batch, "failure.json");
         const info = await stat(failure).catch(() => null);
-        if (!signal.aborted && !this.deps.processRunning() && info?.isFile() && info.size <= 2048) {
+        if (!signal.aborted && !nativeHeld && info?.isFile() && info.size <= 2048) {
           const detail = JSON.parse(await readFile(failure, "utf8")) as {reason?: unknown};
           if (typeof detail.reason === "string" && detail.reason.length <= 500) throw new ProviderRequestRejectedError(detail.reason);
         }
         throw error;
       }
       signal.throwIfAborted();
-      const result = JSON.parse(await readFile(join(batch, "result.json"), "utf8")) as {completedChunks?: number};
+      const result = JSON.parse(await readFile(join(batch, "result.json"), "utf8")) as {completedChunks?: number; expandedBytes?: number};
       if (result.completedChunks !== request.chunks.length) throw new Error("Ming did not complete every narration chunk.");
       const output = await stat(request.output);
       if (!output.isFile() || output.size < 44 || output.size > 64 * 1024 * 1024) throw new Error("Ming produced an invalid or oversized audio file.");
+      if (result.expandedBytes !== undefined && (!Number.isSafeInteger(result.expandedBytes) || result.expandedBytes < 0 || result.expandedBytes > files.lock.expandedBytes)) throw new Error("Ming produced invalid storage accounting.");
+      // The worker's closed phase receipt reports completed expansion. Older workers without
+      // that receipt keep the whole expansion estimate until settlement; unknown is not free.
+      await space?.consumed(output.size + (result.expandedBytes ?? 0));
       return new Uint8Array(await readFile(request.output));
+    } catch (error) {
+      space?.writeFailed(); if (nativeHeld) await space?.uncertain();
+      if (!nativeHeld && error instanceof ImportStorageHeld) throw new ProviderRequestRejectedError(error.message);
+      throw error;
     } finally {
-      // An unconfirmed exit retains both the GPU reservation and its in-use batch files.
-      if (!this.deps.processRunning()) await rm(batch, {recursive: true, force: true});
+      // Native cleanup may finish after the caller stopped waiting. Its retained release
+      // closes this exact batch once host reads/writes have also finished, without replay.
+      hostSettled = true; await settle();
     }
   }
 }

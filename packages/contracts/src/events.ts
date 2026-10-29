@@ -1,4 +1,5 @@
 import { GuideVoiceLineSchema } from "./world-guide.js";
+import { OnboardingStatusSchema } from "./onboarding.js";
 import { ArkePlayerReleaseSchema } from "./arke-player-release.js";
 import { StoryExportBlockerSchema, StoryExportMadeSchema, StoryExportStateSchema } from "./story-export.js";
 import { DramaEditionSchema } from "./audio-drama-edition.js";
@@ -43,6 +44,11 @@ import { MusicHeardRowSchema, MusicTakeViewSchema, MusicWaveformSchema } from ".
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
 import { OllamaRuntimeStatusSchema } from "./ollama.js";
+import { StorageHealthSnapshotSchema } from "./storage-health.js";
+import { SystemResourcesSchema } from "./system-resources.js";
+import { RecoveryHistorySnapshotSchema, RecoveryNoticeSchema } from "./recovery-incidents.js";
+import { RecoveryPolicySnapshotSchema, RecoveryCommandResultSchema, RecoveryHistoryPageSchema } from "./recovery-settings.js";
+import { RecoveryActionResultSchema } from "./recovery-actions.js";
 import { DiagnosticsSnapshotSchema } from "./diagnostics.js";
 import { BuildReviewSchema, FoundingBuildStateSchema } from "./founding-build.js";
 import { GenesisBlueprintSchema } from "./genesis.js";
@@ -172,6 +178,8 @@ export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 // (SPEC-031 §1.3); the domain event below is what still ties them to this file.
 
 export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
+  z.object({ ...base, type: z.literal("world.import-result"), requestId: z.string(), worldId: z.string().optional(), reason: z.string().optional(), cancelled: z.boolean().optional() }).strict(),
+  z.object({ ...base, type: z.literal("onboarding.changed"), onboarding: OnboardingStatusSchema }).strict(),
   z.object({ ...base, type: z.literal("reference.look-renamed"), worldId: UlidSchema, sheetId: SlugSchema,
     lookId: z.string().min(1), requestId: UlidSchema, error: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal("production-narrative.saved"), worldId: UlidSchema,
@@ -2468,6 +2476,14 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   /** The ComfyUI engine and its recipes, whole each time (SPEC-021 §2.12). */
   z.object({ ...base, type: z.literal("comfyui.status"), comfyui: ComfyUiStatusSchema }).strict(),
   z.object({ ...base, type: z.literal("ollama.status"), ollama: OllamaRuntimeStatusSchema }).strict(),
+  z.object({ ...base, type: z.literal("storage.health"), health: StorageHealthSnapshotSchema }).strict(),
+  z.object({ ...base, type: z.literal("system.resources"), resources: SystemResourcesSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.history"), history: RecoveryHistorySnapshotSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.notice"), notice: RecoveryNoticeSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.policy"), policy: RecoveryPolicySnapshotSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.command-result"), result: RecoveryCommandResultSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.action-result"), result: RecoveryActionResultSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.history-page"), requestId: UlidSchema, page: RecoveryHistoryPageSchema }).strict(),
   /** Estimate-versus-actual divergence crossed the drift threshold (SPEC-008 R-13, §2.11). */
   z.object({ ...base, type: z.literal("manifest.drift"), reports: z.array(ManifestDriftSchema) }).strict(),
 

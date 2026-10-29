@@ -157,6 +157,13 @@ describe("v2 normalisation (issue 327 §6)", () => {
 });
 
 describe("v2 adapter against the scripted server (issue 327 §11)", () => {
+  it("changes its lifecycle revision on confirmed runtime exit even while the adapter object survives", async () => {
+    const adapter = new OpenCodeV2Adapter({ baseUrl: () => "http://127.0.0.1:1", password: () => STUB_V2_PASSWORD });
+    const before = adapter.lifecycleRevision();
+    adapter.runtimeExited(); assert(adapter.lifecycleRevision() > before);
+    const replacement = adapter.lifecycleRevision();
+    await adapter.dispose(); assert(adapter.lifecycleRevision() > replacement);
+  });
   const stub = new StubOpenCodeV2();
   before(async () => stub.start());
   after(async () => stub.stop());
@@ -623,7 +630,7 @@ describe("v2 session config (issue 327 §7)", () => {
   it("orders the confinement block deny-first, managed re-allows after", () => {
     const config = buildSessionConfigV2({ defaultAgent: "scene-writer" });
     const agents = config["agents"] as Record<string, { permissions: Array<{ action: string; resource: string; effect: string }> }>;
-    const someAgent = Object.values(agents)[0]!;
+    const someAgent = agents["scene-writer"]!;
     const external = someAgent.permissions.filter((r) => r.action === "external_directory");
     assert.ok(external.length >= 2, "the confinement block exists");
     assert.deepEqual(external[0], { action: "external_directory", resource: "*", effect: "deny" });
@@ -680,6 +687,26 @@ describe("v2 session config (issue 327 §7)", () => {
 });
 
 describe("v2 discovery and the release pin (issue 327 §3)", () => {
+  it("passes a host-owned environment through configured, PATH and bundled discovery probes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "arke-oc2-env-")), configured = join(dir, "configured.exe"), bundled = join(dir, "bundled.exe");
+    writeFileSync(configured, "stub"); writeFileSync(bundled, "stub");
+    try {
+      for (const source of ["configured", "path", "bundled"] as const) {
+        const env = { HOME: "synthetic-owned-profile", PATH: "synthetic-bin", OPENCODE_DISABLE_AUTOUPDATE: "1" };
+        let probes = 0;
+        const result = await discoverPreferredHarness({ v2: { configuredPath: configured, bundledPath: bundled, env,
+          runCommand: async (command, args, _timeoutMs, actualEnv) => {
+            probes++; assert.equal(actualEnv, env);
+            if (command === "where" || command === "which") return source === "path" && args[0] === "opencode2"
+              ? { status: 0, stdout: "synthetic-path.exe" } : { status: 1, stdout: "" };
+            return { status: 0, stdout: command === configured && source !== "configured" ? "1.0.0" : "2.0.26" };
+          },
+        } });
+        assert.equal(result.found?.discovery.source, source); assert(probes > 0);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it("keeps the adapter's release gate in lockstep with the packaged runtime", () => {
     const metadata = JSON.parse(readFileSync(new URL("../../../apps/desktop/runtime-sources.json", import.meta.url), "utf8"));
     assert.equal(OPENCODE2_PINNED_VERSION, metadata.opencode2.version);
