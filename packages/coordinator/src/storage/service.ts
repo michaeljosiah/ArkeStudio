@@ -34,6 +34,7 @@ export class AppStorageService {
   private readonly inventory: StorageInventoryCollector;
   private readonly inventoryRoots: InventoryRoot[];
   private readonly previewInventoryRoot: InventoryRoot;
+  private managedModelRoots: InventoryRoot[] = [];
   private readonly roots = new Map<string, Root>();
   private readonly listeners = new Set<(snapshot: StorageHealthSnapshot) => void>();
   private currentWorld: string | null = null;
@@ -147,9 +148,27 @@ export class AppStorageService {
       if (root.rootId === rootKey(this.currentWorld) || root.worldScope === this.currentWorld) root.world = false;
     }
     this.currentWorld = path;
-    this.inventory.setRoots(path ? [...this.inventoryRoots, { path, kind: "world" }] : this.inventoryRoots);
+    this.syncInventoryRoots();
     if (path) for (const root of this.roots.values()) if (root.worldScope === path) root.world = true;
     this.syncRoots();
+  }
+
+  /** Trusted managed-store owners supply only their model subfolders, never a personal
+   * installation or the whole selected drive. Capacity follows those actual destinations. */
+  setManagedModelRoots(directories: readonly string[]): void {
+    if (this.closing) return;
+    const next = [...new Set(directories.map(path => resolve(path)))].sort().map(path => ({ path, kind: "models" as const }));
+    if (JSON.stringify(next) === JSON.stringify(this.managedModelRoots)) return;
+    if (next.length > 16) throw new Error("Too many managed model destinations.");
+    this.managedModelRoots = next;
+    // Set the new scope before publishing a root change: observers can re-enter this setter.
+    this.syncRoots();
+    this.syncInventoryRoots();
+  }
+
+  private syncInventoryRoots(): void {
+    this.inventory.setRoots([...this.inventoryRoots, ...this.managedModelRoots,
+      ...(this.currentWorld ? [{ path: this.currentWorld, kind: "world" as const }] : [])]);
   }
 
   /** A background operation retains just its known destination after its world leaves the UI.
@@ -186,10 +205,18 @@ export class AppStorageService {
 
   private syncRoots(): void {
     const retained = new Set(this.reservations.snapshot().records.flatMap(record => record.demands.map(demand => demand.rootId)));
-    for (const [id, root] of this.roots) if (!root.fixed && !root.world && root.leases === 0 && !retained.has(id)) this.roots.delete(id);
+    const models = new Set(this.managedModelRoots.map(root => rootKey(root.path)));
+    for (const [id, root] of this.roots) if (!root.fixed && !root.world && root.leases === 0 && !retained.has(id) && !models.has(id)) this.roots.delete(id);
     if (this.closing) return;
     const wasLimited = this.limited;
     this.limited = false;
+    for (const model of this.managedModelRoots) {
+      const rootId = rootKey(model.path);
+      if (!this.roots.has(rootId)) {
+        if (this.roots.size < 128) this.roots.set(rootId, { rootId, path: model.path, role: "local-ai", fixed: false, world: false, leases: 0 });
+        else this.limited = true;
+      }
+    }
     if (this.currentWorld) {
       const rootId = rootKey(this.currentWorld), existing = this.roots.get(rootId);
       if (existing) existing.world = true;

@@ -26,6 +26,9 @@ existing dispatcher and cleared on settlement/cancellation. Contracts `storage-w
 those observations and setup's typed disk blocks for Studio's Activity/Downloads handoffs.
 No job journal or error-text parser is added; a historical check is not a pending operation.
 Contracts `storage-inventory.ts` defines the seven scoped logical-size categories. Coordinator
+`syncStorageObservation` registers the managed Ollama store's `blobs` and `manifests` subfolders
+for inventory and actual-volume observation, including a configured location outside the app root.
+External runtimes and unrelated files in the selected parent stay outside this inventory.
 `storage/inventory.ts` walks only registered managed folders and the open world, yielding after
 50 ms/1,000 entries, skipping links and retaining a single metadata chain until it settles.
 A 15-second lack of progress abandons the reading; a large progressing scan can continue.

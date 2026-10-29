@@ -456,6 +456,12 @@ The actual inventory component supports keyboard disclosure and has no horizonta
 This component check is not the approved-master comparison. Custom model destinations and other
 write owners still require integration; this inventory slice does not complete the epic.
 
+The managed Ollama store now follows its configured location through its two known model
+subfolders. Seventeen focused storage/inventory tests pass, including relocated-store accounting,
+unrelated-parent exclusion, default-store deduplication and observation removal on deselection.
+External runtime installations and user-mapped ComfyUI folders remain outside automatic inventory;
+the existing installer still observes the actual destination for their explicitly selected writes.
+
 ## Optional model removal review — 29 October 2026
 
 Models and Downloads now share one review of the selected component, estimated installed size,

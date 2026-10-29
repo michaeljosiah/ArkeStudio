@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { join } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { StorageHealthSnapshotSchema, type StorageHealthSnapshot } from "@arke-studio/contracts";
 import { AppStorageService, type StorageNativePort } from "../../src/storage/service.js";
 import { tempDir } from "../tmp.js";
@@ -22,6 +23,46 @@ function fixture(root: string) {
 }
 
 describe("application storage ownership", () => {
+  it("counts relocated managed model subfolders once and releases their observations when deselected", async () => {
+    const base = await tempDir("arke-storage-models-"), app = join(base, "app"), selected = join(base, "selected"), { service, roots } = fixture(app);
+    const blobs = join(selected, "blobs"), manifests = join(selected, "manifests");
+    await mkdir(blobs, { recursive: true }); await mkdir(manifests, { recursive: true });
+    await writeFile(join(blobs, "model"), Buffer.alloc(17)); await writeFile(join(manifests, "model"), Buffer.alloc(3));
+    await writeFile(join(selected, "personal-file"), Buffer.alloc(91));
+    service.setManagedModelRoots([blobs, manifests]);
+    const measured = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => { off(); reject(new Error("Managed inventory did not finish.")); }, 5_000);
+      const off = service.subscribe(state => {
+        if (state.inventory?.categories.find(row => row.category === "models")?.logicalBytes === 20) { clearTimeout(timer); off(); resolve(); }
+      });
+    });
+    try {
+      await service.start(); await measured;
+      assert(roots().some(root => root.path === blobs));
+      assert(!roots().some(root => root.path === selected));
+      assert.doesNotMatch(JSON.stringify(service.snapshot()), /personal-file|selected|arke-storage-models-/);
+      service.setManagedModelRoots([]);
+      assert(!roots().some(root => root.path === blobs || root.path === manifests));
+      assert.equal(service.snapshot().inventory!.categories.find(row => row.category === "models")!.logicalBytes, null);
+      service.closeAdmission(); service.setManagedModelRoots([blobs]);
+      assert(!roots().some(root => root.path === blobs));
+    } finally { await service.stop(); }
+  });
+
+  it("does not double-count the default model store when its nested destinations are registered", async () => {
+    const app = await tempDir("arke-storage-default-models-"), blobs = join(app, "models", "ollama", "blobs"), { service } = fixture(app);
+    await mkdir(blobs, { recursive: true }); await writeFile(join(blobs, "model"), Buffer.alloc(23));
+    service.setManagedModelRoots([blobs]);
+    const measured = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => { off(); reject(new Error("Nested inventory did not finish.")); }, 5_000);
+      const off = service.subscribe(state => {
+        const models = state.inventory?.categories.find(row => row.category === "models");
+        if (models?.state === "measured") { clearTimeout(timer); off(); assert.equal(models.logicalBytes, 23); resolve(); }
+      });
+    });
+    try { await service.start(); await measured; } finally { await service.stop(); }
+  });
+
   it("publishes bounded anonymous shortfall checks without retaining paths, inventing work status or reserving failed attempts", async () => {
     const root = await tempDir("arke-storage-checks-"), { service, roots, advance } = fixture(root), gib = 1024 ** 3;
     await service.start();

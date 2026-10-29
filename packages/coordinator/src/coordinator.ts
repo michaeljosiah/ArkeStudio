@@ -1303,6 +1303,11 @@ export class Coordinator {
     const service = this.opts.storageHealth;
     if (!service || this.stopping) return;
     service.setWorld(this.opts.provider.openStore?.()?.dir ?? null);
+    const ollama = this.opts.ollama?.service;
+    const modelStore = ollama && !ollama.externallySelected() ? ollama.modelsDir() : null;
+    // Only the managed runtime's two known store subfolders, not an arbitrary selected
+    // parent or an external server's files. Nested default roots are counted once.
+    service.setManagedModelRoots(modelStore ? [join(modelStore, "blobs"), join(modelStore, "manifests")] : []);
     const active = (job: Job) => job.status === "submitting" || job.status === "running" || job.finalization?.status === "pending";
     if (!event) {
       this.storageWritingJobs.clear();
