@@ -355,7 +355,12 @@ function PageSide({ world, production, page, saving, connected, problem, onSetti
     // The book's dollar cap bounds the retries only; one attempt confirms its own price (codex on PR 2226).
     makeComicPage(worldId, productionId, page.id, until ? Math.max(quote.microUsd, Math.min(total, Math.round(settings.cap.usd * 1_000_000))) : quote.microUsd, undefined, until);
   };
-  const press = making !== null ? "Making…" : takes.length ? "Make again" : "Make page";
+  // Making is the page record's word as well as this window's: after a reconnect the event that ended
+  // it may be lost, and the record says whether anything is still being made (codex on PR 2226).
+  const busy = making !== null && (record?.making.length ?? 0) > 0;
+  const press = busy ? "Making…" : takes.length ? "Make again" : "Make page";
+  // An accepted take a re-check failed is kept only by covering what it found now.
+  const covered = shown?.override !== undefined && blocking.every((finding) => shown.override!.findings.includes(finding.id));
 
   return (
     <div className="fy-comic__side">
@@ -409,9 +414,9 @@ function PageSide({ world, production, page, saving, connected, problem, onSetti
       )}
       <div className="fy-comic__acts">
         {shown !== undefined && shown.id !== accepted && !outOfDate && passed && <Button variant="primary" onClick={() => acceptComicTake(worldId, productionId, page.id, shown.id)}>Accept</Button>}
-        <Button variant={shown !== undefined && passed && shown.id !== accepted && !outOfDate ? "secondary" : "primary"} disabled={!quote?.ok || making !== null || !connected} onClick={make}
+        <Button variant={shown !== undefined && passed && shown.id !== accepted && !outOfDate ? "secondary" : "primary"} disabled={!quote?.ok || busy || !connected} onClick={make}
           title={quote && !quote.ok ? quote.reason : undefined}><Sparkle size={13} />{press}</Button>
-        {shown !== undefined && shown.id !== accepted && !outOfDate && !passed && (
+        {shown !== undefined && !outOfDate && !passed && (shown.id !== accepted || !covered) && (
           <Button title="Keeps this take with what was found on the record" onClick={() => acceptComicTake(worldId, productionId, page.id, shown.id, { findings: blocking.map((finding) => finding.id) })}>Accept anyway</Button>
         )}
         <span className="grow" />
