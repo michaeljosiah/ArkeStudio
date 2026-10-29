@@ -28,6 +28,17 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN ARKE HEARS 248
+  { group: "Arke hears a read · turn 248", screen: "Design a voice makes two, priced", frame: "248a", route: "Character / Voice", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Proposed 29 October 2026."] },
+  { group: "Arke hears a read · turn 248", screen: "Imani: both reads measured, Arke picks B", frame: "248b", route: "Character / Voice", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Proposed 29 October 2026."] },
+  { group: "Arke hears a read · turn 248", screen: "Lin Wei: briefed a tenor, read lower", frame: "248c", route: "Character / Voice", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Proposed 29 October 2026."] },
+  { group: "Arke hears a read · turn 248", screen: "The cast: a pick each, chosen one by one", frame: "248d", route: "Production / Cast", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Proposed 29 October 2026."] },
+  { group: "Arke hears a read · turn 248", screen: "World Chat: a judgement and its evidence", frame: "248e", route: "World Chat", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Proposed 29 October 2026."] },
+  { group: "Arke hears a read · turn 248", screen: "What Arke cannot hear: accent", frame: "248f", route: "World Chat", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Proposed 29 October 2026."] },
+  { group: "Arke hears a read · turn 248", screen: "Table read: three lines to check, each with Redo", frame: "248g", route: "Visual novel / Beats", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Proposed 29 October 2026."] },
+  { group: "Arke hears a read · turn 248", screen: "A take’s measure: Redo with a pause", frame: "248h", route: "Visual novel / Beat", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Proposed 29 October 2026."] },
+  // END ARKE HEARS 248
+
   // BEGIN GRAPHIC NOVEL 247
   { group: "Graphic novel · turn 247", screen: "Tell a story: Graphic novel, a kind of its own", frame: "247a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 29 October 2026."] },
   { group: "Graphic novel · turn 247", screen: "Pages: a page’s panels and lines, priced before it is made", frame: "247b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-28", controls: [], notes: ["Approved 29 October 2026."] },
@@ -990,6 +1001,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "arke-hears-248.review.html", what: "Turn 248: Arke hears a read — every read carries a measure of pace, stops, words, pitch and loudness; Arke judges a voice from it, auditions two before recommending, and says what it cannot hear.", state: "proposed 29 October 2026; not built" },
   { file: "graphic-novel-247.review.html", what: "Turn 247: the graphic novel — Graphic novel under Tell a story, the Pages screen and its page editor, a take’s lettering check drawn on the page, a take that passes, a check that could not run, the reader, and Export.", state: "approved 29 October 2026; not built" },
   { file: "story-plays-itself-246.review.html", what: "Turn 246: A story plays itself — a visual novel plays like a film in Preview and the web package, stops only for a choice of two or more, and plays through a lone way on, drawn on the Branch Map as a link.", state: "approved 28 October 2026; not built" },
   { file: "story-export-245.review.html", what: "Turn 245: Export → Arke Player for an interactive story — the Export sheet with Web package and Arke Player for an interactive movie and a visual novel, its blockers, and the package made and read back beside the world’s releases.", state: "approved 28 October 2026; not built" },
@@ -1188,6 +1200,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="install-journeys.worlds.css">
 <link rel="stylesheet" href="story-plays-itself-246.css">
 <link rel="stylesheet" href="graphic-novel-247.css">
+<link rel="stylesheet" href="arke-hears-248.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">

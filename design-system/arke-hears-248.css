@@ -1,0 +1,266 @@
+/* Turn 248 · Arke hears a read. The Voice page is 132's, the scene's beats and its Arke panel 174's,
+   World Chat 225's, the beat inspector 246h's; copied here under .ah248 so the turn's review page
+   stands alone. New: the measure (pace, stops, words, pitch, loudness), the stop marks in a line,
+   the pitch band, two candidates side by side and the evidence card. Type through the tokens only
+   (turn 139). */
+.ah248{position:relative;box-sizing:border-box;overflow:hidden;text-align:left;font:var(--type-ui);background:var(--background);color:var(--foreground)}
+.ah248 *{box-sizing:border-box}
+.ah248 svg{flex:none}
+.ah248 p{margin:0}
+
+/* Chrome: 132a's bar, 174b's rail. */
+.ah248-top{position:absolute;left:0;right:0;top:0;height:44px;display:flex;align-items:center;gap:16px;padding:0 22px;border-bottom:1px solid var(--border);background:var(--background);z-index:2}
+.ah248-top .where{flex:1;min-width:0;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ah248-top .brand{display:flex;gap:6px;align-items:baseline}
+.ah248-top .brand b{font:var(--type-h3)}
+.ah248-top .brand span{font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ah248-top .tools{flex:1;display:flex;justify-content:flex-end;gap:6px;color:var(--muted-foreground)}
+.ah248-top .tools>span{width:30px;height:30px;border-radius:7px;display:grid;place-items:center}
+.ah248-top .tools>span.on{background:var(--secondary);color:var(--foreground)}
+.ah248-rail{position:absolute;left:0;top:44px;bottom:0;width:56px;border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;gap:8px;padding:12px 0;color:var(--muted-foreground);background:var(--background)}
+.ah248-rail .mark{width:30px;height:30px;border-radius:8px;border:1px solid var(--border);display:grid;place-items:center;font:var(--type-label);font-weight:var(--weight-semibold);color:var(--foreground);margin-bottom:8px}
+.ah248-rail>span{width:34px;height:34px;border-radius:8px;display:grid;place-items:center}
+.ah248-rail>span.on{background:var(--secondary);color:var(--foreground)}
+.ah248-rail .grow{flex:1}
+.ah248-rail hr{width:24px;border:0;border-top:1px solid var(--border);margin:4px 0}
+
+/* Buttons and chips. */
+.ah248-btn{height:34px;padding:0 13px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--background);color:var(--foreground);display:inline-flex;align-items:center;justify-content:center;gap:7px;font:var(--type-ui);white-space:nowrap}
+.ah248-btn.primary{background:var(--primary);color:var(--primary-foreground);border-color:var(--primary)}
+.ah248-btn.ghost{border-color:transparent;background:transparent}
+.ah248-btn.off{color:var(--muted-foreground);background:var(--muted);border-color:var(--muted)}
+.ah248-btn.sm{height:28px;padding:0 10px;font:var(--type-label)}
+.ah248-btn small{font:var(--type-label);font-weight:var(--weight-regular);opacity:.72}
+.ah248-chip{height:22px;padding:0 8px;border-radius:999px;display:inline-flex;align-items:center;gap:5px;font:var(--type-label);white-space:nowrap;background:var(--muted);color:var(--muted-foreground)}
+.ah248-chip.warn{background:var(--warning-bg);color:var(--warning)}
+.ah248-chip.ok{background:var(--success-bg);color:var(--success)}
+.ah248-chip.line{background:transparent;border:1px solid var(--border);color:var(--foreground)}
+.ah248-chip.ink{background:var(--foreground);color:var(--background)}
+.ah248-letter{width:26px;height:26px;border-radius:999px;flex:none;display:grid;place-items:center;font:var(--type-label);font-weight:var(--weight-semibold);color:var(--background);background:var(--c,var(--foreground))}
+.ah248-letter.sm{width:20px;height:20px;font:var(--type-meta);font-weight:var(--weight-semibold)}
+.ah248-play{height:30px;padding:0 11px 0 6px;border:1px solid var(--border);border-radius:999px;display:inline-flex;align-items:center;gap:6px;font:var(--type-label);font-variant-numeric:tabular-nums;background:var(--background);color:var(--foreground);white-space:nowrap}
+.ah248-play .dot{width:20px;height:20px;border-radius:999px;display:grid;place-items:center;background:var(--foreground);color:var(--background)}
+.ah248-heard{display:inline-flex;align-items:center;gap:4px;font:var(--type-meta);color:var(--muted-foreground);white-space:nowrap}
+.ah248-heard svg{color:var(--success)}
+
+/* The voice page (132a): the character's head and its tabs. */
+.ah248-vp{position:absolute;left:0;top:44px;bottom:0;overflow:hidden}
+.ah248-vhead{display:flex;align-items:center;gap:14px;padding:22px 0 16px}
+.ah248-avatar{width:44px;height:44px;border-radius:999px;object-fit:cover;object-position:50% 18%;flex:none;display:block}
+.ah248-avatar.sm{width:36px;height:36px}
+.ah248-vhead .grow{flex:1;min-width:0}
+.ah248-h1{font:var(--type-title);letter-spacing:var(--tracking-tight)}
+.ah248-tabs{display:inline-flex;gap:2px;padding:3px;border-radius:10px;background:var(--muted)}
+.ah248-tabs span{height:30px;padding:0 14px;border-radius:8px;display:inline-flex;align-items:center;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ah248-tabs span.on{background:var(--background);color:var(--foreground);font-weight:var(--weight-medium);box-shadow:var(--shadow-xs)}
+.ah248-shead{display:flex;align-items:center;gap:12px;margin:0 0 12px}
+.ah248-shead h2{margin:0;font:var(--type-h3)}
+.ah248-shead .m{flex:1;font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+
+/* Arke's pick: one strip over the two candidates. */
+.ah248-pick{display:flex;align-items:flex-start;gap:12px;padding:13px 16px;border:1px solid var(--border);border-radius:12px;background:var(--secondary)}
+.ah248-pick .who{width:28px;height:28px;border-radius:8px;flex:none;display:grid;place-items:center;background:var(--background);border:1px solid var(--border)}
+.ah248-pick .body{flex:1;min-width:0;font:var(--type-ui);font-weight:var(--weight-regular);line-height:var(--leading-body)}
+.ah248-pick .body b{font-weight:var(--weight-semibold)}
+.ah248-pick .side{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex:none}
+
+/* Two candidates side by side. */
+.ah248-pair{display:flex;gap:16px;margin-top:12px}
+.ah248-cand{flex:1;min-width:0;border:1px solid var(--border);border-radius:12px;background:var(--background);display:flex;flex-direction:column}
+.ah248-cand.pick{border-color:var(--foreground);box-shadow:0 0 0 1px var(--foreground)}
+.ah248-chead{display:flex;align-items:center;gap:10px;padding:13px 16px 0}
+.ah248-chead .n{flex:1;min-width:0;font:var(--type-ui);font-weight:var(--weight-semibold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ah248-brief{padding:5px 16px 0 52px;font:var(--type-meta);color:var(--muted-foreground)}
+.ah248-said{margin:12px 16px 0;padding:11px 14px;border-radius:10px;background:var(--muted);font:var(--type-body);line-height:1.8}
+.ah248-cfoot{margin-top:auto;display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:12px 16px 14px;border-top:1px solid var(--border)}
+.ah248-cfoot .why{flex:1;font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+
+/* A stop in a line: its pause, or no pause; a run-on is the two words it joins. */
+.ah248-stop{display:inline-flex;align-items:center;height:18px;padding:0 6px;margin:0 3px;border-radius:5px;vertical-align:2px;font:var(--type-meta);font-variant-numeric:tabular-nums;background:var(--background);color:var(--muted-foreground);border:1px solid var(--border);white-space:nowrap}
+.ah248-stop.short{color:var(--warning);border-color:color-mix(in srgb,var(--warning) 45%,transparent)}
+.ah248-stop.none{color:var(--background);background:var(--warning);border-color:var(--warning)}
+.ah248-wm{white-space:nowrap}
+.ah248-join{white-space:nowrap;text-decoration:underline wavy var(--warning);text-decoration-thickness:1.5px;text-underline-offset:5px}
+.ah248-miss{text-decoration:line-through;color:var(--warning)}
+
+/* The measure: five rows, label · value · detail · flag. */
+.ah248-mx{margin:8px 16px 0;display:flex;flex-direction:column}
+.ah248-mx>div{display:flex;align-items:center;gap:10px;min-height:32px;border-top:1px solid var(--border)}
+.ah248-mx>div:first-child{border-top:0}
+.ah248-mx .k{width:72px;flex:none;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ah248-mx .v{font:var(--type-ui);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ah248-mx .d{flex:1;min-width:0;font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* The pitch band: the middle 80 % of the voiced frames, the median a tick. */
+.ah248-band{position:relative;display:block;height:10px;border-radius:99px;background:var(--muted)}
+.ah248-band>i{position:absolute;top:0;bottom:0;left:var(--l);right:var(--r);border-radius:99px;background:color-mix(in srgb,var(--c) 34%,transparent)}
+.ah248-band>b{position:absolute;top:-3px;bottom:-3px;left:var(--m);width:3px;margin-left:-1.5px;border-radius:2px;background:var(--c)}
+.ah248-band.dim>i{background:color-mix(in srgb,var(--c) 14%,transparent)}
+.ah248-band.dim>b{background:color-mix(in srgb,var(--c) 50%,transparent)}
+.ah248-band.only>i{display:none}
+.ah248-axis{position:relative;height:16px;font:var(--type-meta);color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.ah248-axis span{position:absolute;top:0;transform:translateX(-50%)}
+.ah248-strip{margin-top:14px;padding:12px 16px 10px;border:1px solid var(--border);border-radius:12px;display:grid;grid-template-columns:200px 1fr 150px;column-gap:16px;row-gap:9px;align-items:center}
+.ah248-strip .t{font:var(--type-label);color:var(--muted-foreground)}
+.ah248-strip .n{font:var(--type-ui);display:flex;align-items:center;gap:8px;white-space:nowrap}
+.ah248-strip .n small{font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ah248-strip .hz{font:var(--type-ui);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.ah248-strip .hz small{font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+
+/* The design sheet (from 132g's dialog). */
+.ah248-scrim{position:absolute;inset:44px 0 0;background:color-mix(in srgb,var(--foreground) 22%,transparent);z-index:3}
+.ah248-dialog{position:absolute;z-index:4;left:50%;top:70px;width:960px;margin-left:-480px;border:1px solid var(--border);border-radius:16px;background:var(--popover);box-shadow:var(--shadow-lg);display:flex;flex-direction:column}
+.ah248-dhead{display:flex;align-items:center;gap:12px;padding:20px 24px 4px}
+.ah248-dhead .t{flex:1;font:var(--type-h2)}
+.ah248-dbody{padding:12px 24px 0}
+.ah248-eb{font:var(--type-label);color:var(--muted-foreground);margin-bottom:8px}
+.ah248-cols{display:flex;gap:16px}
+.ah248-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.ah248-col .h{display:flex;align-items:center;gap:8px;font:var(--type-ui);font-weight:var(--weight-semibold)}
+.ah248-col .h .grow{flex:1}
+.ah248-area{padding:11px 13px;border:1px solid var(--border);border-radius:10px;background:var(--background);font:var(--type-ui);font-weight:var(--weight-regular);line-height:1.55;color:var(--foreground)}
+.ah248-lines{margin-top:16px;border:1px solid var(--border);border-radius:10px}
+.ah248-lines>div{display:flex;align-items:baseline;gap:14px;padding:10px 14px;border-top:1px solid var(--border)}
+.ah248-lines>div:first-child{border-top:0}
+.ah248-lines .s{width:64px;flex:none;font:var(--type-label);color:var(--muted-foreground)}
+.ah248-lines .l{flex:1;font:var(--type-body)}
+.ah248-dfoot{display:flex;align-items:center;gap:10px;padding:16px 24px 20px;margin-top:18px;border-top:1px solid var(--border)}
+.ah248-dfoot .m{flex:1;font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+
+/* The voice page behind the sheet: 132b's nothing-yet hero and the ways in. */
+.ah248-hero{display:flex;border:1px solid var(--border);border-radius:14px;overflow:hidden;height:250px}
+.ah248-hero img{width:220px;height:100%;object-fit:cover;object-position:50% 20%;display:block}
+.ah248-hero .b{flex:1;padding:24px 28px;display:flex;flex-direction:column;gap:12px}
+.ah248-hero .nm{font:var(--type-title);color:var(--muted-foreground);margin-bottom:12px}
+.ah248-use{display:flex;align-items:center;gap:16px;min-height:52px;border-top:1px solid var(--border);font:var(--type-ui)}
+.ah248-use .k{width:110px;font-weight:var(--weight-semibold)}
+.ah248-use .v{flex:1;color:var(--muted-foreground);font-weight:var(--weight-regular)}
+.ah248-ways{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:12px}
+.ah248-way{border:1px solid var(--border);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:6px;min-height:150px}
+.ah248-way .i{width:36px;height:36px;border-radius:999px;background:var(--muted);display:grid;place-items:center;margin-bottom:6px}
+.ah248-way b{font:var(--type-ui);font-weight:var(--weight-semibold)}
+.ah248-way span{font:var(--type-meta);color:var(--muted-foreground)}
+
+/* The cast: one row a character, A and B, Arke's pick, the author's choice. */
+.ah248-main{position:absolute;top:44px;bottom:0;overflow:hidden}
+.ah248-phead{display:flex;align-items:flex-end;gap:12px;padding:18px 24px 16px;border-bottom:1px solid var(--border)}
+.ah248-phead .grow{flex:1;min-width:0}
+.ah248-phead .meta{margin-top:5px;font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ah248-crumb{font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground);margin-bottom:6px}
+.ah248-table{display:flex;flex-direction:column}
+.ah248-tr{display:grid;align-items:center;column-gap:12px;min-height:78px;padding:0 8px;border-bottom:1px solid var(--border)}
+.ah248-tr.th{min-height:34px;font:var(--type-label);color:var(--muted-foreground)}
+.ah248-who{display:flex;align-items:center;gap:11px;min-width:0}
+.ah248-who b{display:block;font:var(--type-ui);font-weight:var(--weight-semibold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ah248-cell{display:flex;flex-direction:column;gap:6px;min-width:0;padding:8px 10px;border-radius:10px;border:1px solid transparent}
+.ah248-cell.pick{border-color:var(--border);background:var(--secondary)}
+.ah248-cell .top{display:flex;align-items:center;gap:8px;font:var(--type-ui);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ah248-cell .top small{font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ah248-cell .flags{display:flex;gap:4px;flex-wrap:nowrap;min-height:22px;overflow:hidden}
+.ah248-why{font:var(--type-ui);font-weight:var(--weight-regular);line-height:1.45;min-width:0}
+.ah248-why b{font-weight:var(--weight-semibold)}
+.ah248-chose{display:inline-flex;align-items:center;gap:6px;font:var(--type-ui)}
+.ah248-chose svg{color:var(--success)}
+.ah248-panel{border:1px solid var(--border);border-radius:12px;padding:16px}
+.ah248-panel h3{margin:0;font:var(--type-h3)}
+.ah248-panel .m{margin:4px 0 14px;font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ah248-prow{display:grid;grid-template-columns:76px 1fr 34px;column-gap:10px;align-items:center;min-height:30px}
+.ah248-prow .n{font:var(--type-label);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ah248-prow .v{font:var(--type-label);font-weight:var(--weight-regular);font-variant-numeric:tabular-nums;text-align:right}
+.ah248-close{display:flex;align-items:center;gap:8px;margin:6px 0 2px;padding-left:86px}
+
+/* World Chat (225b): the panel beside the page. */
+.ah248-chat{position:absolute;right:0;top:44px;bottom:0;width:420px;border-left:1px solid var(--border);background:var(--background);display:flex;flex-direction:column;z-index:2}
+.ah248-chathead{flex:none;display:flex;align-items:center;gap:8px;padding:16px 18px 14px;border-bottom:1px solid var(--border)}
+.ah248-chathead .grow{flex:1}
+.ah248-chathead b{display:block;font:var(--type-ui);font-weight:var(--weight-semibold)}
+.ah248-chathead small{display:block;margin-top:3px;font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ah248-chathead>span{color:var(--muted-foreground);width:28px;height:28px;display:grid;place-items:center}
+.ah248-msgs{flex:1;min-height:0;overflow:hidden;padding:18px 18px;display:flex;flex-direction:column;gap:14px}
+.ah248-user{align-self:flex-end;max-width:86%;padding:10px 14px;border-radius:10px;background:var(--secondary);font:var(--type-ui);font-weight:var(--weight-regular);line-height:var(--leading-body)}
+.ah248-ans{font:var(--type-ui);font-weight:var(--weight-regular);line-height:1.6}
+.ah248-ans>p+p{margin-top:8px}
+.ah248-ans .lab{font:var(--type-ui);font-weight:var(--weight-semibold);margin-bottom:5px}
+.ah248-rcpt{display:flex;align-items:center;gap:6px;margin-bottom:8px;font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ah248-rcpt svg{color:var(--success)}
+.ah248-compose{flex:none;padding:10px 16px 14px;border-top:1px solid var(--border)}
+.ah248-compose .scope{font:var(--type-meta);color:var(--muted-foreground);margin-bottom:7px}
+.ah248-cbox{border:1px solid var(--border);border-radius:10px;padding:11px 12px 9px}
+.ah248-cbox .ph{font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground);min-height:30px}
+.ah248-cbox .bar{display:flex;align-items:center;gap:12px;color:var(--muted-foreground);font:var(--type-label);font-weight:var(--weight-regular)}
+.ah248-cbox .bar .grow{flex:1}
+.ah248-send{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:var(--foreground);color:var(--background)}
+
+/* The evidence card: drawn from the tool's receipt. */
+.ah248-ev{border:1px solid var(--border);border-radius:10px;background:var(--background);padding:12px 14px 12px;margin-top:12px}
+.ah248-evh{display:flex;align-items:baseline;gap:8px;margin-bottom:8px}
+.ah248-evh b{font:var(--type-ui);font-weight:var(--weight-semibold)}
+.ah248-evh span{flex:1;text-align:right;font:var(--type-meta);color:var(--muted-foreground)}
+.ah248-evrow{display:grid;grid-template-columns:84px 1fr 78px;gap:10px;align-items:center;min-height:36px}
+.ah248-evrow .n{font:var(--type-label);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ah248-evrow .n small{display:block;font:var(--type-meta);color:var(--muted-foreground)}
+.ah248-evrow .v{font:var(--type-label);font-weight:var(--weight-regular);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.ah248-evrow .v small{display:block;font:var(--type-meta);color:var(--muted-foreground)}
+.ah248-evrow.dim .n,.ah248-evrow.dim .v{color:var(--muted-foreground)}
+.ah248-evact{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.ah248-evnot{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 10px}
+.ah248-evkv{display:grid;grid-template-columns:22px 1fr;row-gap:8px;column-gap:8px;align-items:start;font:var(--type-label);font-weight:var(--weight-regular)}
+.ah248-evkv dd{margin:0;font-variant-numeric:tabular-nums;line-height:1.45}
+.ah248-evkv dd small{display:block;color:var(--muted-foreground)}
+.ah248-evsep{height:1px;background:var(--border);margin:10px 0}
+
+/* The scene's beats (174b) with the table read's flags, and the scene's Arke panel. */
+.ah248-scene{position:absolute;left:56px;top:44px;bottom:26px;overflow:hidden}
+.ah248-shd{display:flex;align-items:flex-end;gap:10px;padding:12px 24px 12px}
+.ah248-shd .grow{flex:1;min-width:0}
+.ah248-shd .meta{margin-top:4px;font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ah248-bar{display:flex;align-items:center;gap:10px;padding:0 24px 10px;border-bottom:1px solid var(--border)}
+.ah248-bar .grow{flex:1}
+.ah248-bar .m{font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ah248-seg{display:inline-flex;gap:2px;padding:3px;border-radius:10px;background:var(--muted)}
+.ah248-seg span{height:28px;padding:0 12px;border-radius:8px;display:inline-flex;align-items:center;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ah248-seg span.on{background:var(--background);color:var(--foreground);font-weight:var(--weight-medium);box-shadow:var(--shadow-xs)}
+.ah248-beats{padding:10px 24px;display:flex;flex-direction:column;gap:6px}
+.ah248-beat{display:flex;align-items:center;gap:12px;height:62px;padding:0 10px 0 8px;border:1px solid var(--border);border-radius:12px;background:var(--background)}
+.ah248-beat.sel{border-color:var(--foreground);box-shadow:0 0 0 1px var(--foreground)}
+.ah248-beat .num{width:18px;flex:none;text-align:center;font:var(--type-label);color:var(--muted-foreground)}
+.ah248-beat img{width:84px;height:47px;border-radius:7px;object-fit:cover;display:block;flex:none}
+.ah248-beat .txt{flex:1;min-width:0}
+.ah248-beat .sp{font:var(--type-label);font-size:var(--text-2xs);letter-spacing:var(--tracking-label);text-transform:uppercase;color:var(--muted-foreground)}
+.ah248-beat .ln{margin-top:3px;font:var(--type-ui);font-weight:var(--weight-regular);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ah248-beat .ln.nar{font-style:italic}
+.ah248-beat .ln{padding-bottom:5px;margin-bottom:-5px}
+.ah248-beat .ln .ah248-join{text-underline-offset:3px}
+.ah248-beat .vc{width:200px;flex:none;display:flex;flex-direction:column;gap:4px}
+.ah248-beat .vc .r1{display:flex;align-items:center;gap:6px;font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ah248-beat .vc .r1 i{width:7px;height:7px;border-radius:99px;background:var(--success);flex:none}
+.ah248-beat .vc .r1 i.w{background:var(--warning)}
+.ah248-beat .vc .r2{font:var(--type-meta);color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:4px}
+.ah248-beat .act{width:118px;flex:none;display:flex;justify-content:flex-end}
+.ah248-side{position:absolute;right:0;top:44px;bottom:26px;border-left:1px solid var(--border);background:var(--background);display:flex;flex-direction:column}
+.ah248-side .h{flex:none;padding:16px 18px;font:var(--type-ui);font-weight:var(--weight-semibold);border-bottom:1px solid var(--border)}
+.ah248-side .msgs{flex:1;min-height:0;padding:16px 18px;display:flex;flex-direction:column;gap:10px;overflow:hidden}
+.ah248-bub{padding:11px 14px;border-radius:12px;font:var(--type-ui);font-weight:var(--weight-regular);line-height:1.55}
+.ah248-bub.me{border:1px solid var(--border)}
+.ah248-bub.arke{background:var(--secondary)}
+.ah248-bub.arke p+p{margin-top:6px}
+.ah248-side .acts{display:flex;gap:8px;flex-wrap:wrap}
+.ah248-side .ask{flex:none;margin:12px 16px 16px;height:44px;border:1px solid var(--border);border-radius:10px;padding:0 14px;display:flex;align-items:center;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+
+/* The beat's voice, opened (246h's inspector): the take and its measure. */
+.ah248-insp{display:flex;flex-direction:column;gap:11px;padding:16px 20px 0;flex:1;min-height:0}
+.ah248-insp .crumb{font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ah248-insp .t{margin-top:-6px;font:var(--type-h3)}
+.ah248-insp .lab{font:var(--type-label);color:var(--muted-foreground);margin-bottom:-4px}
+.ah248-take{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:10px}
+.ah248-take .grow{flex:1;min-width:0;font:var(--type-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ah248-take .grow small{display:block;font:var(--type-meta);color:var(--muted-foreground)}
+.ah248-insp .ah248-said{margin:0}
+.ah248-insp .ah248-mx{margin:0}
+.ah248-sent{padding:10px 12px;border-radius:10px;background:var(--muted);font:var(--type-label);font-weight:var(--weight-regular);line-height:1.6}
+.ah248-sent b{font-weight:var(--weight-semibold)}
+.ah248-sent code{font:var(--type-mono);font-size:var(--text-2xs);padding:1px 4px;border-radius:4px;background:var(--background);border:1px solid var(--border)}
+.ah248-ifoot{flex:none;display:flex;gap:8px;justify-content:flex-end;padding:14px 20px 16px;border-top:1px solid var(--border)}
+.ah248-status{position:absolute;left:56px;right:0;bottom:0;height:26px;border-top:1px solid var(--border);display:flex;align-items:center;gap:6px;padding:0 14px;font:var(--type-meta);color:var(--muted-foreground);background:var(--background)}
+.ah248-status .dot{width:7px;height:7px;border-radius:99px;background:var(--success)}
+.ah248-status .grow{flex:1}
