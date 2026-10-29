@@ -77,9 +77,9 @@ ${make('Making', true, PRICE)}`, 'making')],
 ${takes(2, 1, ['w', ''])}
 <div class="gn247-acts"><span class="gn247-btn pri off">Accept</span><span class="gn247-btn">Make again</span></div>`, 'checking')],
 
-  ['d', 'Not checked, in plain words, with the way out', 1360, 850, () => screen("251d The lettering reader cannot see pictures: the verdict says so in one clause and Choose reader opens the setting that fixes it; Accept anyway and Check again stay", 1360, 850,
+  ['d', 'Not checked, in plain words, with the way out', 1360, 850, () => screen("251d The lettering reader cannot see pictures: the verdict says so in one clause; Choose reader opens the setting that fixes it and the page is checked again on return; Accept anyway and Make again stay", 1360, 850,
     `${page()}
-<div class="gn247-verdict warn">${ALERT}<b style="font-weight:600">Not checked</b><span>the reader can&#8217;t see pictures</span><span class="grow"></span><span class="gn247-btn ghost sm">Choose reader</span></div>
+<div class="gn247-verdict warn">${ALERT}<b style="font-weight:600;white-space:nowrap">Not checked</b><span>the reader can&#8217;t see pictures</span></div>
 ${takes(1, 0, ['w'])}
-<div class="gn247-acts"><span class="gn247-btn">Accept anyway</span><span class="gn247-btn">Make again</span><span class="grow"></span><span class="gn247-btn ghost sm">Check again</span></div>`, 'warn')],
+<div class="gn247-acts"><span class="gn247-btn pri">Choose reader</span><span class="gn247-btn">Accept anyway</span><span class="gn247-btn">Make again</span></div>`, 'warn')],
 ];
