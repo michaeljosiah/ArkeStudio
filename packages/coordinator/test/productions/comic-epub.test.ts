@@ -8,7 +8,7 @@ describe("a graphic novel's EPUB parts", () => {
   it("reads a WebP's size, lossy and lossless, as it reads a PNG's", () => {
     assert.deepEqual(imageSize(Buffer.from(encodePng(solidImage(40, 60, [0, 0, 0, 255])))), { width: 40, height: 60 });
     // RIFF....WEBPVP8L + chunk length + signature 0x2f, then 14-bit width-1 and height-1.
-    const lossless = Buffer.alloc(30);
+    const lossless = Buffer.alloc(32);
     lossless.write("RIFF", 0, "ascii"); lossless.write("WEBP", 8, "ascii"); lossless.write("VP8L", 12, "ascii");
     lossless[20] = 0x2f;
     lossless.writeUInt32LE((39 & 0x3fff) | ((59 & 0x3fff) << 14), 21);
