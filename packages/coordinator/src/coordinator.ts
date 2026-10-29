@@ -4540,7 +4540,8 @@ export class Coordinator {
                 try { signal.throwIfAborted(); } catch (error) { release(); throw error; }
                 return this.opts.ollama.service.reserveInstallation(release);
               },
-              beginFileMutation: id => {
+              beginFileMutation: (id, entry) => {
+                if (entry.spec.kind === "pull" && entry.engine === "ollama") return this.localGpu.reserveFileChange("Ollama");
                 if (!id.startsWith("ming-")) return undefined;
                 if (this.localGpu.isBusy("Ming")) throw new Error("Stop the current Ming reading before changing its model files.");
                 return this.mingSpeech?.reserveFileChange();
@@ -10735,6 +10736,7 @@ export class Coordinator {
       }
       case "setup-remove": {
         await this.setup?.remove(msg.componentId).catch(() => {});
+        await this.opts.storageHealth?.refresh().catch(() => {});
         return;
       }
       case "comfyui-restart": {

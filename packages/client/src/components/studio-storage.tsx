@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { deriveStorageFindings, STORAGE_CATEGORY_LABELS, storageByteLabel as bytes, storageWaitingWork, systemStorageGroups, type JobSummary, type SetupStatus, type StorageHealthSnapshot, type StorageRootHealth, type StorageSpaceCheck } from "@arke-studio/contracts";
+import { componentIsSettled, deriveStorageFindings, STORAGE_CATEGORY_LABELS, storageByteLabel as bytes, storageWaitingWork, systemStorageGroups, type JobSummary, type SetupStatus, type StorageHealthSnapshot, type StorageRootHealth, type StorageSpaceCheck } from "@arke-studio/contracts";
 import { Link } from "react-router";
 import { TriangleAlert } from "./icons.js";
 import { openActivityPanel } from "../lib/activity-panel.js";
@@ -80,6 +80,8 @@ export function StudioStorageReadingsView({ health, connected, now, jobs = [], s
       })}</dl>
       <p className="fy-studio-note">File sizes do not explain all used drive space. Shared files may be counted more than once. Recoverable space is unknown. Removing an artifact from the shelf keeps its files.</p>
     </details>}
+    {connected && setup?.components.some(row => row.removable && row.provides?.length && componentIsSettled(row.state)) &&
+      <Link className="fy-studio-button" to="/settings/models?half=local" onClick={close}>Review installed models</Link>}
   </section>;
 }
 

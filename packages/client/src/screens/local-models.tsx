@@ -22,7 +22,8 @@ import {
 import { Button, cx } from "../components/ui.js";
 import { ChevronDown, ChevronRight, Play, RefreshCw } from "../components/icons.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
-import { detectRuntimes, setupInstall, setupRemove, setupRepair, useStore } from "../lib/store.js";
+import { detectRuntimes, setupInstall, setupRepair, useStore } from "../lib/store.js";
+import { SetupRemoveControl } from "../components/setup-remove-control.js";
 import { strandReason, usableModels } from "../components/dispatch-bar.js";
 import { ActionButton, RuntimeStatus, sizeMb, type RuntimeTone } from "./settings-parts.js";
 
@@ -380,9 +381,7 @@ export function LocalModelRow({
             back on the next launch, and a weight file inside a mapped folder may have been the
             user's before Arke ever saw it. A Remove that cannot act is worse than none. */}
         {!elsewhere && state === "installed" && entry.component?.removable === true && (
-          <button type="button" className="fy-set__link" onClick={() => setupRemove(entry.component!.id)}>
-            Remove
-          </button>
+          <SetupRemoveControl component={entry.component} />
         )}
         {!elsewhere &&
           entry.component !== undefined &&

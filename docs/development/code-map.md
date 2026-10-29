@@ -33,6 +33,12 @@ The service coalesces write/wake hints and cancels old-world results. Catalogue 
 feed incremental counts through `recordPreviewInventory`, excluding that subtree from scanning.
 Studio's collapsed inventory distinguishes partial/old/unknown estimates from drive capacity;
 allocation/reclaimable space stays unknown. Custom model locations are not yet inventoried.
+Optional model removal reuses `components/setup-remove-control.tsx` in Models and Downloads,
+with an estimated-size/consequence review before the existing command. Studio links to that
+model page only when the current setup has a removable installed model. `LocalSetupService`
+tracks admitted removal/repair through shutdown and excludes duplicate file mutations;
+`local-ai/gpu.ts` lends an idle lane to Ollama deletion without evicting a model. Ming retains
+its existing file-change owner. Runtime acknowledgement does not measure released allocation.
 Tests: contracts `test/storage-{health,diagnostics}.test.ts`, coordinator `test/storage/`, client
 `test/storage-health.test.ts`; requirements SPEC-032 R-17/R-33, SPEC-062 R-1–R-14/R-24.
 `storage/setup-files.ts` now connects setup's direct HTTP file owner to the shared registry on

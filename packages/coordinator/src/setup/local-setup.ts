@@ -108,7 +108,7 @@ export interface SetupOptions {
    * Unlike beforeComponentInstall's policy recheck, this is acquired only once per install. */
   beginComponentInstall?: (componentId: string, signal: AbortSignal) => Promise<(() => void) | undefined>;
   /** Synchronous admission fence for destructive repair/removal; always released after the operation. */
-  beginFileMutation?: (componentId: string) => (() => void) | undefined;
+  beginFileMutation?: (componentId: string, entry: CatalogueEntry) => (() => void) | undefined;
   /** Invoked only for bytes this service actually downloaded and verified. */
   onFileInstalled?: (componentId: string, path: string) => Promise<void>;
 }
@@ -229,6 +229,7 @@ export class LocalSetupService {
   private readonly repairBlocks = new Map<string, RepairBlock>();
   /** The run in progress, so a second caller awaits it rather than getting a silent no-op. */
   private inFlight: Promise<void> | null = null;
+  private readonly fileMutations = new Map<string, { work: Promise<unknown>; stop: AbortController }>();
   /** HTTP has its own cancellation: Pause must not kill an installer or model pull. */
   private activeTransfer: ActiveTransfer | null = null;
   /** Explicit resumes survive the detect pass that precedes every run. */
@@ -765,6 +766,8 @@ export class LocalSetupService {
   }
 
   private async runOnce(): Promise<void> {
+    await Promise.allSettled([...this.fileMutations.values()].map(value => value.work));
+    if (this.disposed || this.abort.signal.aborted) return;
     try { await this.confirmNativeCleanup(); } catch { return; }
     await this.detect();
 
@@ -1826,10 +1829,33 @@ export class LocalSetupService {
    * keep on a platform where a scanner holds a file open, and every implementation would make it
    * (R-45, D14).
    */
-  async remove(componentId: string): Promise<{ freedMb: number; leftovers: NonNullable<SetupComponent["leftovers"]> }> {
+  remove(componentId: string): Promise<{ freedMb: number; leftovers: NonNullable<SetupComponent["leftovers"]> }> {
+    if (this.heldNative.size) return Promise.reject(new SetupProcessCleanupPending());
+    const component = this.components.get(componentId);
+    if (!this.disposed && component && !this.removable(component.entry)) return this.removeOnce(componentId);
+    return this.changeFiles(componentId, signal => this.removeWithLease(componentId, signal), { freedMb: 0, leftovers: [] });
+  }
+
+  private changeFiles<T>(id: string, run: (signal: AbortSignal) => Promise<T>, refused: T): Promise<T> {
+    const component = this.components.get(id);
+    if (this.disposed || !component) return Promise.resolve(refused);
+    if (this.fileMutations.has(id) || ["queued", "downloading", "paused", "installing"].includes(component.state)) {
+      this.set(id, { detail: "Finish or cancel this component’s current operation before changing its files." }); this.publish();
+      return Promise.resolve(refused);
+    }
+    // A later explicit removal is independent of an earlier Stop all. Cancellation targets
+    // only admitted operations; shutdown still closes admission and drains their original work.
+    const stop = new AbortController();
+    const work = Promise.resolve().then(() => run(stop.signal)).finally(() => { this.fileMutations.delete(id); });
+    this.fileMutations.set(id, { work, stop });
+    return work;
+  }
+
+  private async removeWithLease(componentId: string, signal: AbortSignal): Promise<{ freedMb: number; leftovers: NonNullable<SetupComponent["leftovers"]> }> {
+    if (this.disposed) return { freedMb: 0, leftovers: [] };
     if (this.heldNative.size) throw new SetupProcessCleanupPending();
     let release: (() => void) | undefined;
-    try { release = this.opts.beginFileMutation?.(componentId); return await this.removeOnce(componentId); }
+    try { signal.throwIfAborted(); release = this.opts.beginFileMutation?.(componentId, this.components.get(componentId)!.entry); return await this.removeOnce(componentId, signal); }
     catch (error) {
       if (error instanceof SetupProcessCleanupPending) { this.heldNative.set(componentId, { releaseInstall: release, space: null }); release = undefined; }
       if (this.components.has(componentId)) { this.set(componentId, {detail: errorText(error)}); this.publish(); }
@@ -1837,7 +1863,7 @@ export class LocalSetupService {
     } finally { release?.(); }
   }
 
-  private async removeOnce(componentId: string): Promise<{ freedMb: number; leftovers: NonNullable<SetupComponent["leftovers"]> }> {
+  private async removeOnce(componentId: string, signal: AbortSignal = this.abort.signal): Promise<{ freedMb: number; leftovers: NonNullable<SetupComponent["leftovers"]> }> {
     const c = this.components.get(componentId);
     if (!c) return { freedMb: 0, leftovers: [] };
     if (!this.removable(c.entry)) {
@@ -1865,8 +1891,8 @@ export class LocalSetupService {
     if (spec.kind === "pull") {
       const model = spec.args[spec.args.length - 1] ?? "";
       const result = this.deps.ollama
-        ? await this.deps.ollama.remove(model, this.abort.signal).then(() => ({ code: 0, output: "" }), error => ({ code: 1, output: errorText(error) }))
-        : await this.runProcess(componentId, spec.command, ["rm", model], this.abort.signal).catch(error => {
+        ? await this.deps.ollama.remove(model, signal).then(() => ({ code: 0, output: "" }), error => ({ code: 1, output: errorText(error) }))
+        : await this.runProcess(componentId, spec.command, ["rm", model], signal).catch(error => {
           if (error instanceof SetupProcessCleanupPending) throw error;
           return { code: 1, output: "" };
         });
@@ -1877,11 +1903,11 @@ export class LocalSetupService {
         bytesPerSecond: null,
         leftovers: undefined,
         detail: ok
-          ? `removed · ${gb(c.entry.sizeMb)} free`
+          ? "Removed. Available drive space will refresh; shared model files may remain."
           : `${spec.command} could not remove ${model}${firstLine(result.output) ? ` — ${firstLine(result.output)}` : ""}`,
       });
       this.publish();
-      return { freedMb: ok ? c.entry.sizeMb : 0, leftovers: [] };
+      return { freedMb: 0, leftovers: [] };
     }
     // A `files` entry owns exactly the files it declares; an archive or a tree owns the folder
     // Arke extracted it into, under the app's own root. `installer` never reaches here — the
@@ -1896,7 +1922,9 @@ export class LocalSetupService {
     let freed = 0;
     const leftovers: NonNullable<SetupComponent["leftovers"]> = [];
     for (const target of targets) {
+      signal.throwIfAborted();
       const size = await directorySize(target);
+      signal.throwIfAborted();
       await rm(toExtendedLength(target), { recursive: true, force: true }).catch(() => {});
       // `stat` failing is not the same as the file being gone — a volume that went away answers
       // the same way an absent file does, and reporting that as clean is the lie R-45 forbids.
@@ -1911,7 +1939,7 @@ export class LocalSetupService {
       repairRequired: undefined,
       detail:
         leftovers.length === 0
-          ? `removed · ${gb(Math.round(freed / (1024 * 1024)))} free`
+          ? `removed · ${gb(Math.round(freed / (1024 * 1024)))} of files; available drive space will refresh`
           : `${leftovers.length} could not be removed — reclaim from Downloads`,
       leftovers: leftovers.length > 0 ? leftovers : undefined,
     });
@@ -1920,17 +1948,22 @@ export class LocalSetupService {
   }
 
   /** Remove Arke-managed model files so a repair re-download cannot trust corrupt presence. */
-  async repair(componentId: string): Promise<boolean> {
+  repair(componentId: string): Promise<boolean> {
+    return this.changeFiles(componentId, signal => this.repairWithLease(componentId, signal), false);
+  }
+
+  private async repairWithLease(componentId: string, signal: AbortSignal): Promise<boolean> {
+    if (this.disposed) return false;
     if (this.heldNative.size) throw new SetupProcessCleanupPending();
     let release: (() => void) | undefined;
-    try { release = this.opts.beginFileMutation?.(componentId); return await this.repairOnce(componentId); }
+    try { signal.throwIfAborted(); release = this.opts.beginFileMutation?.(componentId, this.components.get(componentId)!.entry); return await this.repairOnce(componentId, signal); }
     catch (error) {
       if (this.components.has(componentId)) { this.set(componentId, {detail: errorText(error)}); this.publish(); }
       return false;
     } finally { release?.(); }
   }
 
-  private async repairOnce(componentId: string): Promise<boolean> {
+  private async repairOnce(componentId: string, signal: AbortSignal): Promise<boolean> {
     const c = this.components.get(componentId);
     if (!c || c.entry.spec.kind !== "files") return false;
     const spec = c.entry.spec;
@@ -1951,11 +1984,13 @@ export class LocalSetupService {
       // A user-owned folder is never recursively deleted (SPEC-021 §2.4): repair removes
       // exactly the files this entry names, one by one, and touches nothing beside them.
       for (const target of targets) {
+        signal.throwIfAborted();
         await rm(toExtendedLength(target.path), { force: true }).catch((err) => {
           failures.set(target.path, errorCode(err));
         });
       }
     } else {
+      signal.throwIfAborted();
       await rm(toExtendedLength(join(root, spec.dir)), { recursive: true, force: true }).catch((err) => {
         for (const target of targets) failures.set(target.path, errorCode(err));
       });
@@ -1997,6 +2032,7 @@ export class LocalSetupService {
   /** Stop everything and discard only partials whose current catalogue receipt proves ownership. */
   async cancel(): Promise<void> {
     const wasHeld = this.heldNative.size > 0;
+    for (const value of this.fileMutations.values()) value.stop.abort();
     const stopped = new Set<string>();
     if (this.activeTransfer !== null) {
       this.activeTransfer.preserve = null;
@@ -2017,6 +2053,7 @@ export class LocalSetupService {
     }
     this.publish();
     await this.inFlight;
+    await Promise.allSettled([...this.fileMutations.values()].map(value => value.work));
     await Promise.allSettled(this.nativeRuns);
     if (this.heldNative.size && !wasHeld) throw new SetupProcessCleanupPending();
     await this.confirmNativeCleanup();
@@ -2034,6 +2071,7 @@ export class LocalSetupService {
   async dispose(): Promise<void> {
     const wasHeld = this.heldNative.size > 0;
     this.disposed = true;
+    for (const value of this.fileMutations.values()) value.stop.abort();
     if (this.activeTransfer !== null) {
       // Only a range-capable source can survive as useful work. Keeping bytes from an ordinary
       // 200 response would strand an unresumable partial on the next launch.
@@ -2042,6 +2080,7 @@ export class LocalSetupService {
     }
     this.abort.abort();
     await this.inFlight;
+    await Promise.allSettled([...this.fileMutations.values()].map(value => value.work));
     await Promise.allSettled(this.nativeRuns);
     if (this.heldNative.size && !wasHeld) throw new SetupProcessCleanupPending();
     await this.deps.disposeProcesses?.();

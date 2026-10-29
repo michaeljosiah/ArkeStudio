@@ -20,6 +20,28 @@ import {
 
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const;
 
+it("removal refuses a held model and shutdown drains an admitted removal without a duplicate command", async () => {
+  const entry: CatalogueEntry = { ...catalogue()[1]!, requires: [], optional: true, engine: "ollama" };
+  let busy = true, calls = 0, released = 0, entered!: () => void, finish!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  const service = new LocalSetupService({ ...deps(), run: async () => { calls++; entered(); await pending; return { code: 0, output: "" }; } }, () => {}, {
+    appRoot: await root(), catalogue: [entry], beginFileMutation: (_id, selected) => {
+      assert.equal(selected, entry); if (busy) throw new Error("Model is in use");
+      return () => { released++; };
+    },
+  });
+  try {
+    await service.remove(entry.id); assert.equal(calls, 0); assert.match(service.status().components[0]!.detail!, /Model is in use/);
+    busy = false; const removing = service.remove(entry.id); await started;
+    await service.remove(entry.id); assert.equal(calls, 1); assert.equal(released, 0);
+    let stopped = false; const stop = service.dispose().then(() => { stopped = true; });
+    await Promise.resolve(); assert.equal(stopped, false);
+    finish(); await removing; await stop; assert.equal(released, 1);
+    await service.remove(entry.id); assert.equal(calls, 1);
+  } finally { finish(); await service.dispose(); }
+});
+
 it("a late runtime Skip does not abandon an installer that already started", { timeout: 10000 }, async () => {
   let entered!: () => void, release!: () => void;
   const started = new Promise<void>(resolve => { entered = resolve; });

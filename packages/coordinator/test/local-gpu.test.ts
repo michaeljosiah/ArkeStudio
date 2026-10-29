@@ -12,6 +12,46 @@ import { FakeProvider, pngBytes } from "./queue/fake-provider.js";
 import { makeTempRoot } from "./world/helpers.js";
 import { tempDir } from "./tmp.js";
 import { until } from "./wait.js";
+import type { LocalSetupService } from "../src/setup/local-setup.js";
+
+it("coordinator model removal uses the inference fence until the runtime confirms deletion", async () => {
+  const { root } = await makeTempRoot(), provider = new FsWorldProvider(root);
+  let calls = 0, finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  const coordinator = new Coordinator({ provider, adapter: null, appRoot: root, appVersion: "test", changeLogPath: join(root, "log.jsonl"),
+    setup: { which: async () => null, probeUrl: async () => false, diskFreeMb: async () => 100_000,
+      fetchStream: async () => { throw new Error("No download expected"); },
+      run: async (_command, args) => { assert.deepEqual(args, ["rm", "fixture:model"]); calls++; await pending; return { code: 0, output: "" }; },
+    },
+    setupExtraEntries: [{ id: "reviewed-model", displayName: "Fixture", purpose: "Test", optional: true, engine: "ollama", sizeMb: 1,
+      spec: { kind: "pull", command: "fixture", args: ["pull", "fixture:model"] } }],
+  });
+  const { localGpu: gpu, setup } = coordinator as unknown as { localGpu: LocalGpu; setup: LocalSetupService };
+  try {
+    const active = await gpu.acquire("Ollama", new AbortController().signal);
+    await setup.remove("reviewed-model"); assert.equal(calls, 0); active();
+    const removing = setup.remove("reviewed-model"); await until(() => calls === 1, "runtime deletion entered");
+    assert(gpu.isBusy("Ollama"));
+    let inferred = false; const next = gpu.acquire("Ollama", new AbortController().signal).then(release => { inferred = true; release(); });
+    await Promise.resolve(); assert.equal(inferred, false);
+    finish(); await removing; await next; assert(inferred); assert.equal(calls, 1);
+  } finally { finish(); await coordinator.stop(); await provider.close(); }
+});
+
+it("model removal refuses active inference and holds the idle lane without an eviction", async () => {
+  const unloaded: string[] = [], gpu = new LocalGpu(async engine => { unloaded.push(engine); });
+  const signal = new AbortController().signal;
+  const active = await gpu.acquire("Ollama", signal);
+  assert.throws(() => gpu.reserveFileChange("Ollama"), /Finish or cancel/);
+  active(); unloaded.length = 0;
+  const release = gpu.reserveFileChange("Ollama");
+  assert.throws(() => gpu.reserveFileChange("Ollama"), /Finish or cancel/);
+  let entered = false;
+  const next = gpu.acquire("ComfyUI", signal).then(done => { entered = true; done(); });
+  await Promise.resolve(); assert.equal(entered, false); assert.deepEqual(unloaded, []);
+  release(); release(); await next; assert(entered); assert.deepEqual(unloaded, ["Ollama"]);
+  gpu.stop(); assert.throws(() => gpu.reserveFileChange("Ollama"), /stopping/);
+});
 
 it("runs queued creative work before background explanations without preempting the current owner", async () => {
   const gpu = new LocalGpu(async () => {}, ["Ollama", "ComfyUI", "Ming"]), signal = new AbortController().signal;

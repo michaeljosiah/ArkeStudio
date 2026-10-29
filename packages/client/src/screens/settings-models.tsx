@@ -25,10 +25,10 @@ import { OnYourPC } from "../components/on-your-pc.js";
 import { SamplingLine, hasSampling } from "../components/local-sampling.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
+import { SetupRemoveControl } from "../components/setup-remove-control.js";
 import {
   setModelEnabled,
   setupInstall,
-  setupRemove,
   setupRepair,
   setupRetry,
   testLocalVoice,
@@ -319,9 +319,7 @@ function entryFacts(entry: Entry, onOpenDownloads: () => void): LocalFacts {
         </button>
       )}
       {entry.state === "installed" && entry.component?.removable === true && (
-        <button type="button" className="fy-set__link" onClick={() => setupRemove(entry.component!.id)}>
-          Remove
-        </button>
+        <SetupRemoveControl component={entry.component} />
       )}
       {moving && (
         <button type="button" className="fy-set__link" onClick={onOpenDownloads}>

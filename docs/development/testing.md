@@ -26,6 +26,13 @@ receipt exclusions, protected media, hard links, yields/cancellation, discarded 
 and stalled versus progressing metadata calls. Inventory never establishes allocated/reclaimable
 bytes or cleanup authority. Real runtime scans are read-only metadata checks, not media reads.
 
+Model-removal review (SPEC-062 R-19/T-11) uses client `test/setup-remove-control.test.tsx`,
+`downloads.test.tsx`, `local-models.test.tsx` and the Studio storage test; coordinator
+`test/setup/local-setup.test.ts`, `setup/install-closure.test.ts`, `setup/comfyui-setup.test.ts`
+and `local-gpu.test.ts`. Check Cancel/Escape, changed-installation refusal, one confirmation,
+busy inference, queued inference during deletion, duplicate commands and shutdown drain.
+Runtime deletion does not establish reclaimed bytes; the capacity collector refreshes afterward.
+
 Installation journeys (SPEC-016 R-21–R-28, approved turns 242–244): coordinator
 `test/setup/onboarding.test.ts`, `test/setup/onboarding-wire.test.ts`,
 `test/world/import-world.test.ts`, `test/world/sample-world.test.ts`, and

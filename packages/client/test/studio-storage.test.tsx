@@ -16,6 +16,15 @@ const view = (roots: StorageRootHealth[], at = now, connected = true, limited = 
 };
 const facts = (card: Element) => [...card.querySelectorAll("dt")].map(term => [term.textContent, term.nextElementSibling?.textContent]);
 
+it("offers the existing model review only for a current installed removable model", () => {
+  const component = { id: "model", displayName: "Narrator", purpose: "Reading", sizeMb: 100, installLocation: "fixture", state: "present", removable: true, provides: ["narrator"] };
+  for (const [connected, rows, offered] of [[true, [component], true], [false, [component], false], [true, [{ ...component, removable: false }], false], [true, [{ ...component, state: "available" }], false]] as const) {
+    const setup = SetupStatusSchema.parse({ components: rows, running: false, diskFreeMb: null });
+    const document = parseHTML(renderToString(<MemoryRouter><StudioStorageReadingsView connected={connected} now={now} setup={setup} /></MemoryRouter>)).document;
+    assert.equal(document.querySelector('a[href="/settings/models?half=local"]') !== null, offered);
+  }
+});
+
 it("keeps partial inventory separate from drive capacity, shows unknown categories and labels old file estimates", () => {
   const inventory = StorageInventorySchema.parse({ scanning: false, allocatedBytes: null, reclaimableBytes: null,
     categories: STORAGE_CATEGORIES.map(category => ({ category, state: category === "artifacts" ? "partial" : "unmeasured",

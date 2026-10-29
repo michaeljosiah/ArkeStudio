@@ -455,3 +455,24 @@ The actual inventory component supports keyboard disclosure and has no horizonta
 390×480 in dark mode. Its synthetic screenshot is `.dev/studio-239-check/inventory-phone-dark.png`.
 This component check is not the approved-master comparison. Custom model destinations and other
 write owners still require integration; this inventory slice does not complete the epic.
+
+## Optional model removal review — 29 October 2026
+
+Models and Downloads now share one review of the selected component, estimated installed size,
+shared-file uncertainty and the need to download again. Cancel/Escape do nothing; confirmation
+sends once. A changed installation requires a fresh review. Studio offers the existing Models
+handoff only for a current removable installed model. No additional cleanup category is added.
+
+The actual coordinator refuses an Ollama removal during local inference, then retains an idle
+lane through the runtime's deletion response. It performs no eviction to acquire that lane.
+Ming retains its existing file-change fence. Setup tracks removal/repair through shutdown and
+refuses duplicate/concurrent changes to the same component. Old advertised-size “free space”
+claims are replaced by an honest removal result and a fresh capacity request.
+
+All 57 affected setup/removal, 17 GPU/coordinator composition and 17 ComfyUI repair cases pass.
+All 57 Models/Downloads/removal-review client cases and seven Studio storage cases pass.
+The actual component was checked at 390×480 dark: the review fits, Cancel receives initial
+focus, Escape returns focus to Remove, and confirmation reaches the synthetic completion state.
+No installed model was removed by this browser test. Screenshot:
+`.dev/studio-239-check/model-removal-phone-dark.png`. This is component evidence, not the
+still-required matched-master acceptance or proof about requests from other applications.

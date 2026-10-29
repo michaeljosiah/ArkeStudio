@@ -102,6 +102,17 @@ export class LocalGpu {
   hasRun(engine: LocalGpuEngine): boolean { return this.ran.has(engine); }
   isBusy(engine: LocalGpuEngine): boolean { return this.owner === engine || this.queue.some(turn => turn.engine === engine); }
 
+  /** File changes take an idle lane synchronously, without loading or evicting a model.
+   * A busy refusal is immediate; a delayed removal must not surprise an author later. */
+  reserveFileChange(engine: LocalGpuEngine): () => void {
+    this.stopped.signal.throwIfAborted();
+    if (!this.engines.includes(engine)) throw new Error("This local engine is unavailable.");
+    if (this.owner !== null || this.queue.length) throw new Error("Finish or cancel local AI work before removing this model.");
+    this.owner = engine;
+    let held = true;
+    return () => { if (held) { held = false; this.owner = null; this.pump(); } };
+  }
+
   private async settleMingBatch(release: () => void): Promise<void> {
     try { await this.unload("Ming", AbortSignal.timeout(30_000)); }
     catch (error) { this.retainedMing = release; this.mingRevision++; this.mingChanged(); throw error; }

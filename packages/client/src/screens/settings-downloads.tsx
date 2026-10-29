@@ -9,7 +9,8 @@ import {
 } from "@arke-studio/contracts";
 import { Button, cx } from "../components/ui.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
-import { setupCancel, setupRemove, setupRepair, setupRetry, setupSkip, useSetup, useStore } from "../lib/store.js";
+import { setupCancel, setupRepair, setupRetry, setupSkip, useSetup, useStore } from "../lib/store.js";
+import { SetupRemoveControl } from "../components/setup-remove-control.js";
 import { RuntimeHead, RuntimeSection, RuntimeStatus, sizeMb } from "./settings-parts.js";
 
 /**
@@ -82,17 +83,13 @@ function ProgressRow({ component, progress, sizeLabel }: { component: SetupCompo
             </button>
           ))}
         {componentIsSettled(component.state) && component.removable === true && (
-          <button type="button" className="fy-set__link" onClick={() => setupRemove(component.id)}>
-            Remove
-          </button>
+          <SetupRemoveControl component={component} />
         )}
         {/* Reclaim is Remove, tried again on what would not go the first time — the same
             best-effort deletion, which is why a survivor stays actionable rather than becoming
             a line of text about a file nobody can now do anything about (R-45, R-85). */}
         {(component.leftovers?.length ?? 0) > 0 && !componentIsSettled(component.state) && (
-          <button type="button" className="fy-set__link" onClick={() => setupRemove(component.id)}>
-            Reclaim
-          </button>
+          <SetupRemoveControl component={component} label="Reclaim" />
         )}
         </>}
       </div>
