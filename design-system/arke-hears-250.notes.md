@@ -1,7 +1,7 @@
 # Turn 250 · Arke hears a read
 
-Drawn on 29 October 2026, revised the same day, and corrected again the same day. Proposed;
-nothing is built.
+Drawn on 29 October 2026, revised the same day, and corrected again the same day. Approved by
+the owner the same day ("Approve 250"), with its calls as drawn; nothing is built.
 
 ## Asked
 
@@ -332,16 +332,16 @@ Unchanged from v2:
 4. **Use after a play; no Use all.** Drawn.
 5. **The after-table-read card replaces flags on the beats.** Drawn. A flag on the line itself can
    come later if the card proves easy to miss.
-6. **Open: pace against the brief.**
+6. **Pace against the brief.** Approved as drawn.
    - All twelve reads came out faster than their briefs, five by more than a fifth.
    - So Fast may only be saying that Gemini reads fast.
    - The alternative compares the two candidates with each other.
    - Drawn against the brief.
-7. **Open: Imani and the narrator.**
+7. **Imani and the narrator.** Approved: kept as they are.
    - They sit at 149 and 148 Hz, so Wrong voice cannot tell her lines from the narration.
    - A first-person narration may want that.
    - Redesign one, or keep?
-8. **Open: Arke's pick needs a model call.**
+8. **Arke's pick needs a model call.** Approved: the model call.
    - The one-sentence reason needs a model call over the two measures, one a character.
    - A pick by rule costs nothing: fewest run-ons and flags, then the pitch order the briefs ask
      for. But it cannot write the sentence.
