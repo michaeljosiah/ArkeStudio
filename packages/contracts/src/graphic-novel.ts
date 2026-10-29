@@ -253,7 +253,12 @@ export const PageBoxSchema = z.object({
 export type PageBox = z.infer<typeof PageBoxSchema>;
 
 /** What a page reader found: text and where (R-29). */
-export const PageTextRegionSchema = z.object({ text: z.string().max(2000), box: PageBoxSchema.optional() }).strict();
+export const PageTextRegionSchema = z.object({
+  text: z.string().max(2000),
+  box: PageBoxSchema.optional(),
+  /** The reader saw these words cut off by the page edge or a panel border (R-30). */
+  cut: z.boolean().optional(),
+}).strict();
 export type PageTextRegion = z.infer<typeof PageTextRegionSchema>;
 
 export const LetteringFindingSchema = z.object({
