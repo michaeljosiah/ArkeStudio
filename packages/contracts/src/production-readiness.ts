@@ -186,6 +186,11 @@ export function deriveProductionReadiness(world: ReadinessWorld, production: Pro
   if (!shape.hasScenes || shape.dispatchCapability === "image") for (const c of checks.filter(c => c.key !== "export")) { c.status = "not-required"; c.detail = "This format delivers directly without a video cut or subtitle track."; }
   if (shape.kind === "stills") { const c = checks.find(c=>c.key === "export")!; c.status="not-required"; c.detail="Stills deliver accepted images through the contact sheet; no whole-production export is required."; }
   if (shape.hasPages) {
+    // A graphic novel's book is made on the Pages screen's Export and records no manuscript delivery,
+    // so a manuscript export is not what makes it ready: its pages and their lettering are (codex on PR 2225).
+    const exported = checks.find((item) => item.key === "export")!;
+    exported.status = "not-required";
+    exported.detail = "A graphic novel exports from its Pages.";
     // A graphic novel (SPEC-064 R-41): its pages are the book; prose in its chapters is optional.
     // The new keys only appear in a graphic novel's world, which comic.json raised to schema 114 at
     // creation, so a card carrying them needs no boundary of its own.
