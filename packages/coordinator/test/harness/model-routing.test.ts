@@ -353,6 +353,21 @@ describe("coordinator harness/model routing (#1122)", () => {
     } finally { await test.close(); }
   });
 
+  it("runs the lettering reader on the visual reviewer's model when it has none of its own", async () => {
+    const test = await fixture({ production: TEXT, agents: { "stage-designer": { model: STAGE }, "chapter-visual-reviewer": { model: STAGE } } });
+    try {
+      await test.stage();
+      const stage = test.adapter.sessions.find(session => session.agent === "stage-designer");
+      assert.ok(stage);
+      assert.equal(stage.config.agents?.["page-lettering-reader"]?.model, STAGE, "a picture reader left on the harness default could not see the page");
+    } finally { await test.close(); }
+    const own = await fixture({ production: TEXT, agents: { "stage-designer": { model: STAGE }, "chapter-visual-reviewer": { model: STAGE }, "page-lettering-reader": { model: TEXT } } });
+    try {
+      await own.stage();
+      assert.equal(own.adapter.sessions.find(session => session.agent === "stage-designer")?.config.agents?.["page-lettering-reader"]?.model, TEXT, "its own choice stands");
+    } finally { await own.close(); }
+  });
+
   it("refuses a saved text-only Stage override instead of using the compatible production fallback", async () => {
     const test = await fixture({ production: STAGE, agents: { "stage-designer": { model: TEXT } } });
     try {
@@ -551,6 +566,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       assert.equal(stage.config.model, LOCAL_VISION);
       assert.equal(stage.config.agents?.["stage-designer"]?.model, LOCAL_VISION);
       assert.equal(stage.config.agents?.["world-builder"]?.model, LOCAL, "text agents keep the first text-capable row");
+      assert.equal(stage.config.agents?.["page-lettering-reader"]?.model, LOCAL_VISION, "the lettering reader reads pictures too");
       assert.equal((await test.chat())?.config.model, LOCAL, "chat with nothing chosen is decided the same way");
     } finally { await test.close(); }
   });

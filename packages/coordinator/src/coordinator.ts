@@ -4338,7 +4338,7 @@ export class Coordinator {
     this.sessionInput = async (input) => ({
       ...input,
       // Chosen for the session, or for its agent in Settings: either way it runs on something.
-      ...(await this.sessionAgents(input.model !== undefined || (input.agent !== undefined && this.agentOverrides?.[input.agent]?.model !== undefined), input.agent)),
+      ...(await this.sessionAgents(input.model !== undefined || (input.agent !== undefined && this.agentOverridesInEffect()?.[input.agent]?.model !== undefined), input.agent)),
       // The open world's agent notes: under the app's own root, beside nothing a person edits.
       ...(this.agentMemoryDir() !== undefined ? { memoryDir: this.agentMemoryDir()! } : {}),
       // The author's page goes with every session, world open or not: it is about the writer.
@@ -5943,22 +5943,40 @@ export class Coordinator {
       // that model; the refusal is for a session that would otherwise run on nothing chosen.
       const refusal = chosen ? null : this.keylessSessionRefusal(false, agent);
       if (refusal !== null) throw new Error(refusal);
-      return this.agentOverrides ? { agents: this.agentOverrides } : {};
+      const overrides = this.agentOverridesInEffect();
+      return overrides ? { agents: overrides } : {};
     }
-    const agents: Record<string, { model?: string; brief?: string }> = { ...this.agentOverrides };
+    const agents: Record<string, { model?: string; brief?: string }> = { ...this.agentOverridesInEffect() };
     // The roster as it will run: a host's, when it supplies one, since its agents are the ones
     // a session can actually be built for.
     for (const member of this.opts.authoring?.roster ?? ROSTER) {
       const override = agents[member.name];
       if (override?.model !== undefined) continue;
       // Stage reads images; it takes the first local model that can, or none, the same
-      // admission its own override would be held to. The others take the first that can do
-      // what they do: tools for the agents that work through them, text for the rest.
+      // admission its own override would be held to. The lettering reader reads them too, and
+      // calls no tools. The others take the first that can do what they do: tools for the
+      // agents that work through them, text for the rest.
       const model = member.name === "stage-designer" ? this.localHarnessDefault(true)
+        : member.name === "page-lettering-reader" ? this.localHarnessDefault(true, false)
         : this.localHarnessDefault(false, !PROMPT_ONLY_AGENTS.has(member.name));
       if (model !== undefined) agents[member.name] = { ...override, model };
     }
     return { agents };
+  }
+
+  /**
+   * The Settings overrides as sessions run them. The lettering reader reads pictures as the
+   * chapter visual reviewer does, and nobody goes looking for it in Settings: left on "Ask the
+   * harness" it ran on a default that could not see images, and every page came back "Not
+   * checked · the read failed" while the visual reviewer beside it had a model that could
+   * (2026-10-29, a person's Dumah preview). Without a model of its own it takes that one.
+   */
+  private agentOverridesInEffect(): Record<string, { model?: string; brief?: string }> | undefined {
+    const overrides = this.agentOverrides;
+    const visual = overrides?.["chapter-visual-reviewer"]?.model;
+    const reader = overrides?.["page-lettering-reader"];
+    if (visual === undefined || reader?.model !== undefined) return overrides;
+    return { ...overrides, "page-lettering-reader": { ...reader, model: visual } };
   }
 
   /**
