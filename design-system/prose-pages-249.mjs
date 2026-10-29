@@ -12,7 +12,7 @@ const write = (name, content) => fs.writeFileSync(path.join(here, name), content
 const esc = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
 const tokens = '_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens';
 const STYLE = '<link rel="stylesheet" href="graphic-novel-247.css"><link rel="stylesheet" href="prose-pages-249.css">';
-const STATUS = 'proposed';
+const STATUS = 'approved';
 const frames = FRAMES.map(([letter, title, width, height, draw]) => ({ id: '249' + letter, title, width, height, markup: draw() }));
 for (const f of frames) if (!f.markup.startsWith('<div class="gn247 gn249"')) throw new Error(`${f.id}: frame root is not .gn249`);
 
@@ -24,7 +24,7 @@ ${frames.map(f => `<section id="${f.id}"><h2><a href="#${f.id}">${f.id}</a> ${f.
 if (process.argv.includes('--preview')) { console.log(`Wrote prose-pages-249.review.html: ${frames.length} frames.`); process.exit(0); }
 
 export const rules = [
-  ['Review status', '29 October 2026. Proposed. The owner chose this next on 29 October (“proceed”) after turn 248: today a graphic novel starts empty and every page is written by hand. SPEC-064 R-3, R-4 and R-13 already ask for it; turn 247a drew only the entry. Nothing here is built.'],
+  ['Review status', '29 October 2026. Approved by the owner the same day (“Approve it”), calls 1 – 5 as drawn. The owner chose this next on 29 October (“proceed”) after turn 248: today a graphic novel starts empty and every page is written by hand. SPEC-064 R-3, R-4 and R-13 already ask for it; turn 247a drew only the entry. Nothing here is built.'],
   ['The door is 248a', 'With Graphic novel picked and a story set in Adapt from, the primary press is Plan with Arke and nothing is created yet, as for an audio drama (turn 230b). Without a source it is Create, as today. The style chosen there rides into setup.'],
   ['Setup reads first, then asks three things by example', 'Setup is the audio drama’s conversation (249b). Arke reads every chapter whole and says so in one line. It asks reading direction and page shape by showing them, and whether to draft a pilot chapter first. Everything else arrives as one plan.'],
   ['One plan, a chapter for each chapter', 'The plan is the book’s name, its style, reading and shape, and a row per source chapter with a first guess at its pages and a first layout (249b). Page counts are proposals, never limits. Start the pilot creates the book and asks Arke for the pilot chapter; Change the plan keeps talking.'],
@@ -55,9 +55,9 @@ write('Arke Studio.dc.html', master);
 
 let build = read('build-review.mjs').replace(/\r?\n  \/\/ BEGIN PROSE PAGES 249[\s\S]*?  \/\/ END PROSE PAGES 249(?:\r?\n)*/g, '\n');
 const plain = title => title.replaceAll('&#8217;', '’').replaceAll('&#183;', '·');
-const entries = frames.map(f => `  { group: "Prose into pages · turn 249", screen: ${JSON.stringify(plain(f.title))}, frame: "${f.id}", route: "Graphic novel / Setup and Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Proposed 29 October 2026."] },`);
+const entries = frames.map(f => `  { group: "Prose into pages · turn 249", screen: ${JSON.stringify(plain(f.title))}, frame: "${f.id}", route: "Graphic novel / Setup and Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },`);
 build = build.replace('const SCREENS = [', 'const SCREENS = [\n  // BEGIN PROSE PAGES 249\n' + entries.join('\n') + '\n  // END PROSE PAGES 249\n');
-const pageEntry = '{ file: "prose-pages-249.review.html", what: "Turn 249: Arke turns prose into pages — Plan with Arke from a story, and a chapter drafted as pages to keep or discard.", state: "proposed 29 October 2026; not built" }';
+const pageEntry = '{ file: "prose-pages-249.review.html", what: "Turn 249: Arke turns prose into pages — Plan with Arke from a story, and a chapter drafted as pages to keep or discard.", state: "approved 29 October 2026; not built" }';
 if (build.includes('file: "prose-pages-249.review.html"')) build = build.replace(/\{ file: "prose-pages-249\.review\.html",[^\n]+?\}/, pageEntry);
 else build = build.replace('const PAGES = [', 'const PAGES = [\n  ' + pageEntry + ',');
 if (!build.includes(LINK)) build = build.replace('<link rel="stylesheet" href="${TOKENS}/fonts.css">', LINK + '\n<link rel="stylesheet" href="${TOKENS}/fonts.css">');
