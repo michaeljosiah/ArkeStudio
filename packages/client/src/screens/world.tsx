@@ -74,6 +74,8 @@ import { Wave } from "../components/wave.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
 import { artifactDisplayName, artifactOpenLabel, artifactUses, linkNameResolver } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
+import { ComicStylePicker } from "../components/comic-style-picker.js";
+import { draftFromStyle, styleFromDraft, type ComicStyleDraft } from "../lib/comic-styles.js";
 import { clearQueue, enqueueClip, playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
 import { ReadAloud } from "../components/read-aloud.js";
@@ -90,6 +92,7 @@ import {
   subscribeVoiceUploadConfirmations,
   createProduction,
   subscribeProductionCreateResults,
+  setComicSettings,
   createSheetFromSentence,
   attachFiles,
   stopExtraction,
@@ -871,6 +874,7 @@ const PROPOSAL_WHY: Record<string, string> = {
   "story-overview": "story overview",
   "prose-style": "prose style",
   "episode-script": "episode script draft",
+  "comic-script": "pages draft",
   "season-edit": "season change",
   "episode-edit": "episode change",
   "series-edit": "series change",
@@ -4868,6 +4872,9 @@ export function NewProductionScreen() {
   const [source, setSource] = useState(adaptFrom ?? "");
   // The production a soundtrack is for (design turn 238b): none until it is chosen.
   const [soundtrackFor, setSoundtrackFor] = useState("");
+  // A graphic novel's style (design turn 248): World look until a card is chosen.
+  const [comicStyle, setComicStyle] = useState<ComicStyleDraft>(() => draftFromStyle(undefined));
+  const isGraphicNovel = door === "write" && videoKind === GRAPHIC_NOVEL_KIND;
   // Seeded from the kind and re-seeded whenever the kind changes: a default the kind can answer
   // is the kind's to answer (turn 99), and a film that silently kept a micro drama's 9:16 would
   // be the exact failure the grouping is meant to prevent.
@@ -4886,14 +4893,17 @@ export function NewProductionScreen() {
     return subscribeProductionCreateResults((result) => {
       if (result.requestId !== pendingRequest) return;
       if (result.disposition === "created" && result.slug) {
+        // The style is the book's setting, written once the book exists; World look writes nothing.
+        const style = isGraphicNovel ? styleFromDraft(comicStyle) : null;
+        if (worldId && style) setComicSettings(worldId, result.slug, { style });
         navigate(`/w/${worldId}/p/${result.slug}`);
       } else {
         setPendingRequest(null);
         setFailure(result.reason ?? "The production could not be created.");
       }
     });
-  }, [pendingRequest, worldId, navigate]);
-  const characters = world?.sheets.filter((s) => s.type === "character").length ?? 0;
+  }, [pendingRequest, worldId, navigate, isGraphicNovel, comicStyle]);
+  const characters =world?.sheets.filter((s) => s.type === "character").length ?? 0;
   const chosen = door === null ? null : DOOR_CHOICES.find((d) => d.id === door)!;
   const kinds = door === null ? [] : KINDS_BY_DOOR[door];
   const isMicrodrama = door === "watch" && videoKind === "microdrama";
@@ -4903,7 +4913,9 @@ export function NewProductionScreen() {
   // What a soundtrack can be for: the world's productions that are not music, each with its kind and length.
   const scored = (world?.productions ?? []).filter((entry) => !productionShape(entry.meta).isMusic);
   const stories = adaptableStories(world?.productions ?? []);
-  const story = isAudioDrama && source ? stories.find((s) => s.id === source) ?? null : null;
+  // An audio drama and a graphic novel both adapt a story through setup (SPEC-057 R-2, SPEC-064 R-3).
+  const adapts = isAudioDrama || isGraphicNovel;
+  const story = adapts && source ? stories.find((s) => s.id === source) ?? null : null;
   // A name the author has not typed follows the story it adapts, so a drama of Low Water starts
   // as Low Water, and an original drama starts unnamed; anything typed is never replaced.
   useEffect(() => {
@@ -4920,7 +4932,11 @@ export function NewProductionScreen() {
   const planWithArke = () => {
     if (!worldId || !story) return;
     navigate(`/w/${worldId}/productions/setup/${newId("cv")}`, {
-      state: { seed: { kind: AUDIO_DRAMA_KIND, source: { productionId: story.id }, ...(title.trim() ? { title: title.trim() } : {}) } },
+      state: { seed: {
+        kind: isGraphicNovel ? GRAPHIC_NOVEL_KIND : AUDIO_DRAMA_KIND, source: { productionId: story.id }, ...(title.trim() ? { title: title.trim() } : {}),
+        // The style chosen on the cards rides into setup (turns 248a, 249b); World look sends none.
+        ...(isGraphicNovel && styleFromDraft(comicStyle) ? { comicStyle: styleFromDraft(comicStyle)! } : {}),
+      } },
     });
   };
 
@@ -5059,11 +5075,11 @@ export function NewProductionScreen() {
           />
           {/* Adapt from (design turn 230b, SPEC-057 R-2): an audio drama's one other question.
               A novel or Other has none, and a video asks it in setup. */}
-          {isAudioDrama && (stories.length > 0 || source !== "") && (
+          {adapts && (stories.length > 0 || source !== "") && (
             <label className="fy-production-step__adapt">
               <span className="fy-production-step__label">Adapt from</span>
               <Select label="Adapt from" value={source} onChange={(e) => setSource(e.target.value)}>
-                <option value="">Nothing · an original drama</option>
+                <option value="">{isGraphicNovel ? "Nothing · an original book" : "Nothing · an original drama"}</option>
                 {stories.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.title} · {s.kind} · {s.chapters} chapter{s.chapters === 1 ? "" : "s"} · {s.words.toLocaleString("en-GB")} words
@@ -5072,6 +5088,18 @@ export function NewProductionScreen() {
                 {source !== "" && !story && <option value={source}>{source} · no longer here</option>}
               </Select>
             </label>
+          )}
+          {/* Style (design turn 248a, SPEC-064 R-21a): a graphic novel's one other question, asked by
+              showing the same page drawn each way. */}
+          {isGraphicNovel && (
+            <div className="fy-production-step__adapt">
+              <span className="fy-production-step__label">Style</span>
+              <ComicStylePicker
+                draft={comicStyle}
+                onChange={setComicStyle}
+                worldPicture={world?.keyArt ? mediaUrl(world.meta.slug, world.keyArt) : null}
+              />
+            </div>
           )}
           {/* For (design turn 238b, SPEC-060 R-3): the one other question a soundtrack asks. */}
           {isSoundtrack && (
@@ -5165,7 +5193,7 @@ export function NewProductionScreen() {
             ) : (
             <Button
               variant="primary"
-              disabled={title.trim().length === 0 || pendingRequest !== null || (isAudioDrama && source !== "") || (isSoundtrack && soundtrackFor === "")}
+              disabled={title.trim().length === 0 || pendingRequest !== null || (adapts && source !== "") || (isSoundtrack && soundtrackFor === "")}
               onClick={create}
             >
               {pendingRequest

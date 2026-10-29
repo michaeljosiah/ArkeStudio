@@ -1,0 +1,42 @@
+/* Turn 249 · Arke turns prose into pages. Frames root at .gn249 inside .gn247, whose pieces they reuse. */
+.gn249-top{height:48px;display:flex;align-items:center;gap:12px;padding:0 20px;border-bottom:1px solid var(--border);font:var(--type-label)}
+.gn249-top b{font-weight:600}
+.gn249-setup{position:absolute;top:48px;left:0;right:0;bottom:0;display:grid;grid-template-columns:minmax(0,1fr) 520px}
+.gn249-chat{padding:24px 48px;display:flex;flex-direction:column;gap:14px;overflow:hidden;border-right:1px solid var(--border)}
+.gn249-me{align-self:flex-end;max-width:70%;padding:9px 13px;border-radius:14px 14px 4px 14px;background:var(--secondary);font-size:var(--text-sm)}
+.gn249-arke{max-width:86%;font-size:var(--text-sm);line-height:1.5;display:flex;flex-direction:column;gap:8px}
+.gn249-arke .who{font:var(--type-label);font-weight:600}
+.gn249-receipt{display:inline-flex;align-items:center;gap:7px;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.gn249-receipt svg{width:12px;height:12px;color:var(--success)}
+.gn249-ex{display:flex;gap:10px}
+.gn249-exc{width:132px;border:1px solid var(--border);border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:6px;font:var(--type-label)}
+.gn249-exc.on{border-color:var(--foreground);box-shadow:0 0 0 1px var(--foreground)}
+.gn249-exc span{font:var(--type-meta);color:var(--muted-foreground)}
+.gn249-mini{position:relative;height:84px;border-radius:4px;background:var(--secondary)}
+.gn249-mini u{position:absolute;border:1.5px solid var(--neutral-400);border-radius:2px;display:grid;place-items:center;font:var(--type-mono);font-size:9px;text-decoration:none;color:var(--muted-foreground)}
+.gn249-composer{margin-top:auto;height:44px;border:1px solid var(--border);border-radius:12px;display:flex;align-items:center;padding:0 14px;color:var(--muted-foreground);font-size:var(--text-sm)}
+.gn249-plan{padding:24px 24px;display:flex;flex-direction:column;gap:12px;overflow:hidden}
+.gn249-plan h3{margin:0;font:var(--type-ui);font-weight:600;font-size:var(--text-md)}
+.gn249-plan .sub{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);margin-top:-6px}
+.gn249-rows{border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.gn249-prow{display:grid;grid-template-columns:22px minmax(0,1fr) 64px 72px;gap:10px;align-items:center;min-height:40px;padding:4px 12px;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.gn249-prow:first-child{border-top:0}
+.gn249-prow .n{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.gn249-prow .src{display:block;font:var(--type-meta);color:var(--muted-foreground)}
+.gn249-prow .pg{font:var(--type-mono);font-size:var(--text-xs);text-align:right}
+.gn249-prow .lay{font:var(--type-meta);color:var(--muted-foreground);text-align:right}
+.gn249-prow.pilot{background:color-mix(in srgb,var(--foreground) 4%,transparent)}
+.gn249-facts{display:flex;flex-wrap:wrap;gap:6px}
+.gn249-facts span{height:26px;padding:0 10px;border:1px solid var(--border);border-radius:999px;display:inline-flex;align-items:center;gap:6px;font:var(--type-label)}
+.gn249-facts img{width:14px;height:21px;border-radius:2px;object-fit:cover}
+.gn249-acts{display:flex;gap:8px;align-items:center}
+.gn249-empty{grid-column:2 / 4;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center}
+.gn249-empty h3{margin:0;font:var(--type-ui);font-weight:600;font-size:var(--text-md)}
+.gn249-empty .m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.gn249-empty .gn249-acts{justify-content:center}
+.gn249-draftbar{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:color-mix(in srgb,var(--foreground) 4%,transparent);font-size:var(--text-sm)}
+.gn249-draftbar svg{width:15px;height:15px}
+.gn249-src{height:22px;padding:0 8px;border:1px solid var(--border);border-radius:6px;display:inline-flex;align-items:center;gap:5px;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);margin-left:auto}
+.gn249-thumb-draft{border-style:dashed !important;background:var(--background) !important}
+.gn249-thumb-draft .d{position:absolute;inset:0;display:grid;place-items:center;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.gn249-quote{border-left:2px solid var(--border);padding:2px 0 2px 10px;font-size:var(--text-sm);color:var(--muted-foreground);font-style:italic}

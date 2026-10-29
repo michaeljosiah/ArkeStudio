@@ -68,6 +68,7 @@ import {
 import { EpisodeChatScreen, EpisodeDetailScreen } from "./screens/development.js";
 import { ChapterTreeScreen, SceneDetailScreen, ScenesScreen, StoryScreen } from "./screens/production-story.js";
 import { AudiobookScreen } from "./screens/audiobook.js";
+import { ComicPagesScreen } from "./screens/comic-pages.js";
 import { CutScreen } from "./screens/cut.js";
 import { GenerateScreen } from "./screens/production-generate.js";
 import { VoiceLineDialogScreen } from "./screens/production-voice-line.js";
@@ -364,6 +365,7 @@ function AppRoutes() {
           <Route path="adaptation" element={<DramaAdaptationScreen />} />
           {/* The audiobook's door (turn 146, SPEC-047 R-29): a row a chapter, its state, one priced batch. */}
           <Route path="story/audiobook" element={<AudiobookScreen />} />
+          <Route path="story/pages" element={<ComicPagesScreen />} />
           {/* Arcs, themes, setups and payoffs — off the season, under one rail item
               (turn 99): a season is its episodes. */}
           <Route path="story-structure" element={<StoryStructureScreen />} />

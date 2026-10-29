@@ -582,6 +582,14 @@ export const EPISODE_SCRIPT_SCHEMA_VERSION = 91;
 export const GRAPHIC_NOVEL_SCHEMA_VERSION = 114;
 const GRAPHIC_NOVEL_FILE = /^productions\/[^/]+\/(comic\.json$|comic\/|comic-pages\/)/;
 /**
+ * A graphic novel's style and adaptation (design turns 248, 249): `style` and `adapts` in its strict
+ * `comic.json`, a panel's `source` in its strict comic script, Arke's drafted pages staged as a
+ * `comic-script` proposal, and a graphic novel's setup draft. A build of 114 refuses each of them
+ * as unreadable, so any landing of one raises the world first.
+ */
+export const COMIC_ADAPTATION_SCHEMA_VERSION = 115;
+const COMIC_ADAPTATION_KEYS = /"(style|adapts|source)"\s*:/;
+/**
  * An audio drama's takes (SPEC-057 R-29, codex on PR 1871): `drama-takes/` and the `episode` on a
  * take's strict audiobook sidecar. A build before them drops each such artifact as unreadable.
  */
@@ -1086,6 +1094,7 @@ export class Committer {
       input.raiseSchemaVersion ?? 0,
       files.some((f) => classify(f.path).track === "episode-script" && f.newContent != null) ? EPISODE_SCRIPT_SCHEMA_VERSION : 0,
       files.some((f) => GRAPHIC_NOVEL_FILE.test(f.path) && f.newContent != null) ? GRAPHIC_NOVEL_SCHEMA_VERSION : 0,
+      files.some((f) => /^productions\/[^/]+\/(comic\.json$|comic\/)/.test(f.path) && f.newContent != null && COMIC_ADAPTATION_KEYS.test(f.newContent)) ? COMIC_ADAPTATION_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/drama-takes\//.test(f.path) && f.newContent != null) ? DRAMA_TAKE_SCHEMA_VERSION : 0,
       files.some((f) => {
         if (!f.newContent) return false;

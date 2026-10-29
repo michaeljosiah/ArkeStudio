@@ -4,6 +4,7 @@ import { EpisodeSchema, ProductionSchema, SeasonSchema, SeriesSchema } from "./w
 import { SceneRecordSchema, validateSceneFlow } from "./scene-flow.js";
 import { ProductionNarrativeSchema } from "./production-narrative.js";
 import { AudioDramaRecordSchema } from "./audio-drama.js";
+import { ComicCreationSchema } from "./graphic-novel.js";
 
 /** Delivery defaults shared by direct creation and conversational setup. Story endings remain authored. */
 export const MICRODRAMA_DEFAULTS = {
@@ -37,6 +38,12 @@ export const ProductionCreationPlanSchema = z.object({
     scenes: z.array(z.object({ stem: SlugSchema, record: SceneRecordSchema }).strict()).max(300),
     /** An audio drama's plan and source, written as `audio-drama.json` (SPEC-057 R-7). */
     audioDrama: AudioDramaRecordSchema.optional(),
+    /**
+     * A graphic novel made from a plan (SPEC-064 R-4, turn 249b): how it reads, its shape and style,
+     * the story it adapts, and its chapters, each a new chapter file named by `stem`. Only what the
+     * creation decides; `comic.json` is written from it with the defaults for the rest.
+     */
+    graphicNovel: ComicCreationSchema.optional(),
   }).strict().optional(),
   /**
    * A music production's start (SPEC-060 R-3, R-4): an empty album, written as `music.json`, and a
@@ -58,6 +65,14 @@ export function validateInitialContent(plan: ProductionCreationPlan): void {
   if (plan.initialSeason && content.narrative) throw new Error("A season cannot contain a film narrative.");
   if (content.audioDrama && (plan.initialSeason || content.narrative || content.episodes.length || content.scenes.length)) {
     throw new Error("An audio drama holds only its plan at creation.");
+  }
+  if (content.graphicNovel) {
+    if (plan.initialSeason || content.narrative || content.episodes.length || content.scenes.length || content.audioDrama) {
+      throw new Error("A graphic novel holds only its plan and chapters at creation.");
+    }
+    if (new Set(content.graphicNovel.chapters.map((chapter) => chapter.stem)).size !== content.graphicNovel.chapters.length) {
+      throw new Error("The creation plan repeats a chapter filename.");
+    }
   }
   for (const entries of [content.episodes, content.scenes]) {
     if (new Set(entries.map(entry => entry.stem)).size !== entries.length ||

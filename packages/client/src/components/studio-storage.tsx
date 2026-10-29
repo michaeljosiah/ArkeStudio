@@ -3,6 +3,7 @@ import { componentIsSettled, deriveStorageFindings, STORAGE_CATEGORY_LABELS, sto
 import { Link } from "react-router";
 import { TriangleAlert } from "./icons.js";
 import { openActivityPanel } from "../lib/activity-panel.js";
+import { useStudioAssistant } from "./studio-assistant-context.js";
 
 const labels: Record<StorageRootHealth["role"], string> = { "local-ai": "Local models", "generated-media": "World media", "working-files": "Working files", downloads: "Downloads", exports: "Exports" };
 const purposes: Record<StorageSpaceCheck["purpose"], string> = { setup: "Installation", job: "Generation", import: "Import", export: "Export", publication: "Publication", scratch: "Local processing", preview: "Preview", submission: "Generation preparation" };
@@ -22,6 +23,7 @@ export function StudioStorageReadings({ health, connected, jobs, setup, close }:
 }
 
 export function StudioStorageReadingsView({ health, connected, now, jobs = [], setup, close }: StudioStorageProps & { now: number }) {
+  const studio = useStudioAssistant();
   const groups = systemStorageGroups(health?.roots ?? [], now);
   const waiting = storageWaitingWork(jobs, setup, now);
   const checks = (health?.spaceChecks ?? []).filter(check => check.checkedAt <= now && now - check.checkedAt <= 15 * 60_000);
@@ -39,7 +41,7 @@ export function StudioStorageReadingsView({ health, connected, now, jobs = [], s
       {waiting.completed > 0 && <p className="fy-studio-note">Completed generation is waiting for local saving. Arke has not repeated it.</p>}
       <p className="fy-studio-note">{connected ? "The operation’s own controls show its next step and any pause." : "Current work status is unknown until the connection returns."}</p>
       <div className="fy-studio-work-actions">
-        {waiting.unsubmitted + waiting.completed > 0 && <button type="button" className="fy-studio-button" onClick={() => { close?.(); openActivityPanel("inbox"); }}>Open Activity</button>}
+        {waiting.unsubmitted + waiting.completed > 0 && <button type="button" className="fy-studio-button" onClick={() => { if (studio) studio.stepAside(); else close?.(); openActivityPanel("inbox"); }}>Open Activity</button>}
         {waiting.downloads > 0 && <Link className="fy-studio-button" to="/settings/downloads" onClick={close}>Open Downloads</Link>}
       </div>
     </div>}

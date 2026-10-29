@@ -218,7 +218,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 112: a music track's composer — the album's session and a take's length, instrumental and track (SPEC-060 R-9).
 // 113: remembered story facts and conditional routing (SPEC-063, turn 240).
 // 114: the graphic novel — comic.json, comic scripts and page takes (SPEC-064, issue 2219).
-export const SUPPORTED_SCHEMA_VERSION = 114;
+// 115: a graphic novel's style and adaptation — `style`, `adapts`, a panel's `source`, Arke's drafted pages (turns 248, 249).
+export const SUPPORTED_SCHEMA_VERSION = 115;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -1322,9 +1323,24 @@ export async function scanWorld(
       }
     }
 
+    // Arke's chapter of comic pages, whole, so Pages can show it as a draft (SPEC-064 R-13).
+    const proposedComics: Record<string, ComicScript> = {};
+    if (proposal.kind === "comic-script") {
+      for (const target of proposal.targets) {
+        const raw = proposedByPath.get(target.path);
+        if (raw === null || raw === undefined) continue;
+        let json: unknown = null;
+        try { json = JSON.parse(raw); } catch { /* reported below as unreadable */ }
+        const parsed = ComicScriptSchema.safeParse(json);
+        if (parsed.success) proposedComics[target.path] = parsed.data;
+        else problems.push({ path: `.proposals/${pid}/${target.path}`, message: parsed.error.issues[0]?.message ?? "unreadable pages" });
+      }
+    }
+
     proposals.push({
       proposal,
       ripple,
+      ...(Object.keys(proposedComics).length > 0 ? { comicScripts: proposedComics } : {}),
       ...(proposedArtDirection ? { artDirection: proposedArtDirection } : {}),
       ...(Object.keys(proposedScenes).length > 0 ? { scenes: proposedScenes } : {}),
       ...(Object.keys(proposedScripts).length > 0 ? { episodeScripts: proposedScripts } : {}),

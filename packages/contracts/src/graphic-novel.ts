@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ArtifactIdSchema, IsoDateTimeSchema, JobIdSchema, SlugSchema, UlidSchema } from "./ids.js";
+import { ArtifactIdSchema, IsoDateTimeSchema, JobIdSchema, SlugSchema, UlidSchema, ulid } from "./ids.js";
 import { normalizeAspect } from "./manifest.js";
 import { textDigest } from "./subtitles.js";
 
@@ -45,6 +45,23 @@ export type LetteringItem = z.infer<typeof LetteringItemSchema>;
 export const PanelSizeSchema = z.enum(["small", "normal", "large"]);
 
 /**
+ * Where a panel came from (R-13, turn 249d): one version of one chapter, and its paragraphs by
+ * number, as an episode's scene pins its source (SPEC-052 R-29). The story is the book's own when
+ * its chapters hold the prose, or the story it adapts. Not part of a page's picture: a cited
+ * passage never makes a take out of date.
+ */
+export const ComicSourceSchema = z.object({
+  story: SlugSchema,
+  chapter: z.string().min(1).max(200),
+  version: z.number().int().min(1),
+  /** The chapter file's hash when pinned: a direct save keeps the version, so only the hash shows the prose moved. */
+  hash: z.string().min(1).max(200).optional(),
+  /** 1-based paragraph numbers in the pinned version, never text. */
+  paragraphs: z.array(z.number().int().min(1).max(100_000)).min(1).max(200),
+}).strict();
+export type ComicSource = z.infer<typeof ComicSourceSchema>;
+
+/**
  * What one panel shows (R-7). Order is the panel's place in its page's array: a stored `order`
  * beside the array would be a second answer to the same question, and the two could disagree.
  */
@@ -56,6 +73,7 @@ export const ComicPanelSchema = z.object({
   location: SlugSchema.optional(),
   size: PanelSizeSchema.optional(),
   lettering: z.array(LetteringItemSchema).max(COMIC_LIMITS.letteringPerPage).default([]),
+  source: ComicSourceSchema.optional(),
 }).strict();
 export type ComicPanel = z.infer<typeof ComicPanelSchema>;
 
@@ -107,6 +125,63 @@ export const ComicScriptSchema = z.object({
   });
 });
 export type ComicScript = z.infer<typeof ComicScriptSchema>;
+
+/**
+ * A chapter's pages as Arke drafts them (R-13, turn 249d): the script's shapes with every id
+ * optional, since a new page, panel or line has none until it is kept. `settleComicDraft` gives
+ * them ids; the script's own schema then judges the whole.
+ */
+const DraftId = z.string().min(1).max(40);
+export const DraftLetteringSchema = z.object({
+  id: DraftId.optional(),
+  kind: LetteringKindSchema,
+  speaker: SlugSchema.optional(),
+  text: z.string().trim().min(1).max(COMIC_LIMITS.textMax),
+}).strict();
+export const DraftComicPanelSchema = z.object({
+  id: DraftId.optional(),
+  description: z.string().trim().min(1).max(COMIC_LIMITS.descriptionMax),
+  shot: z.string().trim().min(1).max(120).optional(),
+  characters: z.array(SlugSchema).max(8).default([]),
+  location: SlugSchema.optional(),
+  size: PanelSizeSchema.optional(),
+  lettering: z.array(DraftLetteringSchema).max(COMIC_LIMITS.letteringPerPage).default([]),
+  source: ComicSourceSchema.extend({ version: z.number().int().min(1).optional() }).optional(),
+}).strict();
+export const DraftComicPageSchema = z.object({
+  id: DraftId.optional(),
+  layout: z.string().min(1).max(60),
+  notes: z.string().trim().min(1).max(2000).optional(),
+  reading: ComicReadingSchema.optional(),
+  aspect: z.string().min(3).max(12).optional(),
+  panels: z.array(DraftComicPanelSchema).min(1).max(COMIC_LIMITS.panelsPerPage),
+  alt: z.string().trim().min(1).max(4000).optional(),
+}).strict();
+export type DraftComicPage = z.infer<typeof DraftComicPageSchema>;
+
+/**
+ * Arke's pages as the script's: an id the chapter's script already holds is kept, once; any other
+ * id, or none, becomes a new ULID, so a draft can never claim another page's takes by guessing its
+ * id. A source with no version is left for the caller to pin to the chapter as it stands.
+ */
+export function settleComicDraft(draft: readonly DraftComicPage[], current: readonly ComicPage[]): Array<Omit<ComicPage, "panels"> & { panels: Array<Omit<ComicPanel, "source"> & { source?: DraftComicPage["panels"][number]["source"] }> }> {
+  const known = new Set(current.flatMap((page) => [page.id, ...page.panels.flatMap((panel) => [panel.id, ...panel.lettering.map((item) => item.id)])]));
+  const used = new Set<string>();
+  const settle = (id: string | undefined) => {
+    if (id !== undefined && known.has(id) && !used.has(id)) { used.add(id); return id; }
+    return ulid();
+  };
+  return draft.map((page) => ({
+    ...page,
+    id: settle(page.id),
+    status: "draft" as const,
+    panels: page.panels.map((panel) => ({
+      ...panel,
+      id: settle(panel.id),
+      lettering: panel.lettering.map((item) => ({ ...item, id: settle(item.id) })),
+    })),
+  }));
+}
 export const EMPTY_COMIC_SCRIPT: ComicScript = { version: 1, pages: [] };
 
 /** The checks' numbers (D-7), kept on each take as they stood when it was checked (R-31). */
@@ -128,6 +203,31 @@ export const DEFAULT_COMIC_ATTEMPT_CAP = { attempts: 3, usd: 5 } as const;
 
 export const DEFAULT_COMIC_ASPECT = "2:3";
 
+/** The style's words are sent with every page brief, so they are bounded like a look is. */
+export const COMIC_STYLE_WORDS_MAX = 600;
+
+/**
+ * How a book's pages are drawn (R-21a, turn 248). The words are the record; `preset` is only the
+ * card that seeded them, so the picker can show it as chosen. An edited preset is the author's own
+ * words like any other: nothing re-reads the preset's text.
+ */
+export const ComicStyleSchema = z.object({
+  words: z.string().trim().min(1).max(COMIC_STYLE_WORDS_MAX),
+  preset: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/).optional(),
+}).strict();
+export type ComicStyle = z.infer<typeof ComicStyleSchema>;
+
+/**
+ * The story a graphic novel adapts (R-3, turn 249): its own chapter for each of the story's, so
+ * Pages and Arke know which prose a chapter's pages are drawn from. Ids, not text: the prose is
+ * read where it lives.
+ */
+export const ComicAdaptsSchema = z.object({
+  story: SlugSchema,
+  chapters: z.array(z.object({ chapter: z.string().min(1).max(200), from: z.string().min(1).max(200) }).strict()).max(500),
+}).strict();
+export type ComicAdapts = z.infer<typeof ComicAdaptsSchema>;
+
 /** `productions/<id>/comic.json` (R-12): how the book reads and how its pages are checked. */
 export const ComicSettingsSchema = z.object({
   version: z.literal(1),
@@ -137,11 +237,76 @@ export const ComicSettingsSchema = z.object({
   language: z.string().min(2).max(35).default("en"),
   thresholds: LetteringThresholdsSchema.default(DEFAULT_LETTERING_THRESHOLDS),
   cap: ComicAttemptCapSchema.default(DEFAULT_COMIC_ATTEMPT_CAP),
+  /** Absent is World look: the world's art direction alone, as before there was a style. */
+  style: ComicStyleSchema.optional(),
+  /** The story it adapts, when Plan with Arke made it from one (turn 249). */
+  adapts: ComicAdaptsSchema.optional(),
 }).strict().superRefine((settings, ctx) => {
   if (normalizeAspect(settings.aspect) !== settings.aspect) ctx.addIssue({ code: "custom", path: ["aspect"], message: `“${settings.aspect}” is not an aspect.` });
 });
 export type ComicSettings = z.infer<typeof ComicSettingsSchema>;
 export const DEFAULT_COMIC_SETTINGS: ComicSettings = ComicSettingsSchema.parse({ version: 1 });
+
+/**
+ * A graphic novel's plan in setup (R-4, turn 249b): how it reads, its page shape and style, whether
+ * Arke drafts a pilot chapter first, and a chapter of pages for each chapter of the story it adapts,
+ * named by that chapter's number. Page counts and layouts are first guesses, never limits.
+ */
+export interface ComicPlanChapter {
+  /** The adapted story's chapter number. */
+  from: number;
+  title: string;
+  pages: number;
+  layout?: string | undefined;
+}
+/**
+ * Named rather than inferred, as `Frame` is: the plan rides in every setup draft and its review,
+ * inside the conversation's loaded schema, and inferred there it took the engine's bundled
+ * declarations past what the compiler will write (TS7056).
+ */
+export interface ComicPlan {
+  reading: ComicReading;
+  aspect: string;
+  style?: ComicStyle | undefined;
+  pilot: boolean;
+  chapters: ComicPlanChapter[];
+}
+export const ComicPlanChapterSchema: z.ZodType<ComicPlanChapter, z.ZodTypeDef, unknown> = z.object({
+  from: z.number().int().min(1).max(500),
+  title: z.string().trim().min(1).max(200),
+  pages: z.number().int().min(1).max(COMIC_LIMITS.pagesPerChapter),
+  layout: z.string().min(1).max(60).optional(),
+}).strict();
+export const ComicPlanSchema: z.ZodType<ComicPlan, z.ZodTypeDef, unknown> = z.object({
+  reading: ComicReadingSchema,
+  aspect: z.string().min(3).max(12),
+  style: ComicStyleSchema.optional(),
+  pilot: z.boolean(),
+  chapters: z.array(ComicPlanChapterSchema).max(500),
+}).strict().superRefine((plan, ctx) => {
+  if (normalizeAspect(plan.aspect) !== plan.aspect) ctx.addIssue({ code: "custom", path: ["aspect"], message: `“${plan.aspect}” is not an aspect.` });
+});
+
+/** What a graphic novel made from a plan is created with (turn 249b); named for the same reason. */
+export interface ComicCreation {
+  reading: ComicReading;
+  aspect: string;
+  style?: ComicStyle | undefined;
+  adapts?: ComicAdapts | undefined;
+  chapters: Array<{ stem: string; title: string }>;
+}
+export const ComicCreationSchema: z.ZodType<ComicCreation, z.ZodTypeDef, unknown> = z.object({
+  reading: ComicReadingSchema,
+  aspect: z.string().min(3).max(12),
+  style: ComicStyleSchema.optional(),
+  adapts: ComicAdaptsSchema.optional(),
+  chapters: z.array(z.object({ stem: SlugSchema, title: z.string().trim().min(1).max(200) }).strict()).max(500),
+}).strict();
+export const DEFAULT_COMIC_PLAN: ComicPlan = { reading: "ltr", aspect: DEFAULT_COMIC_ASPECT, pilot: true, chapters: [] };
+
+/** The three things setup asks by example (R-4): the page draws example cards for the one open. */
+export const ComicAskSchema = z.enum(["reading", "aspect", "pilot"]);
+export type ComicAsk = z.infer<typeof ComicAskSchema>;
 
 // ---------------------------------------------------------------------------
 // Layout templates (R-14 – R-17)

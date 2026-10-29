@@ -244,6 +244,16 @@ The product-level explanation is in [the architecture guide](docs/architecture/t
 
 ## Publishing a world to Arke Player
 
+For illustrated narration, assess the image holds, not just the image count. Use recorded take
+lengths when available; keep estimated sentence anchors labelled honestly. After narration and
+again on the exported listening plan, review the opening, every picture-to-picture interval and
+the final hold. Report the longest holds and their story purpose. A 30–60 second still is a useful
+starting point; review holds over 75 seconds, without making that a mandatory cut or image quota.
+Let the passage's action, emotional turns, suspense, humour and intended stillness set the pace.
+Additional views must add a supported reaction, detail or change of focus, preserve reveal timing,
+and avoid near duplicates. Portrait variants and unverified camera motion do not count as new
+moments. A count or chapter-wide average alone does not establish sufficient visual coverage.
+
 Arke Player's Available list and its `Update` come from one list of worlds, shipped in the app and
 fetched from the public ArkeStudio release `arke-player-worlds` (SPEC-058 R-29 – R-36, Player P9
 and P12). A new edition of a world is published in four steps across both repositories; the Player
@@ -296,11 +306,24 @@ production id (`npx tsx scripts/export-arke-player.mts <copy> --story <productio
 `--size` for a novel's pictures, `--cover`/`--tall` for its covers), or from the Branch Map's
 Export → Arke Player. It makes `exports/<production-id>-story-<UTC date>.zip`, schema 6 and alone,
 read back with every route replayed, and is blocked as the sheet is — every choice walked in
-preview, a clip or picture for each reachable scene. The script carries only the character voices
-already prepared for the table read, so make a voiced novel from the app. Upload it under that name
+preview, a clip or picture for each reachable scene. The script carries the voices already prepared
+for the table read and makes none: the characters' always, the narration only with `--narrator
+designed:<voice id>:<revision>`, the world's designed voice the app's narrator read it in (the
+script cannot read Settings, and refuses anything but a designed voice of that world). Its reads
+are cached by the Gemini model the narrator read it in: add `--narrator-model <model>` when that is
+not the model the voice was made in. The script prints how many narration lines went voiced;
+without `--narrator` they go as text. Upload it under that name
 to the world's story release, pin it with ArkePlayer's `pin_world`, paste the pin on the production
 as `story` — never `package`: a Player of revision 11 installs every production `package` and would
 fetch a story it cannot read — raise the `serial`, and publish the list.
+
+**A graphic novel as a package of its own** (SPEC-064 R-50, R-51; Player P20): the same four
+steps, made from the Pages screen's Export → Arke Player (or `exportArkePlayer` on the production).
+It makes `exports/<production-id>-comic-<UTC date>.zip`, schema 7 and alone: one `arke-comic`
+document and each accepted page, read back before it is named, and refused while any page is not
+accepted or its lettering not cleared. Upload it under that name, pin it with ArkePlayer's
+`pin_world`, paste the pin on the production as `comic` — never `package` or `story`: an older
+Player would fetch what it cannot read — raise the `serial`, and publish the list.
 
 **A picture comes with the list** (SPEC-058 R-63 – R-67): a world's key art, a story's wide cover
 (16:9) or its upright cover (2:3), new or changed, needs no app release.
