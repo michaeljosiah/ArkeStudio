@@ -1217,8 +1217,10 @@ export function subscribeComicScriptSaveResults(listener: (result: ComicScriptSa
 /** A page's price and brief (SPEC-064 R-19, R-23), and a page being made (R-25). */
 export type ComicPageQuote = Extract<DomainEvent, { type: "comic.page-quote" }>;
 export type ComicPageMade = Extract<DomainEvent, { type: "comic.page-made" }>;
-const comicPageListeners = new Set<(event: ComicPageQuote | ComicPageMade) => void>();
-export function subscribeComicPages(listener: (event: ComicPageQuote | ComicPageMade) => void): () => void {
+export type ComicTakeResult = Extract<DomainEvent, { type: "comic.take-result" }>;
+type ComicPageEvent = ComicPageQuote | ComicPageMade | ComicTakeResult;
+const comicPageListeners = new Set<(event: ComicPageEvent) => void>();
+export function subscribeComicPages(listener: (event: ComicPageEvent) => void): () => void {
   comicPageListeners.add(listener);
   return () => comicPageListeners.delete(listener);
 }
@@ -2002,7 +2004,7 @@ function handleFrame(json: string): void {
     if (event.type === "episode-script.save-result") {
       for (const listener of episodeScriptSaveListeners) listener(event);
     }
-    if (event.type === "comic.page-quote" || event.type === "comic.page-made") {
+    if (event.type === "comic.page-quote" || event.type === "comic.page-made" || event.type === "comic.take-result") {
       for (const listener of comicPageListeners) listener(event);
     }
     if (event.type === "comic-script.save-result") {
@@ -5464,9 +5466,21 @@ export function quoteComicPage(worldId: string, productionId: string, page: stri
 }
 
 /** Make a page on the price its press showed (SPEC-064 R-27). */
-export function makeComicPage(worldId: string, productionId: string, page: string, confirmedMicroUsd: number, mode?: ComicMode): string | null {
+export function makeComicPage(worldId: string, productionId: string, page: string, confirmedMicroUsd: number, mode?: ComicMode, untilPasses?: boolean): string | null {
   const requestId = ulid();
-  return send({ kind: "make-comic-page", requestId, worldId, productionId, page, confirmedMicroUsd, ...(mode !== undefined ? { mode } : {}) }) ? requestId : null;
+  return send({ kind: "make-comic-page", requestId, worldId, productionId, page, confirmedMicroUsd, ...(mode !== undefined ? { mode } : {}), ...(untilPasses ? { untilPasses: true as const } : {}) }) ? requestId : null;
+}
+
+/** Read a take back and check its lettering again (SPEC-064 R-29). */
+export function checkComicTake(worldId: string, productionId: string, page: string, take: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "check-comic-take", requestId, worldId, productionId, page, take }) ? requestId : null;
+}
+
+/** Keep a take as the page; past findings or an unchecked take only with an override (SPEC-064 R-33). */
+export function acceptComicTake(worldId: string, productionId: string, page: string, take: string, override?: { findings: string[]; reason?: string }): string | null {
+  const requestId = ulid();
+  return send({ kind: "accept-comic-take", requestId, worldId, productionId, page, take, ...(override ? { override } : {}) }) ? requestId : null;
 }
 
 /** How a graphic novel reads and how its pages are checked (SPEC-064 R-12). */

@@ -52,7 +52,7 @@ export function letteringSimilarity(a: string, b: string): number {
 
 /** Words of one region, `from` inclusive to `to` exclusive. */
 interface Span { region: number; from: number; to: number }
-interface Candidate { text: string; normalized: string; box?: PageBox; spans: Span[] }
+interface Candidate { text: string; normalized: string; box?: PageBox; spans: Span[]; cut?: true }
 
 /**
  * Readers split one balloon over lines and merge two neighbours into one block. A candidate is a
@@ -65,7 +65,7 @@ function candidatesFor(item: string, regions: readonly PageTextRegion[], tokens:
   const words = item.split(" ").length;
   regions.forEach((region, index) => {
     const own = tokens[index]!;
-    const box = region.box ? { box: region.box } : {};
+    const box = { ...(region.box ? { box: region.box } : {}), ...(region.cut ? { cut: true as const } : {}) };
     out.push({ text: region.text, normalized: own.join(" "), ...box, spans: [{ region: index, from: 0, to: own.length }] });
     if (own.length > words) {
       for (let size = Math.max(1, words - 1); size <= words + 1; size++) {
@@ -77,7 +77,7 @@ function candidatesFor(item: string, regions: readonly PageTextRegion[], tokens:
     }
     const next = regions[index + 1];
     if (next) {
-      const joined = region.box && next.box ? { box: union(region.box, next.box) } : {};
+      const joined = { ...(region.box && next.box ? { box: union(region.box, next.box) } : {}), ...(region.cut || next.cut ? { cut: true as const } : {}) };
       out.push({ text: `${region.text} ${next.text}`, normalized: [...own, ...tokens[index + 1]!].join(" "), ...joined,
         spans: [{ region: index, from: 0, to: own.length }, { region: index + 1, from: 0, to: tokens[index + 1]!.length }] });
     }
@@ -119,6 +119,11 @@ export interface LetteringCheckInput {
   at: string;
   /** Whether the reader reports balloon tails; none do yet, so speakers go unchecked (R-30). */
   tails?: boolean;
+  /**
+   * Whether the reader's boxes are measured. A vision model's boxes are estimates: a balloon it
+   * places at x 0 is not proof the page cut it off, so only its own `cut` says so.
+   */
+  precise?: boolean;
 }
 
 export function compareLettering(input: LetteringCheckInput): LetteringVerification {
@@ -150,8 +155,9 @@ export function compareLettering(input: LetteringCheckInput): LetteringVerificat
         similarity: round(similarity), ...(best.candidate.box ? { box: best.candidate.box } : {}) });
     }
     const box = best.candidate.box;
+    if (!box && best.candidate.cut) findings.push({ id: `clipped:${item.id}`, kind: "clipped", item: item.id, expected: item.text });
     if (box) {
-      if (touchesEdge(box)) findings.push({ id: `clipped:${item.id}`, kind: "clipped", item: item.id, expected: item.text, box });
+      if (best.candidate.cut || (input.precise === true && touchesEdge(box))) findings.push({ id: `clipped:${item.id}`, kind: "clipped", item: item.id, expected: item.text, box });
       placed.push({ item: item.id, key: readingKey(box, page, reading) });
     }
   }

@@ -26,7 +26,7 @@ const GOOD: PageTextRegion[] = [
 ];
 
 const check = (regions: PageTextRegion[], page: ComicPage = PAGE, reading: "ltr" | "rtl" = "ltr") =>
-  compareLettering({ page, reading, regions, thresholds: DEFAULT_LETTERING_THRESHOLDS, reader, at });
+  compareLettering({ page, reading, regions, thresholds: DEFAULT_LETTERING_THRESHOLDS, reader, at, precise: true });
 const kinds = (regions: PageTextRegion[]) => {
   const result = check(regions);
   return result.status === "compared" ? result.findings.map((finding) => finding.kind) : [];
@@ -67,6 +67,14 @@ describe("lettering check (SPEC-064 R-29 – R-33)", () => {
   it("finds words cut off at the page edge", () => {
     const regions = structuredClone(GOOD); regions[2]!.box = { x: 0.85, y: 0.2, w: 0.15, h: 0.08 };
     assert.deepEqual(kinds(regions), ["clipped"]);
+  });
+  it("trusts an estimating reader's own word that text is cut, never its guessed box", () => {
+    const edge = structuredClone(GOOD); edge[2]!.box = { x: 0.85, y: 0.2, w: 0.15, h: 0.08 };
+    const estimated = compareLettering({ page: PAGE, reading: "ltr", regions: edge, thresholds: DEFAULT_LETTERING_THRESHOLDS, reader, at });
+    assert.deepEqual(estimated.status === "compared" ? estimated.findings : null, []);
+    const said = structuredClone(GOOD); said[2]!.cut = true;
+    const cut = compareLettering({ page: PAGE, reading: "ltr", regions: said, thresholds: DEFAULT_LETTERING_THRESHOLDS, reader, at });
+    assert.deepEqual(cut.status === "compared" ? cut.findings.map((finding) => finding.kind) : null, ["clipped"]);
   });
   it("warns when the second line is read before the first", () => {
     const regions = structuredClone(GOOD); regions[0]!.box = { x: 0.1, y: 0.3, w: 0.3, h: 0.05 };

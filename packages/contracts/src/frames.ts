@@ -2502,7 +2502,26 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       page: UlidSchema,
       mode: ComicModeSchema.optional(),
+      /**
+       * The most the press may spend. With `untilPasses` it covers every attempt: the page is made
+       * again until its lettering passes, up to the book's cap (D-6, R-27).
+       */
       confirmedMicroUsd: z.number().int().min(0),
+      untilPasses: z.literal(true).optional(),
+    })
+    .strict(),
+  /** Read a take back and check its lettering again (R-29). */
+  z.object({ kind: z.literal("check-comic-take"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, page: UlidSchema, take: UlidSchema }).strict(),
+  /** Keep a take as the page (R-26); past findings or an unchecked take only with an override (R-33). */
+  z
+    .object({
+      kind: z.literal("accept-comic-take"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      take: UlidSchema,
+      override: z.object({ findings: z.array(z.string().min(1).max(80)).max(200), reason: z.string().trim().min(1).max(400).optional() }).strict().optional(),
     })
     .strict(),
   /** How a graphic novel reads and how its pages are checked (SPEC-064 R-12, R-31). */
