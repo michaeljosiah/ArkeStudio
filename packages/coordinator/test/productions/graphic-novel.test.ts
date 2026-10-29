@@ -69,4 +69,17 @@ describe("a graphic novel on disk (SPEC-064 R-1, R-10, R-12)", () => {
     assert.equal(store.getBundle().productions.find((candidate) => candidate.meta.id === id)!.comic?.reading, "rtl");
     await assert.rejects(setComicSettings(store, id, { aspect: "wide" }));
   });
+
+  it("keeps a style's words, and World look writes no style at all (R-21a)", async () => {
+    const { store, id } = await comic();
+    const noir = { words: "Crime noir comic: solid black shapes and stark white.", preset: "noir" };
+    assert.deepEqual((await setComicSettings(store, id, { style: noir })).style, noir);
+    // Another setting leaves the style as it was.
+    assert.deepEqual((await setComicSettings(store, id, { reading: "rtl" })).style, noir);
+    const cleared = await setComicSettings(store, id, { style: null });
+    assert.equal("style" in cleared, false);
+    const file = JSON.parse(await readFile(join(store.dir, "productions", id, "comic.json"), "utf8"));
+    assert.equal("style" in file, false, "World look reads as a book from before there was a style");
+    await assert.rejects(setComicSettings(store, id, { style: { words: "   " } }));
+  });
 });
