@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { StorageInventorySchema } from "./storage-inventory.js";
 
 /** SPEC-062: facts identify real volumes, never drive letters or a sum across destinations. */
 const bytes = z.number().int().nonnegative().safe();
@@ -164,6 +165,7 @@ export const StorageHealthSnapshotSchema = z.object({ at: instant, writing: z.bo
     reason: z.enum(["invalid", "permission", "disk-full", "read-failed", "write-failed"]).optional(),
   }).strict().optional(),
   spaceChecks: z.array(StorageSpaceCheckSchema).max(16).optional(),
+  inventory: StorageInventorySchema.optional(),
 }).strict();
 export type StorageHealthSnapshot = z.infer<typeof StorageHealthSnapshotSchema>;
 

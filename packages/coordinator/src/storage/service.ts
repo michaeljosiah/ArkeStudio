@@ -6,6 +6,7 @@ import { StorageReservations, type StorageCheckObservation, type StorageReservat
 import { StorageMonitor, type StorageProbeResult } from "./monitor.js";
 import { WindowsVolumeProbe } from "./windows-volume.js";
 import { LinuxVolumeProbe } from "./linux-volume.js";
+import { StorageInventoryCollector, type InventoryRoot } from "./inventory.js";
 
 export interface StorageNativePort {
   setRoots(roots: readonly { rootId: string; path: string }[]): void;
@@ -30,6 +31,9 @@ export class AppStorageService {
   readonly reservations: StorageReservations;
   private readonly monitor: StorageMonitor;
   private readonly native: StorageNativePort;
+  private readonly inventory: StorageInventoryCollector;
+  private readonly inventoryRoots: InventoryRoot[];
+  private readonly previewInventoryRoot: InventoryRoot;
   private readonly roots = new Map<string, Root>();
   private readonly listeners = new Set<(snapshot: StorageHealthSnapshot) => void>();
   private currentWorld: string | null = null;
@@ -63,6 +67,18 @@ export class AppStorageService {
     this.monitor = new StorageMonitor({ probe: (rootId, signal, after) => this.native.probe(rootId, signal, after), now: options.now,
       onSnapshot: snapshot => this.publish(snapshot) });
     const path = resolve(options.appRoot), rootId = rootKey(path);
+    this.inventory = new StorageInventoryCollector({ now: options.now, changed: () => this.publish(this.monitor.snapshot()) });
+    // Fixed Arke-owned folders only: never walk appRoot itself, its worlds library, an
+    // external runtime installation or a caller's arbitrary destination lease.
+    this.inventoryRoots = [
+      { path: join(path, "models"), kind: "models" }, { path: join(path, "comfyui-runtime"), kind: "comfyui" },
+      { path: join(path, "ollama-runtime"), kind: "other" }, { path: join(path, "story-publications"), kind: "publications" },
+      ...["downloads", ".setup-downloads", "comfyui-runtime.staging", "ollama-runtime.staging"].map(name => ({ path: join(path, name), kind: "downloads" as const })),
+      ...[".staging", ".stage", ".ask", "runtime-cache", "voice-previews"].map(name => ({ path: join(path, name), kind: "temporary" as const })),
+    ];
+    this.previewInventoryRoot = { path: join(path, "voice-previews", "local-presets-v1"), kind: "temporary" };
+    this.inventory.record(this.previewInventoryRoot, null);
+    this.inventory.setRoots(this.inventoryRoots);
     this.roots.set(rootId, { rootId, path, role: "working-files", fixed: true, world: false, leases: 0 });
     this.syncRoots();
   }
@@ -74,7 +90,7 @@ export class AppStorageService {
   }
   private decorate(snapshot: StorageHealthSnapshot): StorageHealthSnapshot {
     const control = this.reservations.snapshot(), uncertain = control.records.filter(record => record.state === "uncertain").length;
-    return { ...snapshot, limited: this.limited, admission: {
+    return { ...snapshot, inventory: this.inventory.snapshot(), limited: this.limited, admission: {
       state: !this.admissionReady ? "starting" : !control.auditAvailable ? "unavailable" : uncertain ? "reconciling" : "available",
       reservations: control.records.length, uncertain,
       reason: control.auditFailure,
@@ -99,6 +115,12 @@ export class AppStorageService {
     this.publish(this.monitor.snapshot());
   }
   snapshot(): StorageHealthSnapshot { return this.decorate(this.monitor.snapshot()); }
+  /** Reuse the preview owner's existing bounded receipt read. It does not measure allocation. */
+  recordPreviewInventory(value: { files: number; bytes: number; at: number } | null): void {
+    if (!this.closing) this.inventory.record(this.previewInventoryRoot, value ? {
+      counts: { temporary: { files: value.files, bytes: value.bytes } }, complete: false, at: value.at,
+    } : null);
+  }
   /** Registered host handle only; waits through collector coalescing for a post-fence sample. */
   measure(rootId: string, signal: AbortSignal, after: number): Promise<import("@arke-studio/contracts").StorageCapacity | null> {
     return this.closing || !this.roots.has(rootId) ? Promise.resolve(null) : this.monitor.capacity(rootId, signal, after);
@@ -113,7 +135,7 @@ export class AppStorageService {
     if (this.closing) return Promise.resolve();
     this.starting ??= (async () => {
       await this.reservations.open();
-      if (!this.closing) { this.admissionReady = true; this.publish(this.monitor.snapshot()); await this.monitor.start(); }
+      if (!this.closing) { this.admissionReady = true; this.inventory.start(); this.publish(this.monitor.snapshot()); await this.monitor.start(); }
     })();
     return this.starting;
   }
@@ -125,6 +147,7 @@ export class AppStorageService {
       if (root.rootId === rootKey(this.currentWorld) || root.worldScope === this.currentWorld) root.world = false;
     }
     this.currentWorld = path;
+    this.inventory.setRoots(path ? [...this.inventoryRoots, { path, kind: "world" }] : this.inventoryRoots);
     if (path) for (const root of this.roots.values()) if (root.worldScope === path) root.world = true;
     this.syncRoots();
   }
@@ -155,10 +178,10 @@ export class AppStorageService {
     if (this.closing) throw new Error("Storage admission is stopping.");
     this.writers++; this.monitor.setWriting(true);
     let held = true;
-    return () => { if (held) { held = false; this.writers--; if (!this.closing) this.monitor.setWriting(this.observedWriting || this.writers > 0); } };
+    return () => { if (held) { held = false; this.writers--; if (!this.closing) { this.monitor.setWriting(this.observedWriting || this.writers > 0); this.inventory.refresh(); } } };
   }
-  refresh(): Promise<void> { return this.closing ? Promise.resolve() : this.monitor.refresh(); }
-  wake(): Promise<void> { return this.closing ? Promise.resolve() : this.monitor.wake(); }
+  refresh(): Promise<void> { if (!this.closing) this.inventory.refresh(); return this.closing ? Promise.resolve() : this.monitor.refresh(); }
+  wake(): Promise<void> { if (!this.closing) this.inventory.refresh(); return this.closing ? Promise.resolve() : this.monitor.wake(); }
   writeFailed(rootId: string): void { if (!this.closing && this.roots.has(rootId)) this.monitor.invalidate(rootId); }
 
   private syncRoots(): void {
@@ -182,7 +205,7 @@ export class AppStorageService {
 
   closeAdmission(): void {
     if (this.closing) return;
-    this.closing = true; this.reservations.closeAdmission();
+    this.closing = true; this.reservations.closeAdmission(); this.inventory.stop();
     this.observationsStopped = Promise.allSettled([this.monitor.stop(), this.native.stop()]);
   }
   async stop(): Promise<void> {

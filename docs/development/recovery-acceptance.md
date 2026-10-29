@@ -404,13 +404,20 @@ drains local work. A rejected cleanup can therefore show its existing warning in
 an invisible process. Only the owner's confirmed quit destroys the window. Remote-access
 hide-on-close and update-specific handling keep their existing branches. Twenty-three startup,
 runtime-owner and update tests pass, including delayed/failed cleanup followed by confirmed exit.
-This follow-up is not yet installed and does not establish why the old GPU cleanup was retained.
+The follow-up installer for `23bedea1f` completed at 23:47 UTC on 28 October after the owner
+closed Arke. Installed executable, archive, client assets and Ming files match the verified
+package; SHA-256 is `33c1ff4373e0adedf36e2d5f924115ea2beb768e7e00cb4c10f3d844b4a16565`.
+An isolated actual Electron window also passed delayed/failed cleanup retention and confirmed
+retry exit. All 25 Windows/Linux CI, Effects and Engine checks pass for this checkpoint.
+This does not establish why the old GPU cleanup was retained or finish the wider acceptance.
 
 The new Windows CI run failed the Ming cleanup fixture's immediate PID-exit assertion. Its
 readiness check could accept a newly created but empty PID file, which converts to process zero.
 It now waits for a positive integer PID and identifies that PID in an exit-assertion failure.
 Cleanup, GPU retention and no-replay assertions remain unchanged; all four native Ming cases
 pass locally. This test-only correction needs its own Windows/Linux CI confirmation.
+
+That correction is included in the all-green `23bedea1f` run above.
 
 ## Current storage work
 
@@ -427,3 +434,24 @@ an unrelated synthetic secret. Component captures with synthetic work cover desk
 reduced phone/dark, including keyboard access to both actions and the 44-pixel phone button.
 The captures are `.dev/studio-239-check/storage-waits-*.png`; they do not establish native
 disk-failure behavior or matched-master parity. Browser testing resumed after owner approval.
+
+## Scoped storage inventory — 29 October 2026
+
+The storage overview now includes a collapsed seven-category inventory of fixed managed folders
+and the open world. Preview counts reuse the existing receipt inventory; that subtree is excluded
+from the metadata scan. Partial, stale and unknown sizes remain labelled, and no allocation or
+recoverable-space claim is made. Scanning never reads media, follows directory links, traverses
+the closed-world library or grants cleanup authority.
+
+Seven focused inventory cases and six client storage cases pass. The earlier combined service
+and authenticated cleanup/maintenance run passed 17 cases. A read-only metadata qualification of
+the actual managed ComfyUI folder completed in 17.36 seconds, counting 58,989 runtime files and
+4,401,516,248 logical bytes. This exposed an unsuitable whole-scan deadline; the collector now
+abandons a stalled metadata call after 15 seconds without progress, while allowing bounded,
+yielding slices to continue. A deterministic regression verifies that distinction. Unknown native
+calls retain their read slot and cannot accumulate replacements or publish after cancellation.
+
+The actual inventory component supports keyboard disclosure and has no horizontal overflow at
+390×480 in dark mode. Its synthetic screenshot is `.dev/studio-239-check/inventory-phone-dark.png`.
+This component check is not the approved-master comparison. Custom model destinations and other
+write owners still require integration; this inventory slice does not complete the epic.

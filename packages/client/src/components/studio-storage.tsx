@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { deriveStorageFindings, storageByteLabel as bytes, storageWaitingWork, systemStorageGroups, type JobSummary, type SetupStatus, type StorageHealthSnapshot, type StorageRootHealth, type StorageSpaceCheck } from "@arke-studio/contracts";
+import { Fragment, useEffect, useState } from "react";
+import { deriveStorageFindings, STORAGE_CATEGORY_LABELS, storageByteLabel as bytes, storageWaitingWork, systemStorageGroups, type JobSummary, type SetupStatus, type StorageHealthSnapshot, type StorageRootHealth, type StorageSpaceCheck } from "@arke-studio/contracts";
 import { Link } from "react-router";
 import { TriangleAlert } from "./icons.js";
 import { openActivityPanel } from "../lib/activity-panel.js";
@@ -68,6 +68,18 @@ export function StudioStorageReadingsView({ health, connected, now, jobs = [], s
     })}
     {health?.limited && <p className="fy-studio-note">Some destinations are outside this measurement summary.</p>}
     {groups.length > 0 && <p className="fy-studio-note">These readings alone do not confirm that an export or other operation will fit.</p>}
+    {health?.inventory && <details className="fy-studio-fact-card">
+      <summary>Files in Arke folders{health.inventory.scanning && connected ? " · measuring" : ""}</summary>
+      <p className="fy-studio-note">Size estimates for Arke’s managed folders and the open world. Other locations and closed worlds are not included.</p>
+      <dl className="fy-studio-facts">{health.inventory.categories.map(row => {
+        const fresh = connected && row.measuredAt !== null && row.measuredAt <= now && now - row.measuredAt <= 5 * 60_000;
+        return <Fragment key={row.category}><dt>{STORAGE_CATEGORY_LABELS[row.category]}</dt><dd>
+          {row.measuredAt !== null && row.measuredAt > now ? "Unknown" : bytes(row.logicalBytes)}
+          {row.logicalBytes !== null && row.measuredAt !== null && row.measuredAt <= now && <>{row.state === "partial" ? " · partial" : ""}{!fresh ? " · last measured" : ""}</>}
+        </dd></Fragment>;
+      })}</dl>
+      <p className="fy-studio-note">File sizes do not explain all used drive space. Shared files may be counted more than once. Recoverable space is unknown. Removing an artifact from the shelf keeps its files.</p>
+    </details>}
   </section>;
 }
 

@@ -19,6 +19,13 @@ Coordinator `test/setup/process.test.ts` checks that the standard Windows `Progr
 variable reaches owned workers while unrelated credentials do not. The real NVIDIA probe
 requires separate hardware qualification; a parser fixture cannot establish working counters.
 
+Scoped logical inventory (SPEC-062 R-2/R-4/R-23) uses coordinator
+`test/storage/inventory.test.ts`, `storage/service.test.ts`, the existing authenticated preview
+cleanup/maintenance host cases, and client `test/studio-storage.test.tsx`. Check scope, nested
+receipt exclusions, protected media, hard links, yields/cancellation, discarded old-world results,
+and stalled versus progressing metadata calls. Inventory never establishes allocated/reclaimable
+bytes or cleanup authority. Real runtime scans are read-only metadata checks, not media reads.
+
 Installation journeys (SPEC-016 R-21–R-28, approved turns 242–244): coordinator
 `test/setup/onboarding.test.ts`, `test/setup/onboarding-wire.test.ts`,
 `test/world/import-world.test.ts`, `test/world/sample-world.test.ts`, and

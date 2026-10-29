@@ -25,6 +25,14 @@ Current queue waits use the separate wire-only `JobSummary.storageWait`, publish
 existing dispatcher and cleared on settlement/cancellation. Contracts `storage-work.ts` counts
 those observations and setup's typed disk blocks for Studio's Activity/Downloads handoffs.
 No job journal or error-text parser is added; a historical check is not a pending operation.
+Contracts `storage-inventory.ts` defines the seven scoped logical-size categories. Coordinator
+`storage/inventory.ts` walks only registered managed folders and the open world, yielding after
+50 ms/1,000 entries, skipping links and retaining a single metadata chain until it settles.
+A 15-second lack of progress abandons the reading; a large progressing scan can continue.
+The service coalesces write/wake hints and cancels old-world results. Catalogue preview receipts
+feed incremental counts through `recordPreviewInventory`, excluding that subtree from scanning.
+Studio's collapsed inventory distinguishes partial/old/unknown estimates from drive capacity;
+allocation/reclaimable space stays unknown. Custom model locations are not yet inventoried.
 Tests: contracts `test/storage-{health,diagnostics}.test.ts`, coordinator `test/storage/`, client
 `test/storage-health.test.ts`; requirements SPEC-032 R-17/R-33, SPEC-062 R-1–R-14/R-24.
 `storage/setup-files.ts` now connects setup's direct HTTP file owner to the shared registry on

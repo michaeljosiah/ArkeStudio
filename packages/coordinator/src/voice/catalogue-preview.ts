@@ -73,10 +73,13 @@ export class CataloguePreviewService {
     // revoke a scoped approval when its own capacity refresh schedules this metadata read.
     if (!root || !this.deps.storage || inventory?.state !== "recorded" || !Number.isSafeInteger(at) ||
       await this.localCache.maintenanceRoot() !== root || (!inventory.entries.length && (!policy?.enabled || policy.rootIdentity !== root))) {
+      this.deps.storage?.recordPreviewInventory(null);
       this.candidates = null;
       this.maintenanceRootHold?.release(); this.maintenanceRootHold = null; this.maintenanceRootIdentity = null; return;
     }
     if (this.closed || revision !== this.maintenanceSyncRevision) return;
+    this.deps.storage.recordPreviewInventory({ files: inventory.entries.length,
+      bytes: inventory.entries.reduce((sum, row) => sum + row.recordedBytes, 0), at });
     const keys = this.cleanupKeys(), rows = inventory.entries.filter(row => keys.has(row.resourceKey) && !row.leased &&
       row.createdAt <= at - CACHE_CLEANUP_POLICY.minAgeMs).sort((a, b) => a.createdAt - b.createdAt).slice(0, CACHE_CLEANUP_POLICY.maxFiles);
     this.candidates = { root, at, files: rows.length, bytes: rows.reduce((sum, row) => sum + row.recordedBytes, 0) };
@@ -329,6 +332,7 @@ export class CataloguePreviewService {
 
   close(): void {
     this.closed = true;
+    this.deps.storage?.recordPreviewInventory(null);
     this.maintenanceSyncRevision++; this.maintenanceRootHold?.release(); this.maintenanceRootHold = null;
     this.cleanupLifetime.abort();
     this.localCache.close();
