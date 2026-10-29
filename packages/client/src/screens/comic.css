@@ -80,21 +80,21 @@
 .fy-comic__acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* Read (247f). */
-.fy-comic-read { position: fixed; inset: 0; z-index: 40; background: #141414; color: #ededed; display: flex; flex-direction: column; }
+.fy-comic-read { position: fixed; inset: 0; z-index: 40; background: var(--neutral-950); color: var(--neutral-100); display: flex; flex-direction: column; }
 .fy-comic-read .grow, .fy-comic-sheet .grow { flex: 1; }
 .fy-comic-read__bar { height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 20px; font: var(--type-ui); font-size: var(--text-sm); }
-.fy-comic-read__bar .m { color: #9a9a9a; }
-.fy-comic-read .fy-comic__tabs { background: #262626; }
-.fy-comic-read .fy-comic__tabs button { color: #9a9a9a; }
-.fy-comic-read .fy-comic__tabs button.on { background: #3a3a3a; color: #fff; box-shadow: none; }
-.fy-comic-read__close { height: 28px; padding: 0 10px; border: 1px solid #3a3a3a; border-radius: 8px; background: #262626; color: #ededed; font: var(--type-label); cursor: pointer; }
+.fy-comic-read__bar .m { color: var(--neutral-400); }
+.fy-comic-read .fy-comic__tabs { background: var(--neutral-900); }
+.fy-comic-read .fy-comic__tabs button { color: var(--neutral-400); }
+.fy-comic-read .fy-comic__tabs button.on { background: var(--neutral-700); color: var(--neutral-50); box-shadow: none; }
+.fy-comic-read__close { height: 28px; padding: 0 10px; border: 1px solid var(--neutral-700); border-radius: 8px; background: var(--neutral-900); color: var(--neutral-100); font: var(--type-label); cursor: pointer; }
 .fy-comic-read__stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 10px 0 22px; }
 .fy-comic-read__stage img { height: 100%; max-width: 70vw; object-fit: contain; display: block; }
-.fy-comic-read__missing { height: 100%; aspect-ratio: 2 / 3; display: grid; place-items: center; border: 1px dashed #444; color: #9a9a9a; font: var(--type-label); }
-.fy-comic-read__arrow { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: #ededed; background: #262626; border: 0; margin: 0 18px; cursor: pointer; }
+.fy-comic-read__missing { height: 100%; aspect-ratio: 2 / 3; display: grid; place-items: center; border: 1px dashed var(--neutral-700); color: var(--neutral-400); font: var(--type-label); }
+.fy-comic-read__arrow { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: var(--neutral-100); background: var(--neutral-900); border: 0; margin: 0 18px; cursor: pointer; }
 .fy-comic-read__arrow:disabled { opacity: .35; cursor: default; }
-.fy-comic-read__scrub { height: 4px; margin: 0 20px 18px; border-radius: 2px; background: #333; position: relative; }
-.fy-comic-read__scrub i { position: absolute; left: 0; top: 0; bottom: 0; background: #ededed; border-radius: 2px; }
+.fy-comic-read__scrub { height: 4px; margin: 0 20px 18px; border-radius: 2px; background: var(--neutral-800); position: relative; }
+.fy-comic-read__scrub i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--neutral-400); border-radius: 2px; }
 .fy-comic-read__scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 0; padding-bottom: 40px; }
 .fy-comic-read__scroll img { width: min(560px, 92vw); display: block; }
 

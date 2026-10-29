@@ -6,6 +6,7 @@ import {
   LAYOUT_TEMPLATES,
   comicBook,
   comicPageHash,
+  pageAspect,
   pageReading,
   panelRects,
   priceLabel,
@@ -84,33 +85,55 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const chapter = chapters.find((candidate) => candidate.id === chapterId) ?? chapters[0];
   const stored = production.comicScripts?.find((entry) => entry.chapter === chapter?.id);
 
-  // The chapter's pages as the editor holds them, saved a moment after the last edit (R-10).
+  // The chapter's pages as the editor holds them, saved a moment after the last edit (R-10). A draft
+  // is bound to its chapter and saved on that chapter's base, and it is sent at once when the author
+  // switches chapter or leaves Pages, so an edit is never dropped or saved over another chapter
+  // (codex on PR 2226). One save is in flight at a time; the next waits for its new base.
   const [pages, setPages] = useState<ComicPage[]>(stored?.script.pages ?? []);
-  const base_ = useRef<string | null>(stored?.hash ?? null);
-  const dirty = useRef(false);
-  const pending = useRef<string | null>(null);
+  const scripts = useRef(production.comicScripts);
+  scripts.current = production.comicScripts;
+  const bases = useRef(new Map<string, string | null>());
+  const draft = useRef<{ chapter: string; pages: ComicPage[] } | null>(null);
+  const pending = useRef<{ requestId: string; chapter: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [unsaved, setUnsaved] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const baseFor = (id: string) => bases.current.has(id) ? bases.current.get(id)! : scripts.current?.find((entry) => entry.chapter === id)?.hash ?? null;
+  const send = () => {
+    clearTimeout(timer.current);
+    const next = draft.current;
+    if (next === null) return;
+    if (pending.current !== null) { timer.current = setTimeout(send, 150); return; }
+    draft.current = null;
+    const requestId = saveComicScript(worldId, productionId, next.chapter, next.pages, baseFor(next.chapter));
+    if (requestId === null) { draft.current = next; setProblem("not connected"); return; }
+    pending.current = { requestId, chapter: next.chapter };
+  };
   useEffect(() => {
     // Another window's save, or a chapter change: the stored script wins when nothing is unsaved here.
-    if (!dirty.current) { setPages(stored?.script.pages ?? []); base_.current = stored?.hash ?? null; }
+    if (draft.current === null && pending.current === null && chapter) {
+      setPages(stored?.script.pages ?? []);
+      bases.current.set(chapter.id, stored?.hash ?? null);
+    }
   }, [stored?.hash, chapter?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => subscribeComicScriptSaveResults((result) => {
-    if (result.requestId !== pending.current) return;
+    if (result.requestId !== pending.current?.requestId) return;
+    const saved = pending.current.chapter;
     pending.current = null;
-    if (result.disposition === "saved" && result.hash) { base_.current = result.hash; setProblem(null); }
+    // The base is that chapter's own: a late answer never moves another chapter's base.
+    if (result.disposition === "saved" && result.hash) { bases.current.set(saved, result.hash); setProblem(null); }
     else setProblem(result.reason ?? "not saved");
+    if (draft.current === null) setUnsaved(false);
   }), []);
-  const save = (next: ComicPage[]) => {
+  const edit = (next: ComicPage[]) => {
     if (!chapter) return;
+    draft.current = { chapter: chapter.id, pages: next };
+    setUnsaved(true);
+    setPages(next);
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      dirty.current = false;
-      pending.current = saveComicScript(worldId, productionId, chapter.id, next, base_.current);
-    }, SAVE_AFTER_MS);
+    timer.current = setTimeout(send, SAVE_AFTER_MS);
   };
-  const edit = (next: ComicPage[]) => { dirty.current = true; setPages(next); save(next); };
-  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(() => () => send(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [pageId, setPageId] = useState<string | null>(pages[0]?.id ?? null);
   const page = pages.find((candidate) => candidate.id === pageId) ?? pages[0];
@@ -133,7 +156,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
           <span className="fy-comic__tabs" role="tablist">
             {chapters.map((candidate) => (
               <button key={candidate.id} type="button" role="tab" aria-selected={candidate.id === chapter?.id} className={cx(candidate.id === chapter?.id && "on")}
-                onClick={() => { setChapterId(candidate.id); dirty.current = false; setPageId(null); }}>{candidate.order} · {candidate.title}</button>
+                onClick={() => { send(); setChapterId(candidate.id); setPageId(null); }}>{candidate.order} · {candidate.title}</button>
             ))}
           </span>
           <span className="grow" />
@@ -170,7 +193,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               remove={() => { edit(pages.filter((candidate) => candidate.id !== page.id)); setPageId(null); }} />
           )}
           {page === undefined ? <div className="fy-comic__side" /> : (
-            <PageSide key={page.id} world={world} production={production} page={page} saving={dirty.current || pending.current !== null} connected={connection === "open"}
+            <PageSide key={page.id} world={world} production={production} page={page} saving={unsaved} connected={connection === "open"}
               problem={problem} onSettings={() => navigate("/settings")} />
           )}
         </div>
@@ -264,16 +287,18 @@ function PageSide({ world, production, page, saving, connected, problem, onSetti
   const accepted = record?.accepted[settings.language];
   const [shownId, setShownId] = useState<string | null>(null);
   const shown = takes.find((take) => take.id === shownId) ?? takes.find((take) => take.id === accepted) ?? takes.at(-1);
-  const [quote, setQuote] = useState<ComicPageQuote["quote"] | null>(null);
+  // A quote is for the words it was asked about: one asked before an edit prices the old page.
+  const [quoted, setQuoted] = useState<{ hash: string; quote: ComicPageQuote["quote"] } | null>(null);
   const [until, setUntil] = useState(true);
   const [brief, setBrief] = useState(false);
   const [making, setMaking] = useState<string | null>(null);
   const [said, setSaid] = useState<string | null>(null);
-  const asked = useRef<string | null>(null);
+  const asked = useRef<{ requestId: string; hash: string } | null>(null);
   const hash = comicPageHash(page, settings, "baked");
+  const quote = quoted !== null && quoted.hash === hash && !saving ? quoted.quote : null;
 
   useEffect(() => subscribeComicPages((event) => {
-    if (event.type === "comic.page-quote" && event.requestId === asked.current) setQuote(event.quote);
+    if (event.type === "comic.page-quote" && event.requestId === asked.current?.requestId) setQuoted({ hash: asked.current.hash, quote: event.quote });
     if (event.type === "comic.page-made" && event.page === page.id) {
       if (event.state === "making") setMaking(event.requestId);
       else { setMaking(null); setShownId(event.take ?? null); setSaid(event.state === "failed" ? event.reason ?? "not made" : null); }
@@ -281,7 +306,11 @@ function PageSide({ world, production, page, saving, connected, problem, onSetti
     if (event.type === "comic.take-result" && event.page === page.id) setSaid(event.disposition === "refused" ? event.reason ?? "refused" : null);
   }), [page.id]);
   // The price follows the page's words: asked again once an edit has saved (R-23, R-27).
-  useEffect(() => { if (connected && !saving) asked.current = quoteComicPage(worldId, productionId, page.id); }, [connected, saving, worldId, productionId, page.id, hash]);
+  useEffect(() => {
+    if (!connected || saving) return;
+    const requestId = quoteComicPage(worldId, productionId, page.id);
+    asked.current = requestId === null ? null : { requestId, hash };
+  }, [connected, saving, worldId, productionId, page.id, hash]);
 
   const rects = panelRects(page, pageReading(page, settings));
   const url = takeFile(world, shown);
@@ -295,13 +324,14 @@ function PageSide({ world, production, page, saving, connected, problem, onSetti
   const make = () => {
     if (!quote?.ok) return;
     setSaid(null);
-    makeComicPage(worldId, productionId, page.id, Math.min(total, Math.round(settings.cap.usd * 1_000_000)) || quote.microUsd, undefined, until);
+    // The book's dollar cap bounds the retries only; one attempt confirms its own price (codex on PR 2226).
+    makeComicPage(worldId, productionId, page.id, until ? Math.max(quote.microUsd, Math.min(total, Math.round(settings.cap.usd * 1_000_000))) : quote.microUsd, undefined, until);
   };
   const press = making !== null ? "Making…" : takes.length ? "Make again" : "Make page";
 
   return (
     <div className="fy-comic__side">
-      <div className="fy-comic__page">
+      <div className="fy-comic__page" style={{ aspectRatio: pageAspect(page, settings).replace(":", " / ") }}>
         {url !== null ? <img src={url} alt={`Page take ${takes.indexOf(shown!) + 1}`} /> : rects.map((rect, index) => (
           <div key={index} className="fy-comic__wire" style={{ left: `calc(${rect.x * 100}% + 6px)`, top: `calc(${rect.y * 100}% + 6px)`, width: `calc(${rect.w * 100}% - 12px)`, height: `calc(${rect.h * 100}% - 12px)` }}>{index + 1}</div>
         ))}

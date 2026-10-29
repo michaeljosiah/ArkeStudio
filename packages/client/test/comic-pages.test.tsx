@@ -90,6 +90,19 @@ describe("Pages (turn 247)", () => {
     assert.equal(make.confirmedMicroUsd, 750_000);
   });
 
+  it("holds Make after an edit until the words are saved and priced again (codex on PR 2226)", async () => {
+    const one = page();
+    const m = await mount(withBook([one], {}));
+    const first = m.sent.find((message): message is Extract<ClientMessage, { kind: "quote-comic-page" }> => message.kind === "quote-comic-page")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "comic.page-quote", requestId: first.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", page: one.id,
+      quote: { ok: true, model: "gpt-image-2", modelName: "GPT Image 2", mode: "baked", aspect: "2:3", microUsd: 250_000, brief: "A page.", riding: [], missing: [] } }));
+    assert.equal((button(m.container, "Make page") as unknown as HTMLButtonElement).disabled, false);
+    await act(async () => props(m.container.querySelector("input[aria-label='Words']")!).onChange({ target: { value: "Where now?" } }));
+    assert.equal((button(m.container, "Make page") as unknown as HTMLButtonElement).disabled, true, "the old price is for the old words");
+    await act(async () => props(button(m.container, "Make page")!).onClick({}));
+    assert.equal(m.sent.some((message) => message.kind === "make-comic-page"), false);
+  });
+
   it("draws a take's findings, and Accept anyway covers every blocking one (247c)", async () => {
     const one = page();
     const take = ulid();
