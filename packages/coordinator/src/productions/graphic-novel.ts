@@ -7,6 +7,7 @@ import {
   type ComicCited, type ComicMode, type ComicPage, type ComicPageRecord, type ComicSettings, type ManifestModel, type PictureWho, type ProductionBundle,
 } from "@arke-studio/contracts";
 import { pictureWho } from "./audiobook-picture-suggest.js";
+import { artDirectionFor } from "./audiobook-look.js";
 import type { PageReader } from "./graphic-novel-reader.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
@@ -62,13 +63,23 @@ export async function saveComicScript(
 }
 
 /** `comic.json` changed in one write fenced on the file it was read from (R-12). */
-export async function setComicSettings(store: WorldStore, productionId: string, change: Partial<Omit<ComicSettings, "version">>): Promise<ComicSettings> {
+export async function setComicSettings(
+  store: WorldStore,
+  productionId: string,
+  change: Partial<Omit<ComicSettings, "version" | "style">> & { style?: ComicSettings["style"] | null | undefined },
+): Promise<ComicSettings> {
   graphicNovel(store, productionId);
   const path = `productions/${productionId}/comic.json`;
   return oneAtATime(`${store.dir}/${path}`, async () => {
     const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8").catch(() => null);
     const current = live === null ? DEFAULT_COMIC_SETTINGS : ComicSettingsSchema.parse(JSON.parse(live));
-    const next = ComicSettingsSchema.parse({ ...current, ...change });
+    // A null style is World look, written as no style at all, so the file reads as one made before
+    // there was a style (R-21a).
+    const { style, ...rest } = change;
+    const merged: Record<string, unknown> = { ...current, ...rest };
+    if (style === null) delete merged.style;
+    else if (style !== undefined) merged.style = style;
+    const next = ComicSettingsSchema.parse(merged);
     await store.commit({
       kind: "comic-settings",
       source: "comic-settings",
@@ -147,7 +158,7 @@ export function comicPageRequest(store: WorldStore, productionId: string, pageId
   const held = comicPageRecord(production, pageId);
   if (held.takes.length + held.making.length >= COMIC_LIMITS.takesPerPage) return { ok: false, reason: `this page has ${COMIC_LIMITS.takesPerPage} takes, the most it keeps` };
   // Baked lettering only on a model whose vendor says it letters (R-24); overlay art takes any.
-  if (mode === "baked" && model.limits.lettering !== true) return { ok: false, reason: `${model.displayName} does not letter pages; make it without lettering` };
+  if (mode === "baked" && model.limits.lettering !== true) return { ok: false, reason: `${model.displayName} does not letter pages` };
   const aspect = pageAspect(page, settings);
   if (!makesShape(model, aspect)) return { ok: false, reason: `${model.displayName} makes no ${aspect} page` };
   const bundle = store.getBundle();
@@ -162,8 +173,11 @@ export function comicPageRequest(store: WorldStore, productionId: string, pageId
   ]);
   // Named without a picture that rides: listed, never quietly drawn from the words alone (R-19).
   const missing = who.filter((entry) => !entry.carried || entry.reference === null).map((entry) => entry.name);
-  const look = bundle.artDirection?.masterLook;
-  const prompt = (cited: readonly ComicCited[]) => comicPagePrompt({ page, settings, mode, ...(look ? { look } : {}), names, cited });
+  // The look in words, as an audiobook picture carries it (R-18). `masterLook` is the art direction's
+  // picture, a path: sent as words it told the model nothing.
+  const look = artDirectionFor(store, productionId);
+  const style = settings.style?.words;
+  const prompt = (cited: readonly ComicCited[]) => comicPagePrompt({ page, settings, mode, ...(look ? { look } : {}), ...(style ? { style } : {}), names, cited });
   const longest = prompt(who.filter((entry) => entry.carried && entry.reference !== null).map((entry, index) => ({ name: entry.name, kind: entry.kind, token: `ref${index + 1}` })));
   const bound = Math.min(COMIC_PROMPT_MAX, model.limits.maxPromptChars ?? COMIC_PROMPT_MAX);
   if (longest.length > bound) return { ok: false, reason: `the page brief is ${longest.length} characters; ${model.displayName} takes ${bound}` };

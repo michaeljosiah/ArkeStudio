@@ -266,6 +266,8 @@ export const StagedProposalSchema = z
     scenes: z.record(z.string().min(1), SceneRecordSchema).optional(),
     /** Arke's whole episode script, by target path, for the score's tracked draft (SPEC-057 R-54). */
     episodeScripts: z.record(z.string().min(1), EpisodeScriptSchema).optional(),
+    /** Arke's whole chapter of comic pages, by target path, for Pages' draft (SPEC-064 R-13, turn 249d). */
+    comicScripts: z.record(z.string().min(1), ComicScriptSchema).optional(),
     /**
      * What this proposal would change, field by field (#70 §11.5).
      *

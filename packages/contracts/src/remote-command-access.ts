@@ -207,7 +207,7 @@ export const REMOTE_PREPARED_ACTION_ACCESS = {
   "world-chat-production-metadata": "studio", "world-chat-production-model": "studio",
   "world-chat-music-track-choose": "studio", "world-chat-music-track-edit": "studio", "world-chat-music-sequence-set": "studio",
   "world-chat-production-series": "studio", "world-chat-production-overview": "studio",
-  "world-chat-production-prose-style": "studio", "world-chat-production-episode-script": "studio", "world-chat-production-season": "studio",
+  "world-chat-production-prose-style": "studio", "world-chat-production-episode-script": "studio", "world-chat-production-comic-script": "studio", "world-chat-production-season": "studio",
   "world-chat-production-episode": "studio", "world-chat-production-chapter": "studio",
   "world-chat-production-scene": "studio", "world-chat-production-episode-order": "studio",
   "world-chat-production-chapter-order": "studio", "world-chat-production-scene-order": "studio",

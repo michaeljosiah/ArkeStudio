@@ -2567,6 +2567,24 @@ const exampleWorldActions = {
     ],
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "production-comic-script": {
+    kind: "production-comic-script",
+    productionId: "low-water-drawn",
+    chapter: "salt",
+    baseHash: null,
+    pages: [{
+      layout: "feature",
+      panels: [
+        { description: "The harbour at slack water, boats on the mud, Maren walking the hard with her lantern.", characters: ["maren-kest"], location: "the-harbour",
+          lettering: [{ kind: "caption", text: "Salt was in everything that week." }],
+          source: { story: "low-water", chapter: "salt", paragraphs: [1, 2] } },
+        { description: "Bray at the weigh house door, watching her come.", characters: ["bray"],
+          lettering: [{ kind: "speech", speaker: "bray", text: "You walked the hard again." }],
+          source: { story: "low-water", chapter: "salt", paragraphs: [4] } },
+      ],
+    }],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
   "production-prose-style": {
     kind: "production-prose-style",
     productionId: "saltlight",
@@ -2877,6 +2895,7 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-scene-restore": "Restore a scene to an earlier version.",
   "production-style": "Set the style this production's images and video are made in.",
   "production-prose-style": "Set the story's point of view, tense, voice and samples.",
+  "production-comic-script": "Write or change a graphic novel chapter's pages, whole: turn its prose, or the chapter it adapts, into pages of panels and exact lettering. Read get_production first and name the chapter's comic baseHash — null for a chapter with no pages, as unpagedChapters lists them — keep every unchanged page, panel and line with its id, and cite each panel's source paragraphs. The author keeps or discards the draft in Pages.",
   "production-episode-script": "Write or change an audio drama episode's script, whole. Read get_production first and name the script's baseHash — null for an episode with no script yet, as unwrittenEpisodes lists them — and keep every unchanged block with its id; the author keeps or discards the draft in the score.",
   "production-scene-command": "One command or an ordered commands list on a scene: cast and place, shots, staging, prompt overrides or boards. Independent commands on the same scene share an atomic card showing the resulting shot list. Explicit after dependencies stay separate cards. Use ref:name in a shot target to name the one shot a preceding action with ref=name creates; include that ref in after when it is a separate card. Visual facts require the person's review on the shot panel and cannot be set here.",
   "production-board-compile": "Compile a scene's storyboard from its shots and frames.",

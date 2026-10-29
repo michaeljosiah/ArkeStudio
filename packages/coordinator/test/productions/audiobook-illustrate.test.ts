@@ -259,6 +259,8 @@ describe("what the chapter is asked", () => {
   it("gives the model the chapter on its clock with who is in it, their look, where pictures already stand and the pace", () => {
     const prompt = buildIllustratePrompt({
       title: "Her own hand",
+      seconds: 240,
+      estimated: false,
       mood: "Grey dawn light, fine grain.",
       blocks: [{ key: "p0.0", at: 0, text: "Maren reads." }, { key: "p1.0", at: 75, text: "Bray tells a story.", speaker: "Bray" }],
       lines: [{ label: "Place", text: "Dawn." }, { label: "Maren", text: "Oilskin." }],
@@ -270,6 +272,12 @@ describe("what the chapter is asked", () => {
       maxChars: 900,
     });
     for (const part of ["[p1.0] 1:15 Bray", "p1.0#0 1:15 Bray tells a story.", "At most 3 pictures", "a ceiling, never an aim", "at least 5 seconds apart", "(at 2:30)", "\"reason\": \"<place | arrives | leaves | action | object | time | feeling>\"", "\"at\": \"<the id of the sentence", "Maren: Oilskin.", "[maren-kest] Maren — Wiry.", "Never show, name or hint at: Odile", "at most 900 characters", "## The book's mood (light, colour and grain only)\nGrey dawn light, fine grain.", "1. THE BLOCK IS THE PICTURE.", "\"expressions\": {\"<key>\""]) assert.ok(prompt.includes(part), part);
+    assert.ok(prompt.includes("ends at 4:00 (recorded narration duration)"), "the final hold has an explicit end, rather than stopping at the last sentence's start");
+    assert.ok(prompt.includes("sentence positions on this clock are estimated"), "recorded take lengths do not imply measured sentence anchors");
+    assert.ok(prompt.includes("including the opening and the last picture"));
+    assert.ok(prompt.includes("review every hold over 75 seconds"));
+    assert.ok(prompt.includes("review guides, not enforced limits or a quota"));
+    assert.ok(prompt.includes("Never show a discovery before its words reveal it"));
   });
 });
 

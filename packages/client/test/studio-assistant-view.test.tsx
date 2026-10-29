@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { act, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useNavigate } from "react-router";
 import { parseHTML } from "linkedom";
 import { CACHE_CLEANUP_POLICY, type ClientMessage, type ClientState, type StudioAssistantCommand, type StudioAssistantSnapshot } from "@arke-studio/contracts";
 import { StudioConversationClient } from "../src/lib/studio-assistant.js";
 import { StudioAssistantProvider, StudioAssistantView } from "../src/components/studio-assistant.js";
-import { StudioAssistantContext } from "../src/components/studio-assistant-context.js";
+import { StudioAssistantContext, useStudioAssistant } from "../src/components/studio-assistant-context.js";
+import { __resetActivityPanelForTest, activityPanelOpen, closeActivityPanel } from "../src/lib/activity-panel.js";
 import { GlobalChatContext } from "../src/components/global-chat-context.js";
 import { chatSurfaceForPage, GlobalChatController } from "../src/lib/global-chat.js";
 import { AppChrome } from "../src/components/chrome.js";
@@ -18,8 +19,7 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node, Element: dom.Element, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });
 Object.defineProperty(dom.HTMLElement.prototype, "innerText", { configurable: true, get() { return this.textContent; }, set(value) { this.textContent = value; } });
-Object.defineProperty(dom.document, "activeElement", { configurable: true, value: null, writable: true });
-dom.HTMLElement.prototype.focus = function () { Object.assign(dom.document, { activeElement: this }); };
+Object.defineProperty(dom.document, "activeElement", { configurable: true, value: null, writable: true });dom.HTMLElement.prototype.focus = function () { Object.assign(dom.document, { activeElement: this }); };
 Object.assign(dom.HTMLElement.prototype, { showModal(this: HTMLElement) { this.setAttribute("open", ""); }, show(this: HTMLElement) { this.setAttribute("open", ""); }, close(this: HTMLElement) { this.removeAttribute("open"); } });
 const threadId = "01J8F3K2QW9VZX4N7M0RTYB6HC", runId = "01J8F3K2QW9VZX4N7M0RTYB6HD";
 const initial = (): StudioAssistantSnapshot => ({ audit: "available", accepting: true, busy: false, threads: [], share: null, ephemeralReply: null });
@@ -248,4 +248,63 @@ it("shows the complete app disclosure and never carries cloud consent into a rep
     assert(approve.disabled); assert.equal(container.querySelector<HTMLInputElement>('.fy-studio-consent input')!.checked, false);
     assert.equal(h.sent.filter(message => message.command.action === "approve-cloud").length, 0);
   } finally { await act(async () => root.unmount()); h.client.dispose(); container.remove(); }
+});
+it("Activity takes Studio's place and hands it back with its draft, unless it was left for another page", async () => {
+  const sent: StudioAssistantCommand[] = [], container = document.createElement("div"); document.body.append(container);
+  __setStateForTest({ ...FIXTURE_STATE, world: null }, { connection: "open" });
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json) { sent.push(JSON.parse(json)); } });
+  let studio: StudioConversationClient | null = null, go: (to: string) => void = () => {};
+  function Grab() { studio = useStudioAssistant(); go = useNavigate(); return null; }
+  const root = createRoot(container), press = (selector: string) => act(async () => document.querySelector<HTMLButtonElement>(selector)!.click());
+  const open = () => studio!.getSnapshot().open;
+  try {
+    await act(async () => root.render(<MemoryRouter><GlobalChatContext.Provider value={new GlobalChatController()}><StudioAssistantProvider><AppChrome /><Grab /></StudioAssistantProvider></GlobalChatContext.Provider></MemoryRouter>));
+    await press("[data-studio-chat-trigger]"); studio!.draft("Keep this draft");
+    await press("[data-activity-bell]");
+    assert.equal(activityPanelOpen(), true); assert.equal(open(), false, "Activity stands in Studio's place");
+    // Activity's own Close goes with it, so nothing behind the returning dialog holds the focus.
+    document.body.focus(); await act(async () => closeActivityPanel());
+    assert.equal(activityPanelOpen(), false); assert.equal(open(), true, "closing Activity hands Studio back");
+    assert.equal(studio!.getSnapshot().draft, "Keep this draft");
+    await press('[aria-label="Close Studio assistant"]');
+    assert.equal(document.activeElement, container.querySelector("[data-studio-chat-trigger]"), "focus goes back to Studio's way in");
+    await press("[data-studio-chat-trigger]"); await press("[data-activity-bell]"); await press("[data-activity-bell]");
+    assert.equal(open(), true, "the bell pressed again closes Activity and hands Studio back");
+    await press("[data-activity-bell]"); await press("[data-studio-chat-trigger]");
+    assert.equal(activityPanelOpen(), false, "Chat takes Activity's place in turn"); assert.equal(open(), true);
+    // Activity closes itself once the page behind it changes; Studio does not follow to the new page.
+    await press("[data-activity-bell]"); await act(async () => go("/worlds")); await act(async () => closeActivityPanel());
+    assert.equal(open(), false, "leaving through Activity goes where it leads");
+    await press("[data-activity-bell]"); await act(async () => closeActivityPanel());
+    assert.equal(open(), false, "a Studio that was already closed stays closed");
+    assert.equal(sent.filter(message => message.command?.action === "send").length, 0);
+  } finally { await act(async () => { root.unmount(); __resetActivityPanelForTest(); }); container.remove(); __setBridgeForTest(null); }
+});
+it("keeps Tab inside the modal Studio dialog at both ends, from its heading too; beside the page Tab carries on", async () => {
+  const originalMedia = window.matchMedia;
+  __setStateForTest({ ...FIXTURE_STATE, world: null }, { connection: "open" });
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send() {} });
+  const tab = (from: Element, shiftKey = false) => {
+    const event = Object.assign(new dom.Event("keydown", { bubbles: true, cancelable: true }), { key: "Tab", shiftKey });
+    from.dispatchEvent(event); return event.defaultPrevented;
+  };
+  try {
+    for (const width of [834, 1360]) {
+      window.matchMedia = ((query: string) => { const below = /width < (\d+)px/.exec(query); return { matches: below ? width < Number(below[1]) : false }; }) as typeof window.matchMedia;
+      const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+      try {
+        await act(async () => root.render(<MemoryRouter><GlobalChatContext.Provider value={new GlobalChatController()}><StudioAssistantProvider><AppChrome /></StudioAssistantProvider></GlobalChatContext.Provider></MemoryRouter>));
+        await act(async () => container.querySelector<HTMLButtonElement>("[data-studio-chat-trigger]")!.click());
+        const body = document.querySelector<HTMLElement>(".fy-studio-dialog")!, first = body.querySelector<HTMLButtonElement>('[aria-label="Studio conversations"]')!;
+        first.focus();
+        if (width >= 1100) { assert.equal(tab(first, true), false, "beside the page, Shift+Tab leaves for the page"); continue; }
+        assert.equal(tab(first, true), true); const last = document.activeElement as HTMLElement;
+        assert(last !== first && body.contains(last), "Shift+Tab from the first control wraps to the last");
+        assert.equal(tab(last), true); assert.equal(document.activeElement, first, "Tab from the last control wraps to the first");
+        assert.equal(tab(first), false, "between the ends Tab is the browser's own");
+        body.querySelector<HTMLElement>("h2")!.focus();
+        assert.equal(tab(document.activeElement!, true), true); assert.equal(document.activeElement, last, "the heading it opens on is before every control");
+      } finally { await act(async () => root.unmount()); container.remove(); }
+    }
+  } finally { window.matchMedia = originalMedia; __setBridgeForTest(null); }
 });
