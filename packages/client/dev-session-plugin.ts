@@ -1,9 +1,20 @@
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadEnv, type Plugin } from "vite";
+import { loadEnv, searchForWorkspaceRoot, type Plugin } from "vite";
 
 const LOOPBACK = ["localhost", "127.0.0.1"];
+
+/** The font packages main.tsx imports, where they resolve, when that is outside `served`. A Claude
+ * worktree has no node_modules of its own: its fonts resolve to the main checkout, which Vite
+ * refused to serve, and the whole client drew in Segoe UI (turn 239 check). Font files are public. */
+export function fontPackagesOutside(served: readonly string[]): string[] {
+  const require = createRequire(import.meta.url);
+  return ["@fontsource/geist-sans", "@fontsource/jost"].flatMap(name => {
+    try { return [dirname(require.resolve(name))]; } catch { return []; }
+  }).filter(dir => !served.some(root => { const path = relative(root, dir); return !path.startsWith("..") && !isAbsolute(path); }));
+}
 
 export interface SessionEndpoints {
   /** Where the browser reaches the coordinator. */
@@ -90,7 +101,13 @@ export function devSessionPlugin(): Plugin {
         // Vite itself asks no capability of anyone, and its /@fs/ reaches the whole workspace.
         // On loopback that is only this machine; through the proxy it is every tailnet device.
         // Serve what the page is built from and nothing else of the checkout.
-        (server.fs as Record<string, unknown>).allow = ["packages/client", "packages/contracts", "node_modules"].map(path => resolve(root, path));
+        const allow = ["packages/client", "packages/contracts", "node_modules"].map(path => resolve(root, path));
+        (server.fs as Record<string, unknown>).allow = [...allow, ...fontPackagesOutside(allow)];
+      } else {
+        // Vite's own default, plus the fonts only where they live outside it.
+        const workspace = searchForWorkspaceRoot(resolve(config.root ?? process.cwd()));
+        const fonts = fontPackagesOutside([workspace]);
+        if (fonts.length) (server.fs as Record<string, unknown>).allow = [workspace, ...fonts];
       }
       return { server };
     },

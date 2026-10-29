@@ -216,7 +216,9 @@ options: `start()` returns its generated token alongside the port for trusted ho
   `ws:` or `http:` end: either puts the capability, or a page that reads it, on the wire. Only an
   accepted proxied session widens Vite's allowed hosts and the page policy, for that one origin
   and server, and narrows `/@fs` to the client, contracts and `node_modules`. The built page
-  keeps its loopback-only policy.
+  keeps its loopback-only policy. In a worktree the two `@fontsource` packages resolve to the main
+  checkout; both modes serve those two folders and nothing else outside it, or the client draws in
+  Segoe UI.
 - **Remembered remote devices (#1311):** desktop owns a separate loopback gateway over its
   existing coordinator. Owner controls stay on trusted desktop IPC. Paired browsers use
   individual Secure/HttpOnly cookies; only proof hashes persist, with expiry and revocation.
