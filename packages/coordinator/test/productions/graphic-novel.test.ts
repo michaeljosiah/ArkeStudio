@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { ComicSettingsSchema, productionShape, ulid, type ComicPage } from "@arke-studio/contracts";
 import { createChapter, createProduction } from "../../src/productions/ops.js";
 import { saveComicScript, setComicSettings } from "../../src/productions/graphic-novel.js";
-import { GRAPHIC_NOVEL_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { COMIC_ADAPTATION_SCHEMA_VERSION, GRAPHIC_NOVEL_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { productionRecord } from "../../src/world-chat/production-record.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -73,7 +73,9 @@ describe("a graphic novel on disk (SPEC-064 R-1, R-10, R-12)", () => {
   it("keeps a style's words, and World look writes no style at all (R-21a)", async () => {
     const { store, id } = await comic();
     const noir = { words: "Crime noir comic: solid black shapes and stark white.", preset: "noir" };
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion < COMIC_ADAPTATION_SCHEMA_VERSION, "a book with no style stays readable by 114");
     assert.deepEqual((await setComicSettings(store, id, { style: noir })).style, noir);
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= COMIC_ADAPTATION_SCHEMA_VERSION, "a strict comic.json with a style is past older readers");
     // Another setting leaves the style as it was.
     assert.deepEqual((await setComicSettings(store, id, { reading: "rtl" })).style, noir);
     const cleared = await setComicSettings(store, id, { style: null });

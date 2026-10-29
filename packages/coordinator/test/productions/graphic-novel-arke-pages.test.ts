@@ -7,6 +7,8 @@ import { saveComicScript } from "../../src/productions/graphic-novel.js";
 import { stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
 import { productionRecord } from "../../src/world-chat/production-record.js";
 import { WorldStore } from "../../src/world/store.js";
+import { readWorldMeta } from "../../src/world/scan.js";
+import { COMIC_ADAPTATION_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
@@ -48,6 +50,7 @@ describe("Arke's pages (SPEC-064 R-13, turn 249)", () => {
     run.worldId = store.worldId;
     const proposal = await stageWorldChatProductionAuthoredAction(store, gate, intent, run);
     assert.equal(proposal.kind, "comic-script");
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= COMIC_ADAPTATION_SCHEMA_VERSION, "a drafted-pages proposal is past older readers");
     assert.equal(production(store, id).comicScripts?.length ?? 0, 0, "nothing is written while the draft waits");
     const staged = store.getBundle().proposals.find((entry) => entry.proposal.id === proposal.id)!;
     const drafted = Object.values(staged.comicScripts ?? {})[0]!;

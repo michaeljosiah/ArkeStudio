@@ -218,7 +218,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 112: a music track's composer — the album's session and a take's length, instrumental and track (SPEC-060 R-9).
 // 113: remembered story facts and conditional routing (SPEC-063, turn 240).
 // 114: the graphic novel — comic.json, comic scripts and page takes (SPEC-064, issue 2219).
-export const SUPPORTED_SCHEMA_VERSION = 114;
+// 115: a graphic novel's style and adaptation — `style`, `adapts`, a panel's `source`, Arke's drafted pages (turns 248, 249).
+export const SUPPORTED_SCHEMA_VERSION = 115;
 
 export class WorldOpenError extends Error {
   constructor(

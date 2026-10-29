@@ -40,6 +40,7 @@ import {
 import type { ProposalManager } from "../gate/proposals.js";
 import { ConversationActionPreparationError } from "../arke-actions/lifecycle.js";
 import { keepAdaptedText } from "../productions/audio-drama.js";
+import { COMIC_ADAPTATION_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import { MarkdownFile } from "../world/text-files.js";
@@ -545,6 +546,8 @@ export async function stageWorldChatProductionAuthoredAction(
   if (payload.kind === "world-chat-production-comic-script") {
     const record = comicScriptDraft(store, payload.action);
     const chapter = production.chapters.find((candidate) => candidate.id === payload.action.chapter)!;
+    // A build before drafted pages reads a comic-script proposal as an unknown kind.
+    await store.ensureSchemaVersion(COMIC_ADAPTATION_SCHEMA_VERSION, "comic-script");
     return gate.stage({
       kind: "comic-script",
       summary: `${chapter.title} pages: ${production.meta.title}`,
