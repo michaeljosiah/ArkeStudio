@@ -77,12 +77,15 @@ export class CoalescedReads<T> {
         this.start(key, next);
       } else this.keys.delete(key);
     };
+    // Refed, and cleared in `finish`: a read stuck behind a world that never comes awaits nothing
+    // the loop can see, so an unref'd deadline let the loop drain before it fired and the ask was
+    // never answered — on Node 22 the test runner cancelled the book-read tests outright on Windows
+    // CI. See ArtifactModel for the same lesson.
     const timer = setTimeout(() => {
       const error = new ReadStalledError(stage, Date.now() - started);
       control.abort(error);
       finish({ ok: false, error });
     }, this.deadlineMs);
-    timer.unref?.();
     let reading: Promise<T>;
     try {
       reading = turn.read({ signal: control.signal, stage: (what) => { stage = what; } });
