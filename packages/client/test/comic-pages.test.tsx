@@ -153,6 +153,30 @@ describe("Pages (turn 247)", () => {
     assert.equal((button(m.container, "Export") as unknown as HTMLButtonElement).disabled, true);
   });
 
+  it("opens another chapter's own pages while this one's save is in flight (codex on PR 2226)", async () => {
+    const state = withBook([page()], {});
+    const comic = state.world!.productions.at(-1)! as unknown as { chapters: unknown[]; comicScripts: unknown[] };
+    const salt = page(); salt.panels[0]!.description = "Salt on the boards.";
+    comic.chapters.push({ id: "salt", order: 2, title: "Salt", file: "02-salt.md", words: 0, version: 1, hash: "sha256:s", status: "draft" });
+    comic.comicScripts.push({ chapter: "salt", hash: "sha256:salt", script: { version: 1, pages: [salt] } });
+    const m = await mount(state);
+    await act(async () => props(m.container.querySelector("input[aria-label='Words']")!).onChange({ target: { value: "Edited in the tide." } }));
+    const tab = [...m.container.querySelectorAll("button[role='tab']")].find((b) => b.textContent?.includes("Salt"))!;
+    await act(async () => props(tab).onClick({}));
+    assert.equal(m.sent.filter((message) => message.kind === "save-comic-script").length, 1, "the tide's edit went first");
+    assert.equal(props(m.container.querySelector("textarea[aria-label='Panel 1']")!).value, "Salt on the boards.");
+  });
+
+  it("keeps a refused save's pages unsaved (codex on PR 2226)", async () => {
+    const m = await mount(withBook([page()], {}));
+    await act(async () => props(m.container.querySelector("input[aria-label='Words']")!).onChange({ target: { value: "Mine." } }));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
+    const save = m.sent.find((message): message is Extract<ClientMessage, { kind: "save-comic-script" }> => message.kind === "save-comic-script")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "comic-script.save-result", requestId: save.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", chapter: "the-tide", disposition: "refused", reason: "the script changed" }));
+    assert.equal((button(m.container, "Export") as unknown as HTMLButtonElement).disabled, true, "still unsaved");
+    assert.equal(props(m.container.querySelector("input[aria-label='Words']")!).value, "Mine.");
+  });
+
   it("holds Export while a page has no accepted take, with Go to (247g)", async () => {
     const m = await mount(withBook([page(), page()], {}));
     await act(async () => props(button(m.container, "Export")!).onClick({}));
