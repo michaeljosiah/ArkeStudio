@@ -90,7 +90,11 @@ async function writeCbz(target: string, pages: readonly Picture[], info: string,
 }
 
 async function writePdf(target: string, pages: readonly Picture[], input: { title: string; author: string; language: string; rtl: boolean; alt: (entry: ComicBookPage) => string; chapterTitle: (id: string) => string }, signal: AbortSignal): Promise<void> {
-  const pdf = new PDFDocument({ autoFirstPage: false, pdfVersion: "1.7", tagged: true, lang: input.language, displayTitle: true, compress: true,
+  // No default font: the book is pictures only, and pdfkit loads Helvetica through its own package's
+  // `#standard-fonts` import, which the desktop bundle cannot resolve ("Cannot find module
+  // '#standard-fonts/Helvetica'"). Every comic PDF from the installed app failed with "Something went
+  // wrong" while these tests, run from source, passed. test/pdfkit-fonts.test.ts holds every document to it.
+  const pdf = new PDFDocument({ font: "", autoFirstPage: false, pdfVersion: "1.7", tagged: true, lang: input.language, displayTitle: true, compress: true,
     info: { Title: input.title, ...(input.author ? { Author: input.author } : {}), Creator: "Arke Studio", Producer: "Arke Studio comic PDF v1" } });
   // The reading direction in the PDF's own field (R-47): pdfkit writes a plain string as a name.
   if (input.rtl) (pdf as unknown as { _root: { data: { ViewerPreferences: { data: Record<string, unknown> } } } })._root.data.ViewerPreferences.data["Direction"] = "R2L";
