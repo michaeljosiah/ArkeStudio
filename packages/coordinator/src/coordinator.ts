@@ -21818,15 +21818,45 @@ export class Coordinator {
         continue;
       }
       const cost = take?.cost?.actualMicroUsd;
-      await changeComicPage(store, productionId, pageId, (record) => ({
-        ...record,
-        making: record.making.filter((entry) => entry.requestId !== making.requestId),
-        takes: landed === null || record.takes.some((existing) => existing.artifact === landed!.id) ? record.takes : [...record.takes, {
-          id: ulid(), artifact: landed.id, hash: making.hash, mode: making.mode, model: making.model, language: making.language,
-          ...(typeof cost === "number" ? { usd: cost / 1_000_000 } : {}), at: this.nowIso(),
-        }],
-      }));
+      const id = ulid();
+      let added = false;
+      await changeComicPage(store, productionId, pageId, (record) => {
+        added = landed !== null && !record.takes.some((existing) => existing.artifact === landed!.id);
+        return {
+          ...record,
+          making: record.making.filter((entry) => entry.requestId !== making.requestId),
+          takes: !added ? record.takes : [...record.takes, {
+            id, artifact: landed!.id, hash: making.hash, mode: making.mode, model: making.model, language: making.language,
+            ...(typeof cost === "number" ? { usd: cost / 1_000_000 } : {}), at: this.nowIso(),
+          }],
+        };
+      });
+      if (added) this.checkFiledComicTake(store, productionId, pageId, id, making.requestId);
     }
+  }
+
+  /**
+   * A take filed late is read as a made one is (R-29). A Codex page once took 25 minutes, past the
+   * 20 the press waits; it was filed when the page was next opened and never read, so Pages said
+   * Checking over a take nothing was checking (2026-10-30, The Ledger of Nights). Not awaited: the
+   * quote that filed it answers now, and the read says checking, then made, as a press's does.
+   */
+  private checkFiledComicTake(store: WorldStore, productionId: string, page: string, take: string, requestId: string): void {
+    const emit = (state: "checking" | "made", extra: { passed?: boolean } = {}) =>
+      this.emit({ at: new Date().toISOString(), type: "comic.page-made", requestId, worldId: store.worldId, productionId, page, state, take, ...extra });
+    // Its world closed or another opened while it read: a refresh would load this world again and
+    // undo the author's choice (codex on PR 2265), so it stops without a word.
+    const gone = () => this.stopping || store.closingSignal.aborted || this.opts.provider.openStore?.() !== store;
+    void (async () => {
+      if (gone()) return;
+      await this.refreshWorldSnapshot(store.worldId);
+      emit("checking");
+      const verification = await this.readComicTake(store, productionId, page, take)
+        .catch((err: unknown) => ({ status: "unavailable" as const, reason: "reader-failed" as const, detail: describeCoordinatorError(err), at: this.nowIso() }));
+      if (gone()) return;
+      await this.refreshWorldSnapshot(store.worldId);
+      emit("made", { passed: takePasses(verification) });
+    })().catch(() => {});
   }
 
   /**

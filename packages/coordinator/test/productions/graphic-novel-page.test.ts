@@ -120,5 +120,12 @@ describe("a comic page made (SPEC-064 R-22 – R-27)", () => {
       assert.equal(record.takes.length, 1, "filed once");
       assert.equal(record.takes[0]!.artifact, made.artifact, "the same picture, not a new one");
       assert.equal(h.enqueued.length, 1, "nothing asked again");
+      // And read, as a made take is: filed with no verdict, Pages said Checking over a take nothing
+      // was reading (2026-10-30).
+      const filed = record.takes[0]!.id;
+      for (let i = 0; i < 100 && !h.events.some((event) => event.type === "comic.page-made" && event.take === filed && event.state === "made"); i++) await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(store.getBundle().productions.find((p) => p.meta.id === production)!.comicPages![0]!.record.takes[0]!.verification?.status, "unavailable", "no reader here: not checked, never a pass");
+      const said = h.events.filter((event): event is Made => event.type === "comic.page-made" && event.take === filed).map((event) => event.state);
+      assert.deepEqual(said, ["checking", "made"]);
     }, { model: LETTERER }));
 });

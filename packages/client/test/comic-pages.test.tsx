@@ -220,7 +220,7 @@ describe("Pages uses the window and says what it is doing (turn 251)", () => {
       making: [{ requestId: ulid(), hash: hashOf(one), mode: "baked", model: "codex-image", language: "en", at: new Date(Date.now() - 72_000).toISOString() }] };
     const m = await mount(withBook([one], { [one.id]: record }));
     const over = m.container.querySelector(".fy-comic__over")!;
-    assert.match(over.textContent!, /MakingTake 1 of up to 3 · 1:1\d/);
+    assert.match(over.textContent!, /MakingTake 1 · 1:1\d/, "opened mid-run, it counts the record's takes");
     const press = [...m.container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Making")!;
     assert.equal((press as unknown as HTMLButtonElement).disabled, true, "a second press is not offered");
     assert.equal(m.container.querySelector(".fy-comic__thumb.busy")?.getAttribute("aria-busy"), "true");
