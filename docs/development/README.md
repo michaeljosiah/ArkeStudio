@@ -16,6 +16,7 @@ Start with the root [AGENTS.md](../../AGENTS.md) and shared [operational rules](
 | How do I run and validate it? | [Contributor setup](../../CONTRIBUTING.md#getting-set-up), [testing](testing.md) |
 | What generates this file or ships this asset? | [Maintenance map](maintenance.md) |
 | How do I add or replace a local generation recipe? | [ComfyUI recipe procedure](comfyui-recipes.md) |
+| How are local Pika H3 Flex presets configured and tested? | [Pika setup and qualification](pika-h3-flex.md) |
 | How do local Llama and Gemma models run? | [Local language models](local-language-models.md) |
 | Who owns local Python/CUDA and engine processes? | [Managed local runtimes](managed-local-runtimes.md) |
 | How do I install and use Ming's optional local readers? | [Ming setup, voice recordings and limits](managed-local-runtimes.md#ming-qualification-and-delivery-boundary) |

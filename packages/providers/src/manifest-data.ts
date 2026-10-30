@@ -48,9 +48,9 @@ function withLettering<T extends { id: string; limits?: object }>(models: T[]): 
 }
 
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 31,
+  manifestVersion: 32,
   dialogueGuidance: [],
-  generated: "2026-10-07",
+  generated: "2026-10-30",
   /**
    * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
    * the models rather than about any machine: the gate filters this order by what was measured

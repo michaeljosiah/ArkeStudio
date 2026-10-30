@@ -3,6 +3,7 @@ import type { ManifestModel, ModelSampling, RecipeIdentity, AdapterSelection } f
 import { KREA2_IMAGE, KREA2_BUCKETS } from "./krea2-recipe.js";
 import { QWEN21_IMAGE, QWEN21_BUCKETS_2K, QWEN21_TIER_BUCKETS } from "./qwen21-recipe.js";
 import { H3_REFERENCE, H3_REFERENCE_MODEL } from "./h3-reference-recipe.js";
+import { PIKA_H3_FLEX_RECIPES, PIKA_H3_FLEX_MODELS, PIKA_H3_FLEX_DERIVATIONS } from "./pika-h3-flex-recipe.js";
 import { SEEDVR2_UPSCALE, SEEDVR2_UPSCALE_MODEL } from "./seedvr2-recipe.js";
 
 /**
@@ -722,7 +723,7 @@ const H3_VIDEO_REFERENCE: ComfyUiRecipe = (() => {
 /** H3 Video with its reference route attached; the 768p row spreads H3_VIDEO and has none. */
 const H3_VIDEO_WITH_ROUTES: ComfyUiRecipe = { ...H3_VIDEO, routes: { reference: H3_VIDEO_REFERENCE } };
 
-export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([KREA2_IMAGE, QWEN21_IMAGE, DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO_WITH_ROUTES, H3_VIDEO_768, H3_REFERENCE, SEEDVR2_UPSCALE]);
+export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([KREA2_IMAGE, QWEN21_IMAGE, DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO_WITH_ROUTES, H3_VIDEO_768, H3_REFERENCE, SEEDVR2_UPSCALE, ...PIKA_H3_FLEX_RECIPES]);
 
 /**
  * The graph a dispatch runs: the recipe itself, or the route it names. A route the recipe does not
@@ -1002,6 +1003,7 @@ export const VIDEO_DERIVATIONS: Record<
   [H3_VIDEO.id]: { dimensions: H3_DIMENSIONS, framesBySeconds: H3_FRAMES_BY_SECONDS },
   [H3_VIDEO_768.id]: { dimensions: H3_768_DIMENSIONS, framesBySeconds: H3_768_FRAMES_BY_SECONDS },
   [H3_REFERENCE.id]: { dimensions: H3_DIMENSIONS, framesBySeconds: H3_FRAMES_BY_SECONDS },
+  ...PIKA_H3_FLEX_DERIVATIONS,
 };
 
 export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
@@ -1184,6 +1186,7 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
       accelerator: ["cuda"],
     },
   },
+  ...PIKA_H3_FLEX_MODELS,
   // Last, so no "first video row" fallback anywhere can land on it; Settings draws it under its
   // own kind whatever its place (design 178c).
   SEEDVR2_UPSCALE_MODEL,
