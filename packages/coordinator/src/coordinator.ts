@@ -21844,11 +21844,16 @@ export class Coordinator {
   private checkFiledComicTake(store: WorldStore, productionId: string, page: string, take: string, requestId: string): void {
     const emit = (state: "checking" | "made", extra: { passed?: boolean } = {}) =>
       this.emit({ at: new Date().toISOString(), type: "comic.page-made", requestId, worldId: store.worldId, productionId, page, state, take, ...extra });
+    // Its world closed or another opened while it read: a refresh would load this world again and
+    // undo the author's choice (codex on PR 2265), so it stops without a word.
+    const gone = () => this.stopping || store.closingSignal.aborted || this.opts.provider.openStore?.() !== store;
     void (async () => {
+      if (gone()) return;
       await this.refreshWorldSnapshot(store.worldId);
       emit("checking");
       const verification = await this.readComicTake(store, productionId, page, take)
         .catch((err: unknown) => ({ status: "unavailable" as const, reason: "reader-failed" as const, detail: describeCoordinatorError(err), at: this.nowIso() }));
+      if (gone()) return;
       await this.refreshWorldSnapshot(store.worldId);
       emit("made", { passed: takePasses(verification) });
     })().catch(() => {});
