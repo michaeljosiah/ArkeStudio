@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ModelWorldChatActionSchema, comicPageHash, newId, ulid, type ComicPage, type ConversationId } from "@arke-studio/contracts";
+import { ModelWorldChatActionSchema, WORLD_ACTION_DESCRIPTIONS, comicPageHash, newId, ulid, type ComicPage, type ConversationId } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { createChapter, createProduction, setChapterRetired } from "../../src/productions/ops.js";
 import { saveComicScript } from "../../src/productions/graphic-novel.js";
@@ -108,5 +108,16 @@ describe("Arke's pages (SPEC-064 R-13, turn 249)", () => {
     const wrong = action(novel, chapter, null, [{ layout: "splash", panels: [{ description: "x" }] }]);
     wrong.worldId = store.worldId;
     await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, wrong), /not a graphic novel/);
+  });
+
+  it("refuses a line that ends in a comma, the prose's dialogue with its tag cut, and tells Arke the craft", async () => {
+    // The Ledger of Nights, drawn (30 October 2026): "Give me the addresses," she said became a
+    // balloon reading "Give me the addresses," fourteen times over across eleven pages.
+    const { store, id, chapter, gate, intent } = await book();
+    const cut = action(id, chapter, null, [{ layout: "splash", panels: [{ description: "Maren at the desk.", characters: ["maren-kest"], lettering: [{ kind: "speech", speaker: "maren-kest", text: "Give me the addresses," }] }] }]);
+    cut.worldId = store.worldId;
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, cut), /Page 1 has "Give me the addresses,", which ends in a comma/);
+    assert.match(WORLD_ACTION_DESCRIPTIONS["production-comic-script"], /never the prose with its tags cut/);
+    assert.match(WORLD_ACTION_DESCRIPTIONS["production-comic-script"], /Name each person/);
   });
 });

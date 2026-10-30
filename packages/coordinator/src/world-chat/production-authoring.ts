@@ -6,6 +6,7 @@ import {
   ComicScriptSchema,
   DraftComicPageSchema,
   settleComicDraft,
+  unfinishedLettering,
   EpisodeSchema,
   EpisodeScriptSchema,
   ProseStyleSchema,
@@ -396,6 +397,8 @@ export function comicScriptDraft(store: WorldStore, action: Pick<WorldChatProduc
   const drafted = DraftComicPageSchema.array().safeParse(action.pages);
   if (!drafted.success) throw refuse(`${chapter.title}'s pages cannot be read: ${drafted.error.issues[0]?.message ?? "invalid"}`);
   const pages = settleComicDraft(drafted.data, current?.pages ?? []);
+  const unfinished = unfinishedLettering(pages);
+  if (unfinished) throw refuse(`Page ${unfinished.page} has "${unfinished.text}", which ends in a comma: the prose's line with its tag cut. Letter it as a whole line, said or narrated.`);
   // Each cited passage must be a chapter there is; a pin with no version or hash takes the chapter's
   // as it stands, so a later edit to the prose is seen (as an episode's source is pinned).
   for (const page of pages) {

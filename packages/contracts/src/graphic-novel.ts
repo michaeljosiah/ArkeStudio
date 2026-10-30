@@ -184,6 +184,36 @@ export function settleComicDraft(draft: readonly DraftComicPage[], current: read
 }
 export const EMPTY_COMIC_SCRIPT: ComicScript = { version: 1, pages: [] };
 
+/**
+ * How prose becomes pages a reader can follow without the prose (R-13). The Ledger of Nights, drawn
+ * (30 October 2026) was drafted to the letter of "exact lettering" with nothing on craft: fourteen
+ * balloons were the prose's dialogue with its "she said" cut and its comma left, a ledger's lines
+ * stood as bare captions, Bray was named eight pages after he first spoke and Jory, Beren and Rusk
+ * never were, and one page carried twelve balloons with tails nobody could follow.
+ */
+export const COMIC_ADAPTATION_CRAFT = "Write for a reader who has only the pages, never the prose. " +
+  "Lettering is what is said, thought or narrated, never the prose with its tags cut: no \"she said\", every line whole and never ending in a comma; rewrite a line whose prose version leans on its tag or on what came before. " +
+  "Name each person in the lettering the first time they matter, in what someone says or in a caption, and never speak of anyone the pages have not shown or named. " +
+  "Writing in the world, a ledger entry, a notice or a letter, is drawn on the thing in the panel or set in a caption that says whose it is and when, never a bare fragment the reader cannot place. " +
+  "At most three balloons to a panel and about twelve to a page, so each points to one clear speaker; spread a long exchange over more panels. " +
+  "A page read on its own still says who is speaking, where they are and what changed.";
+
+/**
+ * The first line that ends in a comma: the prose's dialogue with its tag cut ("Give me the
+ * addresses," she said), which leaves the reader holding an unfinished line. Refused when Arke
+ * drafts, so the draft comes back whole (COMIC_ADAPTATION_CRAFT).
+ */
+export function unfinishedLettering(pages: readonly { panels: readonly { lettering: readonly { text: string }[] }[] }[]): { page: number; text: string } | undefined {
+  for (const [index, page] of pages.entries()) {
+    for (const panel of page.panels) {
+      for (const item of panel.lettering) {
+        if (/,\s*$/.test(item.text)) return { page: index + 1, text: item.text };
+      }
+    }
+  }
+  return undefined;
+}
+
 /** The checks' numbers (D-7), kept on each take as they stood when it was checked (R-31). */
 export const LetteringThresholdsSchema = z.object({
   /** At or above: the words are the script's. */
