@@ -83,7 +83,9 @@ function author(preset: Preset) {
   };
   const model: ManifestModel = {
     id, displayName, provider: "comfyui", capability: "video", family: "minimax-h3",
-    accepts: { referenceImages: 1, referenceRoles: false, startFrame: false, endFrame: false },
+    // A first frame has its own task-mode budget. Advertising it as an appearance reference
+    // would let the Reference lane silently send it as frame zero instead of the Ref2VA preset.
+    accepts: { referenceImages: reference ? 1 : 0, referenceRoles: false, startFrame: false, endFrame: false },
     ...(!reference ? { modes: { generate: { locked: [] }, "first-frame": { locked: [] } } } : {}),
     limits: { maxPromptChars: 2000, alwaysSound: true, maxDurationSec: Math.max(...seconds),
       durations: Object.fromEntries(seconds.map(second => [String(second), String(second)])), durationWire: "number",

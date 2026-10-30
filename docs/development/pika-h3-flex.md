@@ -24,6 +24,9 @@ these presets run from text. With the Reference presets, put one picture in Refe
 use `@Image 1` in the brief if desired. The shared H3 prompt handling translates it to native
 picture syntax. A reference guides appearance rather than fixing frame zero. These presets
 offer no video/audio inputs, last frame, extra adapter stacks or generic sampling controls.
+The first-frame rows advertise zero appearance references and one frame task; the Reference
+rows advertise one appearance reference and no frame task. The lanes cannot silently change
+what the supplied picture means.
 
 ## Installation and provenance
 

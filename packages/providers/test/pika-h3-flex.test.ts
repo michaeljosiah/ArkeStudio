@@ -39,7 +39,8 @@ test("Pika registrations expose the measured sizes, durations and reference budg
     const model = SHIPPED_MANIFEST.models.find(row => row.id === recipe.id)!;
     assert.ok(COMFYUI_RECIPES.includes(recipe));
     assert.ok(model);
-    assert.equal(model.accepts.referenceImages, 1);
+    assert.equal(model.accepts.referenceImages, recipe.referenceFrame ? 0 : 1);
+    assert.equal(validateReferences([{ kind: "image" }], model).ok, recipe.referenceFrame === undefined);
     assert.equal(model.accepts.referenceVideos ?? 0, 0);
     assert.equal(model.accepts.referenceAudio ?? 0, 0);
     assert.equal(validateReferences([{ kind: "image" }, { kind: "image" }], model).ok, false);

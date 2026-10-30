@@ -47,6 +47,11 @@ for (const recipe of recipes) test(`${recipe.id}: Bench preserves the model, ref
   await opened.store.append({ type: "composer-set", mode: "video", provider: model.provider, model: model.id,
     params: { kind: "video", durationSec: seconds, aspect: "9:16", resolution: model.limits.resolutions![0]! },
     brief: recipe.referenceFrame ? "The robot waves." : "@Image 1 waves." }, { at: clock() });
+  if (recipe.referenceFrame) {
+    const wrongLane = await addBenchReference({ store: opened.store, session: (await opened.store.fold())! }, store.getBundle(), model,
+      { source: { source: "artifact", artifactId }, requestId: "wrong-pika-lane", at: clock() });
+    assert.equal(wrongLane.outcome, "refused", "a first-frame preset must not change the meaning of an appearance reference");
+  }
   const attached = await addBenchReference({ store: opened.store, session: (await opened.store.fold())! }, store.getBundle(), model,
     { source: { source: "artifact", artifactId }, requestId: "attach-pika", at: clock(), ...(recipe.referenceFrame ? { lane: "keyframe" as const } : {}) });
   assert.notEqual(attached.outcome, "refused", JSON.stringify(attached));
