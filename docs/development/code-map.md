@@ -501,6 +501,7 @@ injects the supervised `VoiceService.transcribeWords` seam; recognized speech ra
 The current harness interprets speech meaning from text; no audio-model listening is implied.
 
 ElevenLabs audiobook direction and grouping: [implementation boundaries and checks](audiobook-direction.md).
+Retail chapter export (SPEC-047 R-22–R-28): coordinator `productions/audiobook-chapters.ts` owns canonical mix capture, safe passage splitting, staging, source revalidation and folder promotion. `audio/retail.ts` owns bounded FFmpeg mastering, decoded measurements and full MP3 frame validation through `AudioMediaTools.retail`; client `components/audiobook-export.tsx` exposes Chapter files using `export-audiobook-chapters` and the existing `audiobook.exported`/`export.progress` lifecycle. See [retail chapter audio](audiobook-retail.md) for measurement limits and native tests.
 Retained narration after paragraph insertions: coordinator `productions/audiobook-book.ts`
 extends the existing reader/seam recovery with unique selected-take matching across moved keys.
 Text, voice, direction, shelf presence and current source/record checks remain required;

@@ -6837,6 +6837,11 @@ export function exportAudiobookPlayer(worldId: string, productionId: string, exp
   return send({ kind: "export-audiobook-player", worldId, productionId, requestId, ...(exportId !== undefined ? { exportId } : {}), ...(scope !== undefined ? { scope } : {}) }) ? requestId : null;
 }
 
+export function exportAudiobookChapters(worldId: string, productionId: string, exportId: string, scope: import("@arke-studio/contracts").AudiobookScope): string | null {
+  const requestId = ulid();
+  return send({ kind: "export-audiobook-chapters", worldId, productionId, requestId, exportId, scope }) ? requestId : null;
+}
+
 /** What Export → Arke Player would make of a story (design turn 245a – 245c): answered as `story.export-state` under the id returned. */
 export function readStoryExport(worldId: string, productionId: string, size?: ArkePlayerPictureSize): string | null {
   const requestId = ulid();

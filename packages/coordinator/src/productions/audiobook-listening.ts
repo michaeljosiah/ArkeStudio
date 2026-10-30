@@ -144,17 +144,18 @@ export async function anyNarrator(store: WorldStore, productionId: string, chapt
  * blocks' places on that mix's clock. Null for a chapter with none, or whose mix cannot be made
  * here — the takes then play back to back, as before timing.
  */
-async function timedListening(store: WorldStore, productionId: string, plan: AudiobookPlan, ffmpeg: FfmpegRunner | undefined, always = false): Promise<{ bars: Array<{ key: string; at: number; seconds: number }>; seconds: number; mix: { file: string; seconds: number } } | null> {
+async function timedListening(store: WorldStore, productionId: string, plan: AudiobookPlan, ffmpeg: FfmpegRunner | undefined, always = false, signal?: AbortSignal): Promise<{ bars: Array<{ key: string; at: number; seconds: number }>; seconds: number; mix: { file: string; seconds: number } } | null> {
   const record = plan.record === "unreadable" ? null : plan.record;
   if (!hasTiming(record) && !always) return null;
   try {
     const timing = chapterTiming(store, plan, "skip");
     const mix = chapterMix(timing);
     if (mix.voices.length === 0) return null;
-    const rendered = await renderChapterMix(store.dir, productionId, plan.chapter.file, mix, ffmpeg !== undefined ? { ffmpeg } : {});
+    const rendered = await renderChapterMix(store.dir, productionId, plan.chapter.file, mix, { ...(ffmpeg !== undefined ? { ffmpeg } : {}), ...(signal ? { signal } : {}) });
     const bars = timing.bars.filter((bar) => bar.kind === "block" && bar.made).map((bar) => ({ key: bar.key, at: bar.at, seconds: bar.seconds }));
     return { bars, seconds: rendered.seconds, mix: { file: rendered.file, seconds: rendered.seconds } };
   } catch {
+    signal?.throwIfAborted();
     return null;
   }
 }
@@ -202,7 +203,7 @@ export async function audiobookListening(store: WorldStore, productionId: string
       }
       continue;
     }
-    const timed = await timedListening(store, productionId, plan, options.ffmpeg, options.mixAll === true);
+    const timed = await timedListening(store, productionId, plan, options.ffmpeg, options.mixAll === true, options.signal);
     const chapter = listeningChapter({ chapterId: summary.id, order: summary.order, title: summary.title, blocks: listeningBlocks(store, plan), pictures, cover, usable: (file) => usable.has(file), ...(timed !== null ? { timed } : {}) });
     await applyAudiobookWordTiming(store, plan, chapter);
     // A picture set inside a take moves onto its first word once the take is timed (design turn 237, R-204).

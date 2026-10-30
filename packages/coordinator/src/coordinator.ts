@@ -420,6 +420,7 @@ import { audioStudioMedia, audioStudioSourceProblems, decideAudioStudioProposal,
 import { AudioStudioPreviews } from "./productions/audio-studio-preview.js";
 import { renderAudioStudioMix } from "./productions/audio-studio-mix.js";
 import { audiobookPlayerFile, exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
+import { exportAudiobookChapters } from "./productions/audiobook-chapters.js";
 import { exportArkePlayer, listArkePlayerPackages } from "./productions/arke-player-export.js";
 import { readStoryExport } from "./productions/story-export.js";
 import { guideVoiceLines, setGuideEntry, setGuideTeasers } from "./productions/world-guide.js";
@@ -7407,7 +7408,7 @@ export class Coordinator {
     // commands and store, never a second coordinator or an unowned filesystem writer.
     if (!audiobookStore && "worldId" in msg && msg.worldId &&
       // The book as a listener hears it takes its store inside its own read, under its deadline.
-      ["read-audiobook-chapter", "read-audiobook-book", "open-audiobook", "keep-audiobook-split", "export-audiobook-player", "export-arke-player"].includes(msg.kind) &&
+      ["read-audiobook-chapter", "read-audiobook-book", "open-audiobook", "keep-audiobook-split", "export-audiobook-player", "export-audiobook-chapters", "export-arke-player"].includes(msg.kind) &&
       this.opts.provider.withBackgroundWorldStore) {
       if (this.stopping) return;
       return this.opts.provider.withBackgroundWorldStore(msg.worldId, store =>
@@ -15639,6 +15640,7 @@ export class Coordinator {
         }
         return;
       }
+      case "export-audiobook-chapters":
       case "export-audiobook-player": {
         // The audiobook as the player (turn 186e, SPEC-047 R-72): the chapters read whole, their
         // audio joined where this machine has ffmpeg, their pictures, in a package under exports/.
@@ -15650,10 +15652,17 @@ export class Coordinator {
         // it waits on the messages in flight, and a long join must not hold it. The world closing
         // aborts it too.
         const exportId = msg.exportId ?? `ab_${ulid()}`;
+        if (this.exports.has(exportId)) return;
         const control = new AbortController();
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
-        const run = exportAudiobookPlayer(store, msg.productionId, { clock: () => new Date().toISOString(), ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), ...(msg.scope !== undefined ? { scope: msg.scope } : {}), signal: control.signal, exportId }).catch(
+        const chapters = msg.kind === "export-audiobook-chapters";
+        const progress = (step: string, percent: number) => {
+          if (chapters) this.emit({ at: this.nowIso(), type: "export.progress", worldId: msg.worldId, productionId: msg.productionId,
+            exportId, status: "running", percent, label: "Chapter files", step, output: null, error: null });
+        };
+        const run = (chapters ? exportAudiobookChapters : exportAudiobookPlayer)(store, msg.productionId, { clock: () => new Date().toISOString(), ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), ...(msg.scope !== undefined ? { scope: msg.scope } : {}), signal: control.signal, exportId,
+          ...(chapters ? { tools: this.opts.audioMediaTools?.retail, fileSpace: this.exportFileSpace, onStep: progress } : {}) }).catch(
           (err: unknown): { ok: false; blockers: string[] } => {
             void this.appLog?.append({ kind: "audiobook.export-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
             return { ok: false, blockers: [control.signal.aborted ? "the export was cancelled" : describeCoordinatorError(err)] };
@@ -15663,6 +15672,9 @@ export class Coordinator {
         this.exports.set(exportId, { id: exportId, cancel: () => control.abort(), done });
         try {
           const result = await run;
+          if (chapters) this.emit({ at: this.nowIso(), type: "export.progress", worldId: msg.worldId, productionId: msg.productionId, exportId,
+            status: result.ok ? "done" : control.signal.aborted ? "cancelled" : "failed", percent: result.ok ? 100 : 0, label: "Chapter files",
+            output: result.ok ? result.dir : null, error: result.ok ? null : result.blockers.join("; ") });
           this.emit({ at: new Date().toISOString(), type: "audiobook.exported", ...ids, result });
         } finally {
           this.exports.delete(exportId);

@@ -1,5 +1,12 @@
 # Running and validating changes
 
+Retail chapter MP3 delivery (SPEC-047 R-22/R-23): coordinator `test/audio/retail.test.ts` and
+`test/productions/audiobook-listening.test.ts`; client `test/audiobook-export.test.tsx`.
+Set `ARKE_FFMPEG` (optionally `ARKE_FFPROBE`) to a qualified installed/bundled encoder for actual
+mono/stereo encoding and the complete chapter export; native cases otherwise report skipped.
+World-store tests require native temporary-file rename access on Windows. See
+[retail chapter audio](audiobook-retail.md) for measurement boundaries and the focused command.
+
 Known storage shortfalls (SPEC-062 R-13/R-21) use coordinator `test/storage/reservations.test.ts`,
 `storage/service.test.ts`, `storage/application.test.ts` and `recovery/history.test.ts`; contracts
 `test/storage-diagnostics.test.ts` and `recovery-incidents.test.ts`; and client

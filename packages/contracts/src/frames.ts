@@ -4132,6 +4132,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       exportId: z.string().regex(/^ab_[0-9A-HJKMNP-TV-Z]{26}$/).optional(),
     })
     .strict(),
+  /** Retail chapter files, SPEC-047 R-22–R-28; same scoped result event and cancellation owner. */
+  z.object({ kind: z.literal("export-audiobook-chapters"), scope: AudiobookScopeSchema.optional(), worldId: UlidSchema,
+    productionId: SlugSchema, requestId: UlidSchema, exportId: z.string().regex(/^ab_[0-9A-HJKMNP-TV-Z]{26}$/).optional() }).strict(),
   /**
    * The world package for Arke Player (design turn 233, SPEC-058 R-1 – R-8): the book and the
    * illustrated narration of the chapters read whole, in one ZIP under `exports/`, answered as

@@ -1852,7 +1852,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       requestId: UlidSchema,
       worldId: UlidSchema,
       packages: z.array(z.object({
-        kind: z.enum(["interactive", "visual-novel", "audiobook", "audiobook-video", "arke-player"]),
+        kind: z.enum(["interactive", "visual-novel", "audiobook", "audiobook-chapters", "audiobook-video", "arke-player"]),
         productionId: SlugSchema,
         title: z.string(),
         dir: z.string().min(1),

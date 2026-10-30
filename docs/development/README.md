@@ -8,6 +8,7 @@ Start with the root [AGENTS.md](../../AGENTS.md) and shared [operational rules](
 | Should the remaining large production screens be split? | [Module boundary decisions](production-module-boundaries.md) |
 | How can another Node host use the engine? | [Engine services and host contracts](engine.md) |
 | How does a host generate page artwork and narration? | [Story media API](story-media-engine.md) |
+| How are retail chapter MP3 files mastered and checked? | [Retail chapter audio](audiobook-retail.md) |
 | Where are the portable publication contracts and file services? | [Publication contracts and implementation boundaries](publications.md) |
 | How do I run Studio without Electron? | [Standalone Node server](standalone-server.md) |
 | How do I open Studio from a phone or another computer? | [Opening Studio from another device](remote-access.md) |
