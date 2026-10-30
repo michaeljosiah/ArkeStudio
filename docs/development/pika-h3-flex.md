@@ -109,6 +109,9 @@ was made. Native hardware measured 10,240 MiB VRAM and 32,676 MiB system RAM.
 | Preset / input | Shape / requested length | Dispatch through saved take and playback |
 |---|---|---|
 | Pika H3 Flex, text only | 864×480, 5 s | 914.081 s; passed |
+| Pika H3 Flex 768p, first frame | 768×1344, 5 s | 1035.488 s; passed |
+| Pika H3 Flex Reference, one picture | 480×864, 15 s | 1057.778 s; passed |
+| Pika H3 Flex Reference 768p, one picture | 768×1344, 5 s | 829.747 s; passed |
 
 The text-only take retained recipe version 1, engine version 0.38.0 and seed 1120718763.
 Its MP4 contains 124 H.264 frames at 24 fps, 5.166688 seconds and 32 kHz stereo AAC.
@@ -116,6 +119,24 @@ Authenticated desktop playback advanced past one second. Six sampled frames show
 toy robot waving beside a red ball. Numeric audio mean/peak were −14.0/−0.6 dBFS; this is
 technical audio evidence, not a listening or semantic-quality assessment. During this run,
 the ten-second resource samples reached 9,499 MiB used VRAM and 703 MiB free RAM.
+
+The 768p first-frame take retained seed 1420475484, produced 124 frames and passed desktop
+playback at its native 768×1344 dimensions. Its opening reflects the supplied drawing, then
+morphs into a different three-dimensional robot/ball style. The test brief asks for a red ball
+while the drawing contains a blue one, so this is a pipeline check rather than a controlled
+reference-fidelity comparison. Do not interpret it as proof of character or style consistency.
+Audio mean/peak were −22.8/−8.2 dBFS; peak used VRAM was 9,498 MiB and minimum sampled
+free RAM 699 MiB.
+
+Both reference runs retained the red robot's broad appearance across six sampled frames while
+adding movement and a different environment. They rendered 362 / 124 frames, respectively,
+with 15.083333 / 5.166688-second containers and 32 kHz stereo AAC. The 480p run's sampled
+peak used VRAM / minimum free RAM were 9,533 / 479 MiB; the 768p run's were 9,512 / 751 MiB.
+Numeric audio mean/peak were −18.1/−6.3 and −16.0/−0.3 dBFS. These are synthetic-fixture
+observations, not proof of arbitrary character consistency or speech quality. All four
+application runs completed under the agreed twenty-minute cutoff, without a GPU retry.
+The private worker was stopped after its queue drained; the installed Studio engine was not
+stopped or reconfigured by the smoke test.
 
 The native evidence directories retain the original MP4 in the fixture world's session,
 the job/take record, dependency-readiness facts, playback measurements and frame contacts.
