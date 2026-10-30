@@ -222,7 +222,9 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
     return () => observer.disconnect();
   }, [draftPages === null]); // eslint-disable-line react-hooks/exhaustive-deps
   const shape = pageAspect(page ?? draftPage ?? newPage(), settings).split(":").map(Number) as [number, number];
-  const columns = room === null ? undefined : `136px minmax(${SCRIPT_MIN}px, 1fr) ${sideWidth(room, shape)}px`;
+  // Too narrow for the strip, the script's minimum and a readable page: the stylesheet's columns
+  // stand, as before turn 251 (codex on PR 2264).
+  const columns = room === null || room.width < 136 + SCRIPT_MIN + 320 ? undefined : `136px minmax(${SCRIPT_MIN}px, 1fr) ${sideWidth(room, shape)}px`;
 
   if (chapters.length === 0) {
     return <Screen id="comic-pages"><EmptyState title="No chapters yet" action={<Button onClick={() => navigate(`${base}/story/chapters`)}>Chapters</Button>} /></Screen>;
@@ -478,6 +480,10 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
     const requestId = quoteComicPage(worldId, productionId, page.id);
     asked.current = requestId === null ? null : { requestId, hash };
   }, [connected, saving, worldId, productionId, page.id, hash]);
+  // Checking only once the ask has gone: an unsent one would spin with nothing behind it (codex on PR 2264).
+  const recheck = (take: ComicPageTake) => {
+    if (checkComicTake(worldId, productionId, page.id, take.id) !== null) setRechecking({ take: take.id, since: take.verification?.at });
+  };
   // Back from choosing a reader with another one chosen: read the take again.
   useEffect(() => {
     const left = choosingReader.get(page.id);
@@ -485,8 +491,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
     choosingReader.delete(page.id);
     const take = takes.find((candidate) => candidate.id === left.take);
     if (take === undefined) return;
-    setRechecking({ take: take.id, since: take.verification?.at });
-    checkComicTake(worldId, productionId, page.id, take.id);
+    recheck(take);
   }, [connected, readerModel, page.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rects = panelRects(page, pageReading(page, settings));
@@ -580,7 +585,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
         )}
         <span className="grow" />
         {shown !== undefined && !checking && !outOfDate && !reason.reader && (
-          <Button variant="ghost" size="sm" onClick={() => { setRechecking({ take: shown.id, since: shown.verification?.at }); checkComicTake(worldId, productionId, page.id, shown.id); }}>Check again</Button>
+          <Button variant="ghost" size="sm" disabled={!connected} onClick={() => recheck(shown)}>Check again</Button>
         )}
       </div>
       <div className="fy-comic__make">
