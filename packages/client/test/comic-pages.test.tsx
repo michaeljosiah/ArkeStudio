@@ -180,6 +180,64 @@ describe("Pages (turn 247)", () => {
     assert.equal(props(m.container.querySelector("textarea[aria-label='Panel 1']")!).value, "Salt on the boards.");
   });
 
+  it("never takes a late snapshot of its own earlier save as news, so the next save is not refused as stale", async () => {
+    // The Ledger of Nights, drawn (30 October 2026): frames are answered concurrently, so the
+    // snapshot after one save arrived after the next save's answer, put the base back a save, and
+    // the edit after that was refused "Something changed while this was saving".
+    const one = page();
+    const state = withBook([one], {});
+    const m = await mount(state);
+    const saves = () => m.sent.filter((message): message is Extract<ClientMessage, { kind: "save-comic-script" }> => message.kind === "save-comic-script");
+    const answer = async (requestId: string, hash: string) => act(async () => __applyEventForTest({ at: AT, type: "comic-script.save-result", requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", chapter: "the-tide", disposition: "saved", version: 1, hash }));
+    const type = async (text: string) => {
+      await act(async () => props(m.container.querySelector("input[aria-label='Words']")!).onChange({ target: { value: text } }));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
+    };
+    await type("First.");
+    await answer(saves()[0]!.requestId, "sha256:one");
+    await type("Second.");
+    assert.equal(saves()[1]!.baseHash, "sha256:one");
+    await answer(saves()[1]!.requestId, "sha256:two");
+    // The snapshot taken after the first save lands now, late.
+    const late = structuredClone(state);
+    const comic = late.world!.productions.at(-1)! as unknown as { comicScripts: Array<{ hash: string; script: { pages: ComicPage[] } }> };
+    comic.comicScripts[0]!.hash = "sha256:one";
+    comic.comicScripts[0]!.script.pages[0]!.panels[0]!.lettering[0]!.text = "First.";
+    await act(async () => __setStateForTest(late, { connection: "open" }));
+    assert.equal(props(m.container.querySelector("input[aria-label='Words']")!).value, "Second.", "the late snapshot does not undo the screen");
+    await type("Third.");
+    assert.equal(saves()[2]!.baseHash, "sha256:two", "saved on the newest base, not the late snapshot's");
+  });
+
+  it("takes another window's return to older words as news once its own saves have caught up (codex on PR 2271)", async () => {
+    const one = page();
+    const state = withBook([one], {});
+    const m = await mount(state);
+    const saves = () => m.sent.filter((message): message is Extract<ClientMessage, { kind: "save-comic-script" }> => message.kind === "save-comic-script");
+    const answer = async (requestId: string, hash: string) => act(async () => __applyEventForTest({ at: AT, type: "comic-script.save-result", requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", chapter: "the-tide", disposition: "saved", version: 1, hash }));
+    const type = async (text: string) => {
+      await act(async () => props(m.container.querySelector("input[aria-label='Words']")!).onChange({ target: { value: text } }));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
+    };
+    const snapshot = async (hash: string, text: string) => {
+      const next = structuredClone(state);
+      const comic = next.world!.productions.at(-1)! as unknown as { comicScripts: Array<{ hash: string; script: { pages: ComicPage[] } }> };
+      comic.comicScripts[0]!.hash = hash;
+      comic.comicScripts[0]!.script.pages[0]!.panels[0]!.lettering[0]!.text = text;
+      await act(async () => __setStateForTest(next, { connection: "open" }));
+    };
+    await type("A.");
+    await answer(saves()[0]!.requestId, "sha256:a");
+    await type("B.");
+    await answer(saves()[1]!.requestId, "sha256:b");
+    await snapshot("sha256:b", "B.");
+    // Another window puts the words back to A: the same text, so the same hash.
+    await snapshot("sha256:a", "A.");
+    assert.equal(props(m.container.querySelector("input[aria-label='Words']")!).value, "A.");
+    await type("C.");
+    assert.equal(saves()[2]!.baseHash, "sha256:a");
+  });
+
   it("keeps a refused save's pages unsaved (codex on PR 2226)", async () => {
     const m = await mount(withBook([page()], {}));
     await act(async () => props(m.container.querySelector("input[aria-label='Words']")!).onChange({ target: { value: "Mine." } }));
