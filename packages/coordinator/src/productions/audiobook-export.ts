@@ -302,13 +302,16 @@ export async function listWebPackages(store: WorldStore): Promise<WebPackagesLis
       const provenance = (raw["provenance"] ?? {}) as Record<string, unknown>;
       const productionId = typeof raw["productionId"] === "string" ? raw["productionId"] : typeof provenance["productionId"] === "string" ? provenance["productionId"] : null;
       if (productionId === null || typeof provenance["exportedAt"] !== "string") continue;
-      if (!(await stat(toExtendedLength(join(exportsDir, entry.name, "player.html"))).then((s) => s.isFile(), () => false))) continue;
-      const kind = raw["kind"] === "audiobook" ? "audiobook" : Array.isArray(raw["beats"]) ? "visual-novel" : "interactive";
+      const retail = raw["kind"] === "audiobook-chapters";
+      if (!retail && !(await stat(toExtendedLength(join(exportsDir, entry.name, "player.html"))).then((s) => s.isFile(), () => false))) continue;
+      if (retail && (!Array.isArray(raw.files) || raw.files.length === 0 || raw.schemaVersion !== 1)) continue;
+      const kind = retail ? "audiobook-chapters" : raw["kind"] === "audiobook" ? "audiobook" : Array.isArray(raw["beats"]) ? "visual-novel" : "interactive";
       const scope = AudiobookScopeSchema.safeParse(raw.scope);
       const chapterIds = SlugSchema.array().min(1).safeParse(raw.chapterIds);
-      if (kind === "audiobook" && raw.scope !== undefined && (!scope.success || !chapterIds.success || (scope.data.kind === "chapter" && (chapterIds.data.length !== 1 || chapterIds.data[0] !== scope.data.chapterId)))) continue;
+      if ((kind === "audiobook" || retail) && raw.scope !== undefined && (!scope.success || !chapterIds.success || (scope.data.kind === "chapter" && (chapterIds.data.length !== 1 || chapterIds.data[0] !== scope.data.chapterId)))) continue;
       const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
-      out.push({ kind, productionId, title: typeof raw["title"] === "string" ? raw["title"] : (production?.meta.title ?? productionId), dir: `exports/${entry.name}`, exportedAt: provenance["exportedAt"], ...(kind === "audiobook" && scope.success && chapterIds.success ? { scope: scope.data, chapterIds: chapterIds.data } : {}) });
+      out.push({ kind, productionId, title: typeof raw["title"] === "string" ? raw["title"] : (production?.meta.title ?? productionId), dir: `exports/${entry.name}`, exportedAt: provenance["exportedAt"], ...((kind === "audiobook" || retail) && scope.success && chapterIds.success ? { scope: scope.data, chapterIds: chapterIds.data } : {}),
+        ...(retail && chapterIds.success ? { chapters: chapterIds.data.length, pictures: 0, file: `exports/${entry.name}/manifest.json` } : {}) });
     } catch {
       // A folder with no readable manifest is no package.
     }

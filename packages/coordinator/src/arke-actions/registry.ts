@@ -692,6 +692,7 @@ const CLIENT_COMMAND_METADATA = {
   "accept-audiobook-timing": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   // The audiobook's web package and the world's packages (turn 186e): a file the host writes, and a read.
   "export-audiobook-player": action("production", "host-action", "export", "export", ["chapters", "artifacts", "exports"]),
+  "export-audiobook-chapters": action("production", "host-action", "export", "export", ["chapters", "artifacts", "exports"]),
   // An interactive movie's or a visual novel's story package reads its routing and scenes too (SPEC-058 R-89).
   "export-arke-player": action("production", "host-action", "export", "export", ["chapters", "routing", "scenes", "artifacts", "exports"]),
   "export-audiobook-video": action("production", "host-action", "export", "export", ["chapters", "artifacts", "exports"]),

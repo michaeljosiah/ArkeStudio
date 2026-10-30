@@ -376,10 +376,9 @@ describe("Export audiobook (turn 186e)", () => {
     assert.match(text(q(m, '[data-testid="audiobook-export"]')), /Audiobook player\s*player\.html · web package/);
     assert.match(text(q(m, '[data-testid="audiobook-export"]')), /Chapters\s*1 of 2 · read whole/);
     assert.match(text(q(m, '[data-testid="audiobook-export"]')), /Pictures\s*2 · cover where a chapter has none/);
-    // Drawn where 197a draws it, and not offered: SPEC-047's own export is issue 1336.
+    // Retail chapter files share this sheet; the player remains the default.
     const files = [...dom.document.querySelectorAll("button")].find((button) => text(button).startsWith("Chapter files"))!;
-    assert.equal(files.hasAttribute("disabled"), true);
-    assert.match(files.getAttribute("title") ?? "", /Not built yet/);
+    assert.equal(files.hasAttribute("disabled"), false);
     await press(q(m, '[data-testid="audiobook-export-start"]'));
     const exportAsk = lastAsk(m, "export-audiobook-player")!;
     assert.equal(exportAsk.productionId, "inkbound");
@@ -390,6 +389,37 @@ describe("Export audiobook (turn 186e)", () => {
     assert.deepEqual(lastAsk(m, "open-exports-folder"), { kind: "open-exports-folder", worldId: FIXTURE_WORLD_ID, dir: "audiobook-inkbound-ab_x" });
     await press([...dom.document.querySelectorAll("button")].find(button => text(button) === "Open player")!);
     assert.deepEqual(lastAsk(m, "open-exports-folder"), { kind: "open-exports-folder", worldId: FIXTURE_WORLD_ID, dir: "audiobook-inkbound-ab_x", file: "player.html" });
+  });
+
+  it("exports retail chapter files in the selected scope, shows checks and failures, and offers the folder without a player", async () => {
+    const production = inkbound().world!.productions.find(p => p.meta.id === "inkbound")!;
+    const scope = { kind: "chapter" as const, chapterId: "slack-water" };
+    const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} chapterId="slack-water" onClose={() => {}} />);
+    const planAsk = lastAsk(m, "open-audiobook-listening")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: planAsk.requestId, worldId: FIXTURE_WORLD_ID,
+      productionId: "inkbound", listening: { ...PLAN, scope, chapters: [PLAN.chapters[0]!] } }));
+    await press([...dom.document.querySelectorAll("button")].find(button => text(button).startsWith("Chapter files"))!);
+    assert.match(text(q(m, '[data-testid="audiobook-export"]')), /192 kbps CBR · 44.1 kHz/);
+    await press(q(m, '[data-testid="audiobook-export-start"]'));
+    const request = lastAsk(m, "export-audiobook-chapters")!;
+    assert.deepEqual(request.scope, scope);
+    assert.equal(lastAsk(m, "export-audiobook-player"), undefined);
+    await act(async () => __applyEventForTest({ at: AT, type: "export.progress", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", exportId: request.exportId!,
+      status: "running", percent: 50, step: "Checking 01-Chapter1.mp3", label: "Chapter files", output: null, error: null }));
+    assert.match(text(q(m, '[data-testid="audiobook-export-busy"]')), /Checking/);
+    await press([...dom.document.querySelectorAll("button")].find(button => text(button) === "Cancel")!);
+    assert.equal(lastAsk(m, "cancel-export")?.exportId, request.exportId);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.exported", requestId: request.requestId, worldId: FIXTURE_WORLD_ID,
+      productionId: "inkbound", result: { ok: false, blockers: ["RMS outside retail range"] } }));
+    assert.match(text(q(m, '[data-testid="audiobook-export"]')), /RMS outside retail range/);
+    await press(q(m, '[data-testid="audiobook-export-start"]'));
+    const retry = lastAsk(m, "export-audiobook-chapters")!;
+    const dir = `exports/audiobook-inkbound-chapters-${retry.exportId}`;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.exported", requestId: retry.requestId, worldId: FIXTURE_WORLD_ID,
+      productionId: "inkbound", result: { ok: true, id: retry.exportId!, dir, file: `${dir}/manifest.json`, chapters: 1, pictures: 0, bytes: 1000, joined: true, scope, chapterIds: ["slack-water"] } }));
+    assert.equal([...dom.document.querySelectorAll("button")].find(button => text(button) === "Open player"), undefined);
+    await press([...dom.document.querySelectorAll("button")].find(button => text(button) === "Show in folder")!);
+    assert.equal(lastAsk(m, "open-exports-folder")?.dir, dir.slice("exports/".length));
   });
 
   it("finds its package again when a reconnect lost the export's answer (codex on PR 1498)", async () => {
@@ -410,6 +440,25 @@ describe("Export audiobook (turn 186e)", () => {
     assert.equal(text(q(m, '[data-testid="audiobook-export-done"]')), `exports/audiobook-inkbound-${exportAsk.exportId}`);
     await press([...dom.document.querySelectorAll("button")].find(button => text(button) === "Open player")!);
     assert.deepEqual(lastAsk(m, "open-exports-folder"), { kind: "open-exports-folder", worldId: FIXTURE_WORLD_ID, dir: `audiobook-inkbound-${exportAsk.exportId}`, file: "player.html" });
+  });
+
+  it("recovers a completed chapter export after reconnect without offering a player", async () => {
+    const production = inkbound().world!.productions.find(p => p.meta.id === "inkbound")!;
+    const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} />);
+    const planAsk = lastAsk(m, "open-audiobook-listening")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: planAsk.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: PLAN }));
+    await press([...dom.document.querySelectorAll("button")].find(button => text(button).startsWith("Chapter files"))!);
+    await press(q(m, '[data-testid="audiobook-export-start"]'));
+    const request = lastAsk(m, "export-audiobook-chapters")!;
+    await act(async () => __setStateForTest(inkbound(), { connection: "closed" }));
+    await act(async () => __setStateForTest(inkbound(), { connection: "open" }));
+    const dir = `exports/audiobook-inkbound-chapters-${request.exportId}`;
+    for (const ask of m.sent.filter((message): message is Extract<ClientMessage, { kind: "list-web-packages" }> => message.kind === "list-web-packages")) {
+      await act(async () => __applyEventForTest({ at: AT, type: "web-packages.listed", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID,
+        packages: [{ kind: "audiobook-chapters", productionId: "inkbound", title: "Inkbound", dir, exportedAt: AT, chapters: 1, scope: { kind: "book" }, chapterIds: ["slack-water"] }] }));
+    }
+    assert.match(text(q(m, '[data-testid="audiobook-export-done"]')), /1 chapter/);
+    assert.equal([...dom.document.querySelectorAll("button")].find(button => text(button) === "Open player"), undefined);
   });
 
   it("lists the world's packages, the audiobook beside the interactive and the visual novel", async () => {
