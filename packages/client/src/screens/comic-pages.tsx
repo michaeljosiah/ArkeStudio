@@ -449,7 +449,9 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
   const [brief, setBrief] = useState(false);
   // Pressed and not yet answered: the record says making a moment later, or the press failed.
   const [pressed, setPressed] = useState(false);
-  const [attempt, setAttempt] = useState(1);
+  // Which try of this window's own press, once the coordinator has said; a page opened mid-run
+  // counts its takes instead (a reopened page read "Take 1 of up to 3" on its second try).
+  const [attempt, setAttempt] = useState<number | null>(null);
   // A take picked by hand while another was being made stays shown when that one lands (turn 251c).
   const picked = useRef(false);
   // Check again on a take: reading until that take's verdict is no longer the one it had.
@@ -464,7 +466,9 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
     if (event.type === "comic.page-quote" && event.requestId === asked.current?.requestId) setQuoted({ hash: asked.current.hash, quote: event.quote });
     if (event.type === "comic.page-made" && event.page === page.id) {
       setPressed(false);
-      if (event.attempt !== undefined) setAttempt(event.attempt);
+      // The run's last word ends this window's count: a picture still out after its wait is the record's.
+      if (event.state === "made" || event.state === "failed") setAttempt(null);
+      else if (event.attempt !== undefined) setAttempt(event.attempt);
       // The landed take is the one shown, unless the author picked another meanwhile.
       if ((event.state === "checking" || event.state === "made") && event.take !== undefined && !picked.current) setShownId(event.take);
       setSaid(event.state === "failed" ? event.reason ?? "not made" : null);
@@ -474,12 +478,22 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
       setSaid(event.disposition === "refused" ? event.reason ?? "refused" : null);
     }
   }), [page.id]);
+  // A picture that outlasts the press's wait is filed by the next quote (R-25): while the record still
+  // says making and no press of this window is running, ask again each minute, or a page whose picture
+  // landed late said Making until someone happened to reopen it (61 minutes, 2026-10-30).
+  const [asking, setAsking] = useState(0);
+  const stale = (record?.making.length ?? 0) > 0 && attempt === null && !pressed;
+  useEffect(() => {
+    if (!stale) return;
+    const tick = setInterval(() => setAsking((n) => n + 1), 60_000);
+    return () => clearInterval(tick);
+  }, [stale]);
   // The price follows the page's words: asked again once an edit has saved (R-23, R-27).
   useEffect(() => {
     if (!connected || saving) return;
     const requestId = quoteComicPage(worldId, productionId, page.id);
     asked.current = requestId === null ? null : { requestId, hash };
-  }, [connected, saving, worldId, productionId, page.id, hash]);
+  }, [connected, saving, worldId, productionId, page.id, hash, asking]);
   // Checking only once the ask has gone: an unsent one would spin with nothing behind it (codex on PR 2264).
   const recheck = (take: ComicPageTake) => {
     if (checkComicTake(worldId, productionId, page.id, take.id) !== null) setRechecking({ take: take.id, since: take.verification?.at });
@@ -544,7 +558,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
           <div className="fy-comic__over" role="status">
             <Spin size={22} />
             <b>Making</b>
-            <span className="m">{until ? `Take ${attempt} of up to ${cap}` : "One take"}{making[0] !== undefined && <Since at={making[0].at} />}</span>
+            <span className="m">{attempt === null ? `Take ${takes.length + 1}` : until ? `Take ${attempt} of up to ${cap}` : "One take"}{making[0] !== undefined && <Since at={making[0].at} />}</span>
           </div>
         )}
         {!busy && checking && <div className="fy-comic__band" role="status"><Spin size={14} />Checking lettering</div>}
