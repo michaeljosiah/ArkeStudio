@@ -44,7 +44,7 @@ function author(preset: Preset) {
     length: { kind: "int", required: true, internal: true, min: 124, max: frames[String(Math.max(...seconds))]!, bind: [["7", "length"]] },
     referenceFile: { kind: "string", internal: true, maxChars: 260, bind: [["14", "image"]] },
   };
-  // The released adapter's six-step LCM schedule is fixed. Generic H3 sampling and additional
+  // The Comfy Pika template's six-step LCM schedule is fixed. Generic H3 sampling and additional
   // adapters are deliberately undeclared: either would change the distillation contract.
   const graph: RecipeGraph = {
     "1": { class_type: "UNETLoader", inputs: { unet_name: diffusion, weight_dtype: "default" } },

@@ -2,8 +2,8 @@
 
 Pika H3 Flex is a separate video recipe family in Arke's normal local generation flow.
 It uses Pika's distilled BF16 adapter on the matching MiniMax H3 INT8-convrot backbone,
-the NVFP4 Qwen encoder, FP16 video VAE and FP32 audio VAE. Its sampler is fixed at six
-LCM steps with Pika's explicit sigma sequence and video/audio shifts of 12/3. The existing
+the NVFP4 Qwen encoder, FP16 video VAE and FP32 audio VAE. Its sampler follows the Comfy
+Pika template's six LCM steps, explicit sigma sequence and video/audio shifts of 12/3. The existing
 H3 turbo recipes and automatic model preference order keep their identities.
 
 | Picker name | Recipe id | Output | Requested seconds | Picture input |
@@ -31,6 +31,13 @@ Select a healthy ComfyUI 0.38.0 or later in Settings and map its models folder. 
 the four optional weight installations and readiness checks from the recipes. Existing matching
 H3 files are reused; Pika adds a different adapter for each backbone. No custom nodes are needed.
 Do not replace H3's turbo adapters with these files.
+
+These are downloadable weights under the
+[MiniMax H3 Community License](https://huggingface.co/Pika-Labs/Pika-H3-Flex/blob/3ff166447d5edb1406107ab8370c42000ce173e4/LICENSE),
+with its territory and use conditions; they are not an unrestricted open-source release.
+The publisher's Comfy conversion note also distinguishes this workflow from Pika's original
+inference implementation. The measured Comfy preset does not establish numerical equivalence
+with that original runtime. License/NOTICE files must accompany redistributed adapters.
 
 The complete five-file closure for each preset lives in
 [`pika-h3-flex-recipe.ts`](../../packages/providers/src/comfyui/pika-h3-flex-recipe.ts).
@@ -102,7 +109,7 @@ node --import tsx --test test/bench/pika-h3-flex.test.ts test/setup/catalogue-in
 ```
 
 For native qualification, build the client/preload, start an idle caller-owned ComfyUI with
-the pinned models mapped, then from the repository root run:
+the pinned models mapped and a healthy existing Ollama service, then from the repository root run:
 
 ```powershell
 node --import tsx apps/desktop/scripts/smoke-pika-h3-flex.mjs http://127.0.0.1:8190 D:/models D:/new-pika-evidence comfyui-pika-h3-flex D:/reference.png 5 16:9
@@ -110,11 +117,16 @@ node --import tsx apps/desktop/scripts/smoke-pika-h3-flex.mjs http://127.0.0.1:8
 
 Use `-` for the picture to exercise text-only generation. The evidence directory must not
 exist. The script copies the fixture world, starts the real coordinator and shared provider
-client, waits for verified readiness, then presses Generate in the built sandboxed Electron
+client, measures hardware through the authenticated detect command, waits for verified readiness,
+then presses Generate in the built sandboxed Electron
 file page. A successful result must land as a durable Bench take and play through authenticated
 media access. It retains screenshots, measured playback, readiness and the job/take records.
 No credentials are put in renderer URLs or process arguments. This is a built-app smoke check;
 run the packaged app before distribution as required by the recipe procedure.
+
+Ollama defaults to `http://127.0.0.1:11434`; set `ARKE_PIKA_OLLAMA_URL` for another existing
+loopback service. The host uses Arke's real runtime-readiness gate and makes no language-model
+calls. Adjacent runs share identity-checked digest receipts, not fabricated integrity verdicts.
 
 The caller owns the native worker and must stop it if the script reaches its 20-minute cutoff.
 The script never interrupts an unrelated engine and never resubmits a stalled generation.

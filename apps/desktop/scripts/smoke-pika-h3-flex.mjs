@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { cp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { totalmem } from "node:os";
 import { build } from "esbuild";
+import WebSocket from "ws";
 import { OnboardingPlanSchema, newId } from "@arke-studio/contracts";
 import { createProviderClients, SHIPPED_MANIFEST, comfyUiRecipeById } from "@arke-studio/providers";
 import { Coordinator } from "../../../packages/coordinator/src/coordinator.ts";
@@ -14,6 +15,7 @@ import { FsWorldProvider } from "../../../packages/coordinator/src/world/provide
 import { WorldStore } from "../../../packages/coordinator/src/world/store.ts";
 import { AppSettingsFile } from "../../../packages/coordinator/src/app-settings.ts";
 import { createNodeComfyUiEngine } from "../../../packages/coordinator/src/comfyui/node-engine.ts";
+import { OllamaEngineService } from "../../../packages/coordinator/src/local-ai/ollama.ts";
 import { addBenchReference, openBenchSession } from "../../../packages/coordinator/src/bench/service.ts";
 
 // Opt-in native qualification, never part of npm test. The supplied engine must be idle and
@@ -59,26 +61,41 @@ try {
 } finally { await store.close(); }
 const settings = new AppSettingsFile(join(appRoot, "settings.json"));
 await settings.setComfyUi({ engineUrl, enginePath: null, modelsDir: resolve(modelsDir) });
+await settings.setOllama({ engineUrl: process.env.ARKE_PIKA_OLLAMA_URL ?? "http://127.0.0.1:11434", modelsDir: null });
 await settings.setOnboarding(OnboardingPlanSchema.parse({ persona: "lightweight", step: "done", writing: "none" }));
 const vramMb = Number(execFileSync("nvidia-smi", ["--query-gpu=memory.total", "--format=csv,noheader,nounits"], { encoding: "utf8", windowsHide: true }).trim().split("\n")[0]);
 const probes = { vramMb, memMb: Math.floor(totalmem() / 1048576), diskFreeMb: null, platform: process.platform, accelerators: ["cuda"], vramMbByAccelerator: { cuda: vramMb } };
 const engine = createNodeComfyUiEngine(appRoot), provider = new FsWorldProvider(appRoot);
-const clients = createProviderClients({ comfyui: engine.client });
+const ollama = new OllamaEngineService({ appRoot, port: 11434 });
+const clients = createProviderClients({ fetch: (url, init) => fetch(url, init), comfyui: engine.client,
+  ollama: () => ollama.baseUrl(), ollamaCleanup: () => ollama.endpoint() });
 const jobs = [];
 const coordinator = new Coordinator({ provider, adapter: null, appRoot, appVersion: "pika-native-smoke", manifest: SHIPPED_MANIFEST,
+  transportAuth: { token: randomBytes(32).toString("hex"), allowedOrigins: ["file://", "null"] },
   changeLogPath: join(appRoot, "logs/coordinator.jsonl"), dispatchClients: clients, validators: clients,
   comfyui: { service: engine.service }, setupExtraEntries: engine.weights, probeRuntime: async () => probes,
+  ollama: { service: ollama },
   observeEvent: event => { if (event.type === "job.updated") jobs.push(event); } });
-let child, watchdog, heartbeat;
+let child, control, watchdog, heartbeat;
 let dispatchedAt;
 try {
   console.log("[pika] starting real coordinator; verifying native dependencies before generation");
   heartbeat = setInterval(() => console.log(`[pika] verifying readiness: ${engine.service.engineStatus().state}`), 55000);
   const session = await coordinator.start();
+  control = new WebSocket(`ws://127.0.0.1:${session.port}`, { headers: { Origin: "file://" } });
+  await new Promise((resolve, reject) => { control.once("open", resolve); control.once("error", reject); });
+  const hello = new Promise((resolve, reject) => {
+    const deadline = setTimeout(() => reject(new Error("Authenticated smoke connection timed out")), 10000);
+    control.once("message", () => { clearTimeout(deadline); resolve(); });
+    control.once("close", () => { clearTimeout(deadline); reject(new Error("Authenticated smoke connection closed")); });
+  });
+  control.send(JSON.stringify({ kind: "hello", token: session.token })); await hello;
+  control.send(JSON.stringify({ kind: "detect-runtimes" }));
   const until = async (test, ms) => { const end = Date.now() + ms; while (!test()) { if (Date.now() > end) throw new Error("Coordinator readiness timed out"); await new Promise(r => setTimeout(r, 500)); } };
   await until(() => coordinator.getState().app.comfyui?.recipes.find(row => row.recipeId === modelId)?.state === "ready", 20 * 60 * 1000);
   const status = coordinator.getState().app.comfyui;
   await cp(join(appRoot, ".index/comfyui-digests"), receipts, { recursive: true });
+  await until(() => coordinator.getState().app.providers.some(row => row.id === "comfyui" && row.validation === "valid"), 60000);
   clearInterval(heartbeat);
   await writeFile(join(dir, "readiness.json"), JSON.stringify({ probes, status }, null, 2));
   await build({ entryPoints: [join(root, "apps/desktop/src/transport-auth.ts")], bundle: true, platform: "node", format: "cjs", outfile: join(dir, "auth.cjs") });
@@ -86,7 +103,7 @@ try {
   const require = createRequire(import.meta.url), env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
   child = spawn(require("electron"), [join(dir, "main.cjs")], { windowsHide: true, env, stdio: ["ignore", "inherit", "inherit", "ipc"] });
   child.on("message", message => {
-    if (message === "ready") child.send({ ...session, dir, worldId, sessionId: opened.session.id, modelName: model.displayName,
+    if (message === "ready") child.send({ ...session, dir, worldId, sessionId: opened.session.id, modelName: model.displayName, modelId,
       preload: join(root, "apps/desktop/dist/preload.cjs"), page: join(root, "packages/client/dist/index.html") });
     if (message === "dispatch") {
       dispatchedAt = Date.now();
@@ -109,8 +126,9 @@ try {
   console.log(`[pika] saved take and authenticated file-page playback passed: ${dir}`);
 } finally {
   clearInterval(heartbeat); clearTimeout(watchdog);
+  control?.close();
   if (child && child.exitCode === null) child.kill();
-  await coordinator.stop(); await engine.service.dispose(); await provider.close();
+  await coordinator.stop(); await engine.service.dispose(); await ollama.dispose(); await provider.close();
 }
 
 async function electronMain() {
@@ -120,26 +138,48 @@ async function electronMain() {
   app.disableHardwareAcceleration(); app.setPath("userData", join(__dirname, "profile"));
   const configuration = new Promise(resolve => process.once("message", resolve)); process.send("ready");
   await app.whenReady(); const config = await configuration;
+  ipcMain.handle("arke:remote-access", (_event, input) => {
+    assert.equal(input.kind, "status");
+    return { status: { enabled: false, running: false, startOnLogin: false, startupSupported: false,
+      pairingDuration: 30, url: null, reason: "Remote access is disabled in this smoke host.", devices: [], pending: [] } };
+  });
   ipcMain.on("arke:get-theme", event => { event.returnValue = { preference: "system", resolved: "light" }; });
   ipcMain.on("arke:startup-state-ready", event => event.sender.send("arke:startup-state", { status: "ready", port: config.port, token: config.token }));
   const window = new BrowserWindow({ show: false, width: 1440, height: 1000, webPreferences: { sandbox: true, contextIsolation: true,
     nodeIntegration: false, backgroundThrottling: false, preload: config.preload } });
   window.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => callback({ requestHeaders: authenticatedMediaHeaders(details, config, window.webContents.id) }));
   const run = text => window.webContents.executeJavaScript(text);
-  const until = async (text, ms = 60000) => { const end = Date.now() + ms; while (!(await run(text))) { if (Date.now() > end) throw new Error(`Desktop timed out: ${text}; ${(await run("document.body.innerText")).slice(-3000)}`); await new Promise(r => setTimeout(r, 500)); } };
-  await window.loadFile(config.page, { hash: `/w/${config.worldId}/artifacts` });
+  const capture = async name => {
+    window.webContents.invalidate(); await new Promise(resolve => setTimeout(resolve, 500));
+    await writeFile(join(config.dir, name), (await window.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG());
+  };
+  const until = async (text, ms = 60000) => { const end = Date.now() + ms; while (!(await run(text))) {
+    if (Date.now() > end) {
+      await capture("failure.png");
+      throw new Error(`Desktop timed out: ${text}; ${(await run("document.body.innerText")).slice(-3000)}`);
+    }
+    await new Promise(r => setTimeout(r, 500));
+  } };
+  await window.loadFile(config.page, { hash: `/w/${config.worldId}/artifacts/bench/${config.sessionId}` });
   await until(`document.body.innerText.includes(${JSON.stringify(config.modelName)})`);
   assert.equal(await run("typeof process"), "undefined");
-  await writeFile(join(config.dir, "before.png"), (await window.webContents.capturePage()).toPNG());
+  const picker = await run(`(() => { const select = document.querySelector('select[aria-label="Model"]');
+    return { value: select?.value, choices: Array.from(select?.options ?? []).filter(option => option.value.startsWith('comfyui/comfyui-pika-h3-flex')).map(option => ({ value: option.value, disabled: option.disabled })) }; })()`);
+  assert.equal(picker.value, `comfyui/${config.modelId}`);
+  assert.equal(picker.choices.length, 4); assert(picker.choices.every(choice => !choice.disabled));
+  await writeFile(join(config.dir, "picker.json"), JSON.stringify(picker, null, 2));
+  await capture("before.png");
   await until(`Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === 'Generate' && !b.disabled)`);
   process.send("dispatch");
   await run("Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Generate').click()");
-  await until("Array.from(document.querySelectorAll('video')).some(v => v.videoWidth > 0)", 20 * 60 * 1000);
-  const media = await run(`(async () => { const video = Array.from(document.querySelectorAll('video')).find(v => v.videoWidth > 0);
+  // The Bench's waiting animation is also a video; only the landed, authenticated media
+  // stream proves this generation completed and the selected take can actually be played.
+  await until("Array.from(document.querySelectorAll('video')).some(v => v.videoWidth > 0 && v.src.includes('/media/') && v.src.includes('.sessions'))", 20 * 60 * 1000);
+  const media = await run(`(async () => { const video = Array.from(document.querySelectorAll('video')).find(v => v.videoWidth > 0 && v.src.includes('/media/') && v.src.includes('.sessions'));
     video.muted = true; await video.play(); await new Promise(r => setTimeout(r, 1500));
     return { width: video.videoWidth, height: video.videoHeight, duration: video.duration, currentTime: video.currentTime, error: video.error?.code }; })()`);
   assert(media.currentTime > 0); assert.equal(media.error, undefined);
   await writeFile(join(config.dir, "playback.json"), JSON.stringify(media, null, 2));
-  await writeFile(join(config.dir, "after.png"), (await window.webContents.capturePage()).toPNG());
+  await capture("after.png");
   window.destroy(); app.exit(0);
 }
