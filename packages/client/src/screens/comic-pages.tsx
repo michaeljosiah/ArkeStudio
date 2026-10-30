@@ -105,10 +105,17 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   // is bound to its chapter and saved on that chapter's base, and it is sent at once when the author
   // switches chapter or leaves Pages, so an edit is never dropped or saved over another chapter
   // (codex on PR 2226). One save is in flight at a time; the next waits for its new base.
-  const [pages, setPages] = useState<ComicPage[]>(stored?.script.pages ?? []);
+  // Held with the chapter they are, so a render between choosing a chapter and loading it never
+  // shows, or edits, one chapter's pages as another's.
+  const [loaded, setLoaded] = useState<{ chapter: string | undefined; pages: ComicPage[] }>({ chapter: chapter?.id, pages: stored?.script.pages ?? [] });
+  const setPages = (next: ComicPage[]) => setLoaded({ chapter: chapter?.id, pages: next });
   const scripts = useRef(production.comicScripts);
   scripts.current = production.comicScripts;
   const bases = useRef(new Map<string, string | null>());
+  // Every hash this editor's saves have written, by chapter. Frames are answered concurrently, so the
+  // snapshot after one save can arrive after the next save's answer; read as news it would put the
+  // base back a save and the next edit would be refused as stale (the Ledger, 30 October 2026).
+  const written = useRef(new Map<string, string[]>());
   // Drafts by chapter: switching chapters never shows or saves one chapter's pages as another's, and a
   // chapter's incomplete draft waits there until it is whole (codex on PR 2226).
   const drafts = useRef(new Map<string, ComicPage[]>());
@@ -138,6 +145,9 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
       if (!drafts.current.has(id)) drafts.current.set(id, next);
       setProblem("not saved");
       settle();
+      // Tried again, rather than left waiting for the author's next keystroke.
+      clearTimeout(timer.current);
+      timer.current = setTimeout(send, SAVE_AFTER_MS);
     }, 15_000);
     if (drafts.current.size > 0) timer.current = setTimeout(send, 150);
   };
@@ -146,8 +156,11 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
     // flight, then the stored script. Another chapter's save never keeps this one from loading.
     if (!chapter) return;
     const held = drafts.current.get(chapter.id) ?? (pending.current?.chapter === chapter.id ? pending.current.pages : undefined);
-    if (held !== undefined) { setPages(held); return; }
-    setPages(stored?.script.pages ?? []);
+    if (held !== undefined) { setLoaded({ chapter: chapter.id, pages: held }); return; }
+    // A snapshot of one of this editor's own earlier saves is behind what it already knows.
+    const ours = written.current.get(chapter.id) ?? [];
+    if (stored?.hash !== undefined && ours.includes(stored.hash) && ours.at(-1) !== stored.hash && loaded.chapter === chapter.id) return;
+    setLoaded({ chapter: chapter.id, pages: stored?.script.pages ?? [] });
     bases.current.set(chapter.id, stored?.hash ?? null);
   }, [stored?.hash, chapter?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => subscribeComicScriptSaveResults((result) => {
@@ -155,7 +168,11 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
     const sent = pending.current;
     pending.current = null;
     // The base is that chapter's own: a late answer never moves another chapter's base.
-    if (result.disposition === "saved" && result.hash) { bases.current.set(sent.chapter, result.hash); setProblem(null); }
+    if (result.disposition === "saved" && result.hash) {
+      bases.current.set(sent.chapter, result.hash);
+      written.current.set(sent.chapter, [...(written.current.get(sent.chapter) ?? []), result.hash].slice(-50));
+      setProblem(null);
+    }
     else {
       // Refused, so not saved: the pages wait again, unsaved, and the next try takes the chapter's
       // current base rather than the one that was refused (codex on PR 2226).
@@ -175,6 +192,8 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   };
   useEffect(() => () => send(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The chapter's own pages: between choosing a chapter and loading it, its draft or stored script.
+  const pages = loaded.chapter === chapter?.id ? loaded.pages : (chapter ? drafts.current.get(chapter.id) : undefined) ?? stored?.script.pages ?? [];
   const [pageId, setPageId] = useState<string | null>(pages[0]?.id ?? null);
   const page = pages.find((candidate) => candidate.id === pageId) ?? pages[0];
   const setPage = (change: (page: ComicPage) => ComicPage) => page && edit(pages.map((candidate) => (candidate.id === page.id ? change(structuredClone(candidate)) : candidate)));
