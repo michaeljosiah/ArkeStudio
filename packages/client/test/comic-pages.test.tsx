@@ -4,8 +4,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { DEFAULT_COMIC_SETTINGS, DEFAULT_LETTERING_THRESHOLDS, comicPageHash, ulid, type ClientMessage, type ClientState, type ComicPage, type ComicPageRecord } from "@arke-studio/contracts";
-import { ComicPagesScreen } from "../src/screens/comic-pages.js";
+import { DEFAULT_COMIC_SETTINGS, DEFAULT_LETTERING_THRESHOLDS, comicPageHash, ulid, type ClientMessage, type ClientState, type ComicPage, type ComicPageRecord, type ComicPageTake } from "@arke-studio/contracts";
+import { ComicPagesScreen, notChecked, sideWidth } from "../src/screens/comic-pages.js";
 import { productionPages } from "../src/lib/production-navigation.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -198,6 +198,74 @@ describe("Pages (turn 247)", () => {
     assert.match(sheet, /Page 1 · no accepted take/);
     const exportPress = [...dom.document.querySelectorAll("button")].filter((b) => b.textContent === "Export").at(-1)!;
     assert.equal((exportPress as unknown as HTMLButtonElement).disabled, true);
+  });
+});
+
+describe("Pages uses the window and says what it is doing (turn 251)", () => {
+  const hashOf = (one: ComicPage) => comicPageHash(one, DEFAULT_COMIC_SETTINGS, "baked");
+
+  it("has the whole content area, and sizes the page column from the height (251a)", async () => {
+    const m = await mount(withBook([page()], {}));
+    assert.ok(m.container.querySelector(".fy-comic-screen[data-screen='comic-pages']"), "not the 1,080 column a page of reading gets");
+    assert.equal(m.container.querySelector(".lay-screen"), null);
+    // 1920 × 1080 less the head: a 2:3 page stands about 520 wide above what sits under it.
+    assert.equal(sideWidth({ width: 1712, height: 1024 }, [2, 3]), Math.round((1024 - 272) * 2 / 3) + 36);
+    assert.equal(sideWidth({ width: 900, height: 1400 }, [2, 3]), 900 - 136 - 440, "the script keeps its 440");
+    assert.equal(sideWidth({ width: 1600, height: 400 }, [2, 3]), 320, "never a page nobody can read");
+  });
+
+  it("says Making on the page, its thumbnail and the button while the record says so (251b)", async () => {
+    const one = page();
+    const record: ComicPageRecord = { version: 1, accepted: {}, lettering: {}, acknowledged: {}, takes: [],
+      making: [{ requestId: ulid(), hash: hashOf(one), mode: "baked", model: "codex-image", language: "en", at: new Date(Date.now() - 72_000).toISOString() }] };
+    const m = await mount(withBook([one], { [one.id]: record }));
+    const over = m.container.querySelector(".fy-comic__over")!;
+    assert.match(over.textContent!, /MakingTake 1 of up to 3 · 1:1\d/);
+    const press = [...m.container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Making")!;
+    assert.equal((press as unknown as HTMLButtonElement).disabled, true, "a second press is not offered");
+    assert.equal(m.container.querySelector(".fy-comic__thumb.busy")?.getAttribute("aria-busy"), "true");
+  });
+
+  it("shows a landed take at once and says Checking until its verdict (251c)", async () => {
+    const one = page();
+    const old = ulid();
+    const landed = ulid();
+    const take = (id: string, verification?: ComicPageTake["verification"]): ComicPageTake => ({ id, artifact: ARTIFACT, hash: hashOf(one), mode: "baked", model: "codex-image", language: "en", at: new Date().toISOString(), ...(verification ? { verification } : {}) });
+    const record: ComicPageRecord = { version: 1, accepted: { en: old }, lettering: {}, acknowledged: {}, making: [],
+      takes: [take(old, { status: "unavailable", reason: "no-reader", at: AT }), take(landed)] };
+    const m = await mount(withBook([one], { [one.id]: record }));
+    await act(async () => __applyEventForTest({ at: AT, type: "comic.page-made", requestId: ulid(), worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", page: one.id, state: "checking", take: landed }));
+    assert.match(m.container.querySelector(".fy-comic__takes")!.textContent!, /Take 2 of 2/, "the new take, not the accepted one");
+    assert.match(m.container.querySelector(".fy-comic__verdict")!.textContent!, /Checking lettering/);
+    assert.equal(button(m.container, "Accept"), undefined, "Accept waits for the verdict");
+    assert.equal(button(m.container, "Accept anyway"), undefined);
+  });
+
+  it("says the reader can't see pictures, and Choose reader checks again once one is chosen (251d)", async () => {
+    const one = page();
+    const id = ulid();
+    const record: ComicPageRecord = { version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
+      id, artifact: ARTIFACT, hash: hashOf(one), mode: "baked", model: "codex-image", language: "en", at: AT,
+      verification: { status: "unavailable", reason: "reader-failed", detail: "The selected visual reviewer cannot inspect images. No image content was sent.", at: AT } }] };
+    const state = withBook([one], { [one.id]: record });
+    const m = await mount(state);
+    assert.match(m.container.querySelector(".fy-comic__verdict")!.textContent!, /Not checked\s*the reader can’t see pictures/);
+    assert.equal(button(m.container, "Check again"), undefined, "checking again with the same reader cannot help");
+    await act(async () => props(button(m.container, "Choose reader")!).onClick({}));
+    assert.equal(m.sent.some((message) => message.kind === "check-comic-take"), false);
+
+    await act(async () => root?.unmount());
+    const chosen = structuredClone(state);
+    chosen.app.agents = [...chosen.app.agents.filter((agent) => agent.name !== "page-lettering-reader"),
+      { name: "page-lettering-reader", description: "Reads lettering", shippedBrief: "", brief: "", edited: false, model: "github-copilot/claude-opus-5.5" } as never];
+    const back = await mount(chosen);
+    const check = back.sent.find((message): message is Extract<ClientMessage, { kind: "check-comic-take" }> => message.kind === "check-comic-take");
+    assert.equal(check?.take, id, "the take it could not check is read again");
+  });
+
+  it("says why for a time-out, and offers Check again rather than a setting", () => {
+    assert.deepEqual(notChecked({ status: "unavailable", reason: "reader-failed", detail: "Review task timed out. It was not retried.", at: AT }), { text: "the reader timed out", reader: false });
+    assert.deepEqual(notChecked({ status: "unavailable", reason: "no-reader", at: AT }), { text: "no image reader", reader: true });
   });
 });
 

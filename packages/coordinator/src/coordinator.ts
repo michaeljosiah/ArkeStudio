@@ -21864,13 +21864,15 @@ export class Coordinator {
     const budget = msg.untilPasses ? Math.min(msg.confirmedMicroUsd, Math.round(cap.usd * 1_000_000)) : msg.confirmedMicroUsd;
     let spent = 0;
     for (let attempt = 1; attempt <= attempts; attempt++) {
-      const emit = (state: "making" | "made" | "failed", extra: { take?: string; reason?: string; sessionId?: string; passed?: boolean } = {}) =>
+      const emit = (state: "making" | "checking" | "made" | "failed", extra: { take?: string; reason?: string; sessionId?: string; passed?: boolean } = {}) =>
         this.emit({ at: new Date().toISOString(), type: "comic.page-made", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, state,
           ...(msg.untilPasses ? { attempt } : {}), ...extra });
       const made = await this.makeComicPage(store, { productionId: msg.productionId, page: msg.page, requestId: attempt === 1 ? msg.requestId : ulid(),
         confirmedMicroUsd: budget - spent, ...(msg.mode !== undefined ? { mode: msg.mode } : {}) }, emit);
       if (!made.ok) return;
       spent += made.microUsd;
+      // The take is in the record already; Pages shows it while its lettering is read (turn 251c).
+      emit("checking", { take: made.take, sessionId: made.sessionId });
       const verification = await this.readComicTake(store, msg.productionId, msg.page, made.take)
         .catch((err: unknown) => ({ status: "unavailable" as const, reason: "reader-failed" as const, detail: describeCoordinatorError(err), at: this.nowIso() }));
       await this.refreshWorldSnapshot(msg.worldId);
@@ -21912,6 +21914,10 @@ export class Coordinator {
       const language = request.settings.language;
       await changeComicPage(store, input.productionId, input.page, (record) => ({ ...record,
         making: [...record.making, { requestId: input.requestId, hash: request.hash, mode: request.mode, model: model.id, language, at: this.nowIso() }] }));
+      // Pages reads making from the record, not only this event, so a window that reconnects still
+      // knows. Without this refresh the record reached it only once the take landed, three minutes on,
+      // and a second press reached here as "making this page already" (issue 2259).
+      await this.refreshWorldSnapshot(store.worldId);
       emit("making");
       const made = await this.makeBenchPicture(store, {
         title: `Page ${request.number}`,
