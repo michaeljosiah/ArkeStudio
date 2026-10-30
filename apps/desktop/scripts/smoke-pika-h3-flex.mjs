@@ -146,7 +146,8 @@ async function electronMain() {
   ipcMain.on("arke:get-theme", event => { event.returnValue = { preference: "system", resolved: "light" }; });
   ipcMain.on("arke:startup-state-ready", event => event.sender.send("arke:startup-state", { status: "ready", port: config.port, token: config.token }));
   const window = new BrowserWindow({ show: false, width: 1440, height: 1000, webPreferences: { sandbox: true, contextIsolation: true,
-    nodeIntegration: false, backgroundThrottling: false, preload: config.preload } });
+    nodeIntegration: false, backgroundThrottling: false, offscreen: true, preload: config.preload } });
+  window.webContents.setFrameRate(10);
   window.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => callback({ requestHeaders: authenticatedMediaHeaders(details, config, window.webContents.id) }));
   const run = text => window.webContents.executeJavaScript(text);
   const capture = async name => {
@@ -169,7 +170,11 @@ async function electronMain() {
   assert.equal(picker.choices.length, 4); assert(picker.choices.every(choice => !choice.disabled));
   await writeFile(join(config.dir, "picker.json"), JSON.stringify(picker, null, 2));
   await capture("before.png");
-  await until(`Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === 'Generate' && !b.disabled)`);
+  await until(`Array.from(document.querySelectorAll('button')).some(b => {
+    if (b.textContent.trim() !== 'Generate' || b.disabled) return false;
+    const box = b.getBoundingClientRect();
+    return box.width > 0 && box.height > 0 && document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)?.closest('button') === b;
+  })`);
   process.send("dispatch");
   await run("Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Generate').click()");
   // The Bench's waiting animation is also a video; only the landed, authenticated media

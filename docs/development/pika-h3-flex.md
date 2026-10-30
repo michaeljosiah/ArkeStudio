@@ -94,6 +94,32 @@ The agreed test cutoff is **20 minutes per clip**. The earlier 39-minute result 
 not an application-wide timeout promise. Reference 480p offers the measured 5/15-second spots;
 its 10-second combination is not advertised pending a native measurement.
 
+## Application qualification, 2026-10-30
+
+The new recipe identities were exercised through the real Coordinator, runtime services,
+provider client, durable Bench journal and built sandboxed Electron file page. Each run used
+a private fixture world and an idle caller-owned ComfyUI 0.38.0, with default allocation
+(no `--vram-headroom` override), no custom/API nodes and the exact verified weight pins.
+Ollama 0.40.6 was an existing healthy service with no loaded models; no language-model call
+was made. Native hardware measured 10,240 MiB VRAM and 32,676 MiB system RAM.
+
+| Preset / input | Shape / requested length | Dispatch through saved take and playback |
+|---|---|---|
+| Pika H3 Flex, text only | 864×480, 5 s | 914.081 s; passed |
+
+The text-only take retained recipe version 1, engine version 0.38.0 and seed 1120718763.
+Its MP4 contains 124 H.264 frames at 24 fps, 5.166688 seconds and 32 kHz stereo AAC.
+Authenticated desktop playback advanced past one second. Six sampled frames show a coherent
+toy robot waving beside a red ball. Numeric audio mean/peak were −14.0/−0.6 dBFS; this is
+technical audio evidence, not a listening or semantic-quality assessment. During this run,
+the ten-second resource samples reached 9,499 MiB used VRAM and 703 MiB free RAM.
+
+The native evidence directories retain the original MP4 in the fixture world's session,
+the job/take record, dependency-readiness facts, playback measurements and frame contacts.
+These application runs use fresh application-selected seeds rather than the matrix's fixed
+9123, so timings are observations rather than a controlled quality comparison. This checks
+the built app flow, not a packaged installer or a distribution release.
+
 ## Validation
 
 Focused provider checks, from `packages/providers`:
