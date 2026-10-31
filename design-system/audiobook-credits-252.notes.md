@@ -1,6 +1,6 @@
 # Turn 252 · Opening and closing credits
 
-Proposed 31 October 2026. Not approved yet. SPEC-047, SPEC-058.
+Proposed 31 October 2026. Approved by the owner the same day ("Approve as drawn"), calls 1 – 7 as drawn. SPEC-047 R-210 – R-218, SPEC-058 R-94.
 
 ## Why this turn
 

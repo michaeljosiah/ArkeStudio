@@ -12,7 +12,7 @@ const write = (name, content) => fs.writeFileSync(path.join(here, name), content
 const esc = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
 const tokens = '_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens';
 const STYLE = '<link rel="stylesheet" href="picture-shapes-235.css"><link rel="stylesheet" href="audiobook-credits-252.css">';
-const STATUS = 'proposed';
+const STATUS = 'approved';
 const frames = FRAMES.map(([letter, title, width, height, draw]) => ({ id: '252' + letter, title, width, height, markup: draw() }));
 for (const f of frames) if (!/^<div class="(v199|ap235) cr252"/.test(f.markup)) throw new Error(`${f.id}: frame root is not .cr252`);
 
@@ -33,7 +33,7 @@ ${frames.map(f => `<section id="${f.id}"><h2><a href="#${f.id}">${f.id}</a> ${f.
 if (process.argv.includes('--preview')) { console.log(`Wrote audiobook-credits-252.review.html: ${frames.length} frames.`); process.exit(0); }
 
 export const rules = [
-  ['Review status', '31 October 2026. Proposed, not approved. From the owner’s question after the Na Love or Juju chapter files went out at 192 kbps: Audible asks for opening and closing credits, and they would suit the story’s audiobook everywhere. ACX’s submission rules (checked 31 October 2026): opening credits state the title, author(s) and narrator(s), matching the metadata and cover; closing credits indicate finality, ideally “You have been listening to…” with the same names and “The End”; both should be separate files. The same page says a submitted audiobook must be narrated by a human unless otherwise authorized, so credits alone do not make an AI-read book eligible for Audible. Nothing here is built.'],
+  ['Review status', '31 October 2026. Approved by the owner the same day (“Approve as drawn”), calls 1 – 7 as drawn. From the owner’s question after the Na Love or Juju chapter files went out at 192 kbps: Audible asks for opening and closing credits, and they would suit the story’s audiobook everywhere. ACX’s submission rules (checked 31 October 2026): opening credits state the title, author(s) and narrator(s), matching the metadata and cover; closing credits indicate finality, ideally “You have been listening to…” with the same names and “The End”; both should be separate files. The same page says a submitted audiobook must be narrated by a human unless otherwise authorized, so credits alone do not make an AI-read book eligible for Audible. Nothing here is built.'],
   ['Two credits, at the ends of the book', 'A story’s audiobook has an Opening credits section before Chapter 1 and a Closing credits section after the last chapter (252a, 252b). They are rows of Chapters in the chapter row’s own markup: the cover as the picture, the name, the length as m:ss, the state, and the words in the synopsis slot. They are not chapters: no number, no pictures of their own, not counted in the chapter count or the meta line’s length. Pressing either opens the Credits sheet.'],
   ['Words drafted from the book’s details', 'The Credits sheet holds four details: Title (the production’s title), Written by (the author Publish last named, else empty), Narrated by and Copyright (the year and the author, optional). The opening is drafted as “Title. Written by Author. Narrated by credit.” and the closing as “You have been listening to Title, written by Author, narrated by credit. Copyright year holder. The End.” Changing a detail redrafts a credit whose words were not edited; edited words are kept.'],
   ['A credit names title, author and narrator', 'A credit whose words no longer name the title, the author or the narrator says which in one clause on its label (“names no narrator”, 252c) and on its row’s state. It is a warning, not a refusal: the words are the author’s.'],
@@ -64,9 +64,9 @@ write('Arke Studio.dc.html', master);
 
 let build = read('build-review.mjs').replace(/\r?\n  \/\/ BEGIN AUDIOBOOK CREDITS 252[\s\S]*?  \/\/ END AUDIOBOOK CREDITS 252(?:\r?\n)*/g, '\n');
 const plain = title => title.replaceAll('&#8217;', '’').replaceAll('&#183;', '·');
-const entries = frames.map(f => `  { group: "Opening and closing credits · turn 252", screen: ${JSON.stringify(plain(f.title))}, frame: "${f.id}", route: "${f.id < '252d' ? 'Story / Audiobook' : 'Story / Audiobook / Export'}", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Proposed 31 October 2026."] },`);
+const entries = frames.map(f => `  { group: "Opening and closing credits · turn 252", screen: ${JSON.stringify(plain(f.title))}, frame: "${f.id}", route: "${f.id < '252d' ? 'Story / Audiobook' : 'Story / Audiobook / Export'}", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Approved 31 October 2026."] },`);
 build = build.replace('const SCREENS = [', 'const SCREENS = [\n  // BEGIN AUDIOBOOK CREDITS 252\n' + entries.join('\n') + '\n  // END AUDIOBOOK CREDITS 252\n');
-const pageEntry = '{ file: "audiobook-credits-252.review.html", what: "Turn 252: opening and closing credits — two rows at the ends of Chapters, the Credits sheet, Narrated by, and the credits in chapter files and Arke Player.", state: "proposed 31 October 2026; not built" }';
+const pageEntry = '{ file: "audiobook-credits-252.review.html", what: "Turn 252: opening and closing credits — two rows at the ends of Chapters, the Credits sheet, Narrated by, and the credits in chapter files and Arke Player.", state: "approved 31 October 2026; not built" }';
 if (build.includes('file: "audiobook-credits-252.review.html"')) build = build.replace(/\{ file: "audiobook-credits-252\.review\.html",[^\n]+?\}/, pageEntry);
 else build = build.replace('const PAGES = [', 'const PAGES = [\n  ' + pageEntry + ',');
 if (!build.includes(LINK)) build = build.replace('<link rel="stylesheet" href="${TOKENS}/fonts.css">', LINK + '\n<link rel="stylesheet" href="${TOKENS}/fonts.css">');
