@@ -12,7 +12,8 @@ import { ChevronRight, PlaySolid, X } from "../components/icons.js";
 import { Portrait } from "../components/portrait.js";
 import { Button, cx } from "../components/ui.js";
 import { mediaUrl } from "../lib/media.js";
-import { readAudiobookChapter, setAudiobookCredits, useAudiobookRuns } from "../lib/store.js";
+import { RemoteVoiceUploadConfirmation, useVoiceUploadAsk } from "../components/remote-voice-upload-confirmation.js";
+import { dismissAudiobookRun, readAudiobookChapter, setAudiobookCredits, useAudiobookRuns } from "../lib/store.js";
 import { NoteRow } from "./chapter-audiobook.js";
 
 /*
@@ -109,8 +110,10 @@ function CreditWords({ which, credit, disabled, onHear, onCommit }: { which: Aud
 
 /**
  * The Credits sheet (252b, 252c): the four details the words are drafted from, then each credit's
- * words. What is not read is priced as the sheet opens, as a chapter's read is before its confirm,
- * so the press carries its price; pressing confirms it.
+ * words. Read is a chapter's read: a press reads, and where the read asks a price first (a cloud
+ * voice past what is free) the button then carries it and the next press confirms it. Opening the
+ * sheet reads nothing (codex on PR 2274): a free or local reader would otherwise make both credits
+ * before the author had pressed anything or written a word.
  */
 export function CreditsSheet({ worldId, productionId, slug, credits, refused, connected, onClose }: {
   worldId: string;
@@ -126,18 +129,21 @@ export function CreditsSheet({ worldId, productionId, slug, credits, refused, co
   const run = useAudiobookRuns()[`${worldId}/${productionId}/${AUDIOBOOK_CREDITS_ID}`];
   const reading = run?.state === "reading";
   const toRead = (["opening", "closing"] as const).filter((key) => credits[key].state !== "made");
-  const asked = useRef(false);
+  // A cloned narrator's recording goes to its vendor only on the author's word (SPEC-046 R-17,
+  // codex on PR 2274), asked as a chapter's read asks it: the word is held for the run, so the
+  // price asked next carries it, and spent when the run ends or a fresh press starts another.
+  const live = useRef<string | null>(null);
+  live.current = run?.requestId ?? null;
+  const upload = useVoiceUploadAsk(() => live.current);
+  const ended = run !== undefined && run.state !== "reading" && run.state !== "priced";
+  const drop = upload.drop;
+  useEffect(() => {
+    if (ended) drop();
+  }, [ended]);
   useEffect(() => {
     shell.current?.focus();
     return () => audio.current?.pause();
   }, []);
-  // Priced once as the sheet opens, while there is something to read: nothing is spent until the
-  // press answers the price.
-  useEffect(() => {
-    if (asked.current || !connected || toRead.length === 0 || reading || run?.state === "priced") return;
-    asked.current = true;
-    readAudiobookChapter(worldId, productionId, AUDIOBOOK_CREDITS_ID);
-  }, [connected, toRead.length, reading, run?.state, worldId, productionId]);
   const hear = (credit: AudiobookCreditView) => {
     if (credit.file === undefined) return null;
     const file = credit.file;
@@ -150,6 +156,13 @@ export function CreditsSheet({ worldId, productionId, slug, credits, refused, co
   const setDetail = (detail: "title" | "author" | "narrator" | "copyright") => (value: string | null) => setAudiobookCredits(worldId, productionId, { details: { [detail]: value ?? "" } });
   const label = toRead.length === 2 ? "Read credits" : toRead.length === 1 ? `Read ${toRead[0]}` : null;
   const price = run?.state === "priced" ? run.price : undefined;
+  const read = () => {
+    const consent = upload.allowed();
+    readAudiobookChapter(worldId, productionId, AUDIOBOOK_CREDITS_ID, {
+      ...(price !== undefined ? { confirmationToken: price.confirmationToken } : {}),
+      ...(consent !== undefined ? { voiceUploadConfirmedFor: consent } : {}),
+    });
+  };
   return (
     <>
       <div className="fy-abshow__scrim" onClick={onClose} aria-hidden="true" />
@@ -199,7 +212,11 @@ export function CreditsSheet({ worldId, productionId, slug, credits, refused, co
               size="sm"
               disabled={!connected || reading}
               data-testid="credits-read"
-              onClick={() => readAudiobookChapter(worldId, productionId, AUDIOBOOK_CREDITS_ID, price !== undefined ? { confirmationToken: price.confirmationToken } : {})}
+              onClick={() => {
+                // A press with no price waiting starts a read of its own: no earlier word rides on it.
+                if (price === undefined) upload.drop();
+                read();
+              }}
             >
               {reading ? "Reading…" : price !== undefined ? `${label} · ~${formatMicroUsd(price.estimatedMicroUsd)}` : label}
             </Button>
@@ -209,6 +226,20 @@ export function CreditsSheet({ worldId, productionId, slug, credits, refused, co
           </Button>
         </div>
       </div>
+      {/* Over the sheet, not in its scrolling body. */}
+      {upload.asked !== null && (
+        <RemoteVoiceUploadConfirmation
+          destinationLabel={upload.asked.destination}
+          destinationNotice={upload.asked.notice}
+          onCancel={() => {
+            upload.drop();
+            dismissAudiobookRun(worldId, productionId, AUDIOBOOK_CREDITS_ID);
+          }}
+          onConfirm={() => {
+            if (upload.answer() !== null) read();
+          }}
+        />
+      )}
     </>
   );
 }

@@ -17948,7 +17948,9 @@ export class Coordinator {
             // Each chapter is its own run under the book's signal and request (R-16): its events
             // say how far it is on the door's row, and it is never priced or asked again.
             runChapter: async (chapterId, priced) => {
-              const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.id === chapterId);
+              // The credits ride the book's run as a chapter of their own (design turn 252, R-214).
+              const credits = chapterId === AUDIOBOOK_CREDITS_ID ? { id: AUDIOBOOK_CREDITS_ID, file: AUDIOBOOK_CREDITS_ID, title: "Credits", retired: false, status: "drafted" } : undefined;
+              const chapter = credits ?? store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.id === chapterId);
               // A chapter gone, or retired, since the book was priced is left to its row as a
               // refused one is (codex on PR 1187): the door leaves a retired chapter out, and so
               // does the book when it reaches one, rather than reading — and paying for — what

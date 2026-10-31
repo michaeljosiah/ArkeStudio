@@ -354,14 +354,18 @@ export function AudiobookScreen() {
   const [exporting, setExporting] = useState(false);
   const [publishing, setPublishing] = useState(false);
   // The credits (design turn 252): asked for as the page opens, sent again after every change and
-  // every read of them; their sheet opens from either of their rows.
+  // every read of them; their sheet opens from either of their rows. Asked again on the door's own
+  // stamp too (codex on PR 2274): Narrated by drafts from the narrator's label and a credit is read
+  // by the book's narrator under its note, so a narrator or note changed elsewhere would otherwise
+  // leave the rows naming the old voice and calling stale takes made.
   const [crediting, setCrediting] = useState(false);
   const creditsByProduction = useAudiobookCredits();
   const creditsAnswer = prodId === undefined ? undefined : creditsByProduction[prodId];
   const credits = creditsAnswer?.credits ?? null;
+  const doorStamp = useAudiobookDoorStamp(worldId, prodId, production, world);
   useEffect(() => {
     if (connection === "open" && worldId !== undefined && prodId !== undefined) openAudiobookCredits(worldId, prodId);
-  }, [connection, worldId, prodId]);
+  }, [connection, worldId, prodId, doorStamp]);
   // A phone's bar over the page once the hero has scrolled away (199f).
   const [scrolled, setScrolled] = useState(false);
   const dock = useRef<HTMLDivElement>(null);
