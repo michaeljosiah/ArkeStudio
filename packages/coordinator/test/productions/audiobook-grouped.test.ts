@@ -31,6 +31,9 @@ import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 import { runAudiobookBook, type AudiobookBookEvent } from "../../src/productions/audiobook-book.js";
+import { AUDIOBOOK_CREDITS_ID } from "@arke-studio/contracts";
+import { updateAudiobookCredits } from "../../src/productions/audiobook.js";
+import { audiobookCreditsView, madeAudiobookCredits } from "../../src/productions/audiobook-credits.js";
 
 /**
  * Grouped reads (design turn 185): a chapter's blocks sent a few requests at a time and split
@@ -404,9 +407,10 @@ interface RunHarness {
   run: (extra?: { confirmationToken?: string; only?: string[] }) => Promise<void>;
 }
 
-async function harness(store: WorldStore, opts: { transcribe?: (text: string, request: number) => Promise<string>; heardFor?: (text: string) => string; fail?: string; failAfter?: number; failClass?: Job["failureClass"]; enqueueError?: unknown; dailyQuota?: () => DailySpeechQuota | null; actual?: number; tail?: number; model?: ManifestModel } = {}): Promise<RunHarness> {
+async function harness(store: WorldStore, opts: { transcribe?: (text: string, request: number) => Promise<string>; heardFor?: (text: string) => string; fail?: string; failAfter?: number; failClass?: Job["failureClass"]; enqueueError?: unknown; dailyQuota?: () => DailySpeechQuota | null; actual?: number; tail?: number; model?: ManifestModel; chapterId?: string } = {}): Promise<RunHarness> {
   const reader = opts.model === undefined ? READER : { provider: opts.model.provider, model: opts.model.id, voiceId: "calen", label: "Calen" };
-  const plan = await planAudiobook(store, LEDGER, "neap", { narrator: reader });
+  const chapterId = opts.chapterId ?? "neap";
+  const plan = await planAudiobook(store, LEDGER, chapterId, { narrator: reader });
   const textOf = new Map(plan.blocks.map((planned) => [planned.block.key, planned.block.text.replace(/\s+/g, " ").trim()]));
   const events: AudiobookRunEvent[] = [];
   const activity: AudiobookActivityUpdate[] = [];
@@ -419,7 +423,7 @@ async function harness(store: WorldStore, opts: { transcribe?: (text: string, re
       store,
       worldId: WORLD_ID,
       productionId: LEDGER,
-      chapterId: "neap",
+      chapterId,
       models: [opts.model ?? GROUPABLE],
       ...(opts.dailyQuota !== undefined ? { dailyQuota: opts.dailyQuota } : {}),
       narrator: reader,
@@ -1117,4 +1121,70 @@ it("new vocal events raise the reader boundary before writing a chapter record",
     await assert.rejects(readWorldMeta(w.worldDir,{supports:81}),/newer|schema|version/i);
     assert.equal((await recordOf(w.worldDir)).direction[block.key]!.plan.cues[0]!.kind,"sound");
   } finally {await w.close();}
+});
+
+describe("the audiobook's credits (design turn 252, SPEC-047 R-214, R-215)", () => {
+  const creditsOf = async (worldDir: string) => ChapterAudiobookSchema.parse(JSON.parse(await readFile(join(worldDir, "productions", LEDGER, ".audiobook", "chapters", `${AUDIOBOOK_CREDITS_ID}.json`), "utf8")));
+  const name = async (store: WorldStore) =>
+    updateAudiobookCredits(store, LEDGER, () => ({ details: { author: "Michael Josiah", narrator: "Ife Balogun" }, words: {} }), () => "2026-10-31T12:00:00.000Z");
+
+  it("reads the opening and the closing as one grouped request, checks their words and files them as a record of their own", async () => {
+    const w = await world();
+    try {
+      await name(w.store);
+      const h = await harness(w.store, { chapterId: AUDIOBOOK_CREDITS_ID });
+      await h.run();
+      await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+      assert.equal(h.sent.length, 1, "both credits in one request");
+      assert.deepEqual(h.sent[0]!.params["blocks"], ["opening", "closing"]);
+      const record = await creditsOf(w.worldDir);
+      assert.deepEqual(Object.keys(record.takes).sort(), ["closing", "opening"]);
+      assert.deepEqual(record.flags, {});
+      const view = await audiobookCreditsView(w.store, LEDGER, READER);
+      assert.equal(view.opening.state, "made");
+      assert.equal(view.opening.words, "The Ledger of Nights. Written by Michael Josiah. Narrated by Ife Balogun.");
+      assert.equal(record.takes.opening!.textHash, audiobookTextHash(view.opening.words));
+      assert.ok((view.closing.seconds ?? 0) > 0);
+      assert.doesNotMatch(`${view.opening.words} ${view.closing.words}`, /\bAI\b/);
+      assert.deepEqual(Object.keys(await madeAudiobookCredits(w.store, LEDGER, READER)).sort(), ["closing", "opening"]);
+      assert.ok((await readWorldMeta(w.worldDir)).schemaVersion >= 116, "the world is raised before the credits are written");
+    } finally {
+      await w.close();
+    }
+  });
+
+  it("flags a credit read back saying a direction aloud, and keeps it out of the editions", async () => {
+    const w = await world();
+    try {
+      await name(w.store);
+      const h = await harness(w.store, { chapterId: AUDIOBOOK_CREDITS_ID, heardFor: (text) => (text.startsWith("You have been") ? text.replace("The End.", "long pause. The End.") : text) });
+      await h.run();
+      await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+      const record = await creditsOf(w.worldDir);
+      assert.ok(record.flags.closing !== undefined, "the closing is flagged");
+      assert.ok(record.takes.opening !== undefined, "the opening is made");
+      const view = await audiobookCreditsView(w.store, LEDGER, READER);
+      assert.equal(view.closing.state, "flagged");
+      assert.deepEqual(Object.keys(await madeAudiobookCredits(w.store, LEDGER, READER)), ["opening"]);
+    } finally {
+      await w.close();
+    }
+  });
+
+  it("goes stale when a detail changes the drafted words, and keeps words the author wrote", async () => {
+    const w = await world();
+    try {
+      await name(w.store);
+      const h = await harness(w.store, { chapterId: AUDIOBOOK_CREDITS_ID });
+      await h.run();
+      await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+      await updateAudiobookCredits(w.store, LEDGER, (current) => ({ details: { ...current!.details, narrator: "Ife A. Balogun" }, words: { closing: "That was The Ledger of Nights, by Michael Josiah, read by Ife Balogun. The End." } }), () => "2026-10-31T12:05:00.000Z");
+      const view = await audiobookCreditsView(w.store, LEDGER, READER);
+      assert.equal(view.opening.state, "stale");
+      assert.equal(view.closing.edited, true);
+      assert.deepEqual(view.closing.missing, ["narrator"], "the closing no longer names the narrator as now set");
+    } finally {
+      await w.close();
+    }
+  });
 });

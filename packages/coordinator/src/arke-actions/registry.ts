@@ -615,6 +615,7 @@ const CLIENT_COMMAND_METADATA = {
   "stage-audiobook-take": action("production", "command", "voice", "host-file-access", ["chapters"]),
   "keep-audiobook-take": action("production", "command", "voice", "privacy-sensitive", ["chapters"]),
   "keep-audiobook-split": action("production", "command", "voice", "authored-change", ["chapters"]),
+  "set-audiobook-credits": action("production", "command", "voice", "authored-change", ["chapters"]),
   "discard-audiobook-take": action("production", "command", "voice", "host-file-access", []),
   // One narrator performs the cast, and a narrator for the book (turn 155g/h): notes and the
   // narrator are commands on the book record; the quote reads; hearing a line may leave the machine.
@@ -638,6 +639,7 @@ const CLIENT_COMMAND_METADATA = {
   // The door and the book (SPEC-047 R-29, R-16): a read of every chapter's state, and the
   // chapter's run over the whole book.
   "open-audiobook": readOnly(QUERY),
+  "open-audiobook-credits": readOnly(QUERY),
   // The book as a listener hears it, and a picture on a block (turn 186): a read, and a command on the record.
   "open-audiobook-listening": readOnly(QUERY),
   "quote-audiobook-motion": readOnly(QUERY),

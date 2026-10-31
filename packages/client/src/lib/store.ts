@@ -456,6 +456,8 @@ interface StoreState {
    * the chapter's run over the whole book, keyed by production like the chapters' by chapter.
    */
   audiobookDoor: Record<string, { door: import("@arke-studio/contracts").AudiobookDoor | null; requestId: string; refused?: string }>;
+  /** The audiobook's credits (design turn 252), by production, as the coordinator last answered. */
+  audiobookCredits: Record<string, { credits: import("@arke-studio/contracts").AudiobookCreditsView | null; refused?: string }>;
   audiobookBook: Record<
     string,
     {
@@ -663,6 +665,7 @@ let current: StoreState = {
   heardLines: {},
   audiobookAsks: {},
   audiobookDoor: {},
+  audiobookCredits: {},
   audiobookBook: {},
   audiobookNotes: {},
   manuscripts: {},
@@ -1882,6 +1885,7 @@ function handleFrame(json: string): void {
       // A reconnect replays no answer to a question in flight (codex on PR 1479): the asker asks again.
       audiobookAsks: changedWorld || rejoined ? {} : current.audiobookAsks,
       audiobookDoor: changedWorld ? {} : current.audiobookDoor,
+      audiobookCredits: changedWorld ? {} : current.audiobookCredits,
       audiobookBook: changedWorld || rejoined ? {} : current.audiobookBook,
       audiobookNotes: changedWorld ? {} : current.audiobookNotes,
       // Both are keyed by sheet slug alone, and slugs recur across worlds: a failure left over
@@ -1920,6 +1924,7 @@ function handleFrame(json: string): void {
     let heardLines = current.heardLines;
     let audiobookAsks = current.audiobookAsks;
     let audiobookDoor = current.audiobookDoor;
+    let audiobookCredits = current.audiobookCredits;
     let audiobookBook = current.audiobookBook;
     let audiobookNotes = current.audiobookNotes;
     let manuscripts = current.manuscripts;
@@ -2667,6 +2672,13 @@ function handleFrame(json: string): void {
       if (landDoorAnswer(event.worldId, event.productionId, event.requestId) && current.state?.world?.meta.worldId === event.worldId) {
         audiobookDoor = { ...audiobookDoor, [event.productionId]: { door: event.door, requestId: event.requestId, ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
       }
+    } else if (event.type === "audiobook.credits") {
+      // Only for the world that is open: productions recur by name across worlds. A refusal keeps
+      // the credits last shown, with its clause beside them.
+      if (current.state?.world?.meta.worldId === event.worldId) {
+        const held = audiobookCredits[event.productionId]?.credits ?? null;
+        audiobookCredits = { ...audiobookCredits, [event.productionId]: { credits: event.credits ?? held, ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
+      }
     } else if (event.type === "audiobook.book-started") {
       // The book's state is keyed by production, and productions recur by name across worlds:
       // a run's late word from a world since closed is not this world's (codex on PR 1187).
@@ -3104,6 +3116,7 @@ function handleFrame(json: string): void {
       heardLines,
       audiobookAsks,
       audiobookDoor,
+      audiobookCredits,
       audiobookBook,
       audiobookNotes,
       manuscripts,
@@ -6789,6 +6802,24 @@ export function useAudiobookDoors(): StoreState["audiobookDoor"] {
   return useStore().audiobookDoor;
 }
 
+export function useAudiobookCredits(): StoreState["audiobookCredits"] {
+  return useStore().audiobookCredits;
+}
+
+/** The audiobook's credits (design turn 252), answered as `audiobook.credits`. */
+export function openAudiobookCredits(worldId: string, productionId: string): boolean {
+  return send({ kind: "open-audiobook-credits", worldId, productionId });
+}
+
+/** A credit detail, or a credit's words written over its draft (R-211); null words go back to the draft. */
+export function setAudiobookCredits(
+  worldId: string,
+  productionId: string,
+  change: { details?: import("@arke-studio/contracts").AudiobookCreditDetails; words?: { opening?: string | null; closing?: string | null } },
+): boolean {
+  return send({ kind: "set-audiobook-credits", worldId, productionId, ...change });
+}
+
 export function useAudiobookBooks(): StoreState["audiobookBook"] {
   return useStore().audiobookBook;
 }
@@ -7115,6 +7146,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
   heardLines: {},
   audiobookAsks: {},
     audiobookDoor: {},
+    audiobookCredits: {},
     audiobookBook: {},
     audiobookNotes: {},
   manuscripts: {},

@@ -562,3 +562,97 @@ describe("on a phone (199f)", () => {
     assert.ok(q('[data-testid="audiobook-bar-more"]'), "with its ⋯");
   });
 });
+
+describe("the credits (design turn 252, SPEC-047 R-210 – R-213)", () => {
+  const OPENING = "Inkbound. Written by Michael Josiah. Narrated by Ife Balogun.";
+  const CLOSING = "You have been listening to Inkbound, written by Michael Josiah, narrated by Ife Balogun. Copyright 2026 Michael Josiah. The End.";
+  const credits = (opening: Partial<{ words: string; missing: Array<"title" | "author" | "narrator"> }> = {}) => ({
+    details: { title: "Inkbound", author: "Michael Josiah", narrator: "Ife Balogun", copyright: "2026 Michael Josiah" },
+    voiceLabel: "Low tide",
+    opening: { words: opening.words ?? OPENING, edited: opening.words !== undefined, missing: opening.missing ?? [], state: "made" as const, seconds: 9, file: "artifacts/inkbound-opening.wav" },
+    closing: { words: CLOSING, edited: false, missing: [], state: "not made" as const },
+  });
+  const answer = async (view: ReturnType<typeof credits>) =>
+    act(async () => __applyEventForTest({ at: AT, type: "audiobook.credits", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", credits: view }));
+
+  it("asks for the credits as the page opens, and draws one row at each end of Chapters", async () => {
+    const mounted = await mount(inkbound(91));
+    assert.ok(mounted.sent.some((message) => message.kind === "open-audiobook-credits"), "the credits are asked for");
+    await answer(credits());
+    const rows = all('[data-testid="audiobook-rows"] > div');
+    assert.equal(rows[0]!.getAttribute("data-credit"), "opening", "the opening comes first");
+    assert.equal(rows.at(-1)!.getAttribute("data-credit"), "closing", "the closing comes last");
+    assert.equal(rows.filter((row) => row.getAttribute("data-testid") === "audiobook-row").length, ROWS.length, "the chapters stay as they were");
+    assert.match(rows[0]!.textContent ?? "", /Opening credits.*0:09 recorded/);
+    assert.match(rows[0]!.textContent ?? "", /Narrated by Ife Balogun/);
+    assert.match(rows.at(-1)!.textContent ?? "", /Closing credits.*not read/);
+  });
+
+  it("opens the Credits sheet without reading, and a press asks the price the next press confirms", async () => {
+    const mounted = await mount(inkbound(91));
+    await answer(credits());
+    await press(q('[data-credit="closing"] .fy-abshow__go'));
+    assert.ok(q('[data-testid="credits-sheet"]'), "the sheet opens");
+    assert.deepEqual(all('[data-testid="credits-sheet"] .fy-vd__note-k').map((label) => label.textContent), ["Title", "Written by", "Narrated by", "Copyright"]);
+    // A free or local reader answers a read with takes, not a price (codex on PR 2274).
+    assert.equal(mounted.sent.some((message) => message.kind === "read-audiobook-chapter"), false, "opening the sheet reads nothing");
+    const read = () => q('[data-testid="credits-read"]');
+    assert.equal(read()?.textContent, "Read closing");
+    await press(read());
+    const asked = mounted.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.equal(asked.chapterFile, "audiobook-credits");
+    assert.equal(asked.confirmationToken, undefined);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "audiobook-credits", characters: 130, estimatedMicroUsd: 10_000, confirmationToken: "token-1", voices: [] }));
+    assert.equal(read()?.textContent, "Read closing · ~$0.01");
+    await press(read());
+    const confirmed = mounted.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.equal(confirmed.confirmationToken, "token-1");
+  });
+
+  it("asks a cloned narrator's consent, carries it to the price, and declining clears the run (codex on PR 2274)", async () => {
+    const mounted = await mount(inkbound(91));
+    await answer(credits());
+    await press(q('[data-credit="closing"] .fy-abshow__go'));
+    await press(q('[data-testid="credits-read"]'));
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "audiobook-credits" };
+    const requestId = "01J8F3K2QW9VZX4N7M0RTYB6H2";
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId, toMake: 1, blocks: 2 }));
+    const ask = (token: string) =>
+      act(async () => __applyEventForTest({ at: AT, type: "voice.upload-confirmation-required", requestId, worldId: FIXTURE_WORLD_ID, command: "read-audiobook-chapter", destinationLabel: "ElevenLabs", confirmationToken: token, destinationNotice: "The recording is saved as a voice on the account." }));
+    await ask("engine-1");
+    assert.equal(q('[data-testid="remote-voice-upload-notice"]')?.textContent, "The recording is saved as a voice on the account.");
+    const button = (pattern: RegExp) => all('[data-testid="remote-voice-upload-confirmation"] button').find((each) => pattern.test(each.textContent ?? ""));
+    await press(button(/allow|send|confirm|yes/i) ?? null);
+    const consented = mounted.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.equal(consented.voiceUploadConfirmedFor, "engine-1");
+    assert.equal(q('[data-testid="remote-voice-upload-confirmation"]'), null);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 130, estimatedMicroUsd: 10_000, confirmationToken: "token-1", voices: [] }));
+    await press(q('[data-testid="credits-read"]'));
+    const both = mounted.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.equal(both.confirmationToken, "token-1");
+    assert.equal(both.voiceUploadConfirmedFor, "engine-1", "the price's answer carries the consent");
+    // Declined: the run came back without a finished event, so the sheet clears its own.
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId, toMake: 1, blocks: 2 }));
+    await ask("engine-2");
+    await press(button(/cancel|not now/i) ?? null);
+    assert.equal(q('[data-testid="remote-voice-upload-confirmation"]'), null);
+    assert.equal(q('[data-testid="credits-read"]')?.textContent, "Read closing", "the run is cleared and the press is free again");
+  });
+
+  it("asks for the credits again when the narrator changes (codex on PR 2274)", async () => {
+    const mounted = await mount(inkbound(91));
+    await answer(credits());
+    const asks = () => mounted.sent.filter((message) => message.kind === "open-audiobook-credits").length;
+    const before = asks();
+    await act(async () => __applyEventForTest({ at: AT, type: "narrator.changed", voice: { provider: "kokoro", model: "kokoro-82m", voiceId: "af_heart", label: "Heart" } }));
+    assert.ok(asks() > before, "Narrated by drafts from the narrator: the credits are asked again");
+  });
+
+  it("says in one clause when a credit no longer names the narrator, on its row and its label", async () => {
+    await mount(inkbound(91));
+    await answer(credits({ words: "Inkbound, by Michael Josiah.", missing: ["narrator"] }));
+    assert.equal(q('[data-credit="opening"] [data-testid="audiobook-credit-state"]')?.textContent, "names no narrator");
+    await press(q('[data-credit="opening"] .fy-abshow__go'));
+    assert.equal(q('[data-testid="audiobook-credit"][data-credit="opening"] [data-testid="audiobook-credit-label-state"]')?.textContent, "names no narrator");
+  });
+});

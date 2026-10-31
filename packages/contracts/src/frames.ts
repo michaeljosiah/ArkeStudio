@@ -17,6 +17,7 @@ import { AccountPageSchema } from "./account.js";
 import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
 import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema, AudiobookTurnPlaceSchema } from "./audiobook.js";
+import { AudiobookCreditDetailsSchema, CREDIT_WORDS_MAX } from "./audiobook-credits.js";
 import { AudiobookPictureSourceSchema } from "./audiobook-pictures.js";
 import { AudiobookScopeSchema } from "./audiobook-listening.js";
 import { AudiobookVideoOptionsSchema } from "./audiobook-video.js";
@@ -3760,6 +3761,32 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * order with their takes, gaps and pictures, answered as `audiobook.listening`. Nothing written.
    */
   z.object({ kind: z.literal("open-audiobook-listening"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, scope: AudiobookScopeSchema.optional() }).strict(),
+  /**
+   * The audiobook's opening and closing credits (design turn 252, SPEC-047 R-210 – R-213): their
+   * details, words and states, answered as `audiobook.credits`. Read as a chapter is, by
+   * `read-audiobook-chapter` naming `audiobook-credits`. Nothing written by opening.
+   */
+  z.object({ kind: z.literal("open-audiobook-credits"), worldId: UlidSchema, productionId: SlugSchema }).strict(),
+  /**
+   * A detail set, or a credit's words written over its draft (R-211); words set to null go back
+   * to the draft. A detail changed redrafts every credit whose words were never written over.
+   * Answered as `audiobook.credits`.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-credits"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      details: AudiobookCreditDetailsSchema.optional(),
+      words: z
+        .object({
+          opening: z.string().max(CREDIT_WORDS_MAX).nullable().optional(),
+          closing: z.string().max(CREDIT_WORDS_MAX).nullable().optional(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
   z.object({ kind: z.literal("quote-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), model: z.string().min(1), params: AudiobookMotionQuoteSchema.shape.params, prompt: AudiobookMotionQuoteSchema.shape.prompt, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("make-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), quote: AudiobookMotionQuoteSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("stop-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), requestId: UlidSchema }).strict(),

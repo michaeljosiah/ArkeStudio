@@ -219,7 +219,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 113: remembered story facts and conditional routing (SPEC-063, turn 240).
 // 114: the graphic novel — comic.json, comic scripts and page takes (SPEC-064, issue 2219).
 // 115: a graphic novel's style and adaptation — `style`, `adapts`, a panel's `source`, Arke's drafted pages (turns 248, 249).
-export const SUPPORTED_SCHEMA_VERSION = 115;
+// 116: the audiobook's opening and closing credits — `.audiobook/credits.json` and their reading record (turn 252, SPEC-047 R-215).
+export const SUPPORTED_SCHEMA_VERSION = 116;
 
 export class WorldOpenError extends Error {
   constructor(

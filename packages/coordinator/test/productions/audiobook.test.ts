@@ -2464,3 +2464,60 @@ describe("audiobook background API", () => {
     });
   });
 });
+
+describe("the credits through the coordinator (design turn 252, SPEC-047 R-210 – R-215)", () => {
+  const credited = (events: readonly DomainEvent[]) => events.filter((event): event is Extract<DomainEvent, { type: "audiobook.credits" }> => event.type === "audiobook.credits");
+
+  it("answers open with the drafted credits, and a detail set redrafts them without a word about how the voice was made", async () => {
+    await withHarness({}, async ({ worldDir, send, events }) => {
+      await send({ kind: "open-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER });
+      const opened = credited(events).at(-1)!.credits!;
+      assert.equal(opened.opening.state, "not made");
+      assert.match(opened.opening.words, /^The Ledger of Nights\./);
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { author: "Michael Josiah", narrator: "Ife Balogun" } });
+      const set = credited(events).at(-1)!.credits!;
+      assert.equal(set.opening.words, "The Ledger of Nights. Written by Michael Josiah. Narrated by Ife Balogun.");
+      assert.doesNotMatch(`${set.opening.words} ${set.closing.words}`, /\bAI\b/);
+      const saved = JSON.parse(await readFile(join(worldDir, "productions", LEDGER, ".audiobook", "credits.json"), "utf8")) as { details: Record<string, string> };
+      assert.deepEqual(saved.details, { author: "Michael Josiah", narrator: "Ife Balogun" });
+    });
+  });
+
+  it("keeps words written over a draft, and words set back to the draft go back to drafting", async () => {
+    await withHarness({}, async ({ send, events }) => {
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { narrator: "Ife Balogun" }, words: { closing: "That was The Ledger of Nights, read by Ife Balogun. The End." } });
+      assert.equal(credited(events).at(-1)!.credits!.closing.edited, true);
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, words: { closing: null } });
+      const back = credited(events).at(-1)!.credits!;
+      assert.equal(back.closing.edited, false);
+      assert.match(back.closing.words, /The End\.$/);
+    });
+  });
+
+  it("takes the credits as a chapter to read, under their reserved id", async () => {
+    await withHarness({}, async ({ send, events }) => {
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { narrator: "Ife Balogun" } });
+      await read(send, { chapterFile: "audiobook-credits" });
+      const priced = events.find((event): event is Extract<DomainEvent, { type: "audiobook.priced" }> => event.type === "audiobook.priced" && event.chapterId === "audiobook-credits");
+      const finished = events.find((event): event is Extract<DomainEvent, { type: "audiobook.finished" }> => event.type === "audiobook.finished" && event.chapterId === "audiobook-credits");
+      assert.ok(priced !== undefined || finished !== undefined, "the read was taken, not dropped as an unknown chapter");
+      assert.ok(credited(events).length >= 2, "the credits are answered again once the read ends");
+    });
+  });
+});
+
+describe("the credits read with the book (design turn 252, SPEC-047 R-214)", () => {
+  const TWO = [
+    { id: "bm_george", label: "George", attributes: [] },
+    { id: "af_heart", label: "Heart", attributes: [] },
+  ];
+  it("reads them after the chapters once the book has credits, and refuses no chapter for them", () =>
+    withHarness({ localVoices: TWO }, async ({ worldDir, events, send }) => {
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { narrator: "Ife Balogun" } });
+      await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      const finished = events.filter((event): event is Extract<DomainEvent, { type: "audiobook.book-finished" }> => event.type === "audiobook.book-finished").at(-1);
+      assert.equal(finished?.chaptersRefused, 0, finished?.reason);
+      const credits = await readRecord(worldDir, "audiobook-credits");
+      assert.deepEqual(Object.keys(credits.takes).sort(), ["closing", "opening"]);
+    }));
+});

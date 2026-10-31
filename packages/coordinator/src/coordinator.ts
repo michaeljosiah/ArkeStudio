@@ -421,6 +421,9 @@ import { AudioStudioPreviews } from "./productions/audio-studio-preview.js";
 import { renderAudioStudioMix } from "./productions/audio-studio-mix.js";
 import { audiobookPlayerFile, exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
 import { exportAudiobookChapters } from "./productions/audiobook-chapters.js";
+import { AUDIOBOOK_CREDIT_KEYS, AUDIOBOOK_CREDITS_ID, audiobookCreditFacts, draftAudiobookCredit } from "@arke-studio/contracts";
+import { adoptPublishedAuthor, audiobookCreditsView } from "./productions/audiobook-credits.js";
+import { audiobookCreditDefaults, updateAudiobookCredits } from "./productions/audiobook.js";
 import { exportArkePlayer, listArkePlayerPackages } from "./productions/arke-player-export.js";
 import { readStoryExport } from "./productions/story-export.js";
 import { guideVoiceLines, setGuideEntry, setGuideTeasers } from "./productions/world-guide.js";
@@ -1781,6 +1784,24 @@ export class Coordinator {
    * Without it the room is the book's, and carries each chapter's own narrator for `chapterRoom`
    * to read in, so a run across the book reads every part in its own voice.
    */
+  /** The credits' view, sent to every window (design turn 252); a failure to build it is said in one clause. */
+  private async emitAudiobookCredits(store: WorldStore, productionId: string): Promise<void> {
+    try {
+      const room = await this.audiobookNarrator(store, this.voiceService, productionId);
+      const credits = await audiobookCreditsView(store, productionId, room.narrator);
+      this.emit({ at: new Date().toISOString(), type: "audiobook.credits", worldId: store.worldId, productionId, credits });
+    } catch (err) {
+      this.emit({ at: new Date().toISOString(), type: "audiobook.credits", worldId: store.worldId, productionId, refused: describeCoordinatorError(err) });
+    }
+  }
+
+  /** Written by from Publish (R-211): its draft's author, else its newest edition's, into the credits once. */
+  private async adoptCreditsAuthor(store: WorldStore, productionId: string): Promise<void> {
+    const draft = await this.storyPublications.settings(store.worldId, productionId).catch(() => undefined);
+    const author = draft?.author?.trim() || (await this.storyPublications.list(store.worldId, productionId).catch(() => []))[0]?.settings.author;
+    await adoptPublishedAuthor(store, productionId, author, () => store.now());
+  }
+
   private async audiobookNarrator(store: WorldStore, voice: VoiceService | null, productionId?: string, requireAvailable = false, chapter?: string): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[]; designedBinding?: DesignedBinding; unavailable?: string; chapterNarrators?: Record<string, ChapterNarration> }> {
     const { chosen, narrationCatalogue, catalogue, designedBinding } = await this.appNarrator(store, voice);
     const read = productionId === undefined ? null : await readAudiobookBook(store, productionId).catch(() => null);
@@ -2175,7 +2196,7 @@ export class Coordinator {
     const production = bundle.productions.find(p => p.meta.id === ids.productionId);
     const chapter = production?.chapters.find(c => c.id === ids.chapterId);
     let activityRequest = 0;
-    const initial = { id: runId, ...ids, chapterFile: chapter?.file ?? ids.chapterId, chapterTitle: chapter?.title || "Chapter narration", ...(chapter ? { chapterOrder: chapter.order } : {}), productionTitle: production?.meta.title ?? ids.productionId, worldName: bundle.meta.name, scope: options.only ? "block" as const : "chapter" as const, ...(options.only?.length === 1 ? { block: options.only[0]! } : {}), startedAt: at() };
+    const initial = { id: runId, ...ids, chapterFile: chapter?.file ?? ids.chapterId, chapterTitle: chapter?.title || (ids.chapterId === AUDIOBOOK_CREDITS_ID ? "Credits" : "Chapter narration"), ...(chapter ? { chapterOrder: chapter.order } : {}), productionTitle: production?.meta.title ?? ids.productionId, worldName: bundle.meta.name, scope: options.only ? "block" as const : "chapter" as const, ...(options.only?.length === 1 ? { block: options.only[0]! } : {}), startedAt: at() };
     try {
     await runAudiobookChapter({
       activity: async patch => {
@@ -16824,7 +16845,12 @@ export class Coordinator {
         // the harness around it: the narrator, the catalogue, the queue and the events.
         const store = audiobookStore ?? this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+        const found = production?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        // The credits are read as a chapter of their own, under their reserved id (design turn 252,
+        // SPEC-047 R-214): priced, grouped, checked and flagged as any chapter's blocks are.
+        const credits = found === undefined && production !== undefined && msg.chapterFile === AUDIOBOOK_CREDITS_ID;
+        const chapter = found ?? (credits ? { id: AUDIOBOOK_CREDITS_ID, file: AUDIOBOOK_CREDITS_ID } : undefined);
         if (!chapter) return;
         const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
         if (this.readingAudiobooks.has(key)) return;
@@ -16852,6 +16878,7 @@ export class Coordinator {
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         let ended = false;
         try {
+          if (credits) await this.adoptCreditsAuthor(store, msg.productionId);
           const room = await this.audiobookNarrator(store, voice, msg.productionId, true, chapter.id);
           await this.readAudiobookChapter(store, voice, room, ids, requestId, msg.kind, control.signal, {
             ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
@@ -16874,6 +16901,46 @@ export class Coordinator {
         // before, the replay told every window a run with no counts was going, and nothing
         // followed to say otherwise (the door's live check on slice 3).
         if (ended) this.refreshIfStillOpen(store);
+        // The page's rows and the Credits sheet say what the read left (design turn 252).
+        if (credits) await this.emitAudiobookCredits(store, msg.productionId);
+        return;
+      }
+      case "open-audiobook-credits": {
+        // The credits as the page and the sheet draw them (design turn 252, SPEC-047 R-210 – R-213).
+        const store = audiobookStore ?? this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        await this.adoptCreditsAuthor(store, msg.productionId).catch(() => {});
+        await this.emitAudiobookCredits(store, msg.productionId);
+        return;
+      }
+      case "set-audiobook-credits": {
+        // A detail, or a credit's words written over its draft (R-211). Words that are the draft
+        // again, or none, go back to the draft, so a detail changed later redrafts them.
+        const store = audiobookStore ?? this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+        if (!production) return;
+        try {
+          await this.adoptCreditsAuthor(store, msg.productionId).catch(() => {});
+          const room = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          await updateAudiobookCredits(store, msg.productionId, (current) => {
+            const details = { ...current?.details, ...msg.details };
+            const facts = audiobookCreditFacts(details, audiobookCreditDefaults(production, room.narrator));
+            const words = { ...current?.words };
+            for (const credit of AUDIOBOOK_CREDIT_KEYS) {
+              const next = msg.words?.[credit];
+              if (next === undefined) continue;
+              const trimmed = next?.trim() ?? "";
+              if (trimmed === "" || trimmed === draftAudiobookCredit(credit, facts)) delete words[credit];
+              else words[credit] = trimmed;
+            }
+            return { details, words };
+          }, () => store.now());
+          await this.emitAudiobookCredits(store, msg.productionId);
+        } catch (err) {
+          this.emit({ at: new Date().toISOString(), type: "audiobook.credits", worldId: msg.worldId, productionId: msg.productionId, refused: describeCoordinatorError(err) });
+        }
         return;
       }
       case "open-audiobook": {
@@ -17853,6 +17920,8 @@ export class Coordinator {
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         let ended = false;
         try {
+          // Written by from Publish first, so the credits read with the book say what their sheet says.
+          await this.adoptCreditsAuthor(store, msg.productionId).catch(() => {});
           const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId, true)), models: this.opts.manifest?.models ?? [], creditLeftMicroUsd: await this.freeCreditLeftNow(), freePlanAllowance: await this.freePlanAllowanceNow(), dailyQuota: (model: string) => this.dailyQuotaFor(model), transcriber: this.wordTimer(voice) !== undefined };
           if (room.narrator.provider === "kokoro" && !voice.localSpeechConfigured) {
             this.emit({ at: at(), type: "audiobook.book-finished", ...ids, outcome: "unavailable", chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0,
@@ -17879,7 +17948,9 @@ export class Coordinator {
             // Each chapter is its own run under the book's signal and request (R-16): its events
             // say how far it is on the door's row, and it is never priced or asked again.
             runChapter: async (chapterId, priced) => {
-              const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.id === chapterId);
+              // The credits ride the book's run as a chapter of their own (design turn 252, R-214).
+              const credits = chapterId === AUDIOBOOK_CREDITS_ID ? { id: AUDIOBOOK_CREDITS_ID, file: AUDIOBOOK_CREDITS_ID, title: "Credits", retired: false, status: "drafted" } : undefined;
+              const chapter = credits ?? store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.id === chapterId);
               // A chapter gone, or retired, since the book was priced is left to its row as a
               // refused one is (codex on PR 1187): the door leaves a retired chapter out, and so
               // does the book when it reaches one, rather than reading — and paying for — what
@@ -17948,6 +18019,8 @@ export class Coordinator {
         // Struck off before the refresh, as the chapter's run is: the replay must not say a
         // book that has ended is still being read.
         if (ended) this.refreshIfStillOpen(store);
+        // The credits were read with it (design turn 252): the page's rows say what they hold now.
+        await this.emitAudiobookCredits(store, msg.productionId);
         return;
       }
       case "stop-audiobook-book": {

@@ -9,15 +9,14 @@ const PLAY = (size = 16) => `<svg width="${size}" height="${size}" viewBox="0 0 
 const DOTS = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>';
 const GO = svg('<path d="m9 6 6 6-6 6"/>');
 const X = svg('<path d="M6 6l12 12M18 6L6 18"/>', 15);
-const DOWN = svg('<path d="m6 9 6 6 6-6"/>', 14);
-const TICK = svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 14, 2.4);
 const ALERT = svg('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>', 14);
 
 const TITLE = 'Na love or Juju';
 const AUTHOR = 'Michael Josiah';
 const COVER = 'assets/t252-nloj-cover-wide.jpg';
-const OPENING = `${TITLE}. Written by ${AUTHOR}. Narrated by an AI voice.`;
-const CLOSING = `You have been listening to ${TITLE}, written by ${AUTHOR}, narrated by an AI voice. Copyright 2026 ${AUTHOR}. The End.`;
+const NARRATOR = 'Ife Balogun';
+const OPENING = `${TITLE}. Written by ${AUTHOR}. Narrated by ${NARRATOR}.`;
+const CLOSING = `You have been listening to ${TITLE}, written by ${AUTHOR}, narrated by ${NARRATOR}. Copyright 2026 ${AUTHOR}. The End.`;
 
 const hero = () => `<div class="v199-hero"><img class="bd" src="assets/nloj-backdrop.jpg" alt=""><div class="sl"></div><div class="sb"></div><div class="v199-wrap" style="--pad:56px"><h1>${TITLE}</h1><div class="v199-meta">Audiobook &#183; 26 chapters &#183; 12 h 9 m recorded &#183; Read by Nigerian Woman 2</div><div class="v199-acts"><span class="v199-btn pri">${PLAY()}Continue <em>&#183; Chapter 10 &#183; 6:57</em></span><span class="v199-btn">Publish</span><span class="v199-btn ic">${DOTS}</span></div></div></div>`;
 const cast = () => `<h2 class="v199-h">Cast</h2><div class="v199-cast"><div class="v199-card"><div class="im"><img src="assets/nloj-backdrop.jpg" alt="" style="object-position:62% center"><span class="wv">${svg('<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/>', 15, 2)}</span></div><div class="nm">Nigerian Woman 2</div><div class="rl">Narrator</div></div><div class="v199-card"><div class="im"><img src="assets/nloj-ade.jpg" alt="" style="object-position:center 20%"></div><div class="nm">Adeyemi &#8220;Ade&#8221; Akinola</div></div><div class="v199-card"><div class="im"><img src="assets/nloj-tunde.jpg" alt="" style="object-position:center 20%"></div><div class="nm">Tunde</div></div><div class="v199-card"><div class="im"><img src="assets/nloj-ife.jpg" alt="" style="object-position:center 20%"></div><div class="nm">Ife</div></div></div>`;
@@ -40,15 +39,14 @@ const body = (inner, extra = '') => `<div class="v199-wrap v199-body" style="--p
 // The Credits sheet, in 199e's grammar: the details as rows, then each credit's words over its field.
 const field = (value) => `<span class="cr252-in">${value}</span>`;
 const credit = (name, data, words, warn = false) => `<div class="v199-lbl" style="margin-top:4px"><span>${name}</span><span class="mono${warn ? ' cr252-w' : ''}">${data}</span></div><textarea aria-label="${name}" style="margin-top:-6px;height:${words.length > 90 ? 88 : 64}px">${words}</textarea>`;
-const sheet = ({ narrated, openingWords = OPENING, openingData = `${PLAY(11)} 0:09`, openingWarn = false, closingData = 'not read', foot, menu = '' }) => `<div class="v199-scrim"></div><div class="v199-sheet"><div class="hd"><h3>Credits</h3><span class="v199-x">${X}</span></div><div class="bdy">
+const sheet = ({ openingWords = OPENING, openingData = `${PLAY(11)} 0:09`, openingWarn = false, closingData = 'not read', foot }) => `<div class="v199-scrim"></div><div class="v199-sheet"><div class="hd"><h3>Credits</h3><span class="v199-x">${X}</span></div><div class="bdy">
 <div class="v199-kv"><b>Title</b>${field(TITLE)}</div>
 <div class="v199-kv"><b>Written by</b>${field(AUTHOR)}</div>
-<div class="v199-sp key cr252-pick"><b>Narrated by</b><span class="v">${narrated}</span><span class="c">${DOWN}</span>${menu}</div>
+<div class="v199-kv"><b>Narrated by</b>${field(NARRATOR)}</div>
 <div class="v199-kv"><b>Copyright</b>${field(`&#169; 2026 ${AUTHOR}`)}</div>
 ${credit('Opening credits', openingData, openingWords, openingWarn)}
 ${credit('Closing credits', closingData, CLOSING)}
 </div><div class="ft">${foot}</div></div>`;
-const MENU = `<div class="v199-menu cr252-menu"><div class="it on"><span>an AI voice</span><em>${TICK}</em></div><div class="it"><span>Nigerian Woman 2, an AI voice</span></div><div class="it"><span>Your words</span></div></div>`;
 
 // The Export sheet in 235d's grammar, over 235's page.
 const PAGE = '<div class="ap235-page">' + [28, 92, 88, 95, 60, 90, 84, 93, 70, 89, 91, 55, 80, 66, 88, 74].map((w) => `<i style="width:${w}%"></i>`).join('') + '</div>';
@@ -67,21 +65,19 @@ export const FRAMES = [
     '252b The foot of Chapters: Closing credits after the last chapter, not read yet; pressed, the Credits sheet opens from the side, as Reading does: the details, then each credit&#8217;s words, and Read for what is not read',
     1180, 860,
     body(`<div style="padding-top:8px">${row(CH[25])}${row(CH[26])}${closing()}</div>`),
-    sheet({ narrated: 'an AI voice<small>Nigerian Woman 2</small>', foot: `<span class="v184-btn">Hear opening</span><span class="v184-btn primary">Read closing <em>&#183; ~$0.01</em></span>` }),
+    sheet({ foot: `<span class="v184-btn primary">Read closing <em>&#183; ~$0.01</em></span><span class="v184-btn">Done</span>` }),
   )],
 
-  ['c', 'Who it says read the book', 1180, 860, () => shell(
-    '252c Narrated by, open: an AI voice, the voice by name and an AI voice, or the author&#8217;s own words; an opening that no longer names the narrator says so in one clause',
+  ['c', 'A credit that drops the narrator', 1180, 860, () => shell(
+    '252c Narrated by is the name the narration is credited to; an opening written over so that it no longer names the narrator says so in one clause, on its label and its row',
     1180, 860,
     body(`<div style="padding-top:8px">${row(CH[25])}${row(CH[26])}${closing({ length: '0:14 recorded' })}</div>`),
     sheet({
-      narrated: 'an AI voice<small>Nigerian Woman 2</small>',
-      menu: MENU,
       openingWords: `${TITLE}, by ${AUTHOR}.`,
       openingData: `<span class="cr252-wi">${ALERT}</span>names no narrator`,
       openingWarn: true,
       closingData: `${PLAY(11)} 0:14`,
-      foot: `<span class="v184-btn">Hear opening</span><span class="v184-btn primary">Read opening <em>&#183; ~$0.01</em></span>`,
+      foot: `<span class="v184-btn primary">Read opening <em>&#183; ~$0.01</em></span><span class="v184-btn">Done</span>`,
     }),
   )],
 

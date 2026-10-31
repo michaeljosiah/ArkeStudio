@@ -31,7 +31,7 @@ const SCREENS = [
   // BEGIN AUDIOBOOK CREDITS 252
   { group: "Opening and closing credits · turn 252", screen: "Opening credits open the book, above Chapter 1", frame: "252a", route: "Story / Audiobook", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Approved 31 October 2026."] },
   { group: "Opening and closing credits · turn 252", screen: "Closing credits close it; the Credits sheet", frame: "252b", route: "Story / Audiobook", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Approved 31 October 2026."] },
-  { group: "Opening and closing credits · turn 252", screen: "Who it says read the book", frame: "252c", route: "Story / Audiobook", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Approved 31 October 2026."] },
+  { group: "Opening and closing credits · turn 252", screen: "A credit that drops the narrator", frame: "252c", route: "Story / Audiobook", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Approved 31 October 2026."] },
   { group: "Opening and closing credits · turn 252", screen: "Chapter files: the credits as files of their own", frame: "252d", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Approved 31 October 2026."] },
   { group: "Opening and closing credits · turn 252", screen: "Arke Player: the credits in the first and last chapters", frame: "252e", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Approved 31 October 2026."] },
   // END AUDIOBOOK CREDITS 252
