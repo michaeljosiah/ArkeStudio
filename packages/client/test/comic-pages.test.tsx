@@ -321,6 +321,22 @@ describe("Pages uses the window and says what it is doing (turn 251)", () => {
     assert.equal(check?.take, id, "the take it could not check is read again");
   });
 
+  it("offers Check again on a take that landed while no reader was ready, beside Choose reader", async () => {
+    // The 2026-10-31 Undersong pages were made where no reader was ready and kept that verdict in the
+    // app, where one was; nothing but changing the chosen model would read them.
+    const one = page();
+    const id = ulid();
+    const record: ComicPageRecord = { version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
+      id, artifact: ARTIFACT, hash: hashOf(one), mode: "baked", model: "codex-image", language: "en", at: AT,
+      verification: { status: "unavailable", reason: "no-reader", at: AT } }] };
+    const m = await mount(withBook([one], { [one.id]: record }));
+    assert.match(m.container.querySelector(".fy-comic__verdict")!.textContent!, /Not checked\s*no image reader/);
+    assert.ok(button(m.container, "Choose reader"));
+    await act(async () => props(button(m.container, "Check again")!).onClick({}));
+    const check = m.sent.find((message): message is Extract<ClientMessage, { kind: "check-comic-take" }> => message.kind === "check-comic-take");
+    assert.equal(check?.take, id);
+  });
+
   it("says why for a time-out, and offers Check again rather than a setting", () => {
     assert.deepEqual(notChecked({ status: "unavailable", reason: "reader-failed", detail: "Review task timed out. It was not retried.", at: AT }), { text: "the reader timed out", reader: false });
     assert.deepEqual(notChecked({ status: "unavailable", reason: "no-reader", at: AT }), { text: "no image reader", reader: true });

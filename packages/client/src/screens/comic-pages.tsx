@@ -561,6 +561,10 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
   // An accepted take a re-check failed is kept only by covering what it found now.
   const covered = shown?.override !== undefined && blocking.every((finding) => shown.override!.findings.includes(finding.id));
   const reason = notChecked(verification);
+  // "No image reader" says what the harness was when the take landed, not what it is now: a take made
+  // while no reader was ready kept that verdict after one was, and only changing the chosen model
+  // would read it again. The same reader can help here, unlike one that cannot see pictures.
+  const again = !reason.reader || (verification?.status === "unavailable" && verification.reason === "no-reader");
   const chooseReader = () => {
     if (shown === undefined) return;
     choosingReader.set(page.id, { take: shown.id, model: readerModel });
@@ -624,7 +628,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
           <Button title="Keeps this take with what was found on the record" onClick={() => acceptComicTake(worldId, productionId, page.id, shown.id, { findings: blocking.map((finding) => finding.id) })}>Accept anyway</Button>
         )}
         <span className="grow" />
-        {shown !== undefined && !checking && !outOfDate && !reason.reader && (
+        {shown !== undefined && !checking && !outOfDate && again && (
           <Button variant="ghost" size="sm" disabled={!connected} onClick={() => recheck(shown)}>Check again</Button>
         )}
       </div>
