@@ -462,6 +462,47 @@ describe("retail chapter files (SPEC-047 R-22/R-23)", () => {
     assert.equal(events.filter(event => event.type === "export.progress").at(-1)?.status, "done");
   }, { ffmpeg, retail: retail() }));
 
+  it("exports the read credits as files of their own, the opening first and the closing last (SPEC-047 R-216)", () => withHarness(async ({ worldDir, events, send }) => {
+    await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { author: "Michael Josiah", narrator: "Ife Balogun" } });
+    await read(send, "audiobook-credits");
+    await read(send, "01-neap");
+    await exportChapters(send);
+    const made = result(events); assert.ok(made.ok, JSON.stringify(made));
+    assert.deepEqual((await readdir(join(worldDir, made.dir))).sort(), ["00-OpeningCredits.mp3", "01-Chapter1.mp3", "02-ClosingCredits.mp3", "manifest.json"]);
+    const report = JSON.parse(await readFile(join(worldDir, made.file), "utf8"));
+    assert.deepEqual(report.credits.map((file: { file: string; credit: string }) => [file.credit, file.file]), [["opening", "00-OpeningCredits.mp3"], ["closing", "02-ClosingCredits.mp3"]]);
+    assert.deepEqual(report.files.map((file: { file: string }) => file.file), ["01-Chapter1.mp3"], "the chapters' list stays the chapters'");
+    // A chapter exported alone is a chapter, not the book: no credits ride with it.
+    await send({ kind: "export-audiobook-chapters", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST, exportId: "ab_01J8G0000000000000000000X2", scope: { kind: "chapter", chapterId: "neap" } });
+    const alone = result(events); assert.ok(alone.ok, JSON.stringify(alone));
+    assert.deepEqual((await readdir(join(worldDir, alone.dir))).sort(), ["01-Chapter1.mp3", "manifest.json"]);
+  }, { ffmpeg, retail: retail() }));
+
+  // Changed while the chapter was mastered: the old closing take keeps its bytes, so only the
+  // credits' record can say it is no longer the credit (codex on PR 2275).
+  {
+    let during: (() => Promise<void>) | null = null;
+    const base = retail();
+    const tools: RetailAudioTools = { ...base, encode: async (input, output, options_, signal) => {
+      if (output.includes("Chapter1") && during !== null) { const change = during; during = null; await change(); }
+      return base.encode(input, output, options_, signal);
+    } };
+    it("refuses credits changed during the export, as it refuses a changed book", () => withHarness(async ({ worldDir, events, send }) => {
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { author: "Michael Josiah", narrator: "Ife Balogun" } });
+      await read(send, "audiobook-credits");
+      await read(send, "01-neap");
+      const file = join(worldDir, "productions", LEDGER, ".audiobook", "credits.json");
+      during = async () => {
+        const credits = JSON.parse(await readFile(file, "utf8"));
+        await writeFile(file, JSON.stringify({ ...credits, words: { ...credits.words, closing: "The End, for now." } }));
+      };
+      await exportChapters(send);
+      const answer = result(events); assert.equal(answer.ok, false);
+      if (!answer.ok) assert.match(answer.blockers.join("; "), /credits changed during export/);
+      assert.equal((await readdir(join(worldDir, "exports")).catch(() => [])).some(name => name.includes("-chapters-")), false);
+    }, { ffmpeg, retail: tools }));
+  }
+
   for (const [label, tools, reason] of [["noisy source", retail({ noise: -30 }), /noise/], ["wrong final bitrate", retail({ corrupt: true }), /not 192 kbps CBR/],
     ["decoded RMS outside range", retail({ output: { rmsDb: -12 } }), /RMS/], ["decoded peak above the ceiling", retail({ output: { truePeakDb: -1 } }), /peaks/],
     ["decoded noisy content despite quiet padding", retail({ output: { noiseFloorDb: -30 } }), /noise floor/], ["decoded spacing outside range", retail({ output: { tailSeconds: 6 } }), /quiet/]] as const) {

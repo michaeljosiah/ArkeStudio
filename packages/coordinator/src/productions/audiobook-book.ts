@@ -39,7 +39,7 @@ import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { chapterFirstPicture } from "./audiobook-listening.js";
 import type { WorldStore } from "../world/store.js";
 import { checkDirection } from "../voice/direction.js";
-import { castRefusal, effectiveReader, planAudiobook, readAudiobookBook, readAudiobookCredits, readerLanguage, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
+import { castRefusal, effectiveReader, planAudiobook, readAudiobook, readAudiobookBook, readAudiobookCredits, readerLanguage, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
 import { directableBlocks, type DirectableBlock } from "./audiobook-direction.js";
 import { chapterPriceToken, chapterRoom, firstReadNotices, groupIdentity, hasRecoverableAudio, missIdentity, prepareChapter, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
 
@@ -373,11 +373,12 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
     if (preparation.prepared.toMake.length > 0) toRead.push({ summary, prepared: preparation.prepared });
   }
   // The credits are read with the chapters (design turn 252, SPEC-047 R-214): after them, on the
-  // book's one answer, when either is not made, once the book has credits of its own (its credits
-  // file, written the first time they are set or opened with Publish's author). A book that has
-  // never had credits reads as it always did. The door does not list them as a chapter.
+  // book's one answer, when either is not made, once the book has credits of its own — its credits
+  // file, written the first time they are set or opened with Publish's author, or a reading of
+  // them, which drafted credits read from the sheet leave without the file (codex on PR 2274). A
+  // book that has never had credits reads as it always did. The door does not list them as a chapter.
   const held = await readAudiobookCredits(store, productionId);
-  if (held !== null && held !== "unreadable") {
+  if (held !== "unreadable" && (held !== null || (await readAudiobook(store, productionId, AUDIOBOOK_CREDITS_ID)) !== null)) {
     const credits = await prepareChapter(store, productionId, AUDIOBOOK_CREDITS_ID, room, deps.now);
     if (credits.kind === "ready" && credits.prepared.toMake.length > 0) toRead.push({ summary: { id: AUDIOBOOK_CREDITS_ID }, prepared: credits.prepared });
   }

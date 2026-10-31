@@ -275,6 +275,23 @@ export function wrapWords(text: string, maxChars: number): string[] {
   return lines;
 }
 
+/**
+ * The book's opening caption fitted to its frame (design turn 252, codex on PR 2275): the opening
+ * credits' words, which name the title, the author and the narrator, wrapped to the caption's
+ * width and set smaller until they sit on the scrim. A short `Read by` line stays one line at the
+ * drawn size; a credit too long for the scrim even at half that size rises above it, still inside
+ * the frame, rather than shrinking past reading.
+ */
+export function fitOpeningCaption(text: string, width: number, height: number): { size: number; lines: string[] } {
+  const drawn = Math.round(Math.min(width, height) * OPENING_CAPTION_SHARE);
+  const least = Math.max(10, Math.round(drawn / 2));
+  const room = height * (SCRIM_HEIGHT_SHARE - CAPTION_BOTTOM_SHARE);
+  for (let size = drawn; ; size = Math.max(least, Math.round(size * 0.9))) {
+    const lines = wrapWords(text, Math.max(10, Math.floor((width * CAPTION_WIDTH_SHARE) / (size * 0.55))));
+    if (lines.length * size * 1.3 <= room || size <= least) return { size, lines };
+  }
+}
+
 /** A cue's line, at most: the subtitler's 42 at 16:9 (turn 197's correction of 2026-10-04). */
 export const CUE_LINE_CHARS = 42;
 /** A cue is on screen at least this long where its words allow, so it can be read… */

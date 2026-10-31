@@ -533,3 +533,31 @@ describe("the package's parts", () => {
     assert.equal(phrases.at(-1)!.end, 300_000);
   });
 });
+
+describe("the credits inside the first and last chapters (design turn 252, SPEC-058 R-94)", () => {
+  it("opens the first chapter with the opening credits over the cover and closes the last with the closing, with no new key", () =>
+    withHarness(async ({ worldDir, events, send }) => {
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { author: "Michael Josiah", narrator: "Ife Balogun" } });
+      await read(send, "audiobook-credits");
+      await read(send, "01-neap");
+      const result = await exportPackage(send, events, 40);
+      assert.ok(result.ok, result.ok ? "" : result.blockers.join("; "));
+      const file = join(worldDir, ...result.file.split("/"));
+      const checked = await checkWorldPackageZip(file);
+      assert.ok(checked.ok, checked.ok ? "" : checked.problems.join("; "));
+      const opened = readWorldManifest(await entry(file, "world.json"));
+      assert.ok(opened.ok);
+      const listening = readListening(await entry(file, "listening.json"), opened.manifest.assets);
+      assert.ok(listening.ok, listening.ok ? "" : listening.reason);
+      const chapter = listening.document.chapters[0]!;
+      const phrases = chapter.phrases ?? [];
+      const heard = phrases.map((phrase) => phrase.text).join(" ");
+      assert.ok(heard.startsWith("The Ledger of Nights. Written by Michael Josiah. Narrated by Ife Balogun."), "the opening is heard first");
+      assert.equal(phrases[0]!.at, 0);
+      assert.ok(heard.endsWith("The End."), "the closing is heard last");
+      const pictures = chapter.pictures ?? [];
+      assert.equal(pictures[0]!.at, 0, "the cover shows over the opening");
+      assert.equal(pictures.at(-1)!.picture, pictures[0]!.picture, "and again over the closing");
+      assert.ok(phrases.every((phrase, index, all) => index === 0 || phrase.at >= all[index - 1]!.end), "phrases follow one another");
+    }, recordingFfmpeg([])));
+});

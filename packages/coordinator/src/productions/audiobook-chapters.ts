@@ -1,6 +1,7 @@
 import { mkdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { type AudiobookScope, type ListeningChapter, ulid } from "@arke-studio/contracts";
+import { type AudiobookScope, type ListeningChapter, type MadeAudiobookCredit, ulid } from "@arke-studio/contracts";
+import { madeAudiobookCredits } from "./audiobook-credits.js";
 import { masterRetailFile, type RetailAudioTools, type RetailMeasurements } from "../audio/retail.js";
 import { readPublicationFile } from "../publications/files.js";
 import type { ImportFileLease, ImportFileSpace } from "../storage/import-files.js";
@@ -8,7 +9,7 @@ import type { FfmpegRunner } from "../takes/export.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { containedWorldFilePath } from "../world/contained-file.js";
 import type { WorldStore } from "../world/store.js";
-import { audiobookListening } from "./audiobook-listening.js";
+import { audiobookListening, anyNarrator } from "./audiobook-listening.js";
 import type { AudiobookExportResult } from "./audiobook-export.js";
 
 const signature = (chapters: ListeningChapter[]) => JSON.stringify(chapters.map(chapter => ({ id: chapter.chapterId, title: chapter.title, order: chapter.order,
@@ -62,6 +63,14 @@ export async function exportAudiobookChapters(store: WorldStore, productionId: s
   // A failed canonical render must never fall back to differently assembled takes.
   if (whole.some(chapter => !chapter.mix)) return { ok: false, blockers: ["A chapter mix could not be rendered. Review its audio before exporting."] };
   const expected = signature(listening.chapters), chapters = whole.map(chapter => ({ chapter, parts: retailParts(chapter) }));
+  // The credits as files of their own (SPEC-047 R-216), the opening first and the closing last,
+  // for the whole book only: a chapter exported alone is a chapter, not the book.
+  const readCredits = async () => scope.kind === "book" ? await madeAudiobookCredits(store, productionId, await anyNarrator(store, productionId)) : {};
+  const creditSignature = (made: Awaited<ReturnType<typeof readCredits>>) => JSON.stringify((["opening", "closing"] as const).map(key => made[key] === undefined ? null : [made[key].artifactId, made[key].file, made[key].text, made[key].seconds]));
+  const credits = await readCredits(), expectedCredits = creditSignature(credits);
+  const lastOrder = Math.max(...whole.map(chapter => chapter.order));
+  const creditFiles = ([["opening", "00-OpeningCredits.mp3"], ["closing", `${String(lastOrder + 1).padStart(2, "0")}-ClosingCredits.mp3`]] as const)
+    .flatMap(([key, name]) => credits[key] !== undefined ? [{ credit: credits[key] as MadeAudiobookCredit, name }] : []);
   // One delivery profile even when chapters are exported separately. Preserve arranged
   // stereo; upmix legacy mono rather than mixing channel formats across a title.
   const channels = 2;
@@ -74,7 +83,9 @@ export async function exportAudiobookChapters(store: WorldStore, productionId: s
   try {
     await store.assertOwnership();
     if (options.fileSpace) {
-      const estimate = chapters.reduce((sum, entry) => sum + entry.parts.reduce((bytes, part) => bytes + Math.ceil((part.to - part.from + 4) * 24_000) + 65_536, 0), 2 * 1024 ** 2);
+      // The credits' files come out of the same lease as the chapters' (codex on PR 2275).
+      const estimate = chapters.reduce((sum, entry) => sum + entry.parts.reduce((bytes, part) => bytes + Math.ceil((part.to - part.from + 4) * 24_000) + 65_536, 0), 2 * 1024 ** 2)
+        + creditFiles.reduce((bytes, { credit }) => bytes + Math.ceil((credit.seconds + 4) * 24_000) + 65_536, 0);
       leases.push(await options.fileSpace.reserve(staging, estimate, signal, "working-files"));
       leases.push(await options.fileSpace.reserve(join(store.dir, "exports"), 0, signal, "exports"));
     }
@@ -82,8 +93,28 @@ export async function exportAudiobookChapters(store: WorldStore, productionId: s
     for (const chapter of whole) for (const file of new Set([chapter.mix!.file, ...chapter.blocks.map(block => block.file)])) {
       if (!sources.has(file)) sources.set(file, await readPublicationFile(store.dir, file, 4 * 1024 ** 3, signal));
     }
+    for (const { credit } of creditFiles) if (!sources.has(credit.file)) sources.set(credit.file, await readPublicationFile(store.dir, credit.file, 4 * 1024 ** 3, signal));
     const files: DeliveredChapter[] = [];
-    const total = chapters.reduce((sum, entry) => sum + entry.parts.length, 0);
+    const delivered: Array<Omit<DeliveredChapter, "chapterId" | "title" | "part"> & { credit: "opening" | "closing" }> = [];
+    const total = chapters.reduce((sum, entry) => sum + entry.parts.length, 0) + creditFiles.length;
+    // A credit is mastered and checked as a chapter's part is (R-23), from its take whole.
+    const masterCredit = async ({ credit, name }: (typeof creditFiles)[number]) => {
+      signal.throwIfAborted();
+      const label = credit.key === "opening" ? "Opening credits" : "Closing credits";
+      options.onStep?.(`Mastering ${label}`, (files.length + delivered.length) / total * 100);
+      const input = await containedWorldFilePath(store.dir, credit.file);
+      const source = await options.tools!.inspect(input, signal, { from: 0, to: credit.seconds });
+      if (!Number.isFinite(source.rmsDb) || source.noiseFloorDb > -60 || Number.isNaN(source.noiseFloorDb)) throw new Error(`${label}: no clean quiet window below -60 dBFS was found in the source; review background noise before exporting.`);
+      const from = Math.max(0, source.headSeconds - 0.03), to = credit.seconds - Math.max(0, source.tailSeconds - 0.03);
+      const final = await masterRetailFile(options.tools!, input, join(staging, name), { from, to, channels, sourceRmsDb: source.rmsDb }, signal,
+        () => options.onStep?.(`Checking ${name}`, (files.length + delivered.length) / total * 100)).catch(error => { throw new Error(`${name}: ${error instanceof Error ? error.message : "Audio validation failed"}.`); });
+      const digest = await readPublicationFile(staging, name, 174_000_000, signal);
+      await leases[0]?.consumed(digest.byteLength);
+      delivered.push({ file: name, credit: credit.key, sha256: digest.sha256, bytes: digest.byteLength,
+        measurements: { ...final, noiseFloorDb: Number.isFinite(final.noiseFloorDb) ? final.noiseFloorDb : null }, assertUnchanged: digest.assertUnchanged });
+    };
+    const opening = creditFiles.find(entry => entry.credit.key === "opening");
+    if (opening !== undefined) await masterCredit(opening);
     for (const { chapter, parts } of chapters) {
       const input = await containedWorldFilePath(store.dir, chapter.mix!.file);
       for (const [index, part] of parts.entries()) {
@@ -103,12 +134,16 @@ export async function exportAudiobookChapters(store: WorldStore, productionId: s
           measurements: { ...final, noiseFloorDb: Number.isFinite(final.noiseFloorDb) ? final.noiseFloorDb : null }, assertUnchanged: digest.assertUnchanged });
       }
     }
+    const closing = creditFiles.find(entry => entry.credit.key === "closing");
+    if (closing !== undefined) await masterCredit(closing);
     const report = { schemaVersion: 1, kind: "audiobook-chapters", title: listening.title, productionId, scope, chapterIds: whole.map(chapter => chapter.chapterId),
       profile: { codec: "mp3", bitrate: 192000, method: "CBR", sampleRate: 44100, channels },
       review: "Technical checks passed. Noise floor is a quiet-window estimate; listen for editing errors and unwanted noise. Verify credits, spoken headings, retail sample and ACX authorization for AI narration separately.",
       omittedChapterIds: listening.chapters.filter(chapter => chapter.state !== "read").map(chapter => chapter.chapterId),
       sources: [...sources].map(([file, digest]) => ({ file, sha256: digest.sha256 })),
-      files: files.map(({ assertUnchanged: _, ...file }) => file), provenance: { exportId, exportedAt: options.clock() } };
+      files: files.map(({ assertUnchanged: _, ...file }) => file),
+      ...(delivered.length > 0 ? { credits: delivered.map(({ assertUnchanged: _, ...file }) => file) } : {}),
+      provenance: { exportId, exportedAt: options.clock() } };
     const text = JSON.stringify(report, null, 2) + "\n";
     if (Buffer.byteLength(text) > 2 * 1024 ** 2) throw new Error("The chapter validation report exceeds its size limit.");
     await atomicWriteFile(stage, text); await leases[0]?.consumed(Buffer.byteLength(text));
@@ -116,15 +151,18 @@ export async function exportAudiobookChapters(store: WorldStore, productionId: s
       signal.throwIfAborted();
       const again = await audiobookListening(store, productionId, listeningOptions);
       if (signature(again.chapters) !== expected) throw new Error("The book changed during export; export again.");
+      // A credit's words changed or read again while it was mastered: its old take still has its
+      // bytes, so only its record says it is no longer the credit (codex on PR 2275).
+      if (creditSignature(await readCredits()) !== expectedCredits) throw new Error("The credits changed during export; export again.");
       for (const source of sources.values()) await source.assertUnchanged();
-      for (const file of files) await file.assertUnchanged();
+      for (const file of [...files, ...delivered]) await file.assertUnchanged();
       signal.throwIfAborted(); await store.assertOwnership();
       const destination = await containedWorldFilePath(store.dir, `exports/${outName}`, true);
       signal.throwIfAborted();
       await rename(staging, destination);
       options.onStep?.("Chapter files ready", 100);
       return { ok: true, id: exportId, dir: `exports/${outName}`, file: `exports/${outName}/manifest.json`, chapters: whole.length, pictures: 0,
-        bytes: files.reduce((sum, file) => sum + file.bytes, Buffer.byteLength(text)), joined: true, scope, chapterIds: report.chapterIds };
+        bytes: [...files, ...delivered].reduce((sum, file) => sum + file.bytes, Buffer.byteLength(text)), joined: true, scope, chapterIds: report.chapterIds };
     });
   } catch (error) {
     for (const lease of leases) lease.writeFailed();

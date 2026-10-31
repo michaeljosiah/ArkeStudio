@@ -5,19 +5,22 @@ import {
   AUDIOBOOK_PLAYER_SOURCE,
   audiobookScopeKey,
   AudiobookScopeSchema,
+  foldAudiobookCredits,
   SlugSchema,
   ulid,
   type AudiobookListening,
   type AudiobookPlayerChapter,
   type AudiobookScope,
   type ListeningChapter,
+  type MadeAudiobookCredit,
   type WebPackagesListed,
 } from "@arke-studio/contracts";
 import type { FfmpegRunner } from "../takes/export.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
-import { audiobookListening } from "./audiobook-listening.js";
+import { audiobookListening, anyNarrator } from "./audiobook-listening.js";
+import { madeAudiobookCredits } from "./audiobook-credits.js";
 import { containedWorldFile } from "./interactive.js";
 
 /**
@@ -84,7 +87,10 @@ export async function exportAudiobookPlayer(
   const scope = options.scope ?? { kind: "book" };
   const listeningOptions = { ...(options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {}), ...(options.signal ? { signal: options.signal } : {}), scope, finalAudio: true };
   const listening: AudiobookListening = await audiobookListening(store, productionId, listeningOptions);
-  const whole = listening.chapters.filter((chapter) => chapter.state === "read" && (chapter.blocks.length > 0 || chapter.audioStudio !== undefined && chapter.mix !== undefined));
+  const readWhole = listening.chapters.filter((chapter) => chapter.state === "read" && (chapter.blocks.length > 0 || chapter.audioStudio !== undefined && chapter.mix !== undefined));
+  // The credits inside the first and last chapters (SPEC-047 R-218), for the whole book only.
+  const credits = scope.kind === "book" && readWhole.length > 0 ? await madeAudiobookCredits(store, productionId, await anyNarrator(store, productionId)) : {};
+  const { chapters: whole, audio: creditAudio } = foldAudiobookCredits(readWhole, credits, listening.cover);
   if (whole.length === 0) return { ok: false, blockers: [scope.kind === "chapter" ? "this chapter is not read whole yet" : "no chapter is read whole yet"] };
   const exportId = options.exportId ?? `ab_${ulid()}`;
   if (!EXPORT_ID.test(exportId)) throw new Error("invalid audiobook export id");
@@ -152,7 +158,20 @@ export async function exportAudiobookPlayer(
           }
         }
         if (name !== encoded) await copyFile(toExtendedLength(real.get(chapter.mix.file)!), toExtendedLength(join(staging, name)));
-        chapters.push({ ...base, audio: [{ src: name, at: 0, seconds: chapter.seconds }], blocks });
+        // Credits around the mix (R-218) play as sources of their own before and after it.
+        const around = creditAudio.get(chapter.chapterId);
+        const before = around?.before !== undefined ? credits.opening : undefined;
+        const after = around?.after !== undefined ? credits.closing : undefined;
+        const lead = before?.seconds ?? 0;
+        const copied = async (credit: MadeAudiobookCredit | undefined, at: number) => {
+          if (credit === undefined) return [];
+          const src = `media/chapter-${pad(chapter.order)}-${credit.key}.wav`;
+          await copyFile(toExtendedLength(real.get(credit.file)!), toExtendedLength(join(staging, src)));
+          return [{ src, at, seconds: credit.seconds }];
+        };
+        const mixSeconds = around === undefined ? chapter.seconds : chapter.mix.seconds;
+        const audio = [...(await copied(before, 0)), { src: name, at: lead, seconds: mixSeconds }, ...(await copied(after, lead + mixSeconds))];
+        chapters.push({ ...base, audio, blocks });
         continue;
       }
       if (options.ffmpeg !== undefined) {
@@ -238,7 +257,9 @@ export async function exportAudiobookPlayer(
     // Under the gate, the book is read again: a take made or a picture moved meanwhile refuses the
     // package rather than shipping it beside the snapshot's.
     return await store.gateOp(async () => {
-      const again = (await audiobookListening(store, productionId, listeningOptions)).chapters.filter((chapter) => chapter.state === "read" && (chapter.blocks.length > 0 || chapter.audioStudio !== undefined && chapter.mix !== undefined));
+      const readAgain = (await audiobookListening(store, productionId, listeningOptions)).chapters.filter((chapter) => chapter.state === "read" && (chapter.blocks.length > 0 || chapter.audioStudio !== undefined && chapter.mix !== undefined));
+      const creditsAgain = scope.kind === "book" && readAgain.length > 0 ? await madeAudiobookCredits(store, productionId, await anyNarrator(store, productionId)) : {};
+      const again = foldAudiobookCredits(readAgain, creditsAgain, listening.cover).chapters;
       if (signature(again) !== signature(whole)) return { ok: false as const, blockers: ["the book changed while the package was made — export again"] };
       await mkdir(toExtendedLength(join(store.dir, "exports")), { recursive: true });
       await rename(toExtendedLength(staging), toExtendedLength(join(store.dir, "exports", outName)));

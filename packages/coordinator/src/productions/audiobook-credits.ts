@@ -8,6 +8,7 @@ import {
   type AudiobookCreditView,
   type AudiobookCreditsView,
   type AudiobookReader,
+  type MadeAudiobookCredit,
 } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { audiobookCreditDefaults, planAudiobook, readAudiobookCredits, updateAudiobookCredits } from "./audiobook.js";
@@ -49,16 +50,6 @@ export async function audiobookCreditsView(store: WorldStore, productionId: stri
     opening: view("opening"),
     closing: view("closing"),
   };
-}
-
-/** A credit made and current, as the exports take it: its words and its take's file and length. */
-export interface MadeAudiobookCredit {
-  key: AudiobookCreditKey;
-  text: string;
-  /** World-relative, `artifacts/…`. */
-  file: string;
-  seconds: number;
-  artifactId: string;
 }
 
 /**

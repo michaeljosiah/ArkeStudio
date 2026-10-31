@@ -8,6 +8,7 @@ import {
   arkePlayerPictureEdge,
   ArkePlayerReleaseSchema,
   arkePlayerReleaseState,
+  foldAudiobookCredits,
   LISTENING_MEDIA_TYPE,
   manuscriptDocument,
   packageSlug,
@@ -32,7 +33,8 @@ import type { FfmpegRunner } from "../takes/export.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { documentChapter, listeningDocument } from "./arke-player-listening.js";
-import { audiobookListening } from "./audiobook-listening.js";
+import { anyNarrator, audiobookListening } from "./audiobook-listening.js";
+import { madeAudiobookCredits } from "./audiobook-credits.js";
 import { containedWorldFile, type BeatVoices } from "./interactive.js";
 import { writeEpub } from "./manuscript.js";
 import { exportStoryPlayer } from "./story-export.js";
@@ -182,7 +184,11 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
   const parting = options.part !== undefined ? await partOf(store, productionId, listening.chapters, options.part) : null;
   if (parting !== null && !parting.ok) return parting;
   const part = parting;
-  const whole = part !== null ? part.chosen : listening.chapters.filter(readWhole);
+  const chosen = part !== null ? part.chosen : listening.chapters.filter(readWhole);
+  // The credits inside the first and last chapters (SPEC-058 R-94): a whole edition's only, as a
+  // part runs on from an edition that already opened, and the next whole one closes.
+  const credits = part === null && chosen.length > 0 ? await madeAudiobookCredits(store, productionId, await anyNarrator(store, productionId)) : {};
+  const { chapters: whole, audio: creditAudio } = foldAudiobookCredits(chosen, credits, part === null ? listening.cover : null);
   if (signal.aborted) return cancelled();
 
   // A part's book holds its chapters alone (R-45): nothing released is sent again.
@@ -259,7 +265,16 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
       step(`Joining chapters · ${index + 1} of ${whole.length}`, (index / total) * 50);
       const path = `audio/ch${pad(chapter.order, 2)}.m4a`;
       try {
-        if (chapter.mix !== undefined) {
+        const around = creditAudio.get(chapter.chapterId);
+        if (chapter.mix !== undefined && around !== undefined) {
+          // A mix with credits around it (R-94): the three joined, each brought to the mix's
+          // rate and channels first, as one file the chapter plays.
+          const inputs = [around.before, chapter.mix.file, around.after].filter((file): file is string => file !== undefined);
+          const rate = chapter.audioStudio ? "48000" : "44100";
+          const layout = chapter.audioStudio ? "stereo" : "mono";
+          const graph = `${inputs.map((_, i) => `[${i}:a]aresample=${rate},aformat=sample_rates=${rate}:channel_layouts=${layout}[a${i}]`).join(";")};${inputs.map((_, i) => `[a${i}]`).join("")}concat=n=${inputs.length}:v=0:a=1[out]`;
+          await ffmpeg.run(["-y", ...inputs.flatMap((file) => ["-i", real.get(file)!]), "-filter_complex", graph, "-map", "[out]", "-vn", "-c:a", "aac", "-b:a", "128k", at(path)], () => {}, signal);
+        } else if (chapter.mix !== undefined) {
           await ffmpeg.run(["-y", "-i", real.get(chapter.mix.file)!, "-vn", "-ac", chapter.audioStudio ? "2" : "1", "-ar", chapter.audioStudio ? "48000" : "44100", "-c:a", "aac", "-b:a", "128k", at(path)], () => {}, signal);
         } else {
           const work = join(staging, "work", chapter.chapterId);
@@ -471,7 +486,11 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
       }
       const book = await bookOf();
       const guide = part !== null ? null : await guideDraft(store, { production: productionId, book: bookPlaces(book) }, signal, ffmpeg);
-      if (fingerprint(again !== null && again.ok ? again.chosen : plan.chapters.filter(readWhole), coverOf(plan), book, guide?.document ?? null, store, productionId) !== madeFrom) return { ok: false as const, blockers: ["the book changed while the package was made · make it again"] };
+      // Folded again as it was made (R-94), so credits changed meanwhile are a change too.
+      const chosenAgain = again !== null && again.ok ? again.chosen : plan.chapters.filter(readWhole);
+      const creditsAgain = part === null && chosenAgain.length > 0 ? await madeAudiobookCredits(store, productionId, await anyNarrator(store, productionId)) : {};
+      const foldedAgain = foldAudiobookCredits(chosenAgain, creditsAgain, part === null ? plan.cover : null).chapters;
+      if (fingerprint(foldedAgain, coverOf(plan), book, guide?.document ?? null, store, productionId) !== madeFrom) return { ok: false as const, blockers: ["the book changed while the package was made · make it again"] };
       const destination = join(store.dir, "exports", name);
       // Never over an earlier export (SPEC-048 R-10).
       const exists = (path: string) => stat(toExtendedLength(path)).then(() => true, () => false);
