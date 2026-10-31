@@ -1,10 +1,7 @@
 /* Turn 252 · Opening and closing credits. Only what is new on turn 199's page and sheet and on
-   235d's Export sheet: the details as fields, a credit's warning, and Narrated by's choices. */
+   235d's Export sheet: the details as fields and a credit's warning. */
 .cr252 .cr252-in { flex: 1; min-width: 0; height: 32px; display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font-size: var(--text-sm); }
 .cr252 .cr252-w, .cr252 .v199-lbl .mono.cr252-w, .cr252 .v199-ep .st.cr252-w { color: var(--warning); }
 .cr252 .cr252-wi { display: inline-flex; vertical-align: -2px; margin-right: 4px; }
-.cr252 .cr252-pick { position: relative; }
-.cr252 .cr252-menu { bottom: 44px; left: 180px; width: 236px; }
-.cr252 .v199-menu .it em { display: inline-flex; color: var(--foreground); }
 .cr252 .v199-lbl .mono svg { vertical-align: -1px; margin-right: 3px; }
 .cr252 .v184-btn em { font-style: normal; color: color-mix(in srgb, currentColor 70%, transparent); }

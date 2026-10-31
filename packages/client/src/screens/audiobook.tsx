@@ -29,6 +29,7 @@ import {
 import { useMediaQuery } from "../lib/media-query.js";
 import { mediaUrl } from "../lib/media.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
+import { CreditRow, CreditsSheet } from "./audiobook-credits.js";
 import { BookRequests, NoteRow, SpeakerNoteInput } from "./chapter-audiobook.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { ChevronLeft, ChevronRight, More, PlaySolid, Waveform, X } from "../components/icons.js";
@@ -47,6 +48,7 @@ import {
   dismissAudiobookNote,
   draftAudiobookSpeakerNotes,
   openAudiobook,
+  openAudiobookCredits,
   readAudiobookBook,
   requestVoiceCatalogue,
   setAudiobookReading,
@@ -55,6 +57,7 @@ import {
   subscribeVoiceUploadConfirmations,
   useAudiobookAsks,
   useAudiobookBooks,
+  useAudiobookCredits,
   useAudiobookDoors,
   useAudiobookNotes,
   useAudiobookRuns,
@@ -350,6 +353,15 @@ export function AudiobookScreen() {
   const [listening, setListening] = useState<{ chapterId?: string } | null>(null);
   const [exporting, setExporting] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  // The credits (design turn 252): asked for as the page opens, sent again after every change and
+  // every read of them; their sheet opens from either of their rows.
+  const [crediting, setCrediting] = useState(false);
+  const creditsByProduction = useAudiobookCredits();
+  const creditsAnswer = prodId === undefined ? undefined : creditsByProduction[prodId];
+  const credits = creditsAnswer?.credits ?? null;
+  useEffect(() => {
+    if (connection === "open" && worldId !== undefined && prodId !== undefined) openAudiobookCredits(worldId, prodId);
+  }, [connection, worldId, prodId]);
   // A phone's bar over the page once the hero has scrolled away (199f).
   const [scrolled, setScrolled] = useState(false);
   const dock = useRef<HTMLDivElement>(null);
@@ -637,6 +649,7 @@ export function AudiobookScreen() {
             </div>
             {rows.length > 0 ? (
               <div data-testid="audiobook-rows">
+                {credits !== null && <CreditRow which="opening" credit={credits.opening} slug={slug} art={hasArt ? art : null} onOpen={() => setCrediting(true)} />}
                 {shown.map(({ row, reading: chapterReading, run, seconds, estimated: chapterEstimated }) => {
                   const state = chapterReading && run !== undefined ? `reading… ${run.made} of ${run.toMake}` : chapterStateWord(row, false);
                   const synopsis = chapters.find((chapter) => chapter.id === row.chapterId)?.synopsis;
@@ -679,6 +692,7 @@ export function AudiobookScreen() {
                     </div>
                   );
                 })}
+                {credits !== null && <CreditRow which="closing" credit={credits.closing} slug={slug} art={hasArt ? art : null} onOpen={() => setCrediting(true)} />}
               </div>
             ) : (
               <EmptyState title={door === null ? (held?.refused ?? "Opening…") : "No chapters yet"} />
@@ -709,6 +723,17 @@ export function AudiobookScreen() {
           onNarrator={() => setNarrating(true)}
           {...(phone && world !== null ? { labels: characterLabels(world.sheets) } : {})}
           onClose={() => setSheet(false)}
+        />
+      )}
+      {crediting && credits !== null && (
+        <CreditsSheet
+          worldId={worldId}
+          productionId={prodId}
+          slug={slug}
+          credits={credits}
+          refused={creditsAnswer?.refused}
+          connected={connection === "open"}
+          onClose={() => setCrediting(false)}
         />
       )}
       {narrating && door !== null && (

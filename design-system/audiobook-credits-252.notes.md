@@ -1,6 +1,6 @@
 # Turn 252 · Opening and closing credits
 
-Proposed 31 October 2026. Approved by the owner the same day ("Approve as drawn"), calls 1 – 7 as drawn. SPEC-047 R-210 – R-218, SPEC-058 R-94.
+Proposed 31 October 2026. Approved by the owner the same day ("Approve as drawn"), calls 1 – 7 as drawn, then amended while it was built: the credits never say how the narration was made, and Narrated by is the name the author gives it ("do not mention AI in the narration. Credit that to Ife Balogun"). SPEC-047 R-210 – R-218, SPEC-058 R-94.
 
 ## Why this turn
 
@@ -29,7 +29,7 @@ The Studio already speaks each chapter's heading (the chapter's `title` block). 
 |---|---|
 | 252a | Opening credits is the first row of Chapters: the cover, its length, its words. |
 | 252b | Closing credits is the last row. The Credits sheet holds four details and each credit's words, with Read for what is not read. |
-| 252c | Narrated by: an AI voice, the voice by name, or your words. A credit that drops the narrator warns in one clause. |
+| 252c | A credit written over so that it drops the narrator warns in one clause, on its label and its row. |
 | 252d | Chapters exports the credits as `00-OpeningCredits.mp3` and `27-ClosingCredits.mp3`. |
 | 252e | Arke Player plays them inside Chapter 1 and the last chapter, over the cover, with no Player change. |
 
@@ -37,7 +37,7 @@ The Studio already speaks each chapter's heading (the chapter's `title` block). 
 
 1. Credits are two rows at the ends of Chapters, opening a Credits sheet.
 2. The words are drafted from four details (Title, Written by, Narrated by, Copyright) and stay editable. A credit that drops the title, author or narrator warns.
-3. Narrated by defaults to "an AI voice".
+3. Narrated by is the name the narration is credited to (the voice's name until set). The credits never mention AI (amended 31 October).
 4. They are read in the narrator's voice, checked like any block.
 5. Chapter files: two files of their own.
 6. Arke Player: inside the first and last chapters, over the cover, with no Player change.

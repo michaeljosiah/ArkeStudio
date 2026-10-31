@@ -19,6 +19,7 @@ import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema, DirectionReadsSchema } from "./audiobook.js";
+import { AudiobookCreditsViewSchema } from "./audiobook-credits.js";
 import { AudiobookListeningSchema, AudiobookScopeSchema } from "./audiobook-listening.js";
 import { AudiobookMotionQuoteSchema } from "./audiobook-motion-quote.js";
 import { AudiobookWordTimingStateSchema } from "./audiobook-word-timing.js";
@@ -1585,6 +1586,21 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       words: z.enum(["match", "differ", "unchecked"]).optional(),
       differences: z.number().int().min(0).optional(),
       /** Why the file cannot be a take, in one clause. */
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
+  /**
+   * The audiobook's credits as the page and the sheet draw them (design turn 252, SPEC-047
+   * R-210 – R-213), answering `open-audiobook-credits` and `set-audiobook-credits`, and sent again
+   * when a credits read ends. `refused` says in one clause why a write was not made.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.credits"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      credits: AudiobookCreditsViewSchema.optional(),
       refused: z.string().min(1).optional(),
     })
     .strict(),

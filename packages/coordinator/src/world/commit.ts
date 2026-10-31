@@ -588,6 +588,12 @@ const GRAPHIC_NOVEL_FILE = /^productions\/[^/]+\/(comic\.json$|comic\/|comic-pag
  * as unreadable, so any landing of one raises the world first.
  */
 export const COMIC_ADAPTATION_SCHEMA_VERSION = 115;
+/**
+ * The audiobook's opening and closing credits (design turn 252, SPEC-047 R-215): the production's
+ * `.audiobook/credits.json`, and the credits' reading record beside the chapters'. A build of 115
+ * neither reads nor keeps them, so the first write of either raises the world.
+ */
+export const AUDIOBOOK_CREDITS_SCHEMA_VERSION = 116;
 const COMIC_ADAPTATION_KEYS = /"(style|adapts|source)"\s*:/;
 /**
  * An audio drama's takes (SPEC-057 R-29, codex on PR 1871): `drama-takes/` and the `episode` on a

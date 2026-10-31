@@ -562,3 +562,54 @@ describe("on a phone (199f)", () => {
     assert.ok(q('[data-testid="audiobook-bar-more"]'), "with its ⋯");
   });
 });
+
+describe("the credits (design turn 252, SPEC-047 R-210 – R-213)", () => {
+  const OPENING = "Inkbound. Written by Michael Josiah. Narrated by Ife Balogun.";
+  const CLOSING = "You have been listening to Inkbound, written by Michael Josiah, narrated by Ife Balogun. Copyright 2026 Michael Josiah. The End.";
+  const credits = (opening: Partial<{ words: string; missing: Array<"title" | "author" | "narrator"> }> = {}) => ({
+    details: { title: "Inkbound", author: "Michael Josiah", narrator: "Ife Balogun", copyright: "2026 Michael Josiah" },
+    voiceLabel: "Low tide",
+    opening: { words: opening.words ?? OPENING, edited: opening.words !== undefined, missing: opening.missing ?? [], state: "made" as const, seconds: 9, file: "artifacts/inkbound-opening.wav" },
+    closing: { words: CLOSING, edited: false, missing: [], state: "not made" as const },
+  });
+  const answer = async (view: ReturnType<typeof credits>) =>
+    act(async () => __applyEventForTest({ at: AT, type: "audiobook.credits", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", credits: view }));
+
+  it("asks for the credits as the page opens, and draws one row at each end of Chapters", async () => {
+    const mounted = await mount(inkbound(91));
+    assert.ok(mounted.sent.some((message) => message.kind === "open-audiobook-credits"), "the credits are asked for");
+    await answer(credits());
+    const rows = all('[data-testid="audiobook-rows"] > div');
+    assert.equal(rows[0]!.getAttribute("data-credit"), "opening", "the opening comes first");
+    assert.equal(rows.at(-1)!.getAttribute("data-credit"), "closing", "the closing comes last");
+    assert.equal(rows.filter((row) => row.getAttribute("data-testid") === "audiobook-row").length, ROWS.length, "the chapters stay as they were");
+    assert.match(rows[0]!.textContent ?? "", /Opening credits.*0:09 recorded/);
+    assert.match(rows[0]!.textContent ?? "", /Narrated by Ife Balogun/);
+    assert.match(rows.at(-1)!.textContent ?? "", /Closing credits.*not read/);
+  });
+
+  it("opens the Credits sheet, prices what is not read, and confirms that price on the press", async () => {
+    const mounted = await mount(inkbound(91));
+    await answer(credits());
+    await press(q('[data-credit="closing"] .fy-abshow__go'));
+    assert.ok(q('[data-testid="credits-sheet"]'), "the sheet opens");
+    assert.deepEqual(all('[data-testid="credits-sheet"] .fy-vd__note-k').map((label) => label.textContent), ["Title", "Written by", "Narrated by", "Copyright"]);
+    const asked = mounted.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.equal(asked.chapterFile, "audiobook-credits");
+    assert.equal(asked.confirmationToken, undefined, "opening prices; nothing is read yet");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "audiobook-credits", characters: 130, estimatedMicroUsd: 10_000, confirmationToken: "token-1", voices: [] }));
+    const read = q('[data-testid="credits-read"]');
+    assert.equal(read?.textContent, "Read closing · ~$0.01");
+    await press(read);
+    const confirmed = mounted.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.equal(confirmed.confirmationToken, "token-1");
+  });
+
+  it("says in one clause when a credit no longer names the narrator, on its row and its label", async () => {
+    await mount(inkbound(91));
+    await answer(credits({ words: "Inkbound, by Michael Josiah.", missing: ["narrator"] }));
+    assert.equal(q('[data-credit="opening"] [data-testid="audiobook-credit-state"]')?.textContent, "names no narrator");
+    await press(q('[data-credit="opening"] .fy-abshow__go'));
+    assert.equal(q('[data-testid="audiobook-credit"][data-credit="opening"] [data-testid="audiobook-credit-label-state"]')?.textContent, "names no narrator");
+  });
+});
