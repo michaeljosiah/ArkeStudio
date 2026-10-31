@@ -47,6 +47,7 @@ import type { FfmpegRunner } from "../takes/export.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
+import { madeAudiobookCredits } from "./audiobook-credits.js";
 import { anyNarrator, audiobookListening } from "./audiobook-listening.js";
 import { containedWorldFile } from "./interactive.js";
 
@@ -133,7 +134,10 @@ async function planBook(store: WorldStore, productionId: string, options: Audiob
     const name = `${narrator.label ?? narrator.voiceId}’s voice`;
     if (!voices.includes(name)) voices.push(name);
   }
-  const readBy = `Read by ${voices.length > 1 ? `${voices.slice(0, -1).join(", ")} and ${voices.at(-1)}` : voices[0]}`;
+  // The opening credits' words once they are read (design turn 252, SPEC-047 R-218): the card says
+  // what the book itself says at its start, the narrator as the author credits them.
+  const opening = scope.kind === "book" ? (await madeAudiobookCredits(store, productionId, await anyNarrator(store, productionId))).opening : undefined;
+  const readBy = opening?.text ?? `Read by ${voices.length > 1 ? `${voices.slice(0, -1).join(", ")} and ${voices.at(-1)}` : voices[0]}`;
   const blockers: string[] = [];
   const chapters: PlannedChapter[] = [];
   for (const chapter of listening.chapters) {

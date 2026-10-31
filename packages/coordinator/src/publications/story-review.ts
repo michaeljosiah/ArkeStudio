@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { AUDIOBOOK_CREDIT_KEYS, AUDIOBOOK_CREDITS_ID, type AudiobookCreditKey } from "@arke-studio/contracts";
 import {
   audiobookBlocks, audiobookBlockOptions, audiobookHeading, chapterMix, countWords, emDashSuggestions,
   manuscriptDocument, publicationTextProblems, StoryPublicationSettingsSchema, resolveAudioArrangement, validateAudioArrangement, productionShape,
@@ -113,8 +114,22 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
     }
     chapters.push({ ...chapter, id: summary.id, audioProblems, plan, mix, studio });
   }
+  // The credits as the M4B's first and last chapters (design turn 252, SPEC-047 R-217): each made
+  // credit timed as a chapter of one block is, a credit not read left out. Beside the chapters, so
+  // the EPUB and the PDF never take them.
+  const credits: Partial<Record<AudiobookCreditKey, ChapterMix>> = {};
+  if (settings.outputs.includes("m4b")) {
+    const plan = await planAudiobook(view, productionId, AUDIOBOOK_CREDITS_ID, { narrator: await anyNarrator(view, productionId) }).catch(() => null);
+    if (plan !== null && plan.record !== "unreadable") for (const key of AUDIOBOOK_CREDIT_KEYS) {
+      const planned = plan.blocks.find((block) => block.block.key === key);
+      if (planned?.state !== "made") continue;
+      const timing = chapterTiming(view, { ...plan, blocks: [planned] }, "skip");
+      if (timing.bars.some((bar) => !bar.made)) continue;
+      credits[key] = chapterMix(timing);
+    }
+  }
   const illustrations = settings.includeIllustrations ? await storyIllustrations(view, chapters, blockers) : [];
-  const mediaPaths = [...new Set([...illustrations.map(image => image.file), ...(settings.cover ? [settings.cover] : []), ...chapters.flatMap(chapter => settings.outputs.includes("m4b") && chapter.studio ? chapter.studio.state.clips.flatMap(clip => clip.source ? [clip.source.file] : []) : chapter.mix ? mixFiles(chapter.mix) : [])])];
+  const mediaPaths = [...new Set([...illustrations.map(image => image.file), ...(settings.cover ? [settings.cover] : []), ...chapters.flatMap(chapter => settings.outputs.includes("m4b") && chapter.studio ? chapter.studio.state.clips.flatMap(clip => clip.source ? [clip.source.file] : []) : chapter.mix ? mixFiles(chapter.mix) : []), ...Object.values(credits).flatMap((mix) => mixFiles(mix))])];
   const media: Array<{ key: string; sha256: string; byteLength: number }> = [];
   for (const path of mediaPaths) {
     try {
@@ -133,10 +148,12 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
     settings, chapters: chapters.map(({ id, title, order, body, plan, mix, studio }) => ({ id, title, order, body,
       ...(settings.outputs.includes("m4b") ? { record: settings.includeIllustrations ? plan?.record : audioRecord(plan?.record), book: plan?.book, cast: plan?.cast, blocks: plan?.blocks, mix, studio } : {}) })),
     media, rights, ...(settings.includeIllustrations ? { illustrations } : {}), compiler: storyCompiler(settings), ...(pdfIdentity ? { pdf: pdfIdentity } : {}),
+    // Only an edition with credits names them, so editions made before credits keep their fingerprints.
+    ...(Object.keys(credits).length > 0 ? { credits } : {}),
   };
   const fingerprint = storyDigest(identity);
   const review: StoryPublicationReview = { fingerprint, settings, chapters: chapters.map(chapter => ({ id: chapter.id, title: chapter.title, words: countWords(chapter.body), audioProblems: chapter.audioProblems })), findings, blockers, warnings };
-  return { review, chapters, media, illustrations, manifest: scan.manifest, identity: storyDigest({ identity, manifest: scan.manifest }), pdfIdentity };
+  return { review, chapters, credits, media, illustrations, manifest: scan.manifest, identity: storyDigest({ identity, manifest: scan.manifest }), pdfIdentity };
 }
 
 /** Approve one exact proposal through the manuscript's ordinary versioned save. No provider work. */

@@ -271,6 +271,16 @@ describe("the audiobook as a video (turn 197)", () => {
       assert.deepEqual(answer.result, { ok: false, blockers: ["making a video needs ffmpeg, which this machine does not have"] });
     }));
 
+  it("says the opening credits' words on its card once they are read (design turn 252, SPEC-047 R-218)", () =>
+    withHarness(async (h) => {
+      await h.send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { author: "Michael Josiah", narrator: "Ife Balogun" } });
+      await read(h.send, "audiobook-credits");
+      await read(h.send, "01-neap");
+      await h.send({ kind: "read-audiobook-video", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST, options: DEFAULT_VIDEO_OPTIONS });
+      const state = h.events.filter((e): e is State => e.type === "audiobook.video-state").at(-1)!;
+      assert.equal(state.state?.readBy, "The Ledger of Nights. Written by Michael Josiah. Narrated by Ife Balogun.");
+    }));
+
   it("keeps a picture's focus on the picture, past the build before it, and back to the centre", () =>
     withHarness(async (h) => {
       await read(h.send, "01-neap");

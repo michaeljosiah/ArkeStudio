@@ -284,15 +284,25 @@ export class StoryPublicationService {
           cover = { file, mediaType: png ? "image/png" : "image/jpeg" };
         }
         const pathOf = (file: string) => { const path = paths.get(file); if (!path) throw new Error("A media input was not captured."); return path; };
+        // The credits as the M4B's first and last chapters (design turn 252, SPEC-047 R-217), their
+        // files captured as a chapter's are.
+        const frozenMix = (mix: ChapterMix): ChapterMix => ({ ...mix,
+          voices: mix.voices.map(voice => ({ ...voice, segments: voice.segments.map(segment => ({ ...segment, file: pathOf(segment.file) })) })),
+          beds: mix.beds.map(bed => ({ ...bed, file: pathOf(bed.file) })),
+          sounds: mix.sounds.map(sound => ({ ...sound, file: pathOf(sound.file) })) });
+        const creditMix = (key: "opening" | "closing", title: string): FrozenStory["mixes"] => {
+          const mix = settings.outputs.includes("m4b") ? snapshot!.credits[key] : undefined;
+          return mix !== undefined ? [{ title, mix: frozenMix(mix) }] : [];
+        };
         const frozen: FrozenStory = { compiler: storyCompiler(settings), ...(snapshot!.pdfIdentity ? { pdfIdentity: snapshot!.pdfIdentity, chapterIds: snapshot!.chapters.map(chapter => chapter.id) } : {}), encoder: settings.outputs.includes("m4b") ? await this.options.ffmpeg?.identity?.(signal) ?? "injected-runner" : null, document: manuscriptDocument({ title: settings.title, worldName: "", chapters: snapshot!.chapters }),
           ...(settings.includeIllustrations ? { illustrations: snapshot!.illustrations.map(image => ({ ...image, file: pathOf(image.file) })) } : {}),
-          mixes: snapshot!.chapters.flatMap((chapter): FrozenStory["mixes"] => settings.outputs.includes("m4b") && chapter.studio ? [{ title: chapter.title, studio: { ...chapter.studio, state: { ...chapter.studio.state,
+          mixes: [...creditMix("opening", "Opening credits"), ...snapshot!.chapters.flatMap((chapter): FrozenStory["mixes"] => settings.outputs.includes("m4b") && chapter.studio ? [{ title: chapter.title, studio: { ...chapter.studio, state: { ...chapter.studio.state,
             clips: chapter.studio.state.clips.map(clip => ({ ...clip, source: clip.source ? { ...clip.source, file: pathOf(clip.source.file) } : null })),
           } } }] : chapter.mix ? [{ title: chapter.title, mix: { ...chapter.mix,
             voices: chapter.mix.voices.map(voice => ({ ...voice, segments: voice.segments.map(segment => ({ ...segment, file: pathOf(segment.file) })) })),
             beds: chapter.mix.beds.map(bed => ({ ...bed, file: pathOf(bed.file) })),
             sounds: chapter.mix.sounds.map(sound => ({ ...sound, file: pathOf(sound.file) })),
-          } }] : []), media, cover };
+          } }] : []), ...creditMix("closing", "Closing credits")], media, cover };
         if (settings.epubImageSize === "reading") {
           frozen.epubImages = await captureEpubImages(inputRoot, [...(frozen.illustrations ?? []).map(image => image.file), ...(cover ? [cover.file] : [])], media, this.options.ffmpeg!, signal);
           media.push(...frozen.epubImages.images.map(({ file, sha256, byteLength }) => ({ file, sha256, byteLength })));
