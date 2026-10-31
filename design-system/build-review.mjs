@@ -28,6 +28,14 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN AUDIOBOOK CREDITS 252
+  { group: "Opening and closing credits · turn 252", screen: "Opening credits open the book, above Chapter 1", frame: "252a", route: "Story / Audiobook", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Proposed 31 October 2026."] },
+  { group: "Opening and closing credits · turn 252", screen: "Closing credits close it; the Credits sheet", frame: "252b", route: "Story / Audiobook", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Proposed 31 October 2026."] },
+  { group: "Opening and closing credits · turn 252", screen: "Who it says read the book", frame: "252c", route: "Story / Audiobook", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Proposed 31 October 2026."] },
+  { group: "Opening and closing credits · turn 252", screen: "Chapter files: the credits as files of their own", frame: "252d", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Proposed 31 October 2026."] },
+  { group: "Opening and closing credits · turn 252", screen: "Arke Player: the credits in the first and last chapters", frame: "252e", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Proposed 31 October 2026."] },
+  // END AUDIOBOOK CREDITS 252
+
   // BEGIN PAGES ROOM 251
   { group: "Pages uses the window · turn 251", screen: "Pages uses the window: the page at full height, the script takes the rest", frame: "251a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },
   { group: "Pages uses the window · turn 251", screen: "Making: the page and its thumbnail say so", frame: "251b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },
@@ -1008,6 +1016,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "audiobook-credits-252.review.html", what: "Turn 252: opening and closing credits — two rows at the ends of Chapters, the Credits sheet, Narrated by, and the credits in chapter files and Arke Player.", state: "proposed 31 October 2026; not built" },
   { file: "pages-room-251.review.html", what: "Turn 251: Pages uses the window, and says what it is doing — the page at full height, Making and Checking, a reason for Not checked.", state: "approved 29 October 2026; not built" },
   { file: "prose-pages-249.review.html", what: "Turn 249: Arke turns prose into pages — Plan with Arke from a story, and a chapter drafted as pages to keep or discard.", state: "approved 29 October 2026; not built" },
   { file: "comic-style-248.review.html", what: "Turn 248: a graphic novel’s comic style — ten styles and your own, each shown as the same page drawn in it, picked in Tell a story and changed in Pages.", state: "approved 29 October 2026; not built" },
@@ -1212,6 +1221,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="comic-style-248.css">
 <link rel="stylesheet" href="prose-pages-249.css">
 <link rel="stylesheet" href="pages-room-251.css">
+<link rel="stylesheet" href="audiobook-credits-252.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">
