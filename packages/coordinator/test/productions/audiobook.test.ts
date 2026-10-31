@@ -2505,3 +2505,19 @@ describe("the credits through the coordinator (design turn 252, SPEC-047 R-210 â
     });
   });
 });
+
+describe("the credits read with the book (design turn 252, SPEC-047 R-214)", () => {
+  const TWO = [
+    { id: "bm_george", label: "George", attributes: [] },
+    { id: "af_heart", label: "Heart", attributes: [] },
+  ];
+  it("reads them after the chapters once the book has credits, and refuses no chapter for them", () =>
+    withHarness({ localVoices: TWO }, async ({ worldDir, events, send }) => {
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { narrator: "Ife Balogun" } });
+      await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      const finished = events.filter((event): event is Extract<DomainEvent, { type: "audiobook.book-finished" }> => event.type === "audiobook.book-finished").at(-1);
+      assert.equal(finished?.chaptersRefused, 0, finished?.reason);
+      const credits = await readRecord(worldDir, "audiobook-credits");
+      assert.deepEqual(Object.keys(credits.takes).sort(), ["closing", "opening"]);
+    }));
+});
