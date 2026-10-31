@@ -605,4 +605,23 @@ describe("the credits in the M4B (design turn 252, SPEC-047 R-217)", () => {
       "Closing credits: measured duration is missing. Read them again to include them.",
     ]);
   });
+
+  it("leaves out recorded credits whose recording is not cleared (codex on PR 2275)", async () => {
+    const { AUDIOBOOK_CREDITS_ID } = await import("@arke-studio/contracts");
+    const { updateAudiobook, updateAudiobookCredits } = await import("../../src/productions/audiobook.js");
+    const h = await setup();
+    await narrate(h);
+    await updateAudiobookCredits(h.store, h.productionId, () => ({ details: { author: "Michael Josiah", narrator: "Ife Balogun" }, words: {} }), () => new Date().toISOString());
+    const { plan } = await narrate(h, true, AUDIOBOOK_CREDITS_ID);
+    await updateAudiobook(h.store, h.productionId, plan.chapter, (record) => ({
+      ...record,
+      takes: Object.fromEntries(Object.entries(record.takes).map(([key, take]) => [key, { ...take, source: "recorded" as const }])),
+    }));
+    await h.store.reload();
+    const review = await h.service.review(h.store, h.productionId, { ...h.settings, outputs: ["m4b"] as ("epub" | "m4b")[] });
+    assert.deepEqual(review.warnings.filter((warning) => warning.includes("credits")), [
+      "Opening credits: recording clearance needs review. They are left out until it is cleared.",
+      "Closing credits: recording clearance needs review. They are left out until it is cleared.",
+    ]);
+  });
 });

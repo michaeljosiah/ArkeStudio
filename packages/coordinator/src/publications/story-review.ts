@@ -131,6 +131,16 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
         warnings.push(`${key === "opening" ? "Opening" : "Closing"} credits: measured duration is missing. Read them again to include them.`);
         continue;
       }
+      // Cleared as a chapter's recorded take must be (codex on PR 2275): a recording whose
+      // acknowledgement was withdrawn is never published, the credits no more than a chapter.
+      if (take?.source === "recorded") {
+        const generation = artifact?.generation;
+        const recording = generation && "recording" in generation ? generation.recording : undefined;
+        if (!recording || !effectiveAudioRights(rights, recording.preparedHash, "recorded-take").some((event) => event.id === recording.acknowledgementId)) {
+          warnings.push(`${key === "opening" ? "Opening" : "Closing"} credits: recording clearance needs review. They are left out until it is cleared.`);
+          continue;
+        }
+      }
       const timing = chapterTiming(view, { ...plan, blocks: [planned] }, "skip");
       if (timing.bars.some((bar) => !bar.made)) continue;
       credits[key] = chapterMix(timing);
