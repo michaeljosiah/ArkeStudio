@@ -17,7 +17,7 @@ import {
   coverCrop,
   ffmpegDrawtextText,
   ffmpegFilterPath,
-  OPENING_CAPTION_SHARE,
+  fitOpeningCaption,
   SCRIM_HEIGHT_SHARE,
   SCRIM_OPACITY,
   segmentFades,
@@ -504,7 +504,7 @@ async function prunePieces(folder: string, keep: string): Promise<void> {
 async function renderOpening(store: WorldStore, book: Book, options: AudiobookVideoOptions, ffmpeg: FfmpegRunner, work: string, signal: AbortSignal): Promise<string> {
   const { width: W, height: H } = shapeSize(options.shape);
   const out = join(work, "opening.mp4");
-  const size = Math.round(Math.min(W, H) * OPENING_CAPTION_SHARE);
+  const { size, lines } = fitOpeningCaption(book.readBy, W, H);
   const cover = book.cover === null ? null : await containedWorldFile(store.dir, book.cover);
   const args = ["-y", ...QUIET];
   let picture: string;
@@ -520,7 +520,7 @@ async function renderOpening(store: WorldStore, book: Book, options: AudiobookVi
     picture,
     `${scrimSource(W, H)}[scrim]`,
     `[pic][scrim]overlay=0:H-h:format=auto[lit]`,
-    `[lit]drawtext=${textOptions(ffmpeg.slateFont, size)}:text='${ffmpegDrawtextText(book.readBy)}':x=(w-tw)/2:y=h-th-${Math.round(H * CAPTION_BOTTOM_SHARE)},format=yuv420p[vout]`,
+    `[lit]drawtext=${textOptions(ffmpeg.slateFont, size)}:text='${ffmpegDrawtextText(lines.join("\n"))}':x=(w-tw)/2:y=h-th-${Math.round(H * CAPTION_BOTTOM_SHARE)},format=yuv420p[vout]`,
   ].join(";\n");
   const graphFile = join(work, "opening.graph");
   await writeFile(toExtendedLength(graphFile), graph, "utf8");

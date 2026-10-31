@@ -1,7 +1,7 @@
 import { mkdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { type AudiobookScope, type ListeningChapter, ulid } from "@arke-studio/contracts";
-import { madeAudiobookCredits, type MadeAudiobookCredit } from "./audiobook-credits.js";
+import { type AudiobookScope, type ListeningChapter, type MadeAudiobookCredit, ulid } from "@arke-studio/contracts";
+import { madeAudiobookCredits } from "./audiobook-credits.js";
 import { masterRetailFile, type RetailAudioTools, type RetailMeasurements } from "../audio/retail.js";
 import { readPublicationFile } from "../publications/files.js";
 import type { ImportFileLease, ImportFileSpace } from "../storage/import-files.js";
@@ -65,7 +65,9 @@ export async function exportAudiobookChapters(store: WorldStore, productionId: s
   const expected = signature(listening.chapters), chapters = whole.map(chapter => ({ chapter, parts: retailParts(chapter) }));
   // The credits as files of their own (SPEC-047 R-216), the opening first and the closing last,
   // for the whole book only: a chapter exported alone is a chapter, not the book.
-  const credits = scope.kind === "book" ? await madeAudiobookCredits(store, productionId, await anyNarrator(store, productionId)) : {};
+  const readCredits = async () => scope.kind === "book" ? await madeAudiobookCredits(store, productionId, await anyNarrator(store, productionId)) : {};
+  const creditSignature = (made: Awaited<ReturnType<typeof readCredits>>) => JSON.stringify((["opening", "closing"] as const).map(key => made[key] === undefined ? null : [made[key].artifactId, made[key].file, made[key].text, made[key].seconds]));
+  const credits = await readCredits(), expectedCredits = creditSignature(credits);
   const lastOrder = Math.max(...whole.map(chapter => chapter.order));
   const creditFiles = ([["opening", "00-OpeningCredits.mp3"], ["closing", `${String(lastOrder + 1).padStart(2, "0")}-ClosingCredits.mp3`]] as const)
     .flatMap(([key, name]) => credits[key] !== undefined ? [{ credit: credits[key] as MadeAudiobookCredit, name }] : []);
@@ -81,7 +83,9 @@ export async function exportAudiobookChapters(store: WorldStore, productionId: s
   try {
     await store.assertOwnership();
     if (options.fileSpace) {
-      const estimate = chapters.reduce((sum, entry) => sum + entry.parts.reduce((bytes, part) => bytes + Math.ceil((part.to - part.from + 4) * 24_000) + 65_536, 0), 2 * 1024 ** 2);
+      // The credits' files come out of the same lease as the chapters' (codex on PR 2275).
+      const estimate = chapters.reduce((sum, entry) => sum + entry.parts.reduce((bytes, part) => bytes + Math.ceil((part.to - part.from + 4) * 24_000) + 65_536, 0), 2 * 1024 ** 2)
+        + creditFiles.reduce((bytes, { credit }) => bytes + Math.ceil((credit.seconds + 4) * 24_000) + 65_536, 0);
       leases.push(await options.fileSpace.reserve(staging, estimate, signal, "working-files"));
       leases.push(await options.fileSpace.reserve(join(store.dir, "exports"), 0, signal, "exports"));
     }
@@ -147,6 +151,9 @@ export async function exportAudiobookChapters(store: WorldStore, productionId: s
       signal.throwIfAborted();
       const again = await audiobookListening(store, productionId, listeningOptions);
       if (signature(again.chapters) !== expected) throw new Error("The book changed during export; export again.");
+      // A credit's words changed or read again while it was mastered: its old take still has its
+      // bytes, so only its record says it is no longer the credit (codex on PR 2275).
+      if (creditSignature(await readCredits()) !== expectedCredits) throw new Error("The credits changed during export; export again.");
       for (const source of sources.values()) await source.assertUnchanged();
       for (const file of [...files, ...delivered]) await file.assertUnchanged();
       signal.throwIfAborted(); await store.assertOwnership();

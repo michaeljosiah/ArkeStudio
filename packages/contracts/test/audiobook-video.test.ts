@@ -27,6 +27,8 @@ import {
   videoSegments,
   computeRunning,
   videoPlaceLine,
+  fitOpeningCaption,
+  CAPTION_WIDTH_SHARE,
   type ClientState,
   type ListeningChapter,
 } from "../src/index.js";
@@ -260,5 +262,32 @@ describe("the audiobook as a video (turn 197)", () => {
     assert.equal(videoPlaceLine({ ...video, leftSec: null }, false), "Chapter 1 of 1");
     const [row] = computeRunning({ app: { jobs: [] } } as unknown as ClientState, { exports: { vb_1: { productionId: "nloj", status: "running", percent: 41, video } } });
     assert.deepEqual(row, { kind: "export", title: "Video · Na love or Juju", detail: "Chapter 1 of 1 · 12:04 of 31:40 · ~3 min left", percent: 41, ref: "vb_1", cancellable: true, video });
+  });
+});
+
+describe("the opening caption fitted to its frame (design turn 252, codex on PR 2275)", () => {
+  const credit = "Na Love or Juju. Written by Michael Josiah. Narrated by Ife Balogun.";
+  const fits = (text: string, width: number, height: number) => {
+    const { size, lines } = fitOpeningCaption(text, width, height);
+    for (const line of lines) assert.ok(line.length * size * 0.55 <= width * CAPTION_WIDTH_SHARE || !line.includes(" "), `"${line}" is wider than the caption at ${size}px`);
+    assert.equal(lines.join(" "), text.replace(/\s+/g, " "), "every word is drawn");
+    return { size, lines };
+  };
+
+  it("keeps a short Read by line on one line at the drawn size", () => {
+    assert.deepEqual(fitOpeningCaption("Read by Nigerian Woman 2’s voice", 1920, 1080), { size: Math.round(1080 * 13 / 225), lines: ["Read by Nigerian Woman 2’s voice"] });
+  });
+
+  it("wraps a drafted opening credit across a portrait frame", () => {
+    const { lines } = fits(credit, 1080, 1920);
+    assert.ok(lines.length > 1, "a portrait frame cannot hold the whole credit on one line");
+  });
+
+  it("sets a long credit smaller until it sits on the scrim, and never below half its size", () => {
+    const long = Array.from({ length: 12 }, () => credit).join(" ");
+    const drawn = Math.round(1080 * 13 / 225);
+    const { size, lines } = fits(long, 1080, 1920);
+    assert.ok(size < drawn && size >= Math.round(drawn / 2));
+    assert.ok(lines.length * size * 1.3 <= 1920 * (0.42 - 0.09) || size === Math.round(drawn / 2));
   });
 });

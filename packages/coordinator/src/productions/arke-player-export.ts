@@ -8,6 +8,7 @@ import {
   arkePlayerPictureEdge,
   ArkePlayerReleaseSchema,
   arkePlayerReleaseState,
+  foldAudiobookCredits,
   LISTENING_MEDIA_TYPE,
   manuscriptDocument,
   packageSlug,
@@ -33,7 +34,7 @@ import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { documentChapter, listeningDocument } from "./arke-player-listening.js";
 import { anyNarrator, audiobookListening } from "./audiobook-listening.js";
-import { foldAudiobookCredits, madeAudiobookCredits } from "./audiobook-credits.js";
+import { madeAudiobookCredits } from "./audiobook-credits.js";
 import { containedWorldFile, type BeatVoices } from "./interactive.js";
 import { writeEpub } from "./manuscript.js";
 import { exportStoryPlayer } from "./story-export.js";

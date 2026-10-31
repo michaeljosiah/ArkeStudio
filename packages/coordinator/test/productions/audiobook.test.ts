@@ -2520,4 +2520,15 @@ describe("the credits read with the book (design turn 252, SPEC-047 R-214)", () 
       const credits = await readRecord(worldDir, "audiobook-credits");
       assert.deepEqual(Object.keys(credits.takes).sort(), ["closing", "opening"]);
     }));
+
+  it("reads the rest of credits begun from the sheet, which leave no credits file (codex on PR 2274)", () =>
+    withHarness({ localVoices: TWO }, async ({ worldDir, events, send }) => {
+      await send({ kind: "read-audiobook-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "audiobook-credits", blocks: ["opening"] });
+      assert.deepEqual(Object.keys((await readRecord(worldDir, "audiobook-credits")).takes), ["opening"]);
+      await assert.rejects(readFile(join(worldDir, "productions", LEDGER, ".audiobook", "credits.json"), "utf8"), "drafted credits read as they are write no credits file");
+      await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      const finished = events.filter((event): event is Extract<DomainEvent, { type: "audiobook.book-finished" }> => event.type === "audiobook.book-finished").at(-1);
+      assert.equal(finished?.chaptersRefused, 0, finished?.reason);
+      assert.deepEqual(Object.keys((await readRecord(worldDir, "audiobook-credits")).takes).sort(), ["closing", "opening"]);
+    }));
 });

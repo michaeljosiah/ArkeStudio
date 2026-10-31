@@ -1,4 +1,4 @@
-import { ulid } from "@arke-studio/contracts";
+import { AUDIOBOOK_CREDITS_ID, ulid } from "@arke-studio/contracts";
 import { SLUG_CAP } from "./paths.js";
 
 /**
@@ -40,12 +40,19 @@ export function fallbackSlug(kind: string): string {
 }
 
 /**
+ * Ids a kind never takes: the audiobook's credits are read and filed under a chapter's id of
+ * their own (design turn 252), so a chapter titled "Audiobook Credits" would have read as them
+ * (codex on PR 2274). Every way of making a chapter takes its id from here.
+ */
+const KEPT: Record<string, readonly string[]> = { chapter: [AUDIOBOOK_CREDITS_ID] };
+
+/**
  * Produce a unique slug within a collection, compared case-insensitively (R-7, D4).
  * Collisions take a numeric suffix; the suffix respects the length cap.
  */
 export function uniqueSlug(name: string, kind: string, taken: Iterable<string>): string {
   const base = slugify(name) || fallbackSlug(kind);
-  const lower = new Set([...taken].map((t) => t.toLowerCase()));
+  const lower = new Set([...taken, ...(KEPT[kind] ?? [])].map((t) => t.toLowerCase()));
   if (!lower.has(base.toLowerCase())) return base;
   for (let n = 2; ; n++) {
     const suffix = `-${n}`;

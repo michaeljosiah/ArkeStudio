@@ -478,6 +478,31 @@ describe("retail chapter files (SPEC-047 R-22/R-23)", () => {
     assert.deepEqual((await readdir(join(worldDir, alone.dir))).sort(), ["01-Chapter1.mp3", "manifest.json"]);
   }, { ffmpeg, retail: retail() }));
 
+  // Changed while the chapter was mastered: the old closing take keeps its bytes, so only the
+  // credits' record can say it is no longer the credit (codex on PR 2275).
+  {
+    let during: (() => Promise<void>) | null = null;
+    const base = retail();
+    const tools: RetailAudioTools = { ...base, encode: async (input, output, options_, signal) => {
+      if (output.includes("Chapter1") && during !== null) { const change = during; during = null; await change(); }
+      return base.encode(input, output, options_, signal);
+    } };
+    it("refuses credits changed during the export, as it refuses a changed book", () => withHarness(async ({ worldDir, events, send }) => {
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { author: "Michael Josiah", narrator: "Ife Balogun" } });
+      await read(send, "audiobook-credits");
+      await read(send, "01-neap");
+      const file = join(worldDir, "productions", LEDGER, ".audiobook", "credits.json");
+      during = async () => {
+        const credits = JSON.parse(await readFile(file, "utf8"));
+        await writeFile(file, JSON.stringify({ ...credits, words: { ...credits.words, closing: "The End, for now." } }));
+      };
+      await exportChapters(send);
+      const answer = result(events); assert.equal(answer.ok, false);
+      if (!answer.ok) assert.match(answer.blockers.join("; "), /credits changed during export/);
+      assert.equal((await readdir(join(worldDir, "exports")).catch(() => [])).some(name => name.includes("-chapters-")), false);
+    }, { ffmpeg, retail: tools }));
+  }
+
   for (const [label, tools, reason] of [["noisy source", retail({ noise: -30 }), /noise/], ["wrong final bitrate", retail({ corrupt: true }), /not 192 kbps CBR/],
     ["decoded RMS outside range", retail({ output: { rmsDb: -12 } }), /RMS/], ["decoded peak above the ceiling", retail({ output: { truePeakDb: -1 } }), /peaks/],
     ["decoded noisy content despite quiet padding", retail({ output: { noiseFloorDb: -30 } }), /noise floor/], ["decoded spacing outside range", retail({ output: { tailSeconds: 6 } }), /quiet/]] as const) {

@@ -5,12 +5,14 @@ import {
   AUDIOBOOK_PLAYER_SOURCE,
   audiobookScopeKey,
   AudiobookScopeSchema,
+  foldAudiobookCredits,
   SlugSchema,
   ulid,
   type AudiobookListening,
   type AudiobookPlayerChapter,
   type AudiobookScope,
   type ListeningChapter,
+  type MadeAudiobookCredit,
   type WebPackagesListed,
 } from "@arke-studio/contracts";
 import type { FfmpegRunner } from "../takes/export.js";
@@ -18,7 +20,7 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { audiobookListening, anyNarrator } from "./audiobook-listening.js";
-import { foldAudiobookCredits, madeAudiobookCredits, type MadeAudiobookCredit } from "./audiobook-credits.js";
+import { madeAudiobookCredits } from "./audiobook-credits.js";
 import { containedWorldFile } from "./interactive.js";
 
 /**

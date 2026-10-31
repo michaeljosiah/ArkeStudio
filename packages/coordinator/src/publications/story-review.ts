@@ -123,6 +123,14 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
     if (plan !== null && plan.record !== "unreadable") for (const key of AUDIOBOOK_CREDIT_KEYS) {
       const planned = plan.blocks.find((block) => block.block.key === key);
       if (planned?.state !== "made") continue;
+      // Measured as a chapter's block must be (codex on PR 2275): timed on an estimate, the mix
+      // would cut the credit off or pad it with silence.
+      const take = plan.record?.takes[key];
+      const artifact = scan.bundle.artifacts.find((row) => row.id === take?.artifactId);
+      if (!(take?.grouped ? take.grouped.durationSec > 0 : (artifact?.mediaInfo?.durationSec ?? 0) > 0)) {
+        warnings.push(`${key === "opening" ? "Opening" : "Closing"} credits: measured duration is missing. Read them again to include them.`);
+        continue;
+      }
       const timing = chapterTiming(view, { ...plan, blocks: [planned] }, "skip");
       if (timing.bars.some((bar) => !bar.made)) continue;
       credits[key] = chapterMix(timing);
