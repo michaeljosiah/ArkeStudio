@@ -53,6 +53,7 @@ export interface Harness {
 }
 
 export interface HarnessOptions {
+  transport?: (application: Coordinator["serverApplication"]) => import("../../src/studio-server.js").StudioEventSink;
   picture?: PictureDeriver;
   look?: LookDeriver;
   illustrate?: IllustrateDeriver;
@@ -191,7 +192,8 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
   const send = (message: ClientMessage) =>
     (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
   let snapshots = 0;
-  coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() { snapshots++; } });
+  const transport = options.transport?.(coordinator.serverApplication);
+  coordinator.serverApplication.attachTransport({ broadcast(event) { transport?.broadcast(event); }, broadcastSnapshot(options) { snapshots++; transport?.broadcastSnapshot(options); } });
   try {
     await run({ worldDir, events, send, seen, enqueued, cancelled, concurrent: () => widest, snapshots: () => snapshots, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!(), landHeld, startHeld: n => { jobs[n]!.attempt = 1; } });
   } finally {

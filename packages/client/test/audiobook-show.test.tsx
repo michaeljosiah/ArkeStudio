@@ -10,7 +10,7 @@ import { audiobookPlaceKey } from "../src/lib/audiobook-place.js";
 import { PlayerDock } from "../src/components/player.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { dismissPlayback, playClip, setAudioFactoryForTest } from "../src/lib/audio.js";
-import { __applyEventForTest, __handleFrameForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __handleFrameForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -420,7 +420,11 @@ describe("Pictures, in one sheet (turn 235a)", () => {
     await act(async () => __applyEventForTest({ at: AT_, type: "audiobook.tall-progress", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", state: "making", total: 1, made: 0, failed: [] }));
     await answerPlans();
     assert.match(q('[data-testid="pictures-make-tall"]')!.textContent!, /^Tall · 0 of 1.*Stop$/);
+    await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 2, state: inkbound(91, { shapes: ["wide", "tall"] }) }));
+    await answerPlans();
+    assert.match(q('[data-testid="pictures-make-tall"]')!.textContent!, /^Tall · 0 of 1.*Stop$/, "refresh keeps the live run without replay");
     // The run ends unheard; the window rejoins to a snapshot, and the coordinator replays no run.
+    await act(async () => __connectionStatusForTest("open"));
     await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 1, state: inkbound(91, { shapes: ["wide", "tall"] }) }));
     await answerPlans();
     assert.match(q('[data-testid="pictures-make-tall"]')!.textContent!, /^Tall · 1 to make.*Make 1 tall$/);

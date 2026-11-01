@@ -232,8 +232,15 @@ describe("the manuscript in (R-50)", () => {
       assert.equal(completed.createdAt,progress[0]!.at,"The durable completion retains the first progress timestamp");
       await (coordinator as unknown as { changeLog: ChangeLog }).changeLog.drain();
       await rm(join(root,"logs/changes.jsonl"));
-      const restarted = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test" });
+      const restoredEvents: DomainEvent[] = [];
+      const restarted = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test", observeEvent: event => restoredEvents.push(event) });
       const records = await (restarted as unknown as { durableExportReads(worldId: string): Promise<ReadinessExport[]> }).durableExportReads(WORLD_ID);
+      const published = (restarted as unknown as { exportReads: Map<string, ReadinessExport> }).exportReads.get(done.exportId)!;
+      assert.equal(published.sourceFingerprint, completed.sourceFingerprint);
+      assert.equal(published.deliveryKind, "manuscript", "announcing the download must preserve readiness metadata");
+      await (restarted as unknown as { durableExportReads(worldId: string): Promise<ReadinessExport[]> }).durableExportReads(WORLD_ID);
+      assert.equal(restoredEvents.filter(event => event.type === "export.progress" && event.exportId === done.exportId).length, 1, "opening a world publishes each restored download once without snapshot replay");
+      await (restarted as unknown as { changeLog: ChangeLog }).changeLog.drain();
       assert.equal(deriveProductionReadiness(bundle, production, records).checks.find(check => check.key === "export")!.status, "ready");
       const chapter = production.chapters[0]!;
       const opened = await openChapter(provider.openStore()!, PRODUCTION, chapter.id);

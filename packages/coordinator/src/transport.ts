@@ -71,7 +71,7 @@ export interface ResolvedMediaFile {
 export interface TransportOptions {
   auth: TransportAuth;
   getSnapshot(): ClientState;
-  /** Transient state that must be replayed after a fresh snapshot, such as held permissions. */
+  /** Transient state replayed after hello/reconnect only, such as held permissions. */
   getInitialEvents?(): DomainEvent[];
   /** Reconcile durable state before a new or reconnecting renderer receives its snapshot. */
   beforeInitialSnapshot?(): Promise<void>;
@@ -122,6 +122,7 @@ export class Transport {
   private http: Server | null = null;
   private readonly connections = new Set<Connection>();
   private readonly initialisations = new Set<Promise<void>>();
+  private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly opts: TransportOptions) {
     if (!/^[a-f0-9]{64}$/.test(opts.auth.token)) throw new Error("transport requires a 32-byte session capability");
@@ -416,15 +417,24 @@ export class Transport {
     }
   }
 
-  /** Re-send the full snapshot to every helloed connection (e.g. after open-world). */
-  broadcastSnapshot(): void {
+  /** Coalesce refresh bursts before building, validating or serializing any snapshot. */
+  broadcastSnapshot(options: { immediate?: boolean } = {}): void {
+    // Save receipts that depend on this state need a kept barrier before their acknowledgement.
+    if (options.immediate) { this.flushSnapshot(true); return; }
+    if (this.snapshotTimer !== null || ![...this.connections].some(conn => conn.helloed)) return;
+    // Do not restart the timer: a continuous picture run must still deliver fresh state.
+    this.snapshotTimer = setTimeout(() => this.flushSnapshot(), 250);
+    this.snapshotTimer.unref();
+  }
+
+  private flushSnapshot(keep = false): void {
+    if (this.snapshotTimer !== null) clearTimeout(this.snapshotTimer);
+    this.snapshotTimer = null;
+    const connections = [...this.connections].filter(conn => conn.helloed && !conn.refused && conn.socket.readyState === 1);
+    if (!connections.length) return;
     const state = this.opts.getSnapshot();
-    for (const conn of this.connections) {
-      if (!conn.helloed) continue;
-      this.sendFrame(conn, { kind: "snapshot", seq: ++conn.seq, state }, { supersede: true });
-      for (const event of this.opts.getInitialEvents?.() ?? []) {
-        this.sendFrame(conn, { kind: "event", seq: ++conn.seq, event });
-      }
+    for (const conn of connections) {
+      this.sendFrame(conn, { kind: "snapshot", seq: ++conn.seq, state }, { supersede: !keep });
     }
   }
 
@@ -433,6 +443,8 @@ export class Transport {
   }
 
   async stop(): Promise<void> {
+    if (this.snapshotTimer !== null) clearTimeout(this.snapshotTimer);
+    this.snapshotTimer = null;
     const wss = this.wss;
     if (!wss) return;
     this.wss = null;

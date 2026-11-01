@@ -5086,7 +5086,19 @@ export class Coordinator {
       if (projection.status === "done") records.set(id, { ...projection, sourceFingerprint: verified.get(id)?.sourceFingerprint });
     }
     for (const projection of completed) records.set(projection.id, { ...projection, percent: 100, error: null });
-    for (const projection of records.values()) this.exportReads.set(projection.id, projection);
+    for (const projection of records.values()) {
+      const previous = this.exportReads.get(projection.id);
+      this.exportReads.set(projection.id, projection);
+      // Opening another world discovers saved downloads after hello. Publish that change
+      // once; ordinary snapshot refreshes no longer replay all startup events (issue 2279).
+      if (projection.status === "done" && (projection.id.startsWith("ms_") || projection.id.startsWith("vb_")) &&
+          projection.productionId && projection.output && (previous?.status !== "done" || previous.output !== projection.output)) {
+        this.emit({ at: this.nowIso(), type: "export.progress", worldId: projection.worldId,
+          productionId: projection.productionId, exportId: projection.id, status: "done", percent: 100,
+          output: projection.output, error: null, deliveryKind: projection.deliveryKind,
+          sourceFingerprint: projection.sourceFingerprint, episodeId: projection.episodeId });
+      }
+    }
     return [...records.values()];
   }
 
@@ -7657,6 +7669,7 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId) throw new Error("Open this production's world before editing its narrative.");
         await saveProductionNarrative(store, msg.productionId, msg.expectedVersion, msg.narrative);
         await this.refreshWorldSnapshot(msg.worldId);
+        this.transport.broadcastSnapshot({ immediate: true });
         this.emit({ type: "production-narrative.saved", at: this.nowIso(), worldId: msg.worldId,
           productionId: msg.productionId, requestId: msg.requestId });
         return;
