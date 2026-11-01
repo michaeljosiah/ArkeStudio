@@ -4,6 +4,8 @@ Proposed on 1 November 2026 for issue #250. Owner review pending. No application
 
 Rebuild with `node design-system/production-spend-255.mjs`, then `node design-system/check-master.mjs --record` and `node design-system/build-review.mjs`. The same drawings are registered in the master and mirrored into the prototype. `production-spend-255.review.html` is the standalone clickable review. Type, colours and light/dark come from the existing design tokens.
 
+Run `node design-system/production-spend-255.capture.mjs --serve` for a loopback preview link. Without `--serve`, the command renders all eight drawings in light/dark, checks layout and interactions, and saves screenshots/measurements under `output/production-spend-255/` (not committed).
+
 ## Decisions to review
 
 1. A compact lifetime summary below the existing production, scene and shot heading. The existing conversation remains first on day one.

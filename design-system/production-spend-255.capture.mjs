@@ -9,7 +9,8 @@ import { dirname, extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { frames } from './production-spend-255.frames.mjs';
 const root = dirname(fileURLToPath(import.meta.url));
-const output = resolve(process.argv[2] ?? join(root, '../output/production-spend-255'));
+const serving = process.argv.includes('--serve');
+const output = resolve((serving ? undefined : process.argv[2]) ?? join(root, '../output/production-spend-255'));
 await mkdir(output, { recursive: true });
 const server = createServer(async (req, res) => {
   const path = resolve(root, '.' + decodeURIComponent(new URL(req.url, 'http://localhost').pathname));
@@ -21,6 +22,10 @@ const server = createServer(async (req, res) => {
   } catch { res.writeHead(404).end(); }
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+if (serving) {
+  console.log('Design turn 255: http://127.0.0.1:' + server.address().port + '/production-spend-255.review.html');
+  await new Promise(() => {});
+}
 const chrome = process.env.ARKE_CHROME ?? (process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : '/usr/bin/google-chrome');
 await access(chrome);
 const profile = await mkdtemp(join(tmpdir(), 'arke-spend-design-'));
