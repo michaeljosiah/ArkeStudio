@@ -65,19 +65,35 @@ export function validateAcousticWords(
     else prefix += `${token} `;
   }
   const words = heard.words.filter((word) => timingWord(word.text) !== "");
-  if (words.length !== authored.length)
-    return { ok: false, reason: `could not match ${Math.abs(words.length - authored.length) || 1} words` };
   let end = 0;
-  for (const [index, word] of words.entries()) {
+  for (const word of words) {
     if (!(word.startSec >= end - 0.005 && word.endSec > word.startSec && word.endSec <= heard.seconds + 0.02))
       return { ok: false, reason: "word timing overlaps or leaves the reading" };
-    if (word.probability < 0.5) return { ok: false, reason: `uncertain timing · ${authored[index]}` };
-    if (timingWord(word.text) !== timingWord(authored[index]!))
-      return { ok: false, reason: `could not match · ${authored[index]}` };
+    if (word.probability < 0.5) return { ok: false, reason: `uncertain timing · ${word.text}` };
     end = word.endSec;
   }
   if (words.length === 0) return { ok: false, reason: "no timed words" };
-  return { ok: true, words: words.map((word, index) => ({ ...word, text: authored[index]! })) };
+  const matched: AcousticWord[] = [];
+  let cursor = 0;
+  for (const token of authored) {
+    const first = words[cursor];
+    if (first && timingWord(first.text) === timingWord(token)) {
+      matched.push({ ...first, text: token }); cursor++; continue;
+    }
+    // A written compound may arrive as separate words. Only its explicit letter-to-letter
+    // hyphens authorize joining; every part must match, with adjoining measured intervals.
+    // Never bridge a pause, guess a homophone or join arbitrary words into a different word.
+    const parts = token.split(/(?<=\p{L})[-‐‑](?=\p{L})/u).map(timingWord);
+    const span = words.slice(cursor, cursor + parts.length);
+    if (parts.length > 1 && parts.every(part => /^\p{L}+$/u.test(part)) && span.length === parts.length
+      && span.every((word, index) => timingWord(word.text) === parts[index]
+        && (index === 0 || Math.abs(word.startSec - span[index - 1]!.endSec) <= 0.005))) {
+      matched.push({ ...span[0]!, text: token, endSec: span.at(-1)!.endSec, probability: Math.min(...span.map(word => word.probability)) });
+      cursor += parts.length;
+    } else return { ok: false, reason: `could not match · ${token}` };
+  }
+  if (cursor !== words.length) return { ok: false, reason: `could not match ${words.length - cursor} extra words` };
+  return { ok: true, words: matched };
 }
 
 export const AudiobookWordTimingStateSchema = z
