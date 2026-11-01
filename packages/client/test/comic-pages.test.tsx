@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { Link, MemoryRouter, Route, Routes } from "react-router";
-import { DEFAULT_COMIC_SETTINGS, DEFAULT_LETTERING_THRESHOLDS, comicPageHash, ulid, type ClientMessage, type ClientState, type ComicPage, type ComicPageRecord, type ComicPageTake } from "@arke-studio/contracts";
+import { WorldChatWorkspaceSchema, DEFAULT_COMIC_SETTINGS, DEFAULT_LETTERING_THRESHOLDS, comicPageHash, ulid, type ClientMessage, type ClientState, type ComicPage, type ComicPageRecord, type ComicPageTake } from "@arke-studio/contracts";
 import { ComicPagesScreen, notChecked, sideWidth } from "../src/screens/comic-pages.js";
 import { productionPages } from "../src/lib/production-navigation.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -93,6 +93,15 @@ describe("Pages (turn 247)", () => {
     changed.world!.productions.at(-1)!.meta.models = { image: "letterer" };
     await act(async () => __setStateForTest(changed, { connection: "open" }));
     assert.equal(sent.filter(message => message.kind === "quote-comic-page").length, before + 1);
+  });
+
+  it("shows the running pilot on the chapter named by the creation route", async () => {
+    const state = withBook([], {}), comic = state.world!.productions.at(-1)!;
+    comic.chapters.push({ ...comic.chapters[0]!, id: "the-thief", title: "The thief", order: 2, file: "02-the-thief.md" });
+    state.worldChat = WorldChatWorkspaceSchema.parse({ conversationId: `cv_${ulid()}`, status: "open", runStatus: "running", messages: [], points: [] });
+    const m = await mount(state, "the-thief");
+    await act(async () => (m.container.querySelector('[data-testid="review-link"]') as HTMLElement).click());
+    assert.ok(m.container.querySelector(".fy-comic__working"));
   });
 
   it("follows a review link while Pages is already open, including the same URL again", async () => {

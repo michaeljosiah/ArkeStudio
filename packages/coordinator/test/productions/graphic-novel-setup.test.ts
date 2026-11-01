@@ -8,7 +8,7 @@ import { createProductionFromPlan } from "../../src/productions/ops.js";
 import { planProductionSetup } from "../../src/productions/setup-plan.js";
 import { productionSetupBrief } from "../../src/productions/setup-brief.js";
 import { WorldStore } from "../../src/world/store.js";
-import { COMIC_ADAPTATION_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { COMIC_ADAPTATION_SCHEMA_VERSION, COMIC_PILOT_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -29,6 +29,22 @@ async function open() {
 const chaptersOf = (store: WorldStore) => store.getBundle().productions.find((p) => p.meta.id === STORY)!.chapters.filter((c) => !c.retired).sort((a, b) => a.order - b.order);
 
 describe("a graphic novel planned with Arke (SPEC-064 R-3, R-4, turn 249b)", () => {
+  it("persists the selected pilot and fences readers that would reject its setup", async () => {
+    const store = await open();
+    const service = new ProductionSetupService(store);
+    const conversation = `cv_${ulid()}` as ConversationId;
+    const start = await service.start(conversation, { kind: "graphic-novel", source: { productionId: STORY } });
+    const source = chaptersOf(store);
+    const changed = await service.update(conversation, { expectedRevision: start.draft.revision, fields: { graphicNovel: {
+      reading: "ltr", aspect: "2:3", pilot: true, pilotFrom: source[1]!.order,
+      chapters: source.slice(0, 2).map(chapter => ({ from: chapter.order, title: chapter.title, pages: 4 })),
+    } } });
+    assert.equal(changed.draft.graphicNovel?.pilotFrom, source[1]!.order);
+    assert.equal((await new ProductionSetupService(store).start(conversation)).draft.graphicNovel?.pilotFrom, source[1]!.order);
+    assert.equal((await readWorldMeta(store.dir)).schemaVersion, COMIC_PILOT_SCHEMA_VERSION);
+    await assert.rejects(readWorldMeta(store.dir, { supports: COMIC_PILOT_SCHEMA_VERSION - 1 }), /newer|version|schema/i);
+  });
+
   it("starts from the door's seed: the kind, the story it adapts and the style chosen on the cards", async () => {
     const store = await open();
     const draft = (await new ProductionSetupService(store).start(`cv_${ulid()}` as ConversationId, { kind: "graphic-novel", source: { productionId: STORY }, comicStyle: MANGA })).draft;

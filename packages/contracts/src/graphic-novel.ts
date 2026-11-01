@@ -370,6 +370,8 @@ export interface ComicPlan {
   aspect: string;
   style?: ComicStyle | undefined;
   pilot: boolean;
+  /** Source chapter number chosen for the pilot; absent keeps older plans on their first row. */
+  pilotFrom?: number | undefined;
   chapters: ComicPlanChapter[];
 }
 export const ComicPlanChapterSchema: z.ZodType<ComicPlanChapter, z.ZodTypeDef, unknown> = z.object({
@@ -383,10 +385,20 @@ export const ComicPlanSchema: z.ZodType<ComicPlan, z.ZodTypeDef, unknown> = z.ob
   aspect: z.string().min(3).max(12),
   style: ComicStyleSchema.optional(),
   pilot: z.boolean(),
+  pilotFrom: z.number().int().min(1).max(500).optional(),
   chapters: z.array(ComicPlanChapterSchema).max(500),
 }).strict().superRefine((plan, ctx) => {
   if (normalizeAspect(plan.aspect) !== plan.aspect) ctx.addIssue({ code: "custom", path: ["aspect"], message: `“${plan.aspect}” is not an aspect.` });
+  if (plan.pilot && plan.pilotFrom !== undefined && plan.chapters.length > 0 && plan.chapters.filter(chapter => chapter.from === plan.pilotFrom).length !== 1) {
+    ctx.addIssue({ code: "custom", path: ["pilotFrom"], message: "Choose one chapter in the plan as the pilot." });
+  }
 });
+
+/** The same pilot for the plan, creation review and first drafting ask (issue 2252). */
+export function comicPilotChapter(plan: ComicPlan | undefined): ComicPlanChapter | undefined {
+  if (!plan?.pilot) return undefined;
+  return plan.pilotFrom === undefined ? plan.chapters[0] : plan.chapters.find(chapter => chapter.from === plan.pilotFrom);
+}
 
 /** What a graphic novel made from a plan is created with (turn 249b); named for the same reason. */
 export interface ComicCreation {

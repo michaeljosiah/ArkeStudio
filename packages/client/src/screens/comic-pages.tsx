@@ -273,7 +273,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const asked = chapter ? askedOf.get(`${productionId}:${chapter.id}`) : undefined;
   const turnRunning = conversation?.runStatus === "running";
   const working = turnRunning && chapter !== undefined && drafted === undefined && pages.length === 0
-    && ((asked !== undefined && Date.now() - asked < 30 * 60_000) || chapter.id === chapters[0]?.id);
+    && ((asked !== undefined && Date.now() - asked < 30 * 60_000) || chapter.id === (new URLSearchParams(search).get("chapter") ?? chapters[0]?.id));
 
   const [reading, setReading] = useState(false);
   const [exporting, setExporting] = useState(false);

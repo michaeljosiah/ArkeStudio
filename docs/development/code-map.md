@@ -3,6 +3,9 @@
 Graphic-novel setup and Pages share client `components/comic-model-choice.tsx`, which offers
 eligible lettering models. Page quotes and generation resolve the production's image choice
 before the app default, independently of the world's image choice (issue 2250).
+The contracts helper `comicPilotChapter` resolves setup's optional `pilotFrom` source number
+for the plan, review and first drafting ask. Older plans use their first row; explicit selection
+raises the world reader boundary to 120 before its setup is written (issue 2252).
 
 Setup file repair uses the host-issued `SetupRepairReview` and shared client
 `components/setup-repair-control.tsx`. `setup/repair-review.ts` binds the selected component

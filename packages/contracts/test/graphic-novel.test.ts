@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   ComicPageRecordSchema,
+  ComicPlanSchema,
+  comicPilotChapter,
   ComicScriptSchema,
   ComicSettingsSchema,
   DEFAULT_COMIC_SETTINGS,
@@ -24,6 +26,17 @@ import { comicPagePrompt } from "../src/graphic-novel-prompt.js";
 import { productionShape } from "../src/production-shape.js";
 
 const id = (n: number) => `01J${String(n).padStart(23, "0")}`;
+
+it("names a pilot by its source chapter while keeping legacy plans readable", () => {
+  const legacy = { reading: "ltr", aspect: "2:3", pilot: true, chapters: [
+    { from: 1, title: "Prologue", pages: 2 }, { from: 2, title: "Chapter 1 — The Thief of Zeel", pages: 8 },
+  ] };
+  assert.equal(comicPilotChapter(ComicPlanSchema.parse(legacy))?.from, 1);
+  assert.equal(comicPilotChapter(ComicPlanSchema.parse({ ...legacy, pilotFrom: 2 }))?.from, 2);
+  assert.equal(comicPilotChapter(ComicPlanSchema.parse({ ...legacy, pilot: false })), undefined);
+  assert.throws(() => ComicPlanSchema.parse({ ...legacy, pilotFrom: 3 }), /Choose one chapter/);
+  assert.throws(() => ComicPlanSchema.parse({ ...legacy, pilotFrom: 2, chapters: [legacy.chapters[1], legacy.chapters[1]] }), /Choose one chapter/);
+});
 
 /** A two-page chapter: a page-turn page and a right-to-left one. */
 const FIXTURE: ComicScript = {
