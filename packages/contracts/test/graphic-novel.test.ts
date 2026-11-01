@@ -11,7 +11,13 @@ import {
   letteringInOrder,
   pageReading,
   panelRects,
+  REVIEW_UNAVAILABLE,
+  takeBlocking,
+  takeClears,
   type ComicScript,
+  type LetteringFinding,
+  type PageReview,
+  type PageReviewFinding,
 } from "../src/graphic-novel.js";
 import { productionShape } from "../src/production-shape.js";
 
@@ -124,5 +130,28 @@ describe("layout and reading (R-9, R-12, R-14, R-15)", () => {
 describe("page record (R-26)", () => {
   it("refuses an accepted take it does not hold", () => {
     assert.equal(ComicPageRecordSchema.safeParse({ version: 1, accepted: { en: id(9) } }).success, false);
+  });
+});
+
+describe("a take's words and picture together (R-69, R-70, R-72)", () => {
+  const AT = "2026-11-01T00:00:00.000Z";
+  const read = (findings: LetteringFinding[]) =>
+    ({ status: "compared" as const, reader: { id: "t", version: "1" }, normalizationVersion: 1, thresholds: { exact: 0.97, missing: 0.75 }, score: 1, findings, speaker: "not-checked" as const, regions: [], at: AT });
+  const extra = { id: "extra:0", kind: "extra" as const, found: "neap" };
+
+  it("blocks on the picture's faults as on the words', and names an unreviewed picture", () => {
+    const review = (findings: PageReviewFinding[]): PageReview =>
+      ({ status: "compared", reviewer: { id: "t", version: "1" }, references: [], findings, cleared: [], at: AT });
+    assert.equal(takeClears({ verification: read([]), review: review([]) }), true);
+    assert.deepEqual(takeBlocking({ verification: read([]), review: review([{ id: "review:caption:0", kind: "caption", note: "a pen" }]) }), ["review:caption:0"]);
+    assert.equal(takeClears({ verification: read([]), review: review([{ id: "review:likeness:0", kind: "likeness", note: "hair" }]) }), true, "a warning is looked at, not fixed");
+    assert.deepEqual(takeBlocking({ verification: read([]), review: { status: "unavailable", reason: "no-reviewer", at: AT } }), [REVIEW_UNAVAILABLE]);
+    assert.equal(takeClears({ verification: read([]) }), true, "a take made before the review is unreviewed, not failed");
+  });
+
+  it("does not block on writing the review found the panel calls for", () => {
+    const cleared: PageReview = { status: "compared", reviewer: { id: "t", version: "1" }, references: [], findings: [], cleared: [{ finding: "extra:0", reason: "the ledger" }], at: AT };
+    assert.deepEqual(takeBlocking({ verification: read([extra]) }), ["extra:0"]);
+    assert.deepEqual(takeBlocking({ verification: read([extra]), review: cleared }), []);
   });
 });

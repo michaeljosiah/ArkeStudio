@@ -5513,6 +5513,12 @@ export function acceptComicTake(worldId: string, productionId: string, page: str
   return send({ kind: "accept-comic-take", requestId, worldId, productionId, page, take, ...(override ? { override } : {}) }) ? requestId : null;
 }
 
+/** A picture review's warning on a take marked Seen (SPEC-064 R-69, turn 253c). */
+export function seeComicWarning(worldId: string, productionId: string, page: string, take: string, warning: "layout" | "continuity" | "likeness"): string | null {
+  const requestId = ulid();
+  return send({ kind: "see-comic-warning", requestId, worldId, productionId, page, take, warning }) ? requestId : null;
+}
+
 /** How a graphic novel reads and how its pages are checked (SPEC-064 R-12). */
 export function setComicSettings(worldId: string, productionId: string, settings: Extract<ClientMessage, { kind: "set-comic-settings" }>["settings"]): boolean {
   return send({ kind: "set-comic-settings", worldId, productionId, settings });

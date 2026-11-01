@@ -424,3 +424,66 @@ describe("Style (turn 248)", () => {
     assert.deepEqual(styleSent(m.sent)?.settings, { style: null });
   });
 });
+
+describe("The page review in Pages (turn 253)", () => {
+  const hashOf = (one: ComicPage) => comicPageHash(one, DEFAULT_COMIC_SETTINGS, "baked");
+  const read = (findings: Extract<NonNullable<ComicPageTake["verification"]>, { status: "compared" }>["findings"] = []): ComicPageTake["verification"] =>
+    ({ status: "compared", reader, normalizationVersion: 1, thresholds: DEFAULT_LETTERING_THRESHOLDS, score: 1, findings, speaker: "not-checked", regions: [], at: AT });
+  const reviewed = (findings: Extract<NonNullable<ComicPageTake["review"]>, { status: "compared" }>["findings"], cleared: Array<{ finding: string; reason: string }> = []): ComicPageTake["review"] =>
+    ({ status: "compared", reviewer: { id: "harness-vision", version: "1:Claude Opus 5.5" }, references: [], findings, cleared, at: AT });
+  const mountTake = async (verification: ComicPageTake["verification"], review: ComicPageTake["review"], acknowledged: ComicPageRecord["acknowledged"] = {}) => {
+    const one = page();
+    const id = ulid();
+    const record: ComicPageRecord = { version: 1, accepted: {}, lettering: {}, acknowledged: Object.keys(acknowledged).length ? { [id]: Object.values(acknowledged)[0]! } : {}, making: [],
+      takes: [{ id, artifact: ARTIFACT, hash: hashOf(one), mode: "baked", model: "codex-image", language: "en", at: AT, ...(verification ? { verification } : {}), ...(review ? { review } : {}) }] };
+    return { id, m: await mount(withBook([one], { [one.id]: record })) };
+  };
+  const lines = (container: HTMLElement) => [...container.querySelectorAll(".fy-comic__verdicts .fy-comic__verdict")]
+    .map((line) => [...line.children].map((part) => part.textContent?.trim()).filter(Boolean).join(" "));
+
+  it("holds a take whose picture has a fault beside lettering that passes, boxed and listed (253a)", async () => {
+    const { id, m } = await mountTake(read(), reviewed([{ id: "review:caption:0", kind: "caption", panel: 1, note: "a pen, but the pier", box: { x: 0, y: 0, w: 1, h: 0.5 } }]));
+    assert.match(lines(m.container)[0]!, /^Lettering 1 of 1/);
+    assert.match(lines(m.container)[1]!, /^Picture 1 to fix/);
+    assert.ok([...m.container.querySelectorAll(".fy-comic__hit span")].some((label) => label.textContent === "Caption"), "boxed on the page");
+    assert.match(m.container.querySelector(".fy-comic__finds")!.textContent!, /CaptionPanel 1 · a pen, but the pier/);
+    assert.equal(button(m.container, "Accept"), undefined, "Accept waits on the picture too");
+    await act(async () => props(button(m.container, "Accept anyway")!).onClick({}));
+    const accept = m.sent.find((message): message is Extract<ClientMessage, { kind: "accept-comic-take" }> => message.kind === "accept-comic-take");
+    assert.deepEqual([accept?.take, accept?.override?.findings], [id, ["review:caption:0"]], "the override names the picture's fault");
+  });
+
+  it("clears writing the panel calls for, struck through with where it is, and offers Accept (253b)", async () => {
+    const { m } = await mountTake(read([{ id: "extra:0", kind: "extra", found: "neap" }]), reviewed([], [{ finding: "extra:0", reason: "the ledger, in the scene" }]));
+    assert.match(lines(m.container)[0]!, /^Lettering 1 of 1/, "not a fault of the lettering");
+    assert.match(lines(m.container)[1]!, /^Picture as written/);
+    const row = m.container.querySelector(".fy-comic__find.clear")!;
+    assert.equal(row.querySelector("s")?.textContent, "neap");
+    assert.match(row.textContent!, /the ledger, in the scene/);
+    assert.ok(button(m.container, "Accept"));
+  });
+
+  it("offers Accept past a warning, and Seen marks it (253c)", async () => {
+    const { id, m } = await mountTake(read(), reviewed([{ id: "review:likeness:0", kind: "likeness", panel: 1, note: "Maren's hair" }]));
+    assert.match(lines(m.container)[1]!, /^Picture 1 to look at/);
+    assert.ok(button(m.container, "Accept"), "a warning is looked at, not fixed");
+    await act(async () => props(button(m.container, "Seen")!).onClick({}));
+    const seen = m.sent.find((message): message is Extract<ClientMessage, { kind: "see-comic-warning" }> => message.kind === "see-comic-warning");
+    assert.deepEqual([seen?.take, seen?.warning], [id, "likeness"]);
+  });
+
+  it("says the picture is not checked and why, with Choose reviewer and Check again (253d)", async () => {
+    const { m } = await mountTake(read(), { status: "unavailable", reason: "no-reviewer", at: AT });
+    assert.match(lines(m.container)[1]!, /^Picture not checked no reviewer/);
+    assert.ok(button(m.container, "Choose reviewer"));
+    assert.ok(button(m.container, "Accept anyway"), "never a pass");
+    await act(async () => props(button(m.container, "Check again")!).onClick({}));
+    assert.ok(m.sent.some((message) => message.kind === "check-comic-take"));
+  });
+
+  it("says a take made before there was a review is not checked, and checks it again on a press", async () => {
+    const { m } = await mountTake(read(), undefined);
+    assert.match(lines(m.container)[1]!, /^Picture not checked/);
+    assert.ok(button(m.container, "Check again"));
+  });
+});

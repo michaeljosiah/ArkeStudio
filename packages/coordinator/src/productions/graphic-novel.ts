@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  BLOCKING_FINDINGS, compareLettering, pageReading, takePasses, type LetteringVerification,
+  compareLettering, comicBook, pageReading, sheetReferencePicture, takeBlocking, takeClears, type LetteringVerification, type PageReview, type ReviewWarning,
   COMIC_LIMITS, COMIC_PROMPT_MAX, ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema, DEFAULT_COMIC_SETTINGS, EMPTY_COMIC_PAGE_RECORD,
   comicPageHash, comicPagePrompt, makesShape, pageAspect, pictureQuote, productionShape,
   type ComicCited, type ComicMode, type ComicPage, type ComicPageRecord, type ComicSettings, type ManifestModel, type PictureWho, type ProductionBundle,
@@ -9,6 +9,7 @@ import {
 import { pictureWho } from "./audiobook-picture-suggest.js";
 import { artDirectionFor } from "./audiobook-look.js";
 import type { PageReader } from "./graphic-novel-reader.js";
+import type { PageReviewer } from "./graphic-novel-reviewer.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
@@ -253,8 +254,10 @@ export async function acceptComicTake(store: WorldStore, productionId: string, p
     const take = record.takes.find((candidate) => candidate.id === takeId);
     if (!take) throw new Error("that take is no longer on the page");
     if (take.hash !== comicPageHash(found.page, settings, take.mode)) throw new Error("the script changed since this take was made; make the page again");
-    const blocking = take.verification?.status === "compared" ? take.verification.findings.filter((finding) => BLOCKING_FINDINGS.has(finding.kind)).map((finding) => finding.id) : [];
-    if (!takePasses(take.verification)) {
+    // Its words' and its picture's findings together (R-69): an override names every one it covers.
+    const blocking = takeBlocking(take);
+    const clears = takeClears(take);
+    if (!clears) {
       if (override === undefined) throw new Error(take.verification?.status === "compared" ? "this take has findings; accept it anyway to keep it" : "this take's lettering was not checked; accept it anyway to keep it");
       const uncovered = blocking.filter((id) => !override.findings.includes(id));
       if (uncovered.length) throw new Error(`the override does not cover ${uncovered.join(", ")}`);
@@ -262,8 +265,92 @@ export async function acceptComicTake(store: WorldStore, productionId: string, p
     return {
       ...record,
       accepted: { ...record.accepted, [take.language]: take.id },
-      takes: record.takes.map((candidate) => candidate.id !== takeId || takePasses(take.verification) ? candidate
+      takes: record.takes.map((candidate) => candidate.id !== takeId || clears ? candidate
         : { ...candidate, override: { at, findings: blocking, ...(override?.reason ? { reason: override.reason } : {}) } }),
     };
+  });
+}
+
+/** The page's script as the reviewer reads it (R-67): what each panel shows and says, never the prose. */
+function scriptForReview(store: WorldStore, page: ComicPage): string {
+  const bundle = store.getBundle();
+  const name = (id: string) => bundle.sheets.find((sheet) => sheet.id === id)?.name ?? id;
+  return [`Layout: ${page.layout}, ${page.panels.length} panel${page.panels.length === 1 ? "" : "s"}.`, ...page.panels.map((panel, index) => [
+    `Panel ${index + 1}: ${panel.description}`,
+    ...(panel.characters.length ? [`  Shows: ${panel.characters.map(name).join(", ")}`] : []),
+    ...(panel.location ? [`  Place: ${name(panel.location)}`] : []),
+    ...panel.lettering.map((item) => `  ${item.kind}${item.speaker ? ` (${name(item.speaker)})` : ""}: "${item.text}"`),
+  ].join("\n"))].join("\n");
+}
+
+async function pictureBytes(store: WorldStore, file: string): Promise<{ bytes: Uint8Array; extension: string } | null> {
+  const bytes = await readFile(toExtendedLength(join(store.dir, fromPortable(file)))).catch(() => null);
+  return bytes === null ? null : { bytes, extension: file.split(".").at(-1)?.toLowerCase() ?? "png" };
+}
+
+/**
+ * Looks at a take as a picture, after its lettering is read (R-67 – R-72): against its script, the
+ * references of the people and places it names, and the accepted page before it. Every way the
+ * review cannot run is `unavailable` with its reason, and that is not a pass.
+ */
+export async function reviewComicTake(store: WorldStore, productionId: string, pageId: string, takeId: string, reviewer: PageReviewer | null, signal: AbortSignal, at: () => string): Promise<PageReview> {
+  const production = graphicNovel(store, productionId);
+  const found = findComicPage(production, pageId);
+  const take = comicPageRecord(production, pageId).takes.find((candidate) => candidate.id === takeId);
+  if (!found || !take) throw new Error("that take is no longer on the page");
+  const unavailable = (reason: "no-reviewer" | "reviewer-failed" | "unreadable", detail?: string): PageReview =>
+    ({ status: "unavailable", reason, ...(detail ? { detail: detail.slice(0, 400) } : {}), at: at() });
+  const bundle = store.getBundle();
+  const artifact = (id: string) => bundle.artifacts.find((candidate) => candidate.id === id);
+  let review: PageReview;
+  const own = artifact(take.artifact);
+  const picture = own ? await pictureBytes(store, `artifacts/${own.file}`) : null;
+  if (reviewer === null) review = unavailable("no-reviewer", "no harness that inspects images is ready");
+  else if (picture === null) review = unavailable("unreadable", "the page picture could not be read");
+  else {
+    // The page before it in the book, as it was accepted (R-21).
+    const book = comicBook(production);
+    const index = book.findIndex((entry) => entry.id === pageId);
+    const before = index > 0 ? book[index - 1]!.take : undefined;
+    const beforeArtifact = before ? artifact(before.artifact) : undefined;
+    const previous = beforeArtifact ? await pictureBytes(store, `artifacts/${beforeArtifact.file}`) : null;
+    const named = [...new Set(found.page.panels.flatMap((panel) => [...panel.characters, ...(panel.location ? [panel.location] : [])]))];
+    const references: Array<{ name: string; bytes: Uint8Array; extension: string }> = [];
+    // The reviewer's image budget goes to the page and the page before it first; references fill what is left (R-67).
+    for (const sheet of named.slice(0, 6)) {
+      const file = sheetReferencePicture(bundle, sheet);
+      const bytes = file ? await pictureBytes(store, file) : null;
+      if (bytes) references.push({ name: bundle.sheets.find((candidate) => candidate.id === sheet)?.name ?? sheet, ...bytes });
+    }
+    const extras = take.verification?.status === "compared"
+      ? take.verification.findings.filter((entry) => entry.kind === "extra" && entry.found).map((entry) => ({ id: entry.id, text: entry.found! })) : [];
+    try {
+      const answer = await reviewer.review({ script: scriptForReview(store, found.page), extras, page: picture, ...(previous ? { previous } : {}), references }, signal);
+      review = { status: "compared", reviewer: answer.reviewer, references: references.map((entry) => entry.name),
+        ...(before && previous ? { previous: before.id } : {}), findings: answer.findings, cleared: answer.cleared, at: at() };
+    } catch (err) {
+      if (signal.aborted) throw err;
+      review = unavailable("reviewer-failed", err instanceof Error ? err.message : String(err));
+    }
+  }
+  await changeComicPage(store, productionId, pageId, (record) => ({ ...record,
+    // A new review is a new verdict: an override the author gave the old one does not carry to it,
+    // and nor does a warning they saw on it.
+    acknowledged: Object.fromEntries(Object.entries(record.acknowledged).filter(([id]) => id !== takeId)),
+    takes: record.takes.map((candidate) => {
+      if (candidate.id !== takeId) return candidate;
+      const { override: _old, ...rest } = candidate;
+      return { ...rest, review };
+    }) }));
+  return review;
+}
+
+/** A review warning on a take marked Seen (R-69, turn 253c): looked at, kept on the page record. */
+export async function seeComicWarning(store: WorldStore, productionId: string, pageId: string, takeId: string, warning: ReviewWarning): Promise<void> {
+  await changeComicPage(store, productionId, pageId, (record) => {
+    if (!record.takes.some((candidate) => candidate.id === takeId)) throw new Error("that take is no longer on the page");
+    const seen = new Set(record.acknowledged[takeId] ?? []);
+    seen.add(warning);
+    return { ...record, acknowledged: { ...record.acknowledged, [takeId]: [...seen] } };
   });
 }

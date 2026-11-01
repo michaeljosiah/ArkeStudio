@@ -586,7 +586,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       ]),
     })
     .strict(),
-  /** `check-comic-take` and `accept-comic-take` answered (R-29, R-33). */
+  /** `check-comic-take`, `accept-comic-take` and `see-comic-warning` answered (R-29, R-33, R-69). */
   z
     .object({
       ...base,
@@ -596,7 +596,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       productionId: SlugSchema,
       page: UlidSchema,
       take: UlidSchema,
-      disposition: z.enum(["checked", "accepted", "refused"]),
+      disposition: z.enum(["checked", "accepted", "seen", "refused"]),
       reason: z.string().min(1).optional(),
     })
     .strict(),

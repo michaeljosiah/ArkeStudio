@@ -2537,6 +2537,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       override: z.object({ findings: z.array(z.string().min(1).max(80)).max(200), reason: z.string().trim().min(1).max(400).optional() }).strict().optional(),
     })
     .strict(),
+  /** A review warning on a take marked Seen (SPEC-064 R-69, turn 253c): looked at, not fixed. */
+  z.object({ kind: z.literal("see-comic-warning"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, page: UlidSchema, take: UlidSchema,
+    warning: z.enum(["layout", "continuity", "likeness"]) }).strict(),
   /** How a graphic novel reads and how its pages are checked (SPEC-064 R-12, R-31). */
   z
     .object({

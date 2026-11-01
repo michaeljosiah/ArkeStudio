@@ -596,6 +596,13 @@ export const COMIC_ADAPTATION_SCHEMA_VERSION = 115;
 export const AUDIOBOOK_CREDITS_SCHEMA_VERSION = 116;
 const COMIC_ADAPTATION_KEYS = /"(style|adapts|source)"\s*:/;
 /**
+ * A comic page's picture review (design turn 253, SPEC-064 R-67 – R-73): `review` on a take and a
+ * `likeness` warning marked Seen, strict fields of the page record a build of 116 refuses, which
+ * would drop every take on the page.
+ */
+export const COMIC_PAGE_REVIEW_SCHEMA_VERSION = 117;
+const COMIC_PAGE_REVIEW_KEYS = /"review"\s*:|"likeness"/;
+/**
  * An audio drama's takes (SPEC-057 R-29, codex on PR 1871): `drama-takes/` and the `episode` on a
  * take's strict audiobook sidecar. A build before them drops each such artifact as unreadable.
  */
@@ -1101,6 +1108,7 @@ export class Committer {
       files.some((f) => classify(f.path).track === "episode-script" && f.newContent != null) ? EPISODE_SCRIPT_SCHEMA_VERSION : 0,
       files.some((f) => GRAPHIC_NOVEL_FILE.test(f.path) && f.newContent != null) ? GRAPHIC_NOVEL_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/(comic\.json$|comic\/)/.test(f.path) && f.newContent != null && COMIC_ADAPTATION_KEYS.test(f.newContent)) ? COMIC_ADAPTATION_SCHEMA_VERSION : 0,
+      files.some((f) => /^productions\/[^/]+\/comic-pages\//.test(f.path) && f.newContent != null && COMIC_PAGE_REVIEW_KEYS.test(f.newContent)) ? COMIC_PAGE_REVIEW_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/drama-takes\//.test(f.path) && f.newContent != null) ? DRAMA_TAKE_SCHEMA_VERSION : 0,
       files.some((f) => {
         if (!f.newContent) return false;
