@@ -20,6 +20,7 @@ import {
   type PageReview,
   type PageReviewFinding,
 } from "../src/graphic-novel.js";
+import { comicPagePrompt } from "../src/graphic-novel-prompt.js";
 import { productionShape } from "../src/production-shape.js";
 
 const id = (n: number) => `01J${String(n).padStart(23, "0")}`;
@@ -164,5 +165,16 @@ describe("a page's layout follows its panels (turn 256)", () => {
     assert.equal(fitLayout("manga", 9), "grid-3x3");
     assert.equal(fitLayout("manga", 1), "splash");
     assert.equal(fitLayout("manga", 6), "manga");
+  });
+
+  it("tells the model the page's own count when its layout draws another", () => {
+    const panel = (n: number) => ({ id: id(100 + n), description: `Panel ${n}.`, characters: [], lettering: [] });
+    const brief = (count: number) => comicPagePrompt({
+      page: { id: id(99), layout: "manga", status: "draft", panels: Array.from({ length: count }, (_, n) => panel(n)) },
+      settings: DEFAULT_COMIC_SETTINGS, mode: "baked", names: (sheet) => sheet, cited: [],
+    }).split("\n")[0]!;
+    assert.match(brief(5), /five panels of varied size in three tiers/);
+    assert.match(brief(6), /exactly 6 panels of varied size\./);
+    assert.doesNotMatch(brief(6), /five/);
   });
 });
