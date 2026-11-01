@@ -2,6 +2,7 @@ import { readShotPromptHistory, restoreShotPrompt, readPromptBench, readRetained
 import { measureProductionMedia } from "./media/measurement.js";
 import { foldBenchSession as foldPromptBench, type PromptToolsResult, type PromptInspection, type PromptInspectSource } from "@arke-studio/contracts";
 import { benchQuoteParams } from "./bench/service.js";
+import { benchSessionSummary } from "@arke-studio/contracts";
 import { productionSpend as deriveProductionSpend } from "./spend/rollups.js";
 import { readProductionSpend } from "./spend/read.js";
 import type { ProductionSpendProjection, WorldBundle } from "@arke-studio/contracts";
@@ -2010,6 +2011,8 @@ export class Coordinator {
           progress.spentMicroUsd += made.costMicroUsd ?? made.estimatedMicroUsd;
           const stamp = pictureLookFor(record?.look ?? null, who.filter((entry) => entry.kind === "character").map((entry) => entry.key), ridingPicks(who), kitLookLibrary(store.getBundle().referenceKits, record?.look ?? null));
           let next = await setAudiobookPicture(store, productionId, chapter.file, row.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, { ...(stamp !== undefined ? { look: stamp } : {}), ...(row.shot !== undefined ? { shot: row.shot } : {}), arke: true });
+          await this.publishPicture(store);
+          this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record: next });
           // Its Tall too, when the book makes them (design turn 237, R-208): from the picture that just
           // landed, under what is left of the one confirm. A Tall that fails leaves the picture made.
           if (row.tallMicroUsd !== undefined && !control.signal.aborted) {
@@ -2018,14 +2021,13 @@ export class Coordinator {
               if (tall.ok) {
                 progress.spentMicroUsd += tall.estimatedMicroUsd;
                 next = tall.record;
+                this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record: next });
               } else if (!control.signal.aborted) void this.appLog?.append({ kind: "audiobook.illustration-tall-failed", chapter: chapter.file, block: row.block, message: tall.reason });
             } catch (err) {
               if (!control.signal.aborted) void this.appLog?.append({ kind: "audiobook.illustration-tall-failed", chapter: chapter.file, block: row.block, message: describeCoordinatorError(err) });
             }
           }
           progress.made.push(row.block);
-          this.refreshIfStillOpen(store);
-          this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record: next });
           publish();
         }
       }
@@ -6930,7 +6932,7 @@ export class Coordinator {
       if (!store || store.worldId !== job.worldId) return;
       await finalize(store);
     }
-    if (this.opts.provider.openStore?.()?.worldId === job.worldId) {
+    if (this.opts.provider.openStore?.()?.worldId === job.worldId && !this.pictureSessions.has(`${job.worldId}/${job.target.id?.split("/")[0]}`)) {
       await this.refreshWorldSnapshot(job.worldId).catch(() => {});
       // A landed bench take reaches the open workspace without waiting for a reopen.
       if (job.target.kind === "bench-take") {
@@ -8856,7 +8858,7 @@ export class Coordinator {
           );
         }
         this.readModel.setBench({ worldId: store.worldId, session: opened.session });
-        this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
+        await this.discoverBenchRows(store);
         await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
         answer(sessionId, medium);
@@ -14114,7 +14116,7 @@ export class Coordinator {
           const session = (await opened.store.fold()) ?? opened.session;
           await this.backfillBenchPosters(store, session);
           this.readModel.setBench({ worldId: store.worldId, session });
-          this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
+          await this.discoverBenchRows(store);
           this.transport.broadcastSnapshot();
           answer(sessionId);
         } catch (error) {
@@ -17367,7 +17369,7 @@ export class Coordinator {
           if (!made.ok) throw new Error(made.reason);
           const record = await saveAudiobookMotionCandidate(store, msg.productionId, chapter.file, msg.block, quote, made.artifact.id);
           this.emit({ at: this.nowIso(), type: "audiobook.record", ...recordIds, record });
-          this.refreshIfStillOpen(store);
+          await this.publishPicture(store);
           emit("review");
         } catch (error) { emit("failed", { reason: control.signal.aborted ? "stopped · any completed clip remains in Library" : describeCoordinatorError(error) }); }
         finally { store.closingSignal.removeEventListener("abort", onClose); if (this.makingMotion.get(key) === control) this.makingMotion.delete(key); }
@@ -17544,7 +17546,7 @@ export class Coordinator {
           const stamp = saved !== undefined ? shown?.look : pictureLookFor(look, characters.map((person) => person.key), ridingPicks(who), kitLookLibrary(store.getBundle().referenceKits, look));
           // The shot the press was made from rides on the picture, so its card still says it (design turn 194g).
           const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, { ...(stamp !== undefined ? { look: stamp } : {}), ...((saved !== undefined ? shown?.shot : msg.shot) !== undefined ? { shot: saved !== undefined ? shown!.shot! : msg.shot! } : {}), ...(saved !== undefined && shown !== undefined ? { expected: shown } : {}), arke: true });
-          this.refreshIfStillOpen(store);
+          await this.publishPicture(store);
           // The record the picture now stands in goes to every window as any record write does: the margin's chip and the panel read it from there, and the card's own word is only that it is done.
           this.emit({ at: at(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, requestId: msg.requestId, record });
           this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "made", sessionId: made.sessionId, record });
@@ -17557,7 +17559,6 @@ export class Coordinator {
             try {
               const tall = await this.makeTallPicture(store, { productionId: msg.productionId, chapter, block: msg.block, ceilingMicroUsd: msg.tall.confirmedMicroUsd, requestId: msg.tall.requestId, signal: control.signal, onMaking: () => this.emit({ at: at(), type: "audiobook.picture-made", ...tallIds, state: "making" }) });
               if (tall.ok) {
-                this.refreshIfStillOpen(store);
                 this.emit({ at: at(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, requestId: msg.tall.requestId, record: tall.record });
                 this.emit({ at: at(), type: "audiobook.picture-made", ...tallIds, state: "made", sessionId: tall.sessionId, record: tall.record });
               } else {
@@ -17614,7 +17615,6 @@ export class Coordinator {
         try {
           const made = await this.makeTallPicture(store, { productionId: msg.productionId, chapter, block: msg.block, ceilingMicroUsd: msg.confirmedMicroUsd, requestId: msg.requestId, signal: control.signal, onMaking: () => this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "making" }) });
           if (!made.ok) return fail(made.reason, made.sessionId);
-          this.refreshIfStillOpen(store);
           this.emit({ at: at(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, requestId: msg.requestId, record: made.record });
           this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "made", sessionId: made.sessionId, record: made.record });
         } catch (err) {
@@ -17687,7 +17687,6 @@ export class Coordinator {
             }
             progress("making", todo.length, made);
           }
-          this.refreshIfStillOpen(store);
           progress(control.signal.aborted ? "stopped" : "done", todo.length, made);
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.tall-pictures-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
@@ -22091,6 +22090,7 @@ export class Coordinator {
     });
     if (!made.ok) return made;
     const record = await setAudiobookPictureTall(store, input.productionId, input.chapter.file, input.block, `artifacts/${made.artifact.file}`, shown.file);
+    await this.publishPicture(store);
     return { ok: true, record, sessionId: made.sessionId, estimatedMicroUsd: made.estimatedMicroUsd };
   }
 
@@ -22350,6 +22350,18 @@ export class Coordinator {
     }
   }
 
+  private readonly pictureSessions = new Set<string>();
+
+  /** Filing and placement publish together, including the accounting derived from that picture. */
+  private async publishPicture(store: WorldStore): Promise<void> {
+    if (!this.stillOpen(store)) return;
+    this.setDisplayWorld(store.getBundle());
+    await this.scheduleProductionSpend();
+    if (!this.stillOpen(store)) return;
+    this.pendingSpendSnapshot = false;
+    this.transport.broadcastSnapshot();
+  }
+
   private async makeBenchPicture(
     store: WorldStore,
     input: {
@@ -22377,12 +22389,14 @@ export class Coordinator {
     const opened = input.saved !== undefined ? await openSavedPicture(store, input.saved, () => this.nowIso(), input.title) : await openBenchSession(store.dir, () => this.nowIso(), { fresh: true, defaultModel: { provider: input.model.provider, model: input.model.id }, initial: { mode, brief: input.prompt, title: input.title } }).catch(() => null);
     if (opened === null) return { ok: false, reason: "the Bench could not open a session" };
     const sessionId = opened.session.id;
+    const sessionKey = `${worldId}/${sessionId}`;
+    this.pictureSessions.add(sessionKey);
+    try {
     if (input.onSession !== undefined) {
       try { await input.onSession(sessionId); } catch (err) { return { ok: false, reason: describeCoordinatorError(err), sessionId }; }
     }
     const fail = async (reason: string) => {
-      this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
-      this.transport.broadcastSnapshot();
+      await this.refreshBench(worldId, sessionId);
       return { ok: false as const, reason, sessionId };
     };
     if (input.saved === undefined) await opened.store.append({ type: "composer-set", mode, provider: input.model.provider, model: input.model.id, params, brief: input.prompt }, { at: this.nowIso(), requestId: `pic-composer:${input.requestId}` });
@@ -22464,8 +22478,7 @@ export class Coordinator {
     }
     const jobId = outcome.acceptedJobIds[0];
     if (jobId !== undefined) await bench.store.append({ type: "take-job", takeId: reserved.id, jobId }, { at: this.nowIso() });
-    this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
-    this.transport.broadcastSnapshot();
+    await this.refreshBench(worldId, sessionId, false);
     // The take lands through the job's own finalisation; this waits for it to be written to the log.
     const deadline = Date.now() + (input.motion === undefined ? this.opts.pictureWait?.waitMs ?? PICTURE_WAIT_MS : 45 * 60_000);
     for (;;) {
@@ -22479,9 +22492,7 @@ export class Coordinator {
       if (take?.media !== undefined && now !== null) {
         try {
           const artifact = await this.fileBenchTake(store, now, take, `pic-keep:${input.requestId}`);
-          await this.refreshWorldSnapshot(worldId);
-          this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
-          this.transport.broadcastSnapshot();
+          await this.refreshBench(worldId, sessionId, false);
           return { ok: true, sessionId, artifact, costMicroUsd: take.cost?.actualMicroUsd ?? null, estimatedMicroUsd: planned };
         } catch (err) {
           return fail(describeCoordinatorError(err));
@@ -22499,6 +22510,7 @@ export class Coordinator {
       if (Date.now() > deadline) return fail("the picture took too long");
       await new Promise((resolve) => setTimeout(resolve, PICTURE_POLL_MS));
     }
+    } finally { this.pictureSessions.delete(sessionKey); }
   }
 
   /** A cast sheet's name for a Bench brief, read from the open world; the id once the sheet is gone. */
@@ -22564,7 +22576,7 @@ export class Coordinator {
       }
     });
     this.readModel.setBench({ worldId: store.worldId, session });
-    this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
+    await this.discoverBenchRows(store);
     this.transport.broadcastSnapshot();
   }
 
@@ -22719,17 +22731,21 @@ export class Coordinator {
     this.emit({ at: this.nowIso(), type: "music.takes", worldId: store.worldId, productionId, requestId, takes });
   }
 
-  private async refreshBench(worldId: string, sessionId: SessionId): Promise<void> {
+  private async discoverBenchRows(store: WorldStore): Promise<void> {
+    const sessions = await discoverBenchSessions(store.dir);
+    if (!this.stillOpen(store)) return;
+    store.setBenchSessions(sessions);
+    this.readModel.setBenchSessions(sessions);
+  }
+
+  private async refreshBench(worldId: string, sessionId: SessionId, publish = true): Promise<void> {
     const store = this.opts.provider.openStore?.();
     if (!store || store.worldId !== worldId) return;
     const key = `${worldId}/${sessionId}`;
     const refresh = Symbol();
     this.benchRefreshes.set(key, refresh);
     try {
-      const [bench, sessions] = await Promise.all([
-        this.benchFor(worldId, sessionId),
-        discoverBenchSessions(store.dir),
-      ]);
+      const bench = await this.benchFor(worldId, sessionId);
       if (!this.stillOpen(store) || this.benchRefreshes.get(key) !== refresh) return;
       // Completion and filing also refresh sessions opened by background chapter work. Those
       // results belong in the session list, not in the workspace the author is reviewing.
@@ -22738,8 +22754,12 @@ export class Coordinator {
       if (bench && active?.worldId === worldId && active.session.id === sessionId) {
         this.readModel.setBench({ worldId, session: bench.session });
       }
+      const sessions = store.getBundle().benchSessions.filter(session => session.id !== sessionId);
+      if (bench) sessions.push(benchSessionSummary(bench.session));
+      sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      store.setBenchSessions(sessions);
       this.readModel.setBenchSessions(sessions);
-      this.transport.broadcastSnapshot();
+      if (publish) this.transport.broadcastSnapshot();
       // An album's own session (SPEC-060 R-9) tells the composer open on it what landed.
       const subject = bench?.session.subject;
       if (subject?.kind === "production" && subject.role === "music") void this.emitMusicTakes(store, subject.productionId, null, sessionId);

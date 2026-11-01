@@ -359,6 +359,11 @@ export class WorldStore {
     };
   }
 
+  /** Bench journals are watcher-ignored; their owner refreshes these rows after changing them. */
+  setBenchSessions(benchSessions: WorldBundle["benchSessions"]): void {
+    this.scan.bundle = { ...this.scan.bundle, benchSessions };
+  }
+
   get worldId(): string {
     return this.scan.meta.worldId;
   }
@@ -844,7 +849,9 @@ export class WorldStore {
    * fingerprint and rebuilds only if the world actually differs.
    */
   private async rescan(changedPaths?: string[]): Promise<void> {
-    this.scan = await scanWorld(this.dir);
+    const scan = await scanWorld(this.dir, { benchSessions: this.scan.bundle.benchSessions });
+    // A Bench job can finish while authored files are being read; keep its newest row.
+    this.scan = { ...scan, bundle: { ...scan.bundle, benchSessions: this.scan.bundle.benchSessions } };
     await this.checkCurrentHistorySnapshots();
     await this.saveScanState();
     try {

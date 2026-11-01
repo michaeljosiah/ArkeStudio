@@ -549,7 +549,7 @@ const CANDIDATE_BACKED_TAKE_KINDS: ReadonlySet<string> = new Set(["main-photo", 
  */
 export async function scanWorld(
   dir: string,
-  opts: { supports?: number; signal?: AbortSignal; includeOperationalState?: boolean; onProgress?: (read: number) => void } = {},
+  opts: { supports?: number; signal?: AbortSignal; includeOperationalState?: boolean; benchSessions?: WorldBundle["benchSessions"]; onProgress?: (read: number) => void } = {},
 ): Promise<ScanResult> {
   const { signal } = opts;
   const operational = opts.includeOperationalState !== false;
@@ -1583,7 +1583,7 @@ export async function scanWorld(
     // Rows only. discoverConversations reads summaries, never transcripts.
     conversations: operational ? (await discoverConversations(dir)).summaries : [],
     // Same split for the bench (issue 305): rows to resume from, never the takes.
-    benchSessions: operational ? await discoverBenchSessions(dir) : [],
+    benchSessions: operational ? opts.benchSessions ?? await discoverBenchSessions(dir) : [],
     changes,
     problems,
     externalEdits: [],
