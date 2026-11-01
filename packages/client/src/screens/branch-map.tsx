@@ -1368,6 +1368,10 @@ export function BranchMapScreen() {
     );
 
     function findingActions(row: FindingRow) {
+      if (row.kind === "ending-with-choices") {
+        const id = row.sceneIds[0];
+        return id && scenes.some(scene => scene.id === id) ? <Button size="sm" onClick={() => setSelection({ kind: "scene", id })}>Review Ending</Button> : null;
+      }
       if (row.witnessPrefix !== undefined) {
         try {
           const point = storyReplay(routing!,row.witnessPrefix);

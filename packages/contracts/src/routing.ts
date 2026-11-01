@@ -410,7 +410,12 @@ function stateRoutingFindings(routing: Routing, scenes: readonly {id: string; ti
   }
   for (const point of graph.points) if (!known.has(point.sceneId)) add(`Missing scene ${point.sceneId}`, [point.sceneId]);
   for (const scene of scenes) if (!routing.excluded.some(e => e.sceneId === scene.id) && !graph.points.some(p => p.sceneId === scene.id)) add(`No reachable story state enters ${scene.title ?? scene.id}`, [scene.id], [], "unreachable");
-  for (const problem of graph.problems) add(`${problem.detail} at ${problem.sceneId}. Route: ${problem.prefix.join(" → ") || "start"}. Facts: ${JSON.stringify(problem.state)}`, [problem.sceneId], problem.prefix, "state-route", problem.prefix);
+  for (const problem of graph.problems) {
+    const ending = problem.detail === "Ending still offers choices";
+    add(`${problem.detail} at ${problem.sceneId}. Route: ${problem.prefix.join(" → ") || "start"}. Facts: ${JSON.stringify(problem.state)}`, [problem.sceneId],
+      ending ? routing.choices.filter(choice => choice.from === problem.sceneId).map(choice => choice.id) : problem.prefix,
+      ending ? "ending-with-choices" : "state-route", problem.prefix);
+  }
   const covered = new Set<string>();
   for (const entry of evidence) {
     if (!entry.story || entry.story.identity !== identity) continue;

@@ -262,6 +262,17 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.match(text(inspector!), /Sometimes plays through/);
   });
 
+  it("offers the Ending control for a stateful ending with choices and warns in the connector (#2238)", async () => {
+    const item = await mount({ ...ROUTING, schemaVersion: 2, endings: [...ROUTING.endings, { sceneId: "sc_quarter", title: "Too soon" }] });
+    await click(all(item, ".bm-count")[0]);
+    await click(button(item, "Review Ending"));
+    const ending = all(item, 'button[role="switch"][aria-label="Ending"]')[0];
+    assert.ok(ending, "the repair action opens the inspector's Ending switch");
+    await click(button(item, "Draw a choice from here"));
+    assert.match(text(item.container.ownerDocument.body), /This scene is an ending.*turn off Ending in the scene inspector/);
+    assert.equal(commands(item).length, 0, "reviewing the fault does not edit the story");
+  });
+
   it("counts the findings in the header and lists them by name when the count is pressed", async () => {
     const item = await mount();
     const count = all(item, ".bm-count")[0];
