@@ -1104,7 +1104,7 @@ export async function resolveBeatScenes(store: WorldStore, production: Productio
         },
         audio: (lineId) => {
           const source = voices.get(lineId);
-          return source === undefined || !safeWorldFile(source) ? undefined : packaged(source, `voice-${lineId.replace(/[^A-Za-z0-9_-]/g, "_")}`);
+          return source === undefined || !safeWorldFile(source) ? undefined : packaged(source, `voice-${createHash("sha256").update(lineId).digest("hex")}`);
         },
         speakerName: (id) => sheets.find((sheet) => sheet.id === id)?.name ?? id,
       });

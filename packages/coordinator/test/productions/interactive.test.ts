@@ -540,20 +540,44 @@ describe("a visual novel's package (turn 174)", () => {
     };
     assert.deepEqual(manifest.media, [], "no footage");
     const first = manifest.beats.find((scene) => scene.sceneId === "sc_i1")!.beats;
+    const voiceFile = first[0]!.audio as string;
+    assert.match(voiceFile, /^media\/voice-[a-f0-9]{64}\.mp3$/);
     assert.deepEqual(first.map((beat) => [beat.text ?? null, beat.speaker ?? null, beat.audio ?? null, beat.picture]), [
-      ["They hung the washing out the morning the water came.", null, "media/voice-sc_i1_sh_v1_blk_wash.mp3", "media/picture-sh_v1.png"],
+      ["They hung the washing out the morning the water came.", null, voiceFile, "media/picture-sh_v1.png"],
       ["Somebody lit a window down there.", "Maren Kest", null, "media/picture-sh_v1.png"],
       [null, null, null, "media/picture-sh_v1.png"],
     ], "narration voiced, Maren's line as text, and the held beat keeps sh_v1's picture");
     assert.equal(first[0]!.advance, "voice");
-    assert.deepEqual(manifest.files.map((entry) => entry.file).sort(), ["media/picture-sh_v1.png", "media/picture-sh_v3.png", "media/voice-sc_i1_sh_v1_blk_wash.mp3"], "each file once");
-    assert.equal(await readFile(join(dir, result.dir, "media", "voice-sc_i1_sh_v1_blk_wash.mp3"), "utf8"), "the narrator reads");
+    assert.deepEqual(manifest.files.map((entry) => entry.file).sort(), ["media/picture-sh_v1.png", "media/picture-sh_v3.png", voiceFile], "each file once");
+    assert.equal(await readFile(join(dir, result.dir, voiceFile), "utf8"), "the narrator reads");
     const player = await readFile(join(dir, result.file), "utf8");
     assert.doesNotThrow(() => new Script(player.match(/<script>([\s\S]*?)<\/script>/)![1]!));
     assert.match(player, /manifest\.beats/, "the page reads the beats");
     assert.match(player, /\+ \(manifest\.beats \? "-beats" : ""\)/, "a beat package keeps its place apart from a clip package's (codex round 15)");
     assert.ok(player.includes(INTERACTIVE_PLAYER_SOURCE.replace(/^export function /gm, "function ").slice(0, 200)), "the one player");
     assert.equal(await interactiveExportCompleted(store, production.meta.id, exportId), true, "it verifies as complete");
+  });
+
+  it("keeps distinct voices for line IDs that collide when punctuation is replaced (#1377)", async () => {
+    const { dir, store, bundle } = await open();
+    const production = await novel(dir, bundle.productions[0]!);
+    const scene = production.scenes[0]!;
+    assert(scene.script && "shots" in scene);
+    scene.script.blocks = scene.script.blocks.map((block, i) => ({ ...block, id: i === 0 ? "a/b" : "a?b" }));
+    scene.shots[0]!.covers = [cover("a/b"), cover("a?b")];
+    await appendTraversal(store, production.meta.id, walked);
+    await mkdir(join(dir, ".cache", "voice-previews"), { recursive: true });
+    for (const name of ["one", "two"]) await writeFile(join(dir, ".cache", "voice-previews", `${name}.mp3`), name);
+    const voices = { narrator: async () => null, plan: async (id: string) => ({ sceneVersion: 1,
+      files: new Map(id === scene.id ? [["sc_i1/sh_v1/a/b", ".cache/voice-previews/one.mp3"], ["sc_i1/sh_v1/a?b", ".cache/voice-previews/two.mp3"]] : []) }) };
+    const result = await exportInteractive(store, production, CLOCK, { voices, current: () => production });
+    assert(result.ok, result.ok ? "" : result.blockers.join("; "));
+    const manifest = JSON.parse(await readFile(join(dir, result.dir, "manifest.json"), "utf8"));
+    const [one, two] = manifest.beats[0].beats;
+    assert.notEqual(one.audio, two.audio);
+    assert.equal(await readFile(join(dir, result.dir, one.audio), "utf8"), "one");
+    assert.equal(await readFile(join(dir, result.dir, two.audio), "utf8"), "two");
+    assert.equal(await interactiveExportCompleted(store, production.meta.id, result.id), true);
   });
 
   it("exports remembered state, guarded beat identities and ending variants in executable offline HTML", async () => {
