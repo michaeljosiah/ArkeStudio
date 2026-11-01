@@ -11,5 +11,5 @@ it("offers only models with a current private owner, excluding embeddings and un
   assert.deepEqual(studioModelChoices(adapter, models, destination), ["ollama/gemma"]);
   owned = false; assert.deepEqual(studioModelChoices(adapter, models, destination), []);
   owned = true; ready = false; assert.deepEqual(studioModelChoices(adapter, models, destination), []);
-  ready = true; assert.deepEqual(studioModelChoices({ ...adapter, privateSessions: false }, models, destination), []);
+  ready = true; assert.deepEqual(studioModelChoices({ ...adapter, privateSessions: undefined }, models, destination), []);
 });
