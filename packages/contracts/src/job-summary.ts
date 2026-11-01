@@ -1,12 +1,21 @@
 import { JobSchema, type Job } from "./job.js";
 import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
+import { StorageRootRoleSchema } from "./storage-health.js";
 
 /** Current queue observation, never persisted as dispatch/retry authority. */
 export const JobStorageWaitSchema = z.object({
   phase: z.enum(["submission", "result"]),
   reason: z.enum(["space", "unavailable"]),
   observedAt: IsoDateTimeSchema,
+  checking: z.boolean().optional(),
+  detail: z.object({
+    code: z.enum(["capacity-unavailable", "capacity-stale", "mapping-changed", "unbounded-output", "space", "audit-unavailable", "reconciliation-required", "reservation-limit", "stopped", "destination-unavailable", "different-volumes"]),
+    roles: z.array(StorageRootRoleSchema).max(5),
+    measuredAt: z.number().int().nonnegative().safe().optional(),
+    availableBytes: z.number().int().nonnegative().safe().optional(),
+    deficitBytes: z.number().int().nonnegative().safe().optional(),
+  }).strict().optional(),
 }).strict();
 export type JobStorageWait = z.infer<typeof JobStorageWaitSchema>;
 

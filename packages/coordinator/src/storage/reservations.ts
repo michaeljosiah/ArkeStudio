@@ -29,7 +29,7 @@ export interface StorageReservationStore {
 
 export type StorageReservationResult =
   | { status: "reserved"; reservation: StorageReservation }
-  | { status: "held"; reason: "stopped" | "audit-unavailable" | "reconciliation-required" | "reservation-limit" | "capacity"; admission?: StorageAdmission; volumeId?: string };
+  | { status: "held"; reason: "stopped" | "audit-unavailable" | "reconciliation-required" | "reservation-limit" | "capacity"; admission?: StorageAdmission; volumeId?: string; rootIds?: string[]; measuredAt?: number };
 export type StorageAssessmentResult = { status: "fits" } | Extract<StorageReservationResult, { status: "held" }>;
 
 const requestSchema = z.object({
@@ -219,13 +219,13 @@ export class StorageReservations {
         if (!fact || fact.volumeId !== d.volumeId || fact.mappingRevision !== d.mappingRevision) {
           record.state = "uncertain";
           this.changed();
-          return { status: "held", reason: "reconciliation-required" };
+          return { status: "held", reason: "reconciliation-required", rootIds: [d.rootId] };
         }
       }
       const demands: StorageReservation["demands"] = [];
       for (const d of request.demands) {
         const fact = facts.get(d.rootId);
-        if (!fact) return { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-unavailable" } };
+        if (!fact) return { status: "held", reason: "capacity", rootIds: [d.rootId], admission: { status: "unknown", reason: "capacity-unavailable" } };
         if (d.remainingBytes === null) return { status: "held", reason: "capacity", volumeId: fact.volumeId, admission: { status: "unknown", reason: "unbounded-output" } };
         demands.push({ ...d, remainingBytes: d.remainingBytes, volumeId: fact.volumeId, mappingRevision: fact.mappingRevision,
           reserveBytes: Math.max(STORAGE_POLICY.reserveBytes, d.reserveBytes ?? STORAGE_POLICY.reserveBytes) });
@@ -239,7 +239,8 @@ export class StorageReservations {
         const readings = [...own, ...other].map(d => facts.get(d.rootId)!);
         const now = this.now();
         if (readings.some(r => r.measuredAt > now || now - r.measuredAt > STORAGE_POLICY.admissionMaxAgeMs)) {
-          return { status: "held", reason: "capacity", volumeId, admission: { status: "unknown", reason: "capacity-stale" } };
+          const stale = [...own, ...other].filter(d => { const fact = facts.get(d.rootId)!; return fact.measuredAt > now || now - fact.measuredAt > STORAGE_POLICY.admissionMaxAgeMs; });
+          return { status: "held", reason: "capacity", volumeId, rootIds: stale.map(d => d.rootId), measuredAt: facts.get(stale[0]!.rootId)!.measuredAt, admission: { status: "unknown", reason: "capacity-stale" } };
         }
         const adjusted = readings.map(reading => ({ reading, debit: bytes.parse(consumed.filter(entry => entry.volumeId === volumeId && entry.at >= reading.measuredAt).reduce((sum, entry) => sum + entry.bytes, 0)) }));
         adjusted.sort((a, b) => ((a.reading.availableBytes ?? 0) - a.debit) - ((b.reading.availableBytes ?? 0) - b.debit));
@@ -251,9 +252,9 @@ export class StorageReservations {
           reservedBytes: bytes.parse(other.reduce((sum, d) => sum + d.remainingBytes, sample.debit)),
           remainingPeakBytes: bytes.parse(own.reduce((sum, d) => sum + d.remainingBytes, 0)),
           reserveBytes: Math.max(...[...own, ...other].map(d => d.reserveBytes)), now });
-        if (admission.status === "unknown") return { status: "held", reason: "capacity", volumeId, admission };
+        if (admission.status === "unknown") return { status: "held", reason: "capacity", volumeId, rootIds: own.map(d => d.rootId), measuredAt: capacity.measuredAt, admission };
         checks.push({ rootIds: own.map(d => d.rootId), volumeId, measuredAt: capacity.measuredAt, admission });
-        if (admission.status === "held") refused ??= { status: "held", reason: "capacity", volumeId, admission };
+        if (admission.status === "held") refused ??= { status: "held", reason: "capacity", volumeId, rootIds: own.map(d => d.rootId), measuredAt: capacity.measuredAt, admission };
       }
       // A bounded presentation projection only. No owner/path is sent to clients, and the
       // callback cannot alter this decision, create a reservation or claim a queued operation.

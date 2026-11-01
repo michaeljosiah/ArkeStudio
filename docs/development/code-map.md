@@ -1,5 +1,12 @@
 # Code map
 
+Operation storage holds (#2240): `contracts/src/job-summary.ts` carries bounded reason/role
+evidence; coordinator `storage/reservations.ts` and `storage/job-artifacts.ts` supply it, and
+`queue/dispatcher.ts` retains it in reconnect snapshots without journal authority. Client
+`components/job-storage-wait.tsx` renders the same observation in Activity and Studio storage.
+`productions/arke-player-export.ts` refuses known external edits before media preparation,
+while its final consistency gate remains authoritative. Design turn 259 records the UI scope.
+
 Storage root churn (issue 2239): `storage/monitor.ts` retains in-flight readings for unchanged
 destinations; `storage/windows-volume.ts` keeps their registration identities across sibling
 acquisition/release and measures newly registered roots in the next batch. Removed/replaced

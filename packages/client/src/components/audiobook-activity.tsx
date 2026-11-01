@@ -8,13 +8,16 @@ import {
 import { resolveHeldJob, stopAudiobook, subscribeAudiobookActivity, useStore } from "../lib/store.js";
 import { activityReason, closeActivityPanel, openActivityPanel, inspectProviderCalls } from "../lib/activity-panel.js";
 import { Button, cx } from "./ui.js";
+import { JobStorageWaitNotice } from "./job-storage-wait.js";
 
 const tone = (run: AudiobookActivity) => run.phase === "ready" ? "ok" : run.phase === "finished" ? "warn" : run.phase === "interrupted" ? "fail" : ["reading", "aligning"].includes(run.phase) ? "live" : "queued";
 
 export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; state: ClientState }) {
+  const connection = useStore().connection;
   const navigate = useNavigate();
   const live = audiobookActivityLive(run);
   const jobs = audiobookActivityJobs(run, state.app.jobs);
+  const storageWait = jobs.map(ref => state.app.jobs.find(job => job.id === ref.id)?.storageWait).find(wait => wait !== undefined);
   const unresolved = jobs.find(ref => state.app.jobs.find(job => job.id === ref.id)?.status === "needs-reconciliation");
   const [expanded, setExpanded] = useState(false);
   const details = useRef<HTMLDetailsElement>(null);
@@ -45,10 +48,10 @@ export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; s
     <div className="fy-ap__main">
       <div className="fy-ap__rowtitle">{audiobookActivityTitle(run)}</div>
       <div className="fy-ap__rowsub">{order !== undefined ? `Chapter ${order} · ` : ""}{run.productionTitle} · {run.worldName}</div>
-      {!blockReady && <><div className="fy-abactivity__stage" role="status">{stage}</div>
+      {!blockReady && <><div className="fy-abactivity__stage" role="status">{storageWait ? storageWait.phase === "submission" ? "Waiting before submission" : "Waiting to save the result" : stage}</div>
         <div className="fy-ap__rowsub">{progress}</div></>}
       <div className="fy-ap__rowsub">{blockReady ? `${run.made} block${run.made === 1 ? "" : "s"} saved · ${cost.replace(" this re-read", " for this re-read")}` : [!uncertain && run.models.join(", "), cost].filter(Boolean).join(" · ")}</div>
-      {run.reason && <div className="fy-ap__reason">{activityReason(run.reason)}</div>}
+      {storageWait ? <JobStorageWaitNotice wait={storageWait} connected={connection === "open"} /> : run.reason && <div className="fy-ap__reason">{activityReason(run.reason)}</div>}
       {!run.reason && run.phase === "aligning" && expanded && <div className="fy-ap__reason">Matching the audio to its blocks.</div>}
       <div className="fy-ap__actions">
         {unresolved && <Button size="sm" variant="primary" onClick={showRequests}>Resolve request</Button>}

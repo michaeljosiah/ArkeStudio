@@ -117,8 +117,9 @@ function withState(state: ClientState): void {
   __resetActivityPanelForTest();
 }
 
-function render(state: ClientState, tab: ActivityTab): string {
+function render(state: ClientState, tab: ActivityTab, connection?: "open" | "closed"): string {
   withState(state);
+  if (connection) __setStateForTest(state, { connection });
   openActivityPanel(tab);
   // Server rendering splits a sentence at every interpolation with a comment marker, and
   // escapes the apostrophe. Neither is on screen.
@@ -136,6 +137,20 @@ function activityControl(html: string): string {
   assert.ok(label > 0, "the bell is drawn");
   return html.slice(html.lastIndexOf("<button", label), html.indexOf("</button>", label));
 }
+
+it("marks normal and audiobook storage notices historical when disconnected", () => {
+  const state = quiet();
+  const request = { ...job({ status: "queued", error: null, attempt: 0 }), storageWait: { phase: "submission" as const, reason: "unavailable" as const, checking: true, observedAt: TODAY } };
+  state.app.jobs = [request];
+  assert.match(render(state, "inbox", "open"), /Checking destination/);
+  const disconnected = render(state, "inbox", "closed");
+  assert.match(disconnected, /Last reported storage hold/); assert.doesNotMatch(disconnected, /Checking destination|It will check again/);
+  state.app.audiobookActivity = [{ id: "01J8F3K2QW9VZX4N7M0RTYB6HD", worldId: FIXTURE_WORLD_ID, productionId: "bell-watch", chapterId: "crossing", chapterFile: "01-crossing",
+    chapterTitle: "The crossing", productionTitle: "Bell Watch", worldName: "The Undersong", scope: "chapter", phase: "reading", startedAt: TODAY, updatedAt: TODAY,
+    toMake: 1, made: 0, flagged: 0, requests: 1, request: 1, estimatedMicroUsd: 0, models: [], local: true, jobs: [{ id: request.id, index: 1, reused: false }] }];
+  const grouped = render(state, "inbox", "closed");
+  assert.match(grouped, /Last reported storage hold/); assert.doesNotMatch(grouped, /Checking destination|It will check again/);
+});
 
 it("keeps an aligning chapter in Running after its provider request succeeded, and retains its owned chapter route", () => {
   const state = quiet();

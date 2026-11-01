@@ -582,10 +582,15 @@ export class JobQueue {
     const typed = error instanceof SubmissionStorageHeld || error instanceof ArtifactStorageHeld;
     if (typed) {
       const reason = error.result?.admission?.status === "held" ? "space" : "unavailable";
-      if (before?.phase === phase && before.reason === reason) return;
-      this.storageWaits.set(job.id, { phase, reason, observedAt: this.clock() });
+      if (before?.phase === phase && before.reason === reason && !before.checking && JSON.stringify(before.detail) === JSON.stringify(error.detail)) return;
+      this.storageWaits.set(job.id, { phase, reason, observedAt: this.clock(), ...(error.detail ? { detail: error.detail } : {}) });
     } else if (!this.storageWaits.delete(job.id)) return;
     this.publishJob(current);
+  }
+
+  private checkingStorage(job: Job): void {
+    const previous = this.storageWaits.get(job.id);
+    if (previous) { this.storageWaits.set(job.id, { ...previous, checking: true }); this.publishJob(this.jobs.get(job.id) ?? job); }
   }
 
   /** Cancellation must retain a response whose usage is already being made durable. */
@@ -1420,6 +1425,7 @@ export class JobQueue {
     const check = this.opts.artifactSpace?.checkSubmission;
     if (!check) { this.storageWaiting(job, "submission"); return true; }
     const checking = new AbortController(); this.submitAborts.set(job.id, checking);
+    this.checkingStorage(job);
     try {
       const directories = [{ directory: join(dirname(this.opts.journalPath), "inline-artifacts"), role: "working-files" as const }];
       if (job.landing) {
@@ -1435,7 +1441,7 @@ export class JobQueue {
           } catch (error) { failure = error; throw error; }
         });
         if (failure) throw failure;
-        if (!available) throw new SubmissionStorageHeld();
+        if (!available) throw new SubmissionStorageHeld(undefined, { code: "destination-unavailable", roles: ["generated-media"] });
       } else await check.call(this.opts.artifactSpace, directories, checking.signal);
       this.storageWaiting(job, "submission");
       return !this.disposed && !checking.signal.aborted && this.stillQueued(job) && !this.lane(job.provider).paused;
@@ -1765,6 +1771,7 @@ export class JobQueue {
     // a missing media result on restart (notably inline-only speech and voice creation).
     if (artifacts.length === 0) return !signal.aborted && this.stillActiveRun(job);
     while (!signal.aborted && !this.disposed && this.stillActiveRun(job)) {
+      this.checkingStorage(job);
       try { await this.artifactFiles.save(job, artifacts, signal, admittedSettings); this.storageWaiting(job, "result"); return !signal.aborted && this.stillActiveRun(job); }
       catch (error) {
         if (signal.aborted || this.disposed || !this.stillActiveRun(job)) return false;
@@ -1924,6 +1931,7 @@ export class JobQueue {
               entries.push({ artifact, name, from, to, rel, published, ready: published || await artifactFileMatches(from, artifact.data, signal) });
             }
             const remainingBytes = entries.reduce((sum, value) => sum + (value.published ? 0 : ARTIFACT_FILE_OVERHEAD + (value.ready ? 0 : value.artifact.data.length + ARTIFACT_FILE_OVERHEAD)), 0);
+            this.checkingStorage(job);
             lease = remainingBytes ? await this.opts.artifactSpace?.reserve(job.id, [
               { directory: stagingDir, remainingBytes, role: "generated-media" },
               { directory: targetDir, remainingBytes: 0, role: "generated-media" },

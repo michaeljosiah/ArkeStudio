@@ -72,6 +72,9 @@ it("holds a paid request on its full world volume, survives restart unsent, then
     await until(() => held(first, job.id), "unsent destination hold");
     assert.equal(first.listJobs()[0]!.storageWait?.phase, "submission");
     assert.equal(first.listJobs()[0]!.storageWait?.reason, "space");
+    assert.deepEqual(first.listJobs()[0]!.storageWait?.detail?.roles, ["generated-media"]);
+    assert.equal(first.listJobs()[0]!.storageWait?.detail?.code, "space");
+    assert.equal(first.listJobs()[0]!.storageWait?.detail?.availableBytes, 0);
     assert.equal(h.events.at(-1)!.storageWait?.reason, "space");
     assert.equal(h.client.submitCount, 0); assert.equal(first.listJobs()[0]!.attempt, 0); assert.equal(h.ledger.length, 0);
     const history = await new JobJournal(join(h.root, "jobs.jsonl")).readHistory();
@@ -82,6 +85,7 @@ it("holds a paid request on its full world volume, survives restart unsent, then
     assert.equal(first.listJobs()[0]!.storageWait, undefined, "A stopped host has no live observation");
     next = h.create(); await next.start(); await until(() => held(next!, job.id), "same unsent identity restored");
     assert.equal(next.listJobs()[0]!.storageWait?.phase, "submission", "Restart reacquires the observation from an actual check");
+    assert.equal(next.listJobs()[0]!.storageWait?.detail?.code, "space", "A reconnect snapshot retains the operation's exact reason");
     assert.equal(h.client.submitCount, 0); h.roomy();
     await until(() => next!.listJobs()[0]?.status === "succeeded", "fresh capacity releases unsent work", 20_000);
     assert.equal(h.client.submitCount, 1); assert.equal(next.listJobs()[0]!.attempt, 1);
