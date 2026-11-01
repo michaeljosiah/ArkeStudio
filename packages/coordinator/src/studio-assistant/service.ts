@@ -12,7 +12,7 @@ import type { StudioModelDisclosure, StudioModelPort } from "./runner.js";
 type Message = StudioAssistantThread["messages"][number];
 type Phase = NonNullable<StudioAssistantThread["pending"]>["phase"];
 interface Turn { id: string; threadId: string; control: AbortController; task?: Promise<void>; share?: { value: StudioCloudShare; resolve(value: boolean): void } }
-export type StudioRequestResult = { status: "accepted"; runId: string } | { status: "refused"; reason: "invalid" | "missing-thread" | "busy" | "interrupted" | "unavailable" | "full" };
+export type StudioRequestResult = { status: "accepted"; runId: string } | { status: "refused"; reason: "invalid" | "missing-thread" | "busy" | "interrupted" | "unavailable" | "model-unavailable" | "full" };
 const requestSchema = StudioAssistantSendSchema.omit({ action: true }).refine(studioRequestFits);
 const hash = (value: unknown) => createHash("sha256").update("studio-disclosure\0" + JSON.stringify(value)).digest("hex");
 const replyShape = '{"kind":"reply","text":"..."}, {"kind":"diagnose","topic":"storage|local-ai|setup|jobs"}, or {"kind":"handoff","destination":"world|builder","draft":"editable request"}';
@@ -31,7 +31,7 @@ export class StudioAssistantService {
   private readonly writes = new WriteQueue();
   private readonly subscribers = new Set<(snapshot: StudioAssistantSnapshot) => void>();
   private readonly stopModelEvents: (() => void) | undefined;
-  constructor(private readonly deps: { store: StudioConversationStore; model: StudioModelPort;
+  constructor(private readonly deps: { store: StudioConversationStore; model: StudioModelPort; modelChoices?(): string[];
     evidence(topic: StudioDiagnosticTopic): StudioDiagnosticEvidence; now?: () => number; shutdownMs?: number }) {
     this.stopModelEvents = deps.model.subscribe?.(() => this.publish());
   }
@@ -39,6 +39,7 @@ export class StudioAssistantService {
   private publish(): void { if (this.closing) return; const snapshot = this.snapshot(); for (const listener of this.subscribers) { try { listener(snapshot); } catch { /* Presentation grants no authority. */ } } }
   snapshot(): StudioAssistantSnapshot {
     return StudioAssistantSnapshotSchema.parse({ audit: this.audit, accepting: !this.closing && this.audit === "available", busy: this.turn !== null || this.deps.model.busy(),
+      ...(this.deps.modelChoices ? { models: this.deps.modelChoices() } : {}),
       threads: structuredClone(this.file.threads), share: this.turn?.share?.value ?? null, ephemeralReply: this.ephemeralReply });
   }
   subscribe(listener: (snapshot: StudioAssistantSnapshot) => void): () => void { this.subscribers.add(listener); return () => this.subscribers.delete(listener); }
@@ -109,6 +110,10 @@ export class StudioAssistantService {
     const input = parsed.data; await this.open();
     if (this.closing || this.audit !== "available") return { status: "refused", reason: "unavailable" };
     if (this.turn || this.deps.model.busy()) return { status: "refused", reason: "busy" };
+    const choices = this.deps.modelChoices?.();
+    if (choices && (!choices.includes(input.model) || input.diagnosticModel && !choices.includes(input.diagnosticModel))) {
+      this.publish(); return { status: "refused", reason: "model-unavailable" };
+    }
     const thread = this.file.threads.find(value => value.id === input.threadId && !value.archived);
     if (!thread) return { status: "refused", reason: "missing-thread" };
     if (thread.pending) return { status: "refused", reason: "interrupted" };

@@ -16,6 +16,18 @@ function fixture(documentReadMs = 30_000) {
     response: { type: "result", status, reason: null, threadId, runId: status === "accepted" ? other : null } });
   return { client, sent, deliver, reply };
 }
+it("remembers an explicit Studio model across restarts without storing conversation content", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage"), values = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (key: string) => values.get(key), setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) } });
+  try {
+    const first = fixture(); first.client.pickModel("ollama/local"); first.client.draft("PRIVATE UNSENT TEXT"); first.client.dispose();
+    const second = fixture(); second.deliver(state([id]));
+    assert.equal(second.client.getSnapshot().model, "ollama/local");
+    assert.deepEqual([...values], [["arke.studio-model", "ollama/local"]]);
+    second.client.pickModel(undefined); second.client.dispose();
+    const third = fixture(); assert.equal(third.client.getSnapshot().model, undefined); third.client.dispose();
+  } finally { if (descriptor) Object.defineProperty(globalThis, "localStorage", descriptor); else Reflect.deleteProperty(globalThis, "localStorage"); }
+});
 it("keeps effort with its conversation and model, sends it explicitly and does not carry it to a new model", async () => {
   const h = fixture(); h.deliver(state([id, other])); h.client.select(id); h.client.pickModel("provider/model"); h.client.pickEffort("provider/model", "high");
   h.client.select(other); assert.equal(h.client.getSnapshot().effort, undefined); h.client.select(id);
@@ -207,5 +219,6 @@ it("keeps explicit model choices with their thread, including a newly created on
   const h = fixture(); h.deliver(state([other])); h.client.select(null); h.client.draft("A new thread"); h.client.pickModel("provider/chosen");
   const sending = h.client.send("provider/chosen"); h.deliver(state([other, id])); h.reply(h.sent.at(-1)!, "ok", id);
   await new Promise(resolve => setImmediate(resolve)); h.reply(h.sent.at(-1)!, "accepted", id); assert(await sending);
-  h.client.select(other); assert.equal(h.client.getSnapshot().model, undefined); h.client.select(id); assert.equal(h.client.getSnapshot().model, "provider/chosen"); h.client.dispose();
+  h.client.select(other); assert.equal(h.client.getSnapshot().model, "provider/chosen"); h.client.pickModel("provider/other");
+  h.client.select(id); assert.equal(h.client.getSnapshot().model, "provider/chosen"); h.client.dispose();
 });

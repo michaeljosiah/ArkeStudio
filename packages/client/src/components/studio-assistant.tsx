@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { Link, useLocation } from "react-router";
 import type { ClientState, StudioAssistantThread, StudioCloudShare } from "@arke-studio/contracts";
-import { STUDIO_ASSISTANT_LIMITS, studioInterruptionMessage, privateSessionVariants } from "@arke-studio/contracts";
+import { STUDIO_ASSISTANT_LIMITS, studioInterruptionMessage, privateSessionVariants, harnessModelReference } from "@arke-studio/contracts";
 import { StudioConversationClient, type StudioConversationView } from "../lib/studio-assistant.js";
 import { STUDIO_DOCUMENT_ACCEPT, studioDocumentsFit } from "../lib/studio-documents.js";
 import { onStudioAssistantReply, send, useStore } from "../lib/store.js";
@@ -98,8 +98,9 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
   const share = view.state?.share && view.state.share.threadId === thread?.id ? view.state.share : null;
   const working = pending && pending.state !== "interrupted";
   const currentDiagnostic = thread?.messages.findLast(message => message.diagnostic)?.id;
+  const models = view.state?.models ?? [];
   const pickerState = appState ? { ...appState, app: { ...appState.app,
-    harnessModels: (appState.app.harnessModels ?? []).map(value => ({ ...value, variants: privateSessionVariants(value) })) } } : null;
+    harnessModels: (appState.app.harnessModels ?? []).filter(value => models.includes(harnessModelReference(value))).map(value => ({ ...value, variants: privateSessionVariants(value) })) } } : null;
   const unavailable = !view.connected ? "Reconnect to use Studio. Your draft is retained."
     : !view.fresh ? "Waiting for Studio history. Your draft is retained."
     : view.state?.audit !== "available" ? "Studio history is unavailable. Your draft is retained."
@@ -107,7 +108,8 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
     : pending?.state === "interrupted" ? "Review the interrupted request before continuing."
     : view.draft.length > STUDIO_ASSISTANT_LIMITS.requestChars ? `Studio accepts up to ${STUDIO_ASSISTANT_LIMITS.requestChars.toLocaleString()} characters per request.`
     : !studioDocumentsFit(view.draft, view.attachments) ? "The request and documents exceed their size limit. Shorten the request or remove a document."
-    : !model ? "Choose a model for the Studio assistant." : undefined;
+    : !models.length ? "Studio needs the bundled writing engine and an Arke-managed Ollama model on Windows. Cloud models and existing Ollama servers cannot serve private Studio conversations."
+    : !model || !models.includes(model) ? "Choose an available model for the Studio assistant." : undefined;
   const draft = (text: string) => { client.draft(text); requestFocus(value => value + 1); };
   return <>
     <header className="fy-studio-head"><div><h2 tabIndex={-1}>Arke</h2><span>Studio assistant</span></div>
@@ -168,6 +170,7 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
       }} />
       {attachmentTrouble && <p className="fy-studio-note" role="status">{attachmentTrouble}<button type="button" className="fy-studio-button" onClick={() => setAttachmentTrouble(null)}>Dismiss</button></p>}
       {view.attachments.length > 0 && <details className="fy-studio-fact-card"><summary>Review unsent documents</summary>{view.attachments.map(row => <div key={row.id}><b>{row.name}</b><pre>{row.text}</pre></div>)}</details>}
+      {view.fresh && !models.length && <p className="fy-studio-note"><a href="#/settings/providers" onClick={client.close}>Open Providers settings</a>{" · "}<button type="button" className="fy-studio-button" onClick={client.refreshModels}>Check Studio models again</button></p>}
       {view.draft.length > STUDIO_ASSISTANT_LIMITS.requestChars && <p className="fy-studio-note" role="status">Studio accepts up to {STUDIO_ASSISTANT_LIMITS.requestChars.toLocaleString()} characters per request.</p>}
     </footer>
   </>;
