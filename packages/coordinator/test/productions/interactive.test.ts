@@ -730,6 +730,25 @@ describe("a visual novel's package (turn 174)", () => {
     assert.deepEqual(result.blockers, ["a voice or a speaker changed while the package was made — export again"]);
   });
 
+  for (const change of ["cache file", "job during capture", "job during validation"] as const) it(`refuses an export after a ${change} changes the voice batch (#1378)`, async () => {
+    const { dir, store, bundle } = await open();
+    const production = await novel(dir, bundle.productions[0]!);
+    await appendTraversal(store, production.meta.id, walked);
+    let ready = false, calls = 0;
+    const voices = {
+      narrator: async () => null,
+      ...(change === "cache file" ? {} : { cacheState: () => [["job", ready ? "succeeded" : "running"]] }),
+      plan: async (sceneId: string) => {
+        if (++calls === (change === "job during validation" ? 4 : 2)) ready = true;
+        return { sceneVersion: 1, files: new Map(change === "cache file" && ready && sceneId === "sc_i1"
+          ? [["sc_i1/sh_v1/blk_wash", ".cache/voice-previews/new.mp3"]] : []) };
+      },
+    };
+    const result = await exportInteractive(store, production, CLOCK, { voices, current: () => production });
+    assert(!result.ok);
+    assert.deepEqual(result.blockers, ["prepared voices changed while the package was made — export again"]);
+  });
+
   it("refuses a package when a scene is added while its voices were gathered (codex round 11)", async () => {
     const { dir, store, bundle } = await open();
     const production = await novel(dir, bundle.productions[0]!);

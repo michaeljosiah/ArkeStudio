@@ -992,9 +992,11 @@ export interface BeatVoices {
    * A scene's prepared voices as the table read planned them, with the scene version that plan was
    * made for — the store's current scene, which may no longer be the snapshot being exported.
    */
-  plan: (sceneId: string) => Promise<{ sceneVersion: number; files: ReadonlyMap<string, string> }>;
+  plan: (sceneId: string) => Promise<{ sceneVersion: number; files: ReadonlyMap<string, string>; confirmationToken?: string }>;
   /** The narrator narration is read in, as it stands: read before the plans and again under the gate. */
   narrator: () => Promise<unknown>;
+  /** Live cache jobs, captured across the whole batch, including its final validation. */
+  cacheState?: () => unknown;
 }
 
 /**
@@ -1068,6 +1070,12 @@ export async function resolveBeatScenes(store: WorldStore, production: Productio
   // decides whether a line is voiced at all (codex round 14) — so any change to a speaker counts.
   const speakerVoices = () => JSON.stringify(speakers.map((id) => [id, store.getBundle().sheets.find((candidate) => candidate.id === id) ?? null]));
   const voicesBefore = speakerVoices();
+  const cacheState = () => JSON.stringify(options.voices?.cacheState?.() ?? null);
+  const cacheBefore = cacheState();
+  const plans = new Map<string, string>();
+  const planIdentity = (plan: Awaited<ReturnType<BeatVoices["plan"]>>) => JSON.stringify([
+    plan.sceneVersion, plan.confirmationToken ?? null, [...plan.files].sort(([a], [b]) => a.localeCompare(b)),
+  ]);
   // The narrator too: it is no sheet's and moves no scene, and the plans read it once for the
   // whole package (codex round 11). A failure to read it is a narrator nobody can vouch for.
   const narratorNow = async () => (options.voices ? JSON.stringify(await options.voices.narrator().catch(() => ({ unreadable: true })) ?? null) : "");
@@ -1080,6 +1088,7 @@ export async function resolveBeatScenes(store: WorldStore, production: Productio
     if (options.voices) {
       try {
         planned = await options.voices.plan(scene.id);
+        plans.set(scene.id, planIdentity(planned));
       } catch {
         blockers.push({ sceneId: scene.id, detail: `${scene.id}'s voices could not be gathered — export again`, clause: "its voices could not be gathered" });
         continue;
@@ -1123,6 +1132,15 @@ export async function resolveBeatScenes(store: WorldStore, production: Productio
   }
 
   const moved = async (now: ProductionBundle | undefined): Promise<string[]> => {
+    // Cache files can land without changing the production. Re-read every plan under the
+    // export gate, and fence queue changes across both passes, rather than mixing scenes
+    // from before and after a preparation finished (#1378).
+    let cacheMoved = cacheState() !== cacheBefore;
+    if (options.voices) for (const [sceneId, before] of plans) {
+      try { if (planIdentity(await options.voices.plan(sceneId)) !== before) cacheMoved = true; }
+      catch { cacheMoved = true; }
+    }
+    cacheMoved ||= cacheState() !== cacheBefore;
     // Under the gate, the production is read again: an edited scene or a frame accepted while the
     // voices were gathered would ship beside the snapshot's (codex round 9). A frame choice is
     // not a scene edit and moves no scene version, so each picture is resolved again as well.
@@ -1143,13 +1161,14 @@ export async function resolveBeatScenes(store: WorldStore, production: Productio
     // is the snapshot's, so a production that is no longer the snapshot refuses it whole; the
     // named cases above only say which change it was.
     const drifted = JSON.stringify(now ?? null) !== JSON.stringify(production);
-    if (edited.length === 0 && !reshaped && !reframed && !rerouted && !revoiced && !drifted) return [];
+    if (edited.length === 0 && !reshaped && !reframed && !rerouted && !revoiced && !drifted && !cacheMoved) return [];
     const named = [
       ...edited.map(({ sceneId }) => `${sceneId} changed while the package was made — export again`),
       ...(reshaped && edited.length === 0 ? ["a scene was added or removed while the package was made — export again"] : []),
       ...(reframed && edited.length === 0 ? ["a picture changed while the package was made — export again"] : []),
       ...(rerouted ? ["the branch map changed while the package was made — export again"] : []),
       ...(revoiced ? ["a voice or a speaker changed while the package was made — export again"] : []),
+      ...(cacheMoved ? ["prepared voices changed while the package was made — export again"] : []),
     ];
     return named.length > 0 ? named : ["the production changed while the package was made — export again"];
   };

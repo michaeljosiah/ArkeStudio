@@ -105,7 +105,7 @@ try {
         plan: async (sceneId) => {
           const { plan } = await planTableRead(store, productionId, sceneId, SHIPPED_MANIFEST, [], [], undefined, narrator);
           for (const item of plan.items) if (item.narration) narration.set(item.lineId, item.file !== undefined);
-          return { sceneVersion: plan.sceneVersion, files: new Map(plan.items.flatMap((item) => (item.file === undefined ? [] : [[item.lineId, item.file] as const]))) };
+          return { sceneVersion: plan.sceneVersion, confirmationToken: plan.confirmationToken, files: new Map(plan.items.flatMap((item) => (item.file === undefined ? [] : [[item.lineId, item.file] as const]))) };
         },
         narrator: async () => narratorNow(),
       }
