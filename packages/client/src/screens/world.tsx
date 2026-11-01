@@ -4809,7 +4809,7 @@ const STORED_KINDS = new Set(["microdrama", "music-video", "interactive", "visua
  * "nothing assumed" would be a picture of something, and the empty box saying so is the truer
  * one. A kind added without a plate falls back to that same empty box rather than breaking.
  */
-export const KIND_PLATES = new Set(["microdrama", "film", "music-video", "interactive", "visual-novel", "book", AUDIO_DRAMA_KIND, "album", "single", "soundtrack"]);
+export const KIND_PLATES = new Set(["microdrama", "film", "music-video", "interactive", "visual-novel", "book", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, "album", "single", "soundtrack"]);
 
 /** The episode-length ranges step two offers, and the seconds each one means (turn 53). */
 export const EPISODE_LENGTH_CHOICES = [
@@ -5047,7 +5047,7 @@ export function NewProductionScreen() {
                     // leading slash resolves to the filesystem root and every plate 404s (the
                     // same lesson as the art-style previews and the setup reel).
                     <img
-                      src={`./video-kinds/${k.id}.webp`}
+                      src={k.id === GRAPHIC_NOVEL_KIND ? "./comic-styles/clean-line.jpg" : `./video-kinds/${k.id}.webp`}
                       alt=""
                       style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                     />

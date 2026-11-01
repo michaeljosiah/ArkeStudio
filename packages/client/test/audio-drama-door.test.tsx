@@ -120,12 +120,13 @@ describe("Tell a story asks what kind of story (design turn 230b)", () => {
     assert.deepEqual(DOOR_CHOICES.map(d => d.label), ["Tell a story", "Make a film", "Make it interactive", "Make music"]);
   });
 
-  it("a novel and an audio drama are chosen by their plates; Other is the empty box", () => {
-    const plates = fileURLToPath(new URL("../public/video-kinds/", import.meta.url));
+  it("each story kind has its shipped plate, including the reused comic illustration; Other is empty", () => {
+    const assets = fileURLToPath(new URL("../public/", import.meta.url));
     for (const kind of STORY_KIND_CHOICES) {
-      assert.equal(existsSync(`${plates}${kind.id}.webp`), KIND_PLATES.has(kind.id), `${kind.id}'s plate matches what the screen asks for`);
+      const asset = kind.id === "graphic-novel" ? "comic-styles/clean-line.jpg" : `video-kinds/${kind.id}.webp`;
+      assert.equal(existsSync(`${assets}${asset}`), KIND_PLATES.has(kind.id), `${kind.id}'s plate matches what the screen asks for`);
     }
-    assert.ok(KIND_PLATES.has("audio-drama") && KIND_PLATES.has("book"));
+    assert.ok(KIND_PLATES.has("audio-drama") && KIND_PLATES.has("book") && KIND_PLATES.has("graphic-novel"));
   });
 
   it("Adapt… arrives on step two with the story set, and Plan with Arke seeds the setup with it", async () => {
@@ -133,6 +134,8 @@ describe("Tell a story asks what kind of story (design turn 230b)", () => {
     const text = m.container.textContent!;
     assert.match(text, /What kind of story\?/);
     assert.match(text, /Novel/);
+    const graphicCard = [...m.container.querySelectorAll("button")].find(button => button.textContent?.includes("Graphic novel"))!;
+    assert.equal(graphicCard.querySelector("img")?.getAttribute("src"), "./comic-styles/clean-line.jpg");
     assert.match(m.container.querySelector(".fy-radio--on")!.textContent!, /Audio drama/, "the drama is the kind already chosen");
     const adapt = m.container.querySelector<HTMLSelectElement>("select[aria-label='Adapt from']")!;
     assert.equal(adapt.value, "low-water");
