@@ -17550,7 +17550,11 @@ export class Coordinator {
           // A look chosen for this picture alone is stamped `only` (R-115): the chapter's later choice never marks it.
           const stamp = saved !== undefined ? shown?.look : pictureLookFor(look, characters.map((person) => person.key), ridingPicks(who), kitLookLibrary(store.getBundle().referenceKits, look));
           // The shot the press was made from rides on the picture, so its card still says it (design turn 194g).
-          const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, { ...(stamp !== undefined ? { look: stamp } : {}), ...((saved !== undefined ? shown?.shot : msg.shot) !== undefined ? { shot: saved !== undefined ? shown!.shot! : msg.shot! } : {}), ...(saved !== undefined && shown !== undefined ? { expected: shown } : {}), arke: true });
+          const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, { ...(stamp !== undefined ? { look: stamp } : {}), ...((saved !== undefined ? shown?.shot : msg.shot) !== undefined ? { shot: saved !== undefined ? shown!.shot! : msg.shot! } : {}), ...(saved !== undefined && shown !== undefined ? { expected: shown } : {}), arke: true }).catch(async error => {
+            // The paid artifact is already filed even when its intended placement has moved.
+            await this.publishPicture(store);
+            throw error;
+          });
           await this.publishPicture(store);
           // The record the picture now stands in goes to every window as any record write does: the margin's chip and the panel read it from there, and the card's own word is only that it is done.
           this.emit({ at: at(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, requestId: msg.requestId, record });

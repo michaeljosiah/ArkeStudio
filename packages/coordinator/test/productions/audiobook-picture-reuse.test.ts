@@ -88,6 +88,23 @@ describe("saved Bench pictures retain their real inputs (#2143)", () => {
     }, { prepare, ...(defect === "limit" ? { model: { ...IMAGE, accepts: { ...IMAGE.accepts, referenceImages: 1 } } } : defect === "model" ? { model: null } : {}) }));
   }
 
+  it("publishes the paid artifact when its saved-picture placement changes during generation", () => withHarness(async h => {
+    await choose(h);
+    const before = h.store()!.getBundle().artifacts.length, snapshots = h.snapshots();
+    const making = make(h);
+    await until(() => h.enqueued.length === 1, "held picture job");
+    await setAudiobookPicture(h.store()!, LEDGER, CHAPTER, "p0.0", null);
+    await h.landHeld(0);
+    await making;
+    assert.equal(last(h.events).state, "failed");
+    assert.match(last(h.events).reason!, /picture changed/);
+    assert.equal(h.store()!.getBundle().artifacts.length, before + 1, "the paid result is filed");
+    assert.equal(h.snapshots() - snapshots, 1, "Library receives the filed result despite the refused placement");
+    const record = await readAudiobook(h.store()!, LEDGER, CHAPTER);
+    assert.ok(record && record !== "unreadable");
+    assert.equal(record.pictures?.["p0.0"], undefined);
+  }, { prepare, land: false }));
+
   it("supports artifact tokens and preserves keyframe lane without inferring a cast identity", () => withHarness(async h => {
     const artifact = h.store()!.getBundle().artifacts.find(item => item.id === ID)!;
     assert.equal(artifact.generation?.source, "bench");
