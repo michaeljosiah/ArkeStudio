@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import type { ClientMessage, DomainEvent, ManifestModel } from "@arke-studio/contracts";
+import type { ClientMessage, DomainEvent, Job, ManifestModel } from "@arke-studio/contracts";
 import { BenchStore, sessionDir } from "../../src/bench/store.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
@@ -45,6 +45,7 @@ export interface Harness {
   cancelled: string[];
   /** The most jobs that were ever in flight at once: a run made one at a time never holds two. */
   concurrent: () => number;
+  snapshots: () => number;
   store: () => ReturnType<NonNullable<FsWorldProvider["openStore"]>>;
   /** Lands the nth job (from 0) that was held, as a provider answering late. */
   landHeld: (n: number) => Promise<void>;
@@ -124,6 +125,12 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
       { type: "take-completed", takeId: takeId as never, media: { file: output, hash: `sha256:${createHash("sha256").update(bytes).digest("hex")}` }, cost: { estimatedMicroUsd: input.estimatedMicroUsd, actualMicroUsd: input.estimatedMicroUsd }, completedAt: CLOCK },
       { at: CLOCK },
     );
+    // Exercise the coordinator's finalization publication too, including an already-journaled
+    // completion as replay sees it; the picture's own placement must still publish just once.
+    await (coordinator as unknown as { onJobTerminal(job: Job): Promise<void> }).onJobTerminal({
+      worldId: WORLD_ID, target: { kind: "bench-take", id: input.target.id }, status: "succeeded",
+      params: input.params, landedFiles: [join(input.landing.dir, output)],
+    } as Job);
   };
   const landHeld = async (n: number) => {
     const input = held.get(n);
@@ -165,9 +172,10 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
   };
   const send = (message: ClientMessage) =>
     (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
-  coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
+  let snapshots = 0;
+  coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() { snapshots++; } });
   try {
-    await run({ worldDir, events, send, seen, enqueued, cancelled, concurrent: () => widest, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!(), landHeld });
+    await run({ worldDir, events, send, seen, enqueued, cancelled, concurrent: () => widest, snapshots: () => snapshots, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!(), landHeld });
   } finally {
     await provider.close();
   }

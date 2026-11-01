@@ -1064,6 +1064,12 @@ On reconnect, `transport.ts` authenticates hello and sends a fresh snapshot rega
 
 ### Generate media and receive a take
 
+Illustrate and Tall pictures publish once after filing and placement (`Coordinator.publishPicture`,
+issue #2281). `refreshBench` updates the changed session row in the world store and read model;
+authored rescans reuse those rows, while opening/reloading the world still discovers all sessions.
+Coverage is in coordinator `test/productions/audiobook-illustrate.test.ts`, the shared picture
+harness and `test/world/scan-read-ahead.test.ts`.
+
 For planned scene generation, start at client `screens/scene-workspace/workspace.tsx` and `lib/store.ts`'s `dispatchScenePlanned`, then follow `dispatch-scene-planned` in Coordinator. The store also exposes `dispatchScene` for the `dispatch-scene` path. Plan/reference validation precedes queue execution; do not equate a plan preview with a provider submission. `queue/dispatcher.ts` owns durable job transitions and invokes configured provider clients. Follow `spend/ledger.ts` and `providers/call-store.ts` for their separate accounting roles.
 
 The dispatcher verifies returned artifacts through `queue/verify.ts`; Coordinator integrates take results via `takes/arrival.ts` (`recordTakesFromJob`). Generated arrival is distinct from accepting a take into authored work. For failures, inspect `queue/classify.ts`, journal recovery and reconciliation: loss of observation is an unknown outcome, not evidence that no charge occurred. Start tests at coordinator `test/queue/dispatcher.test.ts`, `test/queue/verify.test.ts` and client `test/dispatch-scene.test.tsx`.

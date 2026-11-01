@@ -294,7 +294,10 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
       async (h) => {
         const proposal = await proposed(h);
         const total = proposal.rows.reduce((sum, row) => sum + row.estimatedMicroUsd, 0);
+        const snapshotsBefore = h.snapshots();
         await accept(h.send, proposal);
+        assert.equal(h.snapshots() - snapshotsBefore, proposal.rows.length, "one snapshot per filed picture (#2281)");
+        assert.equal(h.store()!.getBundle().benchSessions.filter(session => session.title?.startsWith("Chapter ")).length, proposal.rows.length, "new Bench rows survive authored-file rescans");
         const states = progressOf(h.events).map((event) => event.progress.state);
         assert.equal(states[0], "making");
         assert.equal(states.at(-1), "done");
