@@ -109,11 +109,16 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
   const chapters = useMemo(() => production.chapters.filter((chapter) => !chapter.retired).sort((a, b) => a.order - b.order), [production.chapters]);
   // The dashboard's next step opens Pages on the chapter it names (turn 256e).
-  const search = useLocation().search;
+  const location = useLocation();
+  const search = location.search;
   const [chapterId, setChapterId] = useState<string | null>(() => {
     const asked = new URLSearchParams(search).get("chapter");
     return chapters.find((candidate) => candidate.id === asked)?.id ?? chapters[0]?.id ?? null;
   });
+  useEffect(() => {
+    const asked = new URLSearchParams(search).get("chapter");
+    if (chapters.some(candidate => candidate.id === asked)) setChapterId(asked);
+  }, [location.key, search]);
   const chapter = chapters.find((candidate) => candidate.id === chapterId) ?? chapters[0];
   const stored = production.comicScripts?.find((entry) => entry.chapter === chapter?.id);
 
