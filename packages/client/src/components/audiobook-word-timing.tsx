@@ -22,7 +22,8 @@ export function WordTimingControl({
   onReady: (ready: boolean) => void;
   usePhrases: () => void;
 }) {
-  const world = useStore().state?.world;
+  const { state: clientState, connection } = useStore();
+  const world = clientState?.world;
   const slug = world?.meta.slug;
   const [state, setState] = useState<AudiobookWordTimingState | null>(null);
   const [review, setReview] = useState(false);
@@ -68,8 +69,8 @@ export function WordTimingControl({
   useEffect(() => {
     setState(null);
     runningRequest.current = null;
-    if (enabled) request("read");
-  }, [worldId, productionId, scope, enabled]);
+    if (enabled && connection === "open") request("read");
+  }, [worldId, productionId, scope, enabled, connection]);
   useEffect(() => {
     onReady(ready);
   }, [ready]);
@@ -113,9 +114,9 @@ export function WordTimingControl({
             ? `${state.done} of ${state.total} blocks`
             : ready
               ? `${state!.blocks.length} of ${state!.blocks.length} blocks · matches this reading`
-              : state?.available === false
-                ? (state.reason ?? "No supported word aligner on this desktop")
-                : "Needed for current-word highlighting"}
+              : state?.reason ?? (state?.available === false
+                ? "No supported word aligner on this desktop"
+                : "Needed for current-word highlighting")}
         </p>
         {state?.running ? (
           <>
