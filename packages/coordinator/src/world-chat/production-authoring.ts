@@ -425,16 +425,30 @@ export function comicScriptDraft(store: WorldStore, action: Pick<WorldChatProduc
     }
   }
   const plan = action.plan ?? current?.plan;
-  const parsed = ComicScriptSchema.safeParse({ version: current?.version ?? 1, pages, ...(plan ? { plan } : {}), ...(!planning && action.read ? { read: action.read } : {}) });
-  if (!parsed.success) throw refuse(`${chapter.title}'s pages cannot be kept as drafted: ${[...new Set(parsed.error.issues.slice(0, 3).map((issue) => issue.message))].join("; ")}`);
-  // Only the people and places of this world: a panel naming a sheet nobody wrote would ride no picture.
+  // People in the story need not have cast sheets (issue 2251). Keep their names in the
+  // picture's description; reference fields can only name pictures the world actually owns.
   const sheets = new Set(store.getBundle().sheets.map((sheet) => sheet.id));
-  for (const page of parsed.data.pages) {
+  for (const page of planning ? [] : pages) {
     for (const panel of page.panels) {
-      const unknown = [...panel.characters, ...(panel.location ? [panel.location] : []), ...panel.lettering.flatMap((item) => item.speaker ? [item.speaker] : [])].find((id) => !sheets.has(id));
-      if (unknown) throw refuse(`A panel names ${unknown}, which is not a sheet in this world. Use the sheet ids get_production and the cast list give.`);
+      const notes: string[] = [];
+      const unknown = panel.characters.filter(id => !sheets.has(id));
+      if (unknown.length > 0) notes.push(`Also present: ${unknown.join(", ")}.`);
+      panel.characters = panel.characters.filter(id => sheets.has(id));
+      if (panel.location && !sheets.has(panel.location)) {
+        notes.push(`Setting: ${panel.location}.`);
+        delete panel.location;
+      }
+      panel.lettering.forEach((item, index) => {
+        if (item.speaker && !sheets.has(item.speaker)) {
+          notes.push(`Lettering ${index + 1} is spoken by ${item.speaker}.`);
+          delete item.speaker;
+        }
+      });
+      if (notes.length > 0) panel.description = [panel.description, ...notes].join("\n");
     }
   }
+  const parsed = ComicScriptSchema.safeParse({ version: current?.version ?? 1, pages, ...(plan ? { plan } : {}), ...(!planning && action.read ? { read: action.read } : {}) });
+  if (!parsed.success) throw refuse(`${chapter.title}'s pages cannot be kept as drafted: ${[...new Set(parsed.error.issues.slice(0, 3).map((issue) => issue.message))].join("; ")}`);
   // One draft of a chapter at a time: a second would hide behind the first, and keeping either
   // would make the other stale.
   const path = `productions/${production.meta.id}/comic/${chapter.id}.json`;
