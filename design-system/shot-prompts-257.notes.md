@@ -72,3 +72,7 @@ headless browser. It checks internal destinations, fonts, horizontal fit, fixed 
 source disclosure, context labels and phone scrolling. Output is under `output/shot-prompts-257/`.
 These are drawing checks; native application focus, persistence and request parity are future
 implementation gates. No application code has changed.
+
+Checked 1 November 2026: all 22 light/dark renders pass, along with master anchors/rule counts,
+consolidated review freshness, script syntax and repository lint (8 existing warnings). The
+private SPEC-012 proposal names PR #2292 and keeps design approval explicitly pending.
