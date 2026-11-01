@@ -10,6 +10,7 @@ import { pickBrowserMedia, readBrowserMedia } from "./browser-media-import.js";
 import { isRemoteSession, remoteSocketUrl, remoteSocketProtocols } from "./remote-session.js";
 import { useRef, useSyncExternalStore } from "react";
 import { parseIncomingFrame, shareSnapshot } from "./frame-parser.js";
+import { SnapshotPageBuffer } from "./snapshot-pages.js";
 import type { GroupApprovalPort } from "./conversation-group-approval.js";
 import {
   BROWSER_ATTACHMENT_MAX_BYTES,
@@ -1736,6 +1737,7 @@ export function seedLiveRuns(
 export function __handleFrameForTest(frame: Frame): void {
   handleFrame(JSON.stringify(frame));
 }
+const snapshotPages = new SnapshotPageBuffer();
 
 function handleFrame(json: string): void {
   let parsed: unknown;
@@ -1755,6 +1757,11 @@ function handleFrame(json: string): void {
     return;
   }
   lastSeq = frame.seq;
+  if (frame.kind === "snapshot-page") {
+    try { snapshotPages.append(frame.snapshot, frame.page, rejoining ? null : current.state); }
+    catch { snapshotPages.clear(); send({ kind: "hello", lastSeq, retainHistory: true, pagedSnapshots: true }); }
+    return;
+  }
   if (frame.kind === "studio-assistant") {
     for (const listener of studioAssistantReplyListeners) {
       try { listener(frame); } catch { /* A private panel cannot interrupt shared state folding. */ }
@@ -1762,8 +1769,12 @@ function handleFrame(json: string): void {
     return;
   }
   if (frame.kind === "snapshot") {
+    if (frame.collectionSnapshot !== undefined && !snapshotPages.finish(frame.collectionSnapshot, frame.state, rejoining ? null : current.state)) {
+      send({ kind: "hello", lastSeq, retainHistory: true, pagedSnapshots: true }); return;
+    }
+    if (frame.collectionSnapshot === undefined) snapshotPages.clear();
     if (frame.retainedHistory?.length) {
-      if (!current.state || rejoining) { send({ kind: "hello", lastSeq, retainHistory: true }); return; }
+      if (!current.state || rejoining) { send({ kind: "hello", lastSeq, retainHistory: true, pagedSnapshots: true }); return; }
       if (frame.retainedHistory.includes("jobs")) frame.state.app.jobs = current.state.app.jobs;
       if (frame.retainedHistory.includes("ledger")) frame.state.app.ledger = current.state.app.ledger;
     }
@@ -3173,6 +3184,7 @@ function handleFrame(json: string): void {
 }
 
 function handleStatus(status: ConnectionStatus): void {
+  snapshotPages.clear();
   if (helloFallbackTimer) clearTimeout(helloFallbackTimer);
   helloFallbackTimer = null;
   if (status !== "open") pendingQueueRequests.clear();
@@ -3180,7 +3192,7 @@ function handleStatus(status: ConnectionStatus): void {
   if (status === "open") {
     reconnectAttempts = 0;
     rejoining = true;
-    send({ kind: "hello", lastSeq, retainHistory: true });
+    send({ kind: "hello", lastSeq, retainHistory: true, pagedSnapshots: true });
     // An older strict coordinator drops the new hello field without closing the socket.
     // One legacy hello restores startup after renderer HMR or a mixed-version restart.
     helloFallbackTimer = setTimeout(() => {

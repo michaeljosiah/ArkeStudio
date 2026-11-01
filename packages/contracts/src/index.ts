@@ -54,6 +54,7 @@ export * from "./pass-compiler.js";
 export * from "./dispatch-plan.js";
 export * from "./routing.js";
 export * from "./frames.js";
+export * from "./snapshot-page.js";
 export * from "./world-chat.js";
 export * from "./chapter-review.js";
 export * from "./chapter-tells.js";
