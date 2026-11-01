@@ -15,6 +15,8 @@
   border-bottom: 1px solid var(--border);
 }
 .bm-head__title { flex: 1; min-width: 0; }
+.bm-head > button { white-space: nowrap; flex-shrink: 0; }
+.bm-head__title :is(.bm-h1, .bm-head__meta) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bm-h1 { margin: 0; font: var(--type-h2); letter-spacing: var(--tracking-tight); }
 .bm-head__meta { margin-top: 2px; font: var(--type-meta); font-size: var(--text-xs); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .bm-note { flex: none; padding: 8px 24px; border-bottom: 1px solid var(--border); font: var(--type-meta); font-size: var(--text-xs); color: var(--muted-foreground); }

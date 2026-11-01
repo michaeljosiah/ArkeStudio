@@ -40,6 +40,8 @@ import {
   findingRows,
   fitScale,
   mapGeometry,
+  NODE_H,
+  NODE_W,
   outPort,
   inPort,
   previewUnwalked,
@@ -377,13 +379,14 @@ export function BranchMapScreen() {
   // Links (turn 246): lone in every state, drawn as a plain line and played straight through.
   const links = useMemo(() => (routing ? routingLinks(routing) : new Map<string, "always" | "sometimes">()), [routing]);
 
-  const fit = useCallback(() => {
+  const fit = useCallback((opening = false) => {
     const el = viewportRef.current;
     if (!el || !geometry) return;
     const fitted = fitScale(geometry.width, geometry.height, el.clientWidth, el.clientHeight);
-    const k = compact ? Math.max(.65, Math.min(.72, (el.clientWidth - 12) / (geometry.width - 48))) : fitted;
-    setView({ k, x: compact ? (el.clientWidth - geometry.width * k) / 2 : Math.max(16, (el.clientWidth - geometry.width * k) / 2), y: compact ? 0 : Math.max(16, (el.clientHeight - geometry.height * k) / 2) });
-  }, [geometry, compact]);
+    const k = compact ? Math.max(.65, Math.min(.72, (el.clientWidth - 12) / (geometry.width - 48))) : opening ? Math.max(.65, fitted) : fitted;
+    const start = opening && !compact && k > fitted ? geometry.nodes.find(node => node.id === routing?.start) : undefined;
+    setView({ k, x: start ? 24 - start.x * k : compact ? (el.clientWidth - geometry.width * k) / 2 : Math.max(16, (el.clientWidth - geometry.width * k) / 2), y: start ? Math.max(16, (el.clientHeight - NODE_H * k) / 2) - start.y * k : compact ? 0 : Math.max(16, (el.clientHeight - geometry.height * k) / 2) });
+  }, [geometry, compact, routing?.start]);
 
   // Opens fitted to the window (turn 157), once per production; after that the view is the person's.
   // Only once there is a canvas to fit: opened narrow, the list shows and nothing is fitted, and a
@@ -392,8 +395,22 @@ export function BranchMapScreen() {
   useEffect(() => {
     if (fittedRef.current || !geometry || narrow || !viewportRef.current) return;
     fittedRef.current = true;
-    fit();
+    fit(true);
+    if (!compact && routing) setSelection({ kind: "scene", id: routing.start });
   }, [geometry, fit, narrow]);
+
+  // A new connector can move its destination to another layer. Follow that saved destination
+  // at the person's current zoom instead of leaving it hidden beyond the viewport.
+  useEffect(() => {
+    const el = viewportRef.current, choice = routing?.choices.find(choice => choice.id === addedChoice);
+    const node = geometry?.nodes.find(node => node.id === choice?.to);
+    if (!el || !node || narrow || el.clientWidth <= 0 || el.clientHeight <= 0) return;
+    setView(view => {
+      const left = node.x * view.k + view.x, top = node.y * view.k + view.y;
+      if (left >= 16 && left + NODE_W * view.k <= el.clientWidth - 16 && top >= 16 && top + NODE_H * view.k <= el.clientHeight - 16) return view;
+      return { ...view, x: (el.clientWidth - NODE_W * view.k) / 2 - node.x * view.k, y: (el.clientHeight - NODE_H * view.k) / 2 - node.y * view.k };
+    });
+  }, [addedChoice, geometry, narrow]);
 
   const zoomBy = useCallback((factor: number, about?: { x: number; y: number }) => {
     setView((v) => {
@@ -1068,7 +1085,7 @@ export function BranchMapScreen() {
         <button type="button" aria-label="Zoom out" onClick={() => zoomBy(1 / 1.2)}><Minus size={14} /></button>
         <span className="bm-zoom__pct">{Math.round(view.k * 100)}%</span>
         <button type="button" aria-label="Zoom in" onClick={() => zoomBy(1.2)}><Plus size={14} /></button>
-        <button type="button" aria-label="Fit to view" onClick={fit}><Expand size={13} />Fit</button>
+        <button type="button" aria-label="Fit to view" onClick={() => fit()}><Expand size={13} />Fit</button>
       </div>
     </div>
   );
