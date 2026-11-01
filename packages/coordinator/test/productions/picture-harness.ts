@@ -49,6 +49,7 @@ export interface Harness {
   store: () => ReturnType<NonNullable<FsWorldProvider["openStore"]>>;
   /** Lands the nth job (from 0) that was held, as a provider answering late. */
   landHeld: (n: number) => Promise<void>;
+  startHeld: (n: number) => void;
 }
 
 export interface HarnessOptions {
@@ -64,6 +65,8 @@ export interface HarnessOptions {
   failure?: string;
   /** False: a job the queue failed before any provider call (attempt 0). */
   reached?: boolean;
+  /** A result that completes just as cancellation is requested. */
+  landOnCancel?: boolean;
   prepare?: (worldDir: string) => Promise<void>;
   /** Motion tests exercise the same Bench reservation and filing seam with a measured video. */
   videoOutput?: boolean;
@@ -168,14 +171,23 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
         inFlight -= 1;
       }
     },
-    cancel: async (jobId: string) => void cancelled.push(jobId),
+    cancel: async (jobId: string) => {
+      cancelled.push(jobId);
+      const n = jobs.findIndex(job => job.id === jobId);
+      const input = held.get(n);
+      if (!input) return;
+      if (options.landOnCancel) return landHeld(n);
+      held.delete(n);
+      const [sessionId, takeId] = input.target.id.split("/") as [string, string];
+      await new BenchStore(sessionDir(worldDir, sessionId as never)).append({ type: "take-status", takeId: takeId as never, status: "cancelled", error: "cancelled" }, { at: CLOCK });
+    },
   };
   const send = (message: ClientMessage) =>
     (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
   let snapshots = 0;
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() { snapshots++; } });
   try {
-    await run({ worldDir, events, send, seen, enqueued, cancelled, concurrent: () => widest, snapshots: () => snapshots, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!(), landHeld });
+    await run({ worldDir, events, send, seen, enqueued, cancelled, concurrent: () => widest, snapshots: () => snapshots, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!(), landHeld, startHeld: n => { jobs[n]!.attempt = 1; } });
   } finally {
     await provider.close();
   }
