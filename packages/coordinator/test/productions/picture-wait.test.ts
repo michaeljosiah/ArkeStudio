@@ -43,6 +43,19 @@ it("three pictures waiting for a serial provider keep their jobs and land on the
     assert.equal(h.enqueued.length, 3, "no replacement jobs");
   }, { land: false, reached: false, pictureWait: { waitMs: 50, lateLookMs: 20 } }));
 
+it("keeps a completed result waiting for storage past the generation deadline", () =>
+  withHarness(async h => {
+    const making = make(h, "p0.0");
+    for (let i = 0; h.enqueued.length < 1 && i < 100; i++) await pause(50);
+    assert.equal(h.enqueued.length, 1);
+    await pause(1_200);
+    assert.equal(h.cancelled.length, 0, "low disk space cannot cancel the completed paid result");
+    await h.landHeld(0);
+    await making;
+    assert.equal(h.enqueued.length, 1);
+    assert.ok(h.events.some(event => event.type === "audiobook.picture-made" && event.state === "made"));
+  }, { land: false, storageWait: { phase: "result", reason: "space", observedAt: "2026-11-01T12:00:00Z" }, pictureWait: { waitMs: 50, lateLookMs: 20 } }));
+
 it("cancels a started picture on timeout instead of leaving a late orphan (#2284)", () =>
   withHarness(async h => {
     await make(h, "p0.0");
