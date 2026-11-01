@@ -5184,13 +5184,13 @@ export function NewProductionScreen() {
               lines and crowded them — so there it takes a row of its own. */}
           {(phone || kinds.length === 0) && (
             <span className="fy-mono fy-production-step__joins">
-              joins {world?.meta.name ?? "the world"} · {phone ? "cast, locations, canon" : `${characters} characters, every location, the whole canon`}
+              joins {world?.meta.name ?? "the world"} · {phone ? "cast, locations, canon" : `${characters} character${characters === 1 ? "" : "s"}, every location, the whole canon`}
             </span>
           )}
           <Footer className="fy-production-step__foot">
             {!phone && kinds.length > 0 && (
               <span className="fy-mono">
-                joins {world?.meta.name ?? "the world"} · {characters} characters, every location, the whole canon
+                joins {world?.meta.name ?? "the world"} · {characters} character{characters === 1 ? "" : "s"}, every location, the whole canon
               </span>
             )}
             <span style={{ flex: 1 }} />
