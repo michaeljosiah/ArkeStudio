@@ -20649,6 +20649,16 @@ export class Coordinator {
             if (scene?.version !== prepared.plan.sceneVersion || narratorMoved || prepared.cloud.some(input => JSON.stringify(input.params.tableReadNarration === true
               ? narratorNow ?? undefined
               : store.getBundle().sheets.find(s => s.id === input.params.tableReadSpeakerSheetId)?.voice) !== JSON.stringify(input.params.tableReadVoiceAssignment))) throw new Error("Preparation changed while local lines were being synthesized.");
+            const current = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, readerProblem, narrates ? narratorNow : narrator);
+            // Local cache arrival changes the whole plan's token. Only the still-authorized
+            // cloud inputs may spend: a new performance, retired speaker or cache hit removes
+            // that line from this batch even when its scene and voice assignment stayed put.
+            const cloudIdentity = (inputs: readonly EnqueueInput[]) => JSON.stringify(inputs.map(({ idempotencyKey: _key, ...input }) => input));
+            if (cloudIdentity(current.cloud) !== cloudIdentity(prepared.cloud)) {
+              this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "planned", plan: current.plan,
+                reason: "Preparation changed while local lines were being synthesized. Review the updated plan before confirming." });
+              return;
+            }
             // What the queue would not take is said here (codex round 3): the enqueue result goes
             // out under this request too, but the page reads the rehearsal result, and one that
             // said "planned" over a refused batch cleared the words and offered the same press.
