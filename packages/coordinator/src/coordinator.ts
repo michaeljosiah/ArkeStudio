@@ -17251,11 +17251,13 @@ export class Coordinator {
         const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
         const at = () => new Date().toISOString();
         try {
-          const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, msg.picture);
+          const record = msg.picture?.tallFrom !== undefined
+            ? await setAudiobookPictureTall(store, msg.productionId, chapter.file, msg.block, msg.picture.file, msg.picture.tallFrom)
+            : await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, msg.picture);
           this.refreshIfStillOpen(store);
           this.emit({ at: at(), type: "audiobook.record", ...ids, record });
           // A picture set inside a made take: the take is timed so it starts on its word (design turn 237, R-204).
-          if (msg.picture !== null && pictureKeyParts(msg.block).sentence !== undefined) void this.timeMarkedTakes(store, msg.productionId, chapter.id);
+          if (msg.picture !== null && msg.picture.tallFrom === undefined && pictureKeyParts(msg.block).sentence !== undefined) void this.timeMarkedTakes(store, msg.productionId, chapter.id);
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.picture-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
           this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });

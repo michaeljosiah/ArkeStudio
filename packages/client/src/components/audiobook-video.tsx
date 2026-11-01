@@ -270,7 +270,7 @@ export function VideoExportPreview({ plan, options, ready, onPreview }: { plan: 
   useEffect(() => { const element = host.current; if (!element) return; const measure = () => { if (element.clientWidth > 0) setWidth(element.clientWidth); }; measure(); if (typeof ResizeObserver === "undefined") return; const observer = new ResizeObserver(measure); observer.observe(element); return () => observer.disconnect(); }, []);
   const chapters = plan === null ? [] : wholeChapters(plan), chapter = chapters[0];
   const at = (chapter?.pictures[0]?.at ?? 0) + .5;
-  const segments = chapter === undefined ? [] : videoSegments(chapter, plan?.cover ?? null, options.titleCards);
+  const segments = chapter === undefined ? [] : videoSegments(chapter, plan?.cover ?? null, options.titleCards, options.shape);
   const segment = segmentAt(segments, at);
   const cues = chapter === undefined ? [] : burnedCues(chapter, options.shape, options.captionSize, 0);
   const size = shapeSize(options.shape), height = width * size.height / size.width;
@@ -298,7 +298,7 @@ export function VideoPreview({ worldId, productionId, plan, options, onClose }: 
   /** Focus as dragged here, kept until the plan is read again with it. */
   const [moved, setMoved] = useState<Record<string, { x: number; y: number } | null>>({});
   const shown = useMemo(() => (chapter === undefined ? undefined : { ...chapter, pictures: chapter.pictures.map((picture) => (picture.key in moved ? { ...picture, ...(moved[picture.key] === null ? { focus: undefined } : { focus: moved[picture.key]! }) } : picture)) }), [chapter, moved]);
-  const segments = useMemo(() => (shown === undefined ? [] : videoSegments(shown, plan.cover, options.titleCards)), [shown, plan.cover, options.titleCards]);
+  const segments = useMemo(() => (shown === undefined ? [] : videoSegments(shown, plan.cover, options.titleCards, options.shape)), [shown, plan.cover, options.titleCards, options.shape]);
   const [at, setAt] = useState(() => chapter?.pictures[0]?.at ?? 0);
   const [playing, setPlaying] = useState(false);
   const [natural, setNatural] = useState<Natural>({});

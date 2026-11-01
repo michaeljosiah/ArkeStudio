@@ -160,10 +160,15 @@ export function titleCardSeconds(chapter: Pick<ListeningChapter, "blocks" | "sec
  * next, the cover blurred before the first (never the chapter before's last), and with title
  * cards on, a card over the opening while the title is read.
  */
-export function videoSegments(chapter: Pick<ListeningChapter, "title" | "blocks" | "pictures" | "seconds">, cover: string | null, titleCards: boolean): VideoSegment[] {
+export function videoSegments(chapter: Pick<ListeningChapter, "title" | "blocks" | "pictures" | "seconds">, cover: string | null, titleCards: boolean, shape: VideoShape = "1920x1080"): VideoSegment[] {
   const end = round(chapter.seconds);
   if (!(end > 0)) return [];
-  const pictures = [...chapter.pictures].filter((picture) => picture.at < end).sort((a, b) => a.at - b.at);
+  const pictures = chapter.pictures.filter((picture) => picture.at < end).map((picture) => {
+    if (shape !== "1080x1920" || picture.tall === undefined) return picture;
+    // Tall is a different composition: the Wide picture's focus and motion do not belong to it.
+    const { focus: _focus, motion: _motion, ...still } = picture;
+    return { ...still, file: picture.tall };
+  }).sort((a, b) => a.at - b.at);
   const firstAt = pictures[0]?.at ?? end;
   let segments: VideoSegment[] = [];
   if (firstAt > 0) segments.push(cover !== null ? { kind: "cover", file: cover, from: 0, to: round(firstAt) } : { kind: "black", file: null, from: 0, to: round(firstAt) });

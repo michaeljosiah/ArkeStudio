@@ -321,7 +321,7 @@ export function PicturePress({ onChoose, children }: { onChoose: (() => void) | 
  * pressed, and the checks; Remove (or Discard), Edit prompt and Generate — Make again once a
  * picture is set — in the panel's foot.
  */
-export function PictureCard({ world, worldId, state, onEdit, offline, picture = null, shapes = ["wide"], tall = null, onRemove, onChoose, chapter, mediaActions }: {
+export function PictureCard({ world, worldId, state, onEdit, offline, picture = null, shapes = ["wide"], tall = null, onRemove, onChoose, onChooseTall, chapter, mediaActions }: {
   world: Pick<WorldBundle, "meta" | "referenceKits" | "sheets">;
   worldId: string;
   state: PictureSuggestionState;
@@ -338,6 +338,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   onRemove?: () => void;
   /** Pick another picture from the world: the picture is the press. */
   onChoose?: () => void;
+  onChooseTall?: () => void;
   /** The block's chapter: with it, each person's row ends in the look menu. */
   chapter?: PictureCardChapter;
 }) {
@@ -591,6 +592,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
               <figcaption className="fy-mono">Wide</figcaption>
             </figure>
             <figure>
+              <PicturePress onChoose={busy ? undefined : onChooseTall}>
               {tall !== null ? (
                 <img className="fy-pcard__img fy-pcard__img--tall" src={tall.url} alt="" data-testid="picture-card-tall" />
               ) : (
@@ -598,6 +600,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
                   <span className="fy-mono">9:16</span>
                 </div>
               )}
+              </PicturePress>
               <figcaption className="fy-mono">Tall</figcaption>
             </figure>
           </div>

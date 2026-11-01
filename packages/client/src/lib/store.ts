@@ -6402,7 +6402,7 @@ export function openAudiobookListening(worldId: string, productionId: string, sc
 }
 
 /** A picture set on a block, or taken off with null (design turn 186c): answered as `audiobook.record` under the id returned. */
-export function setAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, picture: { file: string; source: import("@arke-studio/contracts").AudiobookPictureSource } | null): string | null {
+export function setAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, picture: { file: string; source: import("@arke-studio/contracts").AudiobookPictureSource; tallFrom?: string } | null): string | null {
   const requestId = ulid();
   return send({ kind: "set-audiobook-picture", worldId, productionId, chapterFile, block, picture, requestId }) ? requestId : null;
 }

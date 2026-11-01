@@ -149,8 +149,8 @@ async function planBook(store: WorldStore, productionId: string, options: Audiob
       blockers.push(`${chapter.title}: its mix could not be made on this machine`);
       continue;
     }
-    const segments = videoSegments(chapter, listening.cover, options.titleCards);
-    const broken = chapter.pictures.find((p) => p.motionProblem !== undefined);
+    const segments = videoSegments(chapter, listening.cover, options.titleCards, options.shape);
+    const broken = chapter.pictures.find((p) => p.motionProblem !== undefined && !(options.shape === "1080x1920" && p.tall !== undefined));
     if (broken !== undefined) { blockers.push(`${chapter.title}: ${broken.motionProblem} · choose Use still before exporting`); continue; }
     if (wantsBurnIn(options) && options.captionStyle === "word" && chapter.blocks.some((b) => b.words === undefined)) {
       blockers.push(`${chapter.title}: prepare and check word timing before exporting highlighted captions`); continue;
