@@ -219,6 +219,7 @@ describe("Recent", () => {
     assert.equal(headings()[0], "Recent");
     const recent = [...menu()!.querySelectorAll("[role=group]")][0]!;
     assert.deepEqual([...recent.querySelectorAll(".fy-mpick__name")].map((name) => name.textContent), ["Claude Haiku 4.5", "GPT-5.4 Fast", "Claude Sonnet 5.5"]);
+    assert.deepEqual([...recent.querySelectorAll(".fy-mpick__tag")].map((tag) => tag.textContent), ["Anthropic", "OpenAI", "Anthropic"]);
     await type("gpt");
     assert.equal(headings().includes("Recent"), false);
   });

@@ -101,16 +101,20 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
   const models = view.state?.models ?? [];
   const pickerState = appState ? { ...appState, app: { ...appState.app,
     harnessModels: (appState.app.harnessModels ?? []).filter(value => models.includes(harnessModelReference(value))).map(value => ({ ...value, variants: privateSessionVariants(value) })) } } : null;
-  const unavailable = !view.connected ? "Reconnect to use Studio. Your draft is retained."
-    : !view.fresh ? "Waiting for Studio history. Your draft is retained."
-    : view.state?.audit !== "available" ? "Studio history is unavailable. Your draft is retained."
-    : thread?.archived ? "This conversation is archived. Restore it to continue."
-    : pending?.state === "interrupted" ? "Review the interrupted request before continuing."
-    : view.draft.length > STUDIO_ASSISTANT_LIMITS.requestChars ? `Studio accepts up to ${STUDIO_ASSISTANT_LIMITS.requestChars.toLocaleString()} characters per request.`
-    : !studioDocumentsFit(view.draft, view.attachments) ? "The request and documents exceed their size limit. Shorten the request or remove a document."
-    : !models.length ? "Studio needs the bundled writing engine and an Arke-managed Ollama model on Windows. Cloud models and existing Ollama servers cannot serve private Studio conversations."
-    : !model || !models.includes(model) ? "Choose an available model for the Studio assistant." : undefined;
-  const draft = (text: string) => { client.draft(text); requestFocus(value => value + 1); };
+  const unavailable = !view.connected ? "Disconnected · draft kept"
+    : !view.fresh ? "Loading history · draft kept"
+    : view.state?.audit !== "available" ? "History unavailable · draft kept"
+    : thread?.archived ? "Archived · restore to continue"
+    : pending?.state === "interrupted" ? "Interrupted request · review above"
+    : view.draft.length > STUDIO_ASSISTANT_LIMITS.requestChars ? `${STUDIO_ASSISTANT_LIMITS.requestChars.toLocaleString()} character limit`
+    : !studioDocumentsFit(view.draft, view.attachments) ? "Request too large · shorten text or remove a document"
+    : !models.length ? "Local Studio model unavailable · check Providers"
+    : !model || !models.includes(model) ? "Choose a Studio model" : undefined;
+  const busy = view.attaching || view.submitting || !!working || !!view.state?.busy || dictationPhase !== "idle";
+  const submit = () => { if (model && !unavailable && !busy) void client.send(model); };
+  // Suggestions are requests. Keep an existing draft or attachment from being sent or replaced.
+  const promptDisabled = !!unavailable || busy || !!view.draft.trim() || view.attachments.length > 0;
+  const ask = (text: string) => { if (promptDisabled) return; client.draft(text); submit(); requestFocus(value => value + 1); };
   return <>
     <header className="fy-studio-head"><div><h2 tabIndex={-1}>Arke</h2><span>Studio assistant</span></div>
       <button type="button" className="fy-studio-icon" aria-label="Studio conversations" aria-expanded={history} onClick={() => { reading.stop(); setHistory(value => !value); }}><ListBullet size={16} /></button>
@@ -130,9 +134,9 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
       {!thread?.messages.length && <div className="fy-studio-welcome"><div className="fy-studio-mark" aria-hidden="true">a</div><h3>How can I help?</h3>
         <p>Ask about Arke, your setup or what needs attention.</p>
         <div className="fy-studio-prompts">
-          <button type="button" className="fy-studio-prompt" onClick={() => draft("Check local AI")}>Check local AI</button>
-          <button type="button" className="fy-studio-prompt" onClick={() => draft("Review storage")}>Review storage</button>
-          <button type="button" className="fy-studio-prompt" onClick={() => draft("Help with Arke")}>Help with Arke</button>
+          <button type="button" className="fy-studio-prompt" disabled={promptDisabled} onClick={() => ask("Check local AI")}>Check local AI</button>
+          <button type="button" className="fy-studio-prompt" disabled={promptDisabled} onClick={() => ask("Review storage")}>Review storage</button>
+          <button type="button" className="fy-studio-prompt" disabled={promptDisabled} onClick={() => ask("Help with Arke")}>Help with Arke</button>
         </div></div>}
       {thread?.messages.map(message => <StudioMessage key={message.id} message={message} appState={appState} close={client.close}
         connected={view.connected && view.fresh}
@@ -151,8 +155,8 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
         <button type="button" className="fy-studio-button" disabled={!view.fresh} onClick={() => void client.request({ action: "cancel", threadId: thread!.id, runId: pending.id })}>Stop request</button></div>}
     </div>}
     {view.trouble && <p className="fy-studio-trouble" role="status">{view.trouble}</p>}
-    <footer className="fy-studio-compose"><div className="fy-studio-compose-scope">Studio</div><Composer value={view.draft} onChange={client.draft} onSubmit={() => { if (model && dictationPhase === "idle") void client.send(model); }}
-      placeholder="Ask Arke about your studio…" focusRequest={focus} busy={view.attaching || view.submitting || !!working || !!view.state?.busy || dictationPhase !== "idle"} disabledReason={unavailable}
+    <footer className="fy-studio-compose"><div className="fy-studio-compose-scope">Studio</div><Composer value={view.draft} onChange={client.draft} onSubmit={submit}
+      placeholder="Ask Arke about your studio…" focusRequest={focus} busy={busy} disabledReason={unavailable}
       busyLabel={view.attaching ? "Reading documents…" : dictationPhase === "requesting" ? "Microphone permission…" : dictationPhase === "listening" ? "Dictating…" : dictationPhase === "transcribing" ? "Transcribing…" : "Working…"}
       attachmentLabel="Attach text documents" removeAttachmentTitle="Remove this unsent document"
       onAttach={() => { pickerTarget.current = client.documentPickerTarget(); picker.current?.click(); }} onAttachFiles={client.attachFiles} onAttachText={client.attachText}
@@ -171,7 +175,6 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
       {attachmentTrouble && <p className="fy-studio-note" role="status">{attachmentTrouble}<button type="button" className="fy-studio-button" onClick={() => setAttachmentTrouble(null)}>Dismiss</button></p>}
       {view.attachments.length > 0 && <details className="fy-studio-fact-card"><summary>Review unsent documents</summary>{view.attachments.map(row => <div key={row.id}><b>{row.name}</b><pre>{row.text}</pre></div>)}</details>}
       {view.fresh && !models.length && <p className="fy-studio-note"><a href="#/settings/providers" onClick={client.close}>Open Providers settings</a>{" · "}<button type="button" className="fy-studio-button" onClick={client.refreshModels}>Check Studio models again</button></p>}
-      {view.draft.length > STUDIO_ASSISTANT_LIMITS.requestChars && <p className="fy-studio-note" role="status">Studio accepts up to {STUDIO_ASSISTANT_LIMITS.requestChars.toLocaleString()} characters per request.</p>}
     </footer>
   </>;
 }
