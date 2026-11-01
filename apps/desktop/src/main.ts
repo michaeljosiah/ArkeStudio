@@ -1386,15 +1386,15 @@ async function initialize(): Promise<{ port: number }> {
     },
     // Attaching files. The dialog is the host's business and so is the path it hands back — the
     // renderer never sees either, it only sees artifacts appear (SPEC-001 R-9).
-    pickFiles: async ({ accept }) => {
+    pickFiles: async ({ accept, purpose }) => {
       const parent = window;
       if (!parent) return [];
       const result = await dialog.showOpenDialog(parent, {
-        title: "Attach to this world",
-        buttonLabel: "Attach",
+        title: purpose === "music" ? "Import music" : "Attach to this world",
+        buttonLabel: purpose === "music" ? "Import" : "Attach",
         properties: ["openFile", "multiSelections"],
         filters: [
-          { name: "Anything the studio can hold", extensions: [...accept] },
+          { name: purpose === "music" ? "Music files" : "Anything the studio can hold", extensions: [...accept] },
           { name: "All files", extensions: ["*"] },
         ],
       });
