@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import { insertShot, type ClientMessage, type ClientState } from "@arke-studio/contracts";
+import { insertShot, JobSchema, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __applyEventForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -433,6 +433,35 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     next.app.providers = [{ id: "elevenlabs", configured: true, validation: "valid", probes: [{ capability: "voice-tts", available: true }], fault: null }] as never;
     await act(async () => { __setStateForTest(next); });
     assert.equal(askedOf("sc_05"), 2, "a plan made before the provider was ready would read that scene as text");
+  });
+
+  it("restarts the whole preview voice batch when a cache job finishes and ignores its old replies (#1379)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = visualNovel();
+    const production = state.world!.productions.find(candidate => candidate.meta.id === "saltlight")!;
+    production.scenes.push({ ...structuredClone(production.scenes[0]!), id: "sc_05", number: 5, slug: "the-pier" } as never);
+    const job = JobSchema.parse({ id: "jb_" + "0".repeat(26), idempotencyKey: "0".repeat(26), worldId: FIXTURE_WORLD_ID,
+      target: { kind: "table-read-cache", id: LINE_WASH }, capability: "voice-tts", provider: "test", model: "voice", params: {},
+      status: "running", estimatedMicroUsd: 1, createdAt: "2026-11-01T00:00:00Z", updatedAt: "2026-11-01T00:00:00Z" });
+    state.app.jobs = [job];
+    const mounted = await mountState(state, SCENE_PATH);
+    const start = sent.length;
+    await click(all(mounted, ".fy-sw__tab").find(tab => tab.textContent === "Preview")!);
+    const requests = () => sent.slice(start).filter((message): message is Extract<ClientMessage, { kind: "plan-table-read" }> => message.kind === "plan-table-read");
+    const old = requests();
+    const next = structuredClone(state); next.app.jobs = [{ ...job, status: "succeeded" }];
+    await act(async () => __setStateForTest(next));
+    const fresh = requests().filter(request => !old.some(prior => prior.requestId === request.requestId));
+    assert.equal(fresh.filter(request => request.sceneId === "sc_05").length, 1, "the other scene is requested again too");
+    const answer = (request: typeof old[number]) => __applyEventForTest({ at: "2026-11-01T00:00:00Z", type: "rehearsal.result",
+      requestId: request.requestId, worldId: FIXTURE_WORLD_ID, status: "planned", reason: "",
+      plan: { ...plan, sceneId: request.sceneId, items: request.sceneId === "sc_04" ? plan.items : [] } } as never);
+    await act(async () => old.forEach(answer));
+    assert.equal(q(mounted, ".bm-player"), null, "late replies cannot finish the replacement batch");
+    await act(async () => fresh.forEach(answer));
+    assert(q(mounted, ".bm-player"));
+    assert.match(q(mounted, ".bm-player audio")?.getAttribute("src") ?? "", /voice-previews/);
   });
 
   it("a studio lost while the voices are asked for opens the preview as text, rather than waiting forever", async () => {
