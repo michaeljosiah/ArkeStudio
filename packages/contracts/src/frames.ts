@@ -88,6 +88,7 @@ import { NarrativeFieldsSchema } from "./production-narrative.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
 import { DecideConversationActionSchema, PrepareConversationTakeReviewSchema } from "./arke-actions.js";
 import { StudioAssistantCommandSchema, StudioAssistantResponseSchema, type StudioAssistantResponse } from "./studio-assistant.js";
+import { SnapshotPageSchema, type SnapshotPage } from "./snapshot-page.js";
 
 /**
  * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then events and requester-only
@@ -111,12 +112,14 @@ export const PASSAGE_KEPT_MAX = 2_400;
  * frame). Naming the parts keeps the declaration a reference to them.
  */
 export type Frame =
-  | { kind: "snapshot"; seq: number; state: ClientState; retainedHistory?: ("jobs" | "ledger")[] | undefined }
+  | { kind: "snapshot"; seq: number; state: ClientState; retainedHistory?: ("jobs" | "ledger")[] | undefined; collectionSnapshot?: number | undefined }
+  | { kind: "snapshot-page"; seq: number; snapshot: number; page: SnapshotPage }
   | { kind: "event"; seq: number; event: DomainEvent }
   | { kind: "studio-assistant"; seq: number; requestId: string; response: StudioAssistantResponse };
 
 export const FrameSchema: z.ZodType<Frame, z.ZodTypeDef, unknown> = valueSchema(z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema, retainedHistory: z.array(z.enum(["jobs", "ledger"])).optional() }).strict(),
+  z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema, retainedHistory: z.array(z.enum(["jobs", "ledger"])).optional(), collectionSnapshot: z.number().int().min(1).optional() }).strict(),
+  z.object({ kind: z.literal("snapshot-page"), seq: z.number().int().min(1), snapshot: z.number().int().min(1), page: SnapshotPageSchema }).strict(),
   z.object({ kind: z.literal("event"), seq: z.number().int().min(1), event: DomainEventSchema }).strict(),
   z.object({ kind: z.literal("studio-assistant"), seq: z.number().int().min(1), requestId: z.string().uuid(), response: StudioAssistantResponseSchema }).strict(),
 ]));
@@ -167,7 +170,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("stage-inspection"), worldId: z.string(), requestId: z.string().uuid(), round: z.number().int().min(1).max(2), frames: z.array(StageInspectionFrameSchema).min(3).max(8) }).strict(),
   z.object({ kind: z.literal("stage-construct-cancel"), worldId: z.string(), requestId: z.string().uuid() }).strict(),
 
-  z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional(), token: z.string().max(64).optional(), retainHistory: z.boolean().optional() }).strict(),
+  z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional(), token: z.string().max(64).optional(), retainHistory: z.boolean().optional(), pagedSnapshots: z.boolean().optional() }).strict(),
   z.object({ kind: z.literal("open-world"), worldId: UlidSchema }).strict(),
   /** SPEC-002: create a world folder under the app root. */
   z

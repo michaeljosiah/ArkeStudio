@@ -2331,4 +2331,13 @@ Pass `--baseline <git-ref>` to measure the same workload against an earlier clie
 overrides the browser executable. Compare collected heap before/after as well as peak heap and
 p95 frame time; do not mistake Chrome's collection schedule for retained growth.
 
+For transfer size and reconnects, coordinator `test/snapshot-pages.test.ts` budgets the snapshot
+below 3 MB with 5,000 artifacts, jobs and ledger rows each, checks pages below 1.1 MiB and
+checks that an unchanged refresh sends no collection rows. Run it with `test/transport.test.ts`
+and `test/remote-access.test.ts`; these include slow-window barriers, a 66,000-row initial
+transfer exceeding 256 pages, and phone negotiation. `test/socket-writer.test.ts` checks
+callback-paced page delivery, ordering, disposal and the aggregate transfer/waiting budgets.
+Client `test/snapshot-pages.test.ts` and `test/snapshot-history.test.ts` cover atomic visibility,
+complete provenance/history, duplicate ledger receipts, collection shrinkage and reconnect resets.
+
 From client run `node --import tsx --test --test-concurrency=2 test/media-measurement.test.tsx test/cut-trim.test.tsx test/cut-layout.test.tsx test/prompt-tools.test.tsx` for conditional controls, scoped local requests, retries, source replacement and discarded late replies. From the root, `node --import tsx scripts/smoke-media-measurement.mjs` checks the actual Cut/App and existing phone sheet at desktop, phone and short windows in both themes. It measures horizontal fit, reachable controls, pending/failed/success states, phone targets, Tab containment and Escape/focus return; measured media adds no standing control. Its replies are synthetic and do not prove native probe availability. Captures go to `output/media-measurement-native/`.

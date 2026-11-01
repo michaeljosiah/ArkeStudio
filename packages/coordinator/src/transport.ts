@@ -1,4 +1,5 @@
 import { SocketWriter } from "./socket-writer.js";
+import { SnapshotPages } from "./snapshot-pages.js";
 import { timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
 import type { ReadStream } from "node:fs";
@@ -35,6 +36,7 @@ interface Connection {
   requester: TransportRequester;
   writer: SocketWriter;
   retainHistory: boolean;
+  pages?: SnapshotPages;
   jobs?: ClientState["app"]["jobs"];
   ledger?: ClientState["app"]["ledger"];
   socket: WebSocket;
@@ -312,8 +314,9 @@ export class Transport {
       if (msg.kind === "hello") {
         // A legacy retry is only for old strict servers. Never downgrade an already
         // negotiated connection or queue another full snapshot behind a slow first one.
-        if (conn.initialising || (conn.retainHistory && msg.retainHistory !== true)) return;
+        if (conn.initialising || (conn.retainHistory && msg.retainHistory !== true) || (conn.pages && msg.pagedSnapshots !== true)) return;
         conn.retainHistory = msg.retainHistory === true;
+        conn.pages = msg.pagedSnapshots ? new SnapshotPages() : undefined;
         conn.jobs = undefined; conn.ledger = undefined;
         const sendInitialState = () => {
           if (!this.connections.has(conn) || conn.refused || socket.readyState !== 1) return;
@@ -370,6 +373,19 @@ export class Transport {
     // Validate on the way out — a frame that fails its own schema must never reach a client.
     let outgoing = frame;
     let snapshot: { key: string; base: HistoryBase; keep?: true } | undefined;
+    if (frame.kind === "snapshot" && conn.pages) {
+      const snapshotId = frame.seq, texts: string[] = [];
+      for (const page of conn.pages.prepare(frame.state)) texts.push(JSON.stringify(FrameSchema.parse({ kind: "snapshot-page", seq: ++conn.seq, snapshot: snapshotId, page })));
+      const changed = texts.length > 0;
+      const state = { ...frame.state, app: { ...frame.state.app, jobs: [], ledger: [] },
+        world: frame.state.world ? { ...frame.state.world, artifacts: [] } : null };
+      // Every page belongs to this barrier; dropping just the barrier could apply its patches
+      // to another world's snapshot. Pages are small and later refreshes contain only deltas.
+      texts.push(JSON.stringify(FrameSchema.parse({ kind: "snapshot", seq: ++conn.seq, state, collectionSnapshot: snapshotId })));
+      conn.writer.sendBatch(texts,
+        { snapshot: { key: `world:${frame.state.world?.meta.worldId ?? ""}`, keep: changed || !options.supersede } });
+      return;
+    }
     if (frame.kind === "snapshot") {
       const { jobs, ledger } = frame.state.app;
       const key = `world:${frame.state.world?.meta.worldId ?? ""}`;

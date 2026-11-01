@@ -23,6 +23,22 @@ const EVENT = {
   status: "starting",
 } as const;
 
+it("negotiates atomic collection pages, retains them across refreshes and resets them on reconnect", async t => {
+  const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE });
+  const port = await transport.start(); t.after(() => transport.stop());
+  const client = new TestClient(port); await client.open(); t.after(() => client.close());
+  client.send({ kind: "hello", token: TOKEN, retainHistory: true, pagedSnapshots: true }); await client.nextFrame(4);
+  assert(client.frames.slice(0, 3).every(frame => frame.kind === "snapshot-page" && frame.page.reset));
+  const initial = client.frames[3]!; assert.equal(initial.kind, "snapshot");
+  if (initial.kind !== "snapshot") return;
+  assert.equal(initial.collectionSnapshot, client.frames[0]!.kind === "snapshot-page" ? client.frames[0]!.snapshot : null);
+  transport.broadcastSnapshot(); await client.nextFrame(5);
+  assert.equal(client.frames[4]!.kind, "snapshot", "unchanged collections need no extra frames");
+  client.send({ kind: "hello", token: TOKEN, retainHistory: true, pagedSnapshots: true }); await client.nextFrame(9);
+  assert(client.frames.slice(5, 8).every(frame => frame.kind === "snapshot-page" && frame.page.reset));
+  assert(client.frames.every((frame, i) => !i || frame.seq > client.frames[i - 1]!.seq));
+});
+
 class TestClient {
   private socket: WebSocket;
   readonly frames: Frame[] = [];
@@ -547,7 +563,7 @@ function stalledWindow(transport: Transport) {
   (transport as unknown as { accept(socket: unknown, origin: string | undefined): void }).accept(socket, undefined);
   return {
     sent,
-    hello: (retainHistory: boolean) => socket.emit("message", Buffer.from(JSON.stringify({ kind: "hello", token: TOKEN, ...(retainHistory ? { retainHistory } : {}) }))),
+    hello: (retainHistory: boolean, pagedSnapshots = false) => socket.emit("message", Buffer.from(JSON.stringify({ kind: "hello", token: TOKEN, ...(retainHistory ? { retainHistory } : {}), ...(pagedSnapshots ? { pagedSnapshots } : {}) }))),
     drain: () => { while (done.length) done.shift()!(); },
     closed: () => socket.readyState !== 1,
   };
@@ -587,4 +603,38 @@ it("hands a window that fell behind only the newest refresh, every event in orde
   transport.broadcastSnapshot(); window.drain();
   const next = window.sent.at(-1);
   assert.ok(next?.kind === "snapshot" && next.retainedHistory?.includes("jobs"));
+});
+
+it("coalesces unchanged paged refreshes without dropping the initial collection barrier or events", () => {
+  const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE });
+  const window = stalledWindow(transport);
+  window.hello(true, true);
+  for (let n = 0; n < 100; n++) transport.broadcastSnapshot();
+  transport.broadcast(EVENT);
+  transport.broadcastSnapshot();
+  window.drain();
+  assert.equal(window.closed(), false);
+  assert.equal(window.sent.filter(frame => frame.kind === "snapshot-page").length, 3);
+  assert.equal(window.sent.filter(frame => frame.kind === "snapshot").length, 2);
+  assert.equal(window.sent.filter(frame => frame.kind === "event").length, 1);
+  assert.equal(window.sent[3]!.kind, "snapshot", "the first collection barrier is retained");
+  assert(window.sent.every((frame, index) => !index || frame.seq > window.sent[index - 1]!.seq));
+});
+
+it("delivers an initial snapshot with more than 256 pages without overflowing the waiting queue", () => {
+  const ledger = Array.from({ length: 66_000 }, () => ({ ts: "2026-11-01T00:00:00Z", worldId: "0".repeat(26), jobId: "jb_" + "0".repeat(26),
+    provider: "test", model: "voice", outcome: "succeeded" as const, estimatedMicroUsd: 1, actualMicroUsd: 1 }));
+  const transport = new Transport({ auth: AUTH, getSnapshot: () => emptyClientState({ ledger }), getInitialEvents: () => [EVENT] });
+  const window = stalledWindow(transport);
+  window.hello(true, true);
+  assert.equal(window.closed(), false, "queuing the initial sync does not require any send callback to have completed");
+  assert.equal(window.sent.length, 1, "only one page is written at a time");
+  window.drain();
+  assert.equal(window.closed(), false);
+  const pages = window.sent.filter(frame => frame.kind === "snapshot-page");
+  assert(pages.length > 256);
+  assert.equal(pages.filter(frame => frame.page.collection === "ledger").reduce((sum, frame) => sum + frame.page.rows.length, 0), ledger.length);
+  assert.equal(window.sent.at(-2)!.kind, "snapshot");
+  assert.equal(window.sent.at(-1)!.kind, "event");
+  assert(window.sent.every((frame, index) => !index || frame.seq > window.sent[index - 1]!.seq));
 });
