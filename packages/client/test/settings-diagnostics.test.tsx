@@ -144,7 +144,7 @@ describe("Settings · Diagnostics (R-36, R-37, turn 111)", () => {
     assert.match(text, /Key/);
     // The unmeasured finding names the measuring control — and a different pane, because a
     // ComfyUI resolved to a URL draws no machine row for Measure to sit in.
-    assert.match(text, /Settings · Providers · Ollama/);
+    assert.match(text, /Settings · Diagnostics · Hardware/);
     assert.match(text, /Measure/);
   });
 
@@ -152,7 +152,7 @@ describe("Settings · Diagnostics (R-36, R-37, turn 111)", () => {
     const text = plain(render(badDay()));
     assert.match(text, /the child exited with code 1/);
     assert.match(text, /no credential stored/);
-    assert.match(text, /dispatch remains permitted/i);
+    assert.match(text, /work can continue/i);
   });
 
   it("nothing to report is a stated result naming what was checked (R-10)", () => {
@@ -175,12 +175,12 @@ describe("Settings · Diagnostics (R-36, R-37, turn 111)", () => {
       now: NOW,
     });
     const text = plain(render(snapshot));
-    assert.match(text, /No control resolves this\./);
+    assert.match(text, /No action available\./);
     const nested = render(badDay()).match(/data-testid="diag-consequence"/g) ?? [];
     assert.ok(nested.length > 0);
     // The consequence sub-rows never carry the absence sentence — one occurrence at most, and
     // it belongs to the unknown finding, not to them.
-    assert.equal((plain(render(badDay())).match(/No control resolves this\./g) ?? []).length, 0);
+    assert.equal((plain(render(badDay())).match(/No action available\./g) ?? []).length, 0);
   });
 
   it("a stale fact renders as an age with the re-measure control — never a list of fact ids (R-16, turn 69)", () => {

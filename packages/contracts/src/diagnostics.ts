@@ -161,13 +161,12 @@ export const CONTROL_REGISTRY = {
    *
    * The row it names appears in every engine pane that asks a fit question, so the route names a
    * concrete one rather than landing on whichever pane happens to open (SPEC-034 R-13, R-24).
-   * Ollama, not ComfyUI: a ComfyUI resolved to a URL has no fit question and draws no such row,
-   * and `hardware-unmeasured` fires exactly when nothing has probed — so that pairing could send
-   * a reader to the one pane with no Measure button on it.
+   * Diagnostics runs this read-only measurement in place (#2238). Keep Ollama as the detail
+   * route because a ComfyUI resolved to a URL has no local fit question or measurement row.
    */
   "runtime-detect": {
     label: "Measure",
-    place: "Settings · Providers · Ollama",
+    place: "Settings · Diagnostics · Hardware",
     route: "/settings/providers?provider=ollama",
   },
 } as const satisfies Record<
@@ -276,7 +275,7 @@ export const FindingRemedySchema = z
 export type FindingRemedy = z.infer<typeof FindingRemedySchema>;
 
 /** R-25: what both surfaces say for a remedy of `null` — stated once, rendered anywhere. */
-export const REMEDY_ABSENT_STATEMENT = "No control resolves this.";
+export const REMEDY_ABSENT_STATEMENT = "No action available.";
 
 /**
  * What a surface states about a null remedy. A suppressed consequence resolves through the
@@ -923,7 +922,7 @@ const hardwareFacts: Rule = {
           facts: [{ name: "local-runtime", value: null, source: "app.runtime", measuredAt: ctx.now }],
           cause: { statement: "detection has not been requested this session" },
           remedy: { control: "runtime-detect" },
-          note: "Dispatch remains permitted.",
+          note: "Work can continue.",
           consequences: [],
         },
       ];
@@ -954,7 +953,7 @@ const hardwareFacts: Rule = {
           statement: `detection ran and ${failed.map(([name]) => name).join(", ")} could not be measured`,
         },
         remedy: { control: "runtime-detect" },
-        note: "Dispatch remains permitted.",
+        note: "Work can continue.",
         consequences: [],
         ...staleOf(facts, ctx.now, { control: "runtime-detect" }),
       },

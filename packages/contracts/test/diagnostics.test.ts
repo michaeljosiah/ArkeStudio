@@ -643,7 +643,7 @@ describe("the hardware facts (R-4, D5)", () => {
     assert.ok(finding);
     assert.equal(finding.severity, "unmeasured");
     assert.equal(finding.remedy?.control, "runtime-detect");
-    assert.match(finding.note ?? "", /dispatch remains permitted/i);
+    assert.match(finding.note ?? "", /work can continue/i);
     assert.equal(snapshot.findings.some((f) => f.kind === "hardware-unknown"), false);
   });
 
@@ -659,7 +659,7 @@ describe("the hardware facts (R-4, D5)", () => {
     const finding = snapshot.findings.find((f) => f.kind === "hardware-unknown");
     assert.ok(finding);
     assert.equal(finding.severity, "unknown");
-    assert.match(finding.note ?? "", /dispatch remains permitted/i);
+    assert.match(finding.note ?? "", /work can continue/i);
     assert.equal(snapshot.findings.some((f) => f.kind === "hardware-unmeasured"), false);
   });
 });
