@@ -25,7 +25,7 @@ import { RecoveryHistoryBrowser } from "../components/recovery-history.js";
  * It renders the snapshot and computes nothing of its own: no join is re-made here, and no
  * fact another group already states appears unless a join made it a finding (R-36, decision 2).
  * Remedies navigate to the control's own place, behind its existing gate (R-23), except for
- * read-only measurements, which run here so Measure does what its label promises (#2238).
+ * read-only measurements, which run here so Measure does what its label promises (issue 2238).
  */
 
 /** Band order and labels (turn 111): the state word is the contract's, the label the product's. */

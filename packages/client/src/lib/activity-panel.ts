@@ -1,5 +1,22 @@
 import { useSyncExternalStore } from "react";
-import type { UpdateState } from "@arke-studio/contracts";
+import { audiobookJobRun, type AudiobookActivity, type ClientState, type NeedsYouEntry, type UpdateState } from "@arke-studio/contracts";
+import { shortDateTime } from "./format.js";
+
+/** Count the rows Inbox actually shows, after grouping audiobook requests into their read. */
+export function inboxAttention(state: ClientState, needsYou: NeedsYouEntry[], reads: AudiobookActivity[]) {
+  const attentionReads = reads.filter(run => state.app.jobs.some(job => job.status === "needs-reconciliation" && audiobookJobRun(job, [run]))
+    || (["interrupted", "finished"].includes(run.phase) && !reads.some(later => later.worldId === run.worldId && later.productionId === run.productionId && later.chapterId === run.chapterId && later.scope === "chapter" && later.phase === "ready" && later.startedAt > run.startedAt)));
+  const ordinaryNeeds = needsYou.filter(entry => !state.app.jobs.some(job => job.id === entry.ref && audiobookJobRun(job, attentionReads)));
+  return { attentionReads, ordinaryNeeds, count: attentionReads.length + ordinaryNeeds.length };
+}
+
+/** A saved refusal keeps its evidence; its displayed reset is relative to when it is read. */
+export function activityReason(reason: string, now = Date.now()): string {
+  return reason.replace(/resets (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/g, (match, iso: string) => {
+    const at = Date.parse(iso);
+    return !Number.isFinite(at) ? match : at <= now ? "reset time passed" : `resets ${shortDateTime(iso)}`;
+  });
+}
 
 /**
  * The Activity panel's own state (design turn 136): whether it is open, which tab, and whether a

@@ -37,6 +37,8 @@ import { bundledReleases } from "../lib/releases.js";
 import { compareVersions, newestVersion, RELEASE_PAGE, unreadCount, type ReleaseCard } from "../lib/release-notes.js";
 import {
   closeActivityPanel,
+  activityReason,
+  inboxAttention,
   inspectProviderCalls,
   leaveProviderCalls,
   openActivityPanel,
@@ -206,7 +208,7 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   const running = scoped(computeRunning(state, { sidecar, exports: exportsState }));
   const needsYou = scoped(computeNeedsYou(state));
   const unread = unreadCount(releases, seen.whatsNewSeenVersion, waiting?.targetVersion ?? null);
-  const needs = needsYou.length;
+  const needs = inboxAttention(state, needsYou, scoped(state.app.audiobookActivity ?? [])).count;
   const status =
     running.length === 0 && needs === 0
       ? "nothing running · nothing waiting"
@@ -322,10 +324,8 @@ function Inbox({
   const reads = (state.app.audiobookActivity ?? []).filter(run => inScope(run.worldId));
   // A later successful chapter read answers the chapter remedy, but cannot settle an older
   // provider request whose charge is still unknown. Keep that exact request's decision here.
-  const attentionReads = reads.filter(run => state.app.jobs.some(job => job.status === "needs-reconciliation" && audiobookJobRun(job, [run]))
-    || (["interrupted", "finished"].includes(run.phase) && !reads.some(later => later.worldId === run.worldId && later.productionId === run.productionId && later.chapterId === run.chapterId && later.scope === "chapter" && later.phase === "ready" && later.startedAt > run.startedAt)));
+  const { attentionReads, ordinaryNeeds } = inboxAttention(state, needsYou, reads);
   const liveReads = reads.filter(run => audiobookActivityLive(run) && !attentionReads.includes(run));
-  const ordinaryNeeds = needsYou.filter(entry => !state.app.jobs.some(job => job.id === entry.ref && audiobookJobRun(job, attentionReads)));
   const ordinaryRunning = running.filter(entry => !state.app.jobs.some(job => job.id === entry.ref && audiobookJobRun(job, reads)));
   const jobs = [...state.app.jobs].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const cutoff = Date.now() - HISTORY_DAYS * 86_400_000;
@@ -640,7 +640,7 @@ function HistoryRow({
         </div>
         <div className="fy-ap__rowsub">{sub}</div>
         {compact && <div className="fy-ap__diagnostic">{diagnostic}</div>}
-        {note.reason && <div className="fy-ap__reason">{note.reason}</div>}
+        {note.reason && <div className="fy-ap__reason">{activityReason(note.reason)}</div>}
         {/* Where this one is re-run from, which is not one place (issue 226): a founding-build job
             retries through the build's own landing (SPEC-031 R-49), reference work from the
             screen that owns its dialog, and a kind nobody can place says so rather than naming
