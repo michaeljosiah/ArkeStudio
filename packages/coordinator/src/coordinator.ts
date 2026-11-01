@@ -22534,6 +22534,9 @@ export class Coordinator {
       }
       if (take !== undefined && (take.status === "cancelled" || take.status === "needs-reconciliation")) return fail(take.error ?? (take.status === "cancelled" ? "cancelled" : "the picture could not be made"));
       const job = jobId === undefined ? undefined : this.jobQueue?.listJobs().find(candidate => candidate.id === jobId);
+      if (job?.status === "succeeded" && job.finalization?.status === "failed") {
+        return fail("The picture was generated but could not be filed. Open Activity and choose Retry finalization; no regeneration or charge is needed.");
+      }
       // A queued picture has not used any generation time. Keep its original job until it lands
       // or cancellation settles; abandoning the waiter used to strand paid results behind retries.
       if ((job?.attempt ?? 0) > 0) deadline ??= Date.now() + waitMs;
