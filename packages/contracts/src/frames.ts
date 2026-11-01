@@ -3824,7 +3824,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       chapterFile: z.string().min(1),
       block: z.string().min(1),
-      picture: z.object({ file: z.string().min(1).max(1000), source: AudiobookPictureSourceSchema }).strict().nullable(),
+      picture: z.object({ file: z.string().min(1).max(1000), source: AudiobookPictureSourceSchema, tallFrom: z.string().min(1).max(1000).optional() }).strict().nullable(),
       requestId: UlidSchema.optional(),
     })
     .strict(),

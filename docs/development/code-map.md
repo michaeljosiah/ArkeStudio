@@ -1,5 +1,11 @@
 # Code map
 
+Tall pictures (#2164): the existing `set-audiobook-picture` command accepts `picture.tallFrom`
+and routes through `setAudiobookPictureTall`, retaining its expected-Wide and catalogue checks.
+Contracts `videoSegments` selects Tall for portrait output; both the client preview and coordinator
+renderer pass the requested shape. A missing Tall falls back to Wide, while its focus and motion
+stay with Wide. Native encoder coverage is in `productions/audiobook-video.test.ts`.
+
 Graphic-novel preview planning (#2253): `coordinator/src/productions/setup-brief.ts` honours
 the requested chapter scope without preloading every chapter's beats; `setup.ts` requires a
 current full-read receipt for each planned source chapter. Existing plan/create UI and schemas

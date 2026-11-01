@@ -34,6 +34,27 @@ const held = async (h: Pick<Harness, "store">): Promise<ChapterAudiobook> => {
 };
 
 describe("a block's picture made Tall (turn 235, R-196, R-197)", () => {
+  it("places an existing Tall through the picker and refuses a changed Wide (#2164)", () =>
+    withHarness(async h => {
+      await make(h.send);
+      const first = (await held(h)).pictures!["p0.0"]!;
+      await make(h.send);
+      const wide = (await held(h)).pictures!["p0.0"]!;
+      const jobs = h.enqueued.length;
+      const choose: ClientMessage = { kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER,
+        chapterFile: CHAPTER, block: "p0.0", picture: { file: first.file, source: "generated", tallFrom: wide.file }, requestId: nextId() };
+      await h.send(choose);
+      const placed = (await held(h)).pictures!["p0.0"]!;
+      assert.equal(placed.file, wide.file);
+      assert.equal(placed.tall?.file, first.file);
+      assert.equal(placed.tall?.from, wide.file);
+      assert.equal(h.enqueued.length, jobs, "picking does not generate");
+      await make(h.send);
+      await h.send({ ...choose, requestId: nextId() });
+      const refused = h.events.findLast(event => event.type === "audiobook.record");
+      assert.ok(refused?.type === "audiobook.record" && refused.refused?.includes("picture changed"));
+    }));
+
   it("recomposes the picture the block has, with it as the only reference, and files the Tall beside it", () =>
     withHarness(async (h) => {
       await make(h.send);

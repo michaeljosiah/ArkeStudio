@@ -415,6 +415,20 @@ describe("the audiobook as a video (turn 197)", () => {
         assert.ok(right.result.ok, JSON.stringify(right.result));
         const rightFrame = await frameLuma(join(h.worldDir, right.result.dir, right.result.files[0]!.name), right.result.files[0]!.seconds - 0.2, 18, 32);
         assert.ok(Math.max(...rightFrame) < 40, "and moved, on the black half");
+
+        // Choosing an existing Tall changes the actual MP4, not just the preview. Reuse the
+        // world's key-art slot so the ordinary catalogue/path checks still run.
+        await new Promise<void>((done, fail) => {
+          const child = spawn(FFMPEG!, ["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=white:s=180x320", "-frames:v", "1", join(h.worldDir, "world-art.png")], { windowsHide: true });
+          child.on("error", fail);
+          child.on("exit", code => code === 0 ? done() : fail(new Error(`ffmpeg exited ${code}`)));
+        });
+        await h.send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p1.0",
+          picture: { file: "world-art.png", source: "world", tallFrom: "artifacts/board-v2.png" }, requestId: REQUEST });
+        const tall = await render(h, { shape: "1080x1920", slowPush: false, subtitles: "none", titleCards: false });
+        assert.ok(tall.result.ok, JSON.stringify(tall.result));
+        const tallFrame = await frameLuma(join(h.worldDir, tall.result.dir, tall.result.files[0]!.name), tall.result.files[0]!.seconds - 0.2, 18, 32);
+        assert.ok(Math.min(...tallFrame) > 200, "the white Tall replaces the cached black Wide crop");
       },
       { ffmpeg: true },
     ));

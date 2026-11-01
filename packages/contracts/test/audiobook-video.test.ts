@@ -71,6 +71,19 @@ function chapter(overrides: Partial<ListeningChapter> = {}): ListeningChapter {
 }
 
 describe("the audiobook as a video (turn 197)", () => {
+  it("uses Tall in portrait previews and renders, retaining earlier Tall and falling back to Wide (#2164)", () => {
+    const book = chapter();
+    book.pictures[0]!.tall = "artifacts/tall.jpg";
+    book.pictures[0]!.tallEarlier = true;
+    const portrait = videoSegments(book, null, true, "1080x1920");
+    assert.equal(portrait[0]!.file, "artifacts/tall.jpg", "the title card follows the same shape");
+    const pictures = portrait.filter(segment => segment.kind === "picture");
+    assert.equal(pictures[0]!.file, "artifacts/tall.jpg", "an earlier Tall stays in use until replaced");
+    assert.equal(pictures[0]!.focus, undefined, "Wide focus does not crop a recomposed Tall");
+    assert.equal(pictures[1]!.file, "artifacts/booth.jpg", "missing Tall falls back to Wide");
+    assert.equal(videoSegments(book, null, true, "1280x720")[0]!.file, "artifacts/walk.jpg");
+  });
+
   it("defaults as the owner answered: one a chapter, 1920 × 1080, Slow push on, Sidecar at 16:9 and Both at vertical", () => {
     assert.deepEqual(AudiobookVideoOptionsSchema.parse(DEFAULT_VIDEO_OPTIONS), DEFAULT_VIDEO_OPTIONS);
     assert.equal(DEFAULT_VIDEO_OPTIONS.slowPush, true);

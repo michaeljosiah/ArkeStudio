@@ -644,6 +644,23 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.equal(asked(m, "make-audiobook-picture").length, 0, "the picture itself is not made again");
   });
 
+  it("chooses an existing Tall without replacing Wide or buying an image (#2164)", async () => {
+    extraArtifacts = [madeArtifact()];
+    bookShapes = ["wide", "tall"];
+    const pictures = { "p1.0": made(SHOT) };
+    const m = await mount(2, pictures);
+    await press(q(m, '[data-testid="picture-card-tall-slot"]')?.closest("button"));
+    pictures["p1.0"].file = "artifacts/harbour-upload.png";
+    await rerender!(undefined);
+    assert.ok(q(m, '[aria-label="Tall pictures"]'));
+    assert.equal(button(m, "Remove"), undefined, "choosing Tall cannot remove Wide");
+    await press(q(m, '[aria-label="Tall pictures"] [role="option"]'));
+    const chosen = asked(m, "set-audiobook-picture")[0]!;
+    assert.equal(chosen.picture?.tallFrom, "artifacts/made-maren.png");
+    assert.equal(asked(m, "make-audiobook-picture").length, 0);
+    assert.equal(asked(m, "make-audiobook-tall-picture").length, 0);
+  });
+
   it("marks a Tall made from an earlier picture and offers Make tall again; a current one leaves Make again priced for both (call 3)", async () => {
     extraArtifacts = [madeArtifact()];
     bookShapes = ["wide", "tall"];
