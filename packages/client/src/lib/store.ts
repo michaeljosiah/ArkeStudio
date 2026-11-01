@@ -1899,7 +1899,8 @@ function handleFrame(json: string): void {
       audiobookAsks: changedWorld || rejoined ? {} : current.audiobookAsks,
       audiobookDoor: changedWorld ? {} : current.audiobookDoor,
       audiobookCredits: changedWorld ? {} : current.audiobookCredits,
-      audiobookBook: rejoined ? {} : current.audiobookBook,
+      // Book state uses production id alone, unlike the world-keyed chapter runs above.
+      audiobookBook: changedWorld || rejoined ? {} : current.audiobookBook,
       audiobookNotes: changedWorld ? {} : current.audiobookNotes,
       // Both are keyed by sheet slug alone, and slugs recur across worlds: a failure left over
       // from one world would otherwise surface under the same-named character in the next one

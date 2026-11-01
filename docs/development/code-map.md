@@ -1,6 +1,7 @@
 # Code map
 
 Transport snapshot refreshes coalesce in 250 ms windows before projection/serialization.
+The narrative save receipt requests an immediate kept snapshot so it follows its saved state.
 Only hello/reconnect replays transient startup events; client world-keyed live runs and
 permissions survive ordinary refresh/navigation, and newly discovered saved downloads emit
 their own update. `transport.test.ts`, client `snapshot-transients.test.ts` and coordinator

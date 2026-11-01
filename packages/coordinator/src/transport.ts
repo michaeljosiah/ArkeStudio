@@ -418,19 +418,24 @@ export class Transport {
   }
 
   /** Coalesce refresh bursts before building, validating or serializing any snapshot. */
-  broadcastSnapshot(): void {
+  broadcastSnapshot(options: { immediate?: boolean } = {}): void {
+    // Save receipts that depend on this state need a kept barrier before their acknowledgement.
+    if (options.immediate) { this.flushSnapshot(true); return; }
     if (this.snapshotTimer !== null || ![...this.connections].some(conn => conn.helloed)) return;
     // Do not restart the timer: a continuous picture run must still deliver fresh state.
-    this.snapshotTimer = setTimeout(() => {
-      this.snapshotTimer = null;
-      const connections = [...this.connections].filter(conn => conn.helloed && !conn.refused && conn.socket.readyState === 1);
-      if (!connections.length) return;
-      const state = this.opts.getSnapshot();
-      for (const conn of connections) {
-        this.sendFrame(conn, { kind: "snapshot", seq: ++conn.seq, state }, { supersede: true });
-      }
-    }, 250);
+    this.snapshotTimer = setTimeout(() => this.flushSnapshot(), 250);
     this.snapshotTimer.unref();
+  }
+
+  private flushSnapshot(keep = false): void {
+    if (this.snapshotTimer !== null) clearTimeout(this.snapshotTimer);
+    this.snapshotTimer = null;
+    const connections = [...this.connections].filter(conn => conn.helloed && !conn.refused && conn.socket.readyState === 1);
+    if (!connections.length) return;
+    const state = this.opts.getSnapshot();
+    for (const conn of connections) {
+      this.sendFrame(conn, { kind: "snapshot", seq: ++conn.seq, state }, { supersede: !keep });
+    }
   }
 
   connectionCount(): number {

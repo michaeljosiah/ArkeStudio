@@ -27,7 +27,7 @@ it("keeps live permissions and world-keyed runs through refresh/navigation, and 
   let seq = 1;
   for (const event of events) __handleFrameForTest({ kind: "event", seq: ++seq, event });
   const live = __stateForTest(), tall = lastAudiobookTallProgress(worldId, productionId);
-  const slots = ["permissions", "direction", "beats", "illustration", "audiobook", "audiobookBook", "cataloguePreview"] as const;
+  const slots = ["permissions", "direction", "beats", "illustration", "audiobook", "cataloguePreview"] as const;
   for (const world of [FIXTURE_STATE.world, null, FIXTURE_STATE.world]) {
     __handleFrameForTest({ kind: "snapshot", seq: ++seq, state: { ...structuredClone(FIXTURE_STATE), world } });
     const refreshed = __stateForTest();
@@ -35,6 +35,7 @@ it("keeps live permissions and world-keyed runs through refresh/navigation, and 
     assert.equal(refreshed.deriving[key]?.state, "deriving");
     assert.equal(refreshed.casting[key]?.state, "casting");
     assert.equal(lastAudiobookTallProgress(worldId, productionId), tall);
+    if (world === null) assert.deepEqual(refreshed.audiobookBook, {}, "a production-only book key cannot cross worlds");
   }
   __connectionStatusForTest("open");
   __handleFrameForTest({ kind: "snapshot", seq: 1, state: structuredClone(FIXTURE_STATE) });
@@ -47,4 +48,14 @@ it("keeps live permissions and world-keyed runs through refresh/navigation, and 
   assert.equal(__stateForTest().permissions.p1?.description, "Pending");
   assert.equal(__stateForTest().illustration[key]?.state, "reading");
   assert.equal(lastAudiobookTallProgress(worldId, productionId)?.made, 2);
+});
+
+it("does not carry a book run into another world's same-named production", () => {
+  __setStateForTest(FIXTURE_STATE);
+  __handleFrameForTest({ kind: "event", seq: 1, event: events.find(event => event.type === "audiobook.book-started")! });
+  assert.equal(__stateForTest().audiobookBook[productionId]?.state, "reading");
+  const world = structuredClone(FIXTURE_STATE.world!);
+  world.meta.worldId = "01J8F3K2QW9VZX4N7M0RTYB6HD";
+  __handleFrameForTest({ kind: "snapshot", seq: 2, state: { ...FIXTURE_STATE, world } });
+  assert.deepEqual(__stateForTest().audiobookBook, {});
 });

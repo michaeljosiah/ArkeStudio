@@ -5095,7 +5095,8 @@ export class Coordinator {
           projection.productionId && projection.output && (previous?.status !== "done" || previous.output !== projection.output)) {
         this.emit({ at: this.nowIso(), type: "export.progress", worldId: projection.worldId,
           productionId: projection.productionId, exportId: projection.id, status: "done", percent: 100,
-          output: projection.output, error: null });
+          output: projection.output, error: null, deliveryKind: projection.deliveryKind,
+          sourceFingerprint: projection.sourceFingerprint, episodeId: projection.episodeId });
       }
     }
     return [...records.values()];
@@ -7668,6 +7669,7 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId) throw new Error("Open this production's world before editing its narrative.");
         await saveProductionNarrative(store, msg.productionId, msg.expectedVersion, msg.narrative);
         await this.refreshWorldSnapshot(msg.worldId);
+        this.transport.broadcastSnapshot({ immediate: true });
         this.emit({ type: "production-narrative.saved", at: this.nowIso(), worldId: msg.worldId,
           productionId: msg.productionId, requestId: msg.requestId });
         return;

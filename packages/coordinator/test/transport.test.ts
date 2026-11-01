@@ -320,6 +320,23 @@ describe("Transport", () => {
     assert.equal(reads, 1); assert.equal(window.sent.length, 1);
   });
 
+  it("keeps a save's authoritative snapshot ahead of its acknowledgement and later refreshes", t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let state = STATE;
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => state });
+    const window = stalledWindow(transport); window.hello(true);
+    state = emptyClientState({ version: "saved" });
+    transport.broadcastSnapshot();
+    transport.broadcastSnapshot({ immediate: true });
+    transport.broadcast({ at: EVENT.at, type: "production-narrative.saved", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+      productionId: "the-crossing", requestId: "01J8F3K2QW9VZX4N7M0RTYB6HD" });
+    state = emptyClientState({ version: "later" });
+    transport.broadcastSnapshot(); t.mock.timers.tick(250); window.drain();
+    assert.deepEqual(window.sent.map(frame => frame.kind), ["snapshot", "snapshot", "event", "snapshot"]);
+    assert.equal(window.sent[1]!.kind === "snapshot" && window.sent[1]!.state.app.version, "saved");
+    assert.equal(window.sent[3]!.kind === "snapshot" && window.sent[3]!.state.app.version, "later");
+  });
+
   it("routes non-hello messages to the coordinator only after hello", async () => {
     const seen: unknown[] = [];
     const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE, onMessage: (m) => seen.push(m) });

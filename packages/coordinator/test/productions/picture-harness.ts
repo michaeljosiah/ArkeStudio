@@ -193,7 +193,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
     (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
   let snapshots = 0;
   const transport = options.transport?.(coordinator.serverApplication);
-  coordinator.serverApplication.attachTransport({ broadcast(event) { transport?.broadcast(event); }, broadcastSnapshot() { snapshots++; transport?.broadcastSnapshot(); } });
+  coordinator.serverApplication.attachTransport({ broadcast(event) { transport?.broadcast(event); }, broadcastSnapshot(options) { snapshots++; transport?.broadcastSnapshot(options); } });
   try {
     await run({ worldDir, events, send, seen, enqueued, cancelled, concurrent: () => widest, snapshots: () => snapshots, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!(), landHeld, startHeld: n => { jobs[n]!.attempt = 1; } });
   } finally {
