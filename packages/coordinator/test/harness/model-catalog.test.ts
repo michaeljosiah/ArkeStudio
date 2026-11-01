@@ -14,6 +14,25 @@ const adapterWith = (listModels: () => Promise<ModelInfo[]>, ready = true) => ({
 }) satisfies HarnessAdapter;
 
 describe("the running harness model catalog", () => {
+  it("keeps five minutes of unchanged background probes silent but publishes changes and explicit loading", async () => {
+    let rows = [model], ready = true;
+    const states: Array<{ rows: ModelInfo[]; status: HarnessModelStatus }> = [];
+    const adapter = { ...adapterWith(async () => rows), readiness: () => ({ ready }) };
+    const catalog = new HarnessModelCatalog(adapter, (rows, status) => states.push({ rows, status }));
+    await catalog.get(); states.length = 0;
+    for (let tick = 0; tick < 10; tick++) await catalog.get(true, { background: true });
+    assert.equal(states.length, 0);
+    rows = [...rows, { ...model, id: "new-model" }];
+    await catalog.get(true, { background: true });
+    assert.equal(states.length, 1); assert.equal(states[0]?.rows.length, 2);
+    ready = false; await assert.rejects(catalog.get(true, { background: true }));
+    assert.equal(states.at(-1)?.status.status, "error");
+    const count = states.length;
+    await assert.rejects(catalog.get(true, { background: true })); assert.equal(states.length, count);
+    ready = true; await catalog.get(true, { background: true }); assert.equal(states.at(-1)?.status.status, "ready");
+    states.length = 0; await catalog.get(true);
+    assert.deepEqual(states.map(row => row.status.status), ["loading", "ready"]);
+  });
   it("shares in-flight discovery, caches valid empty catalogs, and refreshes on request", async () => {
     let calls = 0;
     let resolve!: (models: ModelInfo[]) => void;

@@ -11,6 +11,7 @@ import {
   type ProviderId,
   type ProviderStatus,
   type RuntimeProbes,
+  type HarnessAdapter,
 } from "@arke-studio/contracts";
 import type { ComfyUiEngineService } from "../../src/comfyui/engine.js";
 import { Coordinator } from "../../src/coordinator.js";
@@ -56,6 +57,30 @@ it("samples a newly running ComfyUI job after a coalesced Ollama residency probe
  */
 
 const LOCAL = (Object.keys(PROVIDERS) as ProviderId[]).filter((id) => PROVIDERS[id].credential === "none");
+
+it("ten idle runtime passes publish no snapshots or provider events after initial discovery (#2280)", async () => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root);
+  let available = true, snapshots = 0;
+  let models = [{ provider: "ollama", id: "local-model" }];
+  const adapter = { id: "test", readiness: () => ({ ready: true }), capabilities: () => new Set(["models"]),
+    listModels: async () => models } as unknown as HarnessAdapter;
+  const events: DomainEvent[] = [];
+  const coordinator = new Coordinator({ provider, adapter, changeLogPath: join(root, "changes.jsonl"), appVersion: "test",
+    validators: localValidators(() => ({ available })), observeEvent: event => events.push(event) });
+  const seam = coordinator as unknown as { started: boolean; transport: { broadcastSnapshot(): void }; providerService: ProviderService; revalidateLocalRuntimes(): Promise<void> };
+  seam.transport.broadcastSnapshot = () => { snapshots++; };
+  try {
+    await seam.providerService.init(); seam.started = true;
+    await seam.revalidateLocalRuntimes(); snapshots = 0; events.length = 0;
+    for (let tick = 0; tick < 10; tick++) await seam.revalidateLocalRuntimes();
+    assert.equal(snapshots, 0); assert.equal(events.filter(event => event.type === "provider.status").length, 0);
+    models = [...models, { provider: "ollama", id: "new-model" }];
+    await seam.revalidateLocalRuntimes(); assert.equal(snapshots, 1);
+    available = false; await seam.revalidateLocalRuntimes();
+    assert.equal(events.filter(event => event.type === "provider.status").length, 1);
+  } finally { seam.started = false; await coordinator.stop(); await provider.close(); }
+});
 
 /** Validators for every keyless provider, each answering for its own declared capabilities. */
 function localValidators(

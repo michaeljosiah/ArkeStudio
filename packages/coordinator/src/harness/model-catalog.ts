@@ -16,6 +16,7 @@ export class HarnessModelCatalog {
   private pending: Promise<ModelInfo[]> | undefined;
   private generation = 0;
   private lifecycleRevision: number | undefined;
+  private lastPublication = "";
 
   constructor(
     private readonly adapter: HarnessAdapter | null,
@@ -23,11 +24,18 @@ export class HarnessModelCatalog {
     private readonly options: { timeoutMs?: number; ttlMs?: number; now?: () => number } = {},
   ) {}
 
+  private publishChanged(models: ModelInfo[], status: HarnessModelStatus): void {
+    const fingerprint = JSON.stringify([models, status]);
+    if (fingerprint === this.lastPublication) return;
+    this.lastPublication = fingerprint;
+    this.publish(models, status);
+  }
+
   invalidate(): void {
     this.generation++;
     this.checkedAt = 0;
     this.pending = undefined;
-    this.publish(this.models, { status: "idle" });
+    this.publishChanged(this.models, { status: "idle" });
   }
 
   private synchronizeLifecycle(): void {
@@ -37,14 +45,17 @@ export class HarnessModelCatalog {
     this.invalidate();
   }
 
-  async get(refresh = false): Promise<ModelInfo[]> {
+  async get(refresh = false, options: { background?: boolean } = {}): Promise<ModelInfo[]> {
     // A process can restart between health polls while both observed readiness values are true.
     this.synchronizeLifecycle();
-    if (this.pending) return this.pending;
+    if (this.pending) {
+      if (refresh && !options.background) this.publishChanged(this.models, { status: "loading" });
+      return this.pending;
+    }
     const now = this.options.now ?? Date.now;
     if (!refresh && this.adapter?.readiness().ready && this.checkedAt && now() - this.checkedAt < (this.options.ttlMs ?? 60_000)) return this.models;
     const generation = this.generation;
-    this.publish(this.models, { status: "loading" });
+    if (!options.background) this.publishChanged(this.models, { status: "loading" });
     const work = async (): Promise<ModelInfo[]> => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -69,14 +80,14 @@ export class HarnessModelCatalog {
         if (generation !== this.generation) throw new CatalogError("The harness changed during model discovery. Retry models.");
         this.models = parsed.data;
         this.checkedAt = now();
-        this.publish(this.models, { status: "ready" });
+        this.publishChanged(this.models, { status: "ready" });
         return this.models;
       } catch (error) {
         // SDK and provider failures can quote raw config, credentials or invalid payloads.
         const safeError = error instanceof CatalogError ? error : new CatalogError("Model discovery failed. Check the running harness and retry models.");
         if (generation === this.generation) {
           this.checkedAt = 0;
-          this.publish(this.models, { status: "error", reason: safeError.message });
+          this.publishChanged(this.models, { status: "error", reason: safeError.message });
         }
         throw safeError;
       } finally {

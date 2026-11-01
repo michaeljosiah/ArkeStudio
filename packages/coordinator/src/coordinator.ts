@@ -5979,7 +5979,7 @@ export class Coordinator {
     const local = (Object.keys(PROVIDERS) as ProviderId[]).filter((id) => PROVIDERS[id].credential === "none");
     try {
       await Promise.all([
-        ...local.map((id) => this.providerService.validate(id).catch(() => {})),
+        ...local.map((id) => this.providerService.validate(id, { background: true }).catch(() => {})),
         this.refreshLocalResidency(),
         this.refreshHarnessModels(),
         // A sign-in surface whose last read faulted is asked again here (issue 1247): a keyless
@@ -5991,7 +5991,7 @@ export class Coordinator {
     }
     if (this.stopping) return;
     const statuses = this.providerService.list();
-    const fingerprint = JSON.stringify(statuses.filter((s) => local.includes(s.id)));
+    const fingerprint = JSON.stringify(statuses.filter((s) => local.includes(s.id)).map(({ lastValidated: _at, ...availability }) => availability));
     if (fingerprint === this.lastLocalRuntimeStatuses) return;
     this.lastLocalRuntimeStatuses = fingerprint;
     this.emit({ at: new Date().toISOString(), type: "provider.status", providers: statuses });
@@ -6013,7 +6013,7 @@ export class Coordinator {
   /** OpenCode discovers local models itself; periodically publish its current catalogue to open pickers. */
   private async refreshHarnessModels(): Promise<void> {
     if (!this.opts.adapter?.readiness().ready || !this.opts.adapter.capabilities().has("models")) return;
-    const work = this.modelCatalog.get(true).then(() => {}, () => {});
+    const work = this.modelCatalog.get(true, { background: true }).then(() => {}, () => {});
     this.backgroundWork.add(work);
     try { await work; } finally { this.backgroundWork.delete(work); }
   }
