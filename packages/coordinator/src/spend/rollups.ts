@@ -163,12 +163,13 @@ export function productionSpend(world: WorldBundle, evidence: SpendEvidence): Pr
     // Retain known production money if its target history has gone; do not invent a shot.
     for (const entry of ledger.values()) if (entry.productionId === id && !latest.has(entry.jobId)) {
       const recorded = entry.actualMicroUsd ?? entry.estimatedMicroUsd;
-      if (!safeMoney(recorded)) { problem.add("amount-overflow"); continue; }
-      const source = allowance(entry.actualSource ?? "") ? entry.actualSource! : local(entry) ? "local-zero"
+      const overflow = !safeMoney(recorded);
+      if (overflow) problem.add("amount-overflow");
+      const source = overflow ? "unavailable" : allowance(entry.actualSource ?? "") ? entry.actualSource! : local(entry) ? "local-zero"
         : entry.actualMicroUsd === null ? "estimated" : entry.actualSource ?? "unknown-actual";
-      const amount = allowance(source) || source === "local-zero" ? 0 : recorded;
+      const amount = overflow ? null : allowance(source) || source === "local-zero" ? 0 : recorded;
       receipts.push({ jobId: entry.jobId, kind: "unknown", provider: entry.provider, model: entry.model, outcome: entry.outcome,
-        source, microUsd: amount, recordedMicroUsd: recorded, shots: [], unallocatedMicroUsd: amount });
+        source, microUsd: amount, recordedMicroUsd: overflow ? null : recorded, shots: [], unallocatedMicroUsd: amount ?? 0 });
       problem.add("history-incomplete");
     }
     if (missing.size) problem.add("history-incomplete");

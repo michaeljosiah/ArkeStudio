@@ -132,6 +132,14 @@ describe("lifetime production spend, turn 255", () => {
     f.evidence.jobs = [job]; f.evidence.ledger = [f.entry(job)]; f.evidence.benchIncomplete = true;
     assert.equal(f.result().total.spentMicroUsd, 101); assert.equal(f.result().total.countsPartial, true);
   });
+  it("never turns an unsafe orphan amount into an empty zero-dollar total", () => {
+    const f = fixture(); f.evidence.ledger = [f.entry(f.job(), Number.MAX_SAFE_INTEGER + 1)];
+    const value = f.result();
+    assert.equal(value.total.coverage, "unavailable");
+    assert.equal(value.total.spentMicroUsd, null);
+    assert.ok(value.total.problems.includes("amount-overflow"));
+    assert.equal(value.receipts.length, 1);
+  });
   it("retains removed-scene and orphan production money without inventing allocation", () => {
     const f = fixture(), job = f.job({ params: { provenance: { sceneId: "sc_removed" } }, status: "failed" });
     f.evidence.jobs = [job]; f.evidence.ledger = [f.entry(job), f.entry(f.job(), 25)];
