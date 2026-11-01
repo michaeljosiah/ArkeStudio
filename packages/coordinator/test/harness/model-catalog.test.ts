@@ -48,6 +48,19 @@ describe("the running harness model catalog", () => {
     assert.deepEqual(states.map(state => state.status), ["loading", "ready", "loading", "ready"]);
   });
 
+  it("keeps concurrent explicit refreshes terminal when discovery refuses synchronously", async () => {
+    let ready = false;
+    const states: HarnessModelStatus[] = [];
+    const adapter = { ...adapterWith(async () => [model]), readiness: () => ({ ready }) };
+    const catalog = new HarnessModelCatalog(adapter, (_, status) => states.push(status));
+    const results = await Promise.allSettled([catalog.get(true), catalog.get(true)]);
+    assert.ok(results.every(result => result.status === "rejected"));
+    assert.equal(states.at(-1)?.status, "error");
+    ready = true;
+    assert.deepEqual(await catalog.get(true), [model]);
+    assert.equal(states.at(-1)?.status, "ready");
+  });
+
   it("expires cached data and does not call a retained catalog fresh after a failed refresh", async () => {
     let now = 100;
     let fail = false;

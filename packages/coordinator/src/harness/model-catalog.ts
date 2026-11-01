@@ -56,6 +56,7 @@ export class HarnessModelCatalog {
     if (!refresh && this.adapter?.readiness().ready && this.checkedAt && now() - this.checkedAt < (this.options.ttlMs ?? 60_000)) return this.models;
     const generation = this.generation;
     if (!options.background) this.publishChanged(this.models, { status: "loading" });
+    let settled = false;
     const work = async (): Promise<ModelInfo[]> => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -91,16 +92,16 @@ export class HarnessModelCatalog {
         }
         throw safeError;
       } finally {
+        settled = true;
         if (timer) clearTimeout(timer);
         if (generation === this.generation) this.pending = undefined;
       }
     };
-    this.pending = work();
-    // Even a synchronous refusal must release the single-flight slot after its assignment.
-    void this.pending.catch(() => {}).finally(() => {
-      if (generation === this.generation) this.pending = undefined;
-    });
-    return this.pending;
+    const pending = work();
+    // An immediate refusal already published its error; a second caller must not join it
+    // and replace that terminal state with loading while awaiting microtask cleanup.
+    this.pending = settled ? undefined : pending;
+    return pending;
   }
 }
 
