@@ -32,6 +32,7 @@
 .fy-music__th { height: 30px; border-top: 0; font: var(--type-meta); color: var(--muted-foreground); }
 .fy-music__tr { min-height: 52px; padding-block: 6px; font-size: var(--text-sm); background: var(--background); }
 .fy-music__tr.on { background: color-mix(in srgb, var(--foreground) 5%, var(--background)); }
+.fy-music__tr.playing { box-shadow: inset 3px 0 var(--foreground); }
 .fy-music__tr .grip, .fy-music__th .grip { width: 14px; color: var(--muted-foreground); display: flex; cursor: grab; flex: none; }
 .fy-music__tr .n, .fy-music__th .n { width: 20px; text-align: right; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); flex: none; }
 .fy-music__tr .t, .fy-music__th .t { flex: 1.5; min-width: 0; }
@@ -83,6 +84,8 @@
 .fy-music-panel__title:focus-visible { box-shadow: 0 1px 0 var(--foreground); }
 .fy-music-panel__bd { padding: 0 20px 16px; display: flex; flex-direction: column; gap: 14px; overflow: auto; }
 .fy-music-panel > footer { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border); }
+/* The floating player remains visible when paused, so keep the track actions above it too. */
+.fy-music--player .fy-music-panel > footer { flex: none; padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
 .fy-music-panel__player { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; }
 .fy-music-panel__wave { flex: 1; min-width: 0; overflow: hidden; display: flex; }
 .fy-music-panel__kv { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px 12px; align-items: start; font-size: var(--text-sm); }
@@ -157,7 +160,7 @@
 @media (max-width: 1099px) {
   .fy-music { grid-template-columns: 240px minmax(0, 1fr); gap: 24px; padding: 24px 32px; }
   .fy-music__cover { width: 240px; }
-  .fy-music-panel { position: fixed; z-index: 30; top: 52px; width: min(460px, 100vw); }
+  .fy-music-panel { position: fixed; z-index: 30; top: 52px; width: min(460px, 100vw); min-height: 0; }
   .fy-music-panel--wide { width: min(640px, 100vw); }
   .fy-music-dlg__tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
@@ -165,6 +168,7 @@
   .fy-music { grid-template-columns: minmax(0, 1fr); padding: 16px; gap: 16px; }
   .fy-music__cover { width: 100%; }
   .fy-music-panel, .fy-music-panel--wide { width: 100vw; }
+  .fy-music--player .fy-music-panel > footer { padding-bottom: calc(148px + env(safe-area-inset-bottom, 0px)); }
   .fy-music-takes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fy-music-seq__wave { display: none; }
   .fy-music-dlg__tiles, .fy-music-dlg__covers { grid-template-columns: repeat(2, minmax(0, 1fr)); }

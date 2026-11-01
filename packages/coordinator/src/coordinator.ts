@@ -1112,7 +1112,7 @@ export interface CoordinatorOptions {
    * they came from — the preload's promise of "no paths" survives (SPEC-001 R-9).
    * Absent → attaching says so instead of doing nothing.
    */
-  pickFiles?: (input: { accept: readonly string[] }) => Promise<readonly string[]>;
+  pickFiles?: (input: { accept: readonly string[]; purpose?: "music" }) => Promise<readonly string[]>;
   confirmLargeMediaImport?: (file: { name: string; sizeBytes: number }) => Promise<boolean>;
   /** Choosing an artifact import folder; like pickFiles, the host path never reaches the renderer. */
   pickFolder?: () => Promise<string | null>;
@@ -19383,7 +19383,7 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "Filing artifacts is unavailable.");
           return;
         }
-        const chosen = msg.sourcePaths ?? await pick!({ accept: msg.music !== undefined ? [...MUSIC_IMPORT_EXTENSIONS] : [...ATTACHABLE_EXTENSIONS] }).catch(() => []);
+        const chosen = msg.sourcePaths ?? await pick!({ accept: msg.music !== undefined ? [...MUSIC_IMPORT_EXTENSIONS] : [...ATTACHABLE_EXTENSIONS], ...(msg.music !== undefined ? { purpose: "music" as const } : {}) }).catch(() => []);
         if (chosen.length > 16) {
           this.rejectEnqueue(msg.requestId, msg.kind, "Import up to 16 files at a time.");
           return;

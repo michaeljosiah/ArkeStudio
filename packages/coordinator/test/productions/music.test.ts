@@ -80,7 +80,7 @@ interface Harness {
   provider: FsWorldProvider;
 }
 
-async function withHarness(run: (h: Harness) => Promise<void>, options: { ffmpeg?: FfmpegRunner; probe?: MediaProbe; prepare?: (worldDir: string) => Promise<void> } = {}): Promise<void> {
+async function withHarness(run: (h: Harness) => Promise<void>, options: { ffmpeg?: FfmpegRunner; probe?: MediaProbe; prepare?: (worldDir: string) => Promise<void>; pickFiles?: (input: { accept: readonly string[]; purpose?: "music" }) => Promise<readonly string[]> } = {}): Promise<void> {
   const { root, worldDir } = await makeTempRoot();
   // A picture on the shelf for the cover, beside the fixture's own board.
   await writeFile(join(worldDir, "artifacts", "cover.png"), Buffer.from("89504e470d0a1a0a", "hex"));
@@ -113,6 +113,7 @@ async function withHarness(run: (h: Harness) => Promise<void>, options: { ffmpeg
     observeEvent: (event) => events.push(event),
     mediaProbe: options.probe ?? { durationSec: async () => 3, info: async () => ({ durationSec: 3, hasAudio: true }) },
     ...(options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {}),
+    ...(options.pickFiles !== undefined ? { pickFiles: options.pickFiles } : {}),
   });
   const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
@@ -153,6 +154,16 @@ async function entry(file: string, name: string): Promise<string> {
 }
 
 describe("a music production (turn 238, SPEC-060 R-1 – R-4)", () => {
+  it("opens the music import picker with its purpose and audio formats (#2238)", async () => {
+    const picks: { accept: readonly string[]; purpose?: "music" }[] = [];
+    await withHarness(async h => {
+      await h.send({ kind: "upload-artifacts", worldId: WORLD_ID, requestId: "01J00000000000000000000001", music: { productionId: "album" } });
+      assert.equal(picks[0]?.purpose, "music");
+      assert.deepEqual(picks[0]?.accept, ["wav", "mp3", "m4a", "flac"]);
+      assert.ok(h.events.some(event => event.type === "queue.enqueue-result"), "cancelling the picker still finishes the request");
+    }, { pickFiles: async input => { picks.push(input); return []; } });
+  });
+
   it("is made with its record, an empty album, and raises the world's schema", () =>
     withHarness(async (h) => {
       const created = await createMusic(h, "Songs of the Drowned Quarter", "album");

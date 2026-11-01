@@ -14,6 +14,7 @@ import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../s
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { dismissPlayback, emitForTest, playClip, setAudioFactoryForTest } from "../src/lib/audio.js";
 
 /**
  * Music productions in the Studio (design turn 238, SPEC-060 tasks 2 and 3): the Listen door, What
@@ -71,6 +72,7 @@ let root: Root | null = null;
 afterEach(async () => {
   await act(async () => root?.unmount());
   root = null; __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE);
+  setAudioFactoryForTest(null);
   dom.document.body.innerHTML = "";
 });
 
@@ -204,6 +206,34 @@ describe("an album's page (238c, R-5)", () => {
     await click(m.container, "Play all");
     assert.equal(m.of("render-music").length, 1);
     assert.equal(buttons(m.container, "Rendering…").length, 1);
+  });
+
+  it("marks the playing track through album transitions and seeking, and keeps room for a paused dock (#2238)", async () => {
+    const audio = { src: "", currentTime: 0, duration: 60, play: async () => {}, pause() {}, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {} };
+    setAudioFactoryForTest(() => audio);
+    const state = withMusic();
+    const album = state.world!.productions.find(p => p.meta.id === ALBUM)!;
+    album.music!.tracks.push({ ...album.music!.tracks[0]!, id: "second-song", title: "The last lantern" });
+    const m = await mount(state, PAGE);
+    await click(m.container, "Play all");
+    const request = m.of("render-music")[0]!;
+    await act(async () => __applyEventForTest({ type: "music.rendered", at: AT, worldId: FIXTURE_WORLD_ID, productionId: ALBUM, requestId: request.requestId, result: { ok: true, file: "album.m4a", durationMs: 60000, starts: [{ trackId: "harbour-bells", atMs: 0 }, { trackId: "second-song", atMs: 30000 }] } }));
+    const playing = () => m.container.querySelector(".fy-music__tr.playing");
+    assert.match(playing()!.textContent!, /Saltmouth Bells/);
+    assert.ok(playing()!.querySelector('[aria-label="Playing"]'));
+    await act(async () => { audio.currentTime = 45; emitForTest("timeupdate"); });
+    assert.match(playing()!.textContent!, /The last lantern/);
+    await act(async () => { audio.currentTime = 5; emitForTest("timeupdate"); });
+    assert.match(playing()!.textContent!, /Saltmouth Bells/);
+    await act(async () => emitForTest("pause"));
+    assert.equal(playing(), null);
+    assert.ok(m.container.querySelector(".fy-music--player"), "the paused dock still needs space");
+    await act(async () => playClip({ id: `track:${ALBUM}:second-song`, title: "The last lantern", url: "second.wav" }));
+    assert.match(playing()!.textContent!, /The last lantern/, "individual track playback is also marked");
+    await act(async () => emitForTest("ended"));
+    assert.equal(playing(), null);
+    await act(async () => dismissPlayback());
+    assert.equal(m.container.querySelector(".fy-music--player"), null);
   });
 });
 

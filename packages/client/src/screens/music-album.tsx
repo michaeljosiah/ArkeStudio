@@ -30,7 +30,7 @@ import { ClipPlayButton } from "../components/player.js";
 import { Button, Callout, cx } from "../components/ui.js";
 import { Wave } from "../components/wave.js";
 import { Folder, megabytes } from "../components/audiobook-video.js";
-import { playClip, type Clip } from "../lib/audio.js";
+import { playClip, usePlayback, type Clip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { useProduction } from "../lib/selectors.js";
@@ -102,6 +102,7 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
   const kind = musicKindOf(production.meta);
   const shape = productionShape(production.meta);
   const connection = useStore().connection;
+  const playback = usePlayback();
   const phone = useMediaQuery("(max-width: 599px)");
   const artifacts = world.artifacts;
   const total = musicTotalMs(record, artifacts);
@@ -157,14 +158,17 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
   // Play all (R-8): the export's render, made once and cached, played whole; Play through
   // (238k) plays the same render from a track's start.
   const [rendering, setRendering] = useState<{ requestId: string; from: string | null } | null>(null);
+  const [albumPlay, setAlbumPlay] = useState<{ clipId: string; starts: { trackId: string; atMs: number }[] } | null>(null);
   useEffect(() => subscribeMusicRendered((answer) => {
     if (rendering === null || answer.requestId !== rendering.requestId) return;
     setRendering(null);
     if (!answer.result.ok) { setProblem(answer.result.reason); return; }
     const { file, durationMs, starts } = answer.result;
     const at = starts.find((start) => start.trackId === rendering.from)?.atMs ?? 0;
+    const clipId = `album:${productionId}:${file}:${at}`;
+    setAlbumPlay({ clipId, starts });
     void playClip({
-      id: `album:${productionId}:${file}:${at}`,
+      id: clipId,
       url: mediaUrl(world.meta.slug, file),
       title: production.meta.title,
       sub: shape.displayLabel,
@@ -191,10 +195,13 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
     reorderMusicTracks(worldId, productionId, ids);
   };
   const openTrack = tracks.find((track) => track.id === open) ?? null;
+  const playingTrack = playback.status !== "playing" ? undefined : playback.clip?.id === albumPlay?.clipId
+    ? albumPlay?.starts.findLast(start => start.atMs <= playback.currentTime * 1000)?.trackId
+    : tracks.find(track => playback.clip?.id === `track:${productionId}:${track.id}`)?.id;
 
   return (
     <Screen id="music-album">
-      <div className={cx("fy-music", openTrack !== null && "fy-music--open")}>
+      <div className={cx("fy-music", openTrack !== null && "fy-music--open", playback.clip !== null && "fy-music--player")}>
         <aside className="fy-music__side">
           <div className="fy-music__cover">
             {cover !== undefined ? <img src={mediaUrl(world.meta.slug, `artifacts/${cover.file}`)} alt="" /> : <MusicMark size={40} />}
@@ -258,7 +265,7 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
             return (
               <div
                 key={track.id}
-                className={cx("fy-music__tr", open === track.id && "on")}
+                className={cx("fy-music__tr", open === track.id && "on", playingTrack === track.id && "playing")}
                 data-testid="music-track"
                 draggable
                 onDragStart={(event: DragEvent) => { dragged.current = track.id; event.dataTransfer.effectAllowed = "move"; }}
@@ -266,7 +273,7 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
                 onDrop={(event) => { event.preventDefault(); drop(track.id); }}
               >
                 <span className="grip" aria-hidden="true"><Grip size={14} /></span>
-                <span className="n">{index + 1}</span>
+                <span className="n">{playingTrack === track.id ? <span role="img" aria-label="Playing"><PlaySolid size={12} /></span> : index + 1}</span>
                 <button type="button" className="t" onClick={() => setOpen(open === track.id ? null : track.id)}>
                   <b>{track.title}</b>
                   {themes.length > 0 && <span className="fy-music__theme">{themes[0]}’s theme{themes.length > 1 ? ` · +${themes.length - 1}` : ""}</span>}
