@@ -44,7 +44,7 @@ export function SystemStatusView({ app, now, connected, remote = false, refresh,
   const measured = connected && resourceFresh(cpu, now) && resourceFresh(memory, now);
   const groups = systemStorageGroups(app.storageHealth?.roots ?? [], now);
   const cloud = app.providers.filter(provider => provider.configured && !PROVIDERS[provider.id].local);
-  const localState = (value: string | undefined) => !connected ? "Unknown" : value === "ready" || value === "healthy" ? "Reported ready" : value === "starting" ? "Starting" : value === "unreachable" ? "Unreachable" : value === "incompatible" ? "Incompatible" : value === "failed" || value === "unhealthy" ? "Needs attention" : value === "absent" ? "Not installed" : value === "stopped" || value === "unconfigured" ? "Not running" : "Unknown";
+  const localState = (value: string | undefined) => !connected ? "Unknown" : value === "ready" || value === "healthy" ? "Ready" : value === "starting" ? "Starting" : value === "unreachable" ? "Unreachable" : value === "incompatible" ? "Incompatible" : value === "failed" || value === "unhealthy" ? "Needs attention" : value === "absent" ? "Not installed" : value === "stopped" || value === "unconfigured" ? "Not running" : "Unknown";
   return <div className="fy-system-panel">
     <header className="fy-system-head"><div><h2 tabIndex={-1}>System</h2><p>{remote ? "Connected desktop" : "This desktop"}</p></div><IconButton className="fy-system-icon" label="Close System" onClick={close}><X size={16} /></IconButton></header>
     <div className="fy-system-scroll">
@@ -65,7 +65,7 @@ export function SystemStatusView({ app, now, connected, remote = false, refresh,
         const warning = fresh && warnings.some(finding => finding.occurrence === capacity?.volumeId);
         return <div className="fy-system-drive" key={key}><div className="fy-system-row"><b>{[...new Set(roots.map(row => labels[row.role]))].join(" · ")}</b><span className={warning ? "fy-system-warning-text" : undefined}>{available === null || available === undefined ? "Unavailable" : `${fresh ? "" : "Last: "}${bytes(available)} free`}</span></div><div className="fy-system-row fy-system-detail"><span>{fresh && capacity ? `Checked ${age(capacity.measuredAt, now)}${unavailable ? ` · ${unavailable} destination${unavailable === 1 ? "" : "s"} stale or unavailable` : ""}` : capacity ? `Stale · ${age(capacity.measuredAt, now)}` : root.state === "unsupported" ? "Unsupported on this host" : "No current reading"}{roots.some(row => row.limitations.includes("quota-unavailable")) ? " · Quota limit unknown" : ""}</span><span>{total ? `of ${bytes(total)}` : "Total unavailable"}</span></div><Meter value={fresh && total && available !== null && available !== undefined ? (total - available) / total * 100 : null} warning={!!warning} /></div>;
       })}</div>
-      <SectionTitle title="Local AI" detail="Reported service states" />
+      <SectionTitle title="Local AI" detail="Last reported status" />
       <div className="fy-system-services">
         <Service label="Ollama" value={localState(app.ollama?.state)} detail="Check time unavailable" />
         <Service label={app.comfyui?.engine.locality === "remote" ? "ComfyUI (remote)" : "ComfyUI"} value={localState(app.comfyui?.engine.state)} detail={app.comfyui ? `Last check ${age(Date.parse(app.comfyui.checkedAt), now)}` : "Not checked"} />
@@ -74,9 +74,9 @@ export function SystemStatusView({ app, now, connected, remote = false, refresh,
       </div>
       <SectionTitle title="Cloud" detail="Configured providers" />
       <div className="fy-system-services">{cloud.length === 0 ? <Service label="Provider connections" value="None configured" detail="Configure in Settings" /> : cloud.map(provider => <Service key={provider.id} label={PROVIDERS[provider.id].displayName} value={!connected ? "Unknown" : provider.validation === "invalid" || provider.faultKind === "credential" ? "Needs attention" : provider.validation === "valid" ? "Last check passed" : provider.validation === "testing" ? "Checking" : "Not checked"} detail={provider.lastValidated ? `Checked ${age(Date.parse(provider.lastValidated), now)}` : "Check in Diagnostics"} />)}</div>
-      <p className="fy-system-note">Configuration and earlier checks do not confirm current provider availability.</p>
+
     </div>
-    <footer className="fy-system-foot"><p>Readings describe the Arke host.</p><div><Button className="fy-system-button" variant="outline" size="sm" disabled={!connected} onClick={refresh}>Refresh</Button><Button className="fy-system-button" variant="primary" size="sm" onClick={() => diagnostics()}>Diagnostics</Button></div></footer>
+    <footer className="fy-system-foot"><div><Button className="fy-system-button" variant="outline" size="sm" disabled={!connected} onClick={refresh}>Refresh</Button><Button className="fy-system-button" variant="primary" size="sm" onClick={() => diagnostics()}>Diagnostics</Button></div></footer>
   </div>;
 }
 

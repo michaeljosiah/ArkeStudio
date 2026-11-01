@@ -181,7 +181,7 @@ describe("readable without the application (R-39, row 43)", () => {
     const bundle = await buildDiagnosticsBundle(stateFor(sources()), null, new SecretRegistry(), derivedSnapshot());
     const { findings } = bundle["findings"] as { findings: Array<Record<string, unknown>> };
     const spend = findings.find((f) => f["kind"] === "spend-above-previous")!;
-    assert.deepEqual(spend["remedy"], { absent: "No control resolves this." });
+    assert.deepEqual(spend["remedy"], { absent: "No action available." });
     const consequence = findings.find((f) => f["kind"] === "comfyui-recipe-disabled")!;
     assert.equal(consequence["remedy"], null);
     // The edge that explains it is in the export, so a reader can follow cause to consequence.
