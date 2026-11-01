@@ -1121,6 +1121,13 @@ Render planning, migration and inspector validation receive the whole world's ar
 
 ### Edit or draft a chapter
 
+Illustration planning recovery (#1813) uses coordinator `productions/illustration-planning.ts`
+to retain completed sections of a long chapter while an explicit retry resumes the failed section.
+Inputs are fingerprinted; changed inputs or Discard invalidate retained work. Chapter looks remain
+in their existing audiobook record. The chapter's existing illustration status offers Continue
+planning and identifies the failed stage. Tests: `productions/illustration-planning.test.ts`,
+`productions/audiobook-illustrate.test.ts`, and client `chapter-audiobook.test.tsx`.
+
 Client `screens/chapter-workspace.tsx` opens prose through `open-chapter`, saves against the file
 hash through `save-chapter`, edits the frontmatter through `edit-chapter-plan`, and restores an
 available snapshot through `restore-chapter`. Coordinator `productions/ops.ts` owns those writes;

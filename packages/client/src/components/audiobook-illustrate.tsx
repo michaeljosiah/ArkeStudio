@@ -85,7 +85,7 @@ const spent = (microUsd: number) => priceLabel(microUsd).replace("~", "");
  * What the dock says of the run (193): one line, and the press that line needs. The proposal itself
  * is the sheet's; a closed sheet is one `Review` away.
  */
-export function IllustrationStatus({ run, onReview, onStop, onDiscard }: { run: IllustrationRun; onReview: () => void; onStop: () => void; onDiscard: () => void }) {
+export function IllustrationStatus({ run, onReview, onStop, onDiscard, onRetry, disabled }: { run: IllustrationRun; onReview: () => void; onStop: () => void; onDiscard: () => void; onRetry?: () => void; disabled?: boolean }) {
   const proposal = run.proposal;
   const line = (state: string, text: string, press: ReactNode, extra?: ReactNode) => (
     <section className="fy-ab__card fy-illst" data-testid="illustration-status" data-state={state}>
@@ -99,7 +99,10 @@ export function IllustrationStatus({ run, onReview, onStop, onDiscard }: { run: 
   );
   if (run.state === "reading") return line("reading", "reading…", null);
   if (run.state === "failed" || run.state === "unavailable" || proposal === undefined) {
-    return line(run.state, run.reason ?? (run.state === "done" ? "illustrated" : "stopped"), <Button variant="ghost" onClick={onDiscard}>Discard</Button>);
+    return line(run.state, run.reason ?? (run.state === "done" ? "illustrated" : "stopped"), <>
+      {run.state === "failed" && onRetry && <Button variant="secondary" disabled={disabled} onClick={onRetry}>Continue planning</Button>}
+      <Button variant="ghost" onClick={onDiscard}>Discard</Button>
+    </>);
   }
   const progress = run.progress;
   if (run.state === "making" && progress !== undefined) {

@@ -2947,6 +2947,8 @@ export function ChapterWorkspace({
                     onReview={illustrationSheet.show}
                     onStop={illustration.stop}
                     onDiscard={illustration.discard}
+                    onRetry={illustration.press}
+                    disabled={connection !== "open"}
                   />
                 ),
               }
