@@ -59,6 +59,7 @@ export interface HarnessOptions {
   /** Update prompt's writer (design turn 193d): absent, the writing service is not running. */
   rewrite?: PromptRewriter;
   model?: ManifestModel | null;
+  models?: ManifestModel[];
   /** All jobs land, or this says what the nth job (from 0) does. */
   land?: boolean | "fail" | ((n: number) => Landing);
   /** What a failed job says, as the provider would. */
@@ -89,7 +90,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
   const cancelled: string[] = [];
   let inFlight = 0;
   let widest = 0;
-  const models = options.model === null ? [] : [options.model ?? IMAGE];
+  const models = options.models ?? (options.model === null ? [] : [options.model ?? IMAGE]);
   const behaviour = (n: number): Landing => (typeof options.land === "function" ? options.land(n) : options.land === false ? "hold" : options.land === "fail" ? "fail" : "land");
   const coordinator = new Coordinator({
     provider,

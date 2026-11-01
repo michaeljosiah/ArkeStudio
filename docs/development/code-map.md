@@ -1,5 +1,9 @@
 # Code map
 
+Graphic-novel setup and Pages share client `components/comic-model-choice.tsx`, which offers
+eligible lettering models. Page quotes and generation resolve the production's image choice
+before the app default, independently of the world's image choice (issue 2250).
+
 Setup file repair uses the host-issued `SetupRepairReview` and shared client
 `components/setup-repair-control.tsx`. `setup/repair-review.ts` binds the selected component
 and destination, records bounded flushed intent, and retains interrupted repairs for explicit

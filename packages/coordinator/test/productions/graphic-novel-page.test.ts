@@ -31,6 +31,21 @@ async function book(h: Harness): Promise<{ production: string; page: ComicPage }
 const last = <T extends DomainEvent["type"]>(events: DomainEvent[], type: T) => events.filter((event): event is Extract<DomainEvent, { type: T }> => event.type === type).at(-1);
 
 describe("a comic page made (SPEC-064 R-22 – R-27)", () => {
+  it("quotes and makes pages with the production's model instead of the world's (issue 2250)", () =>
+    withHarness(async h => {
+      const { production, page } = await book(h);
+      await h.send({ kind: "set-world-model", worldId: WORLD_ID, capability: "image", modelId: IMAGE.id });
+      await h.send({ kind: "set-production-model", worldId: WORLD_ID, productionId: production, capability: "image", modelId: LETTERER.id });
+      await h.send({ kind: "quote-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id });
+      const quote = last(h.events, "comic.page-quote") as Quote;
+      assert.ok(quote.quote.ok, !quote.quote.ok ? quote.quote.reason : "");
+      assert.equal(quote.quote.modelName, LETTERER.displayName);
+      await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, confirmedMicroUsd: quote.quote.microUsd });
+      assert.equal(last(h.events, "comic.page-made")?.state, "made");
+      const take = h.store()!.getBundle().productions.find(p => p.meta.id === production)!.comicPages![0]!.record.takes[0]!;
+      assert.equal(take.model, LETTERER.id);
+    }, { models: [IMAGE, LETTERER] }));
+
   it("quotes the page with its brief, then makes it on that price as a take", () =>
     withHarness(async (h) => {
       const { production, page } = await book(h);
