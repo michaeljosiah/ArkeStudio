@@ -1618,6 +1618,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, spend: event.spend } };
     case "background-notifications.changed":
       return { ...state, app: { ...state.app, backgroundNotifications: event.preference } };
+    case "prompt-tools.changed":
+      return { ...state, app: { ...state.app, promptTools: event.enabled } };
     case "appearance.changed":
       return { ...state, app: { ...state.app, appearance: { theme: event.preference } } };
     case "narrator.changed":
@@ -2008,6 +2010,7 @@ function handleFrame(json: string): void {
     if (event.type === "chapter.open-result") {
       for (const listener of chapterOpenListeners) listener(event);
     }
+    if (event.type === "prompt-tools.result") for (const listener of promptToolsListeners) listener(event);
     if (event.type === "chapter.version-result") {
       for (const listener of chapterVersionListeners) listener(event);
     }
@@ -7952,4 +7955,22 @@ export function onStudioAssistantReply(listener: (frame: Extract<Frame, { kind: 
 export function subscribeRemoteRefusals(listener: (refusal: RemoteCommandRefusal) => void): () => void {
   remoteRefusalListeners.add(listener);
   return () => remoteRefusalListeners.delete(listener);
+}
+
+const promptToolsListeners = new Set<(event: Extract<DomainEvent, { type: "prompt-tools.result" }>) => void>();
+export function setPromptTools(enabled: boolean): void { send({ kind: "set-prompt-tools", enabled }); }
+export function requestPromptTools(message: Omit<Extract<ClientMessage, { kind: "prompt-history-read" }>, "requestId"> |
+  Omit<Extract<ClientMessage, { kind: "prompt-history-restore" }>, "requestId"> |
+  Omit<Extract<ClientMessage, { kind: "prompt-request-inspect" }>, "requestId">): Promise<import("@arke-studio/contracts").PromptToolsResult> {
+  const requestId = ulid();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { promptToolsListeners.delete(listener); reject(new Error("No answer. Read again to retry.")); }, 20_000);
+    const listener = (event: Extract<DomainEvent, { type: "prompt-tools.result" }>) => {
+      if (event.requestId !== requestId || event.worldId !== message.worldId) return;
+      clearTimeout(timer); promptToolsListeners.delete(listener);
+      if (event.result.kind === "failed") reject(new Error(event.result.reason)); else resolve(event.result);
+    };
+    promptToolsListeners.add(listener);
+    if (!send({ ...message, requestId })) { clearTimeout(timer); promptToolsListeners.delete(listener); reject(new Error("Not connected.")); }
+  });
 }

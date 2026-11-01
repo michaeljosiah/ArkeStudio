@@ -28,6 +28,21 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN SHOT PROMPTS 257
+  { group: "Shot prompts · turn 257", screen: "Shot page · two small entry points", frame: "257a", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "History · compare one retained prompt with today", frame: "257b", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Restore · one prompt, saved as a new scene version", frame: "257c", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Inspect · the compiled prompt from the current generator draft", frame: "257d", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "References · actual input order and omission reasons", frame: "257e", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Stale restore · read again before saving", frame: "257f", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Phone history · retained text and explicit gaps", frame: "257g", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Phone inspector · the same request in one scrolling column", frame: "257h", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Unavailable route · no invented prompt or reference order", frame: "257i", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Current only · no fabricated prompt history", frame: "257j", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Settings General - optional prompt tools, off by default", frame: "257l", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Frame inspection · the saved image context stays image", frame: "257k", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  // END SHOT PROMPTS 257
+
   // BEGIN ARKE DRIVES 256
   { group: "Arke drives · turn 256", screen: "Setup: one card for what is usual", frame: "256a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
   { group: "Arke drives · turn 256", screen: "While Arke works, the page says so", frame: "256b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
@@ -1049,6 +1064,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "shot-prompts-257.review.html", what: "Turn 257: prompt history, one-prompt restore and compiled request/reference inspection.", state: "proposed; owner design review pending" },
   { file: "arke-drives-256.review.html", what: "Turn 256: Arke drives, the screen stays simple — the usual as one card, Arke working said on the chapter, mysteries kept apart, a reading view, the book at a glance.", state: "approved 1 November 2026; not built" },
   { file: "production-spend-255.review.html", what: "Turn 255: lifetime production spend, generated and selected counts, receipts and incomplete history.", state: "approved; implementation in progress" },
   { file: "page-plan-254.review.html", what: "Turn 254: adapt before drawing — a page plan of passages, pages and what the reader knows, then a cold read of every draft.", state: "approved 1 November 2026; not built" },
@@ -1263,6 +1279,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="page-plan-254.css">
 <link rel="stylesheet" href="arke-drives-256.css">
 <link rel="stylesheet" href="production-spend-255.css">
+<link rel="stylesheet" href="shot-prompts-257.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">

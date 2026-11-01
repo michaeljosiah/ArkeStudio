@@ -88,6 +88,7 @@ export class ReadModel {
         | "models"
         | "presets"
         | "spend"
+        | "promptTools"
         | "backgroundNotifications"
         | "activitySeen"
         | "account"
@@ -371,6 +372,9 @@ export class ReadModel {
         this.state = { ...this.state, app: { ...this.state.app, providerPlans: event.plans, manifest: event.manifest } };
         return;
       }
+      case "prompt-tools.changed":
+        this.state = { ...this.state, app: { ...this.state.app, promptTools: event.enabled } };
+        break;
       case "appearance.changed": {
         this.state = { ...this.state, app: { ...this.state.app, appearance: { theme: event.preference } } };
         return;

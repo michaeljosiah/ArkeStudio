@@ -2295,3 +2295,19 @@ See [production spend validation](production-spend.md#validation) for the ledger
 regressions and actual App/PageSheet browser smoke. The fixture reconciles production, scene
 and shot totals, separate money/count completeness, deleted Activity/Bench history, frozen
 allocation, filed-copy deduplication, cost sources, and read-only refresh without provider work.
+
+## Optional shot prompt tools (#252)
+
+From `packages/coordinator`, run `node --import tsx --test test/productions/prompt-tools.test.ts`
+for Settings persistence, retained scene history, one-prompt restore fences, source-pin retention,
+compiler parity, read-only torn-tail refusal and coordinator diagnostic privacy. From
+`packages/client`, run `node --import tsx --test test/prompt-tools.test.tsx` for default-off
+visibility, scoped requests, restore review and stale-preview invalidation. Existing
+`scene-workspace.test.tsx` covers Frame/video override protection.
+
+From the root, `node --import tsx scripts/smoke-prompt-tools.mjs` runs the actual App, Settings
+and PageSheet in owned headless Chrome, with synthetic replies and no provider or author world.
+It checks the default-off switch and its command, desktop/phone/short windows in both themes,
+fixed sheet chrome, wrapping, restore refusal, Tab containment and Escape/focus return. Images
+and measurements go to `output/prompt-tools-native/`; they are not world persistence evidence.
+`node design-system/shot-prompts-257.capture.mjs` checks the approved drawings independently.

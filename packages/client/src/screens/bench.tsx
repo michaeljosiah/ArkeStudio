@@ -1,6 +1,7 @@
 import { useGlobalChat } from "../components/global-chat-context.js";
 import { estimateSpeechMicroUsd, freeCreditLeft, SAMPLING_CHOICE_NAMES, samplingSummary, speechPriceCopy } from "@arke-studio/contracts";
 import { castVoiceSummary, planCastCharacterAudio, planSubjectCharacterAudio } from "@arke-studio/contracts";
+import { PromptTools } from "../components/prompt-tools.js";
 import { benchLineLanguage, castNameFor, DEFAULT_REFERENCE_WHO, referenceRouteModel, referenceRouteRefusal, referenceSheetId } from "@arke-studio/contracts";
 import { STAGE_FOLLOWS, STAGE_FOLLOW_LABELS, stageBriefForRouting, stageBriefWithFollow, stageRoutingCitations } from "@arke-studio/contracts";
 import { PageSheet } from "../components/page-sheet.js";
@@ -1854,6 +1855,10 @@ function BenchWorkspace({
               {...(voiceParams !== null ? { onBracket } : {})}
             />
             <PromptCapabilityNotices text={draft.brief} model={noticeModel} />
+            {subject && !soundOnly && <PromptTools worldId={worldId} revision={[session.tokenRegistry, session.composer.activeTokens, session.composer.keyframeTokens]}
+              {...(subject.kind === "shot" ? { target: { productionId: subject.productionId, sceneId: subject.sceneId, shotId: subject.shotId, capability: draft.mode === "image" ? "image" as const : "video" as const } } : {})}
+              source={{ kind: "bench", sessionId: session.id, composer: draft }} />}
+            {subject && selected && !soundOnly && <PromptTools worldId={worldId} source={{ kind: "take", sessionId: session.id, takeId: selected.id }} inspectLabel="Inspect saved request" />}
             <div className="fy-bench__brieffoot">
               <button
                 type="button"

@@ -1,3 +1,4 @@
+import { PromptTools } from "../../components/prompt-tools.js";
 import { createPortal } from "react-dom";
 import { useMediaQuery } from "../../lib/media-query.js";
 import { useEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode } from "react";
@@ -335,6 +336,7 @@ export function ShotFields({
             disabled={disabled || videoOverride}
           />
         </div>
+        <PromptTools worldId={world.meta.worldId} target={{ productionId: production.meta.id, sceneId: scene.id, shotId: shot.id, capability: "image" }} disabled={disabled || promptDirty.current || promptWrite.current !== null} />
         {videoOverride ? <p className="fy-shot__stale">Video prompt retained. Frame editing is unavailable for this shot.</p> : null}
         {videoOverride || stale.length === 0 ? null : (
           <p className="fy-shot__stale" role="status">

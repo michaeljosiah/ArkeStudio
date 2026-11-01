@@ -1,4 +1,5 @@
 import "./components/production-spend.css";
+import "./components/prompt-tools.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter } from "react-router";

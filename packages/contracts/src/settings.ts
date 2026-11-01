@@ -294,6 +294,8 @@ const AppSettingsObjectSchema = z
     clearedLocalRouting: RoutingDefaultsSchema.default({}),
     models: ModelAvailabilitySchema.default({ disabled: [] }),
     spend: SpendSettingsSchema.default({ thresholdMicroUsd: 0, periodDays: 7 }),
+    /** Optional production tuning controls; absent on older installations means off. */
+    promptTools: z.preprocess(value => value === true, z.boolean()).optional(),
     backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
     /** Guarded like appearance: a malformed pair costs two dots, never the settings file. */
     activity: z
