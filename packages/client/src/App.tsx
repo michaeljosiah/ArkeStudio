@@ -151,7 +151,8 @@ export function UpdateTransition() {
       <div className="fy-update-transition__panel">
         <div className="fy-update-transition__pulse" aria-hidden="true" />
         <h1 id="update-title">Finishing local work...</h1>
-        <p>Arke Studio will install the update and {update.flow === "restart" ? "reopen" : "remain closed"}.</p>
+        <p>{update.flow === null ? (update.detail ?? "Arke Studio will close.")
+          : `Arke Studio will install the update and ${update.flow === "restart" ? "reopen" : "remain closed"}.`}</p>
       </div>
     </div>
   );

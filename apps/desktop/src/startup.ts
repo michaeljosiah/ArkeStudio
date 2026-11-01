@@ -97,19 +97,24 @@ export function guardDesktopClose(event: { preventDefault(): void }, allowQuit: 
   quit();
 }
 
-/** Remote unpublication has its own bounded operations. It must finish before the core
- * shutdown deadline begins, so a slow Serve call cannot abandon a still-running stop chain. */
-export async function drainDesktop(stopRemote: () => Promise<void>, stopCore: () => Promise<void>, deadlineMs = 15_000): Promise<void> {
-  await stopRemote();
+/** A slow owner remains in the same drain. The deadline offers an explicit crash-style exit;
+ * it never abandons cleanup or starts a second stop chain underneath the first. */
+export async function drainDesktop(stopRemote: () => Promise<void>, stopCore: () => Promise<void>,
+  onSlow: (stillStopping: () => boolean) => Promise<void> = async () => {}, deadlineMs = 15_000): Promise<void> {
+  let stopping = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const remind = () => {
+    timer = setTimeout(() => {
+      void onSlow(() => stopping).catch(() => {}).finally(() => { if (stopping) remind(); });
+    }, deadlineMs);
+  };
+  remind();
   try {
-    await Promise.race([
-      stopCore(),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error("local shutdown did not finish safely")), deadlineMs);
-      }),
-    ]);
+    // HTTPS must be withdrawn before releasing the local listener or its providers.
+    await stopRemote();
+    await stopCore();
   } finally {
+    stopping = false;
     clearTimeout(timer);
   }
 }
