@@ -274,7 +274,7 @@ export function VideoExportPreview({ plan, options, ready, onPreview }: { plan: 
   const segment = segmentAt(segments, at);
   const cues = chapter === undefined ? [] : burnedCues(chapter, options.shape, options.captionSize, 0);
   const size = shapeSize(options.shape), height = width * size.height / size.width;
-  const clips = chapters.flatMap((entry) => entry.pictures).filter((picture) => picture.motion !== undefined);
+  const clips = chapters.flatMap((entry) => entry.pictures).filter((picture) => picture.motion !== undefined && !(options.shape === "1080x1920" && picture.tall !== undefined));
   const stills = chapters.flatMap((entry) => entry.pictures).length - clips.length;
   const smaller = clips.filter((picture) => picture.motion!.height < size.height).length;
   const url = (file: string) => mediaUrl(world?.meta.slug ?? "", file);
@@ -298,7 +298,8 @@ export function VideoPreview({ worldId, productionId, plan, options, onClose }: 
   /** Focus as dragged here, kept until the plan is read again with it. */
   const [moved, setMoved] = useState<Record<string, { x: number; y: number } | null>>({});
   const shown = useMemo(() => (chapter === undefined ? undefined : { ...chapter, pictures: chapter.pictures.map((picture) => (picture.key in moved ? { ...picture, ...(moved[picture.key] === null ? { focus: undefined } : { focus: moved[picture.key]! }) } : picture)) }), [chapter, moved]);
-  const segments = useMemo(() => (shown === undefined ? [] : videoSegments(shown, plan.cover, options.titleCards, options.shape)), [shown, plan.cover, options.titleCards, options.shape]);
+  const segments = useMemo(() => (shown === undefined ? [] : videoSegments(shown, plan.cover, options.titleCards)), [shown, plan.cover, options.titleCards]);
+  const portraitSegments = useMemo(() => (shown === undefined ? [] : videoSegments(shown, plan.cover, options.titleCards, "1080x1920")), [shown, plan.cover, options.titleCards]);
   const [at, setAt] = useState(() => chapter?.pictures[0]?.at ?? 0);
   const [playing, setPlaying] = useState(false);
   const [natural, setNatural] = useState<Natural>({});
@@ -310,9 +311,11 @@ export function VideoPreview({ worldId, productionId, plan, options, onClose }: 
   const wide = shown === undefined ? [] : burnedCues(shown, landscape, options.captionSize, after);
   const tall = shown === undefined ? [] : burnedCues(shown, "1080x1920", options.captionSize, after);
   const segment = segmentAt(segments, at);
+  const portraitSegment = segmentAt(portraitSegments, at);
   const burned = burnsIn(options);
-  // The picture whose focus the column sets: the one showing, else the chapter's first.
+  // Focus belongs to Wide. Tall is independently composed and never inherits this crop.
   const target = segment?.kind === "picture" ? segment : (segments.find((candidate) => candidate.kind === "picture") ?? null);
+  const targetHasTall = chapter?.pictures.some(picture => picture.key === target?.key && picture.tall !== undefined) === true;
   const focus = target?.focus ?? { x: 0.5, y: 0.5 };
 
   // Play: the chapter's mix where the plan has one, else its takes one after another from here.
@@ -383,7 +386,7 @@ export function VideoPreview({ worldId, productionId, plan, options, onClose }: 
   };
   const [dragFocus, setDragFocus] = useState<{ x: number; y: number } | null>(null);
   const drawn = dragFocus ?? focus;
-  const rendered = options.shape === "1080x1920" ? TALL : WIDE;
+  const rendered = options.shape === "1080x1920" && !targetHasTall ? TALL : WIDE;
   const other = options.shape === "1080x1920" ? WIDE : TALL;
   const cropStyle = (frame: { width: number; height: number }) => {
     if (size === undefined) return null;
@@ -391,8 +394,9 @@ export function VideoPreview({ worldId, productionId, plan, options, onClose }: 
     return { left: fit.left + (crop.x / size.width) * fit.width, width: (crop.width / size.width) * fit.width, top: fit.top + (crop.y / size.height) * fit.height, height: (crop.height / size.height) * fit.height };
   };
   const renderedCrop = cropStyle(rendered);
-  const otherCrop = cropStyle(other);
+  const otherCrop = targetHasTall ? null : cropStyle(other);
   const framed = segment === null ? null : { ...segment, ...(segment.kind === "picture" ? { focus: drawn } : {}) };
+  const framedPortrait = portraitSegment?.file === segment?.file ? framed : portraitSegment;
 
   const shapeNote = options.shape === "1080x1920" ? "9:16 · 1080×1920" : `16:9 · ${options.shape.replace("x", "×")}`;
   const captionNote = burned ? `burned-in captions, ${options.captionPosition}, ${options.captionSize.toUpperCase()}` : options.subtitles === "sidecar" ? "sidecar captions" : "no captions";
@@ -418,11 +422,11 @@ export function VideoPreview({ worldId, productionId, plan, options, onClose }: 
         <div style={{ display: "flex", gap: 28, alignItems: "flex-start" }}>
           <Frame url={url} segment={framed} width={720} height={405} at={at} slowPush={options.slowPush} caption={captionView(cueAt(wide, at), at, options.captionStyle)} captionSize={captionFontPx(landscape, options.captionSize, 405)} position={options.captionPosition} natural={natural} onNatural={onNatural} burned={burned} />
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Frame url={url} segment={framed} width={228} height={405} at={at} slowPush={options.slowPush} caption={captionView(cueAt(tall, at), at, options.captionStyle)} captionSize={captionFontPx("1080x1920", options.captionSize, 405)} position={options.captionPosition} natural={natural} onNatural={onNatural} burned={burned} />
+            <Frame url={url} segment={framedPortrait} width={228} height={405} at={at} slowPush={options.slowPush} caption={captionView(cueAt(tall, at), at, options.captionStyle)} captionSize={captionFontPx("1080x1920", options.captionSize, 405)} position={options.captionPosition} natural={natural} onNatural={onNatural} burned={burned} />
           </div>
           {target !== null && target.file !== null && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minWidth: 0 }}>
-              <b style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>Focus</b>
+              <b style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>{targetHasTall ? "Wide focus" : "Focus"}</b>
               <div
                 className="fy-abv-vid fy-abv-drag"
                 style={{ width: FW, height: FH }}

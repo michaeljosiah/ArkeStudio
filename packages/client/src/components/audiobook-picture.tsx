@@ -185,11 +185,13 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   const connection = store.connection;
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [pickingTall, setPickingTall] = useState(false);
+  const [tallFrom, setTallFrom] = useState<string | null>(null);
+  const pickingTall = tallFrom !== null;
   const [tab, setTab] = useState<PictureTab>("world");
   const [brief, setBrief] = useState<string | null>(null);
   useEffect(() => {
     setOpen(false);
+    setTallFrom(null);
     setBrief(null);
   }, [key]);
   const index = rows.indexOf(row);
@@ -199,8 +201,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   const until = here === null ? null : here.until === null ? "end of chapter" : `until block ${here.until + 1}`;
   const choose = (file: string) => {
     const source: AudiobookPictureSource = tab;
-    if (pickingTall && here === null) return;
-    setAudiobookPicture(worldId, production.meta.id, chapterFile, key, { file, source, ...(pickingTall ? { tallFrom: here!.file } : {}) });
+    setAudiobookPicture(worldId, production.meta.id, chapterFile, key, { file, source, ...(tallFrom !== null ? { tallFrom } : {}) });
   };
 
   // Generate (R-69): a new Bench session in image mode with the brief written in, then the Bench —
@@ -260,8 +261,8 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   );
   // The card in hand: a suggestion being drafted or made stands over the picture's own.
   const card: PictureSuggestionState = suggestion.ask === null && made !== null ? { ...suggestion, ask: { state: "suggested", suggestion: made } } : suggestion;
-  const choosePicture = connection === "open" ? () => { setPickingTall(false); setOpen(true); } : undefined;
-  const chooseTall = connection === "open" && here !== null ? () => { setPickingTall(true); setOpen(true); } : undefined;
+  const choosePicture = connection === "open" ? () => { setTallFrom(null); setOpen(true); } : undefined;
+  const chooseTall = connection === "open" && here !== null ? () => { setTallFrom(here.file); setOpen(true); } : undefined;
   const motionControl = here !== null && world !== null ? <AudiobookMotionControl key={key} worldId={worldId} productionId={production.meta.id} chapterFile={chapterFile} block={key} picture={here.entry} slug={world.meta.slug} label={blockName} chapterLabel={`Chapter ${chapterOrder}`} holdLabel={until ?? undefined} /> : undefined;
   // The Picture tab (design turn 194, rule 12; 194a, 194g): 193's card — the picture beside Frame,
   // Rides and the model, In frame, Not in frame, the prompt, the checks; Remove, Edit prompt and

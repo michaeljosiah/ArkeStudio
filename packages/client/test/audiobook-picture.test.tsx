@@ -647,8 +647,11 @@ describe("a made picture on its block (turn 194g)", () => {
   it("chooses an existing Tall without replacing Wide or buying an image (#2164)", async () => {
     extraArtifacts = [madeArtifact()];
     bookShapes = ["wide", "tall"];
-    const m = await mount(2, { "p1.0": made(SHOT) });
+    const pictures = { "p1.0": made(SHOT) };
+    const m = await mount(2, pictures);
     await press(q(m, '[data-testid="picture-card-tall-slot"]')?.closest("button"));
+    pictures["p1.0"].file = "artifacts/harbour-upload.png";
+    await rerender!(undefined);
     assert.ok(q(m, '[aria-label="Tall pictures"]'));
     assert.equal(button(m, "Remove"), undefined, "choosing Tall cannot remove Wide");
     await press(q(m, '[aria-label="Tall pictures"] [role="option"]'));

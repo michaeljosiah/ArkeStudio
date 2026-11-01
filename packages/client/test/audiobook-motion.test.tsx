@@ -5,6 +5,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import type { ClientMessage, AudiobookPicture, AudiobookMotionQuote } from "@arke-studio/contracts";
 import { AudiobookMotionControl } from "../src/components/audiobook-motion.js";
+import { VideoPreview } from "../src/components/audiobook-video.js";
+import { DEFAULT_VIDEO_OPTIONS, type AudiobookListening } from "@arke-studio/contracts";
 import { WordTimingControl } from "../src/components/audiobook-word-timing.js";
 import { useWordTimingActivity, WordTimingActivityRow } from "../src/components/audiobook-timing-activity.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest, useStore } from "../src/lib/store.js";
@@ -85,6 +87,25 @@ const control = (picture: AudiobookPicture) => (
     slug="fixture"
   />
 );
+for (const shape of ["1280x720", "1080x1920"] as const) it(`previews each picture shape independently and keeps focus on Wide at ${shape} (#2164)`, async () => {
+  const plan: AudiobookListening = { productionId, title: "Book", cover: null, chapters: [{
+    chapterId: "neap", order: 1, title: "Chapter 1", state: "read", seconds: 10,
+    blocks: [{ key: "p0.0", number: 1, file: "read.wav", at: 0, seconds: 10, sentences: [{ at: 0, text: "The harbour." }] }], gaps: [], opening: null,
+    pictures: [{ key: "p0.0", number: 1, file: "wide.png", tall: "tall.png", at: 0, seconds: 10, focus: { x: .2, y: .5 } }],
+  }] };
+  await mount(<VideoPreview worldId={worldId} productionId={productionId} plan={plan}
+    options={{ ...DEFAULT_VIDEO_OPTIONS, shape, titleCards: false, subtitles: "none" }} onClose={() => {}} />);
+  const frames = [...dom.document.querySelectorAll('.fy-abv-vid')].filter(frame => frame.style.height === "405px");
+  assert.equal(frames.length, 2);
+  assert.ok(frames[0]!.querySelector("img")?.getAttribute("src")?.includes("wide.png"));
+  assert.ok(frames[1]!.querySelector("img")?.getAttribute("src")?.includes("tall.png"));
+  assert.ok(dom.document.querySelector('[data-testid="audiobook-video-focus"] img')?.getAttribute("src")?.includes("wide.png"));
+  assert.ok(dom.document.body.textContent?.includes("Wide focus"));
+  await press("Centre");
+  const command = sent.find(message => message.kind === "set-audiobook-picture-focus");
+  assert.ok(command?.kind === "set-audiobook-picture-focus" && command.block === "p0.0");
+});
+
 it("requires a current quote to generate, then an explicit choice to adopt the delivered clip", async () => {
   await mount(control(still));
   await press("Animate");
