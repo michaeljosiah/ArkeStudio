@@ -22480,7 +22480,9 @@ export class Coordinator {
     if (jobId !== undefined) await bench.store.append({ type: "take-job", takeId: reserved.id, jobId }, { at: this.nowIso() });
     await this.refreshBench(worldId, sessionId, false);
     // The take lands through the job's own finalisation; this waits for it to be written to the log.
-    const deadline = Date.now() + (input.motion === undefined ? this.opts.pictureWait?.waitMs ?? PICTURE_WAIT_MS : 45 * 60_000);
+    const waitMs = input.motion === undefined ? this.opts.pictureWait?.waitMs ?? PICTURE_WAIT_MS : 45 * 60_000;
+    let deadline: number | undefined;
+    let cancellationAsked = false;
     for (;;) {
       if (input.signal?.aborted) {
         // Stop costs nothing more: the job is cancelled where it stands, and what was made stays.
@@ -22507,7 +22509,22 @@ export class Coordinator {
         return (ran?.attempt ?? 0) > 0 ? { ...failed, provider: true as const } : failed;
       }
       if (take !== undefined && (take.status === "cancelled" || take.status === "needs-reconciliation")) return fail(take.error ?? (take.status === "cancelled" ? "cancelled" : "the picture could not be made"));
-      if (Date.now() > deadline) return fail("the picture took too long");
+      const job = jobId === undefined ? undefined : this.jobQueue?.listJobs().find(candidate => candidate.id === jobId);
+      // A queued picture has not used any generation time. Keep its original job until it lands
+      // or cancellation settles; abandoning the waiter used to strand paid results behind retries.
+      if ((job?.attempt ?? 0) > 0) deadline ??= Date.now() + waitMs;
+      if (deadline !== undefined && Date.now() > deadline && !cancellationAsked) {
+        // Comic pages persist this session before dispatch and already own late-result recovery.
+        if (input.onSession !== undefined) return fail("the picture took too long");
+        if (jobId !== undefined) {
+          cancellationAsked = true;
+          await this.jobQueue?.cancel(jobId).catch(error => {
+            void this.appLog?.append({ kind: "audiobook.picture-cancel-failed", message: describeCoordinatorError(error) });
+          });
+          // A completion can win the cancellation race. Read the journal again and file it.
+          continue;
+        }
+      }
       await new Promise((resolve) => setTimeout(resolve, PICTURE_POLL_MS));
     }
     } finally { this.pictureSessions.delete(sessionKey); }
