@@ -1152,6 +1152,8 @@ export interface CoordinatorOptions {
   illustrateDeriver?: IllustrateDeriver;
   /** Turn 193d: Update prompt's model seam; the answer is held to the model's room and rule 4 regardless (SPEC-047 R-146). */
   promptRewriter?: PromptRewriter;
+  /** How long a press waits on its picture, and how often a page past that wait looks again; tests shorten both. */
+  pictureWait?: { waitMs: number; lateLookMs: number };
   /** Desktop-owned update commands. Electron APIs remain outside the coordinator. */
   updates?: {
     check: () => Promise<void>;
@@ -1452,6 +1454,10 @@ export class Coordinator {
   private readonly makingPictures = new Map<string, AbortController>();
   /** Comic pages being made in this process, by world/production/page (SPEC-064 R-25). */
   private readonly makingComicPages = new Map<string, AbortController>();
+  /** Pages whose press stopped waiting while their picture was still queued, by the same key. */
+  private readonly lateComicPages = new Map<string, ReturnType<typeof setTimeout>>();
+  /** The tail of the page checks, which run one at a time (see readComicTake). */
+  private comicChecks: Promise<void> = Promise.resolve();
   /** Page reads in flight, stopped with the app as a review is (codex on PR 2223). */
   private readonly readingComicPages = new Set<AbortController>();
   /** Book exports in flight, stopped with the app (SPEC-064 R-47). */
@@ -22072,6 +22078,36 @@ export class Coordinator {
    * page record, then the app closed. The Bench kept the job; this files what it made as a take,
    * once, and drops an entry whose session made nothing. Never asks again — a page is paid once.
    */
+  /**
+   * A press that stopped waiting while its picture was still queued looks again until the picture
+   * lands, then files and reads it as an opened page would. With sixteen pages pressed at once Codex
+   * queued the last seven past the twenty-minute wait; each sat at Making for an hour, its picture
+   * long landed, until someone opened that page (2026-11-01, The Ledger of Nights, redrawn).
+   */
+  private watchLateComicPage(store: WorldStore, productionId: string, pageId: string): void {
+    const key = `${store.worldId}/${productionId}/${pageId}`;
+    if (this.lateComicPages.has(key)) return;
+    const every = this.opts.pictureWait?.lateLookMs ?? 30_000;
+    // A picture the queue never lands is the Bench's to fail; three hours of looking is past any real wait.
+    const until = Date.now() + 3 * 60 * 60_000;
+    const making = () => {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+      return production === undefined ? 0 : comicPageRecord(production, pageId).making.length;
+    };
+    const look = () => {
+      this.lateComicPages.delete(key);
+      if (this.stopping || store.closingSignal.aborted || this.opts.provider.openStore?.() !== store) return;
+      const before = making();
+      void this.reconcileComicPage(store, productionId, pageId).catch(() => {}).then(async () => {
+        const after = making();
+        // A take filed refreshes as it is read; one the Bench failed is only dropped, so Pages is told here.
+        if (after !== before) await this.refreshWorldSnapshot(store.worldId).catch(() => {});
+        if (after > 0 && Date.now() < until && !this.stopping && !store.closingSignal.aborted) this.lateComicPages.set(key, setTimeout(look, every));
+      });
+    };
+    this.lateComicPages.set(key, setTimeout(look, every));
+  }
+
   private async reconcileComicPage(store: WorldStore, productionId: string, pageId: string): Promise<void> {
     if (this.makingComicPages.has(`${store.worldId}/${productionId}/${pageId}`)) return;
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
@@ -22206,19 +22242,28 @@ export class Coordinator {
    * aborts, and the world's close too. The review runs after the read so it can say which of the
    * words the read found are writing in the scene (R-70).
    */
-  private async readComicTake(store: WorldStore, productionId: string, page: string, take: string) {
+  private readComicTake(store: WorldStore, productionId: string, page: string, take: string) {
+    // One take checked at a time. Sixteen pages landing together sent their reads and reviews to the
+    // harness at once; it answered "fetch failed", "models could not be verified" or a model
+    // "unavailable through the running harness" for most of them, and every one passed when re-run
+    // alone (2026-11-01, The Ledger of Nights, redrawn). A check that could not run is never a pass,
+    // so each failure cost a press of Check again.
     const control = new AbortController();
     const onClose = () => control.abort();
     store.closingSignal.addEventListener("abort", onClose, { once: true });
     this.readingComicPages.add(control);
-    try {
-      const verification = await verifyComicTake(store, productionId, page, take, this.pageReader(store), control.signal, () => this.nowIso());
-      const review = await reviewComicTake(store, productionId, page, take, this.pageReviewer(store), control.signal, () => this.nowIso());
-      return { verification, review };
-    } finally {
-      this.readingComicPages.delete(control);
-      store.closingSignal.removeEventListener("abort", onClose);
-    }
+    const turn = this.comicChecks.then(async () => {
+      try {
+        const verification = await verifyComicTake(store, productionId, page, take, this.pageReader(store), control.signal, () => this.nowIso());
+        const review = await reviewComicTake(store, productionId, page, take, this.pageReviewer(store), control.signal, () => this.nowIso());
+        return { verification, review };
+      } finally {
+        this.readingComicPages.delete(control);
+        store.closingSignal.removeEventListener("abort", onClose);
+      }
+    });
+    this.comicChecks = turn.then(() => {}, () => {});
+    return turn;
   }
 
   private async makeComicPage(store: WorldStore, input: { productionId: string; page: string; mode?: ComicMode; requestId: string; confirmedMicroUsd: number },
@@ -22273,6 +22318,7 @@ export class Coordinator {
         }],
       }));
       await this.refreshWorldSnapshot(store.worldId);
+      if (unresolved) this.watchLateComicPage(store, input.productionId, input.page);
       if (!made.ok) return failed(made.reason, made.sessionId);
       return { ok: true, take: take!, sessionId: made.sessionId, microUsd: made.costMicroUsd ?? made.estimatedMicroUsd };
     } catch (err) {
@@ -22400,7 +22446,7 @@ export class Coordinator {
     this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
     this.transport.broadcastSnapshot();
     // The take lands through the job's own finalisation; this waits for it to be written to the log.
-    const deadline = Date.now() + (input.motion === undefined ? PICTURE_WAIT_MS : 45 * 60_000);
+    const deadline = Date.now() + (input.motion === undefined ? this.opts.pictureWait?.waitMs ?? PICTURE_WAIT_MS : 45 * 60_000);
     for (;;) {
       if (input.signal?.aborted) {
         // Stop costs nothing more: the job is cancelled where it stands, and what was made stays.
@@ -24254,6 +24300,8 @@ export class Coordinator {
       for (const control of this.makingPictures.values()) control.abort();
       // A page waiting on its picture would hold the drain below for the picture's whole wait (codex on PR 2222).
       for (const control of this.makingComicPages.values()) control.abort();
+      for (const timer of this.lateComicPages.values()) clearTimeout(timer);
+      this.lateComicPages.clear();
       for (const control of this.readingComicPages) control.abort();
       for (const control of this.exportingComics) control.abort();
       for (const control of this.makingMotion.values()) control.abort();
