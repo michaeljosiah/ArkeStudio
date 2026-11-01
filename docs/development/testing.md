@@ -2316,7 +2316,8 @@ and measurements go to `output/prompt-tools-native/`; they are not world persist
 
 From contracts run `node --import tsx --test test/production-audio-design.test.ts`. From
 coordinator run `node --import tsx --test --test-concurrency=2 test/media/measurement.test.ts
-test/productions/music-video-policy.test.ts test/takes/takes.test.ts test/bench/subject.test.ts`.
+test/media/measurement-wire.test.ts test/productions/music-video-policy.test.ts
+test/takes/takes.test.ts test/bench/subject.test.ts`.
 The fixtures use copied worlds and fake probes, not live providers. They cover score intent,
 actual Bench prompt composition, immutable take/media retention, adjacent full-hash metadata,
 parent segment sources, retry/coalescing, unavailable tools, source changes and cancellation.

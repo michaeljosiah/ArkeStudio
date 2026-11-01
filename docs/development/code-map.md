@@ -1863,5 +1863,6 @@ paid media on failure; the coordinator tracks explicit `measure-production-media
 shutdown and publishes its scoped transient result only for the still-open world.
 
 Tests: contracts `test/production-audio-design.test.ts`; coordinator
-`test/media/measurement.test.ts`, `test/productions/music-video-policy.test.ts`, existing take
+`test/media/measurement.test.ts`, `test/media/measurement-wire.test.ts`,
+`test/productions/music-video-policy.test.ts`, existing take
 and Bench subject suites. Design turn 258 proposes the native Cut retry control; UI awaits approval.
