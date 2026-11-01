@@ -665,6 +665,9 @@ describe("enqueue admission during shutdown", () => {
 describe("ephemeral provider image references", () => {
   it("resolves bytes before submit, never journals them, and lands synchronous output without polling", async () => {
     const fake = new FakeProvider({});
+    let sentParams: Record<string, unknown> = {};
+    const submit = fake.submit.bind(fake);
+    fake.submit = async (key, request) => { sentParams = request.params; return submit(key, request); };
     fake.inlineArtifacts = [{ name: "image.png", contentType: "image/png", data: pngBytes() }];
     const secret = Uint8Array.from([9, 8, 7, 6]);
     let resolutions = 0;
@@ -683,12 +686,14 @@ describe("ephemeral provider image references", () => {
       ...INPUT,
       capability: "image",
       target: { kind: "character-sheet", id: "maren-kest/refs" },
-      params: { prompt: "preserve identity", references: ["references/maren-kest/main.png"] },
+      params: { prompt: "preserve identity", references: ["references/maren-kest/main.png"], productionWork: { productionId: "saltlight", sceneId: "sc_04", kind: "frame", shots: [{ shotId: "sh_12", durationSec: 1, takeId: "tk_reserved" }] } },
       landing: { dir: "references/maren-kest/incoming", name: "sheet.png" },
     });
     await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
     assert.equal(resolutions, 1);
     assert.equal(fake.submitCount, 1);
+    assert.equal(sentParams.productionWork, undefined, "accounting ownership never reaches the provider");
+    assert.equal((job.params.productionWork as { productionId: string }).productionId, "saltlight", "the durable job retains its attribution");
     assert.equal(fake.pollCount, 0, "synchronous image output lands directly");
     assert.deepEqual(fake.submittedReferenceBytes, [secret]);
     const journal = await readFile(h.journalPath, "utf8");

@@ -14,6 +14,7 @@ Start with the root [AGENTS.md](../../AGENTS.md) and shared [operational rules](
 | How do I open Studio from a phone or another computer? | [Opening Studio from another device](remote-access.md) |
 | How do programmatic sheet edits preserve unchanged sections? | [Saving sheet sections](sheet-editing.md) |
 | How does chapter review delegate and preserve evidence? | [Chapter review](chapter-review.md) |
+| How are lifetime production spend and candidate counts derived? | [Production spend](production-spend.md) |
 | How do I run and validate it? | [Contributor setup](../../CONTRIBUTING.md#getting-set-up), [testing](testing.md) |
 | What generates this file or ships this asset? | [Maintenance map](maintenance.md) |
 | How do I add or replace a local generation recipe? | [ComfyUI recipe procedure](comfyui-recipes.md) |

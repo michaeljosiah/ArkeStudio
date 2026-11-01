@@ -1,3 +1,4 @@
+import { ProductionSpend } from "../../components/production-spend.js";
 import { SceneBackRow, SceneDock, SceneRenameSheet, useSceneDock } from "./responsive-chrome.js";
 import { useMediaQuery } from "../../lib/media-query.js";
 import { PageSheet } from "../../components/page-sheet.js";
@@ -567,6 +568,8 @@ export function SceneWorkspace({
             {sceneReviewOpen ? <SceneReview scene={legacySceneView(scene)} onClose={() => setSceneReviewOpen(false)} /> : null}
             {generatorError === null ? null : <p role="alert" className="fy-swboards__refusal">{generatorError}</p>}
           </header>
+
+          <ProductionSpend production={production} sceneId={scene.id} />
 
           {/*
             Tabs are a mode of working, not a rendering of the same thing — so they are a

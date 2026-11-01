@@ -35,6 +35,16 @@ const SCREENS = [
   { group: "Arke drives · turn 256", screen: "The draft, read as pages, with only the gaps counted", frame: "256d", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
   { group: "Arke drives · turn 256", screen: "The book at a glance, and the one next step", frame: "256e", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
   // END ARKE DRIVES 256
+  // BEGIN PRODUCTION SPEND 255
+  { group: "Lifetime production spend · turn 255", screen: "Production · lifetime spend beside current coverage", frame: "255a", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
+  { group: "Lifetime production spend · turn 255", screen: "Scene · the total and each shot’s work", frame: "255b", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
+  { group: "Lifetime production spend · turn 255", screen: "Shot · the same measures, beside its existing fields", frame: "255c", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
+  { group: "Lifetime production spend · turn 255", screen: "Spend details · the receipts behind one total", frame: "255d", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
+  { group: "Lifetime production spend · turn 255", screen: "Partial · known money, with the unassigned share kept", frame: "255e", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
+  { group: "Lifetime production spend · turn 255", screen: "Unavailable · counts survive a failed spend-history read", frame: "255f", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
+  { group: "Lifetime production spend · turn 255", screen: "Empty · zero means no work yet", frame: "255g", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
+  { group: "Lifetime production spend · turn 255", screen: "Phone · shot receipts, with the board share open", frame: "255h", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
+  // END PRODUCTION SPEND 255
 
   // BEGIN PAGE PLAN 254
   { group: "Adapt before drawing · turn 254", screen: "A chapter with no pages: plan it first", frame: "254a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
@@ -1040,6 +1050,7 @@ const SCREENS = [
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
   { file: "arke-drives-256.review.html", what: "Turn 256: Arke drives, the screen stays simple — the usual as one card, Arke working said on the chapter, mysteries kept apart, a reading view, the book at a glance.", state: "approved 1 November 2026; not built" },
+  { file: "production-spend-255.review.html", what: "Turn 255: lifetime production spend, generated and selected counts, receipts and incomplete history.", state: "approved; implementation in progress" },
   { file: "page-plan-254.review.html", what: "Turn 254: adapt before drawing — a page plan of passages, pages and what the reader knows, then a cold read of every draft.", state: "approved 1 November 2026; not built" },
   { file: "page-review-253.review.html", what: "Turn 253: the page review — Lettering and Picture verdicts, picture faults boxed, writing in the scene cleared, warnings seen, Not checked with a reason.", state: "approved 1 November 2026; not built" },
   { file: "audiobook-credits-252.review.html", what: "Turn 252: opening and closing credits — two rows at the ends of Chapters, the Credits sheet, Narrated by, and the credits in chapter files and Arke Player.", state: "approved 31 October 2026; not built" },
@@ -1251,6 +1262,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="page-review-253.css">
 <link rel="stylesheet" href="page-plan-254.css">
 <link rel="stylesheet" href="arke-drives-256.css">
+<link rel="stylesheet" href="production-spend-255.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">

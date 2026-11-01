@@ -3764,7 +3764,10 @@ export function useDiagnostics(): import("@arke-studio/contracts").DiagnosticsSn
   return useStore().diagnostics;
 }
 
-/** Ask for a fresh derivation — R-33's on-demand half, sent when the Diagnostics view opens. */
+/** Read-only refresh of the open world's app-root accounting evidence. */
+export function refreshProductionSpend(worldId: string): void { send({ kind: "production-spend-refresh", worldId }); }
+
+/** Ask for a fresh derivation when Diagnostics opens (SPEC-032 R-33). */
 export function refreshDiagnostics(): void {
   send({ kind: "refresh-diagnostics" });
 }

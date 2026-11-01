@@ -1,3 +1,4 @@
+import { ProductionSpend } from "../../components/production-spend.js";
 import { SceneBackRow, SceneDock, SceneRenameSheet, useSceneDock } from "./responsive-chrome.js";
 import { useMediaQuery } from "../../lib/media-query.js";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject } from "react";
@@ -481,6 +482,8 @@ function ShotWorkspace({
               onOpen={goTo}
             />
           </header>}
+
+          {!workspace && <ProductionSpend production={production} sceneId={scene.id} shotId={shot.id} />}
 
           {workspace ? null : <div className="fy-sw__toolbar">
             {viewSwitch}

@@ -1,0 +1,54 @@
+// Rebuild approved turn 255 and its standalone clickable review from the same HTML drawings.
+// node design-system/production-spend-255.mjs
+import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { frames } from './production-spend-255.frames.mjs';
+const here = dirname(fileURLToPath(import.meta.url));
+const read = name => readFileSync(join(here, name), 'utf8');
+const write = (name, content) => writeFileSync(join(here, name), content);
+const esc = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
+const tokens = '_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens';
+const style = '<link rel="stylesheet" href="production-spend-255.css">';
+export const rules = [
+  ['Review status', 'Approved by the owner on 1 November 2026 after reviewing all eight drawings in chat. Issue 250 implementation is in progress; the drawings remain the UI authority.'],
+  ['Three places, one summary', 'Production, scene and shot keep their existing navigation and review surfaces. A compact bordered row below the heading shows Lifetime spend, On this device, and Video candidates: N generated · M selected. Spend details opens one shared sheet at the originating scope. Day-one conversation remains first; the empty summary belongs below it.'],
+  ['Selected has one meaning', 'Generated counts reviewable video candidates per shot, including unfiled production Bench candidates and independently reviewable board segments, deduplicated after filing. Selected counts current shot video selections, at most one per shot. No hit-rate percentage, lifetime acceptance count, new Keep/Kill state or batch count.'],
+  ['Money and allowances', 'Billed spend uses actual where recorded, estimate otherwise, with its source shown. Local runs and plan-covered work appear separately, never as zero-dollar billed rows. Allowance consumed is unknown. The current shared source vocabulary governs, including usage-derived, mixed-measured, manifest-derived and unknown historical sources; the detail list must name them when present.'],
+  ['One receipt per job', 'Spend details lists the contributing jobs, including failures and frame generation. A failed job can increase spend and produce no candidate. A board has one charge; its expanded receipt shows duration shares, whose integer micro-dollar sum equals the charge. The shot sheet shows only its share and names the full board amount in the receipt.'],
+  ['Partial is a known subtotal', 'A partial summary says partial and Known spend on this device. The sheet names known money, any unassigned share and the missing evidence. Unassigned money is already inside the parent total, not added to it. Removed shots or missing plans never erase known production spend. Incomplete candidate evidence is separately labelled Counts partial; an exact-looking candidate count must not imply complete history.'],
+  ['Unavailable and empty', 'A failed history read displays an em dash with Could not read spend history and Read history again, not zero. A moved world with retained candidates but no matching accounting says Historical spend unavailable. Candidate counts may remain visible if their evidence is complete. Zero is reserved for an empty scope with no work. Loading says Reading history.'],
+  ['The sheet', 'Use the existing PageSheet pattern: title, scope selector, Close; independently scrolling body; lifetime/device scope and Done in a fixed footer. The review links step between the proposed scope drawings; native implementation preserves the originating scope, focus return, Escape and dialog focus containment. Receipt details expand in place and expose outcome, original source and board allocation, without sending another provider request.'],
+  ['Rows and narrow screens', 'Summary radius 12; desktop summary padding 18 by 20; receipt rows at least 51; sheet width at most 920 and radius 16. On phone, 12-pixel outer margins, 16-pixel body padding and targets at least 44; receipts stack as cards rather than a horizontally scrolling table. Source/status text wraps. Header and footer remain visible while receipts scroll. Type uses the shared tokens.'],
+  ['Fixture arithmetic', 'One synthetic fixture drives all drawings: The tide is $10.00, The bell $3.00; shots 12, 13 and 14 are $5.00, $5.00 and $3.00. Seven generated shot candidates, two selected shots; $11.00 provider-reported and $2.00 manifest-derived; one local board job and one plan-covered still. The partial variant removes allocation evidence for the $2.40 video but retains its original charge and candidate evidence. Every amount comes from production-spend-255.fixture.mjs. These are not provider prices.'],
+  ['Read-only boundary', 'The coordinator derives lifetime figures from the ledger, complete job history, frozen production Bench requests, candidates and selections. No accounting summary is written into a world and no historical media or ledger is rewritten. Activity keeps rolling-period spend. World reference spend, budgets, quality scoring and generation controls remain outside this turn.'],
+  ['Calls for the owner', '1 · Put the compact summary below the production/scene/shot heading. 2 · Use one scoped Spend details sheet. 3 · Show generated and selected counts without a percentage. 4 · Show local and allowance work beside billed spend. 5 · Keep partial and unavailable explicit, with a read-again control. All five decisions approved by the owner on 1 November 2026.'],
+];
+
+write('production-spend-255.review.html', `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lifetime production spend · approved turn 255</title>${['fonts', 'colors', 'typography', 'spacing', 'effects'].map(name => `<link rel="stylesheet" href="${tokens}/${name}.css">`).join('')}${style}<style>body{margin:0;background:var(--muted);color:var(--foreground);font:var(--type-ui)}.review{padding:28px;display:flex;flex-direction:column;gap:36px}.review>header{display:flex;align-items:center;gap:16px;flex-wrap:wrap}.review>header a{color:inherit}.review h2{font:var(--type-ui);margin:0 0 12px}.review h2 a{color:inherit;text-decoration:none}.review .frame{border:1px solid var(--border);border-radius:12px;overflow:hidden;width:max-content;box-shadow:0 2px 6px #0001}.review nav{display:flex;gap:12px;flex-wrap:wrap}.review button{font:inherit;border:1px solid var(--border);border-radius:8px;background:var(--background);color:inherit;min-height:34px;padding:6px 12px;cursor:pointer}.review section{scroll-margin-top:20px}.review .intro{color:var(--muted-foreground);margin:0;max-width:800px;line-height:1.6}</style></head><body><main class="review"><header><b>Turn 255 · Proposed · Lifetime production spend</b><button type="button" onclick="document.documentElement.classList.toggle('dark')">Light / dark</button><a href="Arke%20Studio.dc.html#t255">Design master</a><a href="production-spend-255.notes.md">Decisions and fixture</a></header><p class="intro">Approved design for issue 250. Links move between drawings; receipt rows expand. Read history again is a drawn control and performs no I/O. No real work is generated or charged.</p><nav>${frames.map(frame => `<a href="#${frame.id}">${frame.id} · ${esc(frame.title.split(' · ')[0])}</a>`).join('')}</nav>${frames.map(frame => `<section id="${frame.id}"><h2><a href="#${frame.id}">${frame.id}</a> ${esc(frame.title)}</h2><div class="frame" style="width:${frame.width}px">${frame.markup}</div></section>`).join('\n')}</main></body></html>`);
+
+const turn = `<section class="dv-turn" id="t255"><div class="dv-thd"><a class="dv-tid" href="#t255">255</a><span class="dv-tname">Lifetime production spend · generated and selected, from the production to its shots (issue 250; extends <a class="dv-oid" href="#t138">138</a> and <a class="dv-oid" href="#t145">145</a>)</span></div><p class="dv-next">1 November 2026 · Proposed · ${frames.length} HTML drawings. <a href="production-spend-255.review.html">Clickable review</a> · <a href="production-spend-255.notes.md">Decisions and fixture</a></p><div class="dv-opts">${frames.map(frame => `<div class="dv-opt" id="${frame.id}"><div class="dv-olabel"><a class="dv-oid" href="#${frame.id}">${frame.id}</a>${esc(frame.title)}</div><div class="dv-card" style="width:${frame.width}px;max-width:none">${frame.markup}</div></div>`).join('\n')}</div>${rules.map(([title, body], i) => `<p class="dv-rule"><b>${i + 1} · ${esc(title)}.</b> ${esc(body)}</p>`).join('\n')}</section>\n`;
+for (const file of ['Arke Studio.dc.html', 'Arke Studio Prototype.dc.html']) {
+  let html = read(file);
+  const start = html.indexOf('<section class="dv-turn" id="t255">');
+  if (start >= 0) {
+    const next = html.indexOf('<section class="dv-turn"', start + 1);
+    if (next < 0) throw new Error(`No safe next turn in ${file}`);
+    html = html.slice(0, start) + turn + html.slice(next);
+  } else {
+    const below = [...html.matchAll(/<section class="dv-turn" id="t(\d+)"/g)].find(match => Number(match[1]) > 0 && Number(match[1]) < 255);
+    if (!below) throw new Error(`No insertion point in ${file}`);
+    html = html.slice(0, below.index) + turn + html.slice(below.index);
+  }
+  if (!html.includes(style)) html = html.replace('<helmet>', '<helmet>\n' + style);
+  write(file, html);
+}
+let build = read('build-review.mjs').replace(/\r?\n  \/\/ BEGIN PRODUCTION SPEND 255[\s\S]*?  \/\/ END PRODUCTION SPEND 255(?:\r?\n)*/g, '\n');
+const entries = frames.map(frame => `  { group: "Lifetime production spend · turn 255", screen: ${JSON.stringify(frame.title)}, frame: "${frame.id}", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },`);
+build = build.replace('const SCREENS = [', 'const SCREENS = [\n  // BEGIN PRODUCTION SPEND 255\n' + entries.join('\n') + '\n  // END PRODUCTION SPEND 255\n');
+const page = '{ file: "production-spend-255.review.html", what: "Turn 255: lifetime production spend, generated and selected counts, receipts and incomplete history.", state: "approved; implementation in progress" }';
+if (build.includes('file: "production-spend-255.review.html"')) build = build.replace(/\{ file: "production-spend-255\.review\.html",[^\n]+?\}/, page);
+else build = build.replace('const PAGES = [', 'const PAGES = [\n  ' + page + ',');
+if (!build.includes(style)) build = build.replace('<link rel="stylesheet" href="${TOKENS}/fonts.css">', style + '\n<link rel="stylesheet" href="${TOKENS}/fonts.css">');
+write('build-review.mjs', build);
+console.log(`Registered approved turn 255: ${frames.length} frames, ${rules.length} rules. Fixture arithmetic verified.`);

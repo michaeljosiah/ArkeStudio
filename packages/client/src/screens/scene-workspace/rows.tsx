@@ -1,3 +1,4 @@
+import { ProductionSpend } from "../../components/production-spend.js";
 import { useMediaQuery } from "../../lib/media-query.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
@@ -1331,6 +1332,7 @@ function Row({
         {beat === undefined ? null : <BeatLines story={{ worldId, production, scene }} beats={beat.lines} sheets={sheets} voices={beat.voices} />}
         <section className="fy-swrow__descwrap">
           {scriptEditor}
+          <ProductionSpend production={production} shotId={shot.id} compact />
         </section>
       </div>
       {rowActions}

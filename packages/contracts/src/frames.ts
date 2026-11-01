@@ -2780,6 +2780,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     productionId: SlugSchema, binding: MasterAudioBindingSchema }).strict(),
   z.object({ kind: z.literal("prepare-performance-audio-reference"), worldId: UlidSchema, requestId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema, expectedHash: FullSha256Schema, range: AudioRangeSchema }).strict(),
+  z.object({ kind: z.literal("production-spend-refresh"), worldId: UlidSchema }).strict(),
   z
     .object({
       kind: z.literal("dispatch-scene-planned"),

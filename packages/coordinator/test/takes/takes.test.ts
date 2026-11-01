@@ -73,6 +73,15 @@ async function landPass(dir: string): Promise<string> {
 }
 
 describe("pass segmentation (R-3..R-5, D2..D4, §3.2)", () => {
+  it("preserves provider and manifest cost sources on the pass and every segment", async () => {
+    for (const source of ["provider-reported", "manifest-derived"] as const) {
+      const { dir, store } = await open();
+      const takes = await recordTakesFromJob(store, passJob(await landPass(dir)), 400000, {}, source);
+      assert.equal(takes.length, 4);
+      for (const take of takes) assert.equal(take.cost.actualSource, source);
+      await store.close();
+    }
+  });
   it("bounds new rejection writes while preserving and reading older long notes", async () => {
     const { dir, store } = await open();
     const path = join(dir, "productions/saltlight/reviews.jsonl");
