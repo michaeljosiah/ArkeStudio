@@ -1,5 +1,5 @@
 import { stat } from "node:fs/promises";
-import { ArtifactSidecarSchema, TakeSchema, TakeMediaInfoRecordSchema, MediaInfoSchema, type MediaMeasurementSource,
+import { ArtifactSidecarSchema, TakeSchema, TakeMediaInfoRecordSchema, MediaInfoSchema, resolveProductionArtifact, type MediaMeasurementSource,
   type MediaMeasurementResult } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { containedWorldFilePath } from "../world/contained-file.js";
@@ -16,14 +16,15 @@ async function optionalRead(store: WorldStore, path: string): Promise<string | n
 }
 const identity = (info: Awaited<ReturnType<typeof stat>>) => [info.dev, info.ino, info.size, info.mtimeMs, info.ctimeMs].join(":");
 const queues = new WeakMap<WorldStore, { tail: Promise<unknown>; pending: Map<string, Promise<MediaMeasurementResult>> }>();
-class Refused extends Error { constructor(readonly reason: Extract<MediaMeasurementResult, { status: "failed" }>["reason"]) { super(reason); } }
+class Refused extends Error { constructor(readonly reason: Extract<MediaMeasurementResult, { status: "failed" }>["reason"]) { super(reason); this.name = "MediaMeasurementRefused"; } }
 
 async function owner(store: WorldStore, productionId: string, source: MediaMeasurementSource, expectedHash?: string) {
   const world = store.getBundle(), production = world.productions.find(p => p.meta.id === productionId);
   if (!production) throw new Refused("unavailable");
   if (source.kind === "artifact") {
-    const artifact = world.artifacts.find(a => a.id === source.artifactId && !a.retiredAt && (a.production === undefined || a.production === productionId));
-    if (!artifact || !["audio", "video"].includes(artifact.kind)) throw new Refused("unavailable");
+    const resolved = resolveProductionArtifact(world.artifacts, source.artifactId, productionId);
+    if (!resolved.ok || !["audio", "video"].includes(resolved.artifact.kind)) throw new Refused("unavailable");
+    const artifact = resolved.artifact;
     if (expectedHash && artifact.hash !== expectedHash) throw new Refused("source-changed");
     const record = `artifacts/${artifact.file}.json`, raw = await read(store, record), sidecar = ArtifactSidecarSchema.parse(JSON.parse(raw));
     if (sidecar.id !== artifact.id || sidecar.hash !== artifact.hash) throw new Refused("source-changed");

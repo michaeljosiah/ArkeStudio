@@ -16,7 +16,7 @@ it("production Bench appends master-track policy to the compiled request without
   const manifest: ModelManifest = { manifestVersion: 1, generated: "2026-11-01T12:00:00Z", models: [{ id: "policy-video", provider: "fal", capability: "video", displayName: "Video",
     accepts: { referenceImages: 8, startFrame: false, endFrame: false }, limits: { maxDurationSec: 20, durations: { "4": "4" }, soundChoice: true }, pricing: { kind: "perSecond", microUsdPerSecond: 10 } }] };
   const prepared = await prepareBenchSubject(world, { productionId: production.meta.id, sceneId: "sc_04", subject: { kind: "shot", shotId: "sh_12" }, mode: "video",
-    settings: null, manifest, sources: { read: async () => ({ hash: "sha256:deadbeefdeadbeef" }) } });
+    settings: null, manifest, sources: { read: async () => ({ hash: "sha256:deadbeefdeadbeef" }), durationSec: async () => null } });
   assert.ok(prepared.ok, prepared.ok ? undefined : prepared.reason);
   const session = foldBenchSession({ schemaVersion: 1, id: "sess_01J8F3K2QW9VZX4N7M0RTYB6HC", createdAt: "2026-11-01T12:00:00Z", subject: prepared.prefill.subject }, []);
   session.composer = prepared.prefill.composer; session.tokenRegistry = prepared.prefill.references; session.subjectTokens = session.tokenRegistry.map(r => r.token);

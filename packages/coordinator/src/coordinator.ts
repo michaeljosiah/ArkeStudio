@@ -6728,7 +6728,7 @@ export class Coordinator {
           {
             ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
             mediaSignal: this.runtimeStop.signal,
-            onMediaUnavailable: reason => { void this.appLog?.append({ kind: "take.measurement-unavailable", jobId: job.id, reason }); },
+            onMediaUnavailable: reason => { void this.appLog?.append({ kind: "take.measurement-unavailable", jobId: job.id, reason }).catch(() => {}); },
             ...(this.opts.takeQcAnalyzer !== undefined ? { analyzer: this.opts.takeQcAnalyzer } : {}),
             ...(this.opts.takePosterMaker !== undefined ? { poster: this.opts.takePosterMaker } : {}),
             onPosterUnavailable: (reason) => {
@@ -10740,7 +10740,7 @@ export class Coordinator {
           const result = await work;
           if (this.stillOpen(store)) {
             if (result.status === "measured") await this.refreshWorldSnapshot(store.worldId);
-            this.emit({ at: this.nowIso(), type: "media.measured", worldId: msg.worldId, requestId: msg.requestId, result });
+            if (this.stillOpen(store)) this.emit({ at: this.nowIso(), type: "media.measured", worldId: msg.worldId, requestId: msg.requestId, result });
           }
         } finally { this.backgroundWork.delete(work); }
         return;
