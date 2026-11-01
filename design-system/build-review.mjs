@@ -28,6 +28,13 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN PAGE REVIEW 253
+  { group: "The page review · turn 253", screen: "Two checks: the words and the picture", frame: "253a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "The page review · turn 253", screen: "Writing in the scene is part of the picture", frame: "253b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "The page review · turn 253", screen: "Warnings: looked at, not fixed", frame: "253c", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "The page review · turn 253", screen: "The picture is not checked, and says why", frame: "253d", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  // END PAGE REVIEW 253
+
   // BEGIN AUDIOBOOK CREDITS 252
   { group: "Opening and closing credits · turn 252", screen: "Opening credits open the book, above Chapter 1", frame: "252a", route: "Story / Audiobook", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Approved 31 October 2026."] },
   { group: "Opening and closing credits · turn 252", screen: "Closing credits close it; the Credits sheet", frame: "252b", route: "Story / Audiobook", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Approved 31 October 2026."] },
@@ -1016,6 +1023,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "page-review-253.review.html", what: "Turn 253: the page review — Lettering and Picture verdicts, picture faults boxed, writing in the scene cleared, warnings seen, Not checked with a reason.", state: "approved 1 November 2026; not built" },
   { file: "audiobook-credits-252.review.html", what: "Turn 252: opening and closing credits — two rows at the ends of Chapters, the Credits sheet, Narrated by, and the credits in chapter files and Arke Player.", state: "approved 31 October 2026; not built" },
   { file: "pages-room-251.review.html", what: "Turn 251: Pages uses the window, and says what it is doing — the page at full height, Making and Checking, a reason for Not checked.", state: "approved 29 October 2026; not built" },
   { file: "prose-pages-249.review.html", what: "Turn 249: Arke turns prose into pages — Plan with Arke from a story, and a chapter drafted as pages to keep or discard.", state: "approved 29 October 2026; not built" },
@@ -1222,6 +1230,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="prose-pages-249.css">
 <link rel="stylesheet" href="pages-room-251.css">
 <link rel="stylesheet" href="audiobook-credits-252.css">
+<link rel="stylesheet" href="page-review-253.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">
