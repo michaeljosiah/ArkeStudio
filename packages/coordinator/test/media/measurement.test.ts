@@ -43,6 +43,23 @@ it("a failed probe preserves paid media and can be retried locally; repeated pre
   assert.equal(await readFile(join(store.dir, prefix, "take.json"), "utf8"), raw);
   assert.equal(await readFile(join(store.dir, prefix, take.media!), "utf8"), "immutable paid media");
 });
+for (const changed of [false, true]) it(`remeasures malformed metadata and ${changed ? "refuses a concurrent replacement" : "repairs only the sidecar"}`, async () => {
+  const { store, job } = await fixture(), [take] = await recordTakesFromJob(store, job, null); assert.ok(take);
+  const prefix = `productions/saltlight/takes/${take.id}`, sidecar = join(store.dir, prefix, "media-info.json");
+  const raw = await readFile(join(store.dir, prefix, "take.json"), "utf8");
+  await writeFile(sidecar, "{broken");
+  const result = await measureProductionMedia(store, "saltlight", { kind: "take", takeId: take.id }, { durationSec: async () => 12,
+    info: async () => { if (changed) await writeFile(sidecar, "{newer"); return info; } });
+  if (changed) {
+    assert.deepEqual(result, { status: "failed", reason: "source-changed" });
+    assert.equal(await readFile(sidecar, "utf8"), "{newer");
+  } else {
+    assert.deepEqual(result, { status: "measured", info });
+    assert.deepEqual(TakeMediaInfoRecordSchema.parse(JSON.parse(await readFile(sidecar, "utf8"))).mediaInfo, info);
+  }
+  assert.equal(await readFile(join(store.dir, prefix, "take.json"), "utf8"), raw);
+  assert.equal(await readFile(join(store.dir, prefix, take.media!), "utf8"), "immutable paid media");
+});
 it("changed bytes during probing refuse the measurement without changing take history", async () => {
   const { store, job } = await fixture(), [take] = await recordTakesFromJob(store, job, null); assert.ok(take);
   const prefix = `productions/saltlight/takes/${take.id}`, raw = await readFile(join(store.dir, prefix, "take.json"), "utf8");
