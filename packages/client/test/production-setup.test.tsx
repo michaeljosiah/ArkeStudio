@@ -96,7 +96,7 @@ describe("production setup interaction (issue #976)", () => {
     dom.document.body.append(container); root = createRoot(container);
     await act(async () => { __setStateForTest(state, { connection: "open" }); root!.render(
       <GlobalChatContext.Provider value={owner}><MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/${production.meta.id}/chat`]}>
-        <GlobalConversationEntry world={{ worldId: FIXTURE_WORLD_ID, name: state.world!.meta.name }} props={{ worldId: FIXTURE_WORLD_ID, productionId: production.meta.id }} />
+        <GlobalConversationEntry world={{ worldId: FIXTURE_WORLD_ID, name: state.world!.meta.name }} props={{ worldId: FIXTURE_WORLD_ID, productionId: production.meta.id, placeholder: "Ask Arke…", emptyLine: "Start this conversation." }} />
       </MemoryRouter></GlobalChatContext.Provider>); });
     assert.equal(owner.getSnapshot().selected?.entry.kind, "production");
     assert.equal(owner.getSnapshot().selected?.props?.productionId, production.meta.id);
