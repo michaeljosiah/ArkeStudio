@@ -1,4 +1,6 @@
 import { PromptTargetSchema, PromptInspectSourceSchema } from "./prompt-tools.js";
+import { MediaMeasurementSourceSchema } from "./media-measurement.js";
+import { Sha256Schema as MeasurementHashSchema } from "./ids.js";
 import { TraversalEvidenceSchema } from "./routing.js";
 import { OnboardingPlanSchema } from "./onboarding.js";
 import { GuideVoiceLinesRequestSchema, SetGuideEntrySchema, SetGuideTeasersSchema } from "./world-guide.js";
@@ -2782,6 +2784,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("prepare-performance-audio-reference"), worldId: UlidSchema, requestId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema, expectedHash: FullSha256Schema, range: AudioRangeSchema }).strict(),
   z.object({ kind: z.literal("set-prompt-tools"), enabled: z.boolean() }).strict(),
+  z.object({ kind: z.literal("measure-production-media"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema,
+    source: MediaMeasurementSourceSchema, expectedHash: MeasurementHashSchema.optional() }).strict(),
   PromptTargetSchema.extend({ kind: z.literal("prompt-history-read"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
   PromptTargetSchema.extend({ kind: z.literal("prompt-history-restore"), worldId: UlidSchema, requestId: UlidSchema,
     assembledHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),

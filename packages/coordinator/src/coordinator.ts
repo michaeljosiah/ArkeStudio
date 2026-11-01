@@ -1,4 +1,5 @@
 import { readShotPromptHistory, restoreShotPrompt, readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
+import { measureProductionMedia } from "./media/measurement.js";
 import { foldBenchSession as foldPromptBench, type PromptToolsResult, type PromptInspection, type PromptInspectSource } from "@arke-studio/contracts";
 import { benchQuoteParams } from "./bench/service.js";
 import { productionSpend as deriveProductionSpend } from "./spend/rollups.js";
@@ -6725,6 +6726,9 @@ export class Coordinator {
           job,
           ledgerEntry?.actualMicroUsd ?? null,
           {
+            ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+            mediaSignal: this.runtimeStop.signal,
+            onMediaUnavailable: reason => { void this.appLog?.append({ kind: "take.measurement-unavailable", jobId: job.id, reason }); },
             ...(this.opts.takeQcAnalyzer !== undefined ? { analyzer: this.opts.takeQcAnalyzer } : {}),
             ...(this.opts.takePosterMaker !== undefined ? { poster: this.opts.takePosterMaker } : {}),
             onPosterUnavailable: (reason) => {
@@ -10722,6 +10726,23 @@ export class Coordinator {
         if (!this.appSettings) return;
         const settings = await this.appSettings.setPromptTools(msg.enabled);
         this.emit({ at: this.nowIso(), type: "prompt-tools.changed", enabled: settings.promptTools === true });
+        return;
+      }
+      case "measure-production-media": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) {
+          this.emit({ at: this.nowIso(), type: "media.measured", worldId: msg.worldId, requestId: msg.requestId, result: { status: "failed", reason: "unavailable" } });
+          return;
+        }
+        const work = measureProductionMedia(store, msg.productionId, msg.source, this.opts.mediaProbe ?? null, msg.expectedHash, this.runtimeStop.signal);
+        this.backgroundWork.add(work);
+        try {
+          const result = await work;
+          if (this.stillOpen(store)) {
+            if (result.status === "measured") await this.refreshWorldSnapshot(store.worldId);
+            this.emit({ at: this.nowIso(), type: "media.measured", worldId: msg.worldId, requestId: msg.requestId, result });
+          }
+        } finally { this.backgroundWork.delete(work); }
         return;
       }
       case "set-background-notifications": {

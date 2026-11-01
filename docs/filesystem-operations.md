@@ -286,3 +286,13 @@ sibling repository), not in this repository.
 ## Chapter review sidecars
 
 A chapter review creates owned atomic checkpoints at `productions/<production>/.reviews/chapters/<chapter>/<review-id>.json` and `latest.json`. These derived files include the reviewed prose, source hashes, model task receipts, findings and human decisions. They never alter manuscript or media files. Request identity prevents automatic replay of paid inference; recovery marks interrupted tasks and leaves retry to an explicit new review. See [chapter review](development/chapter-review.md) for limits and coverage.
+
+### Explicit source measurement (#253)
+
+Ordinary video/audio take arrival and the local `measure-production-media` action use the same
+full media probe. Successful take measurements create/replace only the owning physical take's
+`media-info.json`; virtual segments reuse their parent. Immutable `take.json`, media, selections,
+costs and prompts are unchanged. Artifact measurements update their existing sidecar. Source
+bytes are contained and checked before/after the bounded probe; the metadata and source identity
+are revalidated under WorldStore ownership before commit. A failed or cancelled read writes no
+measurement. Duration-only hosts cannot persist invented audio presence, and no provider is called.

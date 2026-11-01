@@ -1847,3 +1847,21 @@ Scene-editor Preview has sixteen additional full-App window-bound and choice-acc
 The shared window-overlay rules in `branch-map.css` cover both entry points and release the
 scene centre query container while its modal player is open. Its `--baseline` capture supports comparisons against
 turn 240 without reading or writing an author's world; see the testing guide.
+
+### Music-aware generation and media measurement (#253)
+
+Contracts `production-audio-design.ts` recognises spine masters and saved timeline Music roles,
+with legacy cut fallback only before materialisation. Scene planning's `audioDesignFor` and the
+production Bench compiler use it without editing saved shot bodies. Current policy applies to
+new dispatches; retained original job inspection stays frozen.
+
+Coordinator `media/measurement.ts` resolves opaque take/artifact IDs through their production,
+verifies contained source bytes around the existing full probe, then writes hash-bound adjacent
+metadata through WorldStore. Pass segments resolve to their parent. Requests coalesce in a
+bounded per-world queue. `takes/arrival.ts` measures after immutable take filing and preserves
+paid media on failure; the coordinator tracks explicit `measure-production-media` work through
+shutdown and publishes its scoped transient result only for the still-open world.
+
+Tests: contracts `test/production-audio-design.test.ts`; coordinator
+`test/media/measurement.test.ts`, `test/productions/music-video-policy.test.ts`, existing take
+and Bench subject suites. Design turn 258 proposes the native Cut retry control; UI awaits approval.
