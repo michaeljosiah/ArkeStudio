@@ -68,6 +68,21 @@ it("carries included-plan funding into the chapter illustration proposal before 
     illustrate: says(input => nearest(input, [0, 60])) }));
 
 describe("Illustrate this chapter: the proposal (R-101)", () => {
+  it("names the failed stage and reuses a completed chapter look when planning is retried (#1813)", async () => {
+    let looks = 0, plans = 0;
+    await withHarness(async h => {
+      await illustrate(h.send);
+      assert.match(finished(h.events).reason!, /^Chapter look:.*took too long/);
+      await illustrate(h.send);
+      assert.match(finished(h.events).reason!, /^Picture plan:.*took too long/);
+      assert.equal(looks, 2);
+      await illustrate(h.send);
+      assert.equal(finished(h.events).outcome, "proposed");
+      assert.equal(looks, 2, "the saved chapter look is not derived again");
+      assert.equal(plans, 2, "only an explicit retry repeats the failed plan");
+    }, { look: async () => { if (++looks === 1) throw new Error("deriving took too long"); return { place: { text: "The harbour at dawn." }, characters: [] }; },
+      illustrate: async () => { if (++plans === 1) throw new Error("deriving took too long"); return { pictures: [] }; } });
+  });
   it("proposes where the pictures go and what each shows, priced, held and not made", () =>
     withHarness(
       async ({ events, send, enqueued }) => {
@@ -226,7 +241,7 @@ describe("Illustrate this chapter: the proposal (R-101)", () => {
         await illustrate(send);
         const again = finished(events);
         assert.equal(again.outcome, "failed");
-        assert.equal(again.reason, "the chapter has its pictures");
+        assert.equal(again.reason, "Picture plan: the chapter has its pictures");
       },
       { illustrate: says((input) => nearest(input, [0, 60])) },
     );

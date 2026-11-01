@@ -421,6 +421,7 @@ import { bookLookChoices, lookUsage } from "./productions/audiobook-look-book.js
 import { chooseChapterLook, deriveChapterLook, makeAdapterLookDeriver, setChapterLook, linkChapterCharacter, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
 import { refreshIllustrationProposal, refreshIllustrationRow } from "./productions/audiobook-illustration-refresh.js";
 import { makeAdapterIllustrateDeriver, proposeIllustrations, type IllustrateDeriver } from "./productions/audiobook-illustrate.js";
+import { IllustrationPlanning } from "./productions/illustration-planning.js";
 import { clipPrompt, depictable, makeAdapterPictureDeriver, neutralWhereLooksRide, pictureAspect, pictureRoom, pictureWho, promptRoom, suggestPicture, type PictureDeriver } from "./productions/audiobook-picture-suggest.js";
 import { clothingChange, makeAdapterPromptRewriter, rewritePictureClothing, type PromptRewriter } from "./productions/audiobook-picture-rewrite.js";
 import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
@@ -1476,6 +1477,7 @@ export class Coordinator {
   private readonly illustrating = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /** A proposal not yet accepted (R-101): held by chapter and replayed to a window that connects. Nothing on disk. */
   private readonly heldIllustrations = new Map<string, Extract<DomainEvent, { type: "illustration.finished" }>>();
+  private readonly illustrationPlanning = new IllustrationPlanning();
   /** An accepted proposal being made one picture at a time (R-102), with where it stands, replayed likewise. */
   private readonly makingIllustrations = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string; progress: IllustrationProgress }>();
   /**
@@ -17763,21 +17765,25 @@ export class Coordinator {
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         this.heldIllustrations.delete(key);
         this.emit({ at: at(), type: "illustration.started", ...ids });
+        let stage = "Chapter look";
         try {
           const deriver = this.illustrateDeriverFor();
           if (!deriver) return finish("unavailable", { reason: "the writing service is not running" });
           const model = await this.pictureModel(store);
           if (!model) return finish("failed", { reason: "no picture model is on" });
           const looked = await this.chapterLook(store, msg.productionId, chapter, control.signal);
-          if (typeof looked === "string") return finish("failed", { reason: looked });
+          if (typeof looked === "string") return finish("failed", { reason: `${stage}: ${looked}` });
+          stage = "Picture plan";
           const room = await pictureRoom(store, msg.productionId, chapter.id, looked.look);
           // A row on a block holding a look of its own has that person's clothing words rewritten for it (R-146).
-          const { proposal } = await proposeIllustrations(store, room, model, deriver, control.signal, this.promptRewriterFor() ?? undefined);
+          const { proposal } = await proposeIllustrations(store, room, model,
+            (input, signal) => this.illustrationPlanning.derive(key, input, deriver, signal), control.signal, this.promptRewriterFor() ?? undefined);
           finish("proposed", { proposal: { ...proposal, proposalId: ulid() } });
+          this.illustrationPlanning.discard(key);
         } catch (err) {
           if (control.signal.aborted) return finish("stopped");
           void this.appLog?.append({ kind: "audiobook.illustrate-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
-          finish("failed", { reason: describeCoordinatorError(err) });
+          finish("failed", { reason: `${stage}: ${describeCoordinatorError(err)}` });
         } finally {
           store.closingSignal.removeEventListener("abort", onClose);
           this.illustrating.delete(key);
@@ -17814,6 +17820,7 @@ export class Coordinator {
         const chapter = store?.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
         const key = `${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`;
         if (!this.makingIllustrations.has(key)) this.heldIllustrations.delete(key);
+        if (!this.illustrating.has(key)) this.illustrationPlanning.discard(key);
         return;
       }
       case "stop-illustration": {

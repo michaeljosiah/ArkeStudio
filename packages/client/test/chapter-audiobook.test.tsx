@@ -2108,6 +2108,10 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(q(m, '[data-testid="illustration-status"]')!.dataset.state, "failed");
     assert.equal(q(m, '[data-testid="illustration-sheet"]'), null);
     assert.equal(q(m, ".fy-illst__line")?.textContent, "Illustratethe chapter has its pictures");
+    assert.equal(sentOf(m, "illustrate-chapter").length, 1, "a failure never retries by itself");
+    const retry = [...q(m, '[data-testid="illustration-status"]')!.querySelectorAll("button")].find(button => button.textContent === "Continue planning")!;
+    await act(async () => retry.click());
+    assert.equal(sentOf(m, "illustrate-chapter").length, 2, "continuation is an explicit author action");
   });
 });
 
