@@ -29,13 +29,13 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  */
 const SCREENS = [
   // BEGIN SHOT PROMPTS 258
-  { group: "Media measurement · turn 258", screen: "Cut inspector · measure an unmeasured source", frame: "258a", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026 for owner UI review. Local measurement and retry, issue 253."] },
-  { group: "Media measurement · turn 258", screen: "Local measurement · one pending act, no generation", frame: "258b", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026 for owner UI review. Local measurement and retry, issue 253."] },
-  { group: "Media measurement · turn 258", screen: "Phone · a failed measurement preserves the take", frame: "258c", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026 for owner UI review. Local measurement and retry, issue 253."] },
-  { group: "Media measurement · turn 258", screen: "Phone · local media tools unavailable", frame: "258d", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026 for owner UI review. Local measurement and retry, issue 253."] },
-  { group: "Media measurement · turn 258", screen: "Measured · duration and audio become available", frame: "258e", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026 for owner UI review. Local measurement and retry, issue 253."] },
-  { group: "Media measurement · turn 258", screen: "Phone · changed source refuses stale metadata", frame: "258f", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026 for owner UI review. Local measurement and retry, issue 253."] },
-  { group: "Media measurement · turn 258", screen: "Phone · measure this source from Clip details", frame: "258g", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026 for owner UI review. Local measurement and retry, issue 253."] },
+  { group: "Media measurement · turn 258", screen: "Cut inspector · measure an unmeasured source", frame: "258a", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026. Local measurement and retry, issue 253."] },
+  { group: "Media measurement · turn 258", screen: "Local measurement · one pending act, no generation", frame: "258b", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026. Local measurement and retry, issue 253."] },
+  { group: "Media measurement · turn 258", screen: "Phone · a failed measurement preserves the take", frame: "258c", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026. Local measurement and retry, issue 253."] },
+  { group: "Media measurement · turn 258", screen: "Phone · local media tools unavailable", frame: "258d", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026. Local measurement and retry, issue 253."] },
+  { group: "Media measurement · turn 258", screen: "Measured · duration and audio become available", frame: "258e", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026. Local measurement and retry, issue 253."] },
+  { group: "Media measurement · turn 258", screen: "Phone · changed source refuses stale metadata", frame: "258f", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026. Local measurement and retry, issue 253."] },
+  { group: "Media measurement · turn 258", screen: "Phone · measure this source from Clip details", frame: "258g", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026. Local measurement and retry, issue 253."] },
   // END SHOT PROMPTS 258
 
   // BEGIN SHOT PROMPTS 257
@@ -1074,7 +1074,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
-  { file: "media-measurement-258.review.html", what: "Turn 258: local media measurement and retry in Cut.", state: "proposed; owner UI review pending" },
+  { file: "media-measurement-258.review.html", what: "Turn 258: local media measurement and retry in Cut.", state: "approved; application controls implemented and browser checked" },
   { file: "shot-prompts-257.review.html", what: "Turn 257: prompt history, one-prompt restore and compiled request/reference inspection.", state: "proposed; owner design review pending" },
   { file: "arke-drives-256.review.html", what: "Turn 256: Arke drives, the screen stays simple — the usual as one card, Arke working said on the chapter, mysteries kept apart, a reading view, the book at a glance.", state: "approved 1 November 2026; not built" },
   { file: "production-spend-255.review.html", what: "Turn 255: lifetime production spend, generated and selected counts, receipts and incomplete history.", state: "approved; implementation in progress" },

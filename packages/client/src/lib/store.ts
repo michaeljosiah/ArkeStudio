@@ -2011,6 +2011,7 @@ function handleFrame(json: string): void {
       for (const listener of chapterOpenListeners) listener(event);
     }
     if (event.type === "prompt-tools.result") for (const listener of promptToolsListeners) listener(event);
+    if (event.type === "media.measured") for (const listener of mediaMeasurementListeners) listener(event);
     if (event.type === "chapter.version-result") {
       for (const listener of chapterVersionListeners) listener(event);
     }
@@ -7958,6 +7959,24 @@ export function subscribeRemoteRefusals(listener: (refusal: RemoteCommandRefusal
 }
 
 const promptToolsListeners = new Set<(event: Extract<DomainEvent, { type: "prompt-tools.result" }>) => void>();
+const mediaMeasurementListeners = new Set<(event: Extract<DomainEvent, { type: "media.measured" }>) => void>();
+export function requestMediaMeasurement(message: Omit<Extract<ClientMessage, { kind: "measure-production-media" }>, "kind" | "requestId">,
+  signal: AbortSignal): Promise<import("@arke-studio/contracts").MediaMeasurementResult> {
+  const requestId = ulid();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => { clearTimeout(timer); mediaMeasurementListeners.delete(listener); signal.removeEventListener("abort", cancel); };
+    const cancel = () => { cleanup(); reject(new Error("Measurement dismissed.")); };
+    const listener = (event: Extract<DomainEvent, { type: "media.measured" }>) => {
+      if (event.requestId !== requestId || event.worldId !== message.worldId) return;
+      cleanup(); resolve(event.result);
+    };
+    const timer = setTimeout(() => { cleanup(); reject(new Error("No answer. Try the measurement again.")); }, 60_000);
+    if (signal.aborted) { cancel(); return; }
+    signal.addEventListener("abort", cancel, { once: true });
+    mediaMeasurementListeners.add(listener);
+    if (!send({ kind: "measure-production-media", ...message, requestId })) { cleanup(); reject(new Error("Not connected. Reconnect to try again.")); }
+  });
+}
 export function setPromptTools(enabled: boolean): void { send({ kind: "set-prompt-tools", enabled }); }
 export function requestPromptTools(message: Omit<Extract<ClientMessage, { kind: "prompt-history-read" }>, "requestId"> |
   Omit<Extract<ClientMessage, { kind: "prompt-history-restore" }>, "requestId"> |

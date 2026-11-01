@@ -2323,3 +2323,5 @@ actual Bench prompt composition, immutable take/media retention, adjacent full-h
 parent segment sources, retry/coalescing, unavailable tools, source changes and cancellation.
 Design turn 258 is checked separately by `node design-system/media-measurement-258.capture.mjs`.
 Its drawings are synthetic and do not establish native UI behavior or probe availability.
+
+From client run `node --import tsx --test --test-concurrency=2 test/media-measurement.test.tsx test/cut-trim.test.tsx test/cut-layout.test.tsx test/prompt-tools.test.tsx` for conditional controls, scoped local requests, retries, source replacement and discarded late replies. From the root, `node --import tsx scripts/smoke-media-measurement.mjs` checks the actual Cut/App and existing phone sheet at desktop, phone and short windows in both themes. It measures horizontal fit, reachable controls, pending/failed/success states, phone targets, Tab containment and Escape/focus return; measured media adds no standing control. Its replies are synthetic and do not prove native probe availability. Captures go to `output/media-measurement-native/`.

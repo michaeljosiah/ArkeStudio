@@ -32,6 +32,7 @@ import {
 import { ClipGain, MixPanel, AudioClipSettings } from "./editor-audio.js";
 import { CueInspector, SubtitleSources } from "./editor-subtitles.js";
 import { TrimStrip } from "./editor-preview.js";
+import { SourceMeasurement, measurementSubject } from "./editor-media-measurement.js";
 
 export type CutSelection = { kind: "picture"; id: string } | { kind: "cue"; id: string } | { kind: "effect"; id: string };
 
@@ -127,20 +128,29 @@ export function CutInspector({
         (clipShotId !== null ? (cut?.entries.find((entry) => entry.shot.id === clipShotId) ?? null) : null))
       : null;
   const selectedShotId = selectedSpine?.shotId ?? clipShotId ?? selectedStory?.shot.id ?? null;
-  const selectedTakeId = selectedSpine?.takeId ?? selectedStory?.takeId ?? null;
+  const selectedTakeId = selectedSpine?.takeId ?? selectedStory?.takeId ??
+    (selectedClip?.source.kind === "take" ? selectedClip.source.takeId : null) ??
+    (selectedShotId ? production?.selections[selectedShotId]?.acceptedTakeId : null) ?? null;
   const shotTakes = production && selectedShotId ? reviewableTakesForShot(production, selectedShotId) : [];
   const takeIndex = shotTakes.findIndex((take) => take.id === selectedTakeId);
+  const directTake = selectedClip?.source.kind === "take" ? production?.takes.find(take => take.id === selectedTakeId) : undefined;
   const takeLabel = takeIndex >= 0
     ? `Take ${takeIndex + 1} · ${shotTakes[takeIndex]!.model}`
-    : selectedTakeId ? "Take unavailable" : "no accepted take";
+    : directTake ? directTake.model : selectedTakeId ? "Take unavailable" : "no accepted take";
   const ceiling =
     production && selectedShotId && selectedTakeId
       ? trimCeilingSec(production, selectedShotId, selectedTakeId)
       : null;
   const trim = selectedShotId ? (production?.selections[selectedShotId]?.trimInSec ?? 0) : 0;
-  const takeSec = selectedTakeId
-    ? production?.takeMediaInfo[selectedTakeId]?.mediaInfo.durationSec
-    : undefined;
+  const takeSubject = production && selectedTakeId ? measurementSubject(production, artifacts, { kind: "take", takeId: selectedTakeId }) : null;
+  const physicalSec = takeSubject?.info?.durationSec;
+  const takeSec = physicalSec !== undefined && takeSubject?.segment
+    ? Math.max(0, Math.min(takeSubject.segment.outSec, physicalSec) - takeSubject.segment.inSec) : physicalSec;
+  const measurementSource = selectedClip?.source.kind === "artifact" ? { kind: "artifact" as const, artifactId: selectedClip.source.artifactId }
+    : selectedTakeId ? { kind: "take" as const, takeId: selectedTakeId } : null;
+  const measurement = worldId && production && measurementSource
+    ? <SourceMeasurement worldId={worldId} production={production} artifacts={artifacts} source={measurementSource} disabled={commandsDisabled}
+        onChooseTake={clipShotId && selectedTrack?.kind === "picture" ? () => setTakesOpen(true) : undefined} /> : null;
 
   if (selectedClip && selectedTrack && selectedTrack.kind !== "picture" && production) {
     const label = selectedClip.source.label;
@@ -156,6 +166,7 @@ export function CutInspector({
             <InspectorRow label="Voice">{selectedClip.source.sheetId}{selectedClip.source.voiceAssignedAtVersion !== undefined ? ` · sheet v${selectedClip.source.voiceAssignedAtVersion}` : ""}</InspectorRow>
           )}
         </div>
+        {measurement}
         <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={compact} />
         {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && <ClipGain clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} />}
         {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && timeline !== null && (
@@ -188,6 +199,7 @@ export function CutInspector({
           )}
         </div>
         <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={compact} />
+        {measurement}
         {selectedClip && selectedTrack?.kind === "picture" && <PictureAppearanceInspector key={selectedClip.id} clip={selectedClip} frameRate={frameRate} disabled={appearanceDisabled ?? commandsDisabled} onCommands={onCommands} resetToken={appearanceRevision ?? timeline?.revision} scopeLabel={appearanceScopeLabel} />}
         {timeline && selectedTrack?.kind === "picture" && <DetachAudio production={production} timeline={timeline} artifacts={artifacts} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />}
       </div>
@@ -213,6 +225,7 @@ export function CutInspector({
           <InspectorRow label={selectedSpine ? "Window" : "Shot length"}>{duration.toFixed(1)}s</InspectorRow>
           {takeSec !== undefined && <InspectorRow label="Take length">{takeSec.toFixed(1)}s</InspectorRow>}
         </div>
+        {measurement}
         {selectedClip && (<>
           <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={compact} />
         {selectedClip && selectedTrack?.kind === "picture" && <PictureAppearanceInspector key={selectedClip.id} clip={selectedClip} frameRate={frameRate} disabled={appearanceDisabled ?? commandsDisabled} onCommands={onCommands} resetToken={appearanceRevision ?? timeline?.revision} scopeLabel={appearanceScopeLabel} />}

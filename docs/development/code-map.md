@@ -1865,4 +1865,4 @@ shutdown and publishes its scoped transient result only for the still-open world
 Tests: contracts `test/production-audio-design.test.ts`; coordinator
 `test/media/measurement.test.ts`, `test/media/measurement-wire.test.ts`,
 `test/productions/music-video-policy.test.ts`, existing take
-and Bench subject suites. Design turn 258 proposes the native Cut retry control; UI awaits approval.
+and Bench subject suites. Client `screens/editor-media-measurement.tsx` resolves the selected physical source and exposes recovery only for absent metadata or failure. `lib/store.ts` correlates and releases transient measurement requests; authoritative metadata arrives through the normal world snapshot. The existing Cut inspector and phone sheet host approved turn 258, with no new route or setting. Client `test/media-measurement.test.tsx` and root `scripts/smoke-media-measurement.mjs` cover controls, source/world invalidation, local-only commands, both themes and native sheet behavior.
