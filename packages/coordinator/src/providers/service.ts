@@ -88,7 +88,7 @@ export class ProviderService {
    * Run the per-capability probes (R-3, D5). "Valid" means at least one capability is
    * unlocked; the probes themselves are the real answer either way.
    */
-  async validate(id: ProviderId): Promise<ProviderStatus> {
+  async validate(id: ProviderId, options: { background?: boolean } = {}): Promise<ProviderStatus> {
     const previous = this.statuses.get(id);
     const recentlyHealthy = id === "ollama" && previous?.validation === "valid" && previous.lastValidated !== undefined &&
       Date.parse(this.clock()) - Date.parse(previous.lastValidated) <= 90_000;
@@ -146,7 +146,10 @@ export class ProviderService {
       // replacement, which an unfunded account does not need. The capability stays locked —
       // `deriveCapabilityAvailability` reads the probe — and the probe's reason says why.
       const authenticated = anyAvailable || probes.some((p) => p.authenticated === true);
-      void this.log?.append({ kind: "provider.validated", provider: id, probes });
+      if (!options.background || previous?.validation !== (authenticated ? "valid" : "invalid") || previous.fault !== null ||
+        JSON.stringify(previous.probes) !== JSON.stringify(probes) || (external && previous.configured !== anyAvailable)) {
+        void this.log?.append({ kind: "provider.validated", provider: id, probes });
+      }
       return this.patch(id, {
         validation: authenticated ? "valid" : "invalid",
         probes,
@@ -163,7 +166,9 @@ export class ProviderService {
         if (retained) return retained;
       }
       const message = err instanceof Error ? err.message : String(err);
-      void this.log?.append({ kind: "provider.validation-failed", provider: id, message });
+      if (!options.background || previous?.validation !== "invalid" || previous.probes.some(probe => probe.reason !== message)) {
+        void this.log?.append({ kind: "provider.validation-failed", provider: id, message });
+      }
       return this.patch(id, {
         validation: "invalid",
         probes: PROVIDERS[id].capabilities.map((capability) => ({ capability, available: false, reason: message })),

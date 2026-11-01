@@ -12,6 +12,7 @@ import { AppSettingsFile, availableModels, routingFaults } from "../../src/app-s
 import { CredentialStore, type Cipher } from "../../src/credentials/store.js";
 import { ProviderService } from "../../src/providers/service.js";
 import { SecretRegistry } from "../../src/redact.js";
+import type { AppLog } from "../../src/app-log.js";
 
 const cipher: Cipher = {
   isAvailable: () => true,
@@ -46,6 +47,16 @@ async function makeService(probes: CapabilityProbe[] | Error, before?: () => Pro
 }
 
 describe("provider statuses and availability (R-1..R-4, §3.2)", () => {
+  it("keeps unchanged background validations out of the log while retaining fresh health timestamps", async () => {
+    const logged: unknown[] = []; let time = 0, available = true;
+    const service = new ProviderService(null, { ollama: { validateKey: async () => [{ capability: "llm", available }] } },
+      { append: async (event: unknown) => { logged.push(event); } } as AppLog, () => new Date(time += 30_000).toISOString());
+    await service.init(); const initial = await service.validate("ollama", { background: true });
+    for (let i = 0; i < 10; i++) await service.validate("ollama", { background: true });
+    assert.equal(logged.length, 1); assert.notEqual(service.list().find(row => row.id === "ollama")?.lastValidated, initial.lastValidated);
+    available = false; await service.validate("ollama", { background: true }); assert.equal(logged.length, 2);
+    await service.validate("ollama"); assert.equal(logged.length, 3, "an explicit check is still logged");
+  });
   it("does not offer optional Ming speech or cloning before a witnessed model-readiness probe", async () => {
     let ready = false;
     const service = new ProviderService(null, {ming: {validateKey: async () => ["voice-tts", "voice-clone"].map(capability => ({capability: capability as "voice-tts" | "voice-clone", available: ready}))}}, null);
