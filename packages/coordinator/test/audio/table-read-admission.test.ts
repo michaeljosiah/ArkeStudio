@@ -27,7 +27,7 @@ for (const change of ["retired", "selected", "cached", "unchanged"] as const) it
     { id: "cloud", kind: "dialogue", speaker: cloud.id, text: "Cloud later." }] };
   scene.shots = [{ ...scene.shots[0]!, covers: ["local", "cloud"].map(blockId => ({ blockId, textDigest: "sha256:12345678" })) }];
   production.scenes = [scene];
-  const providers: ProviderStatus[] = ["kokoro", "elevenlabs"].map(id => ({ id, configured: true, validation: "valid", fault: null, probes: [{ capability: "voice-tts", available: true }] }));
+  const providers: ProviderStatus[] = (["kokoro", "elevenlabs"] as const).map(id => ({ id, configured: true, validation: "valid", fault: null, probes: [{ capability: "voice-tts", available: true }] }));
   const before = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], providers);
   assert.equal(before.local.length, 1); assert.equal(before.cloud.length, 1);
   const events: DomainEvent[] = [], admitted: EnqueueInput[] = [];
