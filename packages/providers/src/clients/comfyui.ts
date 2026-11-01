@@ -923,7 +923,8 @@ export class ComfyUiClient implements ProviderClient {
    */
   async poll(_key: string, remoteId: string, _context?: ProviderCallContext): Promise<PollResult> {
     if (this.disposed) throw new Error("comfyui: the provider client is disposed");
-    const base = this.require(_context?.model ?? this.promptModels.get(remoteId));
+    const model = _context?.model ?? this.promptModels.get(remoteId);
+    const base = this.require(model);
     this.listen(base);
     const queue = await jsonRequest(this.fetchImpl, this.id, `${base}/queue`, {});
     if (queue.status < 400) {
@@ -958,7 +959,7 @@ export class ComfyUiClient implements ProviderClient {
     if (status?.status_str === "error") {
       return {
         state: "failed",
-        error: `${historyError(status.messages) ?? "comfyui: the engine reported an execution error"}${this.onEngine()}`,
+        error: `${historyError(status.messages) ?? "comfyui: the engine reported an execution error"}${model && comfyUiRecipeById(model) ? ` · ${comfyUiRecipeById(model)!.displayName}` : ""}${this.onEngine()}`,
       };
     }
     if (status?.completed === true) return { state: "succeeded" };
@@ -1109,7 +1110,14 @@ function historyError(messages: unknown[] | undefined): string | null {
     if (!Array.isArray(message) || message[0] !== "execution_error") continue;
     const detail = message[1] as { exception_message?: unknown } | undefined;
     if (detail && typeof detail.exception_message === "string") {
-      return `comfyui: ${scrubPaths(detail.exception_message).slice(0, 500)}`;
+      const raw = detail.exception_message;
+      // A host-buffer read can fail for several reasons. Neither Windows 1450 nor a later
+      // memory sample proves RAM/commit pressure, VRAM exhaustion or an incompatible engine.
+      const explanation = /hostbuf_file_reader_read failed/i.test(raw)
+        ? "Model data could not be read. The cause is unconfirmed; this is not a measured RAM, committed-memory or GPU-memory diagnosis. Check the engine and memory readings in System, then review the failed job before retrying. "
+        : /CUDA out of memory|CUDA.*outofmemory/i.test(raw)
+          ? "GPU memory allocation failed. Review the failed job and supported size settings before retrying. " : "";
+      return `comfyui: ${explanation}${scrubPaths(raw).slice(0, 500)}`;
     }
   }
   return null;

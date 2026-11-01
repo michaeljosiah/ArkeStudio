@@ -1400,7 +1400,7 @@ export class ComfyUiEngineService {
       return {
         ...base,
         state: "unknown",
-        reason: `${engine.locality === "remote" ? "Remote engine VRAM" : "VRAM"} could not be measured. The ${gb(recipe.minVramMb)} floor was not checked.`,
+        reason: `${engine.locality === "remote" ? "Remote engine VRAM" : "VRAM"} could not be measured. The ${gb(recipe.minVramMb)} floor was not checked. The engine responds, but this does not establish that the recipe will run.`,
         reasonKind: "vram",
       };
     }
