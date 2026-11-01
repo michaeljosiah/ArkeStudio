@@ -46,8 +46,9 @@ describe("the cold read of a draft (SPEC-064 R-64 – R-66, turn 254)", () => {
       (err: unknown) => err instanceof ConversationActionPreparationError && /could not follow Salt: page 1 panel 1, Who is Jory\?/.test(err.message));
     assert.match(asked[0]!.before, /The tide, page 1:[\s\S]*"The tide came in grey\."/, "the chapter before, as its pages");
     assert.match(asked[0]!.draft, /Page 1:[\s\S]*"Then where's Jory\?"/);
-    // The corrective attempt of the same turn is read again and offered with what is left on it.
-    const again = { conversationId: "cv_1", turnId: "turn_1", actions: [draft(id, second)] };
+    // The next draft of the chapter in the conversation — the corrective attempt, or a later ask when
+    // that attempt failed for something else — is read again and offered with what is left on it.
+    const again = { conversationId: "cv_1", turnId: "turn_9", actions: [draft(id, second)] };
     await readComicDrafts(store, again, reader([[JORY]]), refused, SIGNAL, AT);
     const read = (again.actions[0] as { read?: { status: string; findings: unknown[]; redrafts: number } }).read;
     assert.deepEqual([read?.status, read?.findings, read?.redrafts], ["read", [JORY], 1]);
