@@ -14,7 +14,7 @@ const write = (name, content) => fs.writeFileSync(path.join(here, name), content
 const esc = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
 const tokens = '_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens';
 const STYLE = '<link rel="stylesheet" href="graphic-novel-247.css"><link rel="stylesheet" href="pages-room-251.css"><link rel="stylesheet" href="page-review-253.css">';
-const STATUS = 'proposed';
+const STATUS = 'approved';
 const frames = FRAMES.map(([letter, title, draw]) => ({ id: '253' + letter, title, width: 1360, height: 850, markup: draw() }));
 for (const f of frames) if (!f.markup.startsWith('<div class="gn247 gn251 gn253"')) throw new Error(`${f.id}: frame root is not .gn253`);
 
@@ -27,7 +27,7 @@ if (process.argv.includes('--preview')) { console.log(`Wrote page-review-253.rev
 
 
 export const rules = [
-  ['Review status', '1 November 2026, proposed. The owner read The Ledger of Nights, drawn, as published and asked why the pictures had been checked only for their words. The lettering check passed a caption about stopping a pen drawn over Maren at the rail, faces in the water no panel asked for and, before a remake, Bray without his collar; it failed the ledger’s own handwriting as extra (issue 2266). SPEC-064 revision 8 adds the page review (R-67 – R-73). Nothing here is built.'],
+  ['Review status', '1 November 2026. Approved by the owner the same day (“Approved”), calls 1 – 5 as drawn. The owner read The Ledger of Nights, drawn, as published and asked why the pictures had been checked only for their words. The lettering check passed a caption about stopping a pen drawn over Maren at the rail, faces in the water no panel asked for and, before a remake, Bray without his collar; it failed the ledger’s own handwriting as extra (issue 2266). SPEC-064 revision 8 adds the page review (R-67 – R-73). Nothing here is built.'],
   ['Two checks, two lines', 'Every take shows two verdict lines under the page, one block: Lettering, then Picture (253a). Each line says pass, how many to fix, how many to look at, or not checked, and who read it. The page and its thumbnail take the worse of the two.'],
   ['Faults are boxed and listed', 'Picture faults are boxed on the page with their kind, as lettering faults are, and listed under the verdicts as kind, panel and a few words (253a). Kinds that block: Scene, People, Caption, Defect, Speaker. Accept waits for both checks; Make again and Accept anyway stay. Until it passes counts a picture fault as a fail.'],
   ['Writing in the scene is cleared, not hidden', 'Words the lettering check reads as extra are cleared when the panel’s description calls for that writing, a ledger, a notice, a sign. The row stays, struck through, with where it is (253b), so the author sees what was cleared and why. Writing no description calls for stays a fault.'],
@@ -58,9 +58,9 @@ write('Arke Studio.dc.html', master);
 
 let build = read('build-review.mjs').replace(/\r?\n  \/\/ BEGIN PAGE REVIEW 253[\s\S]*?  \/\/ END PAGE REVIEW 253(?:\r?\n)*/g, '\n');
 const plain = title => title.replaceAll('&#8217;', '’').replaceAll('&#183;', '·');
-const entries = frames.map(f => `  { group: "The page review · turn 253", screen: ${JSON.stringify(plain(f.title))}, frame: "${f.id}", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026."] },`);
+const entries = frames.map(f => `  { group: "The page review · turn 253", screen: ${JSON.stringify(plain(f.title))}, frame: "${f.id}", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },`);
 build = build.replace('const SCREENS = [', 'const SCREENS = [\n  // BEGIN PAGE REVIEW 253\n' + entries.join('\n') + '\n  // END PAGE REVIEW 253\n');
-const pageEntry = '{ file: "page-review-253.review.html", what: "Turn 253: the page review — Lettering and Picture verdicts, picture faults boxed, writing in the scene cleared, warnings seen, Not checked with a reason.", state: "proposed 1 November 2026; not built" }';
+const pageEntry = '{ file: "page-review-253.review.html", what: "Turn 253: the page review — Lettering and Picture verdicts, picture faults boxed, writing in the scene cleared, warnings seen, Not checked with a reason.", state: "approved 1 November 2026; not built" }';
 if (build.includes('file: "page-review-253.review.html"')) build = build.replace(/\{ file: "page-review-253\.review\.html",[^\n]+?\}/, pageEntry);
 else build = build.replace('const PAGES = [', 'const PAGES = [\n  ' + pageEntry + ',');
 if (!build.includes(LINK)) build = build.replace('<link rel="stylesheet" href="${TOKENS}/fonts.css">', LINK + '\n<link rel="stylesheet" href="${TOKENS}/fonts.css">');

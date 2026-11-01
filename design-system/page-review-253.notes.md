@@ -1,6 +1,6 @@
 # Turn 253 · The page review
 
-Proposed 1 November 2026. SPEC-064 revision 8, R-67 – R-73 (specs PR 124).
+Proposed 1 November 2026. Approved by the owner the same day ("Approved"), calls 1 – 5 as drawn. SPEC-064 revision 8, R-67 – R-73 (specs PR 124).
 
 ## Why this turn
 
