@@ -1024,7 +1024,14 @@ export function ChapterWorkspace({
   const newestDraft = stagedChapterDraft(world.proposals, path)?.staged.proposal.id ?? null;
   useEffect(() => setShownVersion(null), [newestDraft]);
   const shown = shownVersion !== null && versions.includes(shownVersion) ? shownVersion : undefined;
-  const stagedDraft = stagedChapterDraft(world.proposals, path, shown);
+  const candidateDraft = stagedChapterDraft(world.proposals, path, shown);
+  const draftBaseVersion = candidateDraft?.staged.proposal.targets.find(target => target.path === path)?.baseVersion;
+  const earlierDraft = record !== null && draftBaseVersion != null && draftBaseVersion < record.version;
+  const [reviewingEarlier, setReviewingEarlier] = useState<string | null>(null);
+  const earlierKey = `${candidateDraft?.staged.proposal.id}:${record?.version}`;
+  // Accepting a replacement must not put an older alternative over the accepted manuscript.
+  // Keep the proposal available for deliberate review or discard, without deleting alternatives.
+  const stagedDraft = earlierDraft && reviewingEarlier !== earlierKey ? undefined : candidateDraft;
   const locked = stagedDraft !== undefined || record === null;
 
   /*
@@ -1997,7 +2004,7 @@ export function ChapterWorkspace({
    * are shown and confirmed before it lands.
    */
   // Every staged proposal carries a preview, empty when nothing ripples (codex on PR 1806).
-  const decidedOnPage = view === "manuscript" && !phone && stagedDraft !== undefined && (stagedDraft.staged.ripple?.items.length ?? 0) === 0;
+  const decidedOnPage = view === "manuscript" && !phone && !earlierDraft && stagedDraft !== undefined && (stagedDraft.staged.ripple?.items.length ?? 0) === 0;
   // What a draft adds after the saved prose, when it only adds; null when it rewrites.
   const draftAdds = stagedDraft === undefined || passageChange !== null || live.trim() === "" ? null
     : (stagedDraft.body ?? "").startsWith(live.trimEnd()) ? (stagedDraft.body ?? "").slice(live.trimEnd().length) : null;
@@ -3715,6 +3722,13 @@ export function ChapterWorkspace({
               </DocHead>
             )}
             {povReview}
+            {earlierDraft && candidateDraft !== undefined && <div className="fy-ch__band" data-testid="earlier-draft">
+              <span>Earlier draft · based on v{draftBaseVersion}; accepted manuscript is v{record?.version}.</span>
+              <Button size="sm" disabled={pending || saving || draft !== null} onClick={() => setReviewingEarlier(stagedDraft === undefined ? earlierKey : null)}>
+                {stagedDraft === undefined ? "Review earlier draft" : "Edit accepted manuscript"}
+              </Button>
+              <Button size="sm" disabled={pending || connection !== "open"} onClick={() => discardProposal(worldId, candidateDraft.staged.proposal.id)}>Discard earlier draft</Button>
+            </div>}
             {voicedAt !== null && (
               <div className="fy-ch__band" data-testid="voiced-band">
                 <span className="fy-ch__band-who">{voicedAt.speaker === undefined ? narratorName : voicedAt.sheet !== undefined ? sheetNameOf(voicedAt.sheet) : voicedAt.speaker}</span>
