@@ -234,4 +234,38 @@ describe("a page looked at as a picture (SPEC-064 R-67 – R-73, turn 253)", () 
         assert.equal(record().acknowledged[take.id], undefined, "a new review is a new verdict");
       } finally { restore(); }
     }, { model: LETTERER }));
+
+  it("checks one take at a time, however many pages land together", () =>
+    withHarness(async (h) => {
+      const proto = Coordinator.prototype as unknown as { pageReader: (...args: unknown[]) => PageReader | null; pageReviewer: (...args: unknown[]) => PageReviewer | null };
+      const original = { reader: proto.pageReader, reviewer: proto.pageReviewer };
+      let open = 0;
+      let widest = 0;
+      // Each read and review holds the harness a moment, as a real one does.
+      const busy = async <T>(answer: T): Promise<T> => {
+        open += 1; widest = Math.max(widest, open);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        open -= 1;
+        return answer;
+      };
+      type Reads = { readComicTake(store: unknown, production: string, page: string, take: string): Promise<unknown> };
+      // The coordinator the harness made, met as the reader is asked for.
+      const coordinators = new Set<Reads>();
+      proto.pageReader = function (this: Reads) {
+        coordinators.add(this);
+        return { precise: true, read: () => busy({ regions: GOOD, reader: { id: "test", version: "1" } }) };
+      };
+      proto.pageReviewer = () => ({ review: () => busy({ findings: [], cleared: [], reviewer: { id: "test", version: "1" } }) });
+      try {
+        const books = [await book(h), await book(h), await book(h)];
+        for (const { production, page } of books)
+          await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, confirmedMicroUsd: 1_000_000 });
+        // Then all three read again at once, as sixteen late pages filed together were.
+        widest = 0;
+        const [coordinator] = [...coordinators];
+        await Promise.all(books.map(({ store, production, page, record }) => coordinator!.readComicTake(store, production, page.id, record().takes[0]!.id)));
+        assert.equal(widest, 1, "one take checked at a time");
+        for (const { record } of books) assert.equal(record().takes[0]!.review?.status, "compared");
+      } finally { proto.pageReader = original.reader; proto.pageReviewer = original.reviewer; }
+    }, { model: LETTERER }));
 });

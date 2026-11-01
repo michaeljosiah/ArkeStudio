@@ -46,6 +46,8 @@ export interface Harness {
   /** The most jobs that were ever in flight at once: a run made one at a time never holds two. */
   concurrent: () => number;
   store: () => ReturnType<NonNullable<FsWorldProvider["openStore"]>>;
+  /** Lands the nth job (from 0) that was held, as a provider answering late. */
+  landHeld: (n: number) => Promise<void>;
 }
 
 export interface HarnessOptions {
@@ -64,6 +66,8 @@ export interface HarnessOptions {
   prepare?: (worldDir: string) => Promise<void>;
   /** Motion tests exercise the same Bench reservation and filing seam with a measured video. */
   videoOutput?: boolean;
+  /** How long a press waits on its picture and how often a late page looks again. */
+  pictureWait?: { waitMs: number; lateLookMs: number };
 }
 
 export async function withHarness(run: (h: Harness) => Promise<void>, options: HarnessOptions = {}): Promise<void> {
@@ -102,13 +106,34 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
       (async () => ({ place: { text: "The rail desk at dawn, grey light." }, characters: [{ who: "maren-kest", text: "Oilskin coat, dark with salt." }, { who: "bray-half-hitch", text: "Three belts, a wet cap." }] })),
     ...(options.illustrate !== undefined ? { illustrateDeriver: options.illustrate } : {}),
     ...(options.rewrite !== undefined ? { promptRewriter: options.rewrite } : {}),
+    ...(options.pictureWait !== undefined ? { pictureWait: options.pictureWait } : {}),
   });
   if (options.videoOutput) (coordinator as unknown as { readModel: { apply(event: DomainEvent): void } }).readModel.apply({ at: CLOCK, type: "provider.status", providers: [{ id: "fal", configured: true, validation: "valid", probes: [{ capability: "video", available: true }], fault: null }] });
   // Every job made a submission call, as a provider refusal does: `attempt` is how a run tells one.
   const jobs: Array<{ id: string; attempt: number }> = [];
+  type Input = { target: { id: string }; landing: { dir: string }; params: Record<string, unknown>; estimatedMicroUsd: number };
+  const held = new Map<number, Input>();
+  const landing = async (input: Input) => {
+    const [sessionId, takeId] = input.target.id.split("/") as [string, string];
+    const bench = new BenchStore(sessionDir(worldDir, sessionId as never));
+    await mkdir(join(worldDir, input.landing.dir), { recursive: true });
+    const bytes = options.videoOutput ? Buffer.from("synthetic video fixture") : pngBytes();
+    const output = options.videoOutput ? "made.mp4" : "made.png";
+    await writeFile(join(worldDir, input.landing.dir, output), bytes);
+    await bench.append(
+      { type: "take-completed", takeId: takeId as never, media: { file: output, hash: `sha256:${createHash("sha256").update(bytes).digest("hex")}` }, cost: { estimatedMicroUsd: input.estimatedMicroUsd, actualMicroUsd: input.estimatedMicroUsd }, completedAt: CLOCK },
+      { at: CLOCK },
+    );
+  };
+  const landHeld = async (n: number) => {
+    const input = held.get(n);
+    if (input === undefined) throw new Error(`job ${n} was not held`);
+    held.delete(n);
+    await landing(input);
+  };
   (coordinator as unknown as { jobQueue: unknown }).jobQueue = {
     listJobs: () => jobs,
-    enqueue: async (input: { target: { id: string }; landing: { dir: string }; params: Record<string, unknown>; estimatedMicroUsd: number }) => {
+    enqueue: async (input: Input) => {
       const n = enqueued.length;
       enqueued.push({ params: input.params, estimatedMicroUsd: input.estimatedMicroUsd, at: Date.now() });
       const what = behaviour(n);
@@ -116,7 +141,10 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
       jobs.push({ id, attempt: options.reached === false ? 0 : 1 });
       const [sessionId, takeId] = input.target.id.split("/") as [string, string];
       const bench = new BenchStore(sessionDir(worldDir, sessionId as never));
-      if (what === "hold") return { id };
+      if (what === "hold") {
+        held.set(n, input);
+        return { id };
+      }
       inFlight += 1;
       widest = Math.max(widest, inFlight);
       // A job takes a moment, as a real one does: a run that started the next while this was in
@@ -127,14 +155,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
           await bench.append({ type: "take-status", takeId: takeId as never, status: "failed", error: options.failure ?? "the provider refused the prompt" }, { at: CLOCK });
           return { id };
         }
-        await mkdir(join(worldDir, input.landing.dir), { recursive: true });
-        const bytes = options.videoOutput ? Buffer.from("synthetic video fixture") : pngBytes();
-        const output = options.videoOutput ? "made.mp4" : "made.png";
-        await writeFile(join(worldDir, input.landing.dir, output), bytes);
-        await bench.append(
-          { type: "take-completed", takeId: takeId as never, media: { file: output, hash: `sha256:${createHash("sha256").update(bytes).digest("hex")}` }, cost: { estimatedMicroUsd: input.estimatedMicroUsd, actualMicroUsd: input.estimatedMicroUsd }, completedAt: CLOCK },
-          { at: CLOCK },
-        );
+        await landing(input);
         return { id };
       } finally {
         inFlight -= 1;
@@ -146,7 +167,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
     (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
-    await run({ worldDir, events, send, seen, enqueued, cancelled, concurrent: () => widest, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!() });
+    await run({ worldDir, events, send, seen, enqueued, cancelled, concurrent: () => widest, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!(), landHeld });
   } finally {
     await provider.close();
   }
