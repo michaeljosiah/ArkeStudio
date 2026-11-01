@@ -61,7 +61,7 @@ import {
   useAudiobookDoors,
   useAudiobookNotes,
   useAudiobookRuns,
-  useStore,
+  useStoreSelector, shallowEqual,
 } from "../lib/store.js";
 
 /**
@@ -93,7 +93,7 @@ const chapterSources = (production: DoorProduction | null) => production?.chapte
  * run's own counts (codex on PR 1187).
  */
 export function useAudiobookDoorStamp(worldId: string | undefined, prodId: string | undefined, production: DoorProduction | null, world: DoorWorld | null): string {
-  const store = useStore();
+  const store = useStoreSelector(store => ({ state: store.state, voiceCatalogueHeld: store.voiceCatalogueHeld, audiobookBook: store.audiobookBook, audiobookNotes: store.audiobookNotes, audiobook: store.audiobook, audiobookRecords: store.audiobookRecords }), shallowEqual);
   const narrator = store.state?.app.narrator ?? null;
   const catalogue = store.voiceCatalogueHeld;
   const book = store.audiobookBook[prodId ?? ""];
@@ -136,7 +136,7 @@ export function useAudiobookDoorStamp(worldId: string | undefined, prodId: strin
  * window holds no door yet, as one that joins a run going elsewhere does not (codex on PR 1187).
  */
 export function useAudiobookDoorAsk(worldId: string | undefined, prodId: string | undefined, production: DoorProduction | null, world: DoorWorld | null, enabled = true): void {
-  const connection = useStore().connection;
+  const connection = useStoreSelector(store => store.connection);
   const stamp = useAudiobookDoorStamp(worldId, prodId, production, world);
   const door = useAudiobookDoors()[prodId ?? ""]?.door ?? null;
   const chapterReading = useChapterReading(worldId, prodId);
@@ -321,7 +321,7 @@ export function AudiobookScreen() {
   const { prodId, worldId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
-  const connection = useStore().connection;
+  const connection = useStoreSelector(store => store.connection);
   const held = useAudiobookDoors()[prodId ?? ""];
   const door = held?.door ?? null;
   const book = useAudiobookBooks()[prodId ?? ""];
@@ -334,7 +334,7 @@ export function AudiobookScreen() {
   // voice gone unavailable, or back, moves the voices and the price (codex on PR 1187).
   // As they come and go, not as they are checked: each probe stamps its time, and asking the
   // catalogue on every probe asked every keyed vendor for its voices every few seconds.
-  const app = useStore().state?.app;
+  const app = useStoreSelector(store => store.state?.app);
   const engines = JSON.stringify([
     app?.runtime === null || app?.runtime === undefined ? null : { ...app.runtime, detectedAt: undefined },
     app?.comfyui === null || app?.comfyui === undefined ? null : { ...app.comfyui, checkedAt: undefined },
@@ -892,7 +892,7 @@ function ReadingSheet({ worldId, productionId, production, door, reading, runnin
   onClose: () => void;
 }) {
   const navigate = useNavigate();
-  const connection = useStore().connection;
+  const connection = useStoreSelector(store => store.connection);
   const held = connection !== "open" || running;
   const shell = useRef<HTMLDivElement>(null);
   const [askId, setAskId] = useState<string | null>(null);
@@ -1088,7 +1088,7 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
   const vendors = [...new Set(price.voices.filter((line) => !line.local).map((line) => providerName(line.provider)))];
   // A book Google's free day cannot cover: the reads it needs against the day's, and how far it goes.
   const free = price.freePlan !== undefined ? freePlanAskCopy(price.freePlan) : null;
-  const models = useStore().state?.app.manifest?.models;
+  const models = useStoreSelector(store => store.state?.app.manifest?.models);
   return (
     <EditorDialog open title="Read the book" subtitle={`${price.chapters} chapter${price.chapters === 1 ? "" : "s"} · ${price.characters.toLocaleString()} characters · ${price.cloudBlocks} cloud line${price.cloudBlocks === 1 ? "" : "s"}`} onClose={onClose} width={460} labelledBy="read-book-title">
       <div className="fy-exsheet" data-testid="read-book-sheet">

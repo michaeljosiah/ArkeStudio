@@ -83,7 +83,7 @@ import {
   subscribeVoiceUploadConfirmations,
   useBench,
   useClientState,
-  useStore,
+  useStoreSelector,
   useWorld,
 } from "../lib/store.js";
 import { Button, Badge, cx } from "../components/ui.js";
@@ -208,7 +208,7 @@ export function BenchScreen() {
    * longer names the session in the store, the workspace that asked is unmounted, and a
    * listener kept there would never hear the id it was waiting for. This component stays.
    */
-  const connection = useStore().connection;
+  const connection = useStoreSelector(store => store.connection);
   const pendingSubjectOpen = useRef<string | null>(null);
   const [subjectOpening, setSubjectOpening] = useState(false);
   const [subjectOpenNote, setSubjectOpenNote] = useState<string | null>(null);
@@ -317,7 +317,7 @@ function BenchWorkspace({
 }) {
   const world = useWorld();
   const state = useClientState();
-  const connection = useStore().connection;
+  const connection = useStoreSelector(store => store.connection);
   const navigate = useNavigate();
   const worldSlug = world?.meta.slug;
   const productionAudio = session.subject?.kind === "production" ? session.subject : undefined;

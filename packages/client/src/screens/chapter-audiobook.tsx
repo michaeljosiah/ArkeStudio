@@ -106,7 +106,7 @@ import {
   draftAudiobookSpeakerNotes,
   useAudiobookRuns,
   useDirectionRuns,
-  useStore,
+  useStoreSelector, shallowEqual,
   keepAudiobookSplit,
   resetAudiobookSeams,
   setAudiobookSeam,
@@ -374,14 +374,16 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const { worldId, prodId, chapter, body, cast, record, missing, reading, connection, locked } = input;
   const recordedList = input.recorded;
   const recordedKeys = useMemo(() => new Set(recordedList ?? []), [recordedList]);
-  const { state } = useStore();
-  const world = state?.world ?? null;
+  const { world, storedNarrator, providerRows, modelRows, queues, activity } = useStoreSelector(store => ({
+    world: store.state?.world ?? null, storedNarrator: store.state?.app.narrator,
+    providerRows: store.state?.app.providers, modelRows: store.state?.app.manifest?.models, queues: store.state?.app.queues,
+    activity: store.state?.app.audiobookActivity?.find(run => run.worldId === worldId && run.productionId === prodId && run.chapterId === chapter.id && audiobookActivityLive(run)),
+  }), shallowEqual);
   // What each character goes by in a row, the filter and the panel title; the full name stays the tooltip (design turn 194, rule 12b).
   const labels = useMemo(() => characterLabels(world?.sheets ?? []), [world?.sheets]);
-  const catalogue = useStore().voiceCatalogue;
+  const catalogue = useStoreSelector(store => store.voiceCatalogue);
   const runs = useAudiobookRuns();
   const run = runs[`${worldId}/${prodId}/${chapter.id}`];
-  const activity = state?.app.audiobookActivity?.find(run => run.worldId === worldId && run.productionId === prodId && run.chapterId === chapter.id && audiobookActivityLive(run));
   const at = useQueueAt();
   const [selected, setSelected] = useState<string | null>(null);
   const location = useLocation();
@@ -408,15 +410,15 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // whose recording is gone, so both fall back here as they do there.
   const bookNarrator = input.bookNarrator;
   const narrator = useMemo<AudiobookReader>(
-    () => chapterNarrator({ ...(bookNarrator !== undefined ? { bookNarrator } : {}), stored: state?.app.narrator ?? null, worldId, catalogue, names: world ?? {} }),
-    [state?.app.narrator, catalogue, bookNarrator, worldId, world],
+    () => chapterNarrator({ ...(bookNarrator !== undefined ? { bookNarrator } : {}), stored: storedNarrator ?? null, worldId, catalogue, names: world ?? {} }),
+    [storedNarrator, catalogue, bookNarrator, worldId, world],
   );
   // Why the book's own narrator cannot read now, judged as the coordinator judges it (issue 1661),
   // so Direct and Read are held here where the run would refuse them, and the chapter says why: a
   // 402 once left a read on `request 1 of 9` with the reason only in app.jsonl.
   const narratorUnavailable = useMemo(
-    () => bookNarratorUnavailable(bookNarrator, catalogue, state?.app.providers ?? []),
-    [bookNarrator, catalogue, state?.app.providers],
+    () => bookNarratorUnavailable(bookNarrator, catalogue, providerRows ?? []),
+    [bookNarrator, catalogue, providerRows],
   );
   const notes = input.notes;
   const readingNotes = input.readingNotes;
@@ -424,7 +426,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // each row can carry its proposed direction and what that would be sent as.
   const heldRun = useDirectionRuns()[`${worldId}/${prodId}/${chapter.id}`];
   const proposal = heldRun !== undefined && (heldRun.state === "directed" || heldRun.state === "accepting") && heldRun.proposed !== undefined ? heldRun : null;
-  const models = state?.app.manifest?.models ?? [];
+  const models = modelRows ?? [];
   const modelOf = useCallback(
     (reader: AudiobookReader): ManifestModel | null => models.find((m) => m.provider === reader.provider && m.id === reader.model && m.capability === "voice-tts") ?? null,
     [models],
@@ -657,7 +659,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // the same blocks — consecutive cloud blocks of one groupable reader, packed under the caps and
   // closed at natural breaks — so the button says `5 requests` before anything is asked. Grouping
   // is offered only where this machine can split, as the coordinator decides it.
-  const providers = state?.app.providers;
+  const providers = providerRows;
   const requestsSetting = input.requests;
   const grouping = useMemo(() => {
     const transcriber = localTranscriberAvailable(providers ?? []);
@@ -1053,7 +1055,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       // made or not, else those the chapter's read makes (codex on PR 1869).
       const asked = only.current;
       const readers = new Set(rows.filter((row) => (asked !== null ? asked.includes(row.block.key) : row.state !== "made" && row.state !== "awaiting")).map((row) => row.speaker.provider));
-      const lane = state?.app.queues.find((queue) => queue.paused && readers.has(queue.provider));
+      const lane = queues?.find((queue) => queue.paused && readers.has(queue.provider));
       const waiting = lane === undefined ? null : readerUnavailableWords(lane.provider, lane.reason ?? "paused");
       return whole(
         <span className="fy-ab__control fy-ab__read-progress">
@@ -2797,9 +2799,9 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
 }) {
   const row = rows.find((candidate) => candidate.block.key === selected) ?? null;
   // A Make again past the month's free credit is priced again, and says so (design turn 182).
-  const creditLeft = freeCreditLeft(useStore().state?.app.ledger ?? []);
+  const creditLeft = freeCreditLeft(useStoreSelector(store => store.state?.app.ledger) ?? []);
   // A designed or cloned voice is said by its name, never its id (the door's Cast, 2026-10-03).
-  const voiceNames = useStore().state?.world ?? {};
+  const voiceNames = useStoreSelector(store => store.state?.world) ?? {};
   const [supportNotice, setSupportNotice] = useState<string | null>(null);
   const [lineOpen, setLineOpen] = useState(false);
   const [markerMenu, setMarkerMenu] = useState<MarkerAt | null>(null);
@@ -3352,7 +3354,7 @@ export function ProposedBlock({ row, proposed, model, hear }: {
 }) {
   const [hearId, setHearId] = useState<string | null>(null);
   const heard = useHeardLines()[hearId ?? ""];
-  const slug = useStore().state?.world?.meta.slug;
+  const slug = useStoreSelector(store => store.state?.world?.meta.slug);
   const playback = usePlayback();
   useEffect(() => setHearId(null), [row.block.key]);
   useEffect(() => {
@@ -3640,7 +3642,7 @@ export function BookRequests({ worldId, productionId, setting, reader, counts }:
   reader: string;
   counts?: { requests: number; perParagraph: number };
 }) {
-  const connection = useStore().connection;
+  const connection = useStoreSelector(store => store.connection);
   const held = connection !== "open" || useProductionReading(worldId, productionId);
   return (
     <div className="fy-ab__requests" data-testid="book-requests">
@@ -3687,7 +3689,7 @@ export function BookReadingPanel({ worldId, productionId, title, bookNote, speak
   speakers: ReadonlyArray<{ key: string; name: string; note?: string; source?: "sheet" }>;
   onDone: () => void;
 }) {
-  const connection = useStore().connection;
+  const connection = useStoreSelector(store => store.connection);
   const reading = useProductionReading(worldId, productionId);
   const held = connection !== "open" || reading;
   const [askId, setAskId] = useState<string | null>(null);
@@ -3848,7 +3850,7 @@ export function SpeakerLinesDialog({ worldId, productionId, speaker, label, tone
   onClose: () => void;
 }) {
   const all = useSpeakerLines();
-  const connection = useStore().connection;
+  const connection = useStoreSelector(store => store.connection);
   const [scope, setScope] = useState<"awaiting" | "all">("awaiting");
   const [scriptId, setScriptId] = useState<string | null>(null);
   const [summaryId, setSummaryId] = useState<string | null>(null);
