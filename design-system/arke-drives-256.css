@@ -1,0 +1,37 @@
+/* Turn 256 · Arke drives, the screen stays simple. On top of the 247, 249 and 254 sheets: only the
+   usual-settings card, the working state, kept mysteries, the reading view and the dashboard are new.
+   Type through the tokens only. */
+.gn256-usual{border:1px solid var(--border);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;max-width:340px}
+.gn256-usual .row{display:flex;gap:10px;font-size:var(--text-sm)}
+.gn256-usual .row span{width:58px;flex:none;color:var(--muted-foreground)}
+.gn256-usual .row b{font-weight:600}
+.gn256-usual .gn249-acts{margin-top:4px}
+.gn256-spin{display:inline-block;width:16px;height:16px;flex:none;border-radius:50%;border:2px solid color-mix(in srgb,currentColor 25%,transparent);border-top-color:currentColor}
+.gn256-working{display:flex;flex-direction:column;align-items:center;gap:8px}
+.gn256-working b{font:var(--type-ui);font-weight:600;font-size:var(--text-md)}
+.gn256-working .m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.gn256-kept{height:24px;padding:0 9px;border-radius:999px;display:inline-flex;align-items:center;font:var(--type-label);font-size:var(--text-xs);color:var(--muted-foreground);border:1px solid var(--border);white-space:nowrap;flex:none}
+.gn256-pagehead{display:flex;align-items:center;gap:10px}
+.gn256-pagehead h3{margin:0}
+.gn256-toggle{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;font:var(--type-label);font-size:var(--text-xs)}
+.gn256-toggle span{padding:4px 10px;color:var(--muted-foreground)}
+.gn256-toggle span.on{background:var(--secondary);color:var(--foreground)}
+.gn256-read{display:flex;gap:12px;padding:12px 14px;border:1px solid var(--border);border-radius:12px}
+.gn256-read.flag{box-shadow:0 0 0 2px color-mix(in srgb,var(--destructive) 55%,transparent)}
+.gn256-read .n{width:16px;flex:none;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);padding-top:2px}
+.gn256-read>div{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.gn256-read .d{font:var(--type-meta);color:var(--muted-foreground)}
+.gn256-read .l{font-size:var(--text-sm)}
+.gn256-read .l b{font-weight:600;margin-right:8px}
+.gn256-read .gn254-q{margin:4px -14px -12px;border-radius:0 0 12px 12px}
+.gn256-dash{padding:28px 40px;display:flex;flex-direction:column;gap:14px;max-width:820px}
+.gn256-dash h2{margin:0;font:var(--type-title)}
+.gn256-dash>.m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);margin-top:-8px}
+.gn256-next{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:color-mix(in srgb,var(--foreground) 4%,transparent);font-size:var(--text-sm)}
+.gn256-next svg{width:15px;height:15px}
+.gn256-next b{font-weight:600}
+.gn256-ch .n{width:16px;flex:none;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.gn256-stage{height:22px;padding:0 9px;border-radius:999px;display:inline-flex;align-items:center;font:var(--type-label);font-size:var(--text-xs);border:1px solid var(--border);color:var(--muted-foreground);white-space:nowrap}
+.gn256-stage.made{color:var(--success);border-color:color-mix(in srgb,var(--success) 40%,var(--border))}
+.gn256-stage.wait{color:var(--foreground);background:color-mix(in srgb,var(--warning) 14%,transparent);border-color:transparent}
+.gn256-stage.kept{color:var(--foreground)}
