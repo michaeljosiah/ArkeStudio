@@ -1333,7 +1333,7 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
     // inside, which is why the old regex here passed throughout (issue 687).
     assert.equal(
       unknown.recipes[0]!.reason,
-      "VRAM could not be measured. The 6 GB floor was not checked.",
+      "VRAM could not be measured. The 6 GB floor was not checked. The engine responds, but this does not establish that the recipe will run.",
     );
   });
 
