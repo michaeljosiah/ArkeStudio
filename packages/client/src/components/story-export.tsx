@@ -225,8 +225,8 @@ export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow 
   const wideOnly = pictures === undefined ? 0 : pictures.wide - pictures.tall;
   const picturesRow = pictures !== undefined && opt(
     "Pictures",
-    <span data-testid="story-export-pictures">{`${pictures.wide} wide · ${pictures.tall} tall`}</span>,
-    blocked && toClear("media") > 0 ? `${toClear("media")} to clear` : wideOnly > 0 ? `${wideOnly} wide only` : undefined,
+    <span data-testid="story-export-pictures">{`${pictures.wide} beats wide · ${pictures.tall} tall`}</span>,
+    blocked && toClear("media") > 0 ? `${toClear("media")} to clear` : wideOnly > 0 ? `${wideOnly} beats wide only` : undefined,
     // A visual novel's beat has no Tall of its own yet: 235's Tall flow is the audiobook's moments.
     !blocked && wideOnly > 0 ? <button type="button" className="fy-abv-btn sm" disabled title="Not built yet: a beat's Tall">Make tall</button> : undefined,
   );

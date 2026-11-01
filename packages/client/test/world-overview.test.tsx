@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { CHARACTER_ROLE_MAX, type Sheet } from "@arke-studio/contracts";
+import { CHARACTER_ROLE_MAX, migrateLegacyScene, type Sheet } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __applyEventForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -24,6 +24,27 @@ import { productionsLayoutFixture } from "./productions-layout-fixture.js";
 
 const WORLD = FIXTURE_STATE.world!;
 const WORLD_ID = WORLD.meta.worldId;
+
+it("counts a novel's filed and retained pictures on both production cards (#2238)", () => {
+  const state = structuredClone(FIXTURE_STATE), world = state.world!, production = world.productions[0]!;
+  production.meta = { ...production.meta, medium: "video", kind: "visual-novel" };
+  production.scenes = [migrateLegacyScene({ id: "sc_pictures", slug: "pictures", number: 1, order: 1, title: "Pictures", status: "draft", version: 1,
+    shots: [{ id: "sh_first", number: 1, description: "First picture" }, { id: "sh_kept", number: 2, description: "Keep it", beat: { samePicture: true } }] })];
+  const picture = { id: "ar_01J9M000000000000000000503", kind: "image" as const, file: "picture.png", hash: "sha256:2222222222222222", origin: { by: "user" as const }, links: [], created: "2026-10-23T10:00:00Z" };
+  world.artifacts.push(picture);
+  production.selections = { sh_first: { startFrameArtifactId: picture.id, trimInSec: 0 } };
+  world.productions = [production];
+  const render = (path: string) => {
+    __setStateForTest(state);
+    return parseHTML(renderToString(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>).replace(/<!-- -->/g, "")).document;
+  };
+  try {
+    assert.match(render(`/w/${WORLD_ID}/productions`).querySelector(".fy-prodcard__meta")!.textContent!, /2 of 2 pictures/);
+    assert.match(render(`/w/${WORLD_ID}`).querySelector(".fy-prodtile__foot")!.textContent!, /2 pictures · 2 ready/);
+    production.selections = {};
+    assert.match(render(`/w/${WORLD_ID}/productions`).querySelector(".fy-prodcard__meta")!.textContent!, /0 of 2 pictures/);
+  } finally { __setStateForTest(FIXTURE_STATE); }
+});
 
 /** The fixture world with its cast replaced, so each case controls exactly one card. */
 function renderHubWithCast(characters: Sheet[]): string {

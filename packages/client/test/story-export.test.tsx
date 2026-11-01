@@ -146,7 +146,7 @@ describe("Export on an interactive story (turn 245)", () => {
     await answer(m, NOVEL);
     assert.deepEqual(labels(), ["World", "Story", "Closed choices", "Pictures", "Size", "Voices", "Format", "Edition"]);
     assert.equal(row("Closed choices"), "Closed choices 1 · 1 with a reason", "nothing hidden, so no tail");
-    assert.match(row("Pictures"), /^Pictures 86 wide · 0 tall 86 wide only Make tall$/);
+    assert.match(row("Pictures"), /^Pictures 86 beats wide · 0 tall 86 beats wide only Make tall$/);
     assert.equal(row("Voices"), "Voices 61 of 86 lines 25 as text");
     assert.equal(text(q('[data-testid="story-export-estimate"]')), "~212 MB · ~1 min on this machine 86 beats · 80 pictures · 61 lines");
     await press([...q('[data-testid="story-export-size"]')!.querySelectorAll("button")].find((el) => text(el) === "960 px"));

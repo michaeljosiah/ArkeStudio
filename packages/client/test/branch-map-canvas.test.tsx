@@ -550,6 +550,8 @@ describe("the branch map canvas (design turn 157)", () => {
     await click(button(item, "Story facts"));
     await click(button(item, "+ Add fact"));
     assert.equal(button(item, "Add fact"), undefined, "there is no inner staging step");
+    assert.equal(button(item, "Remove fact"), undefined);
+    assert.equal(all(item, 'dialog.story-dialog [role="alert"]').length, 0, "an untouched name is not a broken reference");
     assert.equal(button(item, "Keep fact")!.hasAttribute("disabled"), true);
     await change(all(item, 'input[aria-label="Name for fact"]')[0], "Has the key");
     await click(button(item, "Keep fact"));
