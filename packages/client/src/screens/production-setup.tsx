@@ -235,7 +235,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
             )}
             {/* A graphic novel's three questions, answered by example (249b): cards for the one Arke is asking. */}
             {graphicNovel && draft?.comicAsk && !locked && !running && (
-              <ComicAskCards ask={draft.comicAsk} disabled={!!pending || running || !!unavailable}
+              <ComicAskCards ask={draft.comicAsk} disabled={!!pending || running || !!unavailable} pilotTitle={draft.graphicNovel?.chapters[0]?.title}
                 onChoose={text => command({ operation: "send", text, ...(modelId ? { modelId } : {}) })} />
             )}
             {/* Under Arke's plan, the two ways on (230c, issue 1883): start the pilot, or change the plan first. */}
@@ -318,7 +318,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
                 choice was for making the world. */}
             {/* Not for an audio drama (issue 1883): its rows are a picture's and a film's, and a
                 drama's voices are chosen by role in Cast. */}
-            {!audioDrama && <ModelsCard
+            {!audioDrama && !graphicNovel && <ModelsCard
               state={state}
               capabilities={PRODUCTION_MODEL_CAPABILITIES}
               choices={draft.models}

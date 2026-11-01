@@ -904,6 +904,7 @@ export class WorldChatRunner {
           },
           { at: this.deps.now() },
         );
+        const sentBackByTheReader = outcome.problems.some((problem) => /A reader who has only the pages/.test(problem.safeMessage ?? ""));
         progress?.("Working it through again");
         raw = await askOnce(
           adapter,
@@ -931,6 +932,18 @@ export class WorldChatRunner {
           view.entryContext?.kind === "production-setup" ? view.productionSetup?.draft.revision : undefined,
           revising ? "only" : undefined,
         );
+        /*
+         * Repair before reporting (design turn 256): a comic draft the cold read sent back spends the
+         * corrective attempt on the redraft, and any other slip in that redraft lost it — three asks
+         * in a row in the owner's run of 1 November 2026. Such a redraft gets one more repair before
+         * a person sees a failure.
+         */
+        if (!outcome.ok && sentBackByTheReader) {
+          progress?.("Working it through again");
+          raw = await askOnce(adapter, session.sessionId, correctiveMessage(outcome.problems), timeoutMs, controller.signal, progress, refused);
+          outcome = await this.applyResult(store, conversationId, raw, runId, leaseToken, at, linked, artDirectionLook, bible.version, sceneBaseVersion,
+            refusedTools, subject, replyOnly, view.entryContext?.kind === "production-setup" ? view.productionSetup?.draft.revision : undefined, revising ? "only" : undefined);
+        }
       }
 
       if (!outcome.ok) {

@@ -6,6 +6,7 @@ import {
   ComicScriptSchema,
   DraftComicPageSchema,
   settleComicDraft,
+  fitLayout,
   unfinishedLettering,
   EpisodeSchema,
   EpisodeScriptSchema,
@@ -41,7 +42,7 @@ import {
 import type { ProposalManager } from "../gate/proposals.js";
 import { ConversationActionPreparationError } from "../arke-actions/lifecycle.js";
 import { keepAdaptedText } from "../productions/audio-drama.js";
-import { COMIC_ADAPTATION_SCHEMA_VERSION, COMIC_PLAN_SCHEMA_VERSION } from "../world/commit.js";
+import { COMIC_ADAPTATION_SCHEMA_VERSION, COMIC_PLAN_SCHEMA_VERSION, COMIC_USUAL_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import { MarkdownFile } from "../world/text-files.js";
@@ -404,7 +405,11 @@ export function comicScriptDraft(store: WorldStore, action: Pick<WorldChatProduc
   const drafted = DraftComicPageSchema.array().safeParse(action.pages);
   if (!drafted.success) throw refuse(`${chapter.title}'s pages cannot be read: ${drafted.error.issues[0]?.message ?? "invalid"}`);
   // A plan leaves the chapter's pages as they are; pages keep the plan they were written from.
-  const pages = planning ? current?.pages ?? [] : settleComicDraft(drafted.data, current?.pages ?? []);
+  // Each page takes the layout its panels fit (turn 256): one template for every page drew nine
+  // panels into five. A page kept as it was keeps its layout, or its takes would go out of date.
+  const before = new Map((current?.pages ?? []).map((page) => [page.id, page.layout]));
+  const pages = planning ? current?.pages ?? [] : settleComicDraft(drafted.data, current?.pages ?? [])
+    .map((page) => before.get(page.id) === page.layout ? page : { ...page, layout: fitLayout(page.layout, page.panels.length) });
   const unfinished = planning ? undefined : unfinishedLettering(pages);
   if (unfinished) throw refuse(`Page ${unfinished.page} has "${unfinished.text}", which ends in a comma: the prose's line with its tag cut. Letter it as a whole line, said or narrated.`);
   // Each cited passage must be a chapter there is; a pin with no version or hash takes the chapter's
@@ -433,10 +438,21 @@ export function comicScriptDraft(store: WorldStore, action: Pick<WorldChatProduc
   // One draft of a chapter at a time: a second would hide behind the first, and keeping either
   // would make the other stale.
   const path = `productions/${production.meta.id}/comic/${chapter.id}.json`;
-  if (store.getBundle().proposals.some((staged) => staged.proposal.targets.some((target) => target.path === path))) {
+  // A plan replaces a plan still waiting (turn 256c): Fix on one of its leans asks for the plan again.
+  // A waiting draft of pages is the author's to keep or discard first.
+  const waiting = waitingComicDraft(store, path);
+  if (waiting && !(planning && waiting.plan)) {
     throw refuse(`A draft of ${chapter.title}'s pages is waiting. Keep or discard it in Pages first.`);
   }
   return parsed.data;
+}
+
+/** The comic draft of a chapter waiting in the gate, and whether it is a plan alone. */
+function waitingComicDraft(store: WorldStore, path: string): { id: string; plan: boolean } | null {
+  const staged = store.getBundle().proposals.find((entry) => entry.proposal.targets.some((target) => target.path === path));
+  if (!staged) return null;
+  const script = staged.comicScripts?.[path];
+  return { id: staged.proposal.id, plan: script !== undefined && script.pages.length === 0 && script.plan !== undefined };
 }
 
 export async function stageWorldChatProductionAuthoredAction(
@@ -559,9 +575,12 @@ export async function stageWorldChatProductionAuthoredAction(
   if (payload.kind === "world-chat-production-comic-script") {
     const record = comicScriptDraft(store, payload.action);
     const chapter = production.chapters.find((candidate) => candidate.id === payload.action.chapter)!;
+    // The plan this one replaces goes first (turn 256c), so the chapter never holds two.
+    const replaced = waitingComicDraft(store, `productions/${production.meta.id}/comic/${chapter.id}.json`);
+    if (replaced?.plan && record.pages.length === 0) await gate.discard(replaced.id);
     // A build before drafted pages reads a comic-script proposal as an unknown kind, and one before
     // plans refuses a script that carries a plan or a read (turn 254).
-    await store.ensureSchemaVersion(record.plan !== undefined || record.read !== undefined ? COMIC_PLAN_SCHEMA_VERSION : COMIC_ADAPTATION_SCHEMA_VERSION, "comic-script");
+    await store.ensureSchemaVersion((record.plan?.mysteries.length ?? 0) > 0 ? COMIC_USUAL_SCHEMA_VERSION : record.plan !== undefined || record.read !== undefined ? COMIC_PLAN_SCHEMA_VERSION : COMIC_ADAPTATION_SCHEMA_VERSION, "comic-script");
     return gate.stage({
       kind: "comic-script",
       summary: `${chapter.title} pages: ${production.meta.title}`,

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import {
   BLOCKING_FINDINGS,
   chapterParagraphs,
@@ -46,6 +46,7 @@ import { comicStylePicture, comicStylePreset, draftFromStyle, styleFromDraft, ty
 import { useProduction } from "../lib/selectors.js";
 import {
   acceptComicTake,
+  cancelWorldChat,
   seeComicWarning,
   acceptProposal,
   discardProposal,
@@ -107,7 +108,12 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const connection = useStore().connection;
   const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
   const chapters = useMemo(() => production.chapters.filter((chapter) => !chapter.retired).sort((a, b) => a.order - b.order), [production.chapters]);
-  const [chapterId, setChapterId] = useState<string | null>(chapters[0]?.id ?? null);
+  // The dashboard's next step opens Pages on the chapter it names (turn 256e).
+  const search = useLocation().search;
+  const [chapterId, setChapterId] = useState<string | null>(() => {
+    const asked = new URLSearchParams(search).get("chapter");
+    return chapters.find((candidate) => candidate.id === asked)?.id ?? chapters[0]?.id ?? null;
+  });
   const chapter = chapters.find((candidate) => candidate.id === chapterId) ?? chapters[0];
   const stored = production.comicScripts?.find((entry) => entry.chapter === chapter?.id);
 
@@ -231,6 +237,8 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const draftRead = draftScript?.read;
   const keptPlan = stored?.script.plan;
   const [planOpen, setPlanOpen] = useState(false);
+  // A draft opens as the reader will meet it (turn 256d); Details is the script as 254d drew it.
+  const [detail, setDetail] = useState(false);
   const [draftPageId, setDraftPageId] = useState<string | null>(null);
   const draftPage = draftPages?.find((candidate) => candidate.id === draftPageId) ?? draftPages?.[0];
   const [draftPanelId, setDraftPanelId] = useState<string | null>(null);
@@ -239,22 +247,26 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const adaptedFrom = chapter ? settings.adapts?.chapters.find((entry) => entry.chapter === chapter.id) : undefined;
   const sourceStory = adaptedFrom ? world.productions.find((candidate) => candidate.meta.id === settings.adapts!.story) : undefined;
   const sourceChapter = adaptedFrom ? sourceStory?.chapters.find((candidate) => candidate.id === adaptedFrom.from) : undefined;
+  // One press asks (turn 256): the words are sent, never left in the chat box for a second press.
   const ask = (words: string) => {
-    if (!chat || !chatSurface) return;
+    if (!chat || !chatSurface || !chapter) return;
     chat.setValue(chatSurface.key, "draft", words);
+    chat.setValue(chatSurface.key, "autoSend", true);
     chat.open(chatSurface);
+    askedOf.set(`${productionId}:${chapter.id}`, Date.now());
   };
   // Plan first (turn 254a): Arke drafts pages only from a plan the author kept.
   const from = sourceStory && sourceChapter ? ` from chapter ${sourceChapter.order} of ${sourceStory.meta.title}` : "";
   const planWithArke = () => chapter && ask(`Plan chapter ${chapter.order}, ${chapter.title}, as pages${from}.`);
   const fixLean = (lean: ComicChapterPlan["leans"][number]) => chapter && ask(`In the plan for chapter ${chapter.order}, ${chapter.title}: page ${lean.page}, "${lean.line}" ${lean.why}. Settle it in the plan.`);
-  const draftWithArke = () => {
-    if (!chat || !chatSurface || !chapter) return;
-    chat.setValue(chatSurface.key, "draft", sourceStory && sourceChapter
-      ? `Turn chapter ${chapter.order}, ${chapter.title}, into pages from chapter ${sourceChapter.order} of ${sourceStory.meta.title}.`
-      : `Turn chapter ${chapter.order}, ${chapter.title}, into pages.`);
-    chat.open(chatSurface);
-  };
+  const draftWithArke = () => chapter && ask(`Draft chapter ${chapter.order}, ${chapter.title}, from its kept plan${from}.`);
+  // Arke at work on this chapter is said on the chapter itself (turn 256b): pressed from here, or the
+  // pilot Start the pilot asked for, while a turn runs.
+  const conversation = useStore().state?.worldChat ?? null;
+  const asked = chapter ? askedOf.get(`${productionId}:${chapter.id}`) : undefined;
+  const turnRunning = conversation?.runStatus === "running";
+  const working = turnRunning && chapter !== undefined && drafted === undefined && pages.length === 0
+    && ((asked !== undefined && Date.now() - asked < 30 * 60_000) || chapter.id === chapters[0]?.id);
 
   const [reading, setReading] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -329,8 +341,8 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               {draftPages.map((candidate, index) => (
                 <button key={candidate.id} type="button" className={cx("fy-comic__thumb fy-comic__thumb--draft", candidate.id === draftPage?.id && "on")} aria-label={`Draft page ${firstNumber + index}`} onClick={() => setDraftPageId(candidate.id)}>
                   <span className="d">draft</span>
-                  {asked(draftRead, index + 1).length > 0 && (
-                    <span className={cx("s", asked(draftRead, index + 1).some((finding) => SCRIPT_READ_BLOCKING.has(finding.kind)) ? "x" : "w")}><TriangleAlert size={10} /></span>
+                  {askedOn(draftRead, index + 1).length > 0 && (
+                    <span className={cx("s", askedOn(draftRead, index + 1).some((finding) => SCRIPT_READ_BLOCKING.has(finding.kind)) ? "x" : "w")}><TriangleAlert size={10} /></span>
                   )}
                   <span className="n">{firstNumber + index}</span>
                 </button>
@@ -342,6 +354,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
                 <b>Arke’s draft</b>
                 <span>{draftPages.length} {draftPages.length === 1 ? "page" : "pages"} from chapter {chapter?.order}</span>
                 <ReadChip read={draftRead} />
+                {kept(draftRead) > 0 && <span className="fy-comic__keptchip">{kept(draftRead)} kept {kept(draftRead) === 1 ? "mystery" : "mysteries"}</span>}
                 <span className="grow" />
                 <Button size="sm" onClick={() => discardProposal(worldId, drafted.proposal.id)}>Discard</Button>
                 {/* Something a reader could not follow, or no read at all, is kept only as Keep anyway (turn 254d, 254e). */}
@@ -351,9 +364,9 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
                 <div className="fy-comic__needs"><TriangleAlert size={15} /><span>{draftRead.reason === "no-reader" ? "No script reader" : "The read failed"}</span><span className="grow" />
                   <Button size="sm" onClick={() => navigate(`/settings/harness?agent=${SCRIPT_READER}`)}>Choose reader</Button></div>
               )}
-              {draftRead?.status === "read" && draftRead.findings.length > 0 && (
+              {draftRead?.status === "read" && draftRead.findings.some((finding) => finding.kind !== "kept") && (
                 <div className="fy-comic__finds">
-                  {draftRead.findings.map((finding, index) => (
+                  {draftRead.findings.filter((finding) => finding.kind !== "kept").map((finding, index) => (
                     <button key={index} type="button" className="fy-comic__find as-button" onClick={() => { const at = draftPages[finding.page - 1]; if (at) setDraftPageId(at.id); }}>
                       <span className={cx("k", !SCRIPT_READ_BLOCKING.has(finding.kind) && "w")}>{READ_KIND[finding.kind]}</span>
                       <span className="what">Page {firstNumber + finding.page - 1} · “{finding.question}”</span>
@@ -361,8 +374,19 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
                   ))}
                 </div>
               )}
-              {draftPage !== undefined && <DraftPage world={world} page={draftPage} number={firstNumber + draftPages.indexOf(draftPage)} selected={draftPanel?.id ?? null} pick={setDraftPanelId}
-                asked={asked(draftRead, draftPages.indexOf(draftPage) + 1)} />}
+              {draftPage !== undefined && (
+                <div className="fy-comic__pagehead">
+                  <span className="grow" />
+                  <span className="fy-comic__toggle" role="tablist" aria-label="How the draft reads">
+                    <button type="button" role="tab" aria-selected={!detail} className={cx(!detail && "on")} onClick={() => setDetail(false)}>Read</button>
+                    <button type="button" role="tab" aria-selected={detail} className={cx(detail && "on")} onClick={() => setDetail(true)}>Details</button>
+                  </span>
+                </div>
+              )}
+              {draftPage !== undefined && (detail
+                ? <DraftPage world={world} page={draftPage} number={firstNumber + draftPages.indexOf(draftPage)} selected={draftPanel?.id ?? null} pick={setDraftPanelId}
+                  asked={askedOn(draftRead, draftPages.indexOf(draftPage) + 1)} />
+                : <ReadPage world={world} page={draftPage} number={firstNumber + draftPages.indexOf(draftPage)} asked={askedOn(draftRead, draftPages.indexOf(draftPage) + 1)} />)}
             </div>
             {draftPage === undefined ? <div className="fy-comic__side" /> : <DraftSide key={draftPage.id} world={world} page={draftPage} panel={draftPanel} settings={settings} />}
           </div>
@@ -391,7 +415,16 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
           {page === undefined ? (
             // A chapter with no pages (turns 249c, 254a, 254c): Arke plans it, then drafts it from the kept plan, or a page is started by hand.
             <div className="fy-comic__empty">
+              {working ? (
+                <div className="fy-comic__working" role="status">
+                  <Spin size={18} />
+                  <b>Arke is {keptPlan ? "drafting" : "planning"} {chapter?.order} · {chapter?.title}</b>
+                  <span className="m">{conversation?.runStartedAt ? <Since at={conversation.runStartedAt} /> : null}</span>
+                  {conversation && <Button size="sm" onClick={() => cancelWorldChat(worldId, conversation.conversationId)}>Stop</Button>}
+                </div>
+              ) : <>
               <h3>{chapter?.order} · {chapter?.title} has no pages</h3>
+              {keptPlan !== undefined && <span className="fy-comic__plankept"><Check size={12} />Plan kept · {keptPlan.pages.length} {keptPlan.pages.length === 1 ? "page" : "pages"}</span>}
               {sourceStory && sourceChapter
                 ? <span className="m">From {sourceStory.meta.title} · chapter {sourceChapter.order}{sourceChapter.words !== undefined ? ` · ${sourceChapter.words.toLocaleString("en-GB")} words` : ""}</span>
                 : chapter?.words !== undefined && <span className="m">{chapter.words.toLocaleString("en-GB")} words</span>}
@@ -401,6 +434,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
                 {keptPlan !== undefined && <Button onClick={() => setPlanOpen(true)}>Plan</Button>}
                 <Button onClick={() => { const next = newPage(); edit([next]); setPageId(next.id); }}>+ Page</Button>
               </div>
+              </>}
             </div>
           ) : (
             <PageEditor world={world} page={page} number={firstNumber + pages.indexOf(page)} change={setPage}
@@ -1067,12 +1101,45 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
 /** The agent that reads Arke's drafted pages cold, as Settings › Harness names it (turn 254e). */
 const SCRIPT_READER = "comic-script-reader";
 /** The cold read's kinds as Pages names them (turn 254d). */
-const READ_KIND: Record<string, string> = { who: "Who", what: "What", why: "Why", where: "Where", voice: "Voice", picture: "Picture", load: "Load" };
+const READ_KIND: Record<string, string> = { who: "Who", what: "What", why: "Why", where: "Where", voice: "Voice", picture: "Picture", load: "Load", kept: "Kept" };
 type AskedOf = Extract<ComicScriptRead, { status: "read" }>["findings"][number];
 
 /** What the reader asked about one page of the draft, counted from 1. */
-function asked(read: ComicScriptRead | undefined, page: number): AskedOf[] {
-  return read?.status === "read" ? read.findings.filter((finding) => finding.page === page) : [];
+function askedOn(read: ComicScriptRead | undefined, page: number): AskedOf[] {
+  return read?.status === "read" ? read.findings.filter((finding) => finding.page === page && finding.kind !== "kept") : [];
+}
+
+/** How many of the book's kept mysteries the reader met: shown apart, never counted as faults (turn 256d). */
+function kept(read: ComicScriptRead | undefined): number {
+  return read?.status === "read" ? read.findings.filter((finding) => finding.kind === "kept").length : 0;
+}
+
+/** Chapters asked of Arke from Pages, by production and chapter, with when: the chapter says Arke is at work. */
+const askedOf = new Map<string, number>();
+
+/** A draft page as the reader will meet it (turn 256d): each panel's words in order beside one line of what is drawn. */
+function ReadPage({ world, page, number, asked }: { world: WorldBundle; page: ComicPage; number: number; asked: readonly AskedOf[] }) {
+  const name = (id: string) => world.sheets.find((sheet) => sheet.id === id)?.name ?? id;
+  return (
+    <>
+      <h3>Page {number}</h3>
+      {page.panels.map((panel, index) => {
+        const questions = asked.filter((finding) => finding.panel === index + 1);
+        return (
+          <div key={panel.id} className={cx("fy-comic__readpanel", questions.some((finding) => SCRIPT_READ_BLOCKING.has(finding.kind)) && "flag")}>
+            <span className="n">{index + 1}</span>
+            <div>
+              <div className="d">{panel.description}</div>
+              {panel.lettering.map((item) => (
+                <div key={item.id} className="l"><b>{item.speaker ? name(item.speaker) : KIND_LABEL[item.kind]}</b>{item.text}</div>
+              ))}
+              {questions.map((finding, n) => <div key={n} className={cx("fy-comic__asked", !SCRIPT_READ_BLOCKING.has(finding.kind) && "w")}><span className="k">{READ_KIND[finding.kind]}</span>“{finding.question}”</div>)}
+            </div>
+          </div>
+        );
+      })}
+    </>
+  );
 }
 
 /** A draft a reader could not follow, or that nobody read, is kept only as Keep anyway (R-65, R-66). */
@@ -1086,7 +1153,9 @@ function ReadChip({ read }: { read: ComicScriptRead | undefined }) {
   if (read.status === "not-read") return <span className="fy-comic__read warn"><TriangleAlert size={13} />Not read</span>;
   const blocking = read.findings.filter((finding) => SCRIPT_READ_BLOCKING.has(finding.kind)).length;
   if (blocking > 0) return <span className="fy-comic__read bad"><CircleAlert size={13} />{blocking} to fix</span>;
-  if (read.findings.length > 0) return <span className="fy-comic__read warn"><TriangleAlert size={13} />{read.findings.length} to look at</span>;
+  // Kept mysteries are the book's on purpose (turn 256d): shown apart, never as something to look at.
+  const looks = read.findings.filter((finding) => finding.kind !== "kept").length;
+  if (looks > 0) return <span className="fy-comic__read warn"><TriangleAlert size={13} />{looks} to look at</span>;
   return <span className="fy-comic__read ok"><Check size={13} />Read</span>;
 }
 
@@ -1112,6 +1181,12 @@ function PlanView({ plan, chapterOrder, fix, actions }: { plan: ComicChapterPlan
               </div>
             ))}
           </div>
+          {(plan.mysteries ?? []).length > 0 && <>
+            <h4>Kept on purpose</h4>
+            <div className="fy-comic__planlist">
+              {(plan.mysteries ?? []).map((question, index) => <div key={index} className="fy-comic__planrow kn"><span className="t">{question}</span><span className="m">open</span></div>)}
+            </div>
+          </>}
           {plan.leans.map((lean, index) => (
             <div key={index} className="fy-comic__needs"><TriangleAlert size={15} /><span><b>Page {lean.page}</b> · “{lean.line}” {lean.why}</span><span className="grow" />
               {fix && <Button size="sm" variant="ghost" onClick={() => fix(lean)}>Fix</Button>}</div>

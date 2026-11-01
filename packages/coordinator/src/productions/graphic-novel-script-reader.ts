@@ -10,7 +10,7 @@ import type { ImageJsonRunner } from "../harness/review-task.js";
  * plan or Arke's reasons, so what it cannot follow is what a reader cannot.
  */
 export interface ScriptReader {
-  read(input: { before: string; draft: string }, signal: AbortSignal): Promise<{ findings: ComicScriptReadFinding[]; reader: { id: string; version: string } }>;
+  read(input: { before: string; draft: string; mysteries?: readonly string[] }, signal: AbortSignal): Promise<{ findings: ComicScriptReadFinding[]; reader: { id: string; version: string } }>;
 }
 
 type PageLike = Pick<ComicPage, "panels"> | DraftComicPage;
@@ -38,6 +38,7 @@ export const SCRIPT_READ_PROMPT = [
   "voice: a caption, or writing in the world, whose speaker, owner or time you cannot place.",
   "picture: words that rely on something the panel does not show, or that the panel contradicts.",
   "load: more than three balloons in a panel, or about twelve on a page.",
+  "kept: a question you would ask that is one of THE BOOK'S KEPT MYSTERIES, which the book means its reader to carry unanswered. Report it as kept, never as what or why.",
   "For each, give the draft's page number, the panel when you can, and the question you would ask, in a few plain words.",
   'Return ONLY JSON: {"findings":[{"kind":"who","page":3,"panel":2,"question":"Who is Jory?"}]}. A draft you can follow returns {"findings":[]}.',
 ].join("\n");
@@ -50,7 +51,7 @@ export function harnessScriptReader(ask: ImageJsonRunner): ScriptReader {
       let model: string | undefined;
       const answer = AnswerSchema.parse(await ask({
         agent: "comic-script-reader",
-        prompt: `${SCRIPT_READ_PROMPT}\n\nTHE PAGES BEFORE IT:\n${input.before || "(none: this is the start of the book)"}\n\nTHE DRAFT:\n${input.draft}`,
+        prompt: `${SCRIPT_READ_PROMPT}\n\nTHE BOOK'S KEPT MYSTERIES:\n${input.mysteries?.length ? input.mysteries.map((question) => `- ${question}`).join("\n") : "(none)"}\n\nTHE PAGES BEFORE IT:\n${input.before || "(none: this is the start of the book)"}\n\nTHE DRAFT:\n${input.draft}`,
         images: [],
       }, signal, async (receipt) => { model = receipt.model; }));
       // A finding outside the schema fails the read rather than being dropped: dropped, it could

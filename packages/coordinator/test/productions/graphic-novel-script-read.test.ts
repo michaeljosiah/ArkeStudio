@@ -74,6 +74,23 @@ describe("the cold read of a draft (SPEC-064 R-64 – R-66, turn 254)", () => {
     assert.equal((again.actions[0] as { read?: { reason: string } }).read?.reason, "reader-failed", "a failed read is never a pass");
   });
 
+  it("tells the reader the kept plan's mysteries, and counts what it says is kept as no fault (turn 256)", async () => {
+    const { store, id, second } = await book();
+    await saveComicScript(store, id, { chapter: second, pages: [], baseHash: null });
+    // The kept plan rides on the chapter's script; a hand save keeps one, so write it as the gate would.
+    const path = `productions/${id}/comic/${second}.json`;
+    const plan = { passages: [{ where: "¶ 1", what: "x", verdict: "keep", why: "y" }], pages: [{ change: "a", turn: "b" }], knows: [], leans: [], mysteries: ["Who is Jory?"] };
+    const hash = store.getBundle().productions.find((p) => p.meta.id === id)!.comicScripts!.find((entry) => entry.chapter === second)!.hash;
+    await store.commit({ kind: "comic-script-save", source: "test", files: [{ path, action: "replace", content: `${JSON.stringify({ version: 1, pages: [], plan })}
+`, baseHash: hash, preserveVersion: true }] });
+    const asked: Array<{ before: string; draft: string; mysteries?: readonly string[] }> = [];
+    const kept = { kind: "kept" as const, page: 1, question: "Who is Jory?" };
+    const turn = { conversationId: "cv_5", turnId: "turn_6", actions: [draft(id, second)] };
+    await readComicDrafts(store, turn, { read: async (input) => { asked.push(input); return { findings: [kept], reader: { id: "t", version: "1" } }; } }, new Map(), SIGNAL, AT);
+    assert.deepEqual(asked[0]!.mysteries, ["Who is Jory?"]);
+    assert.deepEqual((turn.actions[0] as { read?: { findings: unknown[] } }).read?.findings, [kept], "offered at once: a kept mystery blocks nothing");
+  });
+
   it("leaves a plan alone: there are no pages to read", async () => {
     const { store, id, second } = await book();
     const plan = { kind: "production-comic-script", productionId: id, chapter: second, baseHash: null, checkReceiptIds: [], pages: [], plan: { passages: [], pages: [] } };

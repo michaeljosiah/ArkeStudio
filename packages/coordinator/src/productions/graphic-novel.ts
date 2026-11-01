@@ -398,7 +398,9 @@ export async function readComicDrafts(
     const redrafts = refused.get(key) ?? 0;
     let answer: Awaited<ReturnType<ScriptReader["read"]>>;
     try {
-      answer = await reader.read({ before, draft: pagesForReading(action.pages, name, (index) => `Page ${index + 1}`) }, signal);
+      // The plan's kept mysteries go to the reader, so it does not count them as faults (turn 256c).
+      const mysteries = production.comicScripts?.find((entry) => entry.chapter === chapter.id)?.script.plan?.mysteries ?? [];
+      answer = await reader.read({ before, draft: pagesForReading(action.pages, name, (index) => `Page ${index + 1}`), mysteries }, signal);
     } catch (err) {
       if (signal.aborted) throw err;
       action.read = { status: "not-read", reason: "reader-failed", detail: (err instanceof Error ? err.message : String(err)).slice(0, 400), at: at() };

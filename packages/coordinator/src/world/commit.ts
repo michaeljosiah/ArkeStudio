@@ -608,6 +608,12 @@ const COMIC_PAGE_REVIEW_KEYS = /"review"\s*:|"likeness"/;
  * chapter's pages with them.
  */
 export const COMIC_PLAN_SCHEMA_VERSION = 118;
+/**
+ * The usual settings as one card in a graphic novel's setup (design turn 256a): `comicAsk: "usual"`
+ * on the strict setup draft, which a build of 118 refuses as an unreadable setup. A chapter plan's
+ * `mysteries` rides here too: a build of 118 refuses it in the strict plan.
+ */
+export const COMIC_USUAL_SCHEMA_VERSION = 119;
 const COMIC_PLAN_KEYS = /"(plan|read)"\s*:/;
 /**
  * An audio drama's takes (SPEC-057 R-29, codex on PR 1871): `drama-takes/` and the `episode` on a
@@ -1117,6 +1123,7 @@ export class Committer {
       files.some((f) => /^productions\/[^/]+\/(comic\.json$|comic\/)/.test(f.path) && f.newContent != null && COMIC_ADAPTATION_KEYS.test(f.newContent)) ? COMIC_ADAPTATION_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/comic-pages\//.test(f.path) && f.newContent != null && COMIC_PAGE_REVIEW_KEYS.test(f.newContent)) ? COMIC_PAGE_REVIEW_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/comic\//.test(f.path) && f.newContent != null && COMIC_PLAN_KEYS.test(f.newContent)) ? COMIC_PLAN_SCHEMA_VERSION : 0,
+      files.some((f) => /^productions\/[^/]+\/comic\//.test(f.path) && f.newContent != null && /"mysteries"\s*:\s*\[\s*"/.test(f.newContent)) ? COMIC_USUAL_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/drama-takes\//.test(f.path) && f.newContent != null) ? DRAMA_TAKE_SCHEMA_VERSION : 0,
       files.some((f) => {
         if (!f.newContent) return false;

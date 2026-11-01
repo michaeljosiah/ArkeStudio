@@ -19,7 +19,7 @@ function Mini({ cells }: { cells: ReadonlyArray<readonly [number, number, number
   );
 }
 
-const CARDS: Record<ComicAsk, ReadonlyArray<{ label: string; sub: string; answer: string; cells: ReadonlyArray<readonly [number, number, number, number, number | ""]> }>> = {
+const CARDS: Record<Exclude<ComicAsk, "usual">, ReadonlyArray<{ label: string; sub: string; answer: string; cells: ReadonlyArray<readonly [number, number, number, number, number | ""]> }>> = {
   reading: [
     { label: "Left to right", sub: "as a western comic", answer: "Left to right.", cells: [[3, 3, 25, 38, 1], [32, 3, 25, 38, 2], [3, 45, 25, 36, 3], [32, 45, 25, 36, 4]] },
     { label: "Right to left", sub: "as manga", answer: "Right to left, as manga.", cells: [[3, 3, 25, 38, 2], [32, 3, 25, 38, 1], [3, 45, 25, 36, 4], [32, 45, 25, 36, 3]] },
@@ -36,7 +36,22 @@ const CARDS: Record<ComicAsk, ReadonlyArray<{ label: string; sub: string; answer
 };
 
 /** The question Arke is asking, as cards to press (249b). A card is the answer, said in the conversation. */
-export function ComicAskCards({ ask, disabled, onChoose }: { ask: ComicAsk; disabled: boolean; onChoose: (text: string) => void }) {
+export function ComicAskCards({ ask, disabled, onChoose, pilotTitle }: { ask: ComicAsk; disabled: boolean; onChoose: (text: string) => void; pilotTitle?: string | undefined }) {
+  // The usual three as one card to use or change (turn 256a): asking what nearly everyone answers
+  // the same way took three turns of the owner's run.
+  if (ask === "usual") {
+    return (
+      <div className="fy-comic-usual" role="group" aria-label="The usual settings">
+        <div className="row"><span>Reading</span><b>Left to right</b></div>
+        <div className="row"><span>Page</span><b>2:3 comic book</b></div>
+        <div className="row"><span>Pilot</span><b>Chapter 1{pilotTitle ? ` · ${pilotTitle}` : ""}</b></div>
+        <div className="acts">
+          <button type="button" className="fy-comic-usual__use" disabled={disabled} onClick={() => onChoose("Use these: left to right, a 2:3 comic book page, and chapter 1 as the pilot.")}>Use these</button>
+          <button type="button" disabled={disabled} onClick={() => onChoose("I'd like to choose these myself.")}>Change</button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="fy-comic-ask" role="group" aria-label={ask === "reading" ? "Which way it reads" : ask === "aspect" ? "The page shape" : "A pilot chapter first"}>
       {CARDS[ask].map((card) => (
