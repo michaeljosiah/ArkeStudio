@@ -260,7 +260,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
     chat.setValue(chatSurface.key, "draft", words);
     chat.setValue(chatSurface.key, "autoSend", true);
     chat.open(chatSurface);
-    askedOf.set(`${productionId}:${chapter.id}`, Date.now());
+    askedOf.set(`${worldId}:${productionId}:${chapter.id}`, Date.now());
   };
   // Plan first (turn 254a): Arke drafts pages only from a plan the author kept.
   const from = sourceStory && sourceChapter ? ` from chapter ${sourceChapter.order} of ${sourceStory.meta.title}` : "";
@@ -269,11 +269,28 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const draftWithArke = () => chapter && ask(`Draft chapter ${chapter.order}, ${chapter.title}, from its kept plan${from}.`);
   // Arke at work on this chapter is said on the chapter itself (turn 256b): pressed from here, or the
   // pilot Start the pilot asked for, while a turn runs.
-  const conversation = useStore().state?.worldChat ?? null;
-  const asked = chapter ? askedOf.get(`${productionId}:${chapter.id}`) : undefined;
+  const workspace = useStore().state?.worldChat ?? null;
+  const entry = world.conversations.find(row => row.id === workspace?.conversationId)?.entryContext;
+  const conversation = entry && "productionId" in entry && entry.productionId === productionId ? workspace : null;
+  const asked = chapter ? askedOf.get(`${worldId}:${productionId}:${chapter.id}`) : undefined;
+  const lastAsk = conversation?.messages.findLast(message => message.role === "user");
+  const namesChapter = chapter !== undefined && lastAsk !== undefined && [
+    `Plan chapter ${chapter.order}, ${chapter.title},`, `Draft chapter ${chapter.order}, ${chapter.title},`,
+    `Plan chapter ${chapter.order} as the pilot: ${chapter.title},`,
+  ].some(prefix => lastAsk.text.startsWith(prefix));
+  const refused = conversation?.messages.findLast(message => message.role === "studio" && message.turnId === lastAsk?.turnId && message.refusals.length > 0);
+  const failure = namesChapter ? conversation?.lastFailure?.turnId === lastAsk?.turnId ? conversation?.lastFailure
+    : refused ? { detail: refused.refusals.join(" · ") } : undefined : undefined;
   const turnRunning = conversation?.runStatus === "running";
   const working = turnRunning && chapter !== undefined && drafted === undefined && pages.length === 0
     && ((asked !== undefined && Date.now() - asked < 30 * 60_000) || chapter.id === (new URLSearchParams(search).get("chapter") ?? chapters[0]?.id));
+  const openedTurn = useRef<string | null>(null);
+  useEffect(() => {
+    const turn = lastAsk?.turnId;
+    if (!working || !namesChapter || !turn || !chat || !chatSurface || !conversation || openedTurn.current === turn) return;
+    openedTurn.current = turn;
+    chat.open({ ...chatSurface, conversationId: conversation.conversationId, newThread: false });
+  }, [working, namesChapter, lastAsk?.turnId, conversation?.conversationId, chat, chatSurface?.key]);
 
   const [reading, setReading] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -430,7 +447,11 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
                   {conversation && <Button size="sm" onClick={() => cancelWorldChat(worldId, conversation.conversationId)}>Stop</Button>}
                 </div>
               ) : <>
-              <h3>{chapter?.order} · {chapter?.title} has no pages</h3>
+              {failure ? <div role="status">
+                <h3>Arke did not finish {chapter?.order} · {chapter?.title}</h3>
+                <p>{failure.detail ?? "The writing turn did not complete. Open Builder Chat to review the result and try again."}</p>
+                {chatSurface && <Button onClick={() => chat?.open({ ...chatSurface, conversationId: conversation!.conversationId, newThread: false })}>Open Builder Chat</Button>}
+              </div> : <h3>{chapter?.order} · {chapter?.title} has no pages</h3>}
               {keptPlan !== undefined && <span className="fy-comic__plankept"><Check size={12} />Plan kept · {keptPlan.pages.length} {keptPlan.pages.length === 1 ? "page" : "pages"}</span>}
               {sourceStory && sourceChapter
                 ? <span className="m">From {sourceStory.meta.title} · chapter {sourceChapter.order}{sourceChapter.words !== undefined ? ` · ${sourceChapter.words.toLocaleString("en-GB")} words` : ""}</span>
