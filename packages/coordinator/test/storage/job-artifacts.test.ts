@@ -3,11 +3,30 @@ import { it } from "node:test";
 import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { AppStorageService } from "../../src/storage/service.js";
-import { ArtifactStorageHeld, JobArtifactStorage } from "../../src/storage/job-artifacts.js";
+import { ArtifactStorageHeld, JobArtifactStorage, SubmissionStorageHeld } from "../../src/storage/job-artifacts.js";
 import { WindowsVolumeProbe } from "../../src/storage/windows-volume.js";
 import { tempDir } from "../tmp.js";
 
 const GiB = 1024 ** 3, MiB = 1024 ** 2;
+it("identifies the unmeasured operation destination even when the app volume is healthy", async () => {
+  const root = await tempDir("arke-unknown-destination-");
+  let roots: readonly { rootId: string; path: string }[] = [];
+  const storage = new AppStorageService({ appRoot: root, native: {
+    setRoots(value) { roots = value; }, async stop() {}, async probe(rootId) {
+      return roots.find(row => row.rootId === rootId)?.path === root
+        ? { state: "measured", source: "host-provided", limitations: [], capacity: { volumeId: "app", mappingRevision: rootId, measuredAt: Date.now(), availableBytes: 100 * GiB, totalBytes: 200 * GiB } }
+        : { state: "unavailable", source: "host-provided", limitations: [], capacity: null };
+    },
+  } });
+  try {
+    await assert.rejects(new JobArtifactStorage(storage).checkSubmission([{ directory: join(root, "scratch"), role: "working-files" }], new AbortController().signal), (error: unknown) => {
+      assert(error instanceof SubmissionStorageHeld);
+      assert.deepEqual(error.detail, { code: "capacity-unavailable", roles: ["working-files"] });
+      assert(!JSON.stringify(error.detail).includes(root)); return true;
+    });
+    assert.equal(storage.snapshot().admission?.state, "available", "broad accounting availability cannot erase the narrower refusal");
+  } finally { await storage.stop(); }
+});
 it("admits concurrent destinations after a slow Windows read and sibling result write", { timeout: 30_000 }, async () => {
   const root = await tempDir("arke-submission-churn-");
   let now = 600_000, calls = 0, finish!: () => void, entered!: () => void, aborted = false;

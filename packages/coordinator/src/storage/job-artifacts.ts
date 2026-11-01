@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { StorageRootRole } from "@arke-studio/contracts";
+import type { JobStorageWait, StorageRootRole } from "@arke-studio/contracts";
 import type { AppStorageService } from "./service.js";
 import type { StorageAssessmentResult, StorageReservationResult } from "./reservations.js";
 import { toExtendedLength } from "../world/paths.js";
@@ -22,7 +22,7 @@ export interface ArtifactWriteSpace {
   reconcileIdleJobs?(jobIds: ReadonlySet<string>): Promise<void>;
 }
 export class SubmissionStorageHeld extends Error {
-  constructor(readonly result?: Extract<StorageAssessmentResult, { status: "held" }>) {
+  constructor(readonly result?: Extract<StorageAssessmentResult, { status: "held" }>, readonly detail?: JobStorageWait["detail"]) {
     const admission = result?.admission;
     super(admission?.status === "held"
       ? `Not submitted: waiting for storage (${admission.availableBytes} bytes available, ${admission.reservedBytes} already committed, ${admission.peakBytes} minimum headroom and ${admission.reserveBytes} reserve). Check Diagnostics.`
@@ -33,7 +33,7 @@ export class SubmissionStorageHeld extends Error {
 // A disclosed bookkeeping floor, not an estimate or a bound on generated media.
 export const SUBMISSION_BOOKKEEPING_BYTES = 64 * 1024;
 export class ArtifactStorageHeld extends Error {
-  constructor(readonly result?: Extract<StorageReservationResult, { status: "held" }>, readonly differentVolumes = false) {
+  constructor(readonly result?: Extract<StorageReservationResult, { status: "held" }>, readonly differentVolumes = false, readonly detail?: JobStorageWait["detail"]) {
     const admission = result?.admission;
     super(differentVolumes ? "The result's staging and destination are on different volumes. Review the destination before retrying local filing."
       : admission?.status === "held" ? `Completed result is waiting for storage: ${admission.availableBytes} bytes available, ${admission.reservedBytes} already committed, ${admission.peakBytes} remaining and ${admission.reserveBytes} reserve. No generation was repeated.`
@@ -43,6 +43,17 @@ export class ArtifactStorageHeld extends Error {
 }
 const safe = (value: number) => { if (!Number.isSafeInteger(value) || value < 0) throw new Error("Invalid artifact storage plan."); return value; };
 const activeByStorage = new WeakMap<AppStorageService, Set<string>>();
+
+/** Only closed vocabulary and roles leave the host; root handles and paths stay here. */
+function holdDetails(storage: AppStorageService, result: Extract<StorageAssessmentResult, { status: "held" }>): JobStorageWait["detail"] {
+  const admission = result.admission;
+  return {
+    code: admission?.status === "held" ? "space" : admission?.status === "unknown" ? admission.reason : result.reason === "capacity" ? "capacity-unavailable" : result.reason,
+    roles: [...new Set(storage.snapshot().roots.filter(root => result.rootIds?.includes(root.rootId)).map(root => root.role))],
+    ...(result.measuredAt !== undefined ? { measuredAt: result.measuredAt } : {}),
+    ...(admission?.status === "held" ? { availableBytes: admission.availableBytes, deficitBytes: admission.deficitBytes } : {}),
+  };
+}
 
 /** Finite measured result writes and a read-only operational preflight (SPEC-062 R-7/R-10).
  * Full dispatch/scratch/output plans have their own owners; neither operation grants
@@ -70,12 +81,12 @@ export class JobArtifactStorage implements ArtifactWriteSpace {
         rootId: root.rootId, remainingBytes: SUBMISSION_BOOKKEEPING_BYTES,
       })), signal);
       signal.throwIfAborted();
-      if (result.status !== "fits") throw new SubmissionStorageHeld(result);
+      if (result.status !== "fits") throw new SubmissionStorageHeld(result, holdDetails(this.storage, result));
     } catch (error) {
       signal.throwIfAborted();
       if (error instanceof SubmissionStorageHeld) throw error;
       for (const root of roots.values()) this.storage.writeFailed(root.rootId);
-      throw new SubmissionStorageHeld();
+      throw new SubmissionStorageHeld(undefined, { code: "destination-unavailable", roles: [...new Set(input.map(item => item.role))] });
     } finally { for (const root of roots.values()) root.release(); }
   }
   async reconcileIdleJobs(jobIds: ReadonlySet<string>): Promise<void> {
@@ -110,10 +121,11 @@ export class JobArtifactStorage implements ArtifactWriteSpace {
         demands: [...demands.values()].map(value => ({ rootId: value.root.rootId, remainingBytes: value.remaining })) }, signal);
       if (result.status !== "reserved") {
         // No file was opened. A save that finished after invalidation may still retain intent.
-        await this.storage.reservations.settle(id, owner); throw new ArtifactStorageHeld(result);
+        const detail = holdDetails(this.storage, result);
+        await this.storage.reservations.settle(id, owner); throw new ArtifactStorageHeld(result, false, detail);
       }
       admitted = true;
-      if (sameVolume && new Set(result.reservation.demands.map(value => value.volumeId)).size !== 1) throw new ArtifactStorageHeld(undefined, true);
+      if (sameVolume && new Set(result.reservation.demands.map(value => value.volumeId)).size !== 1) throw new ArtifactStorageHeld(undefined, true, { code: "different-volumes", roles: [...new Set(input.map(item => item.role))] });
       stopWriting = this.storage.beginWrite();
       return {
         consumed: async (directory, bytes) => {

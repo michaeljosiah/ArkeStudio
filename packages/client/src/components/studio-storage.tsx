@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
+import { JobStorageWaitNotice } from "./job-storage-wait.js";
 import { componentIsSettled, deriveStorageFindings, STORAGE_CATEGORY_LABELS, storageByteLabel as bytes, storageWaitingWork, systemStorageGroups, type JobSummary, type SetupStatus, type StorageHealthSnapshot, type StorageRootHealth, type StorageSpaceCheck } from "@arke-studio/contracts";
 import { Link } from "react-router";
 import { TriangleAlert } from "./icons.js";
@@ -39,6 +40,7 @@ export function StudioStorageReadingsView({ health, connected, now, jobs = [], s
       </dl>
       {waiting.unverified > 0 && <p className="fy-studio-note">{waiting.unverified} {waiting.unverified === 1 ? "job needs" : "jobs need"} storage verification. Available space or the destination could not be confirmed.</p>}
       {waiting.completed > 0 && <p className="fy-studio-note">Completed generation is waiting for local saving. Arke has not repeated it.</p>}
+      {jobs.filter(job => !job.deletedAt && job.storageWait && (job.storageWait.phase === "submission" ? job.status === "queued" : job.status === "running" || job.status === "submitting")).map(job => <JobStorageWaitNotice key={job.id} wait={job.storageWait} now={now} connected={connected} />)}
       <p className="fy-studio-note">{connected ? "The operation’s own controls show its next step and any pause." : "Current work status is unknown until the connection returns."}</p>
       <div className="fy-studio-work-actions">
         {waiting.unsubmitted + waiting.completed > 0 && <button type="button" className="fy-studio-button" onClick={() => { if (studio) studio.stepAside(); else close?.(); openActivityPanel("inbox"); }}>Open Activity</button>}

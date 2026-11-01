@@ -108,7 +108,7 @@ it("shows current queue/download holds separately from measured space and makes 
     assert.deepEqual(facts(card), [["Waiting to submit", "1 job"], ["Completed results awaiting saving", "1"], ["Downloads awaiting space", "1"]]);
     assert.match(card.textContent!, /1 job needs storage verification/);
     assert.equal(card.querySelector("button")!.textContent, "Open Activity");
-    assert.equal(card.querySelector("a")!.getAttribute("href"), "/settings/downloads");
+    assert.equal(card.querySelector('a[href="/settings/downloads"]')!.textContent, "Open Downloads");
     assert.doesNotMatch(card.textContent!, /PRIVATE_PATH|Export is waiting|Additional space needed/);
     if (!connected) assert.match(card.textContent!, /Current work status is unknown/);
   }

@@ -10,7 +10,7 @@ import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
 import { phrasesOf } from "../../src/productions/arke-player-listening.js";
-import { listArkePlayerPackages, packageSlug, pngHasAlpha, webpHasAlpha } from "../../src/productions/arke-player-export.js";
+import { exportArkePlayer, listArkePlayerPackages, packageSlug, pngHasAlpha, webpHasAlpha } from "../../src/productions/arke-player-export.js";
 import { checkWorldPackageZip, editionFingerprint } from "../../src/productions/world-package.js";
 import { planAudiobook, updateAudiobook } from "../../src/productions/audiobook.js";
 import type { WorldStore } from "../../src/world/store.js";
@@ -135,6 +135,22 @@ async function entry(file: string, name: string): Promise<string> {
 }
 
 describe("Export → Arke Player (turn 233, SPEC-058)", () => {
+  it("reports known external changes before joining audio or fitting pictures", async () => {
+    const calls: string[][] = [];
+    await withHarness(async ({ worldDir, store }) => {
+      const chapter = join(worldDir, "productions", LEDGER, "chapters", "01-neap.md");
+      await writeFile(chapter, (await readFile(chapter, "utf8")) + "\nAn outside edit.\n");
+      await store().reload();
+      assert.equal(store().getBundle().externalEdits.length, 1);
+      // The supported CLI calls the shared exporter directly; the UI has an earlier
+      // background-world ownership check. Preserve both and the final export gate.
+      const result = await exportArkePlayer(store(), LEDGER, { clock: () => "2026-11-01T10:00:00Z", exportId: exportId(91), ffmpeg: recordingFfmpeg(calls), include: { book: true, motion: true }, studioVersion: "test" });
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.match(result.blockers.join(" "), /Review 1 external file change.*Reconcile/);
+      assert.deepEqual(calls, [], "no expensive media preparation before the refusal");
+      assert.equal(store().getBundle().externalEdits.length, 1, "preflight cannot accept edits");
+    }, recordingFfmpeg(calls));
+  });
   it("is refused as Needs ffmpeg on a machine without one, and says so in Activity (R-4)", () =>
     withHarness(async ({ events, send }) => {
       await read(send, "01-neap");

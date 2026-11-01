@@ -154,7 +154,7 @@ describe("shared storage reservations (SPEC-062 R-8/R-9/R-24)", () => {
     const { manager } = harness(); await manager.open();
     const results = await Promise.all([manager.reserve(request("first", 6 * GiB)), manager.reserve(request("second", 6 * GiB, "exports"))]);
     assert.equal(results[0]!.status, "reserved");
-    assert.deepEqual(results[1], { status: "held", reason: "capacity", volumeId: "volume-a", admission: {
+    assert.deepEqual(results[1], { status: "held", reason: "capacity", volumeId: "volume-a", rootIds: ["exports"], measuredAt: 600_000, admission: {
       status: "held", availableBytes: 10 * GiB, reservedBytes: 6 * GiB, peakBytes: 6 * GiB, reserveBytes: GiB, deficitBytes: 3 * GiB,
     } });
     assert.equal(manager.snapshot().records.length, 1);
@@ -263,7 +263,7 @@ describe("shared storage reservations (SPEC-062 R-8/R-9/R-24)", () => {
     assert.equal((await manager.reserve(request("unbounded", null))).status, "held");
     assert.equal((await manager.reserve(request("first", GiB))).status, "reserved");
     revision = "mount-b";
-    assert.deepEqual(await manager.reserve(request("second", GiB)), { status: "held", reason: "reconciliation-required" });
+    assert.deepEqual(await manager.reserve(request("second", GiB)), { status: "held", reason: "reconciliation-required", rootIds: ["media"] });
     assert.equal(manager.snapshot().records[0]!.state, "uncertain");
     await manager.stop();
   });

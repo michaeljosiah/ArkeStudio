@@ -166,6 +166,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
   const signal = options.signal ?? new AbortController().signal;
   const cancelled = (): ArkePlayerExportResult => ({ ok: false, blockers: ["the export was cancelled"] });
   const bundle = store.getBundle();
+  if (bundle.externalEdits.length) return { ok: false, blockers: [`Review ${bundle.externalEdits.length} external file change${bundle.externalEdits.length === 1 ? "" : "s"} in this world before exporting. Reconcile these changes, then export again.`] };
   const production = bundle.productions.find((entry) => entry.meta.id === productionId);
   if (production === undefined) return { ok: false, blockers: ["that production is no longer in this world"] };
   // A music production is its own package (SPEC-060 R-15 – R-17), made by the same press, and so
