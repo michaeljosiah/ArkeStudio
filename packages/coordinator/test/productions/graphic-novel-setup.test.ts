@@ -40,7 +40,7 @@ describe("a graphic novel planned with Arke (SPEC-064 R-3, R-4, turn 249b)", () 
       chapters: source.slice(0, 2).map(chapter => ({ from: chapter.order, title: chapter.title, pages: 4 })),
     } } });
     assert.equal(changed.draft.graphicNovel?.pilotFrom, source[1]!.order);
-    assert.equal((await service.read(conversation)).productionSetup?.draft.graphicNovel?.pilotFrom, source[1]!.order);
+    assert.equal((await new ProductionSetupService(store).start(conversation)).draft.graphicNovel?.pilotFrom, source[1]!.order);
     assert.equal((await readWorldMeta(store.dir)).schemaVersion, COMIC_PILOT_SCHEMA_VERSION);
     await assert.rejects(readWorldMeta(store.dir, { supports: COMIC_PILOT_SCHEMA_VERSION - 1 }), /newer|version|schema/i);
   });

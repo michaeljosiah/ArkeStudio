@@ -399,7 +399,12 @@ function NarratorSamples({ samples, disabled, onChoose }: { samples: NarratorSam
  */
 function createdPath(worldId: string, state: ProductionSetupState): string {
   const home = `/w/${worldId}/p/${state.productionId}`;
-  if (state.draft.kind === GRAPHIC_NOVEL_KIND) return `${home}/story/pages`;
+  if (state.draft.kind === GRAPHIC_NOVEL_KIND) {
+    const plan = state.draft.graphicNovel;
+    const pilot = comicPilotChapter(plan);
+    const chapter = pilot ? state.review?.plan.initialContent?.graphicNovel?.chapters[plan!.chapters.indexOf(pilot)]?.stem : undefined;
+    return `${home}/story/pages${chapter ? `?chapter=${encodeURIComponent(chapter)}` : ""}`;
+  }
   return state.draft.kind === AUDIO_DRAMA_KIND && state.draft.audioDrama?.pilot ? `${home}/script/1` : home;
 }
 

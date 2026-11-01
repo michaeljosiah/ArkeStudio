@@ -53,6 +53,7 @@ afterEach(async () => {
   root = null; __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE);
   dom.document.body.innerHTML = "";
 });
+function CreatedPages() { const location = useLocation(); return <p data-created-pages>{location.pathname}{location.search}</p>; }
 async function mount(state = fixture(draft()), door = false) {
   const sent: ClientMessage[] = [];
   __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
@@ -65,6 +66,7 @@ async function mount(state = fixture(draft()), door = false) {
       <Routes>
         <Route path="/w/:worldId/productions/new" element={<NewProductionScreen />} />
         <Route path="/w/:worldId/productions/setup/:setupId" element={<ProductionSetupScreen />} />
+        <Route path="/w/:worldId/p/:prodId/story/pages" element={<CreatedPages />} />
         <Route path="/w/:worldId/p/:prodId" element={<p>Created production workspace</p>} />
         <Route path="/w/:worldId/productions" element={<p>Saved production setups</p>} />
       </Routes>
@@ -218,6 +220,21 @@ describe("production setup interaction (issue #976)", () => {
     assert.equal(m.commands().at(-1)?.action.operation, "start");
     assert.equal(m.sent.some(message => message.kind === "create-production"), false);
     assert.match(m.container.textContent!, /Production so far/);
+  });
+
+  it("opens a created comic on the selected pilot's real chapter id", async () => {
+    const created = draft();
+    created.status = "created"; created.productionId = "drawn"; created.draft.kind = "graphic-novel";
+    created.draft.graphicNovel = { reading: "ltr", aspect: "2:3", pilot: true, pilotFrom: 2,
+      chapters: [{ from: 1, title: "Prologue", pages: 2 }, { from: 2, title: "The thief", pages: 8 }] };
+    created.review = { id: REVIEW_ID, sourceDigest: `sha256:${"a".repeat(64)}`, plan: {
+      production: { id: "drawn", title: "Drawn", format: "story", kind: "graphic-novel", status: "in-progress", created: AT, updated: AT, failureModes: [] },
+      initialSeason: null, series: { operation: "none" },
+      initialContent: { worldId: FIXTURE_WORLD_ID, setupId: ID, revision: 3, narrative: null, scenes: [], episodes: [],
+        graphicNovel: { reading: "ltr", aspect: "2:3", chapters: [{ stem: "prologue", title: "Prologue" }, { stem: "the-thief", title: "The thief" }] } },
+    } };
+    const m = await mount(fixture(created));
+    assert.equal(m.container.querySelector("[data-created-pages]")?.textContent, `/w/${FIXTURE_WORLD_ID}/p/drawn/story/pages?chapter=the-thief`);
   });
 
   it("reviews the shown revision, then creates exactly the frozen review and navigates by returned id", async () => {
