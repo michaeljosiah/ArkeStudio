@@ -13,7 +13,7 @@ const write = (name, content) => fs.writeFileSync(path.join(here, name), content
 const esc = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
 const tokens = '_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens';
 const STYLE = '<link rel="stylesheet" href="graphic-novel-247.css"><link rel="stylesheet" href="prose-pages-249.css"><link rel="stylesheet" href="page-plan-254.css"><link rel="stylesheet" href="arke-drives-256.css">';
-const STATUS = 'proposed';
+const STATUS = 'approved';
 const frames = FRAMES.map(([letter, title, height, draw]) => ({ id: '256' + letter, title, width: 1360, height, markup: draw() }));
 for (const f of frames) if (!/^<div class="gn247 gn249 (gn254 )?gn256"/.test(f.markup)) throw new Error(`${f.id}: frame root is not .gn256`);
 
@@ -26,7 +26,7 @@ if (process.argv.includes('--preview')) { console.log(`Wrote arke-drives-256.rev
 
 
 export const rules = [
-  ['Review status', '1 November 2026, proposed. The owner asked for a run making a graphic novel entirely in Arke, with Claude acting as the person, and to look out for where the screens could be simpler: most people will want Arke to drive and a simple screen that still looks capable. The run made The Ledger of Nights, redrawn, chapter 1 (installed 0.5.77 – 0.5.79). These are the places it asked a person to do what Arke could, or showed more than they needed. Nothing here is built.'],
+  ['Review status', '1 November 2026. Approved by the owner the same day (“Proceed to build”), calls 1 – 5 as drawn. The owner asked for a run making a graphic novel entirely in Arke, with Claude acting as the person, and to look out for where the screens could be simpler: most people will want Arke to drive and a simple screen that still looks capable. The run made The Ledger of Nights, redrawn, chapter 1 (installed 0.5.77 – 0.5.79). These are the places it asked a person to do what Arke could, or showed more than they needed. Nothing here is built.'],
   ['Ask only what is not settled', 'Setup reads the book, then offers the usual reading, page shape and pilot as one card, Use these or Change (256a). It asks a question only where the book or the person has not already settled it. Arke answers in a few lines, not an essay. Its pilot and the plan’s pilot are the same chapter.'],
   ['No settings Arke chooses', 'The setup plan shows no model panel (256a). Arke picks the image model the book’s style needs; the choice is in Settings for whoever wants it. A graphic novel never shows a video model.'],
   ['One press asks', 'Start the pilot, Plan with Arke, Draft with Arke and Fix send their ask to Arke at once. Nothing fills the chat box for a second press.'],
@@ -59,9 +59,9 @@ write('Arke Studio.dc.html', master);
 
 let build = read('build-review.mjs').replace(/\r?\n  \/\/ BEGIN ARKE DRIVES 256[\s\S]*?  \/\/ END ARKE DRIVES 256(?:\r?\n)*/g, '\n');
 const plain = title => title.replaceAll('&#8217;', '’').replaceAll('&#183;', '·');
-const entries = frames.map(f => `  { group: "Arke drives · turn 256", screen: ${JSON.stringify(plain(f.title))}, frame: "${f.id}", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026."] },`);
+const entries = frames.map(f => `  { group: "Arke drives · turn 256", screen: ${JSON.stringify(plain(f.title))}, frame: "${f.id}", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },`);
 build = build.replace('const SCREENS = [', 'const SCREENS = [\n  // BEGIN ARKE DRIVES 256\n' + entries.join('\n') + '\n  // END ARKE DRIVES 256\n');
-const pageEntry = '{ file: "arke-drives-256.review.html", what: "Turn 256: Arke drives, the screen stays simple — the usual as one card, Arke working said on the chapter, mysteries kept apart, a reading view, the book at a glance.", state: "proposed 1 November 2026; not built" }';
+const pageEntry = '{ file: "arke-drives-256.review.html", what: "Turn 256: Arke drives, the screen stays simple — the usual as one card, Arke working said on the chapter, mysteries kept apart, a reading view, the book at a glance.", state: "approved 1 November 2026; not built" }';
 if (build.includes('file: "arke-drives-256.review.html"')) build = build.replace(/\{ file: "arke-drives-256\.review\.html",[^\n]+?\}/, pageEntry);
 else build = build.replace('const PAGES = [', 'const PAGES = [\n  ' + pageEntry + ',');
 if (!build.includes(LINK)) build = build.replace('<link rel="stylesheet" href="${TOKENS}/fonts.css">', LINK + '\n<link rel="stylesheet" href="${TOKENS}/fonts.css">');

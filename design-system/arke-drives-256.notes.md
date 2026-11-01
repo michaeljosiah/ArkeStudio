@@ -1,6 +1,6 @@
 # Turn 256 · Arke drives, the screen stays simple
 
-Proposed 1 November 2026. SPEC-064, after revision 8.
+Proposed 1 November 2026. Approved by the owner the same day ("Proceed to build"), calls 1 – 5 as drawn. SPEC-064, after revision 8.
 
 ## Why this turn
 

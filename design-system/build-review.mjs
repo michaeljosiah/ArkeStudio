@@ -29,11 +29,11 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  */
 const SCREENS = [
   // BEGIN ARKE DRIVES 256
-  { group: "Arke drives · turn 256", screen: "Setup: one card for what is usual", frame: "256a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026."] },
-  { group: "Arke drives · turn 256", screen: "While Arke works, the page says so", frame: "256b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026."] },
-  { group: "Arke drives · turn 256", screen: "The plan: mysteries kept on purpose, and Fix that redoes it", frame: "256c", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026."] },
-  { group: "Arke drives · turn 256", screen: "The draft, read as pages, with only the gaps counted", frame: "256d", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026."] },
-  { group: "Arke drives · turn 256", screen: "The book at a glance, and the one next step", frame: "256e", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026."] },
+  { group: "Arke drives · turn 256", screen: "Setup: one card for what is usual", frame: "256a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Arke drives · turn 256", screen: "While Arke works, the page says so", frame: "256b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Arke drives · turn 256", screen: "The plan: mysteries kept on purpose, and Fix that redoes it", frame: "256c", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Arke drives · turn 256", screen: "The draft, read as pages, with only the gaps counted", frame: "256d", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Arke drives · turn 256", screen: "The book at a glance, and the one next step", frame: "256e", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
   // END ARKE DRIVES 256
 
   // BEGIN PAGE PLAN 254
@@ -1039,7 +1039,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
-  { file: "arke-drives-256.review.html", what: "Turn 256: Arke drives, the screen stays simple — the usual as one card, Arke working said on the chapter, mysteries kept apart, a reading view, the book at a glance.", state: "proposed 1 November 2026; not built" },
+  { file: "arke-drives-256.review.html", what: "Turn 256: Arke drives, the screen stays simple — the usual as one card, Arke working said on the chapter, mysteries kept apart, a reading view, the book at a glance.", state: "approved 1 November 2026; not built" },
   { file: "page-plan-254.review.html", what: "Turn 254: adapt before drawing — a page plan of passages, pages and what the reader knows, then a cold read of every draft.", state: "approved 1 November 2026; not built" },
   { file: "page-review-253.review.html", what: "Turn 253: the page review — Lettering and Picture verdicts, picture faults boxed, writing in the scene cleared, warnings seen, Not checked with a reason.", state: "approved 1 November 2026; not built" },
   { file: "audiobook-credits-252.review.html", what: "Turn 252: opening and closing credits — two rows at the ends of Chapters, the Credits sheet, Narrated by, and the credits in chapter files and Arke Player.", state: "approved 31 October 2026; not built" },
