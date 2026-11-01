@@ -137,6 +137,7 @@ export function useProductionVoiceFiles({
     (state?.world?.sheets ?? []).map((sheet) => [sheet.id, sheet.voice ?? null, sheet.retired ?? false]),
     review?.reviewHash ?? null,
     review?.selectionHash ?? null,
+    (state?.app.jobs ?? []).filter(job => job.worldId === worldId && job.target.kind === "table-read-cache").map(job => [job.id, job.status]),
     // And the speech it can be read with: a provider made ready or faulted mid-batch (codex round 19).
     speechReadiness(state),
   ]);
