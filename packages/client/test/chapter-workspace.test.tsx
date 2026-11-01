@@ -260,7 +260,7 @@ it("reopens a chapter from its actual list row in the last view, with explicit a
   assert.equal(m.sent.some(message => message.kind === "read-audiobook-chapter" || message.kind === "direct-chapter"), false, "navigation never starts authoring or narration");
 });
 
-async function answerOpen(m: Mounted, body = BODY, hash = HASH): Promise<void> {
+async function answerOpen(m: Mounted, body = BODY, hash = HASH, version = 4): Promise<void> {
   const ask = m.sent.findLast((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
   assert.ok(ask, "opening asks for the body");
   await act(async () => {
@@ -273,7 +273,7 @@ async function answerOpen(m: Mounted, body = BODY, hash = HASH): Promise<void> {
       chapterId: "neap",
       disposition: "opened",
       body,
-      version: 4,
+      version,
       hash,
       versions: [1, 2, 3],
     });
@@ -484,6 +484,29 @@ describe("the chapter, opened (turn 126)", () => {
     const accepted = m.sent.findLast((message) => message.kind === "proposal-accept") as Extract<ClientMessage, { kind: "proposal-accept" }> | undefined;
     assert.equal(accepted?.proposalId, DRAFT.proposal.id, "Keep accepts the staged draft");
     assert.equal(accepted?.expectedDraftRevision, 1, "fenced to the revision on the page");
+  });
+
+  it("keeps the accepted manuscript editable when an earlier alternative remains (#1747)", async () => {
+    const replacement = { ...DRAFT, proposal: { ...DRAFT.proposal, id: "pr_01J8H0000000000000000000P8", created: "2026-09-06T13:00:00Z" } };
+    const m = await mount(inkbound([DRAFT, replacement]));
+    await answerOpen(m);
+    assert.ok(q(m, ".fy-ch__draft"));
+    const accepted = structuredClone(inkbound([DRAFT]));
+    accepted.world!.productions.find(p => p.meta.id === "inkbound")!.chapters[1]!.version = 5;
+    await act(async () => __setStateForTest(accepted, { connection: "open" }));
+    const corrected = `${BODY}\n\nThe corrected manuscript.`;
+    await answerOpen(m, corrected, HASH, 5);
+    assert.equal(sourceProps(m).value, corrected);
+    assert.match(q(m, '[data-testid="earlier-draft"]')!.textContent!, /based on v4; accepted manuscript is v5/);
+    assert.equal(m.sent.some(message => message.kind === "proposal-discard"), false, "alternatives are preserved");
+    const press = async (label: string) => act(async () => ([...m.container.querySelectorAll("button")].find(b => b.textContent === label) as HTMLButtonElement).click());
+    await press("Review earlier draft");
+    assert.match(q(m, ".fy-ch__draft")!.textContent!, /Drafted anew/);
+    assert.equal(q(m, '[data-testid="page-held-bar"]'), null, "a stale draft cannot be kept from the page");
+    await press("Edit accepted manuscript");
+    assert.equal(sourceProps(m).value, corrected);
+    await press("Discard earlier draft");
+    assert.equal(m.sent.findLast(message => message.kind === "proposal-discard")?.proposalId, DRAFT.proposal.id);
   });
 
   it("a draft that adds after the prose shows the prose as it is and only what it adds in grey (R-27)", async () => {
