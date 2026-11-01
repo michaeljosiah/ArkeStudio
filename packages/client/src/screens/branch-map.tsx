@@ -309,6 +309,7 @@ export function BranchMapScreen() {
   const [startPick, setStartPick] = useState<string | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const fittedRef = useRef(false);
+  const openedRef = useRef(false);
   const panRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   /** The grab cursor, as state: read off the ref, it stayed after a drag until something else rendered. */
@@ -332,6 +333,7 @@ export function BranchMapScreen() {
     setFactsOpen(false);
     setHighlight(new Set());
     fittedRef.current = false;
+    openedRef.current = false;
     const offFindings = subscribeRoutingFindings((event) => {
       if (event.productionId === prodId) setServed(event.findings);
     });
@@ -393,10 +395,13 @@ export function BranchMapScreen() {
   // window widened afterwards found the map at actual size, mostly off screen.
   useEffect(() => { fittedRef.current = false; }, [compact]);
   useEffect(() => {
+    if (geometry && !openedRef.current) {
+      openedRef.current = true;
+      if (!compact && !narrow && routing) setSelection({ kind: "scene", id: routing.start });
+    }
     if (fittedRef.current || !geometry || narrow || !viewportRef.current) return;
     fittedRef.current = true;
     fit(true);
-    if (!compact && routing) setSelection({ kind: "scene", id: routing.start });
   }, [geometry, fit, narrow]);
 
   // A new connector can move its destination to another layer. Follow that saved destination
