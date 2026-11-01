@@ -562,6 +562,7 @@ describe("a visual novel's package (turn 174)", () => {
     const { dir, store, bundle } = await open();
     const production = await novel(dir, bundle.productions[0]!);
     const scene = production.scenes[0]!;
+    assert(scene.script && "shots" in scene);
     scene.script.blocks = scene.script.blocks.map((block, i) => ({ ...block, id: i === 0 ? "a/b" : "a?b" }));
     scene.shots[0]!.covers = [cover("a/b"), cover("a?b")];
     await appendTraversal(store, production.meta.id, walked);
