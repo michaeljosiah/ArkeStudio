@@ -40,8 +40,8 @@ it("explains unavailable private routes before Send and offers an explicit model
   try {
     h.deliver({ ...initial(), models: [] }); h.client.draft("Help with Arke");
     await act(async () => root.render(<View client={h.client} />));
-    assert.match(container.textContent!, /Arke-managed Ollama/);
-    assert.match(container.textContent!, /Cloud models and existing Ollama servers/);
+    assert.match(container.textContent!, /Local Studio model unavailable/);
+    assert(container.querySelector<HTMLButtonElement>('.fy-studio-prompt')!.disabled);
     const refresh = [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Check Studio models again")!;
     assert(refresh); const before = h.sent.length;
     await act(async () => refresh.click());
@@ -217,7 +217,7 @@ it("the production provider opens lazily, watches the private reply path and ret
     assert.equal(sent.filter(message => message.command.action === "send").length, 0);
   } finally { await act(async () => root.unmount()); container.remove(); __setBridgeForTest(null); }
 });
-it("quick prompts and private history only change the Studio draft; titlebar opens Studio and closes contextual chat", async () => {
+it("private history preserves the Studio draft; titlebar opens Studio and closes contextual chat", async () => {
   __setStateForTest(FIXTURE_STATE, { connection: "open" });
   const h = fixture(), world = new GlobalChatController(), container = document.createElement("div"); document.body.append(container);
   const surface = chatSurfaceForPage(FIXTURE_STATE, `/w/${FIXTURE_STATE.world!.meta.worldId}`)!;
@@ -225,7 +225,7 @@ it("quick prompts and private history only change the Studio draft; titlebar ope
   const root = createRoot(container);
   try {
     await act(async () => root.render(<MemoryRouter><GlobalChatContext.Provider value={world}><StudioAssistantContext.Provider value={h.client}><AppChrome /><View client={h.client} /></StudioAssistantContext.Provider></GlobalChatContext.Provider></MemoryRouter>));
-    await act(async () => container.querySelector<HTMLButtonElement>('.fy-studio-prompts button:nth-child(2)')!.click());
+    await act(async () => h.client.draft("Review storage"));
     assert.equal(h.client.getSnapshot().draft, "Review storage"); assert.deepEqual(h.sent.map(message => message.command.action), ["watch"]);
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Studio conversations"]')!.click());
     assert(container.querySelector('[aria-label="Studio conversations"].fy-studio-history'));
@@ -242,6 +242,30 @@ it("quick prompts and private history only change the Studio draft; titlebar ope
     await act(async () => container.querySelector<HTMLButtonElement>('[data-system-trigger]')!.click());
     assert.equal(h.client.getSnapshot().open, false); assert.equal(h.sent.some(message => message.command.action === "send"), false);
   } finally { await act(async () => { root.unmount(); closeSystemPanel(); }); h.client.dispose(); container.remove(); }
+});
+
+it("sends a suggestion once through the normal request flow and preserves an existing draft (#2238)", async () => {
+  const h = fixture(), container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  try {
+    await act(async () => root.render(<View client={h.client} />));
+    const prompt = container.querySelector<HTMLButtonElement>('.fy-studio-prompts button:nth-child(2)')!;
+    await act(async () => h.client.draft("Keep my draft"));
+    assert(prompt.disabled);
+    await act(async () => prompt.click());
+    assert.equal(h.client.getSnapshot().draft, "Keep my draft");
+    assert(h.sent.every(message => message.command.action === "watch"));
+    await act(async () => h.client.draft(""));
+    await act(async () => { prompt.click(); prompt.click(); });
+    const create = h.sent.at(-1)!;
+    assert.equal(create.command.action, "create");
+    assert.equal(h.sent.filter(message => message.command.action === "create").length, 1);
+    await act(async () => h.client.receive({ requestId: create.requestId, response: { type: "result", status: "ok", reason: null, runId: null, threadId } }));
+    const send = h.sent.at(-1)!;
+    assert.equal(send.command.action, "send");
+    if (send.command.action === "send") { assert.equal(send.command.text, "Review storage"); assert.equal(send.command.model, "provider/model"); }
+    await act(async () => h.client.receive({ requestId: send.requestId, response: { type: "result", status: "accepted", reason: null, runId, threadId } }));
+    assert.equal(h.client.getSnapshot().draft, "");
+  } finally { await act(async () => root.unmount()); h.client.dispose(); container.remove(); }
 });
 it("shows the complete app disclosure and never carries cloud consent into a replacement disclosure", async () => {
   const h = fixture(), container = document.createElement("div"); document.body.append(container); const root = createRoot(container);

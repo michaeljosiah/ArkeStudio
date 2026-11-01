@@ -100,7 +100,7 @@ export function ModelPicker(props: ModelPickerProps) {
       label: entry.label,
       entry,
       groupName,
-      ...(entry.model.isDefault === true && scope === "model" ? { tag: "default" } : {}),
+      ...(scope === "recent" ? { tag: groupName } : entry.model.isDefault === true ? { tag: "default" } : {}),
       ticked: entry.ref === reference,
       disabled: entry.locked,
     });
