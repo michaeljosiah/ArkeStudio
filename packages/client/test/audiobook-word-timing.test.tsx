@@ -30,3 +30,28 @@ it("shows a busy refusal with an available aligner and rereads status on reconne
   assert(sent.every(message => message.kind === "audiobook-word-timing" && message.action === "read"));
   assert.deepEqual((sent.at(-1) as Extract<ClientMessage, { kind: "audiobook-word-timing" }>).chapters, ["neap"]);
 });
+
+it("offers a confirmed local recheck of only the failed block while retaining Review and estimate fallback", async () => {
+  __setStateForTest(FIXTURE_STATE, { connection: "open" });
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (raw: string) => sent.push(JSON.parse(raw)) } as unknown as ArkeBridge);
+  const host = dom.document.createElement("div"); dom.document.body.append(host); root = createRoot(host);
+  await act(() => root!.render(<WordTimingControl worldId={worldId} productionId="the-ledger-of-nights" chapters={["neap"]} enabled onReady={() => {}} usePhrases={() => {}} />));
+  const request = sent.at(-1)!; assert(request.kind === "audiobook-word-timing");
+  await act(() => __applyEventForTest({ type: "audiobook.word-timing", at: "2026-11-01T10:00:00Z", worldId, productionId: request.productionId, requestId: request.requestId,
+    state: { available: true, running: false, done: 2, total: 2, blocks: [
+      { chapterId: "neap", key: "p0.0", label: "Block 1", ready: false, file: "artifacts/read.wav", reason: "could not match a word" },
+      { chapterId: "neap", key: "p1.0", label: "Block 2", ready: true, file: "artifacts/ready.wav" },
+    ] } }));
+  const find = (label: string) => [...dom.document.querySelectorAll("button")].find(button => button.textContent?.trim() === label)!;
+  const click = async (label: string) => { assert.ok(find(label), label); await act(() => find(label).click()); };
+  await click("Review blocks");
+  assert.match(dom.document.body.textContent!, /picture anchors without validated timing stay estimated/);
+  assert.ok(find("Review"));
+  await click("Prepare again");
+  assert.equal(sent.some(message => message.kind === "audiobook-word-timing" && message.action === "prepare"), false);
+  await click("Prepare timings");
+  const prepare = sent.at(-1)!; assert(prepare.kind === "audiobook-word-timing" && prepare.action === "prepare");
+  assert.deepEqual(prepare.blocks, [{ chapterId: "neap", key: "p0.0" }]);
+  assert.deepEqual(prepare.chapters, ["neap"]);
+  assert(sent.every(message => message.kind === "audiobook-word-timing"));
+});

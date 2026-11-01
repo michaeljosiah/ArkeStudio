@@ -171,7 +171,7 @@ export function WordTimingControl({
           {pending.length > 0 && (
             <div className="fy-abmotion-notice fy-wordtiming-warning">
               <b>{pending.length} blocks need timing</b>
-              <p>Highlighting waits until every selected block is ready. Phrase captions remain available.</p>
+              <p>Highlighting waits until every selected block is ready. Phrase captions remain available; picture anchors without validated timing stay estimated.</p>
             </div>
           )}
           <div className="fy-abmotion-row">
@@ -185,20 +185,19 @@ export function WordTimingControl({
                 <b>{block.label}</b>
                 <p>{block.ready ? "Matches this reading" : block.reason}</p>
               </div>
-              {!block.ready && /changed|not prepared/i.test(block.reason ?? "") ? (
+              <Button variant="outline" onClick={() => setSelected(`${block.chapterId}/${block.key}`)}>
+                Review
+              </Button>
+              {!block.ready && block.file !== undefined && (
                 <Button
                   variant="outline"
-                  disabled={state?.available !== true || state.running}
+                  disabled={connection !== "open" || state?.available !== true || state.running}
                   onClick={() => {
                     setConfirm({ block });
                     setReview(false);
                   }}
                 >
                   Prepare again
-                </Button>
-              ) : (
-                <Button variant="outline" onClick={() => setSelected(`${block.chapterId}/${block.key}`)}>
-                  Review
                 </Button>
               )}
             </div>{selected === `${block.chapterId}/${block.key}` && slug !== undefined && <TimingLine block={block} slug={slug}/>}</Fragment>
@@ -260,7 +259,7 @@ export function WordTimingControl({
           <span className="grow" />
           <Button
             variant="primary"
-            disabled={state?.available !== true || state.running}
+            disabled={connection !== "open" || state?.available !== true || state.running}
             onClick={() => {
               request("prepare", confirm?.block);
               setConfirm(null);
