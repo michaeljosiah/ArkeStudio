@@ -4707,12 +4707,16 @@ export class Coordinator {
     const route = characterAudioRoute(model);
     const voices = session.subject && session.subject.kind !== "production" && session.composer.params.kind === "video" && !session.composer.params.audioReferencesDisabled && route
       ? await resolveSubjectCastVoices(store, session.subject, requestId, route.local === true, { acknowledge: false, at: this.nowIso() })
-      : { references: [], refused: [] };
+      : { references: [], notSent: [], refused: [] };
     if (voices.refused.length) throw Error(voices.refused.map(v => v.reason).join(" · "));
     const value = compilePromptInspection(session, world, this.opts.manifest ?? null, { worldId: store.worldId, requestId, at: this.nowIso(),
       performanceReferences: voices.references, recipeVersionOf: (id, kind) => this.recipeVersionOf(id, kind),
       adapterRecipeFor: (id, selections, kind) => this.adapterRecipeIdentity(id, selections, kind) },
       source.kind === "shot" ? "saved-shot" : "generator-draft", source.kind === "shot" ? `${source.sceneId} v${promptOwner(world, source).scene.version}` : session.id);
+    const capacity = 128 - value.references.length;
+    for (const omitted of voices.notSent.slice(0, capacity)) value.references.push({ field: "Audio", subject: omitted.name,
+      role: "Cast voice", sent: false, reason: omitted.reason });
+    if (voices.notSent.length > capacity) value.notices.push("Additional omitted cast voices exceed this inspection's display limit.");
     await verifyPromptReferences(store, value);
     if (store.getBundle().productions !== world.productions) throw Error("The world changed while preparing its request. Read again.");
     return value;

@@ -290,8 +290,13 @@ export interface StartFrameRunInput {
   compile: () => CompileFrameRunInput;
 }
 
-/** Compile and persist exactly what the confirmation authorized, before the first enqueue. */
+/** The run used by quoting and dispatch; compilation itself writes nothing. */
 export async function compileFrameRun(input: CompileFrameRunInput): Promise<FrameRun> {
+  return (await compileFrameRunEvidence(input)).run;
+}
+
+/** Retain the actual compiler's review facts without reconstructing a second request. */
+export async function compileFrameRunEvidence(input: CompileFrameRunInput): Promise<{ run: FrameRun; passes: ReturnType<typeof compilePasses> }> {
   if (input.model.capability !== "image") throw new Error(`${input.model.displayName} is not an image model`);
   if (!input.eligible) throw new Error(`${input.model.displayName} is not currently eligible to run`);
   const shots = orderedShots(input.scene);
@@ -551,7 +556,7 @@ export async function compileFrameRun(input: CompileFrameRunInput): Promise<Fram
     cancelled: false,
     createdAt: input.clock(),
   });
-  return run;
+  return { run, passes };
 }
 
 function quoteProjection(run: FrameRun, input: CompileFrameRunInput) {

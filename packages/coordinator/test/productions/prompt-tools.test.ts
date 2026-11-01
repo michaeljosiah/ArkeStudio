@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { mkdir, readFile, writeFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { orderedShots, foldBenchSession, projectSceneRecord, BenchTakeSchema, JobSchema, type DomainEvent, type ManifestModel, type PromptTarget, type SceneRecord } from "@arke-studio/contracts";
-import { readShotPromptHistory, restoreShotPrompt, framePromptInspection, compilePromptInspection, frozenPromptInspection, readPromptBench } from "../../src/productions/prompt-tools.js";
-import { compileFrameRun } from "../../src/productions/frame-run.js";
+import { orderedShots, foldBenchSession, projectSceneRecord, BenchTakeSchema, BenchRequestSnapshotSchema, JobSchema, type DomainEvent, type ManifestModel, type PromptTarget, type SceneRecord } from "@arke-studio/contracts";
+import { readShotPromptHistory, restoreShotPrompt, framePromptInspection, compilePromptInspection, frozenPromptInspection, readPromptBench, promptInspection, verifyPromptReferences } from "../../src/productions/prompt-tools.js";
+import { compileFrameRun, compileFrameRunEvidence } from "../../src/productions/frame-run.js";
 import { planBenchDispatch } from "../../src/bench/service.js";
 import { WorldStore } from "../../src/world/store.js";
 import { AppSettingsFile } from "../../src/app-settings.js";
@@ -13,6 +13,7 @@ import { closeOnCleanup } from "../tmp.js";
 import { sha256 } from "../../src/world/text-files.js";
 import { parseSceneRecord } from "../../src/productions/scene-record.js";
 import { startLedgerCoordinator } from "../spend/seeded-ledger.js";
+import { ProposalManager } from "../../src/gate/proposals.js";
 
 const at = "2026-11-01T12:00:00.000Z", clock = () => at;
 const path = "productions/saltlight/scenes/04-the-verse-rises.json";
@@ -103,6 +104,17 @@ it("a no-override version reviews today's assembly and refuses changed source ev
   assert.equal(orderedShots(await live(store))[0]!.promptOverride, undefined);
 });
 
+it("refuses a competing scene proposal under the same gate", async () => {
+  const { store, target } = await fixture();
+  await change(store, scene => { orderedShots(scene)[0]!.promptOverride = { text: "Older", capability: "image", sheetVersions: {} }; });
+  await change(store, scene => { orderedShots(scene)[0]!.promptOverride = { text: "Current", capability: "image", sheetVersions: {} }; });
+  const history = await readShotPromptHistory(store, target), older = history.entries.find(e => e.prompt?.text === "Older")!;
+  await new ProposalManager(store).stage({ kind: "scene-edit", summary: "A competing draft", source: "test", targets: [{ path }] });
+  const before = await readFile(join(store.dir, path), "utf8");
+  await assert.rejects(restoreShotPrompt(store, target, restoreInput(history, older.version)), /scene draft is open/);
+  assert.equal(await readFile(join(store.dir, path), "utf8"), before);
+});
+
 it("the saved image inspector agrees with the actual frame compiler without writing a run", async () => {
   const { store, target } = await fixture(), world = store.getBundle();
   const production = world.productions.find(p => p.meta.id === target.productionId)!, scene = production.scenes.find(s => s.id === target.sceneId)!;
@@ -112,6 +124,28 @@ it("the saved image inspector agrees with the actual frame compiler without writ
   assert.equal(inspected.prompt, run.steps[0]!.dispatch.params.prompt);
   assert.deepEqual(inspected.references.filter(r => r.sent).map(r => r.file), run.steps[0]!.dispatch.references);
   assert.equal(inspected.source, "saved-shot"); assert.deepEqual(await readdir(store.dir), before);
+  const limited = { ...input, model: { ...image, accepts: { ...image.accepts, referenceImages: 0 } } };
+  const evidence = await compileFrameRunEvidence(limited), limitedView = await framePromptInspection(limited);
+  assert.ok(evidence.passes[0]!.dropped.length > 0, "fixture really exceeds the model's reference budget");
+  assert.deepEqual(limitedView.references.filter(r => !r.sent).map(r => r.reason), evidence.passes[0]!.dropped.map(r => r.reason));
+});
+
+it("keeps actual frame fields and image/video/audio namespaces distinct without duplicating transport bindings", async () => {
+  const { store } = await fixture(), world = store.getBundle();
+  const session = foldBenchSession({ schemaVersion: 1, id: "sess_01J8F3K2QW9VZX4N7M0RTYB6HC", createdAt: at }, []);
+  const token = (kind: "image" | "video" | "audio", number: number, path: string) => ({ token: `${kind[0]!.toUpperCase()}${kind.slice(1)} ${number}`, kind, source: { source: "world-file" as const, path, hash: sha256(path) } });
+  const images = [token("image", 1, "references/start.png"), token("image", 2, "references/end.png")];
+  const base = { mode: "video", provider: "fal", model: "test-video", params: { kind: "video" }, brief: "A request", references: [], keyframes: images };
+  const frames = promptInspection({ capability: "video", provider: "fal", model: "test-video", params: { prompt: "Full", taskMode: "first-and-last-frame", references: images.map(t => t.source.path) } },
+    BenchRequestSnapshotSchema.parse(base), session, world, "generator-draft", session.id, 1);
+  assert.deepEqual(frames.references.map(r => r.field), ["Start frame", "End frame"]);
+  const references = [images[0]!, token("video", 1, "references/move.mp4"), token("audio", 1, "references/sound.mp3")];
+  const mixed = promptInspection({ capability: "video", provider: "fal", model: "test-video", params: { prompt: "Full", references: [references[0]!.source.path], videoReferences: [references[1]!.source.path],
+    referenceMedia: [{ kind: "video", file: references[1]!.source.path }, { kind: "audio", file: references[2]!.source.path }] } },
+    BenchRequestSnapshotSchema.parse({ ...base, references, keyframes: [] }), session, world, "generator-draft", session.id, 1);
+  assert.deepEqual(mixed.references.map(r => [r.field, r.index]), [["Images", 1], ["Video", 1], ["Audio", 1]]);
+  await writeFile(join(store.dir, "references/start.png"), "changed");
+  await assert.rejects(verifyPromptReferences(store, frames), /reference changed/);
 });
 
 it("a draft inspection uses dispatch's compiled prompt; missing original jobs never recompile a saved take", async () => {

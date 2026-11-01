@@ -12,7 +12,7 @@ import { sha256 } from "../world/text-files.js";
 import { parseSceneRecord } from "./scene-record.js";
 import { planBenchDispatch, resolveTokenEntry, type BenchEnqueueInput } from "../bench/service.js";
 import type { WorldStore } from "../world/store.js";
-import { compileFrameRun, type CompileFrameRunInput } from "./frame-run.js";
+import { compileFrameRunEvidence, type CompileFrameRunInput } from "./frame-run.js";
 
 const text = async (dir: string, path: string, max = 4 * 1024 * 1024) => new TextDecoder("utf-8", { fatal: true })
   .decode(await readContainedMediaBytes(dir, path, undefined, max)).replace(/^\uFEFF/, "");
@@ -193,15 +193,20 @@ export function frozenPromptInspection(job: Job | undefined, take: BenchTake, se
 
 /** The shot page makes frames through FrameRun, so its preview uses that exact compiler. */
 export async function framePromptInspection(input: CompileFrameRunInput): Promise<PromptInspection> {
-  const run = await compileFrameRun(input), step = run.steps[0];
+  const { run, passes } = await compileFrameRunEvidence(input), step = run.steps[0];
   if (!step) throw Error("No frame request could be compiled.");
+  const pass = passes.find(candidate => candidate.target.id === step.dispatch.target.id);
   const value: PromptInspection = { source: "saved-shot", identity: `${input.scene.id} v${input.scene.version}`,
     capability: "image", provider: input.model.provider, model: input.model.id, prompt: String(step.dispatch.params.prompt), quantity: 1,
     controls: [{ label: "Aspect", value: step.dispatch.output.aspect }, { label: "Size", value: `${step.dispatch.output.width} × ${step.dispatch.output.height}` }],
-    references: step.request.references.map((ref, index) => ({ field: "Images", index: index + 1,
-      subject: input.world.sheets.find(s => s.id === ref.sheetId)?.name ?? ref.sheetId,
-      role: "Image reference", file: ref.path, sheetVersion: ref.version, sent: true })),
+    references: step.request.references.map((ref, index) => {
+      const compiled = pass?.references.find(candidate => candidate.file === ref.path);
+      return { field: "Images", index: index + 1, subject: compiled?.subject ?? input.world.sheets.find(s => s.id === ref.sheetId)?.name ?? ref.sheetId,
+        role: compiled?.role ?? "Image reference", file: ref.path, sheetVersion: ref.version, sent: true };
+    }),
     notices: ["Prepared preview of a per-shot frame run. Generate compiles again from its then-current inputs.", "The full compiler prompt is shown; no separate layer data is retained."] };
   for (const ref of step.request.droppedReferences) value.references.push({ field: "Images", subject: ref.path, role: "Image reference", sent: false, reason: ref.reason });
+  for (const ref of pass?.dropped ?? []) value.references.push({ field: "Images", subject: input.world.sheets.find(sheet => sheet.id === ref.sheetId)?.name ?? ref.sheetId,
+    role: ref.role, sent: false, reason: ref.reason });
   return PromptInspectionSchema.parse(value);
 }
