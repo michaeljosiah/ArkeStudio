@@ -40,3 +40,16 @@ it("does not retain an interrupted section as completed", async () => {
   await planner.derive("chapter", input(), async part => { first ??= part.section!.number; return { pictures: [] }; });
   assert.equal(first, 1);
 });
+
+it("leaves unused chapter capacity available to an uncovered section", async () => {
+  const chapter = input();
+  chapter.cap = 5;
+  chapter.blocks = Array.from({ length: 8 }, (_, n) => ({ key: `p${n}.0`, at: n * 100, text: "x".repeat(6000) }));
+  const sentences = Array.from({ length: 5 }, (_, n) => ({ id: `p8.0#${n}`, at: 800 + n * 20, text: "y".repeat(1000) }));
+  chapter.blocks = [...chapter.blocks, { key: "p8.0", at: 800, text: sentences.map(sentence => sentence.text).join(" "), sentences }];
+  chapter.standing = chapter.blocks.slice(0, 8).map(block => block.at);
+  const plan = await new IllustrationPlanning().derive("chapter", chapter, async part => ({
+    pictures: part.blocks.flatMap(block => chapter.standing.includes(block.at) ? [] : block.sentences!.map(sentence => ({ at: sentence.id, prompt: "A new moment." }))).slice(0, part.cap),
+  }));
+  assert.deepEqual(plan.pictures.map(picture => picture.at), sentences.map(sentence => sentence.id));
+});

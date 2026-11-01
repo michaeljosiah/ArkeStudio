@@ -44,8 +44,8 @@ export class IllustrationPlanning {
       signal?.throwIfAborted();
       const blocks = batches[n]!;
       try {
-        const part = await deriver({ ...input, blocks, section: { number: n + 1, total: batches.length },
-          cap: Math.max(1, Math.ceil(input.cap / batches.length)) }, signal);
+        // Covered sections may use no slots; thinPictures applies the chapter cap after planning.
+        const part = await deriver({ ...input, blocks, section: { number: n + 1, total: batches.length } }, signal);
         signal?.throwIfAborted();
         const names = new Set(blocks.flatMap(block => block.sentences!.map(sentence => sentence.id)));
         plan.parts.push({ pictures: part.pictures.filter(picture => names.has(picture.at ?? `${picture.block}#0`)).slice(0, input.cap),
