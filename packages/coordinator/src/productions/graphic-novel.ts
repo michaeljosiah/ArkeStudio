@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  SCRIPT_READ_BLOCKING, compareLettering, comicBook, type DraftComicPage, pageReading, sheetReferencePicture, takeBlocking, takeClears, type LetteringVerification, type PageReview, type ReviewWarning,
+  SCRIPT_READ_BLOCKING, compareLettering, comicBook, type DraftComicPage, type WorldChatCheckReceipt, pageReading, sheetReferencePicture, takeBlocking, takeClears, type LetteringVerification, type PageReview, type ReviewWarning,
   COMIC_LIMITS, COMIC_PROMPT_MAX, ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema, DEFAULT_COMIC_SETTINGS, EMPTY_COMIC_PAGE_RECORD,
   comicPageHash, comicPagePrompt, makesShape, pageAspect, pictureQuote, productionShape,
   type ComicCited, type ComicMode, type ComicPage, type ComicPageRecord, type ComicSettings, type ManifestModel, type PictureWho, type ProductionBundle,
@@ -371,16 +371,17 @@ export async function seeComicWarning(store: WorldStore, productionId: string, p
  */
 export async function readComicDrafts(
   store: WorldStore,
-  turn: { conversationId: string; turnId: string; actions: readonly unknown[] },
+  turn: { conversationId: string; turnId: string; actions: readonly unknown[]; receipts?: readonly WorldChatCheckReceipt[] },
   reader: ScriptReader | null,
   refused: Map<string, number>,
   signal: AbortSignal,
   at: () => string,
 ): Promise<void> {
   for (const raw of turn.actions) {
-    const action = raw as { kind?: string; productionId?: string; chapter?: string; pages?: DraftComicPage[]; plan?: unknown; read?: unknown };
+    const action = raw as { kind?: string; productionId?: string; chapter?: string; pages?: DraftComicPage[]; plan?: unknown; read?: unknown; checkReceiptIds?: string[] };
     if (action.kind !== "production-comic-script") continue;
     delete action.read;
+    repairCitedReads(action, turn.receipts ?? []);
     if (action.plan !== undefined || !action.pages?.length || !action.productionId || !action.chapter) continue;
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === action.productionId);
     const chapter = production?.chapters.find((candidate) => candidate.id === action.chapter);
@@ -414,4 +415,19 @@ export async function readComicDrafts(
     refused.delete(key);
     action.read = { status: "read", reader: answer.reader, findings: answer.findings, redrafts, at: at() };
   }
+}
+
+/**
+ * Repair before reporting (design turn 256): a comic draft that cites a search where its read of the
+ * production belongs is given the turn's own complete read instead. Arke cited a search receipt twice
+ * in the owner's runs of 1 November 2026, and the corrective attempt cited it again, so the plan and
+ * the draft were lost. Only a read this turn really made is cited; with none, the refusal stands.
+ */
+function repairCitedReads(action: { productionId?: string; checkReceiptIds?: string[] }, receipts: readonly WorldChatCheckReceipt[]): void {
+  const reads = receipts.filter((receipt) => receipt.tool === "target-read" && receipt.complete === true && receipt.nextCursor === null
+    && (receipt.status === "complete" || receipt.status === "empty") && receipt.target?.requirement === "production-metadata" && receipt.target.id === action.productionId);
+  const cited = action.checkReceiptIds ?? [];
+  if (reads.length === 0 || cited.some((id) => reads.some((read) => read.id === id))) return;
+  const kept = cited.filter((id) => receipts.some((receipt) => receipt.id === id && receipt.tool === "target-read"));
+  action.checkReceiptIds = [...kept, reads.at(-1)!.id];
 }

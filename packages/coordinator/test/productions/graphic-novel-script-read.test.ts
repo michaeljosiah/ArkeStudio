@@ -91,6 +91,20 @@ describe("the cold read of a draft (SPEC-064 R-64 – R-66, turn 254)", () => {
     assert.deepEqual((turn.actions[0] as { read?: { findings: unknown[] } }).read?.findings, [kept], "offered at once: a kept mystery blocks nothing");
   });
 
+  it("cites the turn's own read of the production where Arke cited a search (turn 256)", async () => {
+    const { store, id, second } = await book();
+    const plan = { kind: "production-comic-script", productionId: id, chapter: second, baseHash: null, checkReceiptIds: ["check_search"], pages: [], plan: { passages: [], pages: [] } };
+    const receipts = [
+      { id: "check_search", tool: "search" },
+      { id: "check_read", tool: "target-read", status: "complete", complete: true, nextCursor: null, target: { requirement: "production-metadata", id }, observedRevisionOrDigest: "x" },
+    ] as never;
+    await readComicDrafts(store, { conversationId: "cv_6", turnId: "turn_7", actions: [plan], receipts }, null, new Map(), SIGNAL, AT);
+    assert.deepEqual(plan.checkReceiptIds, ["check_read"], "the search goes, the turn's read is cited");
+    const unread = { ...plan, checkReceiptIds: ["check_search"] };
+    await readComicDrafts(store, { conversationId: "cv_6", turnId: "turn_8", actions: [unread], receipts: [{ id: "check_search", tool: "search" }] as never }, null, new Map(), SIGNAL, AT);
+    assert.deepEqual(unread.checkReceiptIds, ["check_search"], "with no read this turn, nothing is invented");
+  });
+
   it("leaves a plan alone: there are no pages to read", async () => {
     const { store, id, second } = await book();
     const plan = { kind: "production-comic-script", productionId: id, chapter: second, baseHash: null, checkReceiptIds: [], pages: [], plan: { passages: [], pages: [] } };
