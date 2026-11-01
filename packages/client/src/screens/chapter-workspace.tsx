@@ -122,7 +122,7 @@ import {
   subscribeChapterSaveResults,
   type ChapterOpenResult,
   type ChapterSaveResult,
-  useStore,
+  useStoreSelector, shallowEqual,
   editChapterPlan,
   deriveContinuity,
   stopContinuity,
@@ -628,7 +628,7 @@ export function ChapterWorkspace({
   const navigate = useNavigate();
   const prodId = production.meta.id;
   const path = chapterPath(production, chapter);
-  const { connection, rejoins } = useStore();
+  const { connection, rejoins } = useStoreSelector(store => ({ connection: store.connection, rejoins: store.rejoins }), shallowEqual);
 
   /*
    * What was read, and the request that read it.
@@ -1157,11 +1157,11 @@ export function ChapterWorkspace({
     () => audiobookSpeakerColours(production?.chapters ?? [], speakers.flatMap((who) => (who.sheet !== undefined ? [who.sheet] : []))),
     [production?.chapters, speakers],
   );
-  const narratorName = narratorLabelFor(useStore().state?.app.narrator ?? null, world.meta.worldId);
+  const narratorName = narratorLabelFor(useStoreSelector(store => store.state?.app.narrator) ?? null, world.meta.worldId);
   // The catalogue says whether an assigned voice can speak now (turn 130's rule, codex on PR
   // 914): asked for once a cast is shown, and a voice it lacks or marks reads in the
   // narrator's, said so in the row rather than found out when the block fails.
-  const catalogue = useStore().voiceCatalogue;
+  const catalogue = useStoreSelector(store => store.voiceCatalogue);
   const castShown = voicesRecord !== null;
   useEffect(() => {
     if (castShown && connection === "open") requestVoiceCatalogue(worldId);
@@ -1789,7 +1789,7 @@ export function ChapterWorkspace({
    * Chat on that answer, as it does for an ask the thread declined. A turn that staged an action
    * is left to the revision's arrival, which the page already waits for.
    */
-  const thread = useStore().state?.worldChat ?? null;
+  const thread = useStoreSelector(store => store.state?.worldChat) ?? null;
   useEffect(() => {
     const turn = awaitedAsks.get(path)?.turn;
     if (turn === undefined || thread === null || thread.conversationId !== turn.conversationId) return;

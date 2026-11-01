@@ -2324,4 +2324,11 @@ parent segment sources, retry/coalescing, unavailable tools, source changes and 
 Design turn 258 is checked separately by `node design-system/media-measurement-258.capture.mjs`.
 Its drawings are synthetic and do not establish native UI behavior or probe availability.
 
+For large-world renderer changes, `node scripts/benchmark-client-snapshots.mjs --output output/client-snapshots.json`
+uses hidden Chrome and CDP `Performance.getMetrics` with the real chapter screen, production CSS,
+100 paragraphs and 50 snapshots of 15 MB. Timing includes fixture serialization and forced layout.
+Pass `--baseline <git-ref>` to measure the same workload against an earlier client. `ARKE_CHROME`
+overrides the browser executable. Compare collected heap before/after as well as peak heap and
+p95 frame time; do not mistake Chrome's collection schedule for retained growth.
+
 From client run `node --import tsx --test --test-concurrency=2 test/media-measurement.test.tsx test/cut-trim.test.tsx test/cut-layout.test.tsx test/prompt-tools.test.tsx` for conditional controls, scoped local requests, retries, source replacement and discarded late replies. From the root, `node --import tsx scripts/smoke-media-measurement.mjs` checks the actual Cut/App and existing phone sheet at desktop, phone and short windows in both themes. It measures horizontal fit, reachable controls, pending/failed/success states, phone targets, Tab containment and Escape/focus return; measured media adds no standing control. Its replies are synthetic and do not prove native probe availability. Captures go to `output/media-measurement-native/`.

@@ -8,10 +8,10 @@ import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
 import { pickBrowserMedia, readBrowserMedia } from "./browser-media-import.js";
 import { isRemoteSession, remoteSocketUrl, remoteSocketProtocols } from "./remote-session.js";
-import { useSyncExternalStore } from "react";
+import { useRef, useSyncExternalStore } from "react";
+import { parseIncomingFrame, shareSnapshot } from "./frame-parser.js";
 import type { GroupApprovalPort } from "./conversation-group-approval.js";
 import {
-  FrameSchema,
   BROWSER_ATTACHMENT_MAX_BYTES,
   type AccountPage,
   type AskCandidate,
@@ -1738,15 +1738,17 @@ export function __handleFrameForTest(frame: Frame): void {
 }
 
 function handleFrame(json: string): void {
+  let parsed: unknown;
+  try { parsed = JSON.parse(json); } catch { console.error("[arke] dropped malformed frame"); return; }
   // Gateway refusals have no coordinator sequence: they neither advance nor reset replay state.
   try {
-    const refusal = RemoteCommandRefusalSchema.safeParse(JSON.parse(json));
+    const refusal = RemoteCommandRefusalSchema.safeParse(parsed);
     if (refusal.success) { for (const listener of remoteRefusalListeners) listener(refusal.data); return; }
   } catch { /* The normal frame parser reports malformed input below. */ }
 
   let frame;
   try {
-    frame = FrameSchema.parse(JSON.parse(json));
+    frame = parseIncomingFrame(parsed);
   } catch {
     // A frame that fails its schema is a coordinator/client version skew — drop loudly.
     console.error("[arke] dropped malformed frame");
@@ -1765,6 +1767,7 @@ function handleFrame(json: string): void {
       if (frame.retainedHistory.includes("jobs")) frame.state.app.jobs = current.state.app.jobs;
       if (frame.retainedHistory.includes("ledger")) frame.state.app.ledger = current.state.app.ledger;
     }
+    frame.state = shareSnapshot(current.state, frame.state);
     if (helloFallbackTimer) clearTimeout(helloFallbackTimer);
     helloFallbackTimer = null;
     frameRunQuoteListeners.clear();
@@ -3531,7 +3534,7 @@ export function archiveWorld(worldId: string): void {
 }
 
 export function useArchiveNote(): StoreState["archiveNote"] {
-  return useStore().archiveNote;
+  return useStoreSelector(store => store.archiveNote);
 }
 
 /** Copy the sample world this build carries into the library (SPEC-016 R-6). */
@@ -3549,7 +3552,7 @@ export function refreshSampleWorldDownload(): void { send({ kind: "refresh-sampl
  * pane opened much later still gets it.
  */
 export function useSampleWorld(): ClientState["app"]["sampleWorld"] | null {
-  return useStore().state?.app.sampleWorld ?? null;
+  return useStoreSelector(store => store.state?.app.sampleWorld ?? null);
 }
 
 export function reconcileExternalEdit(worldId: string, path: string): void {
@@ -3708,7 +3711,7 @@ export function updateProposalPassage(
 }
 
 export function useGateNotices(): Record<string, GateNotice> {
-  return useStore().gateNotices;
+  return useStoreSelector(store => store.gateNotices);
 }
 
 // ---- authoring sessions (SPEC-005) ----------------------------------------
@@ -3730,7 +3733,7 @@ export function continueStudio(worldId: string, path: string, proposalId: string
 }
 
 export function useTranscripts(): Record<string, Array<{ role: "user" | "gate"; text: string; at: string }>> {
-  return useStore().transcripts;
+  return useStoreSelector(store => store.transcripts);
 }
 
 export function setupSkip(componentId: string): void {
@@ -3765,7 +3768,7 @@ export function useSetup(): import("@arke-studio/contracts").SetupStatus | null 
 
 /** The findings snapshot, or null before the first replay arrives (SPEC-032 R-33). */
 export function useDiagnostics(): import("@arke-studio/contracts").DiagnosticsSnapshot | null {
-  return useStore().diagnostics;
+  return useStoreSelector(store => store.diagnostics);
 }
 
 /** Read-only refresh of the open world's app-root accounting evidence. */
@@ -3922,15 +3925,15 @@ export function planKeyArt(worldId: string, opts: {modelId?:string;draftAlternat
 }
 
 export function useKeyArtPlans(): StoreState["keyArtPlans"] {
-  return useStore().keyArtPlans;
+  return useStoreSelector(store => store.keyArtPlans);
 }
 
 export function useBuildPlans(): StoreState["buildPlans"] {
-  return useStore().buildPlans;
+  return useStoreSelector(store => store.buildPlans);
 }
 
 export function useGenesis(): StoreState["genesis"] {
-  return useStore().genesis;
+  return useStoreSelector(store => store.genesis);
 }
 
 export function cancelAuthoring(worldId: string, proposalId: string): void {
@@ -3942,11 +3945,11 @@ export function replyToPermission(permissionId: string, decision: "once" | "alwa
 }
 
 export function useAuthoring(): Record<string, AuthoringActivity> {
-  return useStore().authoring;
+  return useStoreSelector(store => store.authoring);
 }
 
 export function usePermissions(): Record<string, PendingPermission> {
-  return useStore().permissions;
+  return useStoreSelector(store => store.permissions);
 }
 
 // ---- canon (SPEC-006) ------------------------------------------------------
@@ -4035,15 +4038,15 @@ export function retireEntity(worldId: string, path: string): void {
 }
 
 export function useAskResults(): Record<string, AskResult> {
-  return useStore().askResults;
+  return useStoreSelector(store => store.askResults);
 }
 
 export function useCanonSearches(): Record<string, CanonSearchState> {
-  return useStore().canonSearches;
+  return useStoreSelector(store => store.canonSearches);
 }
 
 export function useCanonRefs(): Record<string, CanonRefsState> {
-  return useStore().canonRefs;
+  return useStoreSelector(store => store.canonRefs);
 }
 
 // ---- sheets (SPEC-007) -----------------------------------------------------
@@ -4138,7 +4141,7 @@ export function requestSheetRefs(worldId: string, sheetId: string): void {
 }
 
 export function useSheetRefs(): Record<string, SheetRefsState> {
-  return useStore().sheetRefs;
+  return useStoreSelector(store => store.sheetRefs);
 }
 
 // ---- SPEC-008: providers, routing, spend, runtimes -------------------------
@@ -4465,7 +4468,7 @@ export function resumeQueue(provider: string): void {
 }
 
 export function useReconcileReport(): ReconcileAction[] | null {
-  return useStore().reconcileReport;
+  return useStoreSelector(store => store.reconcileReport);
 }
 
 // ---- SPEC-010/017: reference kits ------------------------------------------
@@ -4487,7 +4490,7 @@ export function chooseAnchor(
 }
 
 export function useMainPhotoAcceptance() {
-  return useStore().mainPhotoAcceptance;
+  return useStoreSelector(store => store.mainPhotoAcceptance);
 }
 
 export function clearMainPhotoAcceptance(sheetId: string): void {
@@ -4532,7 +4535,7 @@ export function importCharacterSheet(worldId: string, sheetId: string): void {
 }
 
 export function useCharacterSheetAcceptance() {
-  return useStore().characterSheetAcceptance;
+  return useStoreSelector(store => store.characterSheetAcceptance);
 }
 
 export function clearCharacterSheetAcceptance(sheetId: string): void {
@@ -4653,7 +4656,7 @@ export function importLocationViewCandidate(worldId: string, sheetId: string): v
 }
 
 export function useLocationViewUpload() {
-  return useStore().locationViewUpload;
+  return useStoreSelector(store => store.locationViewUpload);
 }
 
 export function clearLocationViewUpload(sheetId: string): void {
@@ -5113,7 +5116,7 @@ export function deleteVoice(worldId: string, voiceId: string): string | null {
 }
 
 export function useVoiceClips(): Record<string, StagedClip> {
-  return useStore().voiceClips;
+  return useStoreSelector(store => store.voiceClips);
 }
 
 export function useVoiceCloned(): {
@@ -5121,28 +5124,28 @@ export function useVoiceCloned(): {
   label: string | null;
   reason: string | null;
 } | null {
-  return useStore().voiceCloned;
+  return useStoreSelector(store => store.voiceCloned);
 }
 
 export function useVoiceCandidates(): Record<string, VoiceCandidatesState> {
-  return useStore().voiceCandidates;
+  return useStoreSelector(store => store.voiceCandidates);
 }
 
 export function useVoicePreviews(): Record<string, { file: string | null; error: string | null }> {
-  return useStore().voicePreviews;
+  return useStoreSelector(store => store.voicePreviews);
 }
 
 export function useVoiceAudio(): Record<string, Extract<DomainEvent, { type: "voice.audio" }>> {
-  return useStore().voiceAudio;
+  return useStoreSelector(store => store.voiceAudio);
 }
 
 /** The pieces of a long read, in order, per request. Empty for anything that arrived whole. */
 export function useVoiceParts(): Record<string, string[]> {
-  return useStore().voiceParts;
+  return useStoreSelector(store => store.voiceParts);
 }
 
 export function useDictation(): Record<string, { text: string | null; error: string | null }> {
-  return useStore().dictation;
+  return useStoreSelector(store => store.dictation);
 }
 
 // ---- SPEC-012: productions, scenes, boards, dispatch -----------------------
@@ -6092,7 +6095,7 @@ export interface ExportState {
 }
 
 export function useExports(): Record<string, ExportState> {
-  return useStore().exportsState;
+  return useStoreSelector(store => store.exportsState);
 }
 
 // ---- SPEC-015: artifacts ---------------------------------------------------
@@ -6121,7 +6124,7 @@ export function stopContinuity(worldId: string, productionId: string, chapterFil
 
 /** How each chapter's derivation is going, keyed by `worldId/productionId/chapterId` — the panel reads this. */
 export function useDeriving(): StoreState["deriving"] {
-  return useStore().deriving;
+  return useStoreSelector(store => store.deriving);
 }
 
 /** Cast a chapter's lines (turn 130): a press, never a save; `changed` casts only the paragraphs edited since (design turn 198). */
@@ -6238,11 +6241,11 @@ export const HEAR_ANSWER_MS = 180_000;
 export const HEAR_NO_ANSWER = "no answer · open Activity";
 
 export function useNarratorQuotes(): StoreState["narratorQuotes"] {
-  return useStore().narratorQuotes;
+  return useStoreSelector(store => store.narratorQuotes);
 }
 
 export function useHeardLines(): StoreState["heardLines"] {
-  return useStore().heardLines;
+  return useStoreSelector(store => store.heardLines);
 }
 
 /** A speaker recorded by a person, or given back to their voice (SPEC-047 R-37): `narrator`, a sheet id, or a name. */
@@ -6265,7 +6268,7 @@ export function dismissAudiobookRun(worldId: string, productionId: string, chapt
 
 /** How each chapter's audiobook run is going, keyed by `worldId/productionId/chapterId`. */
 export function useAudiobookRuns(): StoreState["audiobook"] {
-  return useStore().audiobook;
+  return useStoreSelector(store => store.audiobook);
 }
 
 /** Read a chapter into kept takes, these blocks alone (SPEC-047 R-30): the panel's `Make again`. */
@@ -6348,7 +6351,7 @@ export function discardAudiobookLines(worldId: string, requestId: string): void 
 }
 
 export function useSpeakerLines(): StoreState["speakerLines"] {
-  return useStore().speakerLines;
+  return useStoreSelector(store => store.speakerLines);
 }
 
 /** Let the staged recording go: its copies are deleted on the machine that made them. */
@@ -6359,7 +6362,7 @@ export function discardAudiobookTake(worldId: string, requestId: string): void {
 }
 
 export function useStagedTakes(): StoreState["stagedTakes"] {
-  return useStore().stagedTakes;
+  return useStoreSelector(store => store.stagedTakes);
 }
 
 /** One block's direction, set or cleared (SPEC-047 R-6): the coordinator answers with the record, or why not. */
@@ -6575,7 +6578,7 @@ export function stopAudiobookTallPictures(worldId: string, productionId: string)
 }
 
 export function useAudiobookAsks(): StoreState["audiobookAsks"] {
-  return useStore().audiobookAsks;
+  return useStoreSelector(store => store.audiobookAsks);
 }
 
 /** `Illustrate this chapter` (design turn 191b): the proposal comes back as `illustration.finished`; nothing is made or spent. */
@@ -6644,7 +6647,7 @@ export function dismissIllustration(worldId: string, productionId: string, chapt
 }
 
 export function useIllustrationRuns(): StoreState["illustration"] {
-  return useStore().illustration;
+  return useStoreSelector(store => store.illustration);
 }
 
 /** The card accepted whole: the coordinator checks every direction once more and writes the record. */
@@ -6673,16 +6676,16 @@ export function dismissDirection(worldId: string, productionId: string, chapterI
 }
 
 export function useDirectionRuns(): StoreState["direction"] {
-  return useStore().direction;
+  return useStoreSelector(store => store.direction);
 }
 
 /** Group by beats as it runs and ends (design turn 201), by `world/production/chapter`. */
 export function useBeatRuns(): StoreState["beats"] {
-  return useStore().beats;
+  return useStoreSelector(store => store.beats);
 }
 
 export function useAudiobookRecords(): StoreState["audiobookRecords"] {
-  return useStore().audiobookRecords;
+  return useStoreSelector(store => store.audiobookRecords);
 }
 
 // ---- turn 146: the door ----------------------------------------------------
@@ -6812,11 +6815,11 @@ export function dismissAudiobookNote(productionId: string): void {
 }
 
 export function useAudiobookDoors(): StoreState["audiobookDoor"] {
-  return useStore().audiobookDoor;
+  return useStoreSelector(store => store.audiobookDoor);
 }
 
 export function useAudiobookCredits(): StoreState["audiobookCredits"] {
-  return useStore().audiobookCredits;
+  return useStoreSelector(store => store.audiobookCredits);
 }
 
 /** The audiobook's credits (design turn 252), answered as `audiobook.credits`. */
@@ -6834,11 +6837,11 @@ export function setAudiobookCredits(
 }
 
 export function useAudiobookBooks(): StoreState["audiobookBook"] {
-  return useStore().audiobookBook;
+  return useStoreSelector(store => store.audiobookBook);
 }
 
 export function useAudiobookNotes(): StoreState["audiobookNotes"] {
-  return useStore().audiobookNotes;
+  return useStoreSelector(store => store.audiobookNotes);
 }
 
 // ---- turn 131: a manuscript out and in ------------------------------------
@@ -6934,12 +6937,12 @@ export function cancelManuscript(worldId: string, requestId: string): void {
 }
 
 export function useManuscripts(): StoreState["manuscripts"] {
-  return useStore().manuscripts;
+  return useStoreSelector(store => store.manuscripts);
 }
 
 /** How each chapter's casting is going, keyed by `worldId/productionId/chapterId` — the Voices panel reads this. */
 export function useCasting(): StoreState["casting"] {
-  return useStore().casting;
+  return useStoreSelector(store => store.casting);
 }
 
 export function extractArtifact(worldId: string, artifactId: string): void {
@@ -6952,7 +6955,7 @@ export function stopExtraction(worldId: string, artifactId: string): void {
 
 /** How the reading of each document is going — the offer under the composer reads this. */
 export function useReading(): StoreState["reading"] {
-  return useStore().reading;
+  return useStoreSelector(store => store.reading);
 }
 
 export function resolveExtraction(
@@ -6972,7 +6975,7 @@ export interface ImportReportState {
 }
 
 export function useImportReport(): ImportReportState | null {
-  return useStore().importReport;
+  return useStoreSelector(store => store.importReport);
 }
 
 export function useArtifactNotices(): Array<{
@@ -6982,7 +6985,7 @@ export function useArtifactNotices(): Array<{
   sizeBytes: number | null;
   production?: string | null;
 }> {
-  return useStore().artifactNotices;
+  return useStoreSelector(store => store.artifactNotices);
 }
 
 // ---- SPEC-016: first run, updates, diagnostics -----------------------------
@@ -7064,11 +7067,11 @@ export type StoreEnvCheck = {
 };
 
 export function useUpdateStatus(): ClientState["app"]["update"] | null {
-  return useStore().state?.app.update ?? null;
+  return useStoreSelector(store => store.state?.app.update ?? null);
 }
 
 export function useDiagnosticsBundle(): string | null {
-  return useStore().diagnosticsBundle;
+  return useStoreSelector(store => store.diagnosticsBundle);
 }
 
 export function recordReview(
@@ -7094,11 +7097,11 @@ export function useVoiceSidecar(): {
   state: "not-started" | "downloading" | "unavailable" | "ready";
   detail: string;
 } | null {
-  return useStore().voiceSidecar;
+  return useStoreSelector(store => store.voiceSidecar);
 }
 
 export function useVoiceRuntimeTest(): StoreState["voiceRuntimeTest"] {
-  return useStore().voiceRuntimeTest;
+  return useStoreSelector(store => store.voiceRuntimeTest);
 }
 
 const getSnapshot = (): StoreState => current;
@@ -7112,12 +7115,31 @@ export function useStore(): StoreState {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+/** Select a stable slice; inline selectors and custom equality are both supported. */
+export function useStoreSelector<T>(selector: (state: StoreState) => T, equals: (left: T, right: T) => boolean = Object.is): T {
+  const cache = useRef<{ state: StoreState; selector: typeof selector; equals: typeof equals; value: T } | null>(null);
+  const selected = () => {
+    const held = cache.current;
+    if (held?.state === current && held.selector === selector && held.equals === equals) return held.value;
+    const value = selector(current);
+    cache.current = { state: current, selector, equals, value: held && equals(held.value, value) ? held.value : value };
+    return cache.current.value;
+  };
+  return useSyncExternalStore(subscribe, selected, selected);
+}
+
+export function shallowEqual<T extends object>(left: T, right: T): boolean {
+  if (Object.is(left, right)) return true;
+  const keys = Object.keys(left) as (keyof T)[];
+  return keys.length === Object.keys(right).length && keys.every(key => Object.hasOwn(right, key) && Object.is(left[key], right[key]));
+}
+
 export function useClientState(): ClientState | null {
-  return useStore().state;
+  return useStoreSelector(store => store.state);
 }
 
 export function useWorld(): ClientState["world"] {
-  return useStore().state?.world ?? null;
+  return useStoreSelector(store => store.state?.world ?? null);
 }
 
 /**
@@ -7656,7 +7678,7 @@ export function sendProposalBack(worldId: string, proposalId: string): void {
 // ---------------------------------------------------------------------------
 
 export function useBench(): ClientState["bench"] {
-  return useStore().state?.bench ?? null;
+  return useStoreSelector(store => store.state?.bench ?? null);
 }
 
 export function sendBenchOpen(worldId: string, sessionId?: string): void {
