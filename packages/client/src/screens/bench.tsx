@@ -256,7 +256,10 @@ export function BenchScreen() {
       <div className="fy-app" data-screen="bench">
         <AppChrome back={{ label: "Artifacts", to: `/w/${worldId}/artifacts` }}
           context={world ? { label: world.meta.name } : undefined} />
-        <Loading label="Opening the bench…" />
+        {worldId && world && sessionId && bench?.worldId === worldId && bench.session.id !== sessionId && !subjectOpening
+          ? <div className="fy-loading"><p role="status">Another Bench session was opened.</p>
+              <Button disabled={connection !== "open"} onClick={() => sendBenchOpen(worldId, sessionId)}>Open it again</Button></div>
+          : <Loading label="Opening the bench…" />}
       </div>
     );
   }
