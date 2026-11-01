@@ -11,6 +11,8 @@ import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../s
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { GlobalChatContext } from "../src/components/global-chat-context.js";
+import { GlobalChatController, chatSurfaceForPage } from "../src/lib/global-chat.js";
 
 /** A graphic novel's Pages (design turn 247, SPEC-064): the strip, the editor, takes and findings, Export. */
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -52,7 +54,7 @@ afterEach(async () => {
   root = null; __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE);
   dom.document.body.innerHTML = "";
 });
-async function mount(state: ClientState, reviewChapter?: string) {
+async function mount(state: ClientState, reviewChapter?: string, owner?: GlobalChatController) {
   const sent: ClientMessage[] = [];
   __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
   const container = dom.document.createElement("div") as unknown as HTMLElement;
@@ -60,10 +62,10 @@ async function mount(state: ClientState, reviewChapter?: string) {
   root = createRoot(container);
   await act(async () => {
     __setStateForTest(state, { connection: "open" });
-    root!.render(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/low-water-drawn/story/pages`]}>
+    root!.render(<GlobalChatContext.Provider value={owner ?? null}><MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/low-water-drawn/story/pages`]}>
       {reviewChapter && <Link to={`?chapter=${reviewChapter}`} data-testid="review-link">Review in Pages</Link>}
       <Routes><Route path="/w/:worldId/p/:prodId/story/pages" element={<ComicPagesScreen />} /></Routes>
-    </MemoryRouter>);
+    </MemoryRouter></GlobalChatContext.Provider>);
   });
   return { container, sent };
 }
@@ -71,6 +73,36 @@ const props = (el: Element) => (el as unknown as Record<string, Record<string, a
 const button = (container: HTMLElement, text: string) => [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === text);
 
 describe("Pages (turn 247)", () => {
+  it("opens the pilot's exact chat without replay, then shows its failure only on the matching chapter", async () => {
+    const state = withBook([], {}), comic = state.world!.productions.at(-1)!;
+    const id = `cv_${ulid()}`, turnId = `turn_${ulid()}`;
+    state.worldChat = WorldChatWorkspaceSchema.parse({ conversationId: id, status: "open", runStatus: "running", points: [],
+      messages: [{ id: `msg_${ulid()}`, turnId, role: "user", text: "Plan chapter 1 as the pilot: The tide, as pages.", receipts: [], createdAt: AT }] });
+    state.world!.conversations.push({ id, title: "Comic", status: "open", updatedAt: AT, pointCount: 0, openProposalCount: 0, notCarried: [], entryContext: { kind: "production", productionId: comic.meta.id } });
+    comic.chapters.push({ ...comic.chapters[0]!, id: "salt", order: 2, title: "Salt", file: "02-salt.md" });
+    const owner = new GlobalChatController(); owner.setCurrent(chatSurfaceForPage(state, `/w/${FIXTURE_WORLD_ID}/p/low-water-drawn/story/pages`));
+    const m = await mount(state, undefined, owner);
+    assert.equal(owner.getSnapshot().open, true);
+    assert.equal(owner.getSnapshot().selected?.conversationId, id);
+    assert.equal(m.sent.some(message => message.kind === "world-chat-send"), false);
+    state.worldChat.runStatus = null;
+    state.worldChat.lastFailure = { turnId, status: "failed", detail: "The writing turn failed." };
+    await act(async () => { __setStateForTest(structuredClone(state), { connection: "open" }); });
+    assert.match(m.container.textContent!, /Arke did not finish 1 · The tide/);
+    assert.match(m.container.textContent!, /The writing turn failed/);
+    await act(async () => props(button(m.container, "Open Builder Chat")!).onClick({}));
+    assert.equal(owner.getSnapshot().selected?.conversationId, id);
+    delete state.worldChat.lastFailure;
+    state.worldChat.messages.push({ id: `msg_${ulid()}`, turnId, role: "studio", text: "Please review the plan.", receipts: [], refusals: ["The draft could not be prepared."], createdAt: AT });
+    await act(async () => { __setStateForTest(structuredClone(state), { connection: "open" }); });
+    assert.match(m.container.textContent!, /The draft could not be prepared/);
+    await act(async () => props(m.container.querySelector('select[aria-label="Chapter"]')!).onChange({ target: { value: "salt" } }));
+    assert.doesNotMatch(m.container.textContent!, /Arke did not finish/);
+    state.world!.conversations[0]!.entryContext = { kind: "world" };
+    await act(async () => { __setStateForTest(structuredClone(state), { connection: "open" }); props(m.container.querySelector('select[aria-label="Chapter"]')!).onChange({ target: { value: "the-tide" } }); });
+    assert.doesNotMatch(m.container.textContent!, /Arke did not finish/);
+  });
+
   it("keeps all 23 chapters reachable through the picker and selects the last chapter's pages", async () => {
     const state = withBook([page()], {}), comic = state.world!.productions.at(-1)!;
     for (let order = 2; order <= 23; order++) comic.chapters.push({ ...comic.chapters[0]!, id: `chapter-${order}`, order, title: `Chapter ${order}`, file: `${order}.md` });
@@ -112,6 +144,7 @@ describe("Pages (turn 247)", () => {
     const state = withBook([], {}), comic = state.world!.productions.at(-1)!;
     comic.chapters.push({ ...comic.chapters[0]!, id: "the-thief", title: "The thief", order: 2, file: "02-the-thief.md" });
     state.worldChat = WorldChatWorkspaceSchema.parse({ conversationId: `cv_${ulid()}`, status: "open", runStatus: "running", messages: [], points: [] });
+    state.world!.conversations.push({ id: state.worldChat.conversationId, title: "Comic", status: "open", updatedAt: AT, pointCount: 0, openProposalCount: 0, notCarried: [], entryContext: { kind: "production", productionId: comic.meta.id } });
     const m = await mount(state, "the-thief");
     await act(async () => (m.container.querySelector('[data-testid="review-link"]') as HTMLElement).click());
     assert.ok(m.container.querySelector(".fy-comic__working"));

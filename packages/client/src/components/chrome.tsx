@@ -148,7 +148,7 @@ export function AppChrome({
         {aside}
         {controls && (
           <>
-            <button type="button" className={cx("fy-iconbtn", studioView?.open && "fy-iconbtn--current")} title="Chat" aria-label="Chat"
+            <button type="button" className={cx("fy-iconbtn", studioView?.open && "fy-iconbtn--current")} title="Studio assistant" aria-label="Studio assistant"
               aria-haspopup="dialog" aria-expanded={studioView?.open ?? false} data-studio-chat-trigger=""
               onClick={() => { closeSystemPanel(); if (studioView?.open) studio?.close(); else { chat?.close(); closeActivityPanel(); studio?.open(); } }}>
               <Message size={13} />{chatRunning && <span className="fy-iconbtn__dot fy-iconbtn__dot--new" />}

@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
 import { ProductionSetupStateSchema, WorldChatWorkspaceSchema, presetTarget, type ClientMessage, type ClientState, type ProductionSetupState } from "@arke-studio/contracts";
 import { ProductionSetupScreen, ProductionSetupView } from "../src/screens/production-setup.js";
-import { GlobalWorldChatEntry } from "../src/components/global-chat.js";
+import { GlobalConversationEntry, GlobalWorldChatEntry } from "../src/components/global-chat.js";
 import { GlobalChatContext } from "../src/components/global-chat-context.js";
 import { GlobalChatController, chatSurfaceForPage } from "../src/lib/global-chat.js";
 import { NewProductionScreen } from "../src/screens/world.js";
@@ -88,6 +88,19 @@ async function answer(command: Extract<ClientMessage, { kind: "production-setup"
 }
 
 describe("production setup interaction (issue #976)", () => {
+  it("a direct production chat selects its conversation instead of leaving another page parked", async () => {
+    const state = fixture(draft()), owner = new GlobalChatController();
+    const production = state.world!.productions[0]!;
+    owner.select(chatSurfaceForPage(state, `/w/${FIXTURE_WORLD_ID}/chat`)!);
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container); root = createRoot(container);
+    await act(async () => { __setStateForTest(state, { connection: "open" }); root!.render(
+      <GlobalChatContext.Provider value={owner}><MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/${production.meta.id}/chat`]}>
+        <GlobalConversationEntry world={{ worldId: FIXTURE_WORLD_ID, name: state.world!.meta.name }} props={{ worldId: FIXTURE_WORLD_ID, productionId: production.meta.id, placeholder: "Ask Arke…", emptyLine: "Start this conversation." }} />
+      </MemoryRouter></GlobalChatContext.Provider>); });
+    assert.equal(owner.getSnapshot().selected?.entry.kind, "production");
+    assert.equal(owner.getSnapshot().selected?.props?.productionId, production.meta.id);
+  });
   it("the global entry retains the canonical setup route rather than treating its ID as a missing chat", async () => {
     const container = dom.document.createElement("div") as unknown as HTMLElement, owner = new GlobalChatController();
     dom.document.body.append(container); root = createRoot(container);
