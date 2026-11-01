@@ -71,6 +71,19 @@ const props = (el: Element) => (el as unknown as Record<string, Record<string, a
 const button = (container: HTMLElement, text: string) => [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === text);
 
 describe("Pages (turn 247)", () => {
+  it("keeps all 23 chapters reachable through the picker and selects the last chapter's pages", async () => {
+    const state = withBook([page()], {}), comic = state.world!.productions.at(-1)!;
+    for (let order = 2; order <= 23; order++) comic.chapters.push({ ...comic.chapters[0]!, id: `chapter-${order}`, order, title: `Chapter ${order}`, file: `${order}.md` });
+    const last = page(); last.panels[0]!.description = "The last lantern.";
+    comic.comicScripts!.push({ chapter: "chapter-23", hash: "sha256:last", script: { version: 1, pages: [last] } });
+    const m = await mount(state);
+    const picker = m.container.querySelector('select[aria-label="Chapter"]')!;
+    assert.equal(picker.querySelectorAll("option").length, 23);
+    await act(async () => props(picker).onChange({ target: { value: "chapter-23" } }));
+    assert.equal(props(picker).value, "chapter-23");
+    assert.equal(props(m.container.querySelector("textarea[aria-label='Panel 1']")!).value, "The last lantern.");
+  });
+
   it("offers only lettering models, saves the production choice and refreshes its quote", async () => {
     const state = withBook([page()], {});
     const model = { ...state.app.manifest!.models[0]!, capability: "image" as const, id: "letterer", displayName: "Letterer", limits: { lettering: true as const, aspects: ["2:3"] } };
@@ -113,8 +126,7 @@ describe("Pages (turn 247)", () => {
     const review = async () => act(async () => props(m.container.querySelector('[data-testid="review-link"]')!).onClick({ button: 0, preventDefault() {} }));
     await review();
     assert.equal(props(m.container.querySelector("textarea[aria-label='Panel 1']")!).value, "Salt on the boards.");
-    const tide = [...m.container.querySelectorAll("button[role='tab']")].find(b => b.textContent?.includes("The tide"))!;
-    await act(async () => props(tide).onClick({}));
+    await act(async () => props(m.container.querySelector('select[aria-label="Chapter"]')!).onChange({ target: { value: "the-tide" } }));
     await review();
     assert.equal(props(m.container.querySelector("textarea[aria-label='Panel 1']")!).value, "Salt on the boards.");
   });
@@ -222,8 +234,7 @@ describe("Pages (turn 247)", () => {
     comic.comicScripts.push({ chapter: "salt", hash: "sha256:salt", script: { version: 1, pages: [salt] } });
     const m = await mount(state);
     await act(async () => props(m.container.querySelector("input[aria-label='Words']")!).onChange({ target: { value: "Edited in the tide." } }));
-    const tab = [...m.container.querySelectorAll("button[role='tab']")].find((b) => b.textContent?.includes("Salt"))!;
-    await act(async () => props(tab).onClick({}));
+    await act(async () => props(m.container.querySelector('select[aria-label="Chapter"]')!).onChange({ target: { value: "salt" } }));
     assert.equal(m.sent.filter((message) => message.kind === "save-comic-script").length, 1, "the tide's edit went first");
     assert.equal(props(m.container.querySelector("textarea[aria-label='Panel 1']")!).value, "Salt on the boards.");
   });
