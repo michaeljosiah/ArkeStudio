@@ -759,8 +759,8 @@ type NarrationVoice = {
 };
 
 /**
- * A designed narrator's Google binding as the narration path derived it from the kept copy
- * (SPEC-049 R-12), for a world that lacks the voice's record. It rides on each job it admits as
+ * A designed narrator's Google binding from its owning world or the app's kept copy
+ * (SPEC-049 R-12). It rides on each job it admits as
  * the coordinator-only `designedBinding`, so admission and dispatch read the binding the read
  * was priced in rather than whatever the app narrator is by then: a run started under Ife's
  * voice keeps reading in it when the narrator is changed or reset part-way through. Only the
@@ -1586,7 +1586,7 @@ export class Coordinator {
   private async requireEnabledSpeechReader(
     model: import("@arke-studio/contracts").ManifestModel,
     voiceId: string,
-    /** A narration job's binding from the narrator's kept copy (SPEC-049 R-12); no other caller passes one. */
+    /** A narration job's binding from its owning world or the app narrator's kept copy (SPEC-049 R-12). */
     binding?: { remoteId: string; expiresAt: string },
   ): Promise<void> {
     if (!supportsVoiceUse(model, "preview")) throw new Error("This provider no longer supports speech. Choose an available voice reader.");
@@ -1594,10 +1594,9 @@ export class Coordinator {
     if (model.provider === "google") {
       if (isDesignedVoiceTarget(voiceId)) {
         const designed = this.opts.provider.openStore?.()?.getBundle().designedVoices ?? [];
-        // The world's record where it has one; else, for a narration job only, the binding the
-        // read was priced in from the narrator's kept copy (SPEC-049 R-12) — still verified
-        // against the key below, as the world's record would be.
-        const voice = resolveDesignedVoice(designed, voiceId) ?? binding;
+        // A background read keeps its owning world's binding even after another world is
+        // selected. The selected world's record is only for calls without a job binding.
+        const voice = binding ?? resolveDesignedVoice(designed, voiceId);
         if (!voice || Date.parse(voice.expiresAt) <= Date.now()) throw new Error("This saved voice is missing or expired. Saved audio still plays.");
         const key = await this.credentials?.get("google");
         if (!key) throw new Error("Connect Google in Settings to read with this voice.");
@@ -1844,9 +1843,13 @@ export class Coordinator {
           : `The book narrator ${saved.label ?? saved.voiceId} is unavailable · ${unavailable}. Choose another narrator for the book, or read once it is back.`);
       }
       const narrator = own !== null && !own.fallback ? own : saved ?? chosen;
+      const worldVoice = narrator.provider === "google" ? resolveDesignedVoice(store.getBundle().designedVoices ?? [], narrator.voiceId) : null;
+      const binding = worldVoice
+        ? { target: narrator.voiceId, remoteId: worldVoice.remoteId, expiresAt: worldVoice.expiresAt }
+        : saved === undefined && designedBinding?.target === narrator.voiceId ? designedBinding : undefined;
       return {
         narrator: { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, ...(narrator.label !== undefined ? { label: narrator.label } : {}) },
-        ...(designedBinding !== undefined && narrator.voiceId === designedBinding.target ? { designedBinding } : {}),
+        ...(binding !== undefined ? { designedBinding: binding } : {}),
         ...(unavailable !== null ? { unavailable } : {}),
       };
     };
