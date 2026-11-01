@@ -101,7 +101,10 @@ export function GraphicNovelReview({ setup, sourceTitle }: { setup: ProductionSe
   );
 }
 
-/** What Start the pilot asks Arke once the book exists (249b → 249d): chapter 1's pages, as a draft. */
+/**
+ * What Start the pilot asks Arke once the book exists (249b, 254b): chapter 1's page plan first,
+ * since its pages are drafted only from a plan the author kept.
+ */
 export function comicPilotAsk(title: string): string {
-  return `Draft the pilot: turn chapter 1, ${title}, into pages.`;
+  return `Plan the pilot: chapter 1, ${title}, as pages.`;
 }

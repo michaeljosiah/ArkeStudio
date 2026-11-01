@@ -41,6 +41,7 @@ import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript
 import { acceptComicTake, changeComicPage, comicPageRecord, comicPageRequest, comicPageTake, reviewComicTake, saveComicScript, seeComicWarning, setComicSettings, verifyComicTake } from "./productions/graphic-novel.js";
 import { harnessPageReader, type PageReader } from "./productions/graphic-novel-reader.js";
 import { harnessPageReviewer, type PageReviewer } from "./productions/graphic-novel-reviewer.js";
+import { harnessScriptReader } from "./productions/graphic-novel-script-reader.js";
 import { ComicExportBlocked, exportComic } from "./productions/comic-export.js";
 import { makeImageJsonRunner } from "./harness/review-task.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
@@ -1280,7 +1281,7 @@ function worldOpenFailureKind(err: unknown): string {
  * every other agent's first turn. The prose reviewer reads the chapter from its prompt and
  * returns tags (issue 1952).
  */
-const PROMPT_ONLY_AGENTS: ReadonlySet<string> = new Set(["conversation-summarizer", "conversation-namer", "chapter-prose-reviewer", "page-lettering-reader", "comic-page-reviewer"]);
+const PROMPT_ONLY_AGENTS: ReadonlySet<string> = new Set(["conversation-summarizer", "conversation-namer", "chapter-prose-reviewer", "page-lettering-reader", "comic-page-reviewer", "comic-script-reader"]);
 
 export class Coordinator {
   private readonly engine: ReturnType<typeof createEngine>;
@@ -6002,9 +6003,13 @@ export class Coordinator {
     // The page reviewer reads pictures too, and starts on the lettering reader's model until it has
     // one of its own (SPEC-064 decision 15): a separate agent, so it never shares the drafter's context.
     const lettering = withReader?.["page-lettering-reader"]?.model;
-    const reviewer = withReader?.["comic-page-reviewer"];
-    if (lettering === undefined || reviewer?.model !== undefined) return withReader;
-    return { ...withReader, "comic-page-reviewer": { ...reviewer, model: lettering } };
+    if (lettering === undefined) return withReader;
+    // The comic script reader starts there too (SPEC-064 decision 15).
+    const borrowed = { ...withReader };
+    for (const name of ["comic-page-reviewer", "comic-script-reader"]) {
+      if (borrowed[name]?.model === undefined) borrowed[name] = { ...borrowed[name], model: lettering };
+    }
+    return borrowed;
   }
 
   /**
@@ -21975,9 +21980,10 @@ export class Coordinator {
     return ask === null ? null : harnessPageReviewer(ask);
   }
 
-  private comicImageRunner(store: WorldStore) {
+  /** The page checks' harness runner; the script reader reads text alone and needs no image input. */
+  private comicImageRunner(store: WorldStore, images = true) {
     const adapter = this.opts.adapter;
-    if (!adapter?.readiness().ready || adapter.imageInput !== true) return null;
+    if (!adapter?.readiness().ready || (images && adapter.imageInput !== true)) return null;
     return makeImageJsonRunner({ adapter, beforeDispatch: () => store.assertOwnership(), sessionInput: this.sessionInput, scratch: this.extractScratch(),
       ...(this.opts.imageRenditionMaker ? { maker: this.opts.imageRenditionMaker } : {}),
       cloudAllowed: async (provider) => {
@@ -23580,6 +23586,7 @@ export class Coordinator {
       buildItems: () => this.conversationBuildItems(store.worldId),
       exports: () => this.durableExportReads(store.worldId),
       actionExports: () => [...this.exportReads.values()].filter((entry) => entry.worldId === store.worldId),
+      comicScriptReader: () => { const ask = this.comicImageRunner(store, false); return ask === null ? null : harnessScriptReader(ask); },
       researchAllowed: async () => {
         const settings = this.appSettings ? await this.appSettings.load().catch(() => null) : null;
         return settings?.research.web === true;
