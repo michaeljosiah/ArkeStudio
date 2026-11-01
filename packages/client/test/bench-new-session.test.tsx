@@ -81,6 +81,27 @@ afterEach(async () => {
   __setBridgeForTest(null);
 });
 
+it("offers explicit recovery when another window changes the shared session without reopening automatically", async () => {
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() { return () => {}; },
+    send(json: string) { sent.push(JSON.parse(json)); } } as ArkeBridge);
+  __setStateForTest(stateWith(worldSession(OLD, "The old one", "a lagoon")), { connection: "open" });
+  const container = dom.document.createElement("div"); dom.document.body.append(container);
+  const root = createRoot(container);
+  cleanups.push(async () => { await act(async () => root.unmount()); container.remove(); });
+  await act(async () => root.render(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${OLD}`]}><App /></MemoryRouter>));
+  sent.length = 0;
+  await act(async () => __setStateForTest(stateWith(worldSession(FRESH, "Other window", "other brief")), { connection: "open" }));
+  assert.match(container.textContent ?? "", /Another Bench session was opened/);
+  assert.doesNotMatch(container.textContent ?? "", /Opening the bench/);
+  assert.equal(sent.length, 0, "a displaced window must not fight another window for the session");
+  const reopen = [...container.querySelectorAll("button")].find(button => button.textContent === "Open it again");
+  assert.ok(reopen); await act(async () => reopen.click());
+  assert.deepEqual(sent, [{ kind: "bench-open", worldId: FIXTURE_WORLD_ID, sessionId: OLD }]);
+  await act(async () => __setStateForTest(stateWith(worldSession(OLD, "The old one", "a lagoon")), { connection: "open" }));
+  assert.match(container.textContent ?? "", /The old one/); assert.equal(sent.length, 1);
+});
+
 it("a new session waits on the id-less address for the fresh one, then names it", async () => {
   const sent: ClientMessage[] = [];
   __setBridgeForTest({
