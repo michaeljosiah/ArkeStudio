@@ -95,3 +95,17 @@ it("failed downloads and an unavailable AI model do not trap manual authoring", 
     await click(element, "Start using Arke"); await acknowledge(); assert.equal(where, "/worlds");
   } finally { await unmount(); }
 });
+
+it("a stale setup address returns to Worlds without restarting completed onboarding (#2238)", async () => {
+  for (const delayed of [false, true]) {
+    const plan: OnboardingPlan = { ...NEW_ONBOARDING, persona: "guided", step: "done", writing: "account", account: "github-copilot", modelId: "github-copilot/selected" };
+    const { element, state, unmount } = await mount(plan, delayed);
+    try {
+      if (delayed) await act(async () => { __setStateForTest(state); await flush(); });
+      assert.equal(where, "/worlds");
+      assert.doesNotMatch(element.textContent!, /Make Arke yours/);
+      assert.equal(commands.some(command => command.kind === "save-onboarding" || command.kind === "check-onboarding"), false);
+      assert.deepEqual(state.app.onboarding!.plan, plan);
+    } finally { await unmount(); commands = []; }
+  }
+});
