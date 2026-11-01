@@ -2437,7 +2437,7 @@ export function SettingsGeneralScreen() {
   return (
     <div data-screen="settings-general" className="fy-set fy-set--general">
       <h1 className="fy-pane__name">General</h1>
-      {!isRemoteSession() && <FactRow what="Studio setup"><button type="button" className="fy-fact__link" onClick={() => navigate("/setup")}>Set up an AI writing agent & tools</button></FactRow>}
+      {!isRemoteSession() && <FactRow what="Studio setup"><button type="button" className="fy-fact__link" onClick={() => navigate(state?.app.onboarding?.plan.step === "done" ? "/settings/models" : "/setup")}>{state?.app.onboarding?.plan.step === "done" ? "Manage AI models & tools" : "Set up an AI writing agent & tools"}</button></FactRow>}
       <FactRow what="Production tools"><PromptToolsSetting /></FactRow>
       {ROUTED_CAPABILITIES.map((capability) => {
         const candidates = (manifest?.models ?? []).filter((m) => m.capability === capability && m.upscale === undefined);

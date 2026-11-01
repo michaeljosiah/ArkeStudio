@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useNavigate } from "react-router";
+import { Navigate, useNavigate } from "react-router";
 import { NEW_ONBOARDING, componentIsSettled, harnessModelReference, onboardingComponents, onboardingLocalModels,
   onboardingWritingModels, onboardingWritingReadiness, type OnboardingPlan } from "@arke-studio/contracts";
 import { ArrowRight, Check, Cloud, Cpu, Folder, Laptop, Mic, Sliders, TriangleAlert } from "../components/icons.js";
@@ -44,7 +44,7 @@ export function OnboardingScreen() {
   const [comfyUrl, setComfyAddress] = useState("http://127.0.0.1:8188");
   const checked = useRef(false);
   useEffect(() => {
-    if (connection !== "open" || !state || checked.current || isRemoteSession()) return;
+    if (connection !== "open" || !state || saved?.plan.step === "done" || checked.current || isRemoteSession()) return;
     checked.current = true; checkOnboarding();
   }, [connection, state]);
   useEffect(() => subscribeCommandFailures(event => {
@@ -62,7 +62,7 @@ export function OnboardingScreen() {
   const app = state?.app;
   const connected = connection === "open";
   const update = (patch: Partial<OnboardingPlan>, action: "save" | "install" | "finish" = "save") => {
-    if (!connected || pending) return;
+    if (!connected || pending || saved?.plan.step === "done") return;
     const next = { ...plan, ...patch, ...(action === "finish" ? { step: "done" as const } : action === "install" ? { step: "progress" as const } : {}) }; setError(null); if (action !== "finish") setPlan(next); setPending(true);
     expectedPlan.current = JSON.stringify(next);
     finishing.current = action === "finish"; saveOnboarding(next, action);
@@ -243,6 +243,8 @@ export function OnboardingScreen() {
       {detected.length > 0 && <Action onClick={() => update({ step: "assistant" })}>Use an existing assistant</Action>}</div>
     <div className="ij-actions">{back("choose")}{enter}</div>
   </>;
+  // Reopening setup must never replace a completed plan with first-run progress.
+  if (saved?.plan.step === "done" && !finishing.current) return <Navigate to="/worlds" replace />;
   return <div className="ij fy-onboarding" data-screen="onboarding"><LaunchFrame><div className="ij-content" ref={panel}>
     {!connected && <p role="status" className="ij-note">Reconnecting to your studio. Your saved choices are kept.</p>}
     {error && <p role="alert" className="ij-note">{error}</p>}
