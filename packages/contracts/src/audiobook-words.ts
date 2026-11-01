@@ -38,7 +38,7 @@ export function audiobookWording(authored: string, observed: string): "match" | 
   const wording = (value: string) => value.replace(/[‘’]/g, "'")
     .replace(/(?<=\p{L})[-‐‑](?=\p{L})/gu, " ")
     .replace(/[“”"()[\]{}·…]/g, " ")
-    .replace(/(?<!\d)[.,:;!?]|[.,:;!?](?!\d)/g, " ")
+    .replace(/[.,:;!?](?!\d)/g, " ")
     .replace(/(^|\s)'|'(?=\s|$)/g, "$1")
     .toLocaleLowerCase("en").trim().replace(/\s+/gu, " ");
   const words = wording(a);

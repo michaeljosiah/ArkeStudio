@@ -15,6 +15,7 @@ it("separates case, dialogue punctuation, separators and split compounds without
 it("retains every deliberately changed meaning and uncertain recognition in the review set", () => {
   for (const [authored, heard] of [
     ["Do not enter.", "Do enter."], ["Pay 15 coins.", "Pay 50 coins."], ["1.5 metres", "15 metres"],
+    ["Add .5 litres.", "add 5 litres"], ["Add ,5 litres.", "add 5 litres"],
     ["-3 degrees", "3 degrees"], ["5%", "5"], ["1/2", "1 2"], ["10:30", "10 30"],
     ["She ran home.", "She ran ran home."], ["She ran home before dark.", "She ran home."],
     ["She ran home.", "The neighbour left."], ["She ran home.", "whisper She ran home."],
