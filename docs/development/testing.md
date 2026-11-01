@@ -2288,3 +2288,10 @@ the shared player's late stylesheet overriding the preview's position. `--output
 retains captures and measurements; `--baseline <git-ref>` records the prior layout without
 treating its known geometry failures as a pass. Fixtures use the public design example and do
 not read or write an author's world.
+
+## Lifetime production spend (#250)
+
+See [production spend validation](production-spend.md#validation) for the ledger/job/Bench
+regressions and actual App/PageSheet browser smoke. The fixture reconciles production, scene
+and shot totals, separate money/count completeness, deleted Activity/Bench history, frozen
+allocation, filed-copy deduplication, cost sources, and read-only refresh without provider work.

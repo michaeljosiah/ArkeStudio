@@ -1,3 +1,4 @@
+import { ProductionSpend } from "../components/production-spend.js";
 import { useState, type ReactNode } from "react";
 import { NavLink, useNavigate, useParams } from "react-router";
 import {
@@ -270,6 +271,7 @@ export function DevelopmentWorkspace() {
           {episodes.length} episode{episodes.length === 1 ? "" : "s"}
         </span>
       </div>
+      <ProductionSpend production={production} />
       {/* The season record itself, in the header rather than behind a tab of its own (turn 91).
           Inheritance is shown, not hidden (turn 48): the Series engine is read-only here, and
           editing it is the Series' own accept, never a side effect of a season edit. */}

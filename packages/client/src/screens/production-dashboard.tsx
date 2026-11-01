@@ -1,3 +1,4 @@
+import { ProductionSpend } from "../components/production-spend.js";
 import {
   beatPictureShotId,
   orderedShots,
@@ -258,9 +259,11 @@ export function ProductionDashboardScreen() {
               a box to type in. Delivery postdates that drawing and is the app's own (issue 389),
               so it sits where it cannot interrupt the opening. */}
           <ProductionSetup production={production} worldId={worldId} prodId={prodId} />
+          <ProductionSpend production={production} />
         </>
       ) : (
         <>
+          <ProductionSpend production={production} />
           <ProductionSetup production={production} worldId={worldId} prodId={prodId} />
           <div className="fy-dashrow">
             <div className="fy-threadcard">
@@ -323,6 +326,7 @@ export function ProductionDashboardScreen() {
               </div>
             )}
           </div>
+          <ProductionSpend production={production} scenesOnly />
           <div>
             <div className="fy-listhead">
               <span className="fy-dashsection-label">{beats ? "Latest pictures" : "Latest clips"}</span>

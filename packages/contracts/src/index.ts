@@ -249,3 +249,5 @@ export * from "./studio-assistant.js";
 export * from "./story-state-schema.js";
 export * from "./story-state.js";
 export * from "./onboarding.js";
+
+export * from "./production-spend.js";

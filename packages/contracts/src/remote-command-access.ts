@@ -6,6 +6,7 @@ import type { AdapterAction } from "./adapters.js";
  * Studio operations act on world content or preferences; host operations own native UI,
  * credentials, installation or machine processes. Payload cases mix both and are checked below. */
 export const REMOTE_COMMAND_ACCESS = {
+  "production-spend-refresh": "studio",
   "check-onboarding": "host", "save-onboarding": "host",
   "import-world": "host",
   // host

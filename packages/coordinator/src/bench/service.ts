@@ -1,3 +1,4 @@
+import { benchProductionWork } from "@arke-studio/contracts";
 import { benchLineLanguage, benchVoiceDirection, directionSaysAnything, quoteSpeech, recogniseDirection, speechInputFits } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { compileLine, type CompiledLine } from "../voice/direction.js";
@@ -474,6 +475,7 @@ export async function addBenchReference(
 // ---------------------------------------------------------------------------
 
 export interface BenchEnqueueInput {
+  productionId?: string;
   recipe?: import("@arke-studio/contracts").RecipeIdentity;
   worldId: string;
   target: { kind: "bench-take"; id: string };
@@ -1352,6 +1354,10 @@ export function planBenchDispatch(
     if (total > 0 && (confirmed === undefined || total > confirmed)) {
       return { ok: false, reason: "The speech price needs confirmation. Review the current price in the composer and press Generate." };
     }
+  }
+  for (const [index, input] of inputs.entries()) {
+    const work = benchProductionWork(reserved[index]!.request);
+    if (work) { input.productionId = work.productionId; input.params.productionWork = work; }
   }
   return { ok: true, reserved, inputs: adapterRecipe ? inputs.map(input => ({ ...input, recipe: adapterRecipe })) : inputs };
 }

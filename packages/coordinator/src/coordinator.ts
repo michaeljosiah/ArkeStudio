@@ -1,3 +1,6 @@
+import { productionSpend as deriveProductionSpend } from "./spend/rollups.js";
+import { readProductionSpend } from "./spend/read.js";
+import type { ProductionSpendProjection, WorldBundle } from "@arke-studio/contracts";
 import { savedPicture, openSavedPicture, type SavedPicture } from "./productions/audiobook-picture-reuse.js";
 import { NEW_ONBOARDING, onboardingComponents, onboardingWritingReadiness, onboardingWritingModels, type OnboardingPlan } from "@arke-studio/contracts";
 import { checkOnboardingWorkspace, validateOnboardingPlan } from "./setup/onboarding.js";
@@ -4655,6 +4658,50 @@ export class Coordinator {
     this.emit({ type: "setup.status", at: this.nowIso(), setup });
   }
 
+  private productionSpendProjection: ProductionSpendProjection | undefined;
+  private productionSpendWork: Promise<void> | null = null;
+  private productionSpendDirty = false;
+
+  private setDisplayWorld(world: WorldBundle | null): void {
+    this.readModel.setWorld(world);
+    this.scheduleProductionSpend();
+  }
+
+  /** Coalesced reads stay owned through shutdown; old-world results can never replace new ones. */
+  private scheduleProductionSpend(): Promise<void> {
+    this.productionSpendDirty = true;
+    if (this.productionSpendWork) return this.productionSpendWork;
+    const work = Promise.resolve().then(async () => {
+      while (this.productionSpendDirty && !this.stopping) {
+        this.productionSpendDirty = false;
+        const world = this.readModel.getState().world;
+        const store = this.opts.provider.openStore?.();
+        if (!world || !store || store.worldId !== world.meta.worldId) { this.productionSpendProjection = undefined; return; }
+        const result = await readProductionSpend({ world, worldDir: store.dir,
+          ledgerPath: this.opts.appRoot ? join(this.opts.appRoot, "ledger.jsonl") : this.opts.ledgerSeedPath,
+          jobsPath: this.opts.appRoot ? join(this.opts.appRoot, "queue", "jobs.jsonl") : this.opts.jobsSeedPath });
+        if (this.stopping) return;
+        if (this.readModel.getState().world !== world || this.opts.provider.openStore?.() !== store || this.productionSpendDirty) {
+          this.productionSpendDirty = true; continue;
+        }
+        this.productionSpendProjection = result;
+        this.transport.broadcastSnapshot();
+      }
+    }).catch(() => {
+      // An unexpected derivation failure cannot leave the old figure presented as current.
+      const world = this.readModel.getState().world;
+      this.productionSpendProjection = world ? deriveProductionSpend(world, { ledger: [], jobs: [], bench: [], ledgerUnavailable: true,
+        historyUnavailable: true, benchIncomplete: true }) : undefined;
+      if (!this.stopping) this.transport.broadcastSnapshot();
+    }).finally(() => {
+      this.productionSpendWork = null;
+      if (this.productionSpendDirty && !this.stopping) this.scheduleProductionSpend();
+    });
+    this.productionSpendWork = work;
+    this.trackBackground(work);
+    return work;
+  }
+
   getState(): ClientState {
     const state = this.readModel.getState();
     // Asked of the service on the way out rather than folded in, because a run starts and ends
@@ -4662,7 +4709,7 @@ export class Coordinator {
     // stored would be stale by the next rescan (issue 239). Allocation-free when nothing is
     // running, which is nearly always.
     const authoringRuns = this.authoring?.liveRuns() ?? [];
-    return { ...state, ...(authoringRuns.length ? { authoringRuns } : {}), effectAnalyses: this.effectAnalysis.project(this.opts.provider.openStore?.()) };
+    return { ...state, productionSpend: !this.stopping && state.world?.meta.worldId === this.productionSpendProjection?.worldId && this.opts.provider.openStore?.()?.worldId === this.productionSpendProjection?.worldId ? this.productionSpendProjection : undefined, ...(authoringRuns.length ? { authoringRuns } : {}), effectAnalyses: this.effectAnalysis.project(this.opts.provider.openStore?.()) };
   }
 
   /**
@@ -4758,6 +4805,8 @@ export class Coordinator {
       this.exportReads.set(parsed.exportId, exportReadRecord(parsed, this.exportReads.get(parsed.exportId)));
     }
     this.readModel.apply(parsed);
+    if (parsed.type === "ledger.appended" || parsed.type === "spend.status" || parsed.type.startsWith("bench.") ||
+      (parsed.type === "job.updated" && ["succeeded", "failed", "cancelled"].includes(parsed.job.status))) this.scheduleProductionSpend();
     if (parsed.type === "storage.health" || parsed.type === "comfyui.status" || parsed.type === "recovery.policy") this.opts.recoveryHistory?.observeAvailability(this.readModel.getState().app);
     if (parsed.type === "export.progress" && exportStatusChanged) {
       const state = this.readModel.getState();
@@ -5527,7 +5576,7 @@ export class Coordinator {
       ? (await this.engine.worlds.read(LOCAL_ENGINE_CONTEXT, worldId)).bundle
       : loaded;
     if (bundle.meta.worldId !== worldId || (store && !this.stillOpen(store))) return;
-    this.readModel.setWorld(bundle);
+    this.setDisplayWorld(bundle);
     // Recovery always receives the store that owns this bundle, even across awaited reads.
     if (store) await this.recoverFrameRuns(store, bundle).catch(() => {});
     if (store && !wasAlreadyOpen) {
@@ -5647,13 +5696,13 @@ export class Coordinator {
      * await and hoping the list of awaits stays short.
      */
     if (open?.worldId === worldId) {
-      this.readModel.setWorld(open.getBundle());
+      this.setDisplayWorld(open.getBundle());
       this.transport.broadcastSnapshot();
       await this.appLog?.append({ level: "warn", event: "world.open-recovered", worldId, kind });
       return;
     }
 
-    if (open === null) this.readModel.setWorld(null);
+    if (open === null) this.setDisplayWorld(null);
     // The screen and the event carry the reason whole. Neither leaves the machine: the event is
     // journalled to `coordinator.jsonl`, which the diagnostics bundle does not read, and the
     // person looking at the refusal is the one who needs to know which file it was.
@@ -7481,6 +7530,10 @@ export class Coordinator {
       return;
     }
     switch (msg.kind) {
+      case "production-spend-refresh": {
+        if (this.readModel.getState().world?.meta.worldId === msg.worldId) await this.scheduleProductionSpend();
+        return;
+      }
       case "save-production-narrative": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) throw new Error("Open this production's world before editing its narrative.");
@@ -7623,7 +7676,7 @@ export class Coordinator {
         }
         try {
           const { folder } = await archive(msg.worldId);
-          if (this.readModel.getState().world?.meta.worldId === msg.worldId) this.readModel.setWorld(null);
+          if (this.readModel.getState().world?.meta.worldId === msg.worldId) this.setDisplayWorld(null);
           this.readModel.setWorlds(await this.opts.provider.listWorlds());
           this.emit({
             at: new Date().toISOString(),
@@ -7761,7 +7814,7 @@ export class Coordinator {
         const reconcile = this.opts.provider.reconcileExternalEdit?.bind(this.opts.provider);
         if (!reconcile) return;
         try {
-          this.readModel.setWorld(await reconcile(msg.worldId, msg.path));
+          this.setDisplayWorld(await reconcile(msg.worldId, msg.path));
         } catch {
           /* refusal shows up as the edit still listed */
         }
@@ -23520,7 +23573,7 @@ export class Coordinator {
           return { id: store.worldId, folder };
         },
         archived: async ({ folder }: { folder: string }) => {
-          this.readModel.setWorld(null);
+          this.setDisplayWorld(null);
           this.readModel.setWorlds(await this.opts.provider.listWorlds());
           this.emit({ at: this.nowIso(), type: "world.archived", worldId: store.worldId,
             name: store.getBundle().meta.name, folder: basename(folder) });
@@ -23656,7 +23709,7 @@ export class Coordinator {
     if (!this.stillOpen(store)) return;
     // Card acceptance commits through the store just like the proposal panel. Publish that
     // bundle before the completed card, or its chapters and overview stay at their old values.
-    this.readModel.setWorld(store.getBundle());
+    this.setDisplayWorld(store.getBundle());
     await this.refreshConversations(store);
     if (!this.stillOpen(store)) return;
     if (this.getState().worldChat?.conversationId === conversationId) {
@@ -23860,7 +23913,7 @@ export class Coordinator {
    */
   private refreshIfStillOpen(store: WorldStore): void {
     if (!this.stillOpen(store)) return;
-    this.readModel.setWorld(store.getBundle());
+    this.setDisplayWorld(store.getBundle());
     this.transport.broadcastSnapshot();
   }
 
@@ -23927,7 +23980,7 @@ export class Coordinator {
 
   private async refreshWorldSnapshot(worldId: string): Promise<void> {
     try {
-      this.readModel.setWorld(await this.opts.provider.loadWorld(worldId));
+      this.setDisplayWorld(await this.opts.provider.loadWorld(worldId));
     } catch (error) {
       void this.appLog?.append({ kind: "world-refresh.failed", worldId,
         message: error instanceof Error ? error.message : String(error) });

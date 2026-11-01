@@ -1,6 +1,6 @@
 # Lifetime production spend · turn 255
 
-Proposed on 1 November 2026 for issue #250. Owner review pending. No application UI changes.
+Approved by the owner on 1 November 2026 after reviewing all eight drawings in chat. Implementation of issue #250 is in progress.
 
 Rebuild with `node design-system/production-spend-255.mjs`, then `node design-system/check-master.mjs --record` and `node design-system/build-review.mjs`. The same drawings are registered in the master and mirrored into the prototype. `production-spend-255.review.html` is the standalone clickable review. Type, colours and light/dark come from the existing design tokens.
 
@@ -58,8 +58,8 @@ The failed-read variant 255f retains all candidate evidence and withholds money 
 
 ## Implementation boundary
 
-The revised issue #250 supplies the scope. Existing requirements are SPEC-008 R-14–R-19/R-29–R-30, SPEC-013 R-3–R-5/R-8–R-9, SPEC-032 R-21 and SPEC-036's frame-slot/Bench workflow. Their current statuses and amendments were read. A proposed amendment in the private specification set records this design; it does not claim approval or implementation.
+The revised issue #250 supplies the scope. Existing requirements are SPEC-008 R-14–R-19/R-29–R-30, SPEC-013 R-3–R-5/R-8–R-9, SPEC-032 R-21 and SPEC-036's frame-slot/Bench workflow. Their current statuses and amendments were read. The lifetime production spend amendment in the private specification set records the owner-approved scope and implementation contract for PR #2286.
 
 New UI: the compact summary, scoped read-only sheet and accounting evidence copy. Existing UI: production navigation, scene/shot editors, take review, PageSheet and Activity. No new generator, review grammar, batch contract, reference-kit accounting or world-folder summary writes.
 
-Before implementation, settle the five decisions above. Implementation validation will include actual component layout at desktop/phone, long source labels, 200% zoom, keyboard/focus and receipt scrolling. This design-only review can verify drawings and links; it does not qualify application behavior.
+The five decisions above are approved. The application now uses the native summary and PageSheet. Its browser smoke renders the actual App in both themes at desktop, phone and short-window sizes, checking receipt scrolling, horizontal fit, refresh, Escape and focus return. Unit and temporary-world integration tests verify the accounting authorities. The drawings remain a design reference, separate from application validation.

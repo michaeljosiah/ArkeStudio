@@ -1,3 +1,4 @@
+import { ProductionSpendProjectionSchema } from "./production-spend.js";
 import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { EMPTY_GUIDE_RECORD, GuideRecordSchema } from "./world-guide.js";
 import { valueSchema } from "./value-schema.js";
@@ -649,6 +650,8 @@ export const ClientStateSchema = valueSchema(z
     effectAnalyses: z.array(EffectAnalysisProjectionSchema).optional(),
     /** Null until a world is opened. */
     world: WorldBundleSchema.nullable(),
+    /** App-root accounting projection, never persisted in a world (#250). */
+    productionSpend: ProductionSpendProjectionSchema.optional(),
     /**
      * Why the last world asked for is not the one above (issue 571).
      *
