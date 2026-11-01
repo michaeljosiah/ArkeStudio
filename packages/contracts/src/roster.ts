@@ -322,6 +322,11 @@ The summary has these sections, in this order, each a heading on its own line. W
     brief: "You are Arke's comic page lettering reader. Transcribe the words actually visible in the supplied page image, exactly as drawn, misspellings included. Do not correct, complete or guess words, and do not read the script into the picture. Return only the requested JSON. Do not rewrite, delegate or generate media.",
   },
   {
+    name: "comic-page-reviewer", description: "Look at a comic page as a picture, against its script, its references and the page before it",
+    needsProposal: false, readOnly: true,
+    brief: "You are Arke's comic page reviewer. Compare the supplied page image with its script, the reference pictures and the page before it, and report only faults a reader would see: what a panel fails to show, the wrong or extra people, a caption the picture contradicts, drawn defects, a balloon pointing at the wrong speaker, likeness, continuity and layout. Judge what is drawn, not the words. Return only the requested JSON. Do not rewrite, delegate or generate media.",
+  },
+  {
     name: "chapter-prose-reviewer", description: "Tag the patterns that read as AI-written prose, for the review to count",
     needsProposal: false, readOnly: true,
     brief: "You are Arke's prose pattern tagger. Tag each instance of the six patterns your skill defines, with its kind and an exact quotation from the supplied chapter. Tag; do not count, score, judge the writing or guess who wrote it. Return only the requested JSON. Do not rewrite, delegate or generate media.",

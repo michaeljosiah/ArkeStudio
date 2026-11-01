@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ulid, type ComicPage, type DomainEvent, type ManifestModel, type PageTextRegion } from "@arke-studio/contracts";
+import { REVIEW_UNAVAILABLE, ulid, type ComicPage, type DomainEvent, type ManifestModel, type PageReviewFinding, type PageTextRegion } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { createChapter, createProduction } from "../../src/productions/ops.js";
 import { comicPageRecord, saveComicScript } from "../../src/productions/graphic-novel.js";
 import type { PageReader } from "../../src/productions/graphic-novel-reader.js";
+import type { PageReviewInput, PageReviewer } from "../../src/productions/graphic-novel-reviewer.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { IMAGE, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
 
 /**
@@ -17,13 +19,26 @@ let n = 0;
 const rid = () => `01J0000000000000000003${String((n += 1)).padStart(4, "0")}`;
 const last = <T extends DomainEvent["type"]>(events: DomainEvent[], type: T) => events.filter((event): event is Extract<DomainEvent, { type: T }> => event.type === type).at(-1);
 
-/** Swap the page reader for one that answers these regions, attempt by attempt. */
-function readerAnswering(answers: PageTextRegion[][]): () => void {
-  const proto = Coordinator.prototype as unknown as { pageReader: (...args: unknown[]) => PageReader | null };
+type Looked = { findings: PageReviewFinding[]; cleared?: Array<{ finding: string; reason: string }> };
+const CLEAN: Looked = { findings: [] };
+
+/**
+ * Swap the page reader for one that answers these regions, attempt by attempt, and the page
+ * reviewer for one that answers these reviews; each review's input is kept for the test to read.
+ */
+function readerAnswering(answers: PageTextRegion[][], reviews: Looked[] = [CLEAN], asked: PageReviewInput[] = []): () => void {
+  const proto = Coordinator.prototype as unknown as { pageReader: (...args: unknown[]) => PageReader | null; pageReviewer: (...args: unknown[]) => PageReviewer | null };
   const original = proto.pageReader;
+  const reviewer = proto.pageReviewer;
   let call = 0;
+  let looked = 0;
   proto.pageReader = () => ({ precise: true, read: async () => ({ regions: answers[Math.min(call++, answers.length - 1)]!, reader: { id: "test", version: "1" } }) });
-  return () => { proto.pageReader = original; };
+  proto.pageReviewer = () => ({ review: async (input) => {
+    asked.push(input);
+    const answer = reviews[Math.min(looked++, reviews.length - 1)]!;
+    return { findings: answer.findings, cleared: answer.cleared ?? [], reviewer: { id: "test", version: "1" } };
+  } });
+  return () => { proto.pageReader = original; proto.pageReviewer = reviewer; };
 }
 
 async function book(h: Harness) {
@@ -50,7 +65,10 @@ describe("a page's lettering checked (SPEC-064 R-29 – R-33)", () => {
       await h.send({ kind: "accept-comic-take", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, take: take.id });
       assert.equal(last(h.events, "comic.take-result")?.disposition, "refused");
       assert.deepEqual(record().accepted, {});
-      await h.send({ kind: "accept-comic-take", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, take: take.id, override: { findings: [], reason: "Read it myself." } });
+      assert.deepEqual([take.review?.status, take.review?.status === "unavailable" && take.review.reason], ["unavailable", "no-reviewer"], "nor the picture");
+      await h.send({ kind: "accept-comic-take", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, take: take.id, override: { findings: [] } });
+      assert.match(last(h.events, "comic.take-result")?.reason ?? "", /does not cover review:unavailable/, "an unreviewed picture is named, not waved through");
+      await h.send({ kind: "accept-comic-take", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, take: take.id, override: { findings: [REVIEW_UNAVAILABLE], reason: "Read it myself." } });
       assert.equal(last(h.events, "comic.take-result")?.disposition, "accepted");
       assert.equal(record().accepted.en, take.id);
       assert.equal(record().takes[0]!.override?.reason, "Read it myself.");
@@ -132,6 +150,88 @@ describe("a page's lettering checked (SPEC-064 R-29 – R-33)", () => {
         await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, confirmedMicroUsd: 90_000, untilPasses: true });
         assert.equal(h.enqueued.length, 2);
         assert.match(last(h.events, "comic.page-made")?.reason ?? "", /price moved/);
+      } finally { restore(); }
+    }, { model: LETTERER }));
+});
+
+const CAPTION: PageReviewFinding = { id: "review:caption:0", kind: "caption", panel: 1, note: "a pen, but the rail" };
+const LIKENESS: PageReviewFinding = { id: "review:likeness:1", kind: "likeness", panel: 1, note: "Maren's hair" };
+
+describe("a page looked at as a picture (SPEC-064 R-67 – R-73, turn 253)", () => {
+  it("is reviewed after its words are read, from its script and never the prose, and the world is raised to 117", () =>
+    withHarness(async (h) => {
+      const asked: PageReviewInput[] = [];
+      const restore = readerAnswering([GOOD], [CLEAN], asked);
+      try {
+        const { production, page, record } = await book(h);
+        await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, confirmedMicroUsd: 1_000_000 });
+        const take = record().takes[0]!;
+        assert.equal(take.review?.status, "compared");
+        assert.equal(last(h.events, "comic.page-made")?.passed, true);
+        assert.match(asked[0]!.script, /Panel 1: Maren on the rail at dawn\./);
+        assert.match(asked[0]!.script, /caption: "Where are you\?"/);
+        assert.ok((await readWorldMeta(h.store()!.dir)).schemaVersion >= 117, "a build of 116 would drop the reviewed take");
+      } finally { restore(); }
+    }, { model: LETTERER }));
+
+  it("holds a take whose picture contradicts its caption, and an override must name the fault", () =>
+    withHarness(async (h) => {
+      const restore = readerAnswering([GOOD], [{ findings: [CAPTION] }]);
+      try {
+        const { production, page, record } = await book(h);
+        await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, confirmedMicroUsd: 1_000_000 });
+        const take = record().takes[0]!;
+        assert.equal(last(h.events, "comic.page-made")?.passed, false, "the words pass; the picture does not");
+        await h.send({ kind: "accept-comic-take", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, take: take.id });
+        assert.equal(last(h.events, "comic.take-result")?.disposition, "refused");
+        await h.send({ kind: "accept-comic-take", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, take: take.id, override: { findings: [] } });
+        assert.match(last(h.events, "comic.take-result")?.reason ?? "", /does not cover review:caption:0/);
+        await h.send({ kind: "accept-comic-take", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, take: take.id, override: { findings: [CAPTION.id] } });
+        assert.equal(record().accepted.en, take.id);
+      } finally { restore(); }
+    }, { model: LETTERER }));
+
+  it("tries again until the picture passes too", () =>
+    withHarness(async (h) => {
+      const restore = readerAnswering([GOOD], [{ findings: [CAPTION] }, CLEAN]);
+      try {
+        const { production, page, record } = await book(h);
+        await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, confirmedMicroUsd: 1_000_000, untilPasses: true });
+        assert.equal(h.enqueued.length, 2, "the second picture passed");
+        assert.deepEqual(record().takes.map((take) => take.review?.status === "compared" && take.review.findings.length), [1, 0]);
+      } finally { restore(); }
+    }, { model: LETTERER }));
+
+  it("clears words the panel calls for as writing in the scene, and nothing it was not asked about", () =>
+    withHarness(async (h) => {
+      const asked: PageReviewInput[] = [];
+      const NEAP: PageTextRegion[] = [...GOOD, { text: "neap", box: { x: 0.6, y: 0.6, w: 0.1, h: 0.04 } }];
+      const restore = readerAnswering([NEAP], [{ findings: [], cleared: [{ finding: "extra:1", reason: "the ledger, in the scene" }] }], asked);
+      try {
+        const { production, page, record } = await book(h);
+        await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, confirmedMicroUsd: 1_000_000 });
+        assert.deepEqual(asked[0]!.extras, [{ id: "extra:1", text: "neap" }], "the reviewer is asked about the words the read found");
+        const take = record().takes[0]!;
+        assert.equal(take.verification?.status === "compared" && take.verification.findings[0]?.kind, "extra", "the read keeps what it found");
+        assert.equal(last(h.events, "comic.page-made")?.passed, true, "and the take passes, with the reason on it");
+        await h.send({ kind: "accept-comic-take", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, take: take.id });
+        assert.equal(record().accepted.en, take.id);
+      } finally { restore(); }
+    }, { model: LETTERER }));
+
+  it("passes a take with a warning, keeps Seen on the page record, and forgets it when the take is read again", () =>
+    withHarness(async (h) => {
+      const restore = readerAnswering([GOOD], [{ findings: [LIKENESS] }]);
+      try {
+        const { production, page, record } = await book(h);
+        await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, confirmedMicroUsd: 1_000_000 });
+        const take = record().takes[0]!;
+        assert.equal(last(h.events, "comic.page-made")?.passed, true, "a warning is looked at, not fixed");
+        await h.send({ kind: "see-comic-warning", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, take: take.id, warning: "likeness" });
+        assert.equal(last(h.events, "comic.take-result")?.disposition, "seen");
+        assert.deepEqual(record().acknowledged[take.id], ["likeness"]);
+        await h.send({ kind: "check-comic-take", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, take: take.id });
+        assert.equal(record().acknowledged[take.id], undefined, "a new review is a new verdict");
       } finally { restore(); }
     }, { model: LETTERER }));
 });

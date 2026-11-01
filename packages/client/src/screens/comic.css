@@ -190,4 +190,12 @@
 .fy-comic-plan__rows .n { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-comic-plan__rows .pg { font: var(--type-mono); font-size: var(--text-xs); text-align: right; }
 .fy-comic-plan__rows .lay { font: var(--type-meta); color: var(--muted-foreground); text-align: right; }
-.fy-comic-plan__note { margin: 0; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic-plan__note { margin: 0; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }/* Two verdict lines, Lettering then Picture, as one block (turn 253a). */
+.fy-comic__verdicts { display: flex; flex-direction: column; }
+.fy-comic__verdicts > .fy-comic__verdict:not(:last-child) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.fy-comic__verdicts > .fy-comic__verdict + .fy-comic__verdict { border-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
+.fy-comic__verdict.pic b { width: 64px; flex: none; }
+.fy-comic__find .k { width: 76px; }
+.fy-comic__find .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-comic__find.clear .k { color: var(--muted-foreground); }
+.fy-comic__find .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; }

@@ -38,8 +38,9 @@ import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdap
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
 import { DramaEditionService } from "./publications/drama.js";
 import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
-import { acceptComicTake, changeComicPage, comicPageRecord, comicPageRequest, comicPageTake, saveComicScript, setComicSettings, verifyComicTake } from "./productions/graphic-novel.js";
+import { acceptComicTake, changeComicPage, comicPageRecord, comicPageRequest, comicPageTake, reviewComicTake, saveComicScript, seeComicWarning, setComicSettings, verifyComicTake } from "./productions/graphic-novel.js";
 import { harnessPageReader, type PageReader } from "./productions/graphic-novel-reader.js";
+import { harnessPageReviewer, type PageReviewer } from "./productions/graphic-novel-reviewer.js";
 import { ComicExportBlocked, exportComic } from "./productions/comic-export.js";
 import { makeImageJsonRunner } from "./harness/review-task.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
@@ -114,7 +115,7 @@ import {
   OPENCODE_AVAILABILITY,
   type Capability,
   type ClientMessage,
-  takePasses,
+  takeClears,
   type HarnessAvailability,
   type HarnessEngine,
   type ClientState,
@@ -1279,7 +1280,7 @@ function worldOpenFailureKind(err: unknown): string {
  * every other agent's first turn. The prose reviewer reads the chapter from its prompt and
  * returns tags (issue 1952).
  */
-const PROMPT_ONLY_AGENTS: ReadonlySet<string> = new Set(["conversation-summarizer", "conversation-namer", "chapter-prose-reviewer", "page-lettering-reader"]);
+const PROMPT_ONLY_AGENTS: ReadonlySet<string> = new Set(["conversation-summarizer", "conversation-namer", "chapter-prose-reviewer", "page-lettering-reader", "comic-page-reviewer"]);
 
 export class Coordinator {
   private readonly engine: ReturnType<typeof createEngine>;
@@ -5979,7 +5980,7 @@ export class Coordinator {
       // calls no tools. The others take the first that can do what they do: tools for the
       // agents that work through them, text for the rest.
       const model = member.name === "stage-designer" ? this.localHarnessDefault(true)
-        : member.name === "page-lettering-reader" ? this.localHarnessDefault(true, false)
+        : member.name === "page-lettering-reader" || member.name === "comic-page-reviewer" ? this.localHarnessDefault(true, false)
         : this.localHarnessDefault(false, !PROMPT_ONLY_AGENTS.has(member.name));
       if (model !== undefined) agents[member.name] = { ...override, model };
     }
@@ -5997,8 +5998,13 @@ export class Coordinator {
     const overrides = this.agentOverrides;
     const visual = overrides?.["chapter-visual-reviewer"]?.model;
     const reader = overrides?.["page-lettering-reader"];
-    if (visual === undefined || reader?.model !== undefined) return overrides;
-    return { ...overrides, "page-lettering-reader": { ...reader, model: visual } };
+    const withReader = visual === undefined || reader?.model !== undefined ? overrides : { ...overrides, "page-lettering-reader": { ...reader, model: visual } };
+    // The page reviewer reads pictures too, and starts on the lettering reader's model until it has
+    // one of its own (SPEC-064 decision 15): a separate agent, so it never shares the drafter's context.
+    const lettering = withReader?.["page-lettering-reader"]?.model;
+    const reviewer = withReader?.["comic-page-reviewer"];
+    if (lettering === undefined || reviewer?.model !== undefined) return withReader;
+    return { ...withReader, "comic-page-reviewer": { ...reviewer, model: lettering } };
   }
 
   /**
@@ -11452,16 +11458,20 @@ export class Coordinator {
         }
         return;
       }
+      case "see-comic-warning":
       case "check-comic-take":
       case "accept-comic-take": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        const answer = (disposition: "checked" | "accepted" | "refused", reason?: string) => this.emit({ at: new Date().toISOString(), type: "comic.take-result",
+        const answer = (disposition: "checked" | "accepted" | "seen" | "refused", reason?: string) => this.emit({ at: new Date().toISOString(), type: "comic.take-result",
           requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, take: msg.take, disposition, ...(reason ? { reason } : {}) });
         try {
           if (msg.kind === "check-comic-take") {
             await this.readComicTake(store, msg.productionId, msg.page, msg.take);
             answer("checked");
+          } else if (msg.kind === "see-comic-warning") {
+            await seeComicWarning(store, msg.productionId, msg.page, msg.take, msg.warning);
+            answer("seen");
           } else {
             await acceptComicTake(store, msg.productionId, msg.page, msg.take, msg.override, this.nowIso());
             answer("accepted");
@@ -21936,11 +21946,11 @@ export class Coordinator {
       if (gone()) return;
       await this.refreshWorldSnapshot(store.worldId);
       emit("checking");
-      const verification = await this.readComicTake(store, productionId, page, take)
-        .catch((err: unknown) => ({ status: "unavailable" as const, reason: "reader-failed" as const, detail: describeCoordinatorError(err), at: this.nowIso() }));
+      const checked = await this.readComicTake(store, productionId, page, take)
+        .catch((err: unknown) => ({ verification: { status: "unavailable" as const, reason: "reader-failed" as const, detail: describeCoordinatorError(err), at: this.nowIso() } }));
       if (gone()) return;
       await this.refreshWorldSnapshot(store.worldId);
-      emit("made", { passed: takePasses(verification) });
+      emit("made", { passed: takeClears(checked) });
     })().catch(() => {});
   }
 
@@ -21955,15 +21965,26 @@ export class Coordinator {
    * same consent as a chapter review's. None is a check that cannot run, never a pass.
    */
   private pageReader(store: WorldStore): PageReader | null {
+    const ask = this.comicImageRunner(store);
+    return ask === null ? null : harnessPageReader(ask);
+  }
+
+  /** The page reviewer (SPEC-064 R-67): the same image inspection and consent as the reader's. */
+  private pageReviewer(store: WorldStore): PageReviewer | null {
+    const ask = this.comicImageRunner(store);
+    return ask === null ? null : harnessPageReviewer(ask);
+  }
+
+  private comicImageRunner(store: WorldStore) {
     const adapter = this.opts.adapter;
     if (!adapter?.readiness().ready || adapter.imageInput !== true) return null;
-    return harnessPageReader(makeImageJsonRunner({ adapter, beforeDispatch: () => store.assertOwnership(), sessionInput: this.sessionInput, scratch: this.extractScratch(),
+    return makeImageJsonRunner({ adapter, beforeDispatch: () => store.assertOwnership(), sessionInput: this.sessionInput, scratch: this.extractScratch(),
       ...(this.opts.imageRenditionMaker ? { maker: this.opts.imageRenditionMaker } : {}),
       cloudAllowed: async (provider) => {
         const settings = this.appSettings ? await this.appSettings.load() : null;
         return store.getBundle().meta.cloudImageInspection !== false && settings?.imageInspection.cloud === true && settings.imageInspection.providers[provider] !== false;
       },
-    }));
+    });
   }
 
   /**
@@ -21988,23 +22009,31 @@ export class Coordinator {
       spent += made.microUsd;
       // The take is in the record already; Pages shows it while its lettering is read (turn 251c).
       emit("checking", { take: made.take, sessionId: made.sessionId });
-      const verification = await this.readComicTake(store, msg.productionId, msg.page, made.take)
-        .catch((err: unknown) => ({ status: "unavailable" as const, reason: "reader-failed" as const, detail: describeCoordinatorError(err), at: this.nowIso() }));
+      const checked = await this.readComicTake(store, msg.productionId, msg.page, made.take)
+        .catch((err: unknown) => ({ verification: { status: "unavailable" as const, reason: "reader-failed" as const, detail: describeCoordinatorError(err), at: this.nowIso() } }));
       await this.refreshWorldSnapshot(msg.worldId);
-      const passed = takePasses(verification);
+      // A picture fault fails the take as a lettering one does (R-69); a check that could not run
+      // ends the run, since trying again cannot fix a reader or reviewer that is not there.
+      const passed = takeClears(checked);
       emit("made", { take: made.take, sessionId: made.sessionId, passed });
-      if (passed || verification.status !== "compared") return;
+      if (passed || checked.verification.status !== "compared" || ("review" in checked && checked.review.status === "unavailable")) return;
     }
   }
 
-  /** A take read back under a control the app's stop aborts, and the world's close too. */
+  /**
+   * A take read back, then looked at as a picture (R-29, R-67), under a control the app's stop
+   * aborts, and the world's close too. The review runs after the read so it can say which of the
+   * words the read found are writing in the scene (R-70).
+   */
   private async readComicTake(store: WorldStore, productionId: string, page: string, take: string) {
     const control = new AbortController();
     const onClose = () => control.abort();
     store.closingSignal.addEventListener("abort", onClose, { once: true });
     this.readingComicPages.add(control);
     try {
-      return await verifyComicTake(store, productionId, page, take, this.pageReader(store), control.signal, () => this.nowIso());
+      const verification = await verifyComicTake(store, productionId, page, take, this.pageReader(store), control.signal, () => this.nowIso());
+      const review = await reviewComicTake(store, productionId, page, take, this.pageReviewer(store), control.signal, () => this.nowIso());
+      return { verification, review };
     } finally {
       this.readingComicPages.delete(control);
       store.closingSignal.removeEventListener("abort", onClose);

@@ -502,6 +502,54 @@ export const LetteringOverrideSchema = z.object({
 }).strict();
 export type LetteringOverride = z.infer<typeof LetteringOverrideSchema>;
 
+/**
+ * What the page review finds in the picture (R-67 – R-69, turn 253). The lettering check reads the
+ * words alone; on The Ledger of Nights, drawn, it passed a caption about stopping a pen drawn over a
+ * woman at a rail and faces in the water no panel asked for.
+ */
+export const PageReviewFindingKindSchema = z.enum(["content", "cast", "caption", "defect", "speaker", "likeness", "continuity", "layout"]);
+export type PageReviewFindingKind = z.infer<typeof PageReviewFindingKindSchema>;
+/** R-69: these stop an accept; likeness, continuity and layout are looked at, not fixed. */
+export const REVIEW_BLOCKING: ReadonlySet<PageReviewFindingKind> = new Set(["content", "cast", "caption", "defect", "speaker"]);
+/** The warnings the author marks Seen, kept by take in the page record's `acknowledged`. */
+export const REVIEW_WARNINGS = ["layout", "continuity", "likeness"] as const;
+export type ReviewWarning = typeof REVIEW_WARNINGS[number];
+
+export const PageReviewFindingSchema = z.object({
+  /** `review:` first, so an override names it beside the lettering's findings without a clash. */
+  id: z.string().regex(/^review:/).max(80),
+  kind: PageReviewFindingKindSchema,
+  /** The panel, counted from 1 in reading order; absent for the page as a whole. */
+  panel: z.number().int().min(1).max(40).optional(),
+  note: z.string().trim().min(1).max(300),
+  box: PageBoxSchema.optional(),
+}).strict();
+export type PageReviewFinding = z.infer<typeof PageReviewFindingSchema>;
+
+export const PageReviewSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("compared"),
+    reviewer: z.object({ id: z.string().min(1).max(80), version: z.string().min(1).max(80) }).strict(),
+    /** The references it was shown, by name, and the page before it by take (R-67, R-71). */
+    references: z.array(z.string().min(1).max(120)).max(20).default([]),
+    previous: UlidSchema.optional(),
+    findings: z.array(PageReviewFindingSchema).max(60),
+    /** Lettering `extra` findings it found to be writing the panel calls for (R-70), with why. */
+    cleared: z.array(z.object({ finding: z.string().min(1).max(80), reason: z.string().trim().min(1).max(200) }).strict()).max(60).default([]),
+    at: IsoDateTimeSchema,
+  }).strict(),
+  z.object({
+    /** No completed review: never a pass (R-72). */
+    status: z.literal("unavailable"),
+    reason: z.enum(["no-reviewer", "reviewer-failed", "unreadable"]),
+    detail: z.string().max(400).optional(),
+    at: IsoDateTimeSchema,
+  }).strict(),
+]);
+export type PageReview = z.infer<typeof PageReviewSchema>;
+/** The id an override names to keep a take whose picture could not be reviewed (R-72). */
+export const REVIEW_UNAVAILABLE = "review:unavailable";
+
 /** One generated page (R-26). */
 export const ComicPageTakeSchema = z.object({
   id: UlidSchema,
@@ -515,6 +563,8 @@ export const ComicPageTakeSchema = z.object({
   usd: z.number().min(0).optional(),
   at: IsoDateTimeSchema,
   verification: LetteringVerificationSchema.optional(),
+  /** The picture's review (R-67); absent on a take made before there was one. */
+  review: PageReviewSchema.optional(),
   override: LetteringOverrideSchema.optional(),
 }).strict();
 export type ComicPageTake = z.infer<typeof ComicPageTakeSchema>;
@@ -551,8 +601,8 @@ export const ComicPageRecordSchema = z.object({
   accepted: z.record(z.string().min(2).max(35), UlidSchema).default({}),
   /** The overlay layer, by take id (R-38). */
   lettering: z.record(UlidSchema, z.array(LetteringPlacementSchema).max(COMIC_LIMITS.letteringPerPage)).default({}),
-  /** Layout and continuity checks the author has looked at, by take id (R-17, R-21). */
-  acknowledged: z.record(UlidSchema, z.array(z.enum(["layout", "continuity"])).max(2)).default({}),
+  /** The review's warnings the author has marked Seen, by take id (R-17, R-21, R-69). */
+  acknowledged: z.record(UlidSchema, z.array(z.enum(REVIEW_WARNINGS)).max(REVIEW_WARNINGS.length)).default({}),
   /**
    * Generations admitted and not yet landed (R-25). Written before any job exists, so a restart
    * finds the Bench session the picture is landing in and files it, rather than asking again.
@@ -566,6 +616,29 @@ export const ComicPageRecordSchema = z.object({
 });
 export type ComicPageRecord = z.infer<typeof ComicPageRecordSchema>;
 export const EMPTY_COMIC_PAGE_RECORD: ComicPageRecord = { version: 1, takes: [], accepted: {}, lettering: {}, acknowledged: {}, making: [] };
+
+/**
+ * Every finding that stops a take being accepted, its words' and its picture's together (R-31,
+ * R-69): one list, so Accept, Accept anyway, Until it passes and the book read it the same way. An
+ * `extra` the review found to be writing the panel calls for is not one (R-70). A picture that could
+ * not be reviewed blocks by name (R-72); a take made before there was a review has none, and its
+ * picture is unchecked, not failed.
+ */
+export function takeBlocking(take: Pick<ComicPageTake, "verification" | "review">): string[] {
+  const review = take.review;
+  const cleared = new Set(review?.status === "compared" ? review.cleared.map((entry) => entry.finding) : []);
+  const lettering = take.verification?.status === "compared"
+    ? take.verification.findings.filter((finding) => BLOCKING_FINDINGS.has(finding.kind) && !(finding.kind === "extra" && cleared.has(finding.id))).map((finding) => finding.id)
+    : [];
+  const picture = review?.status === "compared" ? review.findings.filter((finding) => REVIEW_BLOCKING.has(finding.kind)).map((finding) => finding.id)
+    : review?.status === "unavailable" ? [REVIEW_UNAVAILABLE] : [];
+  return [...lettering, ...picture];
+}
+
+/** A take that may be accepted as it stands: its words read and nothing of either check blocking. */
+export function takeClears(take: Pick<ComicPageTake, "verification" | "review">): boolean {
+  return take.verification?.status === "compared" && takeBlocking(take).length === 0;
+}
 
 // ---------------------------------------------------------------------------
 // The book as it stands (R-40, R-41, R-47)
@@ -606,8 +679,8 @@ export function comicBook(production: {
       const record = records.get(page.id);
       const accepted = record?.accepted[settings.language];
       const take = accepted === undefined ? undefined : record!.takes.find((candidate) => candidate.id === accepted);
-      const blocking = take?.verification?.status === "compared" ? take.verification.findings.filter((finding) => BLOCKING_FINDINGS.has(finding.kind)).map((finding) => finding.id) : [];
-      const passed = take?.verification?.status === "compared" && blocking.length === 0;
+      const blocking = take ? takeBlocking(take) : [];
+      const passed = take !== undefined && takeClears(take);
       // An override clears only the findings it names: one made before a re-check that found more
       // covers nothing new (codex on PR 2225).
       const covered = take?.override !== undefined && blocking.every((id) => take.override!.findings.includes(id));
