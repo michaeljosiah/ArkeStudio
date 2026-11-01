@@ -614,6 +614,8 @@ export const COMIC_PLAN_SCHEMA_VERSION = 118;
  * `mysteries` rides here too: a build of 118 refuses it in the strict plan.
  */
 export const COMIC_USUAL_SCHEMA_VERSION = 119;
+/** An explicit pilot on the strict setup plan cannot be read by builds through 119 (issue 2252). */
+export const COMIC_PILOT_SCHEMA_VERSION = 120;
 const COMIC_PLAN_KEYS = /"(plan|read)"\s*:/;
 /**
  * An audio drama's takes (SPEC-057 R-29, codex on PR 1871): `drama-takes/` and the `episode` on a

@@ -1,3 +1,4 @@
+import { comicPilotChapter } from "@arke-studio/contracts";
 import { ComicModelChoice } from "../components/comic-model-choice.js";
 import { GlobalWorldChatEntry } from "../components/global-chat.js";
 import { useClientRender } from "../components/production-studio-context.js";
@@ -92,9 +93,9 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   const modelRef = useRef(modelId); modelRef.current = modelId;
   const askForPilot = (created: ProductionSetupState) => {
     const pilot = created.draft.kind === AUDIO_DRAMA_KIND ? created.draft.audioDrama?.pilot : undefined;
-    // A graphic novel's pilot is its first chapter's pages, drafted for Pages (turn 249b).
-    const comicPilot = created.draft.kind === GRAPHIC_NOVEL_KIND && created.draft.graphicNovel?.pilot ? created.draft.graphicNovel.chapters[0] : undefined;
-    const ask = pilot ? pilotAsk(pilot) : comicPilot ? comicPilotAsk(comicPilot.title) : null;
+    const comicPlan = created.draft.kind === GRAPHIC_NOVEL_KIND ? created.draft.graphicNovel : undefined;
+    const comicPilot = comicPilotChapter(comicPlan);
+    const ask = pilot ? pilotAsk(pilot) : comicPilot ? comicPilotAsk(comicPilot.title, comicPlan!.chapters.indexOf(comicPilot) + 1) : null;
     if (!worldId || !setupId || draftPilot.current !== setupId || ask === null) return;
     // Held until the ask is sent (codex on PR 1945): a setup still open here asks again on
     // reconnect; one left for the pilot's page has its empty page's Draft the pilot with Arke.

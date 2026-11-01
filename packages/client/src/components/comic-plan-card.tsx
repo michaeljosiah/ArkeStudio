@@ -1,3 +1,4 @@
+import { comicPilotChapter } from "@arke-studio/contracts";
 import type { ComicAsk, ComicPlan, ProductionSetupState } from "@arke-studio/contracts";
 import { comicStylePicture, comicStylePreset } from "../lib/comic-styles.js";
 
@@ -67,6 +68,7 @@ export function ComicAskCards({ ask, disabled, onChoose, pilotTitle }: { ask: Co
 
 /** The plan as one thing to accept or change (249b): its facts, then a row for each chapter. */
 export function ComicPlanCard({ plan, sourceTitle, sourceWords }: { plan: ComicPlan; sourceTitle: string | undefined; sourceWords: (from: number) => number | undefined }) {
+  const pilot = comicPilotChapter(plan);
   const pages = plan.chapters.reduce((sum, chapter) => sum + chapter.pages, 0);
   const preset = comicStylePreset(plan.style?.preset);
   return (
@@ -78,16 +80,16 @@ export function ComicPlanCard({ plan, sourceTitle, sourceWords }: { plan: ComicP
         <span>{preset && <img src={comicStylePicture(preset.id)} alt="" />}{preset?.name ?? (plan.style ? "Your own" : "World look")}</span>
         <span>{READING_LABEL[plan.reading]}</span>
         <span>{plan.aspect}</span>
-        {plan.pilot && plan.chapters.length > 0 && <span>Pilot · chapter 1</span>}
+        {pilot && <span>Pilot · {pilot.title}</span>}
       </div>
       {plan.chapters.length > 0 && (
         <ol className="fy-comic-plan__rows">
           {plan.chapters.map((chapter, index) => {
             const words = sourceWords(chapter.from);
             return (
-              <li key={index} className={plan.pilot && index === 0 ? "is-pilot" : undefined}>
+              <li key={index} className={chapter === pilot ? "is-pilot" : undefined}>
                 <span className="n">{index + 1}</span>
-                <span>{chapter.title}<small>Chapter {chapter.from}{words !== undefined ? ` · ${words.toLocaleString("en-GB")} words` : ""}</small></span>
+                <span>{chapter.title}{words !== undefined && <small>{words.toLocaleString("en-GB")} words</small>}</span>
                 <span className="pg">~{chapter.pages} {chapter.pages === 1 ? "page" : "pages"}</span>
                 <span className="lay">{chapter.layout ? LAYOUT_LABEL[chapter.layout] ?? chapter.layout : ""}</span>
               </li>
@@ -104,22 +106,23 @@ export function ComicPlanCard({ plan, sourceTitle, sourceWords }: { plan: ComicP
 export function GraphicNovelReview({ setup, sourceTitle }: { setup: ProductionSetupState; sourceTitle: string | undefined }) {
   const plan = setup.review!.plan;
   const comic = plan.initialContent?.graphicNovel;
+  const pilot = comicPilotChapter(setup.draft.graphicNovel);
   const preset = comicStylePreset(comic?.style?.preset);
   return (
     <section className="fy-production-setup__review" aria-label="Review production">
       <h3>Ready to create · {plan.production.title}</h3>
       <p>Story · graphic novel{sourceTitle ? ` · adapts ${sourceTitle}` : ""}</p>
       {comic && <p>{comic.chapters.length} {comic.chapters.length === 1 ? "chapter" : "chapters"} · {READING_LABEL[comic.reading]} · {comic.aspect} · {preset?.name ?? (comic.style ? "your own style" : "world look")}</p>}
-      {setup.draft.graphicNovel?.pilot && comic && comic.chapters.length > 0 && <p>Pilot: chapter 1, {comic.chapters[0]!.title}</p>}
+      {pilot && <p>Pilot: {pilot.title}</p>}
       <p>No pictures will be made.</p>
     </section>
   );
 }
 
 /**
- * What Start the pilot asks Arke once the book exists (249b, 254b): chapter 1's page plan first,
+ * What Start the pilot asks Arke once the book exists: the selected chapter's page plan first,
  * since its pages are drafted only from a plan the author kept.
  */
-export function comicPilotAsk(title: string): string {
-  return `Plan the pilot: chapter 1, ${title}, as pages.`;
+export function comicPilotAsk(title: string, chapter: number): string {
+  return `Plan chapter ${chapter} as the pilot: ${title}, as pages.`;
 }

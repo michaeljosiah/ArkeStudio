@@ -21,8 +21,8 @@ describe("graphic novel setup (turn 249b)", () => {
     assert.match(html, /Graphic novel · from Low Water · 2 chapters · ~15 pages/);
     assert.match(html, /src="\.\/comic-styles\/manga\.jpg"/);
     assert.match(html, /Left to right/);
-    assert.match(html, /Pilot · chapter 1/);
-    assert.match(html, /The tide<small>Chapter 1 · 5,840 words<\/small>/);
+    assert.match(html, /Pilot · The tide/);
+    assert.match(html, /The tide<small>5,840 words<\/small>/);
     assert.match(html, /~8 pages/);
     assert.match(html, /Feature/);
     assert.match(html, /Page counts are a first guess/);
@@ -34,7 +34,18 @@ describe("graphic novel setup (turn 249b)", () => {
     assert.match(html, />Use these<.*>Change</s);
   });
 
+  it("highlights the named pilot after a prologue without contradictory chapter numbering", () => {
+    const html = renderToStaticMarkup(<ComicPlanCard sourceTitle="Whispers" sourceWords={() => 2726}
+      plan={{ reading: "ltr", aspect: "2:3", pilot: true, pilotFrom: 2, chapters: [
+        { from: 1, title: "Prologue", pages: 2 }, { from: 2, title: "Chapter 1 — The Thief of Zeel", pages: 8 },
+      ] }} />);
+    assert.match(html, /Pilot · Chapter 1 — The Thief of Zeel/);
+    assert.match(html, /class="is-pilot"[^>]*><span class="n">2<\/span>/);
+    assert.doesNotMatch(html, /<small>Chapter 2/);
+    assert.equal(comicPilotAsk("Chapter 1 — The Thief of Zeel", 2), "Plan chapter 2 as the pilot: Chapter 1 — The Thief of Zeel, as pages.");
+  });
+
   it("asks for the pilot chapter's pages", () => {
-    assert.equal(comicPilotAsk("The tide"), "Plan the pilot: chapter 1, The tide, as pages.");
+    assert.equal(comicPilotAsk("The tide", 1), "Plan chapter 1 as the pilot: The tide, as pages.");
   });
 });
