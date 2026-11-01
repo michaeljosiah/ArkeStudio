@@ -17435,12 +17435,15 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         const key = `${store.worldId}/${msg.productionId}`;
+        const busyReason = () => this.checkingAudiobookWords.has(key)
+          ? "Not started: a Words check is running for this production. Wait for it to finish, then prepare word timing again." : undefined;
         if (msg.action === "stop") { this.preparingWordTiming.get(key)?.abort(); return; }
         if (msg.action === "status") {
           // Opening Activity must not mix or hash every recording just to display a count.
           const availability = await this.voiceService?.wordTimingAvailability().catch(() => null);
           const progress = this.wordTimingProgress.get(key) ?? { done: 0, total: 0, chapters: [] };
-          this.emit({ at: this.nowIso(), type: "audiobook.word-timing", worldId: store.worldId, productionId: msg.productionId, requestId: msg.requestId, state: { available: availability?.ready === true, ...(availability?.reason !== undefined ? { reason: availability.reason } : {}), running: this.preparingWordTiming.has(key), ...progress, blocks: [] } });
+          const reason = busyReason() ?? availability?.reason;
+          this.emit({ at: this.nowIso(), type: "audiobook.word-timing", worldId: store.worldId, productionId: msg.productionId, requestId: msg.requestId, state: { available: availability?.ready === true, ...(reason !== undefined ? { reason } : {}), running: this.preparingWordTiming.has(key), ...progress, blocks: [] } });
           return;
         }
         const control = new AbortController();
@@ -17466,7 +17469,8 @@ export class Coordinator {
           const blocks = cached.map((block) => ({ ...block, ...(failures.has(`${block.chapterId}/${block.key}`) ? { reason: failures.get(`${block.chapterId}/${block.key}`) } : {}) }));
           const selected = blocks.filter(included);
           const progress = this.wordTimingProgress.get(key) ?? { done, total: selected.length, chapters: [...new Set(selected.map((block) => block.chapterId))] };
-          this.emit({ at: this.nowIso(), type: "audiobook.word-timing", worldId: store.worldId, productionId: msg.productionId, requestId: msg.requestId, state: { available: availability?.ready === true, ...(availability?.reason !== undefined ? { reason: availability.reason } : {}), running: this.preparingWordTiming.has(key), ...(this.wordTimingRequests.has(key) ? { runningRequestId: this.wordTimingRequests.get(key) } : {}), ...progress, blocks } });
+          const reason = busyReason() ?? availability?.reason;
+          this.emit({ at: this.nowIso(), type: "audiobook.word-timing", worldId: store.worldId, productionId: msg.productionId, requestId: msg.requestId, state: { available: availability?.ready === true, ...(reason !== undefined ? { reason } : {}), running: this.preparingWordTiming.has(key), ...(this.wordTimingRequests.has(key) ? { runningRequestId: this.wordTimingRequests.get(key) } : {}), ...progress, blocks } });
           return blocks;
         };
         try {
@@ -17474,7 +17478,7 @@ export class Coordinator {
           if (this.checkingAudiobookWords.has(key)) { await report(); return; }
           const availability = await this.voiceService?.wordTimingAvailability();
           if (availability?.ready !== true) { await report(); return; }
-          if (this.checkingAudiobookWords.has(key)) { await report(); return; }
+          if (this.checkingAudiobookWords.has(key) || this.preparingWordTiming.has(key)) { await report(); return; }
           this.preparingWordTiming.set(key, control);
           this.wordTimingRequests.set(key, msg.requestId);
           const blocks = (await report()).filter(included);

@@ -1,5 +1,10 @@
 # Code map
 
+Words/timing exclusion (#2241): the `audiobook-word-timing` coordinator handler reports an
+explicit production-scoped busy reason in prepare/read/status; the existing client timing panel
+shows that reason and rereads on reconnect. Turn 260; `audiobook-timing-busy.test.ts` covers both
+request orders and task-owned cancellation.
+
 Operation storage holds (#2240): `contracts/src/job-summary.ts` carries bounded reason/role
 evidence; coordinator `storage/reservations.ts` and `storage/job-artifacts.ts` supply it, and
 `queue/dispatcher.ts` retains it in reconnect snapshots without journal authority. Client
