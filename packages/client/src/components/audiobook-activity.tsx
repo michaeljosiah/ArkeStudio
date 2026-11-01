@@ -13,6 +13,7 @@ import { JobStorageWaitNotice } from "./job-storage-wait.js";
 const tone = (run: AudiobookActivity) => run.phase === "ready" ? "ok" : run.phase === "finished" ? "warn" : run.phase === "interrupted" ? "fail" : ["reading", "aligning"].includes(run.phase) ? "live" : "queued";
 
 export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; state: ClientState }) {
+  const connection = useStore().connection;
   const navigate = useNavigate();
   const live = audiobookActivityLive(run);
   const jobs = audiobookActivityJobs(run, state.app.jobs);
@@ -50,7 +51,7 @@ export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; s
       {!blockReady && <><div className="fy-abactivity__stage" role="status">{storageWait ? storageWait.phase === "submission" ? "Waiting before submission" : "Waiting to save the result" : stage}</div>
         <div className="fy-ap__rowsub">{progress}</div></>}
       <div className="fy-ap__rowsub">{blockReady ? `${run.made} block${run.made === 1 ? "" : "s"} saved · ${cost.replace(" this re-read", " for this re-read")}` : [!uncertain && run.models.join(", "), cost].filter(Boolean).join(" · ")}</div>
-      {storageWait ? <JobStorageWaitNotice wait={storageWait} /> : run.reason && <div className="fy-ap__reason">{activityReason(run.reason)}</div>}
+      {storageWait ? <JobStorageWaitNotice wait={storageWait} connected={connection === "open"} /> : run.reason && <div className="fy-ap__reason">{activityReason(run.reason)}</div>}
       {!run.reason && run.phase === "aligning" && expanded && <div className="fy-ap__reason">Matching the audio to its blocks.</div>}
       <div className="fy-ap__actions">
         {unresolved && <Button size="sm" variant="primary" onClick={showRequests}>Resolve request</Button>}

@@ -553,7 +553,8 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
 }
 
 function RunningRow({ entry, activeWorldId }: { entry: RunningEntry; activeWorldId: string | null }) {
-  const wait = useStore().state?.app.jobs.find(job => entry.kind === "job" && job.id === entry.ref)?.storageWait;
+  const { state, connection } = useStore();
+  const wait = state?.app.jobs.find(job => entry.kind === "job" && job.id === entry.ref)?.storageWait;
   const compact = useMediaQuery("(max-width: 1099px)");
   const queued = /\b(queued|submitting)$/.test(entry.detail);
   return (
@@ -565,7 +566,7 @@ function RunningRow({ entry, activeWorldId }: { entry: RunningEntry; activeWorld
         </div>
         <div className="fy-ap__rowsub">{entry.kind === "job" ? entry.detail : `${entry.kind.replaceAll("-", " ")} · ${entry.detail}`}</div>
         {compact && entry.diagnostic && <div className="fy-ap__diagnostic">{entry.diagnostic}</div>}
-        <JobStorageWaitNotice wait={wait} />
+        <JobStorageWaitNotice wait={wait} connected={connection === "open"} />
       </div>
       <div className="fy-ap__end">
         {entry.percent !== null && <span className="fy-ap__meta">{Math.round(entry.percent)}%</span>}
@@ -611,6 +612,7 @@ function HistoryRow({
   owner: { build: { worldId: string }; item: { key: string } } | null;
   navigate: NavigateFunction;
 }) {
+  const connection = useStore().connection;
   const compact = useMediaQuery("(max-width: 1099px)");
   const note = historyNote(job, state.app.manifest);
   const labels = activityJobLabels(state, job);
@@ -644,7 +646,7 @@ function HistoryRow({
         </div>
         <div className="fy-ap__rowsub">{sub}</div>
         {compact && <div className="fy-ap__diagnostic">{diagnostic}</div>}
-        {job.storageWait ? <JobStorageWaitNotice wait={job.storageWait} /> : note.reason && <div className="fy-ap__reason">{activityReason(note.reason)}</div>}
+        {job.storageWait ? <JobStorageWaitNotice wait={job.storageWait} connected={connection === "open"} /> : note.reason && <div className="fy-ap__reason">{activityReason(note.reason)}</div>}
         {/* Where this one is re-run from, which is not one place (issue 226): a founding-build job
             retries through the build's own landing (SPEC-031 R-49), reference work from the
             screen that owns its dialog, and a kind nobody can place says so rather than naming
