@@ -53,6 +53,24 @@ it("refuses missing verification, clock reversal and future measurements without
   assert.equal(missing.incidents[0]!.phase, "needs-user");
 });
 
+it("names the retained fault category without persisting private diagnostic prose (#2238)", () => {
+  for (const [kind, title, action] of [
+    ["queue-paused-credential", /account access/, /sign-in or API key/],
+    ["comfyui-recipe-weights-missing", /needs its files/, /Download the missing model files/],
+    ["hardware-unmeasured", /not been measured/, /hardware check/],
+    ["storage-capacity-unknown", /could not be checked/, /drive is connected/],
+  ] as const) {
+    const history = observeRecoveryIncident(emptyRecoveryHistory(), observation({ kind }), id(1), now);
+    const incident = history.incidents[0]!;
+    const summary = recoveryIncidentSummary(incident);
+    assert.match(summary.title, title); assert.match(summary.detail, action);
+    assert.doesNotMatch(summary.detail, /Review current evidence/);
+    assert.equal(recoveryIncidentSummary({ ...incident, evidence: "stale" }).title, summary.title);
+    assert.doesNotMatch(recoveryIncidentSummary({ ...incident, evidence: "stale" }).detail, action);
+    assert(!JSON.stringify(history).includes(summary.title), "copy is derived from the closed kind, not saved log text");
+  }
+});
+
 it("persists the advisory budget, honors mute/snooze, and allows one critical notice per transition", () => {
   let history = observeRecoveryIncident(emptyRecoveryHistory(), observation(), id(1), now), incident = history.incidents[0]!;
   assert.equal(recoveryNoticeDecision(incident, undefined, history, now, session), "first-actionable"); recordRecoveryNotice(incident, now);

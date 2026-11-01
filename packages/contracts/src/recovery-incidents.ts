@@ -158,11 +158,33 @@ export function recordRecoveryNotice(incident: RecoveryIncident, now: number): v
   if (incident.severity === "blocking") incident.delivery.lastCriticalTransition = incident.severityTransition;
 }
 
-/** Deterministic, generic copy suitable for application-global attention. Detailed current
+const INCIDENT_COPY: Record<RecoveryIncident["kind"], { title: string; detail: string }> = {
+  "ming-cleanup-unconfirmed": { title: "Ming cleanup unconfirmed", detail: "The original worker's exit has not been confirmed." },
+  "storage-pressure": { title: "Storage space is low", detail: "Free space on the affected drive." },
+  "storage-capacity-unknown": { title: "Storage space could not be checked", detail: "Refresh the storage readings. If the destination is unavailable, check that its drive is connected and accessible." },
+  "storage-control-unavailable": { title: "Saved storage status needs verification", detail: "Earlier storage work has not been verified, or its saved status is unavailable. Check the current storage finding for the recorded reason. Saved work is kept." },
+  "work-held-by-engine": { title: "Work is waiting for a local AI engine", detail: "Check the engine in AI models. Existing jobs keep their own status; do not submit them again." },
+  "queue-paused-credential": { title: "Work is paused for account access", detail: "Check the provider's sign-in or API key in AI models, then review the paused work in Activity." },
+  "component-disk-short": { title: "A download needs more disk space", detail: "Free space on the download drive, then retry the component in AI models." },
+  "comfyui-recipe-weights-missing": { title: "A local AI model needs its files", detail: "Download the missing model files in AI models > ComfyUI." },
+  "comfyui-recipe-digest-mismatch": { title: "A local AI model file failed verification", detail: "Review the model's repair control in AI models > ComfyUI." },
+  "comfyui-engine-unavailable": { title: "ComfyUI is unavailable", detail: "Check the engine and its connection in AI models > ComfyUI." },
+  "comfyui-models-folder-unmapped": { title: "ComfyUI's models folder is not set", detail: "Choose the engine's models folder in AI models > ComfyUI." },
+  "comfyui-recipe-disabled": { title: "A ComfyUI recipe is unavailable", detail: "Check the recipe's requirements in AI models > ComfyUI." },
+  "waiting-on-component": { title: "Work is waiting for a component", detail: "Check the component's download or installation progress in AI models." },
+  "hardware-unmeasured": { title: "This computer has not been measured", detail: "Run the hardware check in AI models > Ollama." },
+  "hardware-unknown": { title: "A hardware check could not finish", detail: "Retry the hardware check in AI models > Ollama." },
+  "windows-commit": { title: "Windows memory needs attention", detail: "Review memory use in System and the measured limits in the current finding." },
+  "provider-repeated-faults": { title: "A provider has failed repeatedly", detail: "Check the provider's status and account in AI models before trying more work." },
+  "spend-above-previous": { title: "Recent spending has increased", detail: "Review recent costs in Activity > Spend and the comparison period in the current finding." },
+  "correlation-unavailable": { title: "A diagnostic comparison is unavailable", detail: "Some source readings could not be obtained. Refresh to check them again." },
+  "rule-failed": { title: "A diagnostic check failed", detail: "Refresh to run the check again. Other findings remain available." },
+};
+
+/** Deterministic, category-specific copy suitable for application-global attention. Detailed current
  * evidence/remedies still come from Diagnostics; a notification never approves a repair. */
 export function recoveryIncidentSummary(incident: RecoveryIncident): { title: string; detail: string } {
-  const title = incident.kind.startsWith("storage-") || incident.kind === "component-disk-short" ? "Storage needs attention"
-    : incident.kind.startsWith("comfyui-") || incident.kind === "work-held-by-engine" ? "Local AI needs attention" : "Studio needs attention";
+  const { title, detail } = INCIDENT_COPY[incident.kind];
   if (incident.evidence !== "fresh") return { title, detail: "Current evidence is unavailable. Refresh Diagnostics before taking action." };
   if (incident.kind === "ming-cleanup-unconfirmed") return incident.phase === "recovered"
     ? { title: "Ming cleanup confirmed", detail: "The original worker exit was confirmed and its graphics-card hold is settled. Submitted narration keeps its existing outcome." }
@@ -178,7 +200,7 @@ export function recoveryIncidentSummary(incident: RecoveryIncident): { title: st
     if (deficit?.value !== null && deficit?.value !== undefined) return { title, detail: `${deficit.value ? `The recorded operation check needed ${storageByteLabel(deficit.value)} more space.` : "The recorded operation check had no headroom above the working reserve."} Review the check and available remedies in Diagnostics. The operation's own controls show its current status. Creative media is kept.` };
     return { title, detail: `${available?.value !== null && available?.value !== undefined ? `${(available.value / 1024 ** 3).toFixed(1)} GiB available. ` : ""}${estimate?.value !== null && estimate?.value !== undefined ? `The reserve may be reached in ${Math.max(1, Math.round(estimate.value / 60000))} min at the recent rate. ` : ""}${review ? "A preview cleanup review is available in Diagnostics. Cleanup needs your approval." : "You need to free space on the affected drive, then refresh."} Creative media is kept.` };
   }
-  if (incident.phase === "recovering") return { title: "Local AI recovery is running", detail: "Arke is restoring the service. Submitted work still needs its own reconciliation." };
-  if (incident.phase === "verifying") return { title: "Local AI recovery is being checked", detail: "Readiness has not yet been verified." };
-  return { title, detail: "Review current evidence and the next action in Diagnostics. Opening it does not approve a repair." };
+  if (incident.phase === "recovering") return { title, detail: "Recovery is running. Submitted work still needs its own reconciliation." };
+  if (incident.phase === "verifying") return { title, detail: "Recovery is being checked. Readiness has not yet been verified." };
+  return { title, detail };
 }
