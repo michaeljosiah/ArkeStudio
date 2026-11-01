@@ -28,8 +28,9 @@ export function PromptTools({ worldId, target, source, revision, disabled = fals
   const context = JSON.stringify({ target, session: source && "sessionId" in source ? source.sessionId : undefined, take: source?.kind === "take" ? source.takeId : undefined });
   const generation = useRef(0), identity = enabled ? JSON.stringify({ worldId, target, source, revision, canon: state?.world?.meta.canonRevision,
     artDirection: state?.world?.artDirection.version, sheets: state?.world?.sheets.map(s => [s.id, s.version]), artifacts: state?.world?.artifacts.map(a => [a.id, a.hash]),
+    references: state?.world?.referenceKits, availability: [state?.app.providers, state?.app.setup?.components, state?.app.runtime?.models, state?.app.comfyui?.engine],
     routing: state?.app.routing.defaults, models: state?.app.models, manifest: [state?.app.manifest?.manifestVersion, state?.app.manifest?.generated],
-    scenes: state?.world?.productions.map(p => [p.meta, p.scenes.map(s => [s.id, s.version])]) }) : "";
+    scenes: state?.world?.productions.map(p => [p.meta, p.selections, p.scenes.map(s => [s.id, s.version]), p.performanceReview]) }) : "";
   const entry = history?.entries[selected];
   const scene = target ? state?.world?.productions.find(p => p.meta.id === target.productionId)?.scenes.find(s => s.id === target.sceneId) : undefined;
   const production = target ? state?.world?.productions.find(p => p.meta.id === target.productionId) : undefined;

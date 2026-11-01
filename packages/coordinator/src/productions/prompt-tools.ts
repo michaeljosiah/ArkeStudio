@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
-  BenchSessionMetaSchema, BenchEventEnvelopeSchema, foldBenchSession, editShot, orderedShots, productionShape, promptFor, assemblePrompt,
+  BenchSessionMetaSchema, BenchEventEnvelopeSchema, JobSchema, foldBenchSession, editShot, orderedShots, productionShape, promptFor, assemblePrompt,
   PromptOverrideSnapshotSchema, ShotPromptHistorySchema, PromptInspectionSchema, referenceAudioMediaPath, referenceAudioAsset,
   type PromptTarget, type ShotPromptHistory, type PromptInspection, type BenchSession, type BenchTake,
   type BenchRequestSnapshot, type WorldBundle, type Job,
@@ -107,6 +107,20 @@ export async function readPromptBench(store: WorldStore, sessionId: string): Pro
   const events = raw.split("\n").filter(line => line.trim()).map(line => BenchEventEnvelopeSchema.parse(JSON.parse(line)));
   if (events.some((row, index) => row.seq !== index + 1)) throw Error("The generator history is incomplete.");
   return foldBenchSession(meta, events);
+}
+
+/** Activity tombstones hide a job, not its retained compiler receipt. No journal tail repair. */
+export async function readRetainedPromptJob(root: string, path: string, jobId: string): Promise<Job | undefined> {
+  let raw: string;
+  try { raw = await text(root, path, 64 * 1024 * 1024); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw Error("The retained job history could not be read safely."); }
+  let found: Job | undefined;
+  for (const line of raw.split("\n")) if (line.trim()) {
+    let row: unknown;
+    try { row = JSON.parse(line); } catch { throw Error("The retained job history is incomplete. Its original request is unavailable."); }
+    if (row && typeof row === "object" && "id" in row && row.id === jobId) found = JobSchema.parse(row);
+  }
+  return found;
 }
 
 function fileAddress(value: unknown): value is string {

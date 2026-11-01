@@ -1,4 +1,4 @@
-import { readShotPromptHistory, restoreShotPrompt, readPromptBench, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
+import { readShotPromptHistory, restoreShotPrompt, readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
 import { foldBenchSession as foldPromptBench, type PromptToolsResult, type PromptInspection, type PromptInspectSource } from "@arke-studio/contracts";
 import { benchQuoteParams } from "./bench/service.js";
 import { productionSpend as deriveProductionSpend } from "./spend/rollups.js";
@@ -4693,7 +4693,9 @@ export class Coordinator {
       if (source.kind === "take") {
         const take = session.takes.find(t => t.id === source.takeId);
         if (!take) throw Error("This saved take is no longer available.");
-        return frozenPromptInspection(this.jobQueue?.listJobs().find(job => job.id === take.jobId), take, session, world);
+        let job = this.jobQueue?.listJobs().find(candidate => candidate.id === take.jobId);
+        if (!job && take.jobId && this.opts.appRoot) job = await readRetainedPromptJob(this.opts.appRoot, "queue/jobs.jsonl", take.jobId);
+        return frozenPromptInspection(job, take, session, world);
       }
       const model = this.opts.manifest?.models.find(m => m.id === source.composer.model && m.provider === source.composer.provider) ?? null;
       const routing = subjectSessionReferenceRouting(session, model);

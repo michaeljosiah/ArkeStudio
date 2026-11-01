@@ -3,7 +3,7 @@ import { it } from "node:test";
 import { mkdir, readFile, writeFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { orderedShots, foldBenchSession, projectSceneRecord, BenchTakeSchema, BenchRequestSnapshotSchema, JobSchema, type DomainEvent, type ManifestModel, type PromptTarget, type SceneRecord } from "@arke-studio/contracts";
-import { readShotPromptHistory, restoreShotPrompt, framePromptInspection, compilePromptInspection, frozenPromptInspection, readPromptBench, promptInspection, verifyPromptReferences } from "../../src/productions/prompt-tools.js";
+import { readShotPromptHistory, restoreShotPrompt, framePromptInspection, compilePromptInspection, frozenPromptInspection, readPromptBench, readRetainedPromptJob, promptInspection, verifyPromptReferences } from "../../src/productions/prompt-tools.js";
 import { compileFrameRun, compileFrameRunEvidence } from "../../src/productions/frame-run.js";
 import { planBenchDispatch } from "../../src/bench/service.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -162,6 +162,14 @@ it("a draft inspection uses dispatch's compiled prompt; missing original jobs ne
   session.composer.brief = "Changed draft after dispatch";
   const frozen = frozenPromptInspection(job, take, session, world);
   assert.equal(frozen.prompt, job.params.prompt); assert.equal(frozen.source, "frozen-request");
+  await mkdir(join(store.dir, "queue"), { recursive: true });
+  const tombstone = { ...job, deletedAt: at }, journal = JSON.stringify(tombstone) + "\n";
+  await writeFile(join(store.dir, "queue/jobs.jsonl"), journal);
+  const retained = await readRetainedPromptJob(store.dir, "queue/jobs.jsonl", job.id);
+  assert.equal(frozenPromptInspection(retained, take, session, world).prompt, frozen.prompt, "Activity deletion keeps the original compiler receipt inspectable");
+  await writeFile(join(store.dir, "queue/jobs.jsonl"), journal + '{"torn');
+  await assert.rejects(readRetainedPromptJob(store.dir, "queue/jobs.jsonl", job.id), /history is incomplete/);
+  assert.equal(await readFile(join(store.dir, "queue/jobs.jsonl"), "utf8"), journal + '{"torn');
 });
 
 it("read-only Bench inspection refuses a torn tail without repairing it", async () => {

@@ -69,11 +69,20 @@ it("invalidates inspection when the draft changes and hides an open sheet when d
   await f.reply({ type: "prompt-tools.result", at, worldId: f.worldId, requestId: request.requestId, result: { kind: "inspection", inspection: {
     source: "saved-shot", identity: "Shot current", capability: "image", provider: "test", model: "image", prompt: "Compiled body", quantity: 1, controls: [], references: [], notices: [] } } });
   assert.match(f.dom.document.querySelector("dialog")!.textContent!, /Compiled body/);
+  const changed = structuredClone(f.state);
+  changed.world!.referenceKits[0]!.mainPhoto!.file = "changed-reference.png";
+  await act(async () => __setStateForTest(changed, { connection: "open" }));
+  assert.doesNotMatch(f.dom.document.querySelector("dialog")!.textContent!, /Compiled body/);
+  await f.click("Read again");
+  const refresh = f.sent.at(-1)!; assert.ok("requestId" in refresh && refresh.requestId);
+  await f.reply({ type: "prompt-tools.result", at, worldId: f.worldId, requestId: refresh.requestId, result: { kind: "inspection", inspection: {
+    source: "saved-shot", identity: "Shot current", capability: "image", provider: "test", model: "image", prompt: "Updated compiled body", quantity: 1, controls: [], references: [], notices: [] } } });
+  assert.match(f.dom.document.querySelector("dialog")!.textContent!, /Updated compiled body/);
   await act(async () => root!.render(<PromptTools worldId={f.worldId} source={source} revision={2} />));
   assert.doesNotMatch(f.dom.document.querySelector("dialog")!.textContent!, /Compiled body/);
   assert.match(f.dom.document.querySelector("dialog")!.textContent!, /request changed/);
   await act(async () => __applyEventForTest({ type: "prompt-tools.changed", at, enabled: false }));
   assert.equal(f.dom.document.querySelectorAll("dialog").length, 0);
   assert.equal(f.dom.document.querySelectorAll("button").length, 0);
-  assert.deepEqual(f.sent.map(m => m.kind), ["prompt-request-inspect"]);
+  assert.deepEqual(f.sent.map(m => m.kind), ["prompt-request-inspect", "prompt-request-inspect"]);
 });
