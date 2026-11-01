@@ -192,7 +192,7 @@ export function productionSpend(world: WorldBundle, evidence: SpendEvidence): Pr
       const hasWork = rows.length > 0 || scopedCandidates.length > 0;
       const unavailable = evidence.ledgerUnavailable || evidence.historyUnavailable || (!known.length && (rows.some(row => row.outcome !== "pending") || scopedCandidates.length > 0));
       const overflow = !safeMoney(sum) || !safeMoney(unallocated) || [...sources.values()].some(source => !safeMoney(source.microUsd));
-      const partial = problem.has("history-incomplete") || problem.has("bench-incomplete") ||
+      const partial = problem.has("history-incomplete") || problem.has("bench-incomplete") || problem.has("allocation-missing") ||
         rows.some(row => row.microUsd === null && row.outcome !== "pending") || unallocated > 0 ||
         rows.some(row => !row.shots.length && row.kind !== "unknown");
       return { spentMicroUsd: unavailable || overflow ? null : sum, unallocatedMicroUsd: overflow ? 0 : unallocated,

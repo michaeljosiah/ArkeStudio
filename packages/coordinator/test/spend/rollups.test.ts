@@ -76,6 +76,14 @@ describe("lifetime production spend, turn 255", () => {
     assert.equal(allocateProductionSpend(10, [{ shotId: "x", durationSec: NaN }]), null);
     assert.equal(allocateProductionSpend(10, [{ shotId: "x", durationSec: 1 }, { shotId: "x", durationSec: 2 }]), null);
   });
+  it("marks invalid allocation partial even when an allowance attempt has zero billed money", () => {
+    const f = fixture(), job = f.job({ status: "failed", target: { kind: "scene-pass", id: "sc_a" }, params: {
+      shotPlan: [{ shotId: "sh_1", startSec: 0, endSec: 2 }, { shotId: "sh_1", startSec: 2, endSec: 5 }] } });
+    f.evidence.jobs = [job]; f.evidence.ledger = [f.entry(job, 0, "included-plan")];
+    assert.equal(f.result().total.spentMicroUsd, 0);
+    assert.equal(f.result().total.coverage, "partial");
+    assert.ok(f.result().total.problems.includes("allocation-missing"));
+  });
   it("distinguishes empty, missing accounting, failed reads and known partial spend", () => {
     const f = fixture(); assert.equal(f.result().total.coverage, "empty");
     const job = f.job(); f.production.takes = [f.take(job)];
