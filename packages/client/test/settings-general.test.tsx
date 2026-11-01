@@ -175,8 +175,12 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
     const rows = [...screen.querySelectorAll(".fy-fact")];
     assert.deepEqual(
       rows.map((row) => row.querySelector(".fy-fact__what")?.textContent),
-      ["Studio setup", "Images", "Video", "Text-to-Speech", "Music", "Language", "Narrator"],
+      ["Studio setup", "Production tools", "Images", "Video", "Text-to-Speech", "Music", "Language", "Narrator"],
     );
+    const tools = rows.find(row => row.querySelector(".fy-fact__what")?.textContent === "Production tools")!;
+    assert.match(tools.textContent!, /Prompt history and inspection/);
+    assert.match(tools.textContent!, /Off by default/);
+    assert.equal(tools.querySelector("input")?.hasAttribute("checked"), false);
     // The select carries the source's mark in front of the value, and the state follows it in
     // the same cell rather than under it.
     const video = rows.find(row => row.querySelector(".fy-fact__what")?.textContent === "Video")!;

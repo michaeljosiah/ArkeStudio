@@ -548,6 +548,7 @@ export const ClientStateSchema = valueSchema(z
           .nullable()
           .default(null),
         spend: SpendStatusSchema.nullable().default(null),
+        promptTools: z.boolean().optional(),
         backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
         /** What Activity's panel remembers (SPEC-014 R-25); the bell's foreground dot reads it. */
         activitySeen: ActivitySeenSchema.default(NOTHING_SEEN),

@@ -69,6 +69,9 @@ function unavailable() {
 function emptyHistory() {
   return sheet('Prompt history · Shot 12', `<div class="ph257-scope">${tag('Frame · image')}<span class="ph257-meta">Current scene v21</span></div><div class="ph257-promptblock"><span class="ph257-eyebrow">Current saved prompt</span><p>${current}</p></div><div class="ph257-empty"><h3>No earlier prompts available</h3><p>The current prompt is known. Earlier scene versions are not retained here.</p></div><details class="ph257-details"><summary>When a version has no override</summary><p>Use assembled prompt shows what today’s sources produce. It cannot recover historical words that were never recorded.</p></details>`, { phone: true, subtitle: 'Current value only', footer: `<span class="ph257-meta">Earlier history unavailable</span><span class="grow"></span>${go('a', 'Done')}` });
 }
+function settings() {
+  return shell(`<div class="ph257-pagehead"><h1>Settings</h1></div><div class="ph257-crumb">General</div><section class="ph257-field"><header><h3>Production tools</h3></header><label><input type="checkbox" disabled> Prompt history and inspection</label><p>Show tools to compare earlier shot prompts, restore one as a new version, and inspect the prompt and references before generation. Useful when tuning a difficult shot.</p><p class="ph257-meta">Off by default. Turning this off hides the tools; saved prompts and scene history are kept.</p></section>`);
+}
 export const frames = [
   { id: '257a', title: 'Shot page · two small entry points', width: 1360, height: 820, markup: entry() },
   { id: '257b', title: 'History · compare one retained prompt with today', width: 1100, height: 800, markup: history() },
@@ -80,6 +83,7 @@ export const frames = [
   { id: '257h', title: 'Phone inspector · the same request in one scrolling column', width: 390, height: 844, markup: inspect(true) },
   { id: '257i', title: 'Unavailable route · no invented prompt or reference order', width: 900, height: 650, markup: unavailable() },
   { id: '257j', title: 'Current only · no fabricated prompt history', width: 390, height: 844, markup: emptyHistory() },
+  { id: '257l', title: 'Settings General - optional prompt tools, off by default', width: 1100, height: 800, markup: settings() },
   { id: '257k', title: 'Frame inspection · the saved image context stays image', width: 1360, height: 820, markup: inspectFrame() },
 ];
 for (const frame of frames) frame.markup = frame.markup.replace('<div class=', `<div data-screen-label="${esc(frame.id + ' ' + frame.title)}" style="width:${frame.width}px;height:${frame.height}px" class=`);

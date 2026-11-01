@@ -45,7 +45,7 @@ try {
   await cdp('Page.navigate', { url: base });
   await until(() => js(`document.querySelectorAll('.ph257').length === ${frames.length}`));
   const links = await js(`[...document.querySelectorAll('a[href]')].map(link=>link.getAttribute('href'))`);
-  for (const link of links.filter(link => /#257[a-k]$/.test(link))) assert.ok(frames.some(frame => link.endsWith('#' + frame.id)), link);
+  for (const link of links.filter(link => /#257[a-l]$/.test(link))) assert.ok(frames.some(frame => link.endsWith('#' + frame.id)), link);
   assert.equal(frames.find(frame => frame.id === '257a').markup.includes('shot-prompts-257.review.html#257k'), true, 'frame inspector entry stays image');
   assert.equal(compiled.split('\n\n')[1], draft, 'compiled drawing preserves generator draft verbatim');
   assert.notEqual(current, draft, 'saved shot and generator draft are distinct');

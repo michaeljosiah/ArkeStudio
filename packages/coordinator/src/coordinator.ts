@@ -1,3 +1,5 @@
+import { readShotPromptHistory, restoreShotPrompt, readPromptBench, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
+import { foldBenchSession as foldPromptBench, type PromptToolsResult, type PromptInspection, type PromptInspectSource } from "@arke-studio/contracts";
 import { benchQuoteParams } from "./bench/service.js";
 import { productionSpend as deriveProductionSpend } from "./spend/rollups.js";
 import { readProductionSpend } from "./spend/read.js";
@@ -4660,6 +4662,62 @@ export class Coordinator {
     this.emit({ type: "setup.status", at: this.nowIso(), setup });
   }
 
+  private async inspectPromptRequest(store: WorldStore, source: PromptInspectSource, requestId: string): Promise<PromptInspection> {
+    const world = store.getBundle(), settings = this.appSettings ? await this.appSettings.load() : null;
+    if (source.kind === "shot" && source.capability === "image") {
+      const { production, scene } = promptOwner(world, source);
+      const model = production.meta.models?.image ? this.opts.manifest?.models.find(m => m.id === production.meta.models?.image && m.capability === "image") : this.opts.manifest ? modelForCapability(this.opts.manifest, settings?.routing, "image") : undefined;
+      if (!model || !this.benchModelEligible(model)) throw Error("Choose an available image model before inspecting the frame request.");
+      const localIdentity = this.freezeLocalIdentity({ worldId: store.worldId, productionId: source.productionId, target: { kind: "shot", id: scene.id },
+        capability: "image", provider: model.provider, model: model.id, params: {}, estimatedMicroUsd: 0 });
+      const value = await framePromptInspection({ worldId: store.worldId, productionId: source.productionId, scene, production, world, model,
+        ...(localIdentity.recipe ? { recipe: localIdentity.recipe } : {}), ...(localIdentity.engine ? { engine: localIdentity.engine } : {}),
+        mode: "per-shot", scope: "all", shotId: source.shotId, boardCapSec: 10, eligible: true, clock: () => this.nowIso() });
+      await verifyPromptReferences(store, value);
+      if (store.getBundle().productions !== world.productions) throw Error("The shot changed while preparing its request. Read again.");
+      return value;
+    }
+    let session: import("@arke-studio/contracts").BenchSession;
+    if (source.kind === "shot") {
+      const reader = worldFileReader(store.dir);
+      const prepared = await prepareBenchSubject(world, { productionId: source.productionId, sceneId: source.sceneId,
+        subject: { kind: "shot", shotId: source.shotId }, mode: source.capability, settings, manifest: this.opts.manifest ?? null,
+        sources: { read: reader.read, durationSec: path => measureDurationSec(store, path, this.opts.mediaProbe ?? null, { signal: store.closingSignal }) } });
+      if (!prepared.ok) throw Error(prepared.reason);
+      session = foldPromptBench({ schemaVersion: 1, id: `sess_${requestId}`, createdAt: this.nowIso(), subject: prepared.prefill.subject }, []);
+      session.composer = prepared.prefill.composer; session.tokenRegistry = prepared.prefill.references;
+      session.subjectTokens = prepared.prefill.references.map(ref => ref.token);
+    } else {
+      session = await readPromptBench(store, source.sessionId);
+      if (!session.subject || session.subject.kind === "production") throw Error("These tools inspect production image/video generators only.");
+      if (source.kind === "take") {
+        const take = session.takes.find(t => t.id === source.takeId);
+        if (!take) throw Error("This saved take is no longer available.");
+        return frozenPromptInspection(this.jobQueue?.listJobs().find(job => job.id === take.jobId), take, session, world);
+      }
+      const model = this.opts.manifest?.models.find(m => m.id === source.composer.model && m.provider === source.composer.provider) ?? null;
+      const routing = subjectSessionReferenceRouting(session, model);
+      session = { ...session, composer: { ...source.composer,
+        brief: routing === undefined ? source.composer.brief : subjectRoutedBrief(session, routing.activeTokens, source.composer, this.benchSheetName(store.worldId)),
+        activeTokens: routing?.activeTokens ?? session.composer.activeTokens, keyframeTokens: routing?.keyframeTokens ?? session.composer.keyframeTokens } };
+    }
+    const model = this.opts.manifest?.models.find(m => m.id === session.composer.model && m.provider === session.composer.provider);
+    if (!model || !this.benchModelEligible(model)) throw Error("Choose an available model in the generator before inspecting its request.");
+    if (!["image", "video"].includes(session.composer.mode)) throw Error("Choose an image or video request.");
+    const route = characterAudioRoute(model);
+    const voices = session.subject && session.subject.kind !== "production" && session.composer.params.kind === "video" && !session.composer.params.audioReferencesDisabled && route
+      ? await resolveSubjectCastVoices(store, session.subject, requestId, route.local === true, { acknowledge: false, at: this.nowIso() })
+      : { references: [], refused: [] };
+    if (voices.refused.length) throw Error(voices.refused.map(v => v.reason).join(" · "));
+    const value = compilePromptInspection(session, world, this.opts.manifest ?? null, { worldId: store.worldId, requestId, at: this.nowIso(),
+      performanceReferences: voices.references, recipeVersionOf: (id, kind) => this.recipeVersionOf(id, kind),
+      adapterRecipeFor: (id, selections, kind) => this.adapterRecipeIdentity(id, selections, kind) },
+      source.kind === "shot" ? "saved-shot" : "generator-draft", source.kind === "shot" ? `${source.sceneId} v${promptOwner(world, source).scene.version}` : session.id);
+    await verifyPromptReferences(store, value);
+    if (store.getBundle().productions !== world.productions) throw Error("The world changed while preparing its request. Read again.");
+    return value;
+  }
+
   private productionSpendProjection: ProductionSpendProjection | undefined;
   private productionSpendWork: Promise<void> | null = null;
   private productionSpendDirty = false;
@@ -4830,6 +4888,7 @@ export class Coordinator {
       parsed.type !== "health.changed" &&
       parsed.type !== "editor-effect.analysis" &&
       parsed.type !== "appearance.changed" &&
+      !parsed.type.startsWith("prompt-tools.") &&
       // The plans live in app settings; the manifest it carries is derived, not a domain record.
       parsed.type !== "provider-plans.changed" &&
       // The dedicated flushed adapter journal owns policy history; this is its UI projection.
@@ -6293,7 +6352,7 @@ export class Coordinator {
       ...(settings ? { models: settings.models } : {}),
       ...(settings ? { presets: settings.presets } : {}),
       ...(seededSpend ? { spend: seededSpend } : {}),
-      ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
+      ...(settings ? { promptTools: settings.promptTools === true, backgroundNotifications: settings.backgroundNotifications } : {}),
       ...(settings ? { activitySeen: settings.activity } : {}),
       account: this.account.current(),
       ...(settings ? { research: settings.research, imageInspection: settings.imageInspection } : {}),
@@ -10627,6 +10686,36 @@ export class Coordinator {
         // actually measured, so lowering the threshold onto existing spend still alerts.
         if (!spend.ledgerUnavailable) this.spendAlerted = spend.alerted;
         this.emit({ at: new Date().toISOString(), type: "spend.status", spend });
+        return;
+      }
+      case "prompt-history-read":
+      case "prompt-history-restore":
+      case "prompt-request-inspect": {
+        const store = this.opts.provider.openStore?.();
+        let result: PromptToolsResult;
+        try {
+          if (!this.readModel.getState().app.promptTools) throw Error("Enable Prompt history and inspection in Settings → General first.");
+          if (!store || store.worldId !== msg.worldId) throw Error("The owning world is not open.");
+          if (msg.kind === "prompt-history-read") result = { kind: "history", history: await readShotPromptHistory(store,
+            { productionId: msg.productionId, sceneId: msg.sceneId, shotId: msg.shotId, capability: msg.capability }) };
+          else if (msg.kind === "prompt-history-restore") {
+            const version = await restoreShotPrompt(store, msg, msg);
+            await this.refreshWorldSnapshot(msg.worldId);
+            result = { kind: "restored", version };
+          } else result = { kind: "inspection", inspection: await this.inspectPromptRequest(store, msg.source, msg.requestId) };
+          if (!this.stillOpen(store)) throw Error("The world changed while the request was read. Reopen the tool.");
+        } catch (error) {
+          // Do not put prompt contents or filesystem exceptions into operational diagnostics.
+          result = { kind: "failed", reason: error instanceof Error && !/ENOENT|EACCES|EPERM|UNKNOWN|Zod|\n/.test(error.message)
+            ? error.message.slice(0, 1000) : "The prompt evidence could not be read safely. Read again or reopen the source." };
+        }
+        this.emit({ at: this.nowIso(), type: "prompt-tools.result", worldId: msg.worldId, requestId: msg.requestId, result });
+        return;
+      }
+      case "set-prompt-tools": {
+        if (!this.appSettings) return;
+        const settings = await this.appSettings.setPromptTools(msg.enabled);
+        this.emit({ at: this.nowIso(), type: "prompt-tools.changed", enabled: settings.promptTools === true });
         return;
       }
       case "set-background-notifications": {

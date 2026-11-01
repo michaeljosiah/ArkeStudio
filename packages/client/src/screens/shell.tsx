@@ -1,3 +1,4 @@
+import { PromptToolsSetting } from "../components/prompt-tools.js";
 import { useEffect, useRef, useState } from "react";
 import { importWorld, subscribeWorldImport } from "../lib/store.js";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
@@ -2437,6 +2438,7 @@ export function SettingsGeneralScreen() {
     <div data-screen="settings-general" className="fy-set fy-set--general">
       <h1 className="fy-pane__name">General</h1>
       {!isRemoteSession() && <FactRow what="Studio setup"><button type="button" className="fy-fact__link" onClick={() => navigate("/setup")}>Set up an AI writing agent & tools</button></FactRow>}
+      <FactRow what="Production tools"><PromptToolsSetting /></FactRow>
       {ROUTED_CAPABILITIES.map((capability) => {
         const candidates = (manifest?.models ?? []).filter((m) => m.capability === capability && m.upscale === undefined);
         const usable = (m: (typeof candidates)[number]) =>

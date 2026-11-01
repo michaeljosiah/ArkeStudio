@@ -1,17 +1,18 @@
 # Shot prompts · turn 257
 
-Proposed 1 November 2026. The owner approved narrowing issue #252 to prompt history, restore
-and request inspection. This approves the scope, not these screens. Application implementation
-and the accepted prototype mirror follow owner design review.
+Approved by the owner on 1 November 2026 after the drawings were shown in chat.
+The owner added an app-level configuration: Settings General, Prompt history and inspection,
+off by default, with a clear description. Disabling hides controls without deleting history.
+The accepted turn is mirrored into the prototype.
 
 The latest reviewed main is `2064be208d24491aa607a28e7d20c778c7a30248`. Manual prompt
 editing/reset, conversational scene commands, whole-scene history, shot pages and production
 Bench are already present. The former proposal's new shot list, Patch/Rebuild harness purpose,
 per-shot failure modes, extra status ladder and #250 dependency are removed.
 
-## Proposed behavior
+## Approved behavior
 
-1. Two local actions: History and Inspect request. Keep the existing Frame prompt editor,
+1. An off-by-default Settings General switch exposes two local actions: History and Inspect request. Keep the existing Frame prompt editor,
    View full prompt and Rebuild. A frame entry stays image; the video generator stays video.
 2. History projects retained scene versions for the stable shot ID. Collapse unrelated versions,
    keep source pins/capability, and disclose gaps. No second journal or prompt authority.
@@ -36,6 +37,7 @@ per-shot failure modes, extra status ladder and #250 dependency are removed.
 | 257h | Phone request inspector, one scrolling column. |
 | 257i | Unavailable model/route; no fabricated request or order. |
 | 257j | A known current prompt without recorded older versions. |
+| 257l | Settings General: optional tools, off by default, with retention explained. |
 | 257k | A saved frame prompt opens the image inspector, never the video draft. |
 
 The fixture is synthetic. Version numbers, words, source hashes and route capabilities describe
@@ -70,9 +72,11 @@ The standalone review is `shot-prompts-257.review.html`.
 `node design-system/shot-prompts-257.capture.mjs` renders every frame in both themes in an owned
 headless browser. It checks internal destinations, fonts, horizontal fit, fixed sheet chrome,
 source disclosure, context labels and phone scrolling. Output is under `output/shot-prompts-257/`.
-These are drawing checks; native application focus, persistence and request parity are future
-implementation gates. No application code has changed.
+These are drawing checks. The actual App smoke (`scripts/smoke-prompt-tools.mjs`) additionally
+passes 12 history/inspection cases across desktop, phone and short windows in both themes,
+including Settings default-off/toggle, restore refusal, Tab containment and Escape/focus return.
+Coordinator tests cover persistence, restore fences, compiler parity and diagnostic privacy.
 
-Checked 1 November 2026: all 22 light/dark renders pass, along with master anchors/rule counts,
+Checked 1 November 2026: all 24 light/dark renders pass, along with master anchors/rule counts,
 consolidated review freshness, script syntax and repository lint (8 existing warnings). The
-private SPEC-012 proposal names PR #2292 and keeps design approval explicitly pending.
+private SPEC-012 amendment names PR #2292 and records owner approval plus the optional setting.

@@ -232,6 +232,10 @@ export class AppSettingsFile {
     });
   }
 
+  async setPromptTools(enabled: boolean): Promise<AppSettings> {
+    return this.mutate(current => { const settings: AppSettings = { ...current, promptTools: enabled }; return { settings, value: settings }; });
+  }
+
   async setBackgroundNotifications(preference: BackgroundNotificationPreference): Promise<AppSettings> {
     return this.mutate((current) => {
       const settings: AppSettings = { ...current, backgroundNotifications: preference };
