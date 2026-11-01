@@ -16,7 +16,7 @@ and duration allocation. This is a read-only projection, separate from Activity'
   once per produced shot segment; its container is excluded. Frozen filing IDs deduplicate
   Bench media and filed copies. Current selections, rather than acceptance history, own the
   selected count. Uploaded media does not become a generated candidate.
-- Direct shot/scene-pass video and production-owned Bench video/stills contribute spend,
+- Direct shot/scene-pass video, paid board-sheet image generation and production-owned Bench video/stills contribute spend,
   including failed and cancelled work. Stills do not contribute video candidates. Unrelated
   Bench, voice, music, performance, reference, authoring and export work is excluded when its
   target history is available.
@@ -31,7 +31,7 @@ Local unmetered work and free-plan/free-credit/included-plan attempts remain sep
 billed money. A plan's recorded zero does not establish its allowance consumption. Estimated,
 provider-reported, usage-derived, mixed-measured, manifest-derived and unknown actual sources
 remain distinguishable. Empty, complete, partial and unavailable accounting states are explicit;
-candidate counts independently report partial evidence. Missing history is not a complete zero.
+candidate counts independently report partial evidence. Retained generated stills establish historical work even without their ledger/jobs; they never add video candidates. Provider reconciliation holds have unknown charges rather than pending zeroes. Missing history is not a complete zero.
 
 ## Implementation and lifecycle
 

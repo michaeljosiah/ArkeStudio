@@ -132,6 +132,38 @@ describe("lifetime production spend, turn 255", () => {
     f.evidence.jobs = [job]; f.evidence.ledger = [f.entry(job)]; f.evidence.benchIncomplete = true;
     assert.equal(f.result().total.spentMicroUsd, 101); assert.equal(f.result().total.countsPartial, true);
   });
+  it("includes paid board-sheet image generation at its known scene without inventing shot shares", () => {
+    const f = fixture(), job = f.job({ capability: "image", target: { kind: "board-sheet", coversShots: ["sh_1", "sh_2"] }, status: "failed" });
+    f.evidence.jobs = [job]; f.evidence.ledger = [f.entry(job, 75)];
+    const value = f.result(); assert.equal(value.total.spentMicroUsd, 75); assert.equal(value.scenes.sc_a!.spentMicroUsd, 75);
+    assert.equal(value.total.unallocatedMicroUsd, 75); assert.equal(value.total.generated, 0);
+    assert.equal(value.shots.sh_1!.spentMicroUsd, 0); assert.equal(value.total.coverage, "partial");
+  });
+  it("marks provider reconciliation holds unavailable, or partial alongside known money", () => {
+    const f = fixture(), held = f.job({ status: "needs-reconciliation" }); f.evidence.jobs = [held];
+    assert.equal(f.result().receipts[0]!.outcome, "unknown"); assert.equal(f.result().total.coverage, "unavailable");
+    const known = f.job({ status: "failed" }); f.evidence.jobs = [held, known]; f.evidence.ledger = [f.entry(known)];
+    assert.equal(f.result().total.coverage, "partial"); assert.equal(f.result().total.spentMicroUsd, 101);
+  });
+  it("retains missing accounting evidence for generated frames without adding video candidates", () => {
+    const f = fixture(), job = f.job({ capability: "image" });
+    f.production.takes = [f.take(job, "sh_1", { kind: "frame" })];
+    assert.equal(f.result().total.coverage, "unavailable"); assert.equal(f.result().shots.sh_1!.coverage, "unavailable");
+    assert.equal(f.result().total.generated, 0); assert.equal(f.result().total.spentMicroUsd, null);
+  });
+  it("retains unfiled Bench still evidence on another device, and uses a retained matching ledger", () => {
+    const f = fixture(), job = f.job({ capability: "image", productionId: undefined });
+    const bench = BenchTakeSchema.parse({ id: newId("tk"), n: 1, requestId: WORLD, jobId: job.id, status: "succeeded", disposition: "open", createdAt: AT,
+      media: { file: "frame.png", hash: "sha256:" + "a".repeat(64) }, request: { mode: "image", provider: "fal", model: "image",
+        brief: "A signal", references: [], keyframes: [], params: { kind: "image", count: 1 }, productionProvenance: provenance,
+        filing: { kind: "shot", productionId: "saltlight", sceneId: "sc_a", shotId: "sh_1", productionTakeId: newId("tk"), frameArtifactId: newId("ar") } } });
+    f.evidence.bench = [{ sessionId: "session", takes: [bench] }];
+    assert.equal(f.result().total.coverage, "unavailable"); assert.equal(f.result().total.generated, 0);
+    assert.equal(f.result().scenes.sc_a!.coverage, "unavailable");
+    f.evidence.ledger = [f.entry(job, 30)];
+    assert.equal(f.result().total.spentMicroUsd, 30); assert.equal(f.result().total.coverage, "partial");
+    assert.equal(f.result().shots.sh_1!.spentMicroUsd, 30); assert.equal(f.result().receipts.length, 1);
+  });
   it("never turns an unsafe orphan amount into an empty zero-dollar total", () => {
     const f = fixture(); f.evidence.ledger = [f.entry(f.job(), Number.MAX_SAFE_INTEGER + 1)];
     const value = f.result();

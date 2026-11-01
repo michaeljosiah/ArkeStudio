@@ -86,7 +86,7 @@ export function productionSpend(world: WorldBundle, evidence: SpendEvidence): Pr
       if (frozen.success) return frozen.data;
       const fromBench = benchWork.get(job.id);
       if (fromBench) return fromBench;
-      if (job.productionId !== id || !["shot", "scene-pass"].includes(job.target.kind) || !["image", "video"].includes(job.capability)) return null;
+      if (job.productionId !== id || !["shot", "scene-pass", "board-sheet"].includes(job.target.kind) || !["image", "video"].includes(job.capability)) return null;
       const provenance = object(job.params.provenance);
       const sceneId = typeof provenance.sceneId === "string" ? provenance.sceneId
         : job.target.kind === "scene-pass" ? job.target.id : job.target.id ? shotScenes.get(job.target.id) : undefined;
@@ -125,7 +125,7 @@ export function productionSpend(world: WorldBundle, evidence: SpendEvidence): Pr
       const valid = sceneShots.has(work.sceneId) && work.shots.every(shot => sceneShots.get(work.sceneId)!.has(shot.shotId));
       const allocation = valid && amount !== null ? allocateProductionSpend(amount, work.shots) : null;
       receipts.push({ jobId: job.id, ...(sceneShots.has(work.sceneId) ? { sceneId: work.sceneId } : {}), kind: work.kind,
-        provider: job.provider, model: job.model, outcome: terminal(job) ? job.status as "succeeded" | "failed" | "cancelled" : "pending",
+        provider: job.provider, model: job.model, outcome: terminal(job) ? job.status as "succeeded" | "failed" | "cancelled" : job.status === "needs-reconciliation" ? "unknown" : "pending",
         source, microUsd: amount, recordedMicroUsd: overflow ? null : recorded,
         shots: valid ? work.shots.filter(shot => Number.isFinite(shot.durationSec) && shot.durationSec > 0).map(shot => ({ shotId: shot.shotId, durationSec: shot.durationSec, microUsd: allocation?.get(shot.shotId) ?? null })) : [],
         unallocatedMicroUsd: allocation === null ? amount ?? 0 : 0 });
@@ -135,15 +135,43 @@ export function productionSpend(world: WorldBundle, evidence: SpendEvidence): Pr
       if (take?.media && work.kind === "video") for (const shot of work.shots) addCandidate(shot.shotId, job.id, shot.takeId);
     }
 
+    const retainHistoricalWork = (jobId: string, work: ProductionWork, provider: string, model: string) => {
+      if (receipts.some(row => row.jobId === jobId)) return;
+      const entry = ledger.get(jobId), recorded = entry ? entry.actualMicroUsd ?? entry.estimatedMicroUsd : null;
+      const overflow = recorded !== null && !safeMoney(recorded);
+      if (overflow) problem.add("amount-overflow");
+      const source = !entry || overflow ? "unavailable" : allowance(entry.actualSource ?? "") ? entry.actualSource! : local(entry) ? "local-zero"
+        : entry.actualMicroUsd === null ? "estimated" : entry.actualSource ?? "unknown-actual";
+      const amount = !entry || overflow ? null : allowance(source) || source === "local-zero" ? 0 : recorded;
+      const valid = sceneShots.has(work.sceneId) && work.shots.every(shot => sceneShots.get(work.sceneId)!.has(shot.shotId));
+      const allocation = valid && amount !== null ? allocateProductionSpend(amount, work.shots) : null;
+      receipts.push({ jobId, ...(sceneShots.has(work.sceneId) ? { sceneId: work.sceneId } : {}), kind: work.kind,
+        provider, model, outcome: entry?.outcome ?? "succeeded", source, microUsd: amount, recordedMicroUsd: overflow ? null : recorded,
+        shots: valid ? work.shots.filter(shot => Number.isFinite(shot.durationSec) && shot.durationSec > 0)
+          .map(shot => ({ shotId: shot.shotId, durationSec: shot.durationSec, microUsd: allocation?.get(shot.shotId) ?? null })) : [],
+        unallocatedMicroUsd: allocation === null ? amount ?? 0 : 0 });
+      if (amount !== null && allocation === null) problem.add("allocation-missing");
+      if (!entry) missing.add(jobId);
+      if (!latest.has(jobId)) { problem.add("history-incomplete"); countsPartial = true; }
+    };
+
     // A retained reservation can precede enqueue, or outlive a lost app-root job history.
     for (const session of evidence.bench) for (const take of session.takes) {
       const work = benchProductionWork(take.request);
-      if (work?.productionId !== id || !take.media || work.kind !== "video") continue;
+      if (work?.productionId !== id || !take.media) continue;
       const jobId = take.jobId ?? [...latest.values()].find(job => job.target.id === `${session.sessionId}/${take.id}`)?.id;
-      for (const shot of work.shots) addCandidate(shot.shotId, jobId, shot.takeId);
-      if (!jobId || !ledger.has(jobId)) missing.add(jobId ?? `${session.sessionId}/${take.id}`);
+      if (work.kind === "video") for (const shot of work.shots) addCandidate(shot.shotId, jobId, shot.takeId);
+      retainHistoricalWork(jobId ?? `${session.sessionId}/${take.id}`, work, take.request.provider, take.request.model);
     }
     for (const take of production.takes) {
+      if (["frame", "still"].includes(take.kind) && take.provider !== "user" && take.provider !== "upload" && take.media &&
+        (!take.jobId || !latest.has(take.jobId) || relevantJobs.has(take.jobId))) {
+        if (!take.jobId || !latest.has(take.jobId) || !ledger.has(take.jobId)) {
+          const sceneId = take.provenance.sceneId ?? shotScenes.get(take.coversShots[0] ?? "") ?? "unknown";
+          retainHistoricalWork(take.jobId ?? take.id, { productionId: id, sceneId, kind: "frame",
+            shots: take.coversShots.map(shotId => ({ shotId, durationSec: 1, takeId: take.id })) }, take.provider, take.model);
+        }
+      }
       if (take.kind !== "clip" || passParents.has(take.id) || take.provider === "user" || take.provider === "upload" || (!take.media && !take.segment)) continue;
       if (take.coversShots.length !== 1) continue;
       const job = take.jobId ? latest.get(take.jobId) : undefined;
@@ -161,7 +189,7 @@ export function productionSpend(world: WorldBundle, evidence: SpendEvidence): Pr
         job.finalization?.status !== "pending" && !candidateJobs.has(jobId)) countsPartial = true;
     }
     // Retain known production money if its target history has gone; do not invent a shot.
-    for (const entry of ledger.values()) if (entry.productionId === id && !latest.has(entry.jobId)) {
+    for (const entry of ledger.values()) if (entry.productionId === id && !latest.has(entry.jobId) && !receipts.some(row => row.jobId === entry.jobId)) {
       const recorded = entry.actualMicroUsd ?? entry.estimatedMicroUsd;
       const overflow = !safeMoney(recorded);
       if (overflow) problem.add("amount-overflow");
