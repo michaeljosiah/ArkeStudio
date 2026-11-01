@@ -100,9 +100,11 @@ export function productionGenerationSource(store: WorldStore, ports: {
           if (filing.kind === "board") durationSec = filing.members.at(-1)!.endSec;
           const coversShots = filing.kind === "shot" ? [filing.shotId] : filing.members.map(m => m.shotId);
           const shotPlan = filing.kind === "board" ? filing.members.map(({ shotId, number, startSec, endSec }) => ({ shotId, number, startSec, endSec })) : undefined;
+          // These are direct shot/pass jobs; Bench reservation names are not their identity.
+          const { productionWork: _benchWork, ...providerParams } = input.params;
           inputs.push(ports.freeze({ ...input, productionId: action.productionId,
             target: target.kind === "shot" ? { kind: "shot", id: target.shotId, coversShots } : { kind: "scene-pass", id: scene.id, coversShots },
-            params: { ...input.params, generationQuoteProduction: true, provenance: { ...snapshot.productionProvenance, sceneId: scene.id, sceneVersion: scene.version },
+            params: { ...providerParams, generationQuoteProduction: true, provenance: { ...snapshot.productionProvenance, sceneId: scene.id, sceneVersion: scene.version },
               referenceRoles: prefill.references.flatMap(ref => ref.source.source === "world-file" ? [{ file: ref.source.path, role: ref.label ?? ref.kind }] : []),
               ...(shotPlan && target.kind === "board" ? { shotPlan } : {}), ...(retake ? { retakeOf: retake.id } : {}),
               ...(input.provider === "comfyui" ? { seed: createHash("sha256").update(`${actionId}/${inputs.length}`).digest().readUInt32BE(0) % 0x7fffffff } : {}) },

@@ -1,4 +1,4 @@
-import { benchProductionWork } from "@arke-studio/contracts";
+import { benchProductionWork, ProductionWorkSchema } from "@arke-studio/contracts";
 import { benchLineLanguage, benchVoiceDirection, directionSaysAnything, quoteSpeech, recogniseDirection, speechInputFits } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { compileLine, type CompiledLine } from "../voice/direction.js";
@@ -473,6 +473,13 @@ export async function addBenchReference(
 // ---------------------------------------------------------------------------
 // Dispatch — validate everything, reserve, then enqueue
 // ---------------------------------------------------------------------------
+
+/** Quote equality keeps production ownership and durations, but not fresh filing names. */
+export function benchQuoteParams(params: Record<string, unknown>): Record<string, unknown> {
+  const work = ProductionWorkSchema.safeParse(params.productionWork);
+  return work.success ? { ...params, productionWork: { ...work.data,
+    shots: work.data.shots.map(({ takeId: _takeId, ...shot }) => shot) } } : params;
+}
 
 export interface BenchEnqueueInput {
   productionId?: string;

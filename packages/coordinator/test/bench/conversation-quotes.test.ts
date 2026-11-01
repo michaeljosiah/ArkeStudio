@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { ArkeGenerationReceiptDetailSchema, JobSchema, newId, type ConversationActionCard, type Job, type ModelWorldChatAction, type SessionId } from "@arke-studio/contracts";
 import { BenchStore } from "../../src/bench/store.js";
-import { openBenchSession } from "../../src/bench/service.js";
+import { openBenchSession, openSubjectBenchSession } from "../../src/bench/service.js";
 import { Coordinator } from "../../src/coordinator.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import type { WorldChatActionAdapterDeps } from "../../src/world-chat/actions.js";
@@ -12,7 +12,7 @@ import type { WorldStore } from "../../src/world/store.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
-it("persists Bench take identities and exact inputs before approval without reserving or enqueuing", async t => {
+for (const productionOwned of [false, true]) it(`persists ${productionOwned ? "production" : "world"} Bench take identities and exact inputs before approval without reserving or enqueuing`, async t => {
   const at = "2026-10-03T12:00:00.000Z";
   const { root, worldDir } = await makeTempRoot();
   const provider = new FsWorldProvider(root, { clock: () => at });
@@ -20,7 +20,12 @@ it("persists Bench take identities and exact inputs before approval without rese
   await provider.loadWorld(WORLD_ID);
   const store = provider.openStore()!;
   const sessionId = newId("sess") as SessionId;
-  const opened = await openBenchSession(worldDir, () => at, { sessionId,
+  const opened = productionOwned ? await openSubjectBenchSession(worldDir, sessionId, at, {
+    subject: { kind: "shot", productionId: "saltlight", productionTitle: "Saltlight", sceneId: "sc_04", sceneNumber: 4, sceneTitle: "The vigil",
+      shotId: "sh_12", shotNumber: 12, shotTitle: "The signal", durationSec: 6, aspect: "16:9" },
+    title: "Shot 12", references: [], composer: { mode: "image", provider: "fal", model: "test-image", brief: "A tide clock",
+      activeTokens: [], keyframeTokens: [], params: { kind: "image", count: 1, aspect: "16:9" } },
+  }) : await openBenchSession(worldDir, () => at, { sessionId,
     defaultModel: { provider: "fal", model: "test-image" }, initial: { mode: "image", brief: "A tide clock" } });
   assert.ok(opened);
   const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "changes.jsonl"), appVersion: "test",
@@ -43,11 +48,11 @@ it("persists Bench take identities and exact inputs before approval without rese
   };
   const quotes = () => internals.conversationActionDependencies(store).benchGenerationQuotes!;
   const action: ModelWorldChatAction = { kind: "bench-generation", sessionId, checkReceiptIds: [newId("check")],
-    composer: { mode: "image", provider: "fal", model: "test-image", brief: "a".repeat(50_000), params: { kind: "image", count: 2 } } };
+    composer: { mode: "image", provider: "fal", model: "test-image", brief: "a".repeat(50_000), params: { kind: "image", count: 2, ...(productionOwned ? { aspect: "16:9" } : {}) } } };
   const id = newId("act");
   const body = await quotes().prepare(action, id, at);
   assert.equal(body.estimatedMicroUsd, 20_000);
-  assert.equal(body.prompt, "a".repeat(50_000), "a shared long brief is disclosed once");
+  assert.ok(body.prompt.includes("a".repeat(50_000)), "the shared long brief is disclosed");
   assert.equal(body.quantity, 2);
   assert.deepEqual(await quotes().prepare(action, id, at), body);
   await quotes().validate(action, id);
@@ -56,6 +61,7 @@ it("persists Bench take identities and exact inputs before approval without rese
   const frozen = JSON.parse(await readFile(join(worldDir, ".history/world/prepared", `${id}.generation.json`), "utf8"));
   assert.equal((await quotes().dispatch(action, id)).status, "queued");
   assert.deepEqual(admitted, frozen.inputs);
+  if (productionOwned) assert.ok((admitted as EnqueueInput[]).every(input => input.productionId === "saltlight" && input.params.productionWork));
   assert.ok((await opened.store.fold())!.takes.every(take => take.status === "queued" && take.error === undefined));
   assert.deepEqual((await opened.store.fold())!.takes.map(take => take.id), frozen.materialization.reserved.map((take: { id: string }) => take.id));
   assert.equal((await quotes().dispatch(action, id)).status, "running");

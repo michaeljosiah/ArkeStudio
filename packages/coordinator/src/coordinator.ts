@@ -1,3 +1,4 @@
+import { benchQuoteParams } from "./bench/service.js";
 import { productionSpend as deriveProductionSpend } from "./spend/rollups.js";
 import { readProductionSpend } from "./spend/read.js";
 import type { ProductionSpendProjection, WorldBundle } from "@arke-studio/contracts";
@@ -4661,6 +4662,15 @@ export class Coordinator {
   private productionSpendProjection: ProductionSpendProjection | undefined;
   private productionSpendWork: Promise<void> | null = null;
   private productionSpendDirty = false;
+  private handlingClientMessages = 0;
+  private pendingSpendSnapshot = false;
+
+  private publishProductionSpend(): void {
+    // Background accounting must not jump ahead of the active command's direct answer.
+    if (this.handlingClientMessages) { this.pendingSpendSnapshot = true; return; }
+    this.pendingSpendSnapshot = false;
+    if (!this.stopping) this.transport.broadcastSnapshot();
+  }
 
   private setDisplayWorld(world: WorldBundle | null): void {
     this.readModel.setWorld(world);
@@ -4685,14 +4695,14 @@ export class Coordinator {
           this.productionSpendDirty = true; continue;
         }
         this.productionSpendProjection = result;
-        this.transport.broadcastSnapshot();
+        this.publishProductionSpend();
       }
     }).catch(() => {
       // An unexpected derivation failure cannot leave the old figure presented as current.
       const world = this.readModel.getState().world;
       this.productionSpendProjection = world ? deriveProductionSpend(world, { ledger: [], jobs: [], bench: [], ledgerUnavailable: true,
         historyUnavailable: true, benchIncomplete: true }) : undefined;
-      if (!this.stopping) this.transport.broadcastSnapshot();
+      this.publishProductionSpend();
     }).finally(() => {
       this.productionSpendWork = null;
       if (this.productionSpendDirty && !this.stopping) this.scheduleProductionSpend();
@@ -7472,6 +7482,23 @@ export class Coordinator {
   }
 
   private async handleClientMessage(
+    msg: ClientMessage,
+    benchTakeActionHeld = false,
+    benchDispatchHeld = false,
+    genesisDecisionHeld = false,
+    browserImportStore?: WorldStore,
+    audiobookStore?: WorldStore,
+    browserImportSpace?: ImportFileSpace,
+  ): Promise<void> {
+    this.handlingClientMessages++;
+    try { await this.handleClientMessageInner(msg, benchTakeActionHeld, benchDispatchHeld, genesisDecisionHeld, browserImportStore, audiobookStore, browserImportSpace); }
+    finally {
+      this.handlingClientMessages--;
+      if (!this.handlingClientMessages && this.pendingSpendSnapshot) this.publishProductionSpend();
+    }
+  }
+
+  private async handleClientMessageInner(
     msg: ClientMessage,
     benchTakeActionHeld = false,
     benchDispatchHeld = false,
@@ -23086,7 +23113,7 @@ export class Coordinator {
         capability: input.capability,
         provider: input.provider,
         model: input.model,
-        params: input.params,
+        params: benchQuoteParams(input.params),
         estimatedMicroUsd: input.estimatedMicroUsd,
       })),
     });
@@ -23247,7 +23274,9 @@ export class Coordinator {
         if (action.kind !== "bench-generation") throw new Error("The Bench generation action is unavailable.");
         return this.quoteBenchGenerationForConversationAction(store, action, at, id, scope);
       },
-      compareInputs: inputs => inputs.map(({ target, landing: _landing, ...input }) => ({ ...input, target: { kind: target.kind } })),
+      compareInputs: inputs => inputs.map(({ target, landing: _landing, params, ...input }) => ({
+        ...input, target: { kind: target.kind }, params: benchQuoteParams(params),
+      })),
       beforeDispatch: async (action, id, _inputs, materialization) => {
         if (action.kind !== "bench-generation") throw new Error("The Bench generation action is unavailable.");
         await this.serialiseBenchDispatch(`${store.worldId}/${benchChatSessionId(action, id)}`, async () => {

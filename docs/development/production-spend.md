@@ -42,7 +42,7 @@ changing the ordinary Bench wall's deletion behavior. `spend/rollups.ts` derives
 Nothing is written into the portable world and legacy records are not rewritten.
 
 Coordinator coalesces refreshes on world snapshots, relevant job/ledger and Bench events.
-Reads are tracked through shutdown and discarded after a world/store change. The optional
+Reads are tracked through shutdown and discarded after a world/store change. Background spend snapshots wait until active commands have answered. Bench quote comparisons preserve ownership/durations while ignoring fresh reservation names; direct shot/pass quotes retain their own target identity. The optional
 `ClientState.productionSpend` snapshot field is never persisted in `WorldBundle`.
 `production-spend-refresh` only repeats these reads; it does not dispatch work or refresh the
 world from disk. The client uses `components/production-spend.tsx` and native `PageSheet` for
@@ -53,7 +53,7 @@ focus containment, Escape, scrolling and focus return.
 From `packages/coordinator`, run:
 
 ```
-node --import tsx --test test/spend/rollups.test.ts test/spend/read.test.ts test/takes/takes.test.ts test/queue/dispatcher.test.ts test/bench/subject.test.ts
+node --import tsx --test test/spend/rollups.test.ts test/spend/read.test.ts test/takes/takes.test.ts test/queue/dispatcher.test.ts test/bench/subject.test.ts test/bench/conversation-quotes.test.ts
 ```
 
 From `packages/client`, run:
