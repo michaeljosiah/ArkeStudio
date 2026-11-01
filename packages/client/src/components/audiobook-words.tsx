@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { audiobookWordsCounts, type AudiobookWordsRow, type AudiobookWordsState } from "@arke-studio/contracts";
+import { audiobookWording, audiobookWordsCounts, type AudiobookWordsRow, type AudiobookWordsState } from "@arke-studio/contracts";
 import { requestAudiobookWords, subscribeAudiobookWords, useStore } from "../lib/store.js";
 import { EditorDialog } from "./editor-dialog.js";
 import { Button } from "./ui.js";
 
 export function wordsCheckLabel(row: AudiobookWordsRow): string {
-  if (row.comparison?.status === "compared") return row.comparison.result === "exact" ? "match" : "words differ";
+  if (row.comparison?.status === "compared") {
+    const review = audiobookWording(row.text, row.comparison.observedText);
+    return review === "match" ? "match" : review === "formatting" ? "same words, different formatting" : "review wording";
+  }
   return row.reason ?? (row.comparison?.status === "unavailable" ? "local transcription unavailable" : "unchecked");
 }
 
@@ -58,13 +61,14 @@ export function AudiobookWordsDialog({ worldId, productionId, chapterId, block, 
         </span>}
       </div>
       <p className="fy-mono" role="status">{counts === null ? "Loading checks…" :
-        `${counts.match} match · ${counts.differ} differ · ${counts.unchecked} unchecked · ${counts.unavailable} unavailable${running ? ` · ${state!.done} / ${state!.total} checked` : ""}`}</p>
+        `${counts.match} match · ${counts.differ} to review · ${counts.unchecked} unchecked · ${counts.unavailable} unavailable${running ? ` · ${state!.done} / ${state!.total} checked` : ""}`}</p>
       {state?.reason && <p className="fy-rectake__refused" role="status">{state.reason}</p>}
-      <p className="fy-mono">Transcription can mishear names or punctuation. Review differences; no reading is changed. This does not check pronunciation or word timing.</p>
+      <p className="fy-mono">Formatting differences are separated from wording to review. Spelling, numbers, abbreviations and names may be recognition errors. Listen before changing a recording; no reading is changed. This does not check pronunciation or word timing.</p>
       <div className="fy-rectake__table">
         {state?.rows.map(row => {
           const compared = row.comparison?.status === "compared" ? row.comparison : null;
-          const tone = compared ? compared.result === "exact" ? "pass" : "warning" : "unavailable";
+          const review = compared ? audiobookWording(row.text, compared.observedText) : null;
+          const tone = compared ? review !== "review" ? "pass" : "warning" : "unavailable";
           return <details key={`${row.chapterId}/${row.key}`} className="fy-abp__disc">
             <summary className={`fy-rectake__check fy-rectake__check--${tone}`}>
               <span className="fy-rectake__check-label">{scope === "book" ? `${row.chapterTitle} · ` : ""}{row.label}</span>
@@ -74,7 +78,7 @@ export function AudiobookWordsDialog({ worldId, productionId, chapterId, block, 
               <div className="fy-ab__read"><b>Words</b><span>{row.text || "—"}</span></div>
               <div className="fy-ab__read"><b>Heard</b><span>{compared?.observedText ?? "unchecked"}</span></div>
             </div></div>
-            {compared?.result === "mismatch" && <p className="fy-mono">{compared.differences.length} difference{compared.differences.length === 1 ? "" : "s"} · review the recording</p>}
+            {compared?.result === "mismatch" && <p className="fy-mono">{review === "formatting" ? "Formatting differences · raw transcript kept" : `${compared.differences.length} difference${compared.differences.length === 1 ? "" : "s"} · the transcript may be wrong; review the recording`}</p>}
           </details>;
         })}
       </div>

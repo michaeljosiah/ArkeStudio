@@ -34,6 +34,23 @@ async function answer(state: AudiobookWordsState, requestId?: string) {
 }
 const button = (name: string) => [...dom.document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === name)!;
 
+it("keeps formatting out of wording review while retaining the authored and raw recognized text", async () => {
+  await mount();
+  const comparison = { status: "compared" as const, audioHash: `sha256:${"a".repeat(64)}`, targetTextHash: `sha256:${"b".repeat(64)}`,
+    transcriber: { id: "fixture", version: "1", normalizationVersion: 1 }, observedText: "maren opens the ledger", result: "mismatch" as const,
+    differences: [{ kind: "changed" as const, authored: base.rows[0]!.text, observed: "maren opens the ledger" }], boundaryAlignment: "unavailable" as const };
+  await answer({ ...base, rows: [{ ...base.rows[0]!, comparison }] });
+  assert.match(dom.document.body.textContent!, /1 match · 0 to review/);
+  assert.match(dom.document.body.textContent!, /same words, different formatting/);
+  assert.match(dom.document.body.textContent!, /Maren opens the ledger\./);
+  assert.match(dom.document.body.textContent!, /maren opens the ledger/);
+  assert.match(dom.document.body.textContent!, /raw transcript kept/);
+  await answer({ ...base, rows: [{ ...base.rows[0]!, comparison: { ...comparison, observedText: "maren the ledger" } }] });
+  assert.match(dom.document.body.textContent!, /0 match · 1 to review/);
+  assert.match(dom.document.body.textContent!, /the transcript may be wrong; review the recording/);
+  assert.equal(sent.length, 1, "classification never asks for recognition or paid regeneration");
+});
+
 it("shows match/difference/unavailable separately and sends only an explicit local check", async () => {
   await mount(); assert.equal(sent.length, 1); assert.equal(sent[0]?.kind, "audiobook-words");
   await answer(base);

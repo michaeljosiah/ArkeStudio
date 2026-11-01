@@ -1,5 +1,9 @@
 # Code map
 
+Saved Words review (#2242): `contracts/src/audiobook-words.ts` owns the presentation-only
+formatting classification used by counts and the existing client Words dialog (turn 261).
+The shared transcript cache, raw diff, source selection and acoustic timing remain unchanged.
+
 Words/timing exclusion (#2241): the `audiobook-word-timing` coordinator handler reports an
 explicit production-scoped busy reason in prepare/read/status; the existing client timing panel
 shows that reason and rereads on reconnect. Turn 260; `audiobook-timing-busy.test.ts` covers both
