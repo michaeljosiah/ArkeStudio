@@ -459,6 +459,10 @@ state, its blockers and the read-back line. Client `components/story-export.tsx`
 on the Branch Map: Web package and Arke Player. `scripts/export-arke-player.mts --story` makes the
 same package from a copy of a world.
 
+The shared beat resolver captures cache-job state and revalidates each prepared voice plan
+under the export gate. A cache or job change refuses the whole export before files are written
+(#1378); it never combines scenes from opposite sides of voice preparation finishing.
+
 Audio Studio (approved turn 226): client
 `screens/chapter-audio-studio.tsx` composes the Cut layout, shared `EditorPanelTabs`,
 `EditorSheetSlot` and `useCutLayout` around the chapter script. `audio-studio-workspace.tsx`
