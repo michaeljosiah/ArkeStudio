@@ -37,9 +37,13 @@ export function comicPagePrompt(input: {
 }): string {
   const { page, mode } = input;
   const reading = pageReading(page, input.settings);
+  // A template describes its own count. Sent for a page holding more or fewer panels, "five panels"
+  // won over the six that followed: every six-panel page came back with five and failed review.
   const template = layoutTemplate(page.layout);
+  const count = page.panels.length;
+  const layout = template?.panels.length === count ? template.describe : `exactly ${count} ${count === 1 ? "panel" : "panels"} of varied size`;
   const lines: string[] = [];
-  lines.push(`A single finished comic book page, ${pageAspect(page, input.settings)}, ${template?.describe ?? `${page.panels.length} panels`}. ${READING_WORDS[reading]} Clean panel borders and gutters.`);
+  lines.push(`A single finished comic book page, ${pageAspect(page, input.settings)}, ${layout}. ${READING_WORDS[reading]} Clean panel borders and gutters.`);
   if (input.look) lines.push(`Look: ${input.look.replace(/\s+/g, " ").trim()}`);
   if (input.style?.trim()) lines.push(`Style: ${input.style.replace(/\s+/g, " ").trim()}`);
   page.panels.forEach((panel, index) => {
