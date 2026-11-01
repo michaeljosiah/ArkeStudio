@@ -22540,7 +22540,8 @@ export class Coordinator {
       // A queued picture has not used any generation time. Keep its original job until it lands
       // or cancellation settles; abandoning the waiter used to strand paid results behind retries.
       if ((job?.attempt ?? 0) > 0) deadline ??= Date.now() + waitMs;
-      if (deadline !== undefined && Date.now() > deadline && !cancellationAsked) {
+      // A completed result waiting for disk space still owns its bytes and local filing retry.
+      if (deadline !== undefined && Date.now() > deadline && !cancellationAsked && job?.storageWait?.phase !== "result") {
         // Comic pages persist this session before dispatch and already own late-result recovery.
         if (input.onSession !== undefined) return fail("the picture took too long");
         if (jobId !== undefined) {
