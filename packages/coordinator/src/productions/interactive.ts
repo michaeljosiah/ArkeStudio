@@ -20,6 +20,7 @@ import {
   publicationBlockers,
   storyReplay,
   storyIdentity,
+  carryTraversalEvidence,
   routingFindings,
   RoutingSchema,
   sceneBeats,
@@ -375,11 +376,26 @@ async function readStoredTraversal(store: Pick<WorldStore,"dir">, productionId: 
 }
 
 export async function readTraversal(store: WorldStore, productionId: string): Promise<TraversalEvidence[]> {
-  return readTraversalFromDirectory(store.dir,productionId);
+  return readTraversalFromDirectory(store.dir,productionId,store.getBundle().productions.find(production => production.meta.id === productionId)?.routing ?? undefined);
 }
 
 export async function readTraversalFromDirectory(dir: string, productionId: string, routing?: Routing): Promise<TraversalEvidence[]> {
-  if (!routing || routing.schemaVersion === 2) return (await readStoredTraversal({dir}, productionId)).map(({ requestId: _requestId, ...entry }) => entry);
+  if (!routing || routing.schemaVersion === 2) {
+    const entries = (await readStoredTraversal({dir}, productionId)).map(({ requestId: _requestId, ...entry }) => entry);
+    if (!routing) return entries;
+    const identity = storyIdentity(routing), revisions = new Map<number, Routing | null>();
+    for (const entry of entries) {
+      if (!entry.story || entry.story.identity === identity || revisions.has(entry.routingVersion)) continue;
+      try {
+        const raw = await readFile(toExtendedLength(join(dir, ".history", "productions", productionId, "routing", `v${entry.routingVersion}.json`)), "utf8");
+        revisions.set(entry.routingVersion, RoutingSchema.parse(JSON.parse(raw)));
+      } catch { revisions.set(entry.routingVersion, null); }
+    }
+    return entries.map(entry => {
+      const previous = revisions.get(entry.routingVersion);
+      return previous ? carryTraversalEvidence(entry, previous, routing) ?? entry : entry;
+    });
+  }
   if (!routing.choices.length) return [];
   const byChoice = new Map(routing.choices.map(choice => [choice.id, choice])), found = new Map<string, TraversalEvidence>();
   const input = createReadStream(toExtendedLength(join(dir, "productions", productionId, EVIDENCE_FILE)), { encoding: "utf8" });

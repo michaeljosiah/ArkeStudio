@@ -1,7 +1,7 @@
 import { orderedShots, type SceneRecord } from "./scene-flow.js";
 import { z } from "zod";
 import { StoryFactSchema, StoryPredicateSchema, StoryEffectSchema, StoryPresentationSchema, StoryEndingSchema } from "./story-state-schema.js";
-import { validateStoryProgram, exploreStory, storyIdentity, storyReplay } from "./story-state.js";
+import { validateStoryProgram, exploreStory, storyIdentity, storyReplay, storyFactReferences } from "./story-state.js";
 import { IsoDateTimeSchema, SceneIdSchema } from "./ids.js";
 
 /**
@@ -93,6 +93,24 @@ export const TraversalEvidenceSchema = z
   })
   .strict();
 export type TraversalEvidence = z.infer<typeof TraversalEvidenceSchema>;
+
+/** Only non-logical edits may carry an existing walk forward (#2238). Endings are checked
+ * separately by the current graph; changing one does not undo the choices already walked. */
+function traversalRules(routing: Routing): string {
+  return storyIdentity({ start: routing.start, choices: routing.choices, presentation: routing.presentation ?? [], excluded: routing.excluded,
+    facts: (routing.facts ?? []).filter(fact => storyFactReferences(routing, fact.id).some(use => use.kind !== "ending")) });
+}
+
+/** A read projection only: the original journal and its provenance stay unchanged. */
+export function carryTraversalEvidence(entry: TraversalEvidence, previous: Routing, current: Routing): TraversalEvidence | null {
+  if (!entry.story || entry.story.identity !== storyIdentity(previous) || traversalRules(previous) !== traversalRules(current)) return null;
+  try {
+    const before = storyReplay(previous, entry.story.prefix), after = storyReplay(previous, [...entry.story.prefix, entry.choiceId]);
+    if (before.sceneId !== entry.from || after.sceneId !== entry.to || storyIdentity(before.state) !== entry.story.before || storyIdentity(after.state) !== entry.story.after) return null;
+    const nextBefore = storyReplay(current, entry.story.prefix), nextAfter = storyReplay(current, [...entry.story.prefix, entry.choiceId]);
+    return { ...entry, story: { ...entry.story, identity: storyIdentity(current), before: storyIdentity(nextBefore.state), after: storyIdentity(nextAfter.state) } };
+  } catch { return null; }
+}
 
 // ---------------------------------------------------------------------------
 // Findings (brief §4): named, evidenced, blocks or warns — never a number
@@ -417,7 +435,16 @@ function stateRoutingFindings(routing: Routing, scenes: readonly {id: string; ti
       ending ? "ending-with-choices" : "state-route", problem.prefix);
   }
   const covered = new Set<string>();
+  // A first unused fact opts a legacy story into schema 2 without changing its edge-only rules.
+  const stateless = (routing.facts ?? []).every(fact => storyFactReferences(routing, fact.id).length === 0);
   for (const entry of evidence) {
+    if (!entry.story && stateless) {
+      const choice = routing.choices.find(candidate => candidate.id === entry.choiceId);
+      if (choice?.from === entry.from && choice.to === entry.to) {
+        for (const point of graph.points) if (point.sceneId === entry.from) covered.add(storyIdentity([point.sceneId, point.state, entry.choiceId]));
+      }
+      continue;
+    }
     if (!entry.story || entry.story.identity !== identity) continue;
     try {
       const before = storyReplay(routing, entry.story.prefix);

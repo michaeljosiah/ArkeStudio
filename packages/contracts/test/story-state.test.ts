@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { RoutingSchema, routingFindings } from "../src/routing.js";
+import { RoutingSchema, routingFindings, carryTraversalEvidence } from "../src/routing.js";
 import { exploreStory, storyReplay, storyIdentity, storyEnding, storyLinkSteps, storyLinks, storyLoneChoice, storyVisibleBeats } from "../src/story-state.js";
 
 const routing = () => RoutingSchema.parse({
@@ -113,6 +113,24 @@ describe("remembered story rules (SPEC-063)", () => {
     assert.notDeepEqual(storyReplay(r,uncovered.witnessPrefix).state,before.state,"the witness represents the other pre-state");
     const stale = { ...r, version: 2 };
     assert.equal(routingFindings(stale, [], [evidence]).filter(f => f.kind === "untraversed-edge" && f.choiceIds.includes("ch_manual")).length, 2);
+  });
+  it("carries verified walks across unused facts and ending edits, but not changed story rules (#2238)", () => {
+    const r = routing(), prefix = ["ch_save"], before = storyReplay(r, prefix), after = storyReplay(r, [...prefix, "ch_manual"]);
+    const evidence = { ts: "2026-10-27T12:00:00.000Z", routingVersion: 1, choiceId: "ch_manual", from: "sc_collar", to: "sc_escape", route: ["sc_bore", "sc_collar"], story: { identity: storyIdentity(r), prefix, before: storyIdentity(before.state), after: storyIdentity(after.state), provenance: "human" as const } };
+    const current = { ...r, version: 2, endings: [], facts: [...r.facts!, { id: "unused", label: "Unused", type: "boolean" as const, default: false }] };
+    const carried = carryTraversalEvidence(evidence, r, current);
+    assert.ok(carried);
+    assert.equal(carried.story!.provenance, "human");
+    assert.equal(carried.routingVersion, 1, "the original walk's version is retained");
+    assert.equal(routingFindings(current, [], [carried]).filter(f => f.kind === "untraversed-edge" && f.choiceIds.includes("ch_manual")).length, 1, "the other pre-state still needs its own walk");
+    for (const changed of [
+      { ...current, start: "sc_collar" },
+      { ...current, choices: current.choices.map(c => c.id === "ch_manual" ? { ...c, to: "sc_bore" } : c) },
+      { ...current, choices: current.choices.map(c => c.id === "ch_manual" ? { ...c, when: { op: "eq" as const, fact: "unused", value: false } } : c) },
+      { ...current, choices: current.choices.map(c => c.id === "ch_save" ? { ...c, effects: [{ fact: "elsie", value: "Lost" }] } : c) },
+    ]) assert.equal(carryTraversalEvidence(evidence, r, changed), null);
+    assert.equal(carryTraversalEvidence({ ...evidence, story: { ...evidence.story, before: "corrupt" } }, r, current), null);
+    assert.equal(carryTraversalEvidence(evidence, current, current), null, "a mismatched historical identity cannot vouch for the original walk");
   });
 });
 
