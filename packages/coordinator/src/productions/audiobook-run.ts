@@ -48,7 +48,8 @@ import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
 import { applyGain, dropRunawayTail, normaliseSpeech, readSpeechWav, samplePeak, sliceSpeech, trimSpeech, writeSpeechWav } from "../audio/speech-wav.js";
 import { TranscriptionUnavailableError, type TimedWord } from "../voice/word-times.js";
-import { judgeSplit, LONG_TAIL, splitAudio, splitLexicon, splitRequest } from "./audiobook-split.js";
+import { heardAsWritten, LONG_TAIL, splitAudio, splitLexicon, splitRequest } from "./audiobook-split.js";
+import { textTokens } from "../audio/heard-match.js";
 import { checkDirection, directionPlan, type RenderedPart } from "../voice/direction.js";
 import { plannedReactions } from "./audiobook-timing.js";
 import { audiobookLanding, recordsLoudness, castLeftToCast, castRefusal, currentDirection, directionEntry, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type ProposalOverride } from "./audiobook.js";
@@ -1323,6 +1324,11 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           await flag(block, "over the reader's cap · flac parts cannot be joined");
           continue;
         }
+        const checkWords = block.format === "wav" && block.reaction?.sound === undefined && readsGrouped(block.model, true, null);
+        if (checkWords && deps.wordTimes === undefined) {
+          await flag(block, "unchecked · no local transcriber");
+          continue;
+        }
         // One request a part, in order, each awaited: a local reader is one job at a time on
         // this machine and a cloud reader is bounded by the queue, and the record is written
         // only once the whole block is a file.
@@ -1442,18 +1448,17 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         // Keep the received jobs intact until the local check succeeds, so an outage costs no
         // second synthesis. The same applies when this reader is set to read per paragraph.
         let checked: { heard: string; seconds: number; matched: boolean } | undefined;
-        if (block.format === "wav" && readsGrouped(block.model, true, null)) {
-          if (deps.wordTimes === undefined) {
-            await flag(block, "unchecked · no local transcriber");
-            continue;
-          }
+        if (checkWords && deps.wordTimes !== undefined) {
           await deps.activity?.({ phase: "aligning" });
           const bytes = new Uint8Array(await readFile(toExtendedLength(sourcePath)));
           try {
             const heard = await deps.wordTimes(bytes, signal);
             if (signal.aborted) break;
             const text = heard.words.map(word => word.text).join(" ");
-            checked = { heard: text, seconds: heard.seconds, matched: judgeSplit(block.text, text, audioHash(bytes), { lexicon: preparation.prepared.lexicon, ...(block.sounds === true ? { sounds: true } : {}) }).matched };
+            // The split's matching decision, without constructing its unused QC report, whose
+            // 2,000-word limit is smaller than a multipart solo block.
+            const exact = textTokens(block.text).join(" ") === textTokens(text).join(" ");
+            checked = { heard: text, seconds: heard.seconds, matched: exact || heardAsWritten(block.text, text, { lexicon: preparation.prepared.lexicon, ...(block.sounds === true ? { sounds: true } : {}) }) };
           } catch (err) {
             if (signal.aborted) break;
             await flag(block, "unchecked · local transcription failed");

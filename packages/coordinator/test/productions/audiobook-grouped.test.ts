@@ -1003,6 +1003,7 @@ describe("a chapter read grouped (design turn 185)", () => {
         await h.run({ only, confirmationToken: priced(h.events)!.confirmationToken });
         assert.ok(h.sent.every(input => input.params["blocks"] === undefined), "each scattered block is a solo request");
         const record = await recordOf(w.worldDir);
+        if (mode === "missing") assert.equal(h.sent.length, 0, "no speech is bought without the required local check");
         if (mode === "clean") {
           assert.deepEqual(Object.keys(record.takes).sort(), [...only].sort());
           assert.deepEqual(record.flags, {});
@@ -1024,6 +1025,19 @@ describe("a chapter read grouped (design turn 185)", () => {
       } finally { await w.close(); }
     });
   }
+
+  it("checks a solo paragraph past the QC report's 2,000-word cap", async () => {
+    const w = await world("The lantern stays lit. ".repeat(520));
+    try {
+      await writeAudiobookBookRaised(w.store, LEDGER, { schemaVersion: 1, reading: "narrator", requests: "per-paragraph" });
+      const h = await harness(w.store);
+      await h.run();
+      await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+      const record = await recordOf(w.worldDir);
+      assert.deepEqual(record.flags, {});
+      assert.ok(Object.values(record.takes).some(take => take.characters > 10_000));
+    } finally { await w.close(); }
+  });
 
   it("reads a single block again with its neighbours in one request, keeping only the middle cut", async () => {
     const { store, worldDir, close } = await world();
@@ -1106,6 +1120,7 @@ it("a paid performed-v4 sound reaction retains the identity needed for crash rec
     assert.equal(h.sent.length, 1);
     const input = h.sent[0]!;
     assert.equal(input.params.text, "[laughs]");
+    assert.ok((await recordOf(w.worldDir)).takes.x1, "a nonverbal reaction does not need to speak its label");
     assert.ok(input.params.directionHash);
     const prepared = await prepareChapter(w.store, LEDGER, "neap", { narrator, models: [model], catalogue: [], transcriber: true }, () => "2026-10-03T09:00:00.000Z", ["x1"]);
     assert.equal(prepared.kind, "ready"); if (prepared.kind !== "ready") return;
