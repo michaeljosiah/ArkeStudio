@@ -3,7 +3,7 @@ import { StoryFactSchema, StoryPredicateSchema, StoryEffectSchema, StoryPresenta
 import { z } from "zod";
 import { AudioStudioProposalInputSchema } from "./audio-arrangement-schema.js";
 import { DraftScriptBlockSchema } from "./audio-drama.js";
-import { COMIC_LIMITS, DraftComicPageSchema } from "./graphic-novel.js";
+import { COMIC_LIMITS, ComicChapterPlanSchema, ComicScriptReadSchema, DraftComicPageSchema } from "./graphic-novel.js";
 import { PropAuthoringChangeSchema, PropIdSchema, PropStateIdSchema } from "./prop.js";
 export { ProductionCreationPlanSchema, type ProductionCreationPlan } from "./production-creation.js";
 import { ProductionCreationPlanSchema } from "./production-creation.js";
@@ -936,8 +936,12 @@ const ProductionComicScriptModelActionSchema = z
     chapter: z.string().min(1).max(200).describe("The graphic novel's own chapter id, as get_production lists it."),
     baseHash: z.string().min(1).nullable()
       .describe("The chapter's comic script baseHash exactly as get_production read it; null for a chapter with no pages yet."),
-    pages: z.array(DraftComicPageSchema).min(1).max(COMIC_LIMITS.pagesPerChapter)
-      .describe("Every page of the chapter after the change, in reading order, and only here: never in the reply. Keep each unchanged page, panel and line with its id. A new one has no id. Each panel's description is what is drawn; each line's text is exactly what is lettered. Cite each panel's source: the story and chapter it adapts and its paragraph numbers."),
+    pages: z.array(DraftComicPageSchema).max(COMIC_LIMITS.pagesPerChapter)
+      .describe("Every page of the chapter after the change, in reading order, and only here: never in the reply. Keep each unchanged page, panel and line with its id. A new one has no id. Each panel's description is what is drawn; each line's text is exactly what is lettered. Cite each panel's source: the story and chapter it adapts and its paragraph numbers. Empty when this draft is the chapter's plan alone."),
+    plan: ComicChapterPlanSchema.optional()
+      .describe("The chapter's page plan, sent alone with no pages before any pages are drafted (SPEC-064 R-60): every passage with keep, cut, merge, show or invent and why; each page's change and the turn it ends on; what the reader is shown or told and on which page; and every line that would lean on a cut or on something not yet shown. Leave it out when drafting pages: the kept plan stays."),
+    /** Written by the studio from its cold read of the pages, never by Arke (R-64); whatever Arke sends here is dropped. */
+    read: ComicScriptReadSchema.optional().describe("Never send this. The studio fills it."),
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();

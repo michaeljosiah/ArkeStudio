@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   BLOCKING_FINDINGS,
@@ -13,12 +13,15 @@ import {
   panelRects,
   priceLabel,
   REVIEW_BLOCKING,
+  SCRIPT_READ_BLOCKING,
   takeBlocking,
   takeClears,
   ulid,
   type ComicPage,
   type ComicPageTake,
+  type ComicChapterPlan,
   type ComicPanel,
+  type ComicScriptRead,
   type ComicReading,
   type ComicSettings,
   type ComicSource,
@@ -221,7 +224,13 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const chatSurface = chat?.forPage() ?? null;
   const draftPath = chapter ? `productions/${productionId}/comic/${chapter.id}.json` : null;
   const drafted = draftPath === null ? undefined : world.proposals.find((staged) => staged.proposal.kind === "comic-script" && staged.comicScripts?.[draftPath] !== undefined);
-  const draftPages = drafted && draftPath ? drafted.comicScripts![draftPath]!.pages : null;
+  const draftScript = drafted && draftPath ? drafted.comicScripts![draftPath]! : null;
+  // A plan arrives as a draft of its own, with no pages (turn 254b); pages arrive after it is kept.
+  const draftPlan = draftScript && draftScript.pages.length === 0 && draftScript.plan ? draftScript.plan : null;
+  const draftPages = draftScript && draftPlan === null ? draftScript.pages : null;
+  const draftRead = draftScript?.read;
+  const keptPlan = stored?.script.plan;
+  const [planOpen, setPlanOpen] = useState(false);
   const [draftPageId, setDraftPageId] = useState<string | null>(null);
   const draftPage = draftPages?.find((candidate) => candidate.id === draftPageId) ?? draftPages?.[0];
   const [draftPanelId, setDraftPanelId] = useState<string | null>(null);
@@ -230,6 +239,15 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const adaptedFrom = chapter ? settings.adapts?.chapters.find((entry) => entry.chapter === chapter.id) : undefined;
   const sourceStory = adaptedFrom ? world.productions.find((candidate) => candidate.meta.id === settings.adapts!.story) : undefined;
   const sourceChapter = adaptedFrom ? sourceStory?.chapters.find((candidate) => candidate.id === adaptedFrom.from) : undefined;
+  const ask = (words: string) => {
+    if (!chat || !chatSurface) return;
+    chat.setValue(chatSurface.key, "draft", words);
+    chat.open(chatSurface);
+  };
+  // Plan first (turn 254a): Arke drafts pages only from a plan the author kept.
+  const from = sourceStory && sourceChapter ? ` from chapter ${sourceChapter.order} of ${sourceStory.meta.title}` : "";
+  const planWithArke = () => chapter && ask(`Plan chapter ${chapter.order}, ${chapter.title}, as pages${from}.`);
+  const fixLean = (lean: ComicChapterPlan["leans"][number]) => chapter && ask(`In the plan for chapter ${chapter.order}, ${chapter.title}: page ${lean.page}, "${lean.line}" ${lean.why}. Settle it in the plan.`);
   const draftWithArke = () => {
     if (!chat || !chatSurface || !chapter) return;
     chat.setValue(chatSurface.key, "draft", sourceStory && sourceChapter
@@ -289,12 +307,31 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
           {/* The book exports as saved: an edit still waiting would ship the words before it (codex on PR 2226). */}
           <Button disabled={unsaved} onClick={() => { send(); setExporting(true); }}>Export</Button>
         </div>
-        {draftPages !== null && drafted !== undefined ? (
+        {(draftPlan !== null && drafted !== undefined) || (planOpen && keptPlan !== undefined && draftPages === null) ? (
+          <div className="fy-comic__body" ref={body} style={{ gridTemplateColumns: columns }}>
+            <div className="fy-comic__strip" />
+            <PlanView plan={(draftPlan ?? keptPlan)!} chapterOrder={chapter?.order ?? 1} fix={chatSurface ? fixLean : null}
+              actions={draftPlan !== null && drafted !== undefined ? (
+                <>
+                  <Button size="sm" onClick={() => discardProposal(worldId, drafted.proposal.id)}>Discard</Button>
+                  <Button size="sm" variant="primary" onClick={() => acceptProposal(worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision)}>Keep</Button>
+                </>
+              ) : (
+                <>
+                  {chatSurface && <Button size="sm" onClick={() => chapter && ask(`Change the plan for chapter ${chapter.order}, ${chapter.title}: `)}>Change</Button>}
+                  <Button size="sm" onClick={() => setPlanOpen(false)}>Close</Button>
+                </>
+              )} />
+          </div>
+        ) : draftPages !== null && drafted !== undefined ? (
           <div className="fy-comic__body" ref={body} style={{ gridTemplateColumns: columns }}>
             <div className="fy-comic__strip">
               {draftPages.map((candidate, index) => (
                 <button key={candidate.id} type="button" className={cx("fy-comic__thumb fy-comic__thumb--draft", candidate.id === draftPage?.id && "on")} aria-label={`Draft page ${firstNumber + index}`} onClick={() => setDraftPageId(candidate.id)}>
                   <span className="d">draft</span>
+                  {asked(draftRead, index + 1).length > 0 && (
+                    <span className={cx("s", asked(draftRead, index + 1).some((finding) => SCRIPT_READ_BLOCKING.has(finding.kind)) ? "x" : "w")}><TriangleAlert size={10} /></span>
+                  )}
                   <span className="n">{firstNumber + index}</span>
                 </button>
               ))}
@@ -304,11 +341,28 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
                 <Sparkle size={15} />
                 <b>Arke’s draft</b>
                 <span>{draftPages.length} {draftPages.length === 1 ? "page" : "pages"} from chapter {chapter?.order}</span>
+                <ReadChip read={draftRead} />
                 <span className="grow" />
                 <Button size="sm" onClick={() => discardProposal(worldId, drafted.proposal.id)}>Discard</Button>
-                <Button size="sm" variant="primary" onClick={() => acceptProposal(worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision)}>Keep</Button>
+                {/* Something a reader could not follow, or no read at all, is kept only as Keep anyway (turn 254d, 254e). */}
+                <Button size="sm" variant={readHolds(draftRead) ? undefined : "primary"} onClick={() => acceptProposal(worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision)}>{readHolds(draftRead) ? "Keep anyway" : "Keep"}</Button>
               </div>
-              {draftPage !== undefined && <DraftPage world={world} page={draftPage} number={firstNumber + draftPages.indexOf(draftPage)} selected={draftPanel?.id ?? null} pick={setDraftPanelId} />}
+              {draftRead?.status === "not-read" && (
+                <div className="fy-comic__needs"><TriangleAlert size={15} /><span>{draftRead.reason === "no-reader" ? "No script reader" : "The read failed"}</span><span className="grow" />
+                  <Button size="sm" onClick={() => navigate(`/settings/harness?agent=${SCRIPT_READER}`)}>Choose reader</Button></div>
+              )}
+              {draftRead?.status === "read" && draftRead.findings.length > 0 && (
+                <div className="fy-comic__finds">
+                  {draftRead.findings.map((finding, index) => (
+                    <button key={index} type="button" className="fy-comic__find as-button" onClick={() => { const at = draftPages[finding.page - 1]; if (at) setDraftPageId(at.id); }}>
+                      <span className={cx("k", !SCRIPT_READ_BLOCKING.has(finding.kind) && "w")}>{READ_KIND[finding.kind]}</span>
+                      <span className="what">Page {firstNumber + finding.page - 1} · “{finding.question}”</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {draftPage !== undefined && <DraftPage world={world} page={draftPage} number={firstNumber + draftPages.indexOf(draftPage)} selected={draftPanel?.id ?? null} pick={setDraftPanelId}
+                asked={asked(draftRead, draftPages.indexOf(draftPage) + 1)} />}
             </div>
             {draftPage === undefined ? <div className="fy-comic__side" /> : <DraftSide key={draftPage.id} world={world} page={draftPage} panel={draftPanel} settings={settings} />}
           </div>
@@ -335,14 +389,16 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
             <button type="button" className="fy-comic__add" onClick={() => { const next = newPage(); edit([...pages, next]); setPageId(next.id); }}>+ Page</button>
           </div>
           {page === undefined ? (
-            // A chapter with no pages (turn 249c): Arke turns its prose into pages, or one is started by hand.
+            // A chapter with no pages (turns 249c, 254a, 254c): Arke plans it, then drafts it from the kept plan, or a page is started by hand.
             <div className="fy-comic__empty">
               <h3>{chapter?.order} · {chapter?.title} has no pages</h3>
               {sourceStory && sourceChapter
                 ? <span className="m">From {sourceStory.meta.title} · chapter {sourceChapter.order}{sourceChapter.words !== undefined ? ` · ${sourceChapter.words.toLocaleString("en-GB")} words` : ""}</span>
                 : chapter?.words !== undefined && <span className="m">{chapter.words.toLocaleString("en-GB")} words</span>}
               <div className="fy-comic__emptyacts">
-                {chatSurface && <Button variant="primary" onClick={draftWithArke}><Sparkle size={14} />Draft with Arke</Button>}
+                {chatSurface && keptPlan === undefined && <Button variant="primary" onClick={planWithArke}><Sparkle size={14} />Plan with Arke</Button>}
+                {chatSurface && keptPlan !== undefined && <Button variant="primary" onClick={draftWithArke}><Sparkle size={14} />Draft with Arke</Button>}
+                {keptPlan !== undefined && <Button onClick={() => setPlanOpen(true)}>Plan</Button>}
                 <Button onClick={() => { const next = newPage(); edit([next]); setPageId(next.id); }}>+ Page</Button>
               </div>
             </div>
@@ -814,13 +870,13 @@ const KIND_LABEL: Record<LetteringKind, string> = { speech: "Speech", thought: "
  * A page of Arke's draft (turn 249d), read only: nothing in a draft is edited or made until it is
  * kept. Each panel names the passage it was drawn from.
  */
-function DraftPage({ world, page, number, selected, pick }: { world: WorldBundle; page: ComicPage; number: number; selected: string | null; pick: (panel: string) => void }) {
+function DraftPage({ world, page, number, selected, pick, asked = [] }: { world: WorldBundle; page: ComicPage; number: number; selected: string | null; pick: (panel: string) => void; asked?: readonly AskedOf[] }) {
   const name = (id: string) => world.sheets.find((sheet) => sheet.id === id)?.name ?? id;
   return (
     <>
       <h3>Page {number} <span className="m">{LAYOUT_LABEL[page.layout] ?? page.layout}</span></h3>
       {page.panels.map((panel, index) => (
-        <div key={panel.id} className={cx("fy-comic__panel fy-comic__panel--draft", panel.id === selected && "on")} role="button" tabIndex={0} aria-pressed={panel.id === selected}
+        <div key={panel.id} className={cx("fy-comic__panel fy-comic__panel--draft", panel.id === selected && "on", asked.some((finding) => finding.panel === index + 1 && SCRIPT_READ_BLOCKING.has(finding.kind)) && "flag")} role="button" tabIndex={0} aria-pressed={panel.id === selected}
           onClick={() => pick(panel.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") pick(panel.id); }}>
           <div className="fy-comic__ph"><b>Panel {index + 1}</b><span className="grow" />{panel.source && <span className="fy-comic__src">{paragraphLabel(panel.source.paragraphs)}</span>}</div>
           <div className="fy-comic__desc">{panel.description}</div>
@@ -829,6 +885,9 @@ function DraftPage({ world, page, number, selected, pick }: { world: WorldBundle
           )}
           {panel.lettering.map((item) => (
             <div key={item.id} className="fy-comic__row"><span className="kind">{KIND_LABEL[item.kind]}</span><span className="who">{item.speaker ? name(item.speaker) : "—"}</span><span className="words">{item.text}</span></div>
+          ))}
+          {asked.filter((finding) => finding.panel === index + 1).map((finding, n) => (
+            <div key={n} className={cx("fy-comic__asked", !SCRIPT_READ_BLOCKING.has(finding.kind) && "w")}><span className="k">{READ_KIND[finding.kind]}</span>“{finding.question}”</div>
           ))}
         </div>
       ))}
@@ -1005,3 +1064,76 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
   );
 }
 
+/** The agent that reads Arke's drafted pages cold, as Settings › Harness names it (turn 254e). */
+const SCRIPT_READER = "comic-script-reader";
+/** The cold read's kinds as Pages names them (turn 254d). */
+const READ_KIND: Record<string, string> = { who: "Who", what: "What", why: "Why", where: "Where", voice: "Voice", picture: "Picture", load: "Load" };
+type AskedOf = Extract<ComicScriptRead, { status: "read" }>["findings"][number];
+
+/** What the reader asked about one page of the draft, counted from 1. */
+function asked(read: ComicScriptRead | undefined, page: number): AskedOf[] {
+  return read?.status === "read" ? read.findings.filter((finding) => finding.page === page) : [];
+}
+
+/** A draft a reader could not follow, or that nobody read, is kept only as Keep anyway (R-65, R-66). */
+export function readHolds(read: ComicScriptRead | undefined): boolean {
+  return read !== undefined && (read.status === "not-read" || read.findings.some((finding) => SCRIPT_READ_BLOCKING.has(finding.kind)));
+}
+
+/** The cold read on the draft bar, in a word or two (turn 254d, 254e). */
+function ReadChip({ read }: { read: ComicScriptRead | undefined }) {
+  if (read === undefined) return null;
+  if (read.status === "not-read") return <span className="fy-comic__read warn"><TriangleAlert size={13} />Not read</span>;
+  const blocking = read.findings.filter((finding) => SCRIPT_READ_BLOCKING.has(finding.kind)).length;
+  if (blocking > 0) return <span className="fy-comic__read bad"><CircleAlert size={13} />{blocking} to fix</span>;
+  if (read.findings.length > 0) return <span className="fy-comic__read warn"><TriangleAlert size={13} />{read.findings.length} to look at</span>;
+  return <span className="fy-comic__read ok"><Check size={13} />Read</span>;
+}
+
+const VERDICT_LABEL: Record<ComicChapterPlan["passages"][number]["verdict"], string> = { keep: "Keep", cut: "Cut", merge: "Merge", show: "Show", invent: "Invent" };
+
+/**
+ * A chapter's page plan (turn 254b): passages with their verdicts, the pages with the turns they end
+ * on, and what the reader knows by which page. A line that leans on a cut is named, with Fix.
+ */
+function PlanView({ plan, chapterOrder, fix, actions }: { plan: ComicChapterPlan; chapterOrder: number; fix: ((lean: ComicChapterPlan["leans"][number]) => void) | null; actions: ReactNode }) {
+  return (
+    <div className="fy-comic__plan">
+      <div className="fy-comic__draftbar"><Sparkle size={15} /><b>Page plan</b><span>{plan.pages.length} {plan.pages.length === 1 ? "page" : "pages"} from chapter {chapterOrder}</span><span className="grow" />{actions}</div>
+      <div className="fy-comic__plancols">
+        <section>
+          <h4>Passages</h4>
+          <div className="fy-comic__planlist">
+            {plan.passages.map((passage, index) => (
+              <div key={index} className="fy-comic__planrow">
+                <span className="fy-comic__src">{passage.where}</span>
+                <span className="t">{passage.what}<span className="why">{passage.why}</span></span>
+                <span className={cx("fy-comic__verdictchip", passage.verdict)}>{VERDICT_LABEL[passage.verdict]}</span>
+              </div>
+            ))}
+          </div>
+          {plan.leans.map((lean, index) => (
+            <div key={index} className="fy-comic__needs"><TriangleAlert size={15} /><span><b>Page {lean.page}</b> · “{lean.line}” {lean.why}</span><span className="grow" />
+              {fix && <Button size="sm" variant="ghost" onClick={() => fix(lean)}>Fix</Button>}</div>
+          ))}
+        </section>
+        <section>
+          <h4>Pages</h4>
+          <div className="fy-comic__planlist">
+            {plan.pages.map((page, index) => (
+              <div key={index} className="fy-comic__planrow"><span className="n">{index + 1}</span><span className="t">{page.change}<span className="why">ends: {page.turn}</span></span></div>
+            ))}
+          </div>
+          {plan.knows.length > 0 && <>
+            <h4>The reader knows</h4>
+            <div className="fy-comic__planlist">
+              {plan.knows.map((known, index) => (
+                <div key={index} className="fy-comic__planrow kn"><span className="t">{known.name}</span><span className="m">{known.how}, page {known.page}</span></div>
+              ))}
+            </div>
+          </>}
+        </section>
+      </div>
+    </div>
+  );
+}

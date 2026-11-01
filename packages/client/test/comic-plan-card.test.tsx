@@ -29,6 +29,6 @@ describe("graphic novel setup (turn 249b)", () => {
   });
 
   it("asks for the pilot chapter's pages", () => {
-    assert.equal(comicPilotAsk("The tide"), "Draft the pilot: turn chapter 1, The tide, into pages.");
+    assert.equal(comicPilotAsk("The tide"), "Plan the pilot: chapter 1, The tide, as pages.");
   });
 });
