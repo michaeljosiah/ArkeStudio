@@ -465,6 +465,7 @@ describe("the branch map canvas (design turn 157)", () => {
     await change(all(item, 'textarea[aria-label="Choice text"]')[0], "Ask Dev to hold the release");
     await click(button(item, "Add condition"));
     await click(button(item, "Remember a value"));
+    assert.equal((all(item, 'select[aria-label="Remember value"]')[0] as HTMLSelectElement).value, "Lost at release", "a new remembered value differs from the starting value");
     await change(all(item, 'select[aria-label="Remember value"]')[0], "Lost at release");
     await click(button(item, "Choose on map"));
     assert.equal(all(item, 'dialog.story-dialog').length, 0);
@@ -542,6 +543,24 @@ describe("the branch map canvas (design turn 157)", () => {
       assert.ok(button(item, "Show when"));
       assert.ok(button(item, "Draw a choice from here"));
     } finally { narrowWindow = false; }
+  });
+
+  it("adds a fact with one save and starts remembered booleans with a change (#2238)", async () => {
+    const item = await mount({ ...ROUTING, schemaVersion: 2 });
+    await click(button(item, "Story facts"));
+    await click(button(item, "+ Add fact"));
+    assert.equal(button(item, "Add fact"), undefined, "there is no inner staging step");
+    assert.equal(button(item, "Keep fact")!.hasAttribute("disabled"), true);
+    await change(all(item, 'input[aria-label="Name for fact"]')[0], "Has the key");
+    await click(button(item, "Keep fact"));
+    const facts = [{ id: "fact", label: "Has the key", type: "boolean" as const, default: false }];
+    assert.deepEqual(commands(item), [{ operation: "set-facts", baseVersion: ROUTING.version, facts }]);
+    await act(async () => __setStateForTest(state({ ...ROUTING, schemaVersion: 2, version: ROUTING.version + 1, facts })));
+    assert.equal(button(item, "Keep fact"), undefined);
+    await click(card(item, "sc_quarter"));
+    await click(all(item, '[data-scene="sc_quarter"] .bm-port')[0]);
+    await click(button(item, "Remember a value"));
+    assert.equal((all(item, 'select[aria-label="Remember value"]')[0] as HTMLSelectElement).value, "true");
   });
 
   it("loading current rules shows the intervening facts before a stale replacement can save", async () => {

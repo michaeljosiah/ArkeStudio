@@ -504,14 +504,14 @@ export function BranchMapScreen() {
           type="button"
           className={cx("bm-count", selection?.kind === "findings" && "bm-count--on")}
           aria-pressed={selection?.kind === "findings"}
-          aria-label={`Findings: ${counts.blocks} block, ${counts.warns} warn`}
+          aria-label={`Routing findings: ${counts.blocks} block, ${counts.warns} warn`}
           onClick={() => {
             setSelection(selection?.kind === "findings" ? null : { kind: "findings" });
             setHighlight(new Set());
           }}
         >
           {rows.length === 0 ? (
-            "No findings"
+            "Routing clear"
           ) : (
             <>
               <span className="bm-dot bm-dot--blocks" />
@@ -1287,7 +1287,7 @@ export function BranchMapScreen() {
     const reason = excluded.get(scene.id);
     const onRoute = geometry.nodes.some((node) => node.id === scene.id);
     return (
-      <Inspector title="Scene" sub={scene.id} onClose={() => setSelection(null)}>
+      <Inspector title="Scene" sub={`Scene ${scene.number}`} onClose={() => setSelection(null)}>
         <div className="bm-actions"><Button onClick={() => { setSceneRules(scene.id); setRuleBlock(scene.script?.blocks[0]?.id); }}>Show when</Button>{ending !== undefined && <Button onClick={() => setEndingRules(scene.id)}>Ending variants</Button>}</div>
         <div className="bm-scenehead">
           <span className="bm-thumb bm-thumb--small">{frame ? <img src={frame} alt="" /> : <span className="bm-thumb__none">{scene.number}</span>}</span>
