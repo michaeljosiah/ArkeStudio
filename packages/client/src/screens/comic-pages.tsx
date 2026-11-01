@@ -304,12 +304,12 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
       <div className="fy-comic">
         <div className="fy-comic__head">
           <h2>Pages</h2>
-          <span className="fy-comic__tabs" role="tablist">
-            {chapters.map((candidate) => (
-              <button key={candidate.id} type="button" role="tab" aria-selected={candidate.id === chapter?.id} className={cx(candidate.id === chapter?.id && "on")}
-                onClick={() => { send(); setChapterId(candidate.id); setPageId(null); }}>{candidate.order} · {candidate.title}</button>
-            ))}
-          </span>
+          <label className="fy-comic__sel fy-comic__chapter"><b>Chapter</b>
+            <select aria-label="Chapter" value={chapter?.id ?? ""}
+              onChange={(event) => { send(); setChapterId(event.target.value); setPageId(null); }}>
+              {chapters.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.order} · {candidate.title}</option>)}
+            </select>
+          </label>
           <span className="grow" />
           {/* Style (design turn 248b): the style's page and name, opening the same cards as Tell a story. */}
           <button type="button" className="fy-comic__sel as-button" aria-label={`Style: ${styleName(settings.style)}`} onClick={() => setStyling(true)}>
