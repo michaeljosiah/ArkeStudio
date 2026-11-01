@@ -7,7 +7,7 @@ import { useStudioAssistant } from "./studio-assistant-context.js";
 import { AccountControl } from "./account-menu.js";
 import { cx } from "./ui.js";
 import { useStore } from "../lib/store.js";
-import { closeActivityPanel, openActivityPanel, useActivityPanel, waitingUpdate } from "../lib/activity-panel.js";
+import { closeActivityPanel, inboxAttention, openActivityPanel, useActivityPanel, waitingUpdate } from "../lib/activity-panel.js";
 import { bundledReleases } from "../lib/releases.js";
 import { unreadCount } from "../lib/release-notes.js";
 import { arrivedSince, computeNeedsYou, deriveStorageFindings, STORAGE_POLICY, type StorageHealthSnapshot } from "@arke-studio/contracts";
@@ -100,7 +100,7 @@ export function AppChrome({
   const chatRunning = !!studioView?.state?.busy;
   // Same derivation as Activity: rare unattended proposals must light this from every screen,
   // alongside reconciliation, paused providers, external edits and paid work awaiting review.
-  const attention = state ? computeNeedsYou(state).length > 0 : false;
+  const attention = state ? inboxAttention(state, computeNeedsYou(state), state.app.audiobookActivity ?? []).count > 0 : false;
   // The second dot (design turn 136, R-24): something to read rather than decide — work that came
   // back since the Inbox was last opened, a release not yet read, or one the updater has found
   // and the person does not have yet. Warning wins when both apply.

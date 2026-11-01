@@ -48,7 +48,7 @@ export function audiobookActivityTitle(run: AudiobookActivity): string {
 
 export function audiobookActivityStage(run: AudiobookActivity): string {
   const phase = run.phase === "aligning" ? "Aligning locally" : run.phase === "queued" ? "Waiting for the reader"
-    : run.phase === "stopping" ? "Keeping the blocks already saved" : run.phase === "finished" ? `${run.flagged} block${run.flagged === 1 ? "" : "s"} need review`
+    : run.phase === "stopping" ? "Keeping the blocks already saved" : run.phase === "finished" ? `${run.flagged} block${run.flagged === 1 ? " needs" : "s need"} review`
     : run.phase === "reading" ? "Reading" : run.phase === "ready" ? "Finished" : run.phase === "stopped" ? "Stopped" : "Interrupted";
   return [phase, run.request > 0 && ["reading", "aligning"].includes(run.phase) ? `request ${run.request} of ${run.requests}` : ""].filter(Boolean).join(" · ");
 }

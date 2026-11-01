@@ -6,7 +6,7 @@ import {
   audiobookActivityTitle, audiobookRequestCost, formatMicroUsd, type AudiobookActivity, type ClientState,
 } from "@arke-studio/contracts";
 import { resolveHeldJob, stopAudiobook, subscribeAudiobookActivity, useStore } from "../lib/store.js";
-import { closeActivityPanel, openActivityPanel, inspectProviderCalls } from "../lib/activity-panel.js";
+import { activityReason, closeActivityPanel, openActivityPanel, inspectProviderCalls } from "../lib/activity-panel.js";
 import { Button, cx } from "./ui.js";
 
 const tone = (run: AudiobookActivity) => run.phase === "ready" ? "ok" : run.phase === "finished" ? "warn" : run.phase === "interrupted" ? "fail" : ["reading", "aligning"].includes(run.phase) ? "live" : "queued";
@@ -27,9 +27,9 @@ export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; s
   const stage = unresolved ? `Request ${unresolved.index} needs a decision` : run.phase === "ready" ? saved : run.phase === "stopped" ? saved + remaining
     : run.phase === "interrupted" && run.interruptedDuring === "aligning" ? `Request ${run.request} · alignment failed` : audiobookActivityStage(run);
   const progress = run.phase === "queued" ? `${run.toMake} blocks · ${run.requests} requests`
-    : run.phase === "ready" ? `${run.requests} requests finished`
+    : run.phase === "ready" ? `${run.requests} request${run.requests === 1 ? "" : "s"} finished`
     : run.phase === "stopped" ? `${Math.max(0, run.request - cancelled)} request${run.request - cancelled === 1 ? "" : "s"} finished${cancelled > 0 ? ` · ${cancelled} cancelled` : ""}`
-    : saved + (run.phase === "finished" ? ` · ${run.requests} requests finished` : !live ? remaining : "");
+    : saved + (run.phase === "finished" ? ` · ${run.requests} request${run.requests === 1 ? "" : "s"} finished` : !live ? remaining : "");
   const showRequests = () => { setExpanded(true); requestAnimationFrame(() => details.current?.querySelector("summary")?.focus()); };
   const showDetails = expanded || (run.phase === "aligning" && !unresolved);
   const uncertain = Boolean(unresolved) || ["stopping", "stopped"].includes(run.phase);
@@ -48,7 +48,7 @@ export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; s
       {!blockReady && <><div className="fy-abactivity__stage" role="status">{stage}</div>
         <div className="fy-ap__rowsub">{progress}</div></>}
       <div className="fy-ap__rowsub">{blockReady ? `${run.made} block${run.made === 1 ? "" : "s"} saved · ${cost.replace(" this re-read", " for this re-read")}` : [!uncertain && run.models.join(", "), cost].filter(Boolean).join(" · ")}</div>
-      {run.reason && <div className="fy-ap__reason">{run.reason}</div>}
+      {run.reason && <div className="fy-ap__reason">{activityReason(run.reason)}</div>}
       {!run.reason && run.phase === "aligning" && expanded && <div className="fy-ap__reason">Matching the audio to its blocks.</div>}
       <div className="fy-ap__actions">
         {unresolved && <Button size="sm" variant="primary" onClick={showRequests}>Resolve request</Button>}
@@ -68,7 +68,7 @@ export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; s
           return <div className="fy-abactivity__request" key={ref.id}>
             <div className="fy-abactivity__request-head"><b>Request {ref.index} · {ref.reused ? "reused" : phase}</b>{!ref.reused && charge.amount !== null && <span>{formatMicroUsd(charge.amount)}</span>}</div>
             <div className="fy-ap__rowsub">{ref.reused ? "No new request or charge" : [blocks !== undefined ? `${blocks} blocks` : "", charge.amount === null ? charge.label : chargeKind, aligning ? "no new TTS request" : ""].filter(Boolean).join(" · ")}</div>
-            {job?.error && <div className="fy-ap__reason">{job.error}</div>}
+            {job?.error && <div className="fy-ap__reason">{activityReason(job.error)}</div>}
             {job?.status === "needs-reconciliation" && <div className="fy-ap__actions">
               <Button size="sm" onClick={() => resolveHeldJob(job.id, "resubmit")}>Resubmit · may charge again</Button>
               <Button size="sm" variant="ghost" onClick={() => resolveHeldJob(job.id, "discard")}>Abandon · prior cost unknown</Button>
@@ -95,7 +95,7 @@ function ReadReceipt({ initial, dismiss }: { initial: AudiobookActivity; dismiss
     <div className="fy-note__body">
       <div className="fy-note__title">{audiobookActivityTitle(run)}</div>
       <div className="fy-note__meta">{[run.request > 0 && audiobookActivityLive(run) ? `Request ${run.request} of ${run.requests}` : "", audiobookActivityCost(run, state?.app.jobs ?? [])].filter(Boolean).join(" · ")}</div>
-      {run.phase === "interrupted" && run.reason && <div className="fy-note__reason">{run.reason}</div>}
+      {run.phase === "interrupted" && run.reason && <div className="fy-note__reason">{activityReason(run.reason)}</div>}
     </div>
     <div className="fy-note__end"><Button variant="outline" size="sm" onClick={() => { openActivityPanel("inbox"); dismiss(); requestAnimationFrame(() => { const row = document.querySelector<HTMLElement>(`[data-run="${run.id}"]`); row?.focus({ preventScroll: true }); row?.scrollIntoView({ block: "nearest" }); }); }}>Activity</Button>
       <button className="fy-note__close" aria-label="Dismiss narration notice" onClick={dismiss}>×</button>

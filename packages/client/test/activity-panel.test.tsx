@@ -22,6 +22,7 @@ import { AppChrome } from "../src/components/chrome.js";
 import { ActivityPanel } from "../src/components/activity-panel.js";
 import {
   __resetActivityPanelForTest,
+  activityReason,
   leaveProviderCalls,
   openActivityPanel,
   showActivityTab,
@@ -155,6 +156,8 @@ it("keeps an aligning chapter in Running after its provider request succeeded, a
   assert.equal((html.match(/data-testid="audiobook-activity-row"/g) ?? []).length, 1);
   state.app.audiobookActivity = [{ ...read, phase: "interrupted", reason: "Studio restarted before this read finished." }];
   const history = render(state, "inbox");
+  assert.match(history, /aria-label="Inbox · 1"/);
+  assert.match(history, /Needs you · 1/);
   assert.match(history, /Narration interrupted/);
   assert.match(history, /14 left unread/);
   assert.doesNotMatch(history, /nothing finished in the last/);
@@ -164,9 +167,26 @@ it("keeps an aligning chapter in Running after its provider request succeeded, a
   state.app.jobs = [{ ...request, status: "needs-reconciliation", providerJobId: "accepted-maybe" }];
   const unknown = render(state, "inbox");
   assert.match(unknown, /Needs you · 1/);
+  assert.match(unknown, /aria-label="Inbox · 1"/, "a read replaces its request in both counts");
   assert.match(unknown, /Resolve request/);
   assert.match(unknown, /Request 2 needs a decision/);
   assert.equal((unknown.match(/data-testid="audiobook-activity-row"/g) ?? []).length, 2, "the completed new read cannot settle the older provider outcome");
+  state.app.jobs = [];
+  state.app.audiobookActivity = [{ ...read, phase: "finished", requests: 1, flagged: 1, reason: "Google free limit reached · resets 2020-10-24T07:00:00.000Z" }];
+  const finished = render(state, "inbox");
+  assert.match(finished, /1 block needs review/);
+  assert.match(finished, /1 request finished/);
+  assert.match(finished, /reset time passed/);
+  assert.doesNotMatch(finished, /2020-10-24T/);
+});
+
+it("formats recorded reset times without changing unrelated refusal evidence (#2238)", () => {
+  const reason = "Google free limit reached · 10 a day · resets 2026-10-24T07:00:00.000Z";
+  const future = activityReason(reason, Date.parse("2026-10-23T00:00:00Z"));
+  assert.match(future, /10 a day · resets /);
+  assert.doesNotMatch(future, /T07:00:00/);
+  assert.equal(activityReason(reason, Date.parse("2026-10-29T00:00:00Z")), "Google free limit reached · 10 a day · reset time passed");
+  assert.equal(activityReason("Provider refused: capacity unavailable"), "Provider refused: capacity unavailable");
 });
 
 async function mounted(node: React.ReactNode, run: (container: HTMLElement) => Promise<void>): Promise<void> {
