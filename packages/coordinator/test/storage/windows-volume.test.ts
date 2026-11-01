@@ -11,6 +11,48 @@ const row = (rootId: string, extra: Record<string, unknown> = {}) => ({ rootId, 
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 
 describe("Windows volume identity port", () => {
+  it("keeps unchanged destinations in flight across sibling root registration and release", async () => {
+    const entered = deferred(), finish = deferred(); let calls = 0, aborted = false;
+    const port = new WindowsVolumeProbe({ platform: "win32", now: () => 600_000, query: async (input, signal) => {
+      calls++;
+      if (calls === 1) {
+        signal.addEventListener("abort", () => { aborted = true; }, { once: true });
+        entered.resolve(); await finish.promise;
+      }
+      return JSON.stringify(input.map(root => row(root.rootId)));
+    } });
+    port.setRoots([roots[0]!]);
+    const first = port.probe("media", new AbortController().signal); await entered.promise;
+    port.setRoots(roots);
+    const second = port.probe("exports", new AbortController().signal);
+    finish.resolve();
+    try {
+      assert.equal((await first).state, "measured");
+      assert.equal((await second).state, "measured");
+      assert.equal(aborted, false);
+      assert.equal(calls, 2, "the newly registered destination gets its own bounded read");
+      port.setRoots([roots[0]!]);
+      assert.equal((await port.probe("media", new AbortController().signal)).state, "measured");
+      assert.equal(calls, 2, "releasing a sibling does not discard the unchanged destination's cache");
+    } finally { await port.stop(); }
+  });
+  it("rejects an old read when its root was replaced and registered again", async () => {
+    const entered = deferred(), finish = deferred(); let calls = 0;
+    const port = new WindowsVolumeProbe({ platform: "win32", now: () => 600_000, query: async () => {
+      if (++calls === 1) { entered.resolve(); await finish.promise; }
+      return JSON.stringify([row("media")]);
+    } });
+    port.setRoots([roots[0]!]);
+    const old = port.probe("media", new AbortController().signal); await entered.promise;
+    port.setRoots([{ rootId: "media", path: "D:\\replacement" }]);
+    port.setRoots([roots[0]!]); finish.resolve();
+    try {
+      assert.equal((await old).capacity, null);
+      assert.equal((await port.probe("media", new AbortController().signal)).state, "measured");
+      assert.equal(calls, 2, "an identical path after replacement still needs a new measurement");
+    } finally { await port.stop(); }
+  });
+
   it("drains a cancelled real reader and its pending leash helper", { skip: process.platform !== "win32", timeout: 30_000 }, async () => {
     const dir = await tempDir("arke-volume-cancel-"), control = new AbortController();
     const timer = setTimeout(() => control.abort(), 20);
