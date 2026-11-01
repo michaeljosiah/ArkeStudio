@@ -48,7 +48,7 @@ import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
 import { applyGain, dropRunawayTail, normaliseSpeech, readSpeechWav, samplePeak, sliceSpeech, trimSpeech, writeSpeechWav } from "../audio/speech-wav.js";
 import { TranscriptionUnavailableError, type TimedWord } from "../voice/word-times.js";
-import { LONG_TAIL, splitAudio, splitLexicon, splitRequest } from "./audiobook-split.js";
+import { judgeSplit, LONG_TAIL, splitAudio, splitLexicon, splitRequest } from "./audiobook-split.js";
 import { checkDirection, directionPlan, type RenderedPart } from "../voice/direction.js";
 import { plannedReactions } from "./audiobook-timing.js";
 import { audiobookLanding, recordsLoudness, castLeftToCast, castRefusal, currentDirection, directionEntry, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type ProposalOverride } from "./audiobook.js";
@@ -1438,7 +1438,40 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           sourcePath = join(store.dir, fromPortable(`${landingDir}/${block.block.key.replace(/[^a-z0-9]+/gi, "-")}-joined.${block.format}`));
           await atomicWriteFile(sourcePath, joined);
         }
+        // Scattered re-reads bypass grouping, but must not bypass its word check (issue 2272).
+        // Keep the received jobs intact until the local check succeeds, so an outage costs no
+        // second synthesis. The same applies when this reader is set to read per paragraph.
+        let checked: { heard: string; seconds: number; matched: boolean } | undefined;
+        if (block.format === "wav" && readsGrouped(block.model, true, null)) {
+          if (deps.wordTimes === undefined) {
+            await flag(block, "unchecked · no local transcriber");
+            continue;
+          }
+          await deps.activity?.({ phase: "aligning" });
+          const bytes = new Uint8Array(await readFile(toExtendedLength(sourcePath)));
+          try {
+            const heard = await deps.wordTimes(bytes, signal);
+            if (signal.aborted) break;
+            const text = heard.words.map(word => word.text).join(" ");
+            checked = { heard: text, seconds: heard.seconds, matched: judgeSplit(block.text, text, audioHash(bytes), { lexicon: preparation.prepared.lexicon, ...(block.sounds === true ? { sounds: true } : {}) }).matched };
+          } catch (err) {
+            if (signal.aborted) break;
+            await flag(block, "unchecked · local transcription failed");
+            await finish("failed", { reason: `${err instanceof Error ? err.message : String(err)} Received audio is kept. Check Voxa in Settings → Providers, then retry the same read.`, record });
+            return;
+          }
+        }
         const artifact = await file(block, sourcePath, { ...(firstJob !== undefined ? { jobId: firstJob } : {}), parts: landed.length, estimatedMicroUsd: estimated, costMicroUsd: cost });
+        if (checked !== undefined && !checked.matched) {
+          const reason = `${SPLIT_DID_NOT_MATCH} · “${checked.heard.slice(0, 80)}”`;
+          const split: AudiobookSplitFlag = { artifactId: artifact.id, heard: checked.heard.slice(0, 4000), request: firstJob!, offsetSec: 0, durationSec: Math.max(0.001, checked.seconds) };
+          await write(current => ({ ...current, updatedAt: deps.now(), flags: { ...current.flags, [block.block.key]: { reason, at: deps.now(), split } } }));
+          flaggedCount += 1;
+          await progress(block, "flagged", reason);
+          for (const rel of landed) await unlink(toExtendedLength(join(store.dir, fromPortable(rel)))).catch(() => {});
+          if (landed.length > 1) await unlink(toExtendedLength(sourcePath)).catch(() => {});
+          continue;
+        }
         await keep(block, artifact, { parts: landed.length, estimatedMicroUsd: estimated, costMicroUsd: cost });
         for (const rel of landed) await unlink(toExtendedLength(join(store.dir, fromPortable(rel)))).catch(() => {});
         if (landed.length > 1) await unlink(toExtendedLength(sourcePath)).catch(() => {});

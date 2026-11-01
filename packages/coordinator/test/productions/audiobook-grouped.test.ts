@@ -407,7 +407,7 @@ interface RunHarness {
   run: (extra?: { confirmationToken?: string; only?: string[] }) => Promise<void>;
 }
 
-async function harness(store: WorldStore, opts: { transcribe?: (text: string, request: number) => Promise<string>; heardFor?: (text: string) => string; fail?: string; failAfter?: number; failClass?: Job["failureClass"]; enqueueError?: unknown; dailyQuota?: () => DailySpeechQuota | null; actual?: number; tail?: number; model?: ManifestModel; chapterId?: string } = {}): Promise<RunHarness> {
+async function harness(store: WorldStore, opts: { noTranscriber?: boolean; transcribe?: (text: string, request: number) => Promise<string>; heardFor?: (text: string) => string; fail?: string; failAfter?: number; failClass?: Job["failureClass"]; enqueueError?: unknown; dailyQuota?: () => DailySpeechQuota | null; actual?: number; tail?: number; model?: ManifestModel; chapterId?: string } = {}): Promise<RunHarness> {
   const reader = opts.model === undefined ? READER : { provider: opts.model.provider, model: opts.model.id, voiceId: "calen", label: "Calen" };
   const chapterId = opts.chapterId ?? "neap";
   const plan = await planAudiobook(store, LEDGER, chapterId, { narrator: reader });
@@ -456,14 +456,15 @@ async function harness(store: WorldStore, opts: { transcribe?: (text: string, re
       cancelJob: async () => {},
       findJobs: () => [...jobs.values()],
       actualCost: async () => opts.actual ?? 1_000,
-      wordTimes: (wav) => {
+      ...(!opts.noTranscriber ? { wordTimes: (wav: Uint8Array) => {
         assert.equal(activity.at(-1)?.phase, "aligning", "provider success stays live while local alignment works");
         let call = 0;
         return timeWords(wav, async () => {
           const text = heard[call++] ?? "";
           return opts.transcribe === undefined ? text : opts.transcribe(text, sent.length);
         });
-      },
+      }
+      } : {}),
       emit: (event) => events.push(event),
       now: () => "2026-10-03T09:00:00.000Z",
     });
@@ -985,6 +986,44 @@ describe("a chapter read grouped (design turn 185)", () => {
       assert.equal(h.sent.length, 0);assert.equal(finished(h.events)?.outcome, "failed");assert.match(finished(h.events)?.reason ?? "", /100 a day/);
     } finally { await w.close(); }
   });
+
+  for (const mode of ["clean", "direction", "cut", "missing", "outage"] as const) {
+    it(`checks scattered solo blocks: ${mode} (issue 2272)`, async () => {
+      const w = await world();
+      try {
+        const plan = await planAudiobook(w.store, LEDGER, "neap", { narrator: READER });
+        const only = [plan.blocks[1]!.block.key, plan.blocks[3]!.block.key];
+        let offline = mode === "outage";
+        const h = await harness(w.store, {
+          noTranscriber: mode === "missing",
+          heardFor: text => mode === "direction" ? `${text} Long pause.` : mode === "cut" ? text.split(" ").slice(0, 2).join(" ") : text,
+          transcribe: async text => { if (offline) throw new Error("Voxa /stt HTTP 503"); return text; },
+        });
+        await h.run({ only });
+        await h.run({ only, confirmationToken: priced(h.events)!.confirmationToken });
+        assert.ok(h.sent.every(input => input.params["blocks"] === undefined), "each scattered block is a solo request");
+        const record = await recordOf(w.worldDir);
+        if (mode === "clean") {
+          assert.deepEqual(Object.keys(record.takes).sort(), [...only].sort());
+          assert.deepEqual(record.flags, {});
+        } else {
+          assert.ok(only.every(key => record.takes[key] === undefined));
+          assert.match(record.flags[only[0]!]!.reason, mode === "missing" || mode === "outage" ? /unchecked/ : /split did not match/);
+          if (mode === "direction" || mode === "cut") assert.ok(record.flags[only[0]!]!.split?.artifactId);
+        }
+        if (mode === "outage") {
+          assert.equal(h.sent.length, 1, "stop buying speech while transcription is down");
+          const retained = [...h.jobs.values()][0]!;
+          await readFile(join(w.worldDir, retained.landedFiles![0]!));
+          offline = false;
+          h.seedTranscript([plan.blocks[1]!.block.text]);
+          await h.run({ only, confirmationToken: priced(h.events)!.confirmationToken });
+          assert.equal(h.sent.length, 2, "retry reuses the paid first recording");
+          assert.deepEqual(Object.keys((await recordOf(w.worldDir)).takes).sort(), [...only].sort());
+        }
+      } finally { await w.close(); }
+    });
+  }
 
   it("reads a single block again with its neighbours in one request, keeping only the middle cut", async () => {
     const { store, worldDir, close } = await world();
