@@ -69,6 +69,7 @@ export function edgePath(
   to: PlacedNode,
   layerOf: ReadonlyMap<string, number>,
   nth = 0,
+  bounds?: { top: number; bottom: number },
 ): { d: string; lx: number; ly: number } {
   const o = outPort(from);
   const i = inPort(to);
@@ -91,14 +92,14 @@ export function edgePath(
     // Several choices over the same cards stack their arcs upward, where there is only more room;
     // moved down, or along the arc, a third one landed on a card the arc exists to clear. Above
     // the map's top is room too: mapGeometry moves the whole picture down until the highest fits.
-    const top = Math.min(o.y, i.y) - 150 - fan;
+    const top = Math.min(Math.min(o.y, i.y) - 150, bounds ? (bounds.top - 32 - 0.125 * (o.y + i.y)) / 0.75 : Infinity) - fan;
     return {
       d: `M${o.x},${o.y} C${o.x + 110},${top} ${i.x - 110},${top} ${i.x - 6},${i.y}`,
       lx: (o.x + i.x) / 2,
       ly: 0.125 * (o.y + i.y) + 0.75 * top,
     };
   }
-  const bottom = Math.max(o.y, i.y) + 150 + fan;
+  const bottom = Math.max(Math.max(o.y, i.y) + 150, bounds ? (bounds.bottom + 32 - 0.125 * (o.y + i.y)) / 0.75 : -Infinity) + fan;
   return {
     d: `M${o.x},${o.y} C${o.x + 110},${bottom} ${i.x - 110},${bottom} ${i.x - 6},${i.y}`,
     lx: (o.x + i.x) / 2,
@@ -140,7 +141,9 @@ function mapGeometryAt(routing: Routing, scenes: ReadonlyArray<{ id: string }>, 
     const pair = `${choice.from}\u0000${choice.to}`;
     const nth = seen.get(pair) ?? 0;
     seen.set(pair, nth + 1);
-    return { id: choice.id, from: choice.from, to: choice.to, label: choice.label, ...edgePath(from, to, layerOf, nth) };
+    const between = nodes.filter(node => node.x >= Math.min(from.x, to.x) && node.x <= Math.max(from.x, to.x));
+    const bounds = between.length ? { top: Math.min(...between.map(node => node.y)), bottom: Math.max(...between.map(node => node.y + (compact ? 196 : NODE_H))) } : undefined;
+    return { id: choice.id, from: choice.from, to: choice.to, label: choice.label, ...edgePath(from, to, layerOf, nth, bounds) };
   };
   const bottomOf = (list: DrawnEdge[]) => Math.max(0, ...list.map((edge) => edge.ly + 24));
   const rightOf = (list: DrawnEdge[]) =>

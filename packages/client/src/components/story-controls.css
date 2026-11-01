@@ -77,6 +77,10 @@
 .bm-node-settings { position:absolute; right:4px; top:4px; width:44px; height:44px; border:1px solid var(--border); border-radius:8px; background:var(--background); color:var(--foreground); display:grid; place-items:center; cursor:pointer; }
 .bm-head { flex-wrap:wrap; }
 .bm-head__title { min-width:180px; }
+@media (min-width:1300px) {
+  .bm-head { flex-wrap:nowrap; }
+  .bm-head__title { min-width:0; }
+}
 .bm[data-stateful="true"] .bm-port { width:calc(44px / var(--bm-scale,1)); height:calc(44px / var(--bm-scale,1)); margin:calc(-22px / var(--bm-scale,1)) 0 0 calc(-22px / var(--bm-scale,1)); display:grid; place-items:center; padding:0; color:var(--foreground); }
 .bm[data-stateful="true"] .bm-port svg { width:calc(16px / var(--bm-scale,1)); height:calc(16px / var(--bm-scale,1)); }
 .bm[data-stateful="true"] .bm-port::after { display:none; }

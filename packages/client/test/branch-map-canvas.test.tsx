@@ -20,8 +20,9 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 /** Set by a test that wants the narrow window (157i); every other test is wide. */
 let narrowWindow = false;
+let compactWindow = false;
 Object.assign(dom.window, {
-  matchMedia: (query: string) => ({ matches: narrowWindow && query === "(max-width: 599px)", media: query, addEventListener() {}, removeEventListener() {} }),
+  matchMedia: (query: string) => ({ matches: narrowWindow && query === "(max-width: 599px)" || compactWindow && query === "(max-width: 1099px)", media: query, addEventListener() {}, removeEventListener() {} }),
 });
 // linkedom keeps no focus; this does, so a test can ask where it went.
 const focusLog: unknown[] = [];
@@ -183,9 +184,9 @@ async function blur(el: HTMLElement | undefined) {
   });
 }
 /** linkedom lays nothing out; a test that needs the viewport's size gives it one, then takes it back. */
-async function sized<T>(run: () => Promise<T>): Promise<T> {
+async function sized<T>(run: () => Promise<T>, width = 1200): Promise<T> {
   const proto = dom.HTMLElement.prototype as unknown as object;
-  Object.defineProperty(proto, "clientWidth", { get: () => 1200, configurable: true });
+  Object.defineProperty(proto, "clientWidth", { get: () => width, configurable: true });
   Object.defineProperty(proto, "clientHeight", { get: () => 800, configurable: true });
   try {
     return await run();
@@ -278,7 +279,7 @@ describe("the branch map canvas (design turn 157)", () => {
     const count = all(item, ".bm-count")[0];
     assert.match(text(count!), /7 block\s*2 warn/, "the undertow and six unwalked choices block; two scenes are reached two ways");
     assert.match(text(button(item, "Export blocked · 7")!), /Export blocked · 7/, "the header and the export say one number");
-    assert.equal(all(item, ".bm-insp").length, 0, "nothing selected, so no Inspector");
+    assert.match(text(all(item, ".bm-insp")[0]!), /The drowned quarter/, "the opening scene makes the inspector useful immediately");
     await click(count);
     const panel = text(all(item, ".bm-insp")[0]!);
     assert.match(panel, /The undertow\s*no way in/);
@@ -739,6 +740,32 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.equal(focused(), player, "Tab from the last control that shows wraps to the player, not the map behind it");
   });
 
+  it("opens a long map at readable size and retains an explicit Fit overview (#2238)", () => sized(async () => {
+    const routing: Routing = { ...ROUTING, choices: SCENES.slice(1).map((scene, index) => ({ id: `ch_step-${index}`, from: SCENES[index]!.id, to: scene.id, label: "Continue" })) };
+    const item = await mount(routing);
+    const scale = () => Number(/scale\(([^)]+)\)/.exec(all(item, ".bm-stage")[0]!.getAttribute("style")!)?.[1]);
+    assert.ok(scale() >= .65, "opening does not reduce scene labels to an overview");
+    await click(button(item, "Fit to view"));
+    assert.ok(scale() < .65, "Fit still shows the whole graph when requested");
+  }, 800));
+
+  it("brings a newly connected destination into view at the current zoom (#2238)", () => sized(async () => {
+    const routing: Routing = { ...ROUTING, choices: SCENES.slice(1, -1).map((scene, index) => ({ id: `ch_step-${index}`, from: SCENES[index]!.id, to: scene.id, label: "Continue" })) };
+    const item = await mount(routing);
+    const before = all(item, ".bm-stage")[0]!.getAttribute("style")!;
+    await click(card(item, "sc_pier"));
+    await click(button(item, "Draw a choice from here"));
+    await change(all(item, 'textarea[aria-label="Choice text"]')[0], "Into the undertow");
+    await change(all(item, 'select[aria-label="Destination scene"]')[0], "sc_undertow");
+    await click(button(item, "Add choice"));
+    const add = commands(item)[0]!;
+    if (add.operation !== "add-choice") throw new Error("Expected add");
+    await act(async () => __setStateForTest(state({ ...routing, version: routing.version + 1, choices: [...routing.choices, add.choice] })));
+    const after = all(item, ".bm-stage")[0]!.getAttribute("style")!;
+    assert.notEqual(after, before, "the saved destination is brought into view");
+    assert.equal(/scale\(([^)]+)\)/.exec(after)?.[1], /scale\(([^)]+)\)/.exec(before)?.[1], "the person's zoom is kept");
+  }, 800));
+
   it("fits the canvas when a window opened narrow is widened", () =>
     sized(async () => {
       narrowWindow = true;
@@ -753,6 +780,20 @@ describe("the branch map canvas (design turn 157)", () => {
       assert.match(style, /translate\([\d.]+px, [\d.]+px\)/, "a real fit");
       assert.doesNotMatch(style, /translate\(0px, 0px\) scale\(1\)/, "fitted, not left at actual size from the corner");
     }));
+
+  it("keeps an unsaved fact draft when a compact map becomes desktop (#2238)", () => sized(async () => {
+    compactWindow = true;
+    try {
+      const routing: Routing = { ...ROUTING, schemaVersion: 2, facts: [{ id: "dev", label: "Dev Malik", type: "boolean", default: true }] };
+      const item = await mount(routing);
+      await click(button(item, "Story facts · 1"));
+      await click(button(item, "Edit Dev Malik"));
+      await change(all(item, 'input[aria-label="Name for dev"]')[0], "Dev's promise");
+      compactWindow = false;
+      await act(async () => __setStateForTest(state(routing)));
+      assert.equal((all(item, 'input[aria-label="Name for dev"]')[0] as HTMLInputElement).value, "Dev's promise");
+    } finally { compactWindow = false; }
+  }));
 
   it("offers to remove a choice whose scene is gone, from its finding", async () => {
     const broken: Routing = { ...ROUTING, choices: [...ROUTING.choices, { id: "ch_ghost", from: "sc_gone", label: "Into the dark", to: "sc_pier" }] };
