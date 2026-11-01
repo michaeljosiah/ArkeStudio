@@ -29,11 +29,11 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  */
 const SCREENS = [
   // BEGIN PAGE PLAN 254
-  { group: "Adapt before drawing · turn 254", screen: "A chapter with no pages: plan it first", frame: "254a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026."] },
-  { group: "Adapt before drawing · turn 254", screen: "The page plan: passages, pages and what the reader knows", frame: "254b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026."] },
-  { group: "Adapt before drawing · turn 254", screen: "Plan kept: now draft", frame: "254c", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026."] },
-  { group: "Adapt before drawing · turn 254", screen: "The draft, read cold: what a reader would ask", frame: "254d", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026."] },
-  { group: "Adapt before drawing · turn 254", screen: "The draft not read: say so", frame: "254e", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026."] },
+  { group: "Adapt before drawing · turn 254", screen: "A chapter with no pages: plan it first", frame: "254a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Adapt before drawing · turn 254", screen: "The page plan: passages, pages and what the reader knows", frame: "254b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Adapt before drawing · turn 254", screen: "Plan kept: now draft", frame: "254c", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Adapt before drawing · turn 254", screen: "The draft, read cold: what a reader would ask", frame: "254d", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Adapt before drawing · turn 254", screen: "The draft not read: say so", frame: "254e", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
   // END PAGE PLAN 254
 
   // BEGIN PAGE REVIEW 253
@@ -1031,7 +1031,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
-  { file: "page-plan-254.review.html", what: "Turn 254: adapt before drawing — a page plan of passages, pages and what the reader knows, then a cold read of every draft.", state: "proposed 1 November 2026; not built" },
+  { file: "page-plan-254.review.html", what: "Turn 254: adapt before drawing — a page plan of passages, pages and what the reader knows, then a cold read of every draft.", state: "approved 1 November 2026; not built" },
   { file: "page-review-253.review.html", what: "Turn 253: the page review — Lettering and Picture verdicts, picture faults boxed, writing in the scene cleared, warnings seen, Not checked with a reason.", state: "approved 1 November 2026; not built" },
   { file: "audiobook-credits-252.review.html", what: "Turn 252: opening and closing credits — two rows at the ends of Chapters, the Credits sheet, Narrated by, and the credits in chapter files and Arke Player.", state: "approved 31 October 2026; not built" },
   { file: "pages-room-251.review.html", what: "Turn 251: Pages uses the window, and says what it is doing — the page at full height, Making and Checking, a reason for Not checked.", state: "approved 29 October 2026; not built" },

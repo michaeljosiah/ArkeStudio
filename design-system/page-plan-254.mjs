@@ -14,7 +14,7 @@ const write = (name, content) => fs.writeFileSync(path.join(here, name), content
 const esc = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
 const tokens = '_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens';
 const STYLE = '<link rel="stylesheet" href="graphic-novel-247.css"><link rel="stylesheet" href="prose-pages-249.css"><link rel="stylesheet" href="page-plan-254.css">';
-const STATUS = 'proposed';
+const STATUS = 'approved';
 const frames = FRAMES.map(([letter, title, height, draw]) => ({ id: '254' + letter, title, width: 1360, height, markup: draw() }));
 for (const f of frames) if (!f.markup.startsWith('<div class="gn247 gn249 gn254"')) throw new Error(`${f.id}: frame root is not .gn254`);
 
@@ -27,7 +27,7 @@ if (process.argv.includes('--preview')) { console.log(`Wrote page-plan-254.revie
 
 
 export const rules = [
-  ['Review status', '1 November 2026, proposed. The owner read The Ledger of Nights, drawn, and found parts that made no sense and did not flow. Arke had drafted straight from the prose, faithful to it and written for someone who knew the novel, and nothing read the draft as a reader would. SPEC-064 revision 8 adds a page plan (R-60 – R-63) and a cold read of the script (R-64 – R-66); the owner asked for both in one turn. Nothing here is built.'],
+  ['Review status', '1 November 2026. Approved by the owner the same day (“Yes build them”), calls 1 – 5 as drawn. The owner read The Ledger of Nights, drawn, and found parts that made no sense and did not flow. Arke had drafted straight from the prose, faithful to it and written for someone who knew the novel, and nothing read the draft as a reader would. SPEC-064 revision 8 adds a page plan (R-60 – R-63) and a cold read of the script (R-64 – R-66); the owner asked for both in one turn. Nothing here is built.'],
   ['Plan first', 'A chapter with no pages offers Plan with Arke first (254a). Draft with Arke appears once a plan is kept (254c). + Page still starts a page by hand, with no plan.'],
   ['The plan is three lists', 'Passages, each with Keep, Cut, Merge, Show or Invent and a reason of a few words; Pages, each with what changes and the turn it ends on; and what the reader knows, with the page that shows or names it (254b). Keep or Discard, as a draft is.'],
   ['A cut names what leans on it', 'A line on a planned page that relies on a cut passage, or on anything the reader has not been shown, is named under Passages with its page, and Fix asks Arke to settle it (254b). Keep is still allowed; the line stays named.'],
@@ -58,9 +58,9 @@ write('Arke Studio.dc.html', master);
 
 let build = read('build-review.mjs').replace(/\r?\n  \/\/ BEGIN PAGE PLAN 254[\s\S]*?  \/\/ END PAGE PLAN 254(?:\r?\n)*/g, '\n');
 const plain = title => title.replaceAll('&#8217;', '’').replaceAll('&#183;', '·');
-const entries = frames.map(f => `  { group: "Adapt before drawing · turn 254", screen: ${JSON.stringify(plain(f.title))}, frame: "${f.id}", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Proposed 1 November 2026."] },`);
+const entries = frames.map(f => `  { group: "Adapt before drawing · turn 254", screen: ${JSON.stringify(plain(f.title))}, frame: "${f.id}", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },`);
 build = build.replace('const SCREENS = [', 'const SCREENS = [\n  // BEGIN PAGE PLAN 254\n' + entries.join('\n') + '\n  // END PAGE PLAN 254\n');
-const pageEntry = '{ file: "page-plan-254.review.html", what: "Turn 254: adapt before drawing — a page plan of passages, pages and what the reader knows, then a cold read of every draft.", state: "proposed 1 November 2026; not built" }';
+const pageEntry = '{ file: "page-plan-254.review.html", what: "Turn 254: adapt before drawing — a page plan of passages, pages and what the reader knows, then a cold read of every draft.", state: "approved 1 November 2026; not built" }';
 if (build.includes('file: "page-plan-254.review.html"')) build = build.replace(/\{ file: "page-plan-254\.review\.html",[^\n]+?\}/, pageEntry);
 else build = build.replace('const PAGES = [', 'const PAGES = [\n  ' + pageEntry + ',');
 if (!build.includes(LINK)) build = build.replace('<link rel="stylesheet" href="${TOKENS}/fonts.css">', LINK + '\n<link rel="stylesheet" href="${TOKENS}/fonts.css">');
