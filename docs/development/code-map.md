@@ -1,5 +1,13 @@
 # Code map
 
+Storage root churn (issue 2239): `storage/monitor.ts` retains in-flight readings for unchanged
+destinations; `storage/windows-volume.ts` keeps their registration identities across sibling
+acquisition/release and measures newly registered roots in the next batch. Removed/replaced
+roots cannot publish an old result. Storage monitor/native-port and job-artifact tests cover
+slow reads, concurrent submission destinations and sibling result accounting.
+Reservation flushes bind their registration check to the roots they measured; unrelated root
+churn cannot turn them uncertain. Capacity invalidation still revokes pending grants.
+
 Transport snapshot refreshes coalesce in 250 ms windows before projection/serialization.
 The narrative save receipt requests an immediate kept snapshot so it follows its saved state.
 Only hello/reconnect replays transient startup events; client world-keyed live runs and

@@ -4,9 +4,46 @@ import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { AppStorageService } from "../../src/storage/service.js";
 import { ArtifactStorageHeld, JobArtifactStorage } from "../../src/storage/job-artifacts.js";
+import { WindowsVolumeProbe } from "../../src/storage/windows-volume.js";
 import { tempDir } from "../tmp.js";
 
 const GiB = 1024 ** 3, MiB = 1024 ** 2;
+it("admits concurrent destinations after a slow Windows read and sibling result write", { timeout: 30_000 }, async () => {
+  const root = await tempDir("arke-submission-churn-");
+  let now = 600_000, calls = 0, finish!: () => void, entered!: () => void, aborted = false;
+  const reading = new Promise<void>(resolve => { entered = resolve; });
+  const held = new Promise<void>(resolve => { finish = resolve; });
+  const port = new WindowsVolumeProbe({ platform: "win32", now: () => now, query: async (roots, signal) => {
+    if (++calls === 3) {
+      signal.addEventListener("abort", () => { aborted = true; }, { once: true });
+      entered(); await held;
+    }
+    // Startup takes longer than admission's freshness window; the actual sample is fresh.
+    now += 6_000;
+    return JSON.stringify(roots.map(({ rootId }) => ({ rootId, state: "measured", error: 0,
+      canonical: `\\\\?\\Volume{12345678-1234-1234-1234-123456789abc}\\${rootId}`, fileId: rootId,
+      availableBytes: 40 * GiB, measuredAt: now })));
+  } });
+  const storage = new AppStorageService({ appRoot: root, now: () => now, native: {
+    setRoots: roots => port.setRoots(roots.map(({ rootId }) => ({ rootId, path: `C:\\fixture\\${rootId}` }))),
+    probe: (id, signal, after) => port.probe(id, signal, after), stop: () => port.stop(),
+  } });
+  const space = new JobArtifactStorage(storage), signal = new AbortController().signal, directory = join(root, "result");
+  try {
+    await storage.start();
+    const writer = await space.reserve("writer", [{ directory, role: "generated-media", remainingBytes: MiB }], signal);
+    const first = space.checkSubmission([{ directory: join(root, "first"), role: "generated-media" }], signal);
+    await reading;
+    const second = space.checkSubmission([{ directory: join(root, "second"), role: "generated-media" }], signal);
+    const writing = writer.consumed(directory, MiB).then(() => writer.settle());
+    await new Promise(resolve => setImmediate(resolve)); finish();
+    await Promise.all([first, second, writing]);
+    assert.equal(aborted, false, "a sibling registration cannot cancel the existing measurement");
+    assert.equal(storage.reservations.snapshot().records.length, 0);
+    assert(calls <= 5, `recovery is bounded to the changed destination batches, got ${calls}`);
+  } finally { finish(); await storage.stop(); }
+});
+
 function fixture(root: string, separate = false) {
   let clock = Date.now(), available = GiB + 3 * MiB, roots: readonly { rootId: string; path: string }[] = [];
   const storage = new AppStorageService({ appRoot: root, now: () => clock, native: {

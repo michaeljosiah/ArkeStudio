@@ -65,7 +65,7 @@ export class StorageReservations {
     /** Bounded, cancellable read of a registered host handle. Null means mapping unavailable. */
     probe(rootId: string, signal: AbortSignal, after?: number): Promise<StorageCapacity | null>;
     /** Host collector invalidations revoke captured evidence across an awaited flush. */
-    capacityEpoch?(): number;
+    capacityEpoch?(rootIds: readonly string[]): string;
     capacityCurrent?(rootId: string, fact: StorageCapacity): boolean;
     now?: () => number;
     onChange?: () => void;
@@ -206,7 +206,7 @@ export class StorageReservations {
       if (this.closing || combined.aborted) return { status: "held", reason: "stopped" };
       // Establish the baseline after collection, whose accepted readings can themselves
       // invalidate older observations. Every captured root must still match that baseline.
-      const capacityEpoch = this.deps.capacityEpoch?.();
+      const capacityEpoch = this.deps.capacityEpoch?.(roots);
       const current = () => !this.deps.capacityCurrent || [...facts].every(([rootId, fact]) => this.deps.capacityCurrent!(rootId, fact));
       if (!current()) return { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-unavailable" } };
       if (replanAfter !== undefined && [...facts.values()].some(fact => fact.measuredAt <= replanAfter)) {
@@ -269,7 +269,7 @@ export class StorageReservations {
         return { status: "held", reason: "stopped" };
       }
       const grantedAt = this.now();
-      if (this.deps.capacityEpoch?.() !== capacityEpoch || !current()) {
+      if (this.deps.capacityEpoch?.(roots) !== capacityEpoch || !current()) {
         reservation.state = "uncertain"; this.changed();
         return { status: "held", reason: "capacity", admission: { status: "unknown", reason: "capacity-unavailable" } };
       }
