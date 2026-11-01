@@ -184,6 +184,7 @@ import {
   type LedgerEntry,
   type ModelManifest,
   type ProviderId,
+  type ProviderStatus,
   type ProviderToolStatus,
   orderedLocationViews,
   type QueueCommand,
