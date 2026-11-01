@@ -41,7 +41,10 @@ async function owner(store: WorldStore, productionId: string, source: MediaMeasu
   if (JSON.stringify(disk) !== JSON.stringify(take)) throw new Refused("source-changed");
   const record = `productions/${productionId}/takes/${take.id}/media-info.json`;
   const raw = await optionalRead(store, record);
-  const previous = raw === null ? null : TakeMediaInfoRecordSchema.safeParse(JSON.parse(raw));
+  let decoded: unknown = null;
+  // A damaged derived sidecar can be remeasured; keep its bytes for the replacement fence.
+  try { decoded = raw === null ? null : JSON.parse(raw); } catch { /* invalid cached measurement */ }
+  const previous = TakeMediaInfoRecordSchema.safeParse(decoded);
   return { media: `productions/${productionId}/takes/${take.id}/${take.media}`, record, raw, expected: take.mediaHash,
     takeRecord, takeRaw, cached: previous?.success ? previous.data.mediaInfo : undefined,
     cachedHash: previous?.success ? previous.data.sourceHash : undefined,
