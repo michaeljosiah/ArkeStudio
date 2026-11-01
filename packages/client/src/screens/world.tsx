@@ -1,4 +1,5 @@
 import { ExtractionReviewCandidates } from "../components/extraction-review.js";
+import { shotHasFrame } from "./scene-workspace/boards.js";
 import { HeldBar } from "../components/held-bar.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
@@ -8,6 +9,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   artifactPosterPath,
+  beatPictureShotId,
+  type ProductionBundle,
   CHARACTER_ROLE_MAX,
   CharacterAliasesInputSchema,
   MICRODRAMA_DEFAULTS,
@@ -816,9 +819,9 @@ function WorldProductions({ worldId, world }: { worldId: string; world: WorldBun
           } as CSSProperties}
         >
           {productions.map((p) => {
-            const hasChapters = productionShape(p.meta).hasChapters;
+            const { hasChapters, playsAsBeats } = productionShape(p.meta);
             const shots = p.scenes.flatMap((s) => orderedShots(s));
-            const covered = shots.filter((s) => p.selections[s.id]?.acceptedTakeId).length;
+            const covered = coveredProductionShots(p, world?.artifacts ?? []);
             const board = p.scenes.find((s) => s.board)?.board;
             const take = p.takes.find((t) => t.media);
             const art = board
@@ -847,7 +850,7 @@ function WorldProductions({ worldId, world }: { worldId: string; world: WorldBun
                 <div className="fy-prodtile__foot">
                   <span className="fy-prodtile__meta">
                     {hasChapters ? `${chapterCountLabel(p)} · ${p.meta.status}` : shots.length > 0
-                      ? `${shots.length} shot${shots.length === 1 ? "" : "s"} · ${covered} accepted`
+                      ? `${shots.length} ${playsAsBeats ? "picture" : "shot"}${shots.length === 1 ? "" : "s"} · ${covered} ${playsAsBeats ? "ready" : "accepted"}`
                       : `${p.scenes.length} scene${p.scenes.length === 1 ? "" : "s"} · ${p.meta.status}`}
                   </span>
                   {!hasChapters && shots.length > 0 && (
@@ -4554,6 +4557,17 @@ export function ArtifactsScreen() {
 
 // ---- Productions -----------------------------------------------------------
 
+/** Use the same picture source as the workspace, including a beat that keeps the prior picture. */
+function coveredProductionShots(production: ProductionBundle, artifacts: WorldBundle["artifacts"]): number {
+  const pictures = productionShape(production.meta).playsAsBeats;
+  return production.scenes.reduce((count, scene) => {
+    const shots = orderedShots(scene);
+    return count + shots.filter(shot => pictures
+      ? shotHasFrame(production, artifacts, beatPictureShotId(shots, shot.id))
+      : Boolean(production.selections[shot.id]?.acceptedTakeId)).length;
+  }, 0);
+}
+
 export function ProductionsScreen() {
   const phone = useMediaQuery("(max-width: 599px)");
   const { worldId } = useParams();
@@ -4592,7 +4606,7 @@ export function ProductionsScreen() {
           const drafted = chapters.filter(chapter => (chapter.words ?? 0) > 0).length;
           const story = phone && productionShape(p.meta).hasChapters;
           const shots = p.scenes.flatMap((s) => orderedShots(s));
-          const covered = shots.filter((s) => p.selections[s.id]?.acceptedTakeId).length;
+          const covered = coveredProductionShots(p, world?.artifacts ?? []);
           const active = p.meta.status !== "complete" && shots.length > 0 && covered < shots.length;
           const progress = (<div className="fy-progress">
                     <div
@@ -4628,7 +4642,7 @@ export function ProductionsScreen() {
                     <Badge tone="outline">{productionShape(p.meta).displayLabel}</Badge>
                     {active && <span className="fy-dot fy-dot--warn" />}
                     <span style={{ marginLeft: "auto" }} className="fy-mono">
-                      {story ? `${drafted} of ${chapters.length} chapters` : p.audioDrama ? `${p.audioDrama.plan.episodes} episodes` : shots.length > 0 ? `${covered} of ${shots.length} shots` : `${p.takes.length} takes`}
+                      {story ? `${drafted} of ${chapters.length} chapters` : p.audioDrama ? `${p.audioDrama.plan.episodes} episodes` : shots.length > 0 ? `${covered} of ${shots.length} ${productionShape(p.meta).playsAsBeats ? "pictures" : "shots"}` : `${p.takes.length} takes`}
                     </span>
                   </div>
                   <div className="fy-prodcard__name">{p.meta.title}</div>
