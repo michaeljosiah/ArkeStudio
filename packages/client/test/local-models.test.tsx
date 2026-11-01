@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { parseHTML } from "linkedom";
 import {
   activationFor,
   modelSetupComponent,
@@ -190,6 +191,20 @@ const renderPane = (state: ClientState, engine: EngineId): string =>
 
 /** SSR splits a text node at every interpolation, so a rendered string is checked without them. */
 const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, " ");
+
+it("groups Ming under its own supplier and keeps each readiness count separate (#2238)", () => {
+  const state = stateWith();
+  state.app.manifest!.models.push({ ...KOKORO, provider: "ming", id: "ming-3-0.5b", displayName: "Ming Tiny" },
+    { ...KOKORO, provider: "comfyui", id: "comfy-voice", displayName: "Comfy voice" });
+  const { document } = parseHTML(render(state, "/settings/models?half=local&kind=voice-tts"));
+  const sections = [...document.querySelectorAll('[data-testid="models-section"]')];
+  const section = (name: string) => sections.find(row => row.querySelector(".fy-by__name")?.textContent === name)!;
+  assert.match(section("Ming 3").textContent!, /Ming Tiny/);
+  assert.match(section("Ming 3").querySelector(".fy-by__state")!.textContent!, /0 of 1 ready/);
+  assert.doesNotMatch(section("ComfyUI").textContent!, /Ming/);
+  assert.match(section("ComfyUI").querySelector(".fy-by__state")!.textContent!, /0 of 1 ready/);
+  assert.match(section("Voxa").textContent!, /Kokoro/);
+});
 
 it("shows persistent model requirements before Install without opening details", () => {
   const state = stateWith({});
