@@ -1,3 +1,4 @@
+import { ComicModelChoice } from "../components/comic-model-choice.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import {
@@ -60,6 +61,7 @@ import {
   quoteComicPage,
   saveComicScript,
   setComicSettings,
+  setProductionModel,
   subscribeArkePlayerExported,
   subscribeComicExported,
   subscribeComicPages,
@@ -588,7 +590,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
   const [shownId, setShownId] = useState<string | null>(null);
   const shown = takes.find((take) => take.id === shownId) ?? takes.find((take) => take.id === accepted) ?? takes.at(-1);
   // A quote is for the words it was asked about: one asked before an edit prices the old page.
-  const [quoted, setQuoted] = useState<{ hash: string; quote: ComicPageQuote["quote"] } | null>(null);
+  const [quoted, setQuoted] = useState<{ hash: string; modelChoice: string; quote: ComicPageQuote["quote"] } | null>(null);
   const [until, setUntil] = useState(true);
   const [brief, setBrief] = useState(false);
   // Pressed and not yet answered: the record says making a moment later, or the press failed.
@@ -601,13 +603,15 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
   // Check again on a take: reading until that take's verdict is no longer the one it had.
   const [rechecking, setRechecking] = useState<{ take: string; since: string | undefined; review: string | undefined } | null>(null);
   const [said, setSaid] = useState<string | null>(null);
-  const asked = useRef<{ requestId: string; hash: string } | null>(null);
+  const asked = useRef<{ requestId: string; hash: string; modelChoice: string } | null>(null);
+  const state = useStore().state;
+  const modelChoice = JSON.stringify([production.meta.models?.image, state?.app.routing, state?.app.models.disabled]);
   const hash = comicPageHash(page, settings, "baked");
-  const quote = quoted !== null && quoted.hash === hash && !saving ? quoted.quote : null;
+  const quote = quoted !== null && quoted.hash === hash && quoted.modelChoice === modelChoice && !saving ? quoted.quote : null;
   const readerModel = useStore().state?.app.agents.find((agent) => agent.name === LETTERING_READER)?.model;
 
   useEffect(() => subscribeComicPages((event) => {
-    if (event.type === "comic.page-quote" && event.requestId === asked.current?.requestId) setQuoted({ hash: asked.current.hash, quote: event.quote });
+    if (event.type === "comic.page-quote" && event.requestId === asked.current?.requestId) setQuoted({ hash: asked.current.hash, modelChoice: asked.current.modelChoice, quote: event.quote });
     if (event.type === "comic.page-made" && event.page === page.id) {
       setPressed(false);
       // The run's last word ends this window's count: a picture still out after its wait is the record's.
@@ -636,8 +640,8 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
   useEffect(() => {
     if (!connected || saving) return;
     const requestId = quoteComicPage(worldId, productionId, page.id);
-    asked.current = requestId === null ? null : { requestId, hash };
-  }, [connected, saving, worldId, productionId, page.id, hash, asking]);
+    asked.current = requestId === null ? null : { requestId, hash, modelChoice };
+  }, [connected, saving, worldId, productionId, page.id, hash, modelChoice, asking]);
   // Checking only once the ask has gone: an unsent one would spin with nothing behind it (codex on PR 2264).
   const recheck = (take: ComicPageTake) => {
     if (checkComicTake(worldId, productionId, page.id, take.id) !== null) setRechecking({ take: take.id, since: take.verification?.at, review: take.review?.at });
@@ -784,6 +788,8 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
           <Button variant="ghost" size="sm" disabled={!connected} onClick={() => recheck(shown)}>Check again</Button>
         )}
       </div>
+      <ComicModelChoice state={state} choices={production.meta.models} disabled={!connected || pressed || attempt !== null || stale}
+        onChange={model => { setQuoted(null); asked.current = null; setProductionModel(worldId, productionId, "image", model); }} />
       <div className="fy-comic__make">
         <label className="fy-comic__check"><input type="checkbox" checked={until} onChange={(event) => setUntil(event.target.checked)} />Until it passes</label>
         <span className="grow" />

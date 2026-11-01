@@ -2097,10 +2097,12 @@ export class Coordinator {
    * is routed to, the Bench's own default — and none when it is switched off, since a substitute
    * would spend on a model nobody chose.
    */
-  private async pictureModel(store: WorldStore): Promise<ManifestModel | null> {
+  private async pictureModel(store: WorldStore, productionId?: string): Promise<ManifestModel | null> {
     if (!this.opts.manifest) return null;
     const settings = this.appSettings ? await this.appSettings.load() : null;
-    return imageModelFor(settings, this.opts.manifest, undefined, store.getBundle().meta.models);
+    const bundle = store.getBundle();
+    const scope = productionId === undefined ? bundle.meta.models : bundle.productions.find(production => production.meta.id === productionId)?.meta.models;
+    return imageModelFor(settings, this.opts.manifest, undefined, scope);
   }
 
   private async directionRoom(store: WorldStore, productionId: string, chapter?: string): Promise<{ narrator: AudiobookReader; models: readonly ManifestModel[]; catalogue: VoiceCandidate[]; narratorDescription?: string; designedBinding?: DesignedBinding; unavailable?: string; chapterNarrators?: Record<string, ChapterNarration> }> {
@@ -11628,7 +11630,7 @@ export class Coordinator {
           this.emit({ at: new Date().toISOString(), type: "comic.page-quote", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, quote });
         try {
           await this.reconcileComicPage(store, msg.productionId, msg.page);
-          const model = await this.pictureModel(store);
+          const model = await this.pictureModel(store, msg.productionId);
           if (!model) answer({ ok: false, reason: "no picture model is on" });
           else {
             const request = comicPageRequest(store, msg.productionId, msg.page, model, msg.mode);
@@ -22322,7 +22324,7 @@ export class Coordinator {
     const onClose = () => control.abort();
     store.closingSignal.addEventListener("abort", onClose, { once: true });
     try {
-      const model = await this.pictureModel(store);
+      const model = await this.pictureModel(store, input.productionId);
       if (!model) return failed("no picture model is on");
       const request = comicPageRequest(store, input.productionId, input.page, model, input.mode);
       if (!request.ok) return failed(request.reason);

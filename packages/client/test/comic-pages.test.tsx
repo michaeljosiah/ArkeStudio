@@ -71,6 +71,30 @@ const props = (el: Element) => (el as unknown as Record<string, Record<string, a
 const button = (container: HTMLElement, text: string) => [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === text);
 
 describe("Pages (turn 247)", () => {
+  it("offers only lettering models, saves the production choice and refreshes its quote", async () => {
+    const state = withBook([page()], {});
+    const model = { ...state.app.manifest!.models[0]!, capability: "image" as const, id: "letterer", displayName: "Letterer", limits: { lettering: true as const, aspects: ["2:3"] } };
+    state.app.manifest!.models = [model, { ...model, id: "art-only", displayName: "Art only", limits: {} }, { ...model, id: "off", displayName: "Off" }];
+    state.app.models.disabled = ["off"];
+    state.app.routing.defaults.image = "art-only";
+    const { container, sent } = await mount(state);
+    const select = container.querySelector('select[aria-label="Picture model"]')!;
+    assert.ok(select.querySelector('option[value="letterer"]'));
+    assert.equal(select.querySelector('option[value="art-only"]'), null);
+    assert.equal(select.querySelector('option[value="off"]'), null);
+    const before = sent.filter(message => message.kind === "quote-comic-page").length;
+    const quoted = sent.find((message): message is Extract<ClientMessage, { kind: "quote-comic-page" }> => message.kind === "quote-comic-page")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "comic.page-quote", requestId: quoted.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", page: quoted.page,
+      quote: { ok: true, model: "art-only", modelName: "Art only", mode: "baked", aspect: "2:3", microUsd: 250_000, brief: "A page.", riding: [], missing: [] } }));
+    await act(async () => props(select).onChange({ target: { value: "letterer" } }));
+    assert.equal((button(container, "Make page") as HTMLButtonElement).disabled, true, "the old quote cannot be spent while the model change is pending");
+    assert.ok(sent.some(message => message.kind === "set-production-model" && message.modelId === "letterer" && message.productionId === "low-water-drawn"));
+    const changed = structuredClone(state);
+    changed.world!.productions.at(-1)!.meta.models = { image: "letterer" };
+    await act(async () => __setStateForTest(changed, { connection: "open" }));
+    assert.equal(sent.filter(message => message.kind === "quote-comic-page").length, before + 1);
+  });
+
   it("follows a review link while Pages is already open, including the same URL again", async () => {
     const state = withBook([page()], {}), comic = state.world!.productions.at(-1)!;
     const salt = page(); salt.panels[0]!.description = "Salt on the boards.";

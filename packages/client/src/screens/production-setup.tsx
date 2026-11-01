@@ -1,3 +1,4 @@
+import { ComicModelChoice } from "../components/comic-model-choice.js";
 import { GlobalWorldChatEntry } from "../components/global-chat.js";
 import { useClientRender } from "../components/production-studio-context.js";
 import { ConversationPanelContent, useConversationPresentation, useConversationState, useGlobalChat } from "../components/global-chat-context.js";
@@ -318,6 +319,8 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
                 choice was for making the world. */}
             {/* Not for an audio drama (issue 1883): its rows are a picture's and a film's, and a
                 drama's voices are chosen by role in Cast. */}
+            {graphicNovel && <ComicModelChoice state={state} choices={draft.models} disabled={!!pending || running || locked}
+              onChange={modelId => update({ models: withModelChoice(draft.models, "image", modelId) ?? {} })} />}
             {!audioDrama && !graphicNovel && <ModelsCard
               state={state}
               capabilities={PRODUCTION_MODEL_CAPABILITIES}

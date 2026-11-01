@@ -164,7 +164,7 @@ export function comicPageRequest(store: WorldStore, productionId: string, pageId
   const held = comicPageRecord(production, pageId);
   if (held.takes.length + held.making.length >= COMIC_LIMITS.takesPerPage) return { ok: false, reason: `this page has ${COMIC_LIMITS.takesPerPage} takes, the most it keeps` };
   // Baked lettering only on a model whose vendor says it letters (R-24); overlay art takes any.
-  if (mode === "baked" && model.limits.lettering !== true) return { ok: false, reason: `${model.displayName} does not letter pages` };
+  if (mode === "baked" && model.limits.lettering !== true) return { ok: false, reason: `${model.displayName} does not letter pages · choose a model that letters` };
   const aspect = pageAspect(page, settings);
   if (!makesShape(model, aspect)) return { ok: false, reason: `${model.displayName} makes no ${aspect} page` };
   const bundle = store.getBundle();
