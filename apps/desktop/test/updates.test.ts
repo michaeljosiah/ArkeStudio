@@ -73,6 +73,14 @@ function setup(
 }
 
 describe("desktop update controller", () => {
+  it("describes ordinary closing and setup restart without announcing an unarmed install", () => {
+    for (const action of ["close", "restart"] as const) {
+      const { controller, states } = setup();
+      controller.beginShutdown(action);
+      assert.equal(states.at(-1)?.flow, null);
+      assert.equal(states.at(-1)?.detail, `Arke Studio will ${action}.`);
+    }
+  });
   it("uses isUpdateAvailable and retains target version and progress", async () => {
     const { controller, updater, states } = setup();
     updater.checkResult = { isUpdateAvailable: false, updateInfo: { version: "9.9.9" } };

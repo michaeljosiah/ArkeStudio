@@ -944,6 +944,8 @@ export interface CoordinatorOptions {
   transportAuth?: import("./transport.js").TransportAuth;
   provider: WorldProvider;
   observeEvent?: (event: DomainEvent) => void;
+  /** Host-only shutdown diagnostics, available after the transport closes. */
+  onShutdownWait?: (owner: string) => void;
   adapter: HarnessAdapter | null;
   /** Existing domain authorities exposed through the shared SPEC-041 decision lifecycle. */
   conversationActionAdapters?: readonly ConversationActionAuthorityAdapter[];
@@ -24365,10 +24367,14 @@ export class Coordinator {
     // but none can reserve work and receive an id from a queue shutdown has stopped accepting.
     this.jobQueue?.stopAccepting();
     this.stopPromise = (async () => {
+      this.opts.onShutdownWait?.("chapter reviews");
       await this.chapterReviewService?.stop();
+      this.opts.onShutdownWait?.("audio previews");
       await audioStudioStopped;
+      this.opts.onShutdownWait?.("audio analysis");
       await this.effectAnalysis.stop();
       const setupStopped = Promise.allSettled([this.setup?.dispose()]);
+      this.opts.onShutdownWait?.("adapter library");
       await this.adapterLibrary?.dispose();
       for (const dispose of this.lifecycleDisposers) dispose();
       this.lifecycleDisposers.clear();
@@ -24401,6 +24407,7 @@ export class Coordinator {
       for (const run of this.makingTallPictures.values()) run.control.abort();
       for (const run of this.readingBooks.values()) run.control.abort();
       for (const run of this.readingAudiobooks.values()) run.control.abort();
+      this.opts.onShutdownWait?.("story publications");
       await this.storyPublications.stop();
       this.dramaEditions.stop();
       for (const handle of this.exports.values()) handle.cancel();
@@ -24410,25 +24417,39 @@ export class Coordinator {
       this.backfillAbort?.abort();
       // The door is already closing, so once it has stopped there can be no additions to this
       // set. Update-install handlers are deliberately excluded: one may be awaiting this stop.
+      this.opts.onShutdownWait?.("Studio connections");
       await connectionsClosed;
+      this.opts.onShutdownWait?.("active commands");
       await Promise.allSettled(this.activeMessages);
+      this.opts.onShutdownWait?.("world opening");
       await this.openWorldTail;
+      this.opts.onShutdownWait?.("runtime setup");
       const setupStops = await setupStopped;
+      this.opts.onShutdownWait?.("staged audio");
       await Promise.all([...this.stagedClips.keys()].map((clipId) => this.dropStagedClip(clipId)));
 
       // Message handlers have now either committed their queue rows or recorded their refusal.
       // Only now may queue disposal cancel execution and suppress further journal transitions.
+      this.opts.onShutdownWait?.("job providers");
       await this.jobQueue?.dispose();
       this.opts.voice?.dispose?.();
+      this.opts.onShutdownWait?.("ComfyUI");
       const comfyUiStops = await Promise.allSettled([this.opts.comfyui?.service.dispose()]);
+      this.opts.onShutdownWait?.("background work");
       await Promise.allSettled(this.backgroundWork);
+      this.opts.onShutdownWait?.("world transfers");
       await Promise.allSettled(this.carrying.values());
+      this.opts.onShutdownWait?.("appearance settings");
       await this.appearanceWrite;
+      this.opts.onShutdownWait?.("active jobs and queue journal");
       await this.jobQueue?.waitForIdle();
       await this.jobQueue?.drain();
       await this.audiobookActivity.drain();
+      this.opts.onShutdownWait?.("supervised processes");
       const supervisedStops = await Promise.allSettled([...this.supervisors.values()].map(supervisor => supervisor.stopAndConfirm()));
+      this.opts.onShutdownWait?.("writing adapters");
       await this.opts.adapter?.dispose?.().catch(() => {});
+      this.opts.onShutdownWait?.("local runtimes");
       await this.releaseOllama();
       const runtimeStops = await Promise.allSettled([
         this.opts.ming?.dispose().then(() => this.localGpu.confirmMingCleanup(AbortSignal.timeout(30_000))),
@@ -24436,16 +24457,23 @@ export class Coordinator {
       ]);
       // The captured transport checks BOTH original native owners itself. Failed cleanup of
       // either owner cannot be replaced by a successful stop of a newer process or HTTP client.
+      this.opts.onShutdownWait?.("Studio assistant");
       const studioRetirementStops = await Promise.allSettled([Promise.resolve().then(() => this.studioAssistantHost?.reconcileRetirement())]);
+      this.opts.onShutdownWait?.("recovery history");
       await historyStopped;
+      this.opts.onShutdownWait?.("Studio assistant");
       await studioStopped;
+      this.opts.onShutdownWait?.("world queries");
       await this.worldQuery.stop();
       // Provider close is the critical gate: it saves pending state and releases the world lock.
       this.engineClosed = true;
+      this.opts.onShutdownWait?.("world storage");
       await this.engine.close();
       await this.opts.provider.close?.();
+      this.opts.onShutdownWait?.("provider journal and spend ledger");
       await this.opts.providerCalls?.drain();
       await this.ledger?.drain();
+      this.opts.onShutdownWait?.("application logs");
       await this.changeLog.drain();
       // The operational log drains with the rest. It was the one writer with a drain nobody
       // called, so a fault recorded in the last moments of a run — the kind most worth having,
@@ -24453,10 +24481,13 @@ export class Coordinator {
       await this.appLog?.drain();
       const failedRuntimeStops = [...setupStops, ...comfyUiStops, ...runtimeStops, ...supervisedStops, ...studioRetirementStops].filter(result => result.status === "rejected");
       if (failedRuntimeStops.length) throw new AggregateError(failedRuntimeStops.map(result => result.reason), "Local runtime cleanup did not confirm exit.");
+      this.opts.onShutdownWait?.("storage measurements");
       await this.opts.storageHealth?.stop();
+      this.opts.onShutdownWait?.("system resources");
       await systemResourcesStopped;
       // Admission closed synchronously above; owner settlement must remain available across
       // a failed native stop so a later confirmed cleanup can resolve its retained intent.
+      this.opts.onShutdownWait?.("recovery control");
       await this.opts.recoveryControl?.stop();
     })();
     try {

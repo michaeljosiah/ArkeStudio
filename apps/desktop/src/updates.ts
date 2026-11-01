@@ -398,9 +398,10 @@ export class UpdateController {
     void this.check();
   }
 
-  beginShutdown(): void {
+  beginShutdown(action: "close" | "restart" = "close"): void {
     this.shuttingDown = true;
-    this.set({ status: "shutting-down", flow: this.installOnCloseArmed ? "on-close" : null, detail: null });
+    this.set({ status: "shutting-down", flow: this.installOnCloseArmed ? "on-close" : null,
+      detail: this.installOnCloseArmed ? null : action === "restart" ? "Arke Studio will restart." : "Arke Studio will close." });
   }
 
   failShutdown(): void {

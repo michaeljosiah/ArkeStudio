@@ -1,5 +1,10 @@
 # Code map
 
+Desktop `startup.ts` keeps one shutdown drain alive through slow owners and prompts after
+15 seconds, including remote cleanup. `main.ts` owns the native Wait/Close anyway choice;
+coordinator `onShutdownWait` names the pending service in the desktop log even after sockets
+close. The existing queue disposal preserves unsubmitted storage-held jobs (issue 2353).
+
 Graphic-novel setup and Pages share client `components/comic-model-choice.tsx`, which offers
 eligible lettering models. Page quotes and generation resolve the production's image choice
 before the app default, independently of the world's image choice (issue 2250).

@@ -220,6 +220,11 @@ let remoteAccess: DesktopRemoteAccess | null = null;
 let remoteTray: Tray | null = null;
 let window: BrowserWindow | null = null;
 let shuttingDown = false;
+let shutdownOwner = "local work";
+function waitingForShutdown(owner: string): void {
+  shutdownOwner = owner;
+  traceDesktop("shutdown.waiting", { owner });
+}
 let allowQuit = false;
 let closeForUpdate: Promise<void> | null = null;
 let normalShutdown: Promise<void> | null = null;
@@ -1246,6 +1251,7 @@ async function initialize(): Promise<{ port: number }> {
 
   const transportToken = randomBytes(32).toString("hex");
   const studioHost = createStudioHost({
+    onShutdownWait: waitingForShutdown,
     transportAuth: { token: transportToken, allowedOrigins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL) },
     provider,
     adapter,
@@ -1603,15 +1609,34 @@ async function shutdownConfirmed(): Promise<void> {
   shuttingDown = true;
   backgroundNotifications.stop();
   try {
-    await drainDesktop(async () => { await remoteAccess?.stop(); }, async () => {
+    await drainDesktop(async () => {
+      waitingForShutdown("remote access");
+      await remoteAccess?.stop();
+    }, async () => {
       try {
+        waitingForShutdown("publication playback");
         await publicationHost?.stop();
+        waitingForShutdown("Studio coordinator");
         await (studioServer?.stop() ?? startupProvider?.close() ?? Promise.resolve());
       } finally {
-        try { await startupRuntimeOwners.close(); }
-        finally { await closeProviderTransport(); }
+        try { waitingForShutdown("startup runtimes"); await startupRuntimeOwners.close(); }
+        finally { waitingForShutdown("provider connections"); await closeProviderTransport(); }
+      }
+    }, async stillStopping => {
+      traceDesktop("shutdown.slow", { owner: shutdownOwner });
+      const options = {
+        type: "warning" as const, title: "Arke is still closing", message: `Waiting for ${shutdownOwner}.`,
+        detail: "You can keep waiting or close anyway. Saved queued jobs remain available next start. Unfinished work will recover as after a forced quit; recent changes may be lost. No update will be installed if you close anyway.",
+        buttons: ["Wait", "Close anyway"], defaultId: 0, cancelId: 0, noLink: true,
+      };
+      const result = window && !window.isDestroyed()
+        ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options);
+      if (result.response === 1 && stillStopping()) {
+        traceDesktop("shutdown.forced", { owner: shutdownOwner });
+        app.exit(0);
       }
     });
+    traceDesktop("shutdown.complete");
   } finally {
     shuttingDown = false;
   }
@@ -1619,7 +1644,7 @@ async function shutdownConfirmed(): Promise<void> {
 
 async function restartForSetup(beforeRestart?: () => Promise<void>): Promise<{ reason?: string }> {
   if (shuttingDown || normalShutdown || closeForUpdate || updateController?.isInstallOnCloseArmed()) return { reason: "Finish the current shutdown or update before restarting setup." };
-  updateController?.beginShutdown();
+  updateController?.beginShutdown("restart");
   try {
     normalShutdown = shutdownConfirmed();
     await normalShutdown;
