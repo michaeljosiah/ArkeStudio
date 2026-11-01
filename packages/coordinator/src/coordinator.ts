@@ -579,7 +579,7 @@ import {
 } from "./references/generate.js";
 import { makeArtDirector } from "./references/art-director.js";
 import { enhancerBrief } from "./bench/enhancer.js";
-import { LYRICS_MAX_CHARS, lyricistBrief } from "./bench/lyricist.js";
+import { LYRICS_MAX_CHARS, draftLyrics } from "./bench/lyricist.js";
 import { addMusicTrack, chooseMusicTake, editMusicTrack, ensureMusicSession, MusicRefusal, musicTakeViews, readMusicRecord, removeMusicTrack, reorderMusicTracks, setMusicCover, setMusicSequence, tagMusicTakes, untaggedMusicTakes, updateMusicTrack } from "./productions/music.js";
 import { musicWaveform } from "./productions/music-waveform.js";
 import { musicHeardIn } from "./productions/music-heard.js";
@@ -11858,9 +11858,9 @@ export class Coordinator {
           this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
           { agent: "lyricist", answerKey: "lyrics", maxChars: LYRICS_MAX_CHARS },
         );
-        const drafted = await lyricist(lyricistBrief({ description: msg.description })).catch(() => null);
-        void this.appLog?.append({ kind: drafted ? "music.lyrics-drafted" : "music.lyrics-unavailable", worldId: msg.worldId });
-        return answer(drafted, drafted === null ? "the lyricist had no answer this time" : undefined);
+        const drafted = await draftLyrics(lyricist, { description: msg.description });
+        void this.appLog?.append({ kind: drafted.lyrics ? "music.lyrics-drafted" : "music.lyrics-unavailable", worldId: msg.worldId, ...(drafted.reason ? { reason: drafted.reason } : {}) });
+        return answer(drafted.lyrics, drafted.reason);
       }
       case "read-music-heard-in": {
         // Heard in (R-14): found again each time it is asked for, never kept.
@@ -14912,17 +14912,18 @@ export class Coordinator {
           this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
           { agent: "lyricist", answerKey: "lyrics", maxChars: LYRICS_MAX_CHARS },
         );
-        const drafted = await lyricist(
-          lyricistBrief({
+        const drafted = await draftLyrics(lyricist,
+          {
             description: msg.description,
             ...(msg.style !== undefined ? { style: msg.style } : {}),
-          }),
-        ).catch(() => null);
+          },
+        );
         void this.appLog?.append({
-          kind: drafted ? "bench.lyrics-drafted" : "bench.lyrics-unavailable",
+          kind: drafted.lyrics ? "bench.lyrics-drafted" : "bench.lyrics-unavailable",
           worldId: msg.worldId,
+          ...(drafted.reason ? { reason: drafted.reason } : {}),
         });
-        return answer(drafted, drafted === null ? "the lyricist had no answer this time" : undefined);
+        return answer(drafted.lyrics, drafted.reason);
       }
       case "bench-preset-save": {
         if (!this.appSettings || !this.opts.manifest) return;
