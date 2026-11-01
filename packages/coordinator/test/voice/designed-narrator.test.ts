@@ -8,6 +8,9 @@ import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { readAudiobookBook } from "../../src/productions/audiobook.js";
+import type { EnqueueInput } from "../../src/queue/dispatcher.js";
+import type { WorldStore } from "../../src/world/store.js";
+import type { VoiceService } from "../../src/voice/service.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { until } from "../wait.js";
 
@@ -55,9 +58,14 @@ async function harness(options: { worldHoldsTheVoice?: boolean } = {}) {
   const events: DomainEvent[] = [];
   const spokenWith: unknown[] = [];
   const bodies: string[] = [];
+  const verifiedWith: string[] = [];
   const google = new GoogleClient(async (url, init) => {
     if (init?.body !== undefined) bodies.push(String(init.body));
-    if (String(url).endsWith(`/voices/${IFE.remoteId}`)) return Response.json(remote());
+    if (String(url).endsWith(`/voices/${IFE.remoteId}`)) {
+      const key = new Headers(init?.headers).get("x-goog-api-key")!;
+      verifiedWith.push(key);
+      return key === "fixture-key" ? Response.json(remote()) : new Response(null, { status: 404 });
+    }
     if (String(url).endsWith("/interactions")) {
       const body = JSON.parse(String(init?.body));
       spokenWith.push(body.generation_config.speech_config[0].voice);
@@ -91,7 +99,7 @@ async function harness(options: { worldHoldsTheVoice?: boolean } = {}) {
     send({ kind: "read-sheet-section", requestId, worldId: WORLD_ID, sheetId: "maren-kest", sectionHeading: "Essence", ...(confirmationToken ? { confirmationToken } : {}) });
   const close = async () => { await coordinator.stop(); await provider.close(); };
   const store = () => provider.openStore()!;
-  return { events, send, settings, audio, read, spoken, spokenWith, bodies, store, close };
+  return { events, send, settings, audio, read, spoken, spokenWith, bodies, store, close, provider, coordinator, verifiedWith };
 }
 
 describe("a designed narrator in a world that does not hold it", () => {
@@ -153,6 +161,47 @@ describe("a designed narrator in a world that does not hold it", () => {
 });
 
 describe("choosing a designed narrator where the world holds it", () => {
+  for (const selected of ["missing", "conflicting"] as const) it(`keeps the book's binding when the selected world's voice is ${selected} (#2158)`, async () => {
+    const h = await harness({ worldHoldsTheVoice: true });
+    const openStore = h.provider.openStore.bind(h.provider);
+    try {
+      await h.send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: "the-ledger-of-nights", voice: CHOICE });
+      const owner = h.store();
+      const host = h.coordinator as unknown as {
+        voiceService: VoiceService;
+        audiobookNarrator(store: WorldStore, voice: VoiceService, production: string, requireAvailable: boolean): Promise<{
+          narrator: typeof CHOICE; designedBinding?: { target: string; remoteId: string; expiresAt: string };
+        }>;
+        requireSpeechInputsAvailable(inputs: EnqueueInput[], checks?: Map<string, Promise<void>>): Promise<void>;
+      };
+      // The app's narrator remains George: this must come from the book's world, not an app copy.
+      const room = await host.audiobookNarrator(owner, host.voiceService, "the-ledger-of-nights", true);
+      assert.deepEqual(room.designedBinding, { target: TARGET, remoteId: IFE.remoteId, expiresAt: IFE.expiresAt });
+      const other = { ...owner.getBundle(), designedVoices: selected === "missing" ? [] : [{ ...IFE, remoteId: "voice_other_world", expiresAt: "2000-01-01T00:00:00Z" }] };
+      h.provider.openStore = () => new Proxy(owner, { get(store, key) {
+        if (key === "getBundle") return () => other;
+        const value = Reflect.get(store, key);
+        return typeof value === "function" ? value.bind(store) : value;
+      } });
+      const input: EnqueueInput = { worldId: WORLD_ID, productionId: "the-ledger-of-nights", target: { kind: "voice-preview", id: "background" },
+        capability: "voice-tts", provider: "google", model: model.id, estimatedMicroUsd: 0,
+        params: { voiceId: TARGET, designedBinding: room.designedBinding } };
+      await Promise.all([host.requireSpeechInputsAvailable([input]), host.requireSpeechInputsAvailable([input])]);
+      assert.deepEqual(h.verifiedWith, ["fixture-key", "fixture-key"], "each background read verifies the owning voice");
+      const checked = new Map<string, Promise<void>>();
+      await host.requireSpeechInputsAvailable([input], checked);
+      await assert.rejects(host.requireSpeechInputsAvailable([{ ...input, params: { ...input.params,
+        designedBinding: { ...room.designedBinding, expiresAt: "2000-01-01T00:00:00Z" } } }]), /missing or expired/);
+      await h.send({ kind: "set-credential", provider: "google", key: "different-fixture-key" });
+      await assert.rejects(host.requireSpeechInputsAvailable([input], checked), /unavailable with the current Google key/);
+      assert.equal(h.verifiedWith.at(-1), "different-fixture-key", "a prior validation never authorizes a changed key");
+      assert.deepEqual(h.spokenWith, [], "validation neither buys speech nor falls back to another voice");
+    } finally {
+      h.provider.openStore = openStore;
+      await h.close();
+    }
+  });
+
   it("keeps the voice's identity and binding with the choice, never its sample path, and ignores a record the client sends", async () => {
     const h = await harness({ worldHoldsTheVoice: true });
     try {
