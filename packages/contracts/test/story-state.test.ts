@@ -20,6 +20,15 @@ const routing = () => RoutingSchema.parse({
 });
 
 describe("remembered story rules (SPEC-063)", () => {
+  it("identifies an ending with choices as a repairable scene finding (#2238)", () => {
+    const r = routing();
+    r.endings.push({ sceneId: "sc_bore", title: "Too soon" });
+    const finding = routingFindings(r, ["sc_bore", "sc_collar", "sc_escape"].map(id => ({ id }))).find(f => f.kind === "ending-with-choices");
+    assert.ok(finding);
+    assert.deepEqual(finding.sceneIds, ["sc_bore"]);
+    assert.deepEqual(finding.choiceIds, ["ch_save", "ch_seal"]);
+    assert.equal(finding.severity, "blocks");
+  });
   it("permits authored unavailable reasons only in stateful routing and rejects empty reasons", () => {
     const r=routing();
     r.choices[2]!.unavailable={reason:"Elsie’s measurements are needed."};
