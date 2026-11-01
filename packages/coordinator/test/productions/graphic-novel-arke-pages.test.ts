@@ -4,7 +4,7 @@ import { ModelWorldChatActionSchema, WORLD_ACTION_DESCRIPTIONS, comicPageHash, n
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { createChapter, createProduction, setChapterRetired } from "../../src/productions/ops.js";
 import { saveComicScript } from "../../src/productions/graphic-novel.js";
-import { stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
+import { comicScriptDraft, stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
 import { productionRecord } from "../../src/world-chat/production-record.js";
 import { WorldStore } from "../../src/world/store.js";
 import { readWorldMeta } from "../../src/world/scan.js";
@@ -168,12 +168,17 @@ describe("Arke's pages (SPEC-064 R-13, turn 249)", () => {
     await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, retired), /has no chapter/);
   });
 
-  it("refuses a sheet that is not in the world, a passage in a chapter that is not, and a book that is not a graphic novel", async () => {
+  it("keeps unsheeted characters in the description, but refuses a missing source or the wrong book kind", async () => {
     const { store, id, chapter, gate, intent } = await book();
     const planned = await keepPlan(store, gate, intent, id, chapter);
-    const nobody = action(id, chapter, planned, [{ layout: "splash", panels: [{ description: "x", characters: ["nobody-at-all"] }] }]);
+    const nobody = action(id, chapter, planned, [{ layout: "splash", panels: [{ description: "At the gate.", characters: ["maren-kest", "fallon"], location: "gatehouse", lettering: [{ kind: "speech", text: "Come in.", speaker: "fallon" }] }] }]);
     nobody.worldId = store.worldId;
-    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, nobody), /not a sheet/);
+    const panel = comicScriptDraft(store, nobody.action).pages[0]!.panels[0]!;
+    assert.deepEqual(panel.characters, ["maren-kest"]);
+    assert.equal(panel.location, undefined);
+    assert.equal(panel.lettering[0]!.speaker, undefined);
+    assert.equal(panel.lettering[0]!.text, "Come in.");
+    assert.match(panel.description, /At the gate\.[\s\S]*Also present: fallon\.[\s\S]*Setting: gatehouse\.[\s\S]*spoken by fallon\./);
     const nowhere = action(id, chapter, planned, [{ layout: "splash", panels: [{ description: "x", source: { story: id, chapter: "nowhere", paragraphs: [1] } }] }]);
     nowhere.worldId = store.worldId;
     await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, nowhere), /not in this world/);
