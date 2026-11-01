@@ -3210,6 +3210,23 @@ describe("versions of an edit (design turn 227e, SPEC-056 R-25, D-6)", () => {
     assert.deepEqual(passageVersions([SECOND, PASSAGE], PATH, new Map()), [SECOND.proposal.id], "untagged, two revisions of the same words are not versions either");
   });
 
+  it("reviews all preserved earlier versions without restoring page-level acceptance", async () => {
+    __tagAskForTest(SECOND.proposal.id, { ask: "rewrite", root: PASSAGE.proposal.id });
+    const state = inkbound([PASSAGE, SECOND]);
+    state.world!.productions.find(p => p.meta.id === "inkbound")!.chapters[1]!.version = 5;
+    const m = await mount(state);
+    await answerOpen(m, `${BODY}\n\nThe accepted replacement.`, HASH, 5);
+    await act(async () => ([...m.container.querySelectorAll("button")].find(b => b.textContent === "Review earlier draft") as HTMLButtonElement).click());
+    assert.match(q(m, '[data-testid="earlier-draft-versions"]')!.textContent!, /2 of 2/);
+    await act(async () => (q(m, '[aria-label="Previous version"]') as HTMLButtonElement).click());
+    assert.match(q(m, '[data-testid="earlier-draft-versions"]')!.textContent!, /1 of 2/);
+    assert.match(text(m), /Maren counted the seven bells\./);
+    await act(async () => (q(m, '[aria-label="Next version"]') as HTMLButtonElement).click());
+    assert.match(q(m, '[data-testid="earlier-draft-versions"]')!.textContent!, /2 of 2/);
+    assert.equal(q(m, '[data-testid="page-held-bar"]'), null);
+    assert.equal(m.sent.some(message => message.kind === "proposal-accept" || message.kind === "proposal-discard"), false);
+  });
+
   it("the held bar steps between them, back at no cost, and keeping one discards the other", async () => {
     __tagAskForTest(SECOND.proposal.id, { ask: "rewrite", root: PASSAGE.proposal.id });
     const m = await mount(inkbound([PASSAGE, SECOND]));

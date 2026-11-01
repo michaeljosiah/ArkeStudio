@@ -2039,14 +2039,18 @@ export function ChapterWorkspace({
     // Quiet, as the rewrite it repeats: the version lands on the page, not in Chat.
     setAsk({ press, line, text: `About this passage in ${chapterLabel}${where}: «${quoted}» ${line}`, subject, quiet: true });
   };
+  const showVersion = (id: string | null) => {
+    setShownVersion(id);
+    if (earlierDraft && id !== null) setReviewingEarlier(`${id}:${record?.version}`);
+  };
   const versionControls = passageChange === null || versions.length === 0 ? undefined : {
     at: Math.max(0, versionAt),
     count: versions.length,
     max: MAX_VERSIONS,
     asking: versionWanted,
     ...(versionRefused ? { note: "No other version" } : {}),
-    onPrevious: () => setShownVersion(versions[Math.max(0, versionAt - 1)] ?? null),
-    onNext: () => (versionAt < versions.length - 1 ? setShownVersion(versions[versionAt + 1] ?? null) : askVersion()),
+    onPrevious: () => showVersion(versions[Math.max(0, versionAt - 1)] ?? null),
+    onNext: () => (versionAt < versions.length - 1 ? showVersion(versions[versionAt + 1] ?? null) : askVersion()),
   };
   /*
    * Continue, Describe… and Dialogue for… (SPEC-056 R-19, R-26): Arke writes on from the caret.
@@ -3730,6 +3734,11 @@ export function ChapterWorkspace({
                 {stagedDraft === undefined ? "Review earlier draft" : "Edit accepted manuscript"}
               </Button>
               <Button size="sm" disabled={pending || connection !== "open"} onClick={() => discardProposal(worldId, candidateDraft.staged.proposal.id)}>Discard earlier draft</Button>
+              {!compact && stagedDraft !== undefined && versionControls !== undefined && versions.length > 1 && <span className="fy-pageheld__versions" data-testid="earlier-draft-versions">
+                <button type="button" className="fy-ch__wbtn" aria-label="Previous version" disabled={versionControls.at === 0} onClick={versionControls.onPrevious}><ChevronLeft size={14} /></button>
+                <span className="fy-mono">{versionControls.at + 1} of {versionControls.count}</span>
+                <button type="button" className="fy-ch__wbtn" aria-label="Next version" disabled={versionControls.at === versionControls.count - 1} onClick={versionControls.onNext}><ChevronRight size={14} /></button>
+              </span>}
             </div>}
             {voicedAt !== null && (
               <div className="fy-ch__band" data-testid="voiced-band">
