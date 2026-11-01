@@ -22,7 +22,7 @@ Object.defineProperty(dom.HTMLElement.prototype, "innerText", { configurable: tr
 Object.defineProperty(dom.document, "activeElement", { configurable: true, value: null, writable: true });dom.HTMLElement.prototype.focus = function () { Object.assign(dom.document, { activeElement: this }); };
 Object.assign(dom.HTMLElement.prototype, { showModal(this: HTMLElement) { this.setAttribute("open", ""); }, show(this: HTMLElement) { this.setAttribute("open", ""); }, close(this: HTMLElement) { this.removeAttribute("open"); } });
 const threadId = "01J8F3K2QW9VZX4N7M0RTYB6HC", runId = "01J8F3K2QW9VZX4N7M0RTYB6HD";
-const initial = (): StudioAssistantSnapshot => ({ audit: "available", accepting: true, busy: false, threads: [], share: null, ephemeralReply: null });
+const initial = (): StudioAssistantSnapshot => ({ audit: "available", accepting: true, busy: false, threads: [], share: null, ephemeralReply: null, models: ["provider/model"] });
 function fixture() {
   let id = 0; const sent: StudioAssistantCommand[] = [];
   const client = new StudioConversationClient({ id: () => String(++id), send(message) { sent.push(message); return true; } });
@@ -35,6 +35,20 @@ function View({ client, appState = FIXTURE_STATE }: { client: StudioConversation
   const view = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot);
   return <StudioAssistantView view={view} client={client} appState={appState} model="provider/model" pickModel={client.pickModel} />;
 }
+it("explains unavailable private routes before Send and offers an explicit model refresh", async () => {
+  const h = fixture(), container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  try {
+    h.deliver({ ...initial(), models: [] }); h.client.draft("Help with Arke");
+    await act(async () => root.render(<View client={h.client} />));
+    assert.match(container.textContent!, /Arke-managed Ollama/);
+    assert.match(container.textContent!, /Cloud models and existing Ollama servers/);
+    const refresh = [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Check Studio models again")!;
+    assert(refresh); const before = h.sent.length;
+    await act(async () => refresh.click());
+    assert.equal(h.sent.length, before + 1); assert.equal(h.sent.at(-1)!.command.action, "watch");
+    assert(h.sent.every(message => message.command.action === "watch"));
+  } finally { await act(async () => root.unmount()); h.client.dispose(); container.remove(); }
+});
 it("focuses the Studio composer once on entry without stealing focus after a busy period", async () => {
   const h = fixture(), container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
   try {

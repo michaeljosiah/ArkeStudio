@@ -1427,6 +1427,10 @@ prerequisites; production route/spend integration, the reviewed repair registry 
 dialog/visual acceptance remain unfinished.
 
 The Studio core lives in coordinator `studio-assistant/`: `service.ts` owns one
+private model eligibility check before admitting a turn; `models.ts` restricts its picker to
+the host's currently owned destinations. Unsupported routes retain the unsent draft and expose
+managed-local setup guidance. The client remembers only the explicit model reference on the device.
+`service.ts` also owns one
 on-demand conversation turn, flushed phase intents, a closed diagnostic delegation and editable
 handoff data. `evidence.ts` selects bounded enumerated operational facts without world content,
 free-text causes, provider IDs, paths or raw logs. `store.ts` keeps a separate bounded private

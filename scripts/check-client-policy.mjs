@@ -169,6 +169,8 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
     [join("components", "device-notifications.tsx"), "localStorage"],
     [join("lib", "reply-reads.ts"), "localStorage"],
     [join("lib", "recent-models.ts"), "localStorage"],
+    // Studio remembers only the chosen model reference, never requests or credentials.
+    [join("lib", "studio-assistant.ts"), "localStorage"],
     [join("lib", "audiobook-place.ts"), "localStorage"],
     // Issue 1825: the Stage's look (Greybox, Lit or Plate) on this device, never world state.
     [join("lib", "stage-look-preference.ts"), "localStorage"],

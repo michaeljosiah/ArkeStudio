@@ -3311,6 +3311,7 @@ export class Coordinator {
   private studioConversation(): StudioAssistantHost | null {
     if (this.stopping || !this.opts.appRoot || this.opts.studioAssistant === null) return null;
     return this.studioAssistantHost ??= createStudioAssistantHost({ root: this.opts.appRoot,
+      models: () => this.readModel.getState().app.harnessModels ?? [],
       adapter: () => this.opts.adapter ?? null, sessionInput: this.sessionInput, options: this.opts.studioAssistant,
       transcribe: (audio, contentType, signal) => {
         if (!this.voiceService) return Promise.reject(new Error("Local dictation is unavailable."));
