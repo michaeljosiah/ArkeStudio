@@ -34,6 +34,8 @@ import { WorldChatAttachmentStore, MAX_TEXT_PER_RUN_CHARS } from "../world-chat/
 import { planFor } from "../world-chat/check-plan.js";
 import { createRunScratch, removeRunScratch } from "../world-chat/run-scratch.js";
 import { prepareWorldChatActions } from "../world-chat/actions.js";
+import { readComicDrafts } from "../productions/graphic-novel.js";
+import type { ScriptReader } from "../productions/graphic-novel-script-reader.js";
 import { makeConversationSummariser } from "../world-chat/summarisation.js";
 import type { WorldStore } from "../world/store.js";
 import type { RunDeps } from "../world-chat/run.js";
@@ -59,6 +61,8 @@ export interface ConversationRunDependencies {
   exports: NonNullable<RetrievalDeps["getExports"]>;
   actionExports: NonNullable<NonNullable<Parameters<typeof prepareWorldChatActions>[3]>["getExports"]>;
   researchAllowed: NonNullable<RetrievalDeps["researchAllowed"]>;
+  /** The reader of Arke's comic drafts (SPEC-064 R-64); null when no harness can read. */
+  comicScriptReader?: () => ScriptReader | null;
   imageRenditionMaker?: ImageRenditionMaker;
   agentMediaTools?: AgentMediaTools;
   agentSpeechReader?: AgentSpeechReader;
@@ -148,6 +152,8 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
   });
 
   const actionLifecycle = deps.actions;
+  // Drafts refused once for what the reader asked, by turn and chapter: the redraft is offered.
+  const refusedComicDrafts = new Map<string, number>();
   const summarise = deps.adapter?.readiness().ready
     ? makeConversationSummariser(
         deps.adapter,
@@ -207,6 +213,9 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     validateSceneEdits: ({ entryContext, edits, baseVersion }) =>
       applySceneEdits(store, { entryContext, edits, baseVersion, dryRun: true }),
     prepareActions: async (turn) => {
+      // Arke's comic drafts are read cold before they are prepared, so a draft a reader cannot
+      // follow goes back to Arke inside its turn (SPEC-064 R-64, R-65).
+      await readComicDrafts(store, turn, deps.comicScriptReader?.() ?? null, refusedComicDrafts, store.closingSignal, () => new Date().toISOString());
       const prepared = await prepareWorldChatActions(store, actionLifecycle, turn, { getGenerationRouteRows: deps.generationRoutes, getExports: () => deps.actionExports(), getJobs: () => deps.jobs(), getBuildItems: () => deps.buildItems?.() ?? [] });
       if (turn.actions.some(action => action.kind === "production-timeline-operation") || prepared.some(item => item.payload.kind === "world-chat-editor-request")) await store.ensureSchemaVersion(PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION, "production-chat-timeline");
       if (turn.actions.some(action => action.kind.startsWith("production-audio-") || action.kind === "production-performance-command") || prepared.some(item => item.payload.kind === "world-chat-bench-generation" && item.payload.action.productionId)) await store.ensureSchemaVersion(PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, "world-chat");

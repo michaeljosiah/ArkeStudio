@@ -603,6 +603,13 @@ const COMIC_ADAPTATION_KEYS = /"(style|adapts|source)"\s*:/;
 export const COMIC_PAGE_REVIEW_SCHEMA_VERSION = 117;
 const COMIC_PAGE_REVIEW_KEYS = /"review"\s*:|"likeness"/;
 /**
+ * A comic chapter's page plan and the cold read of Arke's draft (design turn 254, SPEC-064 R-60 –
+ * R-66): `plan` and `read` on the strict comic script, which a build of 117 refuses, dropping the
+ * chapter's pages with them.
+ */
+export const COMIC_PLAN_SCHEMA_VERSION = 118;
+const COMIC_PLAN_KEYS = /"(plan|read)"\s*:/;
+/**
  * An audio drama's takes (SPEC-057 R-29, codex on PR 1871): `drama-takes/` and the `episode` on a
  * take's strict audiobook sidecar. A build before them drops each such artifact as unreadable.
  */
@@ -1109,6 +1116,7 @@ export class Committer {
       files.some((f) => GRAPHIC_NOVEL_FILE.test(f.path) && f.newContent != null) ? GRAPHIC_NOVEL_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/(comic\.json$|comic\/)/.test(f.path) && f.newContent != null && COMIC_ADAPTATION_KEYS.test(f.newContent)) ? COMIC_ADAPTATION_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/comic-pages\//.test(f.path) && f.newContent != null && COMIC_PAGE_REVIEW_KEYS.test(f.newContent)) ? COMIC_PAGE_REVIEW_SCHEMA_VERSION : 0,
+      files.some((f) => /^productions\/[^/]+\/comic\//.test(f.path) && f.newContent != null && COMIC_PLAN_KEYS.test(f.newContent)) ? COMIC_PLAN_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/drama-takes\//.test(f.path) && f.newContent != null) ? DRAMA_TAKE_SCHEMA_VERSION : 0,
       files.some((f) => {
         if (!f.newContent) return false;

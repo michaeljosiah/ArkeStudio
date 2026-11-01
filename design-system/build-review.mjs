@@ -28,6 +28,13 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN ARKE DRIVES 256
+  { group: "Arke drives · turn 256", screen: "Setup: one card for what is usual", frame: "256a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Arke drives · turn 256", screen: "While Arke works, the page says so", frame: "256b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Arke drives · turn 256", screen: "The plan: mysteries kept on purpose, and Fix that redoes it", frame: "256c", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Arke drives · turn 256", screen: "The draft, read as pages, with only the gaps counted", frame: "256d", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Arke drives · turn 256", screen: "The book at a glance, and the one next step", frame: "256e", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  // END ARKE DRIVES 256
   // BEGIN PRODUCTION SPEND 255
   { group: "Lifetime production spend · turn 255", screen: "Production · lifetime spend beside current coverage", frame: "255a", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
   { group: "Lifetime production spend · turn 255", screen: "Scene · the total and each shot’s work", frame: "255b", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
@@ -1042,6 +1049,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "arke-drives-256.review.html", what: "Turn 256: Arke drives, the screen stays simple — the usual as one card, Arke working said on the chapter, mysteries kept apart, a reading view, the book at a glance.", state: "approved 1 November 2026; not built" },
   { file: "production-spend-255.review.html", what: "Turn 255: lifetime production spend, generated and selected counts, receipts and incomplete history.", state: "approved; implementation in progress" },
   { file: "page-plan-254.review.html", what: "Turn 254: adapt before drawing — a page plan of passages, pages and what the reader knows, then a cold read of every draft.", state: "approved 1 November 2026; not built" },
   { file: "page-review-253.review.html", what: "Turn 253: the page review — Lettering and Picture verdicts, picture faults boxed, writing in the scene cleared, warnings seen, Not checked with a reason.", state: "approved 1 November 2026; not built" },
@@ -1253,6 +1261,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="audiobook-credits-252.css">
 <link rel="stylesheet" href="page-review-253.css">
 <link rel="stylesheet" href="page-plan-254.css">
+<link rel="stylesheet" href="arke-drives-256.css">
 <link rel="stylesheet" href="production-spend-255.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">

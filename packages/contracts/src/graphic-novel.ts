@@ -107,9 +107,74 @@ export type ComicPage = z.infer<typeof ComicPageSchema>;
  * the whole document, because takes, findings and translations point at them by id alone. It rides
  * the committer's JSON track, which stamps `version` on every accepted change, as an episode script's.
  */
+/**
+ * A chapter's page plan (SPEC-064 R-60 – R-63, turn 254b): what of the prose is kept, cut or merged,
+ * what each page does, and what the reader has been shown where. The Ledger of Nights, drawn, was
+ * drafted straight from the prose with no such step, and its cuts left later lines leaning on what
+ * was cut.
+ */
+export const COMIC_PLAN_VERDICTS = ["keep", "cut", "merge", "show", "invent"] as const;
+export const ComicChapterPlanSchema = z.object({
+  passages: z.array(z.object({
+    /** Where in the prose, as the reader of the plan finds it: "¶ 1–6". */
+    where: z.string().trim().min(1).max(80),
+    what: z.string().trim().min(1).max(200),
+    verdict: z.enum(COMIC_PLAN_VERDICTS),
+    why: z.string().trim().min(1).max(200),
+  }).strict()).min(1).max(120),
+  pages: z.array(z.object({
+    change: z.string().trim().min(1).max(200),
+    /** The turn the page ends on. */
+    turn: z.string().trim().min(1).max(200),
+  }).strict()).min(1).max(COMIC_LIMITS.pagesPerChapter),
+  /** What the reader holds (R-61): each person, place, thing or rule, and the page that first shows or names it. */
+  knows: z.array(z.object({ name: z.string().trim().min(1).max(120), page: z.number().int().min(1).max(COMIC_LIMITS.pagesPerChapter), how: z.string().trim().min(1).max(40) }).strict()).max(200).default([]),
+  /** Lines that lean on a cut, or on anything the reader was not shown (R-61, R-62): named, never hidden. */
+  leans: z.array(z.object({ page: z.number().int().min(1).max(COMIC_LIMITS.pagesPerChapter), line: z.string().trim().min(1).max(300), why: z.string().trim().min(1).max(200) }).strict()).max(60).default([]),
+}).strict();
+export type ComicChapterPlan = z.infer<typeof ComicChapterPlanSchema>;
+
+/**
+ * What a reader with only the pages asked of a draft (R-64 – R-66, turn 254d). `who`, `what`, `why`
+ * and `voice` block; the rest warn. Kept on the chapter's script with the draft, so a draft kept
+ * past them carries what it was kept with.
+ */
+export const SCRIPT_READ_KINDS = ["who", "what", "why", "where", "voice", "picture", "load"] as const;
+export const SCRIPT_READ_BLOCKING: ReadonlySet<string> = new Set(["who", "what", "why", "voice"]);
+export const ComicScriptReadFindingSchema = z.object({
+  kind: z.enum(SCRIPT_READ_KINDS),
+  page: z.number().int().min(1).max(COMIC_LIMITS.pagesPerChapter),
+  panel: z.number().int().min(1).max(COMIC_LIMITS.panelsPerPage).optional(),
+  /** The question the reader would ask, in its words. */
+  question: z.string().trim().min(1).max(300),
+}).strict();
+export type ComicScriptReadFinding = z.infer<typeof ComicScriptReadFindingSchema>;
+export const ComicScriptReadSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("read"),
+    reader: z.object({ id: z.string().min(1).max(80), version: z.string().min(1).max(80) }).strict(),
+    findings: z.array(ComicScriptReadFindingSchema).max(60),
+    /** Drafts read before this one in the same turn: the redrafts Arke made for the reader (R-65). */
+    redrafts: z.number().int().min(0).max(5).default(0),
+    at: IsoDateTimeSchema,
+  }).strict(),
+  z.object({
+    /** Never a pass (R-66). */
+    status: z.literal("not-read"),
+    reason: z.enum(["no-reader", "reader-failed"]),
+    detail: z.string().max(400).optional(),
+    at: IsoDateTimeSchema,
+  }).strict(),
+]);
+export type ComicScriptRead = z.infer<typeof ComicScriptReadSchema>;
+
 export const ComicScriptSchema = z.object({
   version: z.number().int().min(1),
   pages: z.array(ComicPageSchema).max(COMIC_LIMITS.pagesPerChapter).default([]),
+  /** The plan the pages were drafted from (R-60); a chapter Arke drafts has one kept first. */
+  plan: ComicChapterPlanSchema.optional(),
+  /** The cold read of Arke's draft (R-64); dropped once the author edits the pages by hand. */
+  read: ComicScriptReadSchema.optional(),
 }).strict().superRefine((script, ctx) => {
   const seen = new Set<string>();
   const once = (id: string, path: (string | number)[]) => {

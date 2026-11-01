@@ -221,7 +221,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 115: a graphic novel's style and adaptation — `style`, `adapts`, a panel's `source`, Arke's drafted pages (turns 248, 249).
 // 116: the audiobook's opening and closing credits — `.audiobook/credits.json` and their reading record (turn 252, SPEC-047 R-215).
 // 117: a comic page's picture review — `review` on a take and a `likeness` warning seen (turn 253, SPEC-064 R-67 – R-73).
-export const SUPPORTED_SCHEMA_VERSION = 117;
+// 118: a comic chapter's page plan and the cold read of Arke's draft — `plan` and `read` on its script (turn 254, SPEC-064 R-60 – R-66).
+export const SUPPORTED_SCHEMA_VERSION = 118;
 
 export class WorldOpenError extends Error {
   constructor(

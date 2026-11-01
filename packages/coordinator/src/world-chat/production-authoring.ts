@@ -41,7 +41,7 @@ import {
 import type { ProposalManager } from "../gate/proposals.js";
 import { ConversationActionPreparationError } from "../arke-actions/lifecycle.js";
 import { keepAdaptedText } from "../productions/audio-drama.js";
-import { COMIC_ADAPTATION_SCHEMA_VERSION } from "../world/commit.js";
+import { COMIC_ADAPTATION_SCHEMA_VERSION, COMIC_PLAN_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import { MarkdownFile } from "../world/text-files.js";
@@ -380,7 +380,7 @@ export function episodeScriptDraft(store: WorldStore, action: Pick<WorldChatProd
  * be, in words Arke can act on — checked when the turn is prepared as well as when it is staged, as
  * an episode script is (issue 1883).
  */
-export function comicScriptDraft(store: WorldStore, action: Pick<WorldChatProductionComicScriptAction["action"], "productionId" | "chapter" | "baseHash" | "pages">): ComicScript {
+export function comicScriptDraft(store: WorldStore, action: Pick<WorldChatProductionComicScriptAction["action"], "productionId" | "chapter" | "baseHash" | "pages" | "plan" | "read">): ComicScript {
   const production = requireProduction(store, action.productionId);
   if (!productionShape(production.meta).hasPages) throw refuse(`${production.meta.title} is not a graphic novel`);
   // Retirement is the flag, not the status: a retired chapter keeps the status it had (codex on PR 2246).
@@ -393,11 +393,19 @@ export function comicScriptDraft(store: WorldStore, action: Pick<WorldChatProduc
   if (stored && action.baseHash === null) throw refuse(`${chapter.title} already has pages. Name the baseHash get_production read for them.`);
   if (stored && stored.hash !== action.baseHash) throw refuse(`${chapter.title}'s pages changed since they were read. Read get_production again and redraft from them.`);
   const current = stored?.script;
+  // A chapter is planned before it is drafted (SPEC-064 R-60, turn 254): the plan comes alone and is
+  // kept by the author, and pages are written from a kept plan. The Ledger of Nights, drawn, went
+  // straight from prose to pages, and its cuts left later lines leaning on what was cut.
+  const planning = action.plan !== undefined;
+  if (planning && action.pages.length > 0) throw refuse(`Send ${chapter.title}'s plan alone, with no pages. Write the pages once the author keeps it.`);
+  if (!planning && action.pages.length === 0) throw refuse(`${chapter.title}'s draft has no pages. Send its plan alone, or its pages written from the kept plan.`);
+  if (!planning && current?.plan === undefined) throw refuse(`${chapter.title} has no kept plan. Send its plan first, alone, with no pages; write the pages once the author keeps it.`);
   // Read as the action's own schema reads them, so a caller that skipped it still gets its defaults.
   const drafted = DraftComicPageSchema.array().safeParse(action.pages);
   if (!drafted.success) throw refuse(`${chapter.title}'s pages cannot be read: ${drafted.error.issues[0]?.message ?? "invalid"}`);
-  const pages = settleComicDraft(drafted.data, current?.pages ?? []);
-  const unfinished = unfinishedLettering(pages);
+  // A plan leaves the chapter's pages as they are; pages keep the plan they were written from.
+  const pages = planning ? current?.pages ?? [] : settleComicDraft(drafted.data, current?.pages ?? []);
+  const unfinished = planning ? undefined : unfinishedLettering(pages);
   if (unfinished) throw refuse(`Page ${unfinished.page} has "${unfinished.text}", which ends in a comma: the prose's line with its tag cut. Letter it as a whole line, said or narrated.`);
   // Each cited passage must be a chapter there is; a pin with no version or hash takes the chapter's
   // as it stands, so a later edit to the prose is seen (as an episode's source is pinned).
@@ -411,7 +419,8 @@ export function comicScriptDraft(store: WorldStore, action: Pick<WorldChatProduc
       if (source.hash === undefined && found.hash !== undefined && (found.version ?? 1) === source.version) source.hash = found.hash;
     }
   }
-  const parsed = ComicScriptSchema.safeParse({ version: current?.version ?? 1, pages });
+  const plan = action.plan ?? current?.plan;
+  const parsed = ComicScriptSchema.safeParse({ version: current?.version ?? 1, pages, ...(plan ? { plan } : {}), ...(!planning && action.read ? { read: action.read } : {}) });
   if (!parsed.success) throw refuse(`${chapter.title}'s pages cannot be kept as drafted: ${[...new Set(parsed.error.issues.slice(0, 3).map((issue) => issue.message))].join("; ")}`);
   // Only the people and places of this world: a panel naming a sheet nobody wrote would ride no picture.
   const sheets = new Set(store.getBundle().sheets.map((sheet) => sheet.id));
@@ -550,8 +559,9 @@ export async function stageWorldChatProductionAuthoredAction(
   if (payload.kind === "world-chat-production-comic-script") {
     const record = comicScriptDraft(store, payload.action);
     const chapter = production.chapters.find((candidate) => candidate.id === payload.action.chapter)!;
-    // A build before drafted pages reads a comic-script proposal as an unknown kind.
-    await store.ensureSchemaVersion(COMIC_ADAPTATION_SCHEMA_VERSION, "comic-script");
+    // A build before drafted pages reads a comic-script proposal as an unknown kind, and one before
+    // plans refuses a script that carries a plan or a read (turn 254).
+    await store.ensureSchemaVersion(record.plan !== undefined || record.read !== undefined ? COMIC_PLAN_SCHEMA_VERSION : COMIC_ADAPTATION_SCHEMA_VERSION, "comic-script");
     return gate.stage({
       kind: "comic-script",
       summary: `${chapter.title} pages: ${production.meta.title}`,

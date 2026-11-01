@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  compareLettering, comicBook, pageReading, sheetReferencePicture, takeBlocking, takeClears, type LetteringVerification, type PageReview, type ReviewWarning,
+  SCRIPT_READ_BLOCKING, compareLettering, comicBook, type DraftComicPage, pageReading, sheetReferencePicture, takeBlocking, takeClears, type LetteringVerification, type PageReview, type ReviewWarning,
   COMIC_LIMITS, COMIC_PROMPT_MAX, ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema, DEFAULT_COMIC_SETTINGS, EMPTY_COMIC_PAGE_RECORD,
   comicPageHash, comicPagePrompt, makesShape, pageAspect, pictureQuote, productionShape,
   type ComicCited, type ComicMode, type ComicPage, type ComicPageRecord, type ComicSettings, type ManifestModel, type PictureWho, type ProductionBundle,
@@ -10,6 +10,8 @@ import { pictureWho } from "./audiobook-picture-suggest.js";
 import { artDirectionFor } from "./audiobook-look.js";
 import type { PageReader } from "./graphic-novel-reader.js";
 import type { PageReviewer } from "./graphic-novel-reviewer.js";
+import { pagesForReading, type ScriptReader } from "./graphic-novel-script-reader.js";
+import { ConversationActionPreparationError } from "../arke-actions/lifecycle.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
@@ -45,7 +47,10 @@ export async function saveComicScript(
   // A script for a chapter the book does not have would be read by nothing and exported by nothing.
   if (!production.chapters?.some((chapter) => chapter.id === input.chapter)) throw new Error(`${production.meta.title} has no chapter ${input.chapter}.`);
   const path = comicScriptPath(productionId, input.chapter);
-  const record = ComicScriptSchema.parse({ version: 1, pages: input.pages });
+  // The editor writes pages; the kept plan they were drawn from stays (SPEC-064 R-60). The cold read
+  // described Arke's draft, not the author's edit of it, so it goes.
+  const plan = production.comicScripts?.find((entry) => entry.chapter === input.chapter)?.script.plan;
+  const record = ComicScriptSchema.parse({ version: 1, pages: input.pages, ...(plan ? { plan } : {}) });
   const result = await store.commit({
     kind: "comic-script-save",
     source: options.source ?? "editor",
@@ -353,4 +358,58 @@ export async function seeComicWarning(store: WorldStore, productionId: string, p
     seen.add(warning);
     return { ...record, acknowledged: { ...record.acknowledged, [takeId]: [...seen] } };
   });
+}
+
+/**
+ * The cold read of Arke's drafted pages (R-64 – R-66, turn 254d), run while the turn is being
+ * prepared so a refusal reaches Arke inside its turn. A draft a reader cannot follow is refused once
+ * for its chapter in the conversation, with the reader's questions; the next draft of that chapter is
+ * offered whatever it holds, the questions kept on it. Once per turn was not enough: the refusal used
+ * the turn's one corrective attempt, so any other slip in the redraft lost the draft, and in installed
+ * 0.5.78 three asks in a row ended with nothing (a lettered line over 400 characters, then a cited
+ * search). Anything Arke wrote in `read` is replaced: the read is the studio's.
+ */
+export async function readComicDrafts(
+  store: WorldStore,
+  turn: { conversationId: string; turnId: string; actions: readonly unknown[] },
+  reader: ScriptReader | null,
+  refused: Map<string, number>,
+  signal: AbortSignal,
+  at: () => string,
+): Promise<void> {
+  for (const raw of turn.actions) {
+    const action = raw as { kind?: string; productionId?: string; chapter?: string; pages?: DraftComicPage[]; plan?: unknown; read?: unknown };
+    if (action.kind !== "production-comic-script") continue;
+    delete action.read;
+    if (action.plan !== undefined || !action.pages?.length || !action.productionId || !action.chapter) continue;
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === action.productionId);
+    const chapter = production?.chapters.find((candidate) => candidate.id === action.chapter);
+    if (!production || !chapter) continue;
+    if (reader === null) { action.read = { status: "not-read", reason: "no-reader", detail: "no harness is ready to read", at: at() }; continue; }
+    const bundle = store.getBundle();
+    const name = (id: string) => bundle.sheets.find((sheet) => sheet.id === id)?.name ?? id;
+    // The pages before it as the reader met them: the kept pages of every earlier chapter, never the prose.
+    const before = production.chapters.filter((candidate) => candidate.retired !== true && candidate.order < chapter.order).sort((a, b) => a.order - b.order)
+      .flatMap((candidate) => {
+        const pages = production.comicScripts?.find((entry) => entry.chapter === candidate.id)?.script.pages ?? [];
+        return pages.length ? [pagesForReading(pages, name, (index) => `${candidate.title}, page ${index + 1}`)] : [];
+      }).join("\n");
+    const key = `${turn.conversationId}:${production.meta.id}:${chapter.id}`;
+    const redrafts = refused.get(key) ?? 0;
+    let answer: Awaited<ReturnType<ScriptReader["read"]>>;
+    try {
+      answer = await reader.read({ before, draft: pagesForReading(action.pages, name, (index) => `Page ${index + 1}`) }, signal);
+    } catch (err) {
+      if (signal.aborted) throw err;
+      action.read = { status: "not-read", reason: "reader-failed", detail: (err instanceof Error ? err.message : String(err)).slice(0, 400), at: at() };
+      continue;
+    }
+    const blocking = answer.findings.filter((finding) => SCRIPT_READ_BLOCKING.has(finding.kind));
+    if (blocking.length > 0 && redrafts === 0) {
+      refused.set(key, 1);
+      throw new ConversationActionPreparationError(`A reader who has only the pages could not follow ${chapter.title}: ${blocking.map((finding) => `page ${finding.page}${finding.panel ? ` panel ${finding.panel}` : ""}, ${finding.question}`).join("; ")}. Redraft the pages whole so the pages themselves answer each question.`);
+    }
+    refused.delete(key);
+    action.read = { status: "read", reader: answer.reader, findings: answer.findings, redrafts, at: at() };
+  }
 }

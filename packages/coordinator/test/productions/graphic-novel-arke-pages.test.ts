@@ -8,7 +8,7 @@ import { stageWorldChatProductionAuthoredAction } from "../../src/world-chat/pro
 import { productionRecord } from "../../src/world-chat/production-record.js";
 import { WorldStore } from "../../src/world/store.js";
 import { readWorldMeta } from "../../src/world/scan.js";
-import { COMIC_ADAPTATION_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { COMIC_ADAPTATION_SCHEMA_VERSION, COMIC_PLAN_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
@@ -26,9 +26,24 @@ async function book(pages: ComicPage[] = []) {
   return { store, id, chapter, gate: new ProposalManager(store), intent: { actionId: newId("act"), conversationId: newId("cv") as ConversationId } };
 }
 const production = (store: WorldStore, id: string) => store.getBundle().productions.find((p) => p.meta.id === id)!;
-const action = (id: string, chapter: string, baseHash: string | null, pages: unknown[]) => ({
-  kind: "world-chat-production-comic-script" as const, worldId: "", action: { kind: "production-comic-script" as const, productionId: id, chapter, baseHash, checkReceiptIds: [], pages: pages as never },
+const action = (id: string, chapter: string, baseHash: string | null, pages: unknown[], plan?: unknown) => ({
+  kind: "world-chat-production-comic-script" as const, worldId: "", action: { kind: "production-comic-script" as const, productionId: id, chapter, baseHash, checkReceiptIds: [], pages: pages as never, ...(plan ? { plan: plan as never } : {}) },
 });
+const PLAN = {
+  passages: [{ where: "¶ 1–2", what: "Salt in everything", verdict: "keep", why: "opens on her hands" }, { where: "¶ 3", what: "Jory and the boat", verdict: "cut", why: "a second thread" }],
+  pages: [{ change: "Maren walks the hard", turn: "Bray at the door" }],
+  knows: [{ name: "Bray", page: 1, how: "named" }],
+  leans: [],
+};
+/** The plan staged alone and kept, as the author keeps it in Pages (R-60): the base the pages are drafted on. */
+async function keepPlan(store: WorldStore, gate: ProposalManager, intent: { actionId: string; conversationId: ConversationId }, id: string, chapter: string): Promise<string> {
+  const base = production(store, id).comicScripts?.find((entry) => entry.chapter === chapter)?.hash ?? null;
+  const run = action(id, chapter, base, [], PLAN);
+  run.worldId = store.worldId;
+  const proposal = await stageWorldChatProductionAuthoredAction(store, gate, intent as never, run);
+  assert.equal((await gate.accept(proposal.id)).status, "accepted");
+  return production(store, id).comicScripts!.find((entry) => entry.chapter === chapter)!.hash;
+}
 
 describe("Arke's pages (SPEC-064 R-13, turn 249)", () => {
   it("is a model action Arke can name, with pages, panels and lines that need no id", () => {
@@ -42,29 +57,59 @@ describe("Arke's pages (SPEC-064 R-13, turn 249)", () => {
   it("lists a chapter with no pages for Arke, and stages its pages as a draft, citing the chapter as it stands", async () => {
     const { store, id, chapter, gate, intent } = await book();
     const read = productionRecord(store.getBundle(), id) as { unpagedChapters?: { chapters: Array<{ chapter: string; baseHash: string | null }> } };
-    assert.deepEqual(read.unpagedChapters?.chapters, [{ chapter, baseHash: null }]);
-    const run = action(id, chapter, null, [{ layout: "feature", panels: [
+    assert.deepEqual(read.unpagedChapters?.chapters, [{ chapter, baseHash: null, planKept: false }]);
+    const early = action(id, chapter, null, [{ layout: "splash", panels: [{ description: "x" }] }]);
+    early.worldId = store.worldId;
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, early), /no kept plan/, "pages are written from a kept plan (R-60)");
+    const planned = await keepPlan(store, gate, intent, id, chapter);
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= COMIC_PLAN_SCHEMA_VERSION, "a build of 117 would drop a planned chapter");
+    assert.deepEqual((productionRecord(store.getBundle(), id) as { unpagedChapters?: { chapters: unknown[] } }).unpagedChapters?.chapters, [{ chapter, baseHash: planned, planKept: true }]);
+    const run = action(id, chapter, planned, [{ layout: "feature", panels: [
       { description: "Maren walks the hard with her lantern.", characters: ["maren-kest"], lettering: [{ kind: "caption", text: "Salt was in everything that week." }], source: { story: id, chapter, paragraphs: [1, 2] } },
       { description: "Bray at the weigh house door.", characters: ["bray-half-hitch"], lettering: [{ kind: "speech", speaker: "bray-half-hitch", text: "You walked the hard again." }] },
     ] }]);
     run.worldId = store.worldId;
+    // The studio's cold read rides on the draft (R-64): what a draft is kept with is on the record.
+    const coldRead = { status: "read" as const, reader: { id: "test", version: "1" }, findings: [{ kind: "where" as const, page: 1, question: "Is this the same night?" }], redrafts: 0, at: CLOCK };
+    (run.action as Record<string, unknown>).read = coldRead;
     const proposal = await stageWorldChatProductionAuthoredAction(store, gate, intent, run);
     assert.equal(proposal.kind, "comic-script");
     assert.ok((await readWorldMeta(store.dir)).schemaVersion >= COMIC_ADAPTATION_SCHEMA_VERSION, "a drafted-pages proposal is past older readers");
-    assert.equal(production(store, id).comicScripts?.length ?? 0, 0, "nothing is written while the draft waits");
+    assert.equal(production(store, id).comicScripts![0]!.script.pages.length, 0, "nothing is written while the draft waits");
     const staged = store.getBundle().proposals.find((entry) => entry.proposal.id === proposal.id)!;
     const drafted = Object.values(staged.comicScripts ?? {})[0]!;
+    assert.deepEqual(drafted.read, coldRead);
     const panel = drafted.pages[0]!.panels[0]!;
     assert.match(panel.id, /^[0-9A-HJKMNP-TV-Z]{26}$/, "a new panel is given its id");
     assert.equal(panel.source?.version, production(store, id).chapters[0]!.version ?? 1, "an unversioned citation is pinned to the chapter as it stands");
     assert.equal((await gate.accept(proposal.id)).status, "accepted");
     assert.equal(production(store, id).comicScripts![0]!.script.pages[0]!.panels.length, 2);
+    assert.deepEqual(production(store, id).comicScripts![0]!.script.plan?.pages, PLAN.pages, "the pages keep the plan they were drafted from");
+  });
+
+  it("tells Arke the plan's exact shape, and never offers it read to send (installed 0.5.77, 2026-11-01)", async () => {
+    // Shown only "passages: array<object>", Arke sent {paragraphs, treatment} twice and the turn failed.
+    const { actionGuideEntry } = await import("../../src/world-chat/action-guide.js");
+    const entry = actionGuideEntry("production-comic-script")!;
+    assert.match(entry.description, /"passages":\[\{"where":"¶ 1–6","what":"what happens","verdict":"keep","why"/);
+    assert.match(entry.description, /"pages":\[\{"change":/);
+    assert.ok(!entry.fields.some((field) => field.startsWith("read")), "the read is the studio's");
+  });
+
+  it("refuses a plan sent with pages, and pages sent with a plan", async () => {
+    const { store, id, chapter, gate, intent } = await book();
+    const both = action(id, chapter, null, [{ layout: "splash", panels: [{ description: "x" }] }], PLAN);
+    both.worldId = store.worldId;
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, both), /plan alone, with no pages/);
+    const none = action(id, chapter, null, []);
+    none.worldId = store.worldId;
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, none), /has no pages/);
   });
 
   it("keeps a page's id, so its takes stay its own, and fences on the pages Arke read", async () => {
     const page: ComicPage = { id: ulid(), layout: "feature", status: "draft", panels: [{ id: ulid(), description: "Maren on the pier.", characters: ["maren-kest"], lettering: [] }] };
     const { store, id, chapter, gate, intent } = await book([page]);
-    const baseHash = production(store, id).comicScripts![0]!.hash;
+    const baseHash = await keepPlan(store, gate, intent, id, chapter);
     const stale = action(id, chapter, "sha256:old", [{ id: page.id, layout: "feature", panels: [{ id: page.panels[0]!.id, description: "Maren on the pier." }] }]);
     stale.worldId = store.worldId;
     await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, stale), /changed since/);
@@ -88,7 +133,7 @@ describe("Arke's pages (SPEC-064 R-13, turn 249)", () => {
     const { store, id, chapter, gate, intent } = await book();
     const saved = await saveComicScript(store, id, { chapter, pages: [], baseHash: null });
     const read = productionRecord(store.getBundle(), id) as { unpagedChapters?: { chapters: Array<{ chapter: string; baseHash: string | null }> } };
-    assert.deepEqual(read.unpagedChapters?.chapters, [{ chapter, baseHash: saved.hash }], "a saved empty script is drafted on its own hash, not null");
+    assert.deepEqual(read.unpagedChapters?.chapters, [{ chapter, baseHash: saved.hash, planKept: false }], "a saved empty script is drafted on its own hash, not null");
     await setChapterRetired(store, id, production(store, id).chapters.find((c) => c.id === chapter)!.file, true);
     assert.deepEqual((productionRecord(store.getBundle(), id) as { unpagedChapters?: { chapters: unknown[] } }).unpagedChapters?.chapters, []);
     const retired = action(id, chapter, saved.hash, [{ layout: "splash", panels: [{ description: "x" }] }]);
@@ -98,10 +143,11 @@ describe("Arke's pages (SPEC-064 R-13, turn 249)", () => {
 
   it("refuses a sheet that is not in the world, a passage in a chapter that is not, and a book that is not a graphic novel", async () => {
     const { store, id, chapter, gate, intent } = await book();
-    const nobody = action(id, chapter, null, [{ layout: "splash", panels: [{ description: "x", characters: ["nobody-at-all"] }] }]);
+    const planned = await keepPlan(store, gate, intent, id, chapter);
+    const nobody = action(id, chapter, planned, [{ layout: "splash", panels: [{ description: "x", characters: ["nobody-at-all"] }] }]);
     nobody.worldId = store.worldId;
     await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, nobody), /not a sheet/);
-    const nowhere = action(id, chapter, null, [{ layout: "splash", panels: [{ description: "x", source: { story: id, chapter: "nowhere", paragraphs: [1] } }] }]);
+    const nowhere = action(id, chapter, planned, [{ layout: "splash", panels: [{ description: "x", source: { story: id, chapter: "nowhere", paragraphs: [1] } }] }]);
     nowhere.worldId = store.worldId;
     await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, nowhere), /not in this world/);
     const novel = await createProduction(store, { title: "A book", medium: "story" });
@@ -114,7 +160,8 @@ describe("Arke's pages (SPEC-064 R-13, turn 249)", () => {
     // The Ledger of Nights, drawn (30 October 2026): "Give me the addresses," she said became a
     // balloon reading "Give me the addresses," fourteen times over across eleven pages.
     const { store, id, chapter, gate, intent } = await book();
-    const cut = action(id, chapter, null, [{ layout: "splash", panels: [{ description: "Maren at the desk.", characters: ["maren-kest"], lettering: [{ kind: "speech", speaker: "maren-kest", text: "Give me the addresses," }] }] }]);
+    const planned = await keepPlan(store, gate, intent, id, chapter);
+    const cut = action(id, chapter, planned, [{ layout: "splash", panels: [{ description: "Maren at the desk.", characters: ["maren-kest"], lettering: [{ kind: "speech", speaker: "maren-kest", text: "Give me the addresses," }] }] }]);
     cut.worldId = store.worldId;
     await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, cut), /Page 1 has "Give me the addresses,", which ends in a comma/);
     assert.match(WORLD_ACTION_DESCRIPTIONS["production-comic-script"], /never the prose with its tags cut/);

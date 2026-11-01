@@ -487,3 +487,70 @@ describe("The page review in Pages (turn 253)", () => {
     assert.ok(button(m.container, "Check again"));
   });
 });
+
+describe("Adapt before drawing (turn 254)", () => {
+  const PATH = "productions/low-water-drawn/comic/the-tide.json";
+  const PLAN = {
+    passages: [{ where: "¶ 1–6", what: "Salt in the bread", verdict: "keep" as const, why: "opens on her hands" }, { where: "¶ 16–21", what: "Jory and the boat", verdict: "cut" as const, why: "a second thread" }],
+    pages: [{ change: "Maren in the salt house", turn: "Bray at the door" }, { change: "Bray finds her", turn: "“Where’s Jory?”" }],
+    knows: [{ name: "Bray", page: 1, how: "named" }],
+    leans: [{ page: 2, line: "where’s Jory?", why: "leans on a cut passage" }],
+  };
+  function drafting(script: Record<string, unknown>): ClientState {
+    const state = withBook([], {});
+    const proposal = { id: "pr_01J8H0000000000000000000Q9", kind: "comic-script", status: "pending", summary: "The tide", draftRevision: 3,
+      targets: [{ path: PATH, baseVersion: null, baseHash: null }], createdAt: AT } as never;
+    state.world!.proposals = [...state.world!.proposals, { proposal, ripple: [], comicScripts: { [PATH]: { version: 1, ...script } } } as never];
+    return state;
+  }
+
+  it("shows a plan as passages, pages and what the reader knows, with the lean named, kept or discarded whole (254b)", async () => {
+    const m = await mount(drafting({ pages: [], plan: PLAN }));
+    const plan = m.container.querySelector(".fy-comic__plan")!;
+    assert.match(plan.textContent!, /Page plan2 pages from chapter 1/);
+    assert.match(plan.textContent!, /Jory and the boata second threadCut/);
+    assert.match(plan.textContent!, /Bray finds herends: “Where’s Jory\?”/);
+    assert.match(plan.textContent!, /Braynamed, page 1/);
+    assert.match(plan.querySelector(".fy-comic__needs")!.textContent!, /Page 2 · “where’s Jory\?” leans on a cut passage/);
+    await act(async () => props(button(m.container, "Keep")!).onClick({}));
+    const keep = m.sent.find((message) => message.kind === "proposal-accept") as Extract<ClientMessage, { kind: "proposal-accept" }>;
+    assert.equal(keep.expectedDraftRevision, 3);
+  });
+
+  it("opens a kept plan from a chapter with no pages yet (254c)", async () => {
+    const state = withBook([], {});
+    (state.world!.productions.at(-1) as { comicScripts: unknown }).comicScripts = [{ chapter: "the-tide", hash: "sha256:p", script: { version: 1, pages: [], plan: PLAN } }];
+    const m = await mount(state);
+    assert.match(m.container.textContent!, /1 · The tide has no pages/);
+    await act(async () => props(button(m.container, "Plan")!).onClick({}));
+    assert.ok(m.container.querySelector(".fy-comic__plan"), "the plan the pages will be drawn from");
+    assert.ok(button(m.container, "Close"));
+  });
+
+  it("marks what a reader could not follow and keeps it only as Keep anyway (254d)", async () => {
+    const one = page();
+    const read = { status: "read", reader: { id: "harness", version: "1:m" }, findings: [{ kind: "who", page: 1, panel: 1, question: "Who is Jory?" }, { kind: "where", page: 1, question: "Is this the same night?" }], redrafts: 1, at: AT };
+    const m = await mount(drafting({ pages: [one], read }));
+    assert.match(m.container.querySelector(".fy-comic__draftbar")!.textContent!, /1 to fix/);
+    assert.equal(button(m.container, "Keep"), undefined);
+    assert.ok(button(m.container, "Keep anyway"));
+    assert.match(m.container.querySelector(".fy-comic__finds")!.textContent!, /WhoPage 1 · “Who is Jory\?”/);
+    assert.ok(m.container.querySelector(".fy-comic__panel--draft.flag"), "the panel is marked");
+    assert.match(m.container.querySelector(".fy-comic__asked")!.textContent!, /Who“Who is Jory\?”/);
+    assert.ok(m.container.querySelector(".fy-comic__thumb--draft .s.x"), "and its page in the strip");
+  });
+
+  it("says a draft nobody read is not read, with Choose reader (254e)", async () => {
+    const m = await mount(drafting({ pages: [page()], read: { status: "not-read", reason: "no-reader", at: AT } }));
+    assert.match(m.container.querySelector(".fy-comic__draftbar")!.textContent!, /Not read/);
+    assert.ok(button(m.container, "Choose reader"));
+    assert.ok(button(m.container, "Keep anyway"), "never a pass");
+  });
+
+  it("keeps a draft a reader could follow with Keep", async () => {
+    const read = { status: "read", reader: { id: "harness", version: "1:m" }, findings: [], redrafts: 0, at: AT };
+    const m = await mount(drafting({ pages: [page()], read }));
+    assert.match(m.container.querySelector(".fy-comic__draftbar")!.textContent!, /Read/);
+    assert.ok(button(m.container, "Keep"));
+  });
+});
