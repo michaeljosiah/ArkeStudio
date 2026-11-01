@@ -365,6 +365,7 @@ export function ConversationPermissionCard({
   };
 
   const body = <ConversationActionBody action={action} supported={supported} />;
+  const comicDraft = action.actionKind === "world-chat-production-comic-script";
   const consequences = action.shown.ripples.length > 0 ? (
     <div className="fy-actioncard__body">
       <strong>Consequences</strong>
@@ -385,7 +386,7 @@ export function ConversationPermissionCard({
           <div className="fy-actioncard__reason">{action.shown.permissionReason.replaceAll("-", " ")}</div>
           <h3>{action.shown.title}</h3>
         </div>
-        <span className="fy-actioncard__status">{ACTION_STATUS[action.status]}</span>
+        <span className="fy-actioncard__status">{comicDraft && action.status === "pending" ? "Waiting in Pages" : ACTION_STATUS[action.status]}</span>
       </div>
       <StudioShow action={action} />
       <p className="fy-actioncard__consequence">{action.shown.consequence}</p>
@@ -422,7 +423,14 @@ export function ConversationPermissionCard({
       )}
       {state?.world?.meta.worldId === action.worldId && state.world.productions.filter(p => p.meta.id === action.productionId).map(production => <TimelineCardHistory key={production.meta.id} action={action} production={production} />)}
       {action.undo && <div className="fy-actioncard__audit">Undo available · {action.undo.kind}</div>}
-      {supported && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
+      {/* A comic draft is kept or discarded in Pages alone (turn 256): deciding it here as well asked
+          the same question twice. */}
+      {comicDraft && action.status === "pending" && state?.world ? (
+        <div className="fy-actioncard__actions">
+          <Button variant="primary" onClick={() => void navigate(`/w/${state.world!.meta.worldId}/p/${action.productionId}/story/pages`)}>Open in Pages</Button>
+        </div>
+      ) : null}
+      {supported && !comicDraft && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
         <div className="fy-actioncard__actions">
           {action.status === "pending" && (!onPC || action.availableDecisions.includes("approve")) && (onPC ? <OnYourPC>choose files and approve</OnYourPC> : <Button
             variant="primary"
@@ -1075,6 +1083,14 @@ export function ProductionConversationBody({
     onSent?.(requestId);
     return true;
   };
+  // A screen that asks Arke sends its words at once (turn 256): Plan with Arke, Draft with Arke and
+  // Fix used to fill this box and wait for a second press.
+  const [autoSend, setAutoSend] = useConversationState("autoSend", false);
+  useEffect(() => {
+    if (!autoSend || !message.trim() || opening || running) return;
+    setAutoSend(false);
+    submit();
+  }); // eslint-disable-line react-hooks/exhaustive-deps
   const submit = () => {
     const text = message.trim();
     if (!text || !worldId || !hasContext) return;

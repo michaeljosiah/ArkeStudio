@@ -12,6 +12,7 @@ import {
   pageReading,
   panelRects,
   REVIEW_UNAVAILABLE,
+  fitLayout,
   takeBlocking,
   takeClears,
   type ComicScript,
@@ -153,5 +154,15 @@ describe("a take's words and picture together (R-69, R-70, R-72)", () => {
     const cleared: PageReview = { status: "compared", reviewer: { id: "t", version: "1" }, references: [], findings: [], cleared: [{ finding: "extra:0", reason: "the ledger" }], at: AT };
     assert.deepEqual(takeBlocking({ verification: read([extra]) }), ["extra:0"]);
     assert.deepEqual(takeBlocking({ verification: read([extra]), review: cleared }), []);
+  });
+});
+
+describe("a page's layout follows its panels (turn 256)", () => {
+  it("keeps a layout whose count agrees, takes the template that fits, and keeps its own when none does", () => {
+    assert.equal(fitLayout("feature", 3), "feature");
+    assert.equal(fitLayout("manga", 4), "grid-2x2");
+    assert.equal(fitLayout("manga", 9), "grid-3x3");
+    assert.equal(fitLayout("manga", 1), "splash");
+    assert.equal(fitLayout("manga", 6), "manga");
   });
 });

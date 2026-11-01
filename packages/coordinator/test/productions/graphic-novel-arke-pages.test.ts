@@ -96,6 +96,29 @@ describe("Arke's pages (SPEC-064 R-13, turn 249)", () => {
     assert.ok(!entry.fields.some((field) => field.startsWith("read")), "the read is the studio's");
   });
 
+  it("lets a new plan replace one still waiting, and fits each drafted page's layout to its panels (turn 256)", async () => {
+    const { store, id, chapter, gate, intent } = await book();
+    const first = action(id, chapter, null, [], PLAN);
+    first.worldId = store.worldId;
+    const waiting = await stageWorldChatProductionAuthoredAction(store, gate, intent, first);
+    const again = action(id, chapter, null, [], { ...PLAN, mysteries: ["What is under the water?"] });
+    again.worldId = store.worldId;
+    const replacing = await stageWorldChatProductionAuthoredAction(store, gate, intent, again);
+    const staged = store.getBundle().proposals.filter((entry) => entry.proposal.targets.some((target) => target.path.endsWith(`/comic/${chapter}.json`)));
+    assert.deepEqual(staged.map((entry) => entry.proposal.id), [replacing.id], "Fix on a lean replaces the waiting plan");
+    assert.notEqual(waiting.id, replacing.id);
+    assert.equal((await gate.accept(replacing.id)).status, "accepted");
+    const base = production(store, id).comicScripts![0]!.hash;
+    const run = action(id, chapter, base, [
+      { layout: "manga", panels: [{ description: "a" }, { description: "b" }, { description: "c" }, { description: "d" }] },
+      { layout: "manga", panels: [{ description: "a" }, { description: "b" }] },
+    ]);
+    run.worldId = store.worldId;
+    const drafted = await stageWorldChatProductionAuthoredAction(store, gate, intent, run);
+    const pages = Object.values(store.getBundle().proposals.find((entry) => entry.proposal.id === drafted.id)!.comicScripts!)[0]!.pages;
+    assert.deepEqual(pages.map((page) => page.layout), ["grid-2x2", "manga"], "four panels take the four-panel grid; two have no template and keep theirs");
+  });
+
   it("refuses a plan sent with pages, and pages sent with a plan", async () => {
     const { store, id, chapter, gate, intent } = await book();
     const both = action(id, chapter, null, [{ layout: "splash", panels: [{ description: "x" }] }], PLAN);

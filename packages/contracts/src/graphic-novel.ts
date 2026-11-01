@@ -129,6 +129,12 @@ export const ComicChapterPlanSchema = z.object({
   }).strict()).min(1).max(COMIC_LIMITS.pagesPerChapter),
   /** What the reader holds (R-61): each person, place, thing or rule, and the page that first shows or names it. */
   knows: z.array(z.object({ name: z.string().trim().min(1).max(120), page: z.number().int().min(1).max(COMIC_LIMITS.pagesPerChapter), how: z.string().trim().min(1).max(40) }).strict()).max(200).default([]),
+  /**
+   * Questions the book means the reader to carry (turn 256c): the cold read is told them and does
+   * not count them as faults. Nineteen of a draft's flags in the owner's run were mysteries the
+   * book keeps on purpose.
+   */
+  mysteries: z.array(z.string().trim().min(1).max(200)).max(30).default([]),
   /** Lines that lean on a cut, or on anything the reader was not shown (R-61, R-62): named, never hidden. */
   leans: z.array(z.object({ page: z.number().int().min(1).max(COMIC_LIMITS.pagesPerChapter), line: z.string().trim().min(1).max(300), why: z.string().trim().min(1).max(200) }).strict()).max(60).default([]),
 }).strict();
@@ -139,7 +145,7 @@ export type ComicChapterPlan = z.infer<typeof ComicChapterPlanSchema>;
  * and `voice` block; the rest warn. Kept on the chapter's script with the draft, so a draft kept
  * past them carries what it was kept with.
  */
-export const SCRIPT_READ_KINDS = ["who", "what", "why", "where", "voice", "picture", "load"] as const;
+export const SCRIPT_READ_KINDS = ["who", "what", "why", "where", "voice", "picture", "load", "kept"] as const;
 export const SCRIPT_READ_BLOCKING: ReadonlySet<string> = new Set(["who", "what", "why", "voice"]);
 export const ComicScriptReadFindingSchema = z.object({
   kind: z.enum(SCRIPT_READ_KINDS),
@@ -400,7 +406,8 @@ export const ComicCreationSchema: z.ZodType<ComicCreation, z.ZodTypeDef, unknown
 export const DEFAULT_COMIC_PLAN: ComicPlan = { reading: "ltr", aspect: DEFAULT_COMIC_ASPECT, pilot: true, chapters: [] };
 
 /** The three things setup asks by example (R-4): the page draws example cards for the one open. */
-export const ComicAskSchema = z.enum(["reading", "aspect", "pilot"]);
+/** What setup is asking (turn 249b), or the usual three as one card to use or change (turn 256a). */
+export const ComicAskSchema = z.enum(["usual", "reading", "aspect", "pilot"]);
 export type ComicAsk = z.infer<typeof ComicAskSchema>;
 
 // ---------------------------------------------------------------------------
@@ -463,6 +470,16 @@ export function pageAspect(page: Pick<ComicPage, "aspect" | "layout">, settings:
  * mirrors the template, which mirrors its reading order with it; lettering inside a panel keeps its
  * order either way. Panels past the template's count have no rectangle and review says so (R-40).
  */
+/**
+ * The layout a page's panels fit (turn 256): its own when the counts agree, otherwise the first
+ * template with exactly that many panels, otherwise its own. Arke gave every page of a draft the
+ * five-panel Manga template, one of them holding nine panels.
+ */
+export function fitLayout(layout: string, panels: number): string {
+  if (layoutTemplate(layout)?.panels.length === panels) return layout;
+  return LAYOUT_TEMPLATES.find((template) => !template.scroll && template.panels.length === panels)?.id ?? layout;
+}
+
 export function panelRects(page: Pick<ComicPage, "layout">, reading: ComicReading): LayoutRect[] {
   return (layoutTemplate(page.layout)?.panels ?? []).map((rect) => reading === "rtl" ? { ...rect, x: 1 - rect.x - rect.w } : rect);
 }

@@ -28,6 +28,12 @@ describe("graphic novel setup (turn 249b)", () => {
     assert.match(html, /Page counts are a first guess/);
   });
 
+  it("offers the usual three as one card to use or change (turn 256a)", () => {
+    const html = renderToStaticMarkup(<ComicAskCards ask="usual" disabled={false} onChoose={() => {}} pilotTitle="The tide" />);
+    assert.match(html, /Reading.*Left to right.*Page.*2:3 comic book.*Pilot.*Chapter 1 · The tide/s);
+    assert.match(html, />Use these<.*>Change</s);
+  });
+
   it("asks for the pilot chapter's pages", () => {
     assert.equal(comicPilotAsk("The tide"), "Plan the pilot: chapter 1, The tide, as pages.");
   });

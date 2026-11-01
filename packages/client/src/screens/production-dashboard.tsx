@@ -20,6 +20,7 @@ import { PageSheet } from "../components/page-sheet.js";
 import { ChevronRight, More } from "../components/icons.js";
 import { DramaEpisodesScreen } from "./drama-episodes.js";
 import { MusicAlbumScreen } from "./music-album.js";
+import { ComicDashboard } from "./comic-dashboard.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-card.js";
 import { seconds } from "../lib/format.js";
@@ -58,6 +59,7 @@ export function ProductionHomeScreen() {
   if (production && productionShape(production.meta).isEpisodic) return <DevelopmentWorkspace />;
   if (production && productionShape(production.meta).isAudioDrama) return <DramaEpisodesScreen />;
   if (production && productionShape(production.meta).isMusic) return <MusicAlbumScreen />;
+  if (production && productionShape(production.meta).hasPages) return <ComicDashboard />;
   return <ProductionDashboardScreen />;
 }
 

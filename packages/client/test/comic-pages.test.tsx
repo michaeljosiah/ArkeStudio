@@ -365,6 +365,9 @@ describe("Arke's pages (turn 249)", () => {
     const m = await mount(withDraft([drafted, page()]));
     assert.match(m.container.textContent!, /Arke’s draft2 pages from chapter 1/);
     assert.equal(m.container.querySelectorAll(".fy-comic__thumb--draft").length, 2);
+    // A draft opens as the reader meets it (turn 256d); Details is the script with its passages.
+    assert.ok(m.container.querySelector(".fy-comic__readpanel"));
+    await act(async () => props(button(m.container, "Details")!).onClick({}));
     assert.match(m.container.querySelector(".fy-comic__src")!.textContent!, /1.2/);
     const make = [...m.container.querySelectorAll("button")].find((b) => b.textContent?.includes("Make page"))!;
     assert.equal((make as unknown as HTMLButtonElement).disabled, true);
@@ -535,7 +538,7 @@ describe("Adapt before drawing (turn 254)", () => {
     assert.equal(button(m.container, "Keep"), undefined);
     assert.ok(button(m.container, "Keep anyway"));
     assert.match(m.container.querySelector(".fy-comic__finds")!.textContent!, /WhoPage 1 · “Who is Jory\?”/);
-    assert.ok(m.container.querySelector(".fy-comic__panel--draft.flag"), "the panel is marked");
+    assert.ok(m.container.querySelector(".fy-comic__readpanel.flag"), "the panel is marked");
     assert.match(m.container.querySelector(".fy-comic__asked")!.textContent!, /Who“Who is Jory\?”/);
     assert.ok(m.container.querySelector(".fy-comic__thumb--draft .s.x"), "and its page in the strip");
   });
@@ -545,6 +548,17 @@ describe("Adapt before drawing (turn 254)", () => {
     assert.match(m.container.querySelector(".fy-comic__draftbar")!.textContent!, /Not read/);
     assert.ok(button(m.container, "Choose reader"));
     assert.ok(button(m.container, "Keep anyway"), "never a pass");
+  });
+
+  it("keeps the book's mysteries apart: listed in the plan, shown beside a draft and never counted (turn 256c, 256d)", async () => {
+    const planned = await mount(drafting({ pages: [], plan: { ...PLAN, mysteries: ["What is under the water?"] } }));
+    assert.match(planned.container.querySelector(".fy-comic__plan")!.textContent!, /Kept on purposeWhat is under the water\?open/);
+    await act(async () => root?.unmount());
+    const read = { status: "read", reader: { id: "harness", version: "1:m" }, findings: [{ kind: "kept", page: 1, question: "What is under the water?" }], redrafts: 0, at: AT };
+    const m = await mount(drafting({ pages: [page()], read }));
+    assert.match(m.container.querySelector(".fy-comic__draftbar")!.textContent!, /Read1 kept mystery/);
+    assert.ok(button(m.container, "Keep"), "a kept mystery is not a fault");
+    assert.equal(m.container.querySelector(".fy-comic__finds"), null, "nor listed as one");
   });
 
   it("keeps a draft a reader could follow with Keep", async () => {
