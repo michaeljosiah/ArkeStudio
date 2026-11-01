@@ -1551,8 +1551,10 @@ export class Coordinator {
       plan: async (sceneId) => {
         narrator ??= this.tableReadNarrator(store, productionId);
         const { plan } = await planTableRead(store, productionId, sceneId, manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, undefined, await narrator);
-        return { sceneVersion: plan.sceneVersion, files: new Map(plan.items.flatMap((item) => (item.file === undefined ? [] : [[item.lineId, item.file] as const]))) };
+        return { sceneVersion: plan.sceneVersion, confirmationToken: plan.confirmationToken, files: new Map(plan.items.flatMap((item) => (item.file === undefined ? [] : [[item.lineId, item.file] as const]))) };
       },
+      cacheState: () => (this.jobQueue?.listJobs() ?? []).filter(job => job.worldId === store.worldId && job.target.kind === "table-read-cache")
+        .map(job => [job.id, job.status, job.finalization]),
       // The narrator as chosen in Settings, read fresh each time: the export compares it before
       // and under its gate, and the setting is what a person changes — not the catalogue's
       // resolution of it, which would put a provider listing inside the world's gate.
