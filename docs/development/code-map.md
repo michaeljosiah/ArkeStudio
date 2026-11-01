@@ -1,5 +1,10 @@
 # Code map
 
+Graphic-novel preview planning (#2253): `coordinator/src/productions/setup-brief.ts` honours
+the requested chapter scope without preloading every chapter's beats; `setup.ts` requires a
+current full-read receipt for each planned source chapter. Existing plan/create UI and schemas
+already support a subset; other adaptation kinds retain their whole-story requirement.
+
 Saved Words review (#2242): `contracts/src/audiobook-words.ts` owns the presentation-only
 formatting classification used by counts and the existing client Words dialog (turn 261).
 The shared transcript cache, raw diff, source selection and acoustic timing remain unchanged.

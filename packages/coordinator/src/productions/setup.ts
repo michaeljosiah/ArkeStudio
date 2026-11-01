@@ -25,17 +25,18 @@ import { ADAPT_FROM_SCHEMA_VERSION, AUDIO_DRAMA_SCHEMA_VERSION, COMIC_ADAPTATION
 export function assertSourceReadForPlan(
   bundle: WorldBundle, update: ProductionSetupUpdate, draft: ProductionSetupDraft, receipts: readonly WorldChatCheckReceipt[],
 ): void {
-  // A graphic novel's chapters are planned from the story the same way (SPEC-064 R-4, turn 249b).
+  // A graphic novel can preview just the requested chapters; each planned source still needs a current full read.
   const plansAudio = !!update.fields?.audioDrama && draft.kind === AUDIO_DRAMA_KIND;
   const plansPages = !!update.fields?.graphicNovel && update.fields.graphicNovel.chapters.length > 0 && draft.kind === GRAPHIC_NOVEL_KIND;
   if ((!plansAudio && !plansPages) || !draft.source) return;
   const story = bundle.productions.find(production => production.meta.id === draft.source!.productionId);
   if (!story) return;
-  const chapters = story.chapters.filter(chapter => chapter.retired !== true).sort((a, b) => a.order - b.order);
+  const selected = plansPages ? new Set(update.fields!.graphicNovel!.chapters.map(chapter => chapter.from)) : null;
+  const chapters = story.chapters.filter(chapter => chapter.retired !== true && (!selected || selected.has(chapter.order))).sort((a, b) => a.order - b.order);
   const read = chaptersReadWhole(receipts, story.meta.id, chapterId => chapterFence(story, chapterId));
   const unread = chapters.filter(chapter => !read.has(chapter.id));
   if (unread.length === 0) return;
-  throw new Error(`Read all of “${story.meta.title}” before proposing the plan: ${chapters.length - unread.length} of ${chapters.length} chapters read whole. Still to read with get_chapter (no section): ${unread.slice(0, 40).map(chapter => chapter.id).join(", ")}${unread.length > 40 ? ", …" : ""}.`);
+  throw new Error(`${plansPages ? "Read every selected chapter of" : "Read all of"} “${story.meta.title}” before proposing the plan: ${chapters.length - unread.length} of ${chapters.length} chapters read whole. Still to read with get_chapter (no section): ${unread.slice(0, 40).map(chapter => chapter.id).join(", ")}${unread.length > 40 ? ", …" : ""}.`);
 }
 
 /** What a door may say about the production before setup opens (SPEC-057 R-3). */

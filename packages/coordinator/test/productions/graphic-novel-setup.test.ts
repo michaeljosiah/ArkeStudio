@@ -12,6 +12,7 @@ import { COMIC_ADAPTATION_SCHEMA_VERSION, COMIC_PILOT_SCHEMA_VERSION } from "../
 import { readWorldMeta } from "../../src/world/scan.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
+import { chapterFence } from "../../src/world-chat/target-reads.js";
 
 /**
  * A graphic novel planned with Arke (SPEC-064 R-3, R-4, design turn 249b): setup adapts a story,
@@ -53,11 +54,26 @@ describe("a graphic novel planned with Arke (SPEC-064 R-3, R-4, turn 249b)", () 
     assert.ok((await readWorldMeta(store.dir)).schemaVersion >= COMIC_ADAPTATION_SCHEMA_VERSION, "a graphic novel's setup draft is past older readers");
   });
 
-  it("refuses a plan of chapters until every chapter of the story is read", async () => {
+  it("requires current full reads of the selected chapters, without requiring the rest of the book", async () => {
     const store = await open();
     const draft = (await new ProductionSetupService(store).start(`cv_${ulid()}` as ConversationId, { kind: "graphic-novel", source: { productionId: STORY } })).draft;
     const update = { expectedRevision: draft.revision, fields: { graphicNovel: { reading: "ltr" as const, aspect: "2:3", pilot: true, chapters: [{ from: 1, title: "Neap", pages: 8 }] } } };
-    assert.throws(() => assertSourceReadForPlan(store.getBundle(), update, draft, []), /Read all of/);
+    assert.throws(() => assertSourceReadForPlan(store.getBundle(), update, draft, []), /Read every selected chapter/);
+    const source = store.getBundle().productions.find(production => production.meta.id === STORY)!;
+    const first = source.chapters.find(chapter => chapter.order === 1)!;
+    const whole = (id: string, extra: object = {}) => ({ id: newId("check"), runId: newId("run"), tool: "target-read", status: "complete", consulted: [], at: CLOCK,
+      target: { requirement: "chapters", id: `${STORY}:${id}` }, complete: true, observedRevisionOrDigest: chapterFence(source, id), ...extra }) as never;
+    assert.doesNotThrow(() => assertSourceReadForPlan(store.getBundle(), update, draft, [whole(first.id)]));
+    for (const receipt of [whole(`${first.id}:beats`), whole(first.id, { complete: false }), whole(first.id, { observedRevisionOrDigest: "old" })]) {
+      assert.throws(() => assertSourceReadForPlan(store.getBundle(), update, draft, [receipt]), /Still to read/);
+    }
+    const entire = { ...update, fields: { graphicNovel: { ...update.fields.graphicNovel, chapters: chaptersOf(store).map(chapter => ({ from: chapter.order, title: chapter.title, pages: 4 })) } } };
+    assert.throws(() => assertSourceReadForPlan(store.getBundle(), entire, draft, [whole(first.id)]), /Still to read/);
+    assert.doesNotThrow(() => assertSourceReadForPlan(store.getBundle(), entire, draft, chaptersOf(store).map(chapter => whole(chapter.id))));
+    const preview = applyProductionSetupUpdate(draft, { ...update, fields: { ...update.fields, title: "One chapter preview" } });
+    const plan = planProductionSetup(store.getBundle(), preview, CLOCK);
+    await createProductionFromPlan(store, plan, { source: "test", requestId: ulid(), precondition: () => null });
+    assert.equal(store.getBundle().productions.find(production => production.meta.id === plan.production.id)!.chapters.length, 1);
     // Asking a question is not a plan: it needs no reading.
     assert.doesNotThrow(() => assertSourceReadForPlan(store.getBundle(), { expectedRevision: draft.revision, fields: { comicAsk: "reading" } }, draft, []));
   });
@@ -98,20 +114,27 @@ describe("a graphic novel planned with Arke (SPEC-064 R-3, R-4, turn 249b)", () 
     assert.ok((await readWorldMeta(store.dir)).schemaVersion >= COMIC_ADAPTATION_SCHEMA_VERSION);
   });
 
-  it("tells Arke to ask three things by example and plan a chapter of pages for each, only for a graphic novel", async () => {
+  it("honours a requested preview without preloading every chapter's beats or requiring a whole-book plan", async () => {
     const store = await open();
     const draft = (await new ProductionSetupService(store).start(`cv_${ulid()}` as ConversationId, { kind: "graphic-novel", source: { productionId: STORY }, comicStyle: MANGA })).draft;
-    const read = async (tool: string, args: Record<string, unknown>) => ({
+    const reads: string[] = [];
+    const read = async (tool: string, args: Record<string, unknown>) => { reads.push(tool); return ({
       result: tool === "get_chapter" ? { items: [] } : { id: args.id },
       receipt: { id: newId("check"), runId: newId("run"), tool: "get-entry", status: "complete", consulted: [], at: CLOCK },
-    }) as never;
-    const brief = await productionSetupBrief(store.getBundle(), draft, read, 400_000);
+    }) as never; };
+    const bundle = store.getBundle();
+    for (const chapter of bundle.productions.find(production => production.meta.id === STORY)!.chapters) chapter.audiobook ??= {} as never;
+    const brief = await productionSetupBrief(bundle, draft, read, 400_000);
     assert.match(brief, /This production is a graphic novel/);
     assert.match(brief, /set fields\.comicAsk to "reading", "aspect" or "pilot"/);
-    assert.match(brief, /one chapter of pages for each chapter of the story/);
+    assert.match(brief, /one chapter of pages for each selected source chapter/);
+    assert.match(brief, /A one-chapter plan is a first-class result/);
+    assert.doesNotMatch(brief, /read every chapter/i);
+    assert(!reads.includes("get_chapter"), "setup does not read unrequested chapter content or beats");
     assert.match(brief, /Japanese manga/, "the author's style is named, to keep");
     assert.match(brief, /Do not propose verdicts or a page-by-page outline here/);
     const drama = await productionSetupBrief(store.getBundle(), { ...draft, kind: "audio-drama", graphicNovel: undefined }, read, 400_000);
     assert.doesNotMatch(drama, /This production is a graphic novel/);
+    assert.match(drama, /read every chapter/i, "other adaptation rules remain unchanged");
   });
 });
