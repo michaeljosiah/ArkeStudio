@@ -20,6 +20,9 @@ import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import type { TakeQcAnalyzer, TakeQcUnavailableReason } from "./qc.js";
 import { writePosterFor, type TakePosterMaker, type TakePosterUnavailableReason } from "./poster.js";
+import { measureProductionMedia } from "../media/measurement.js";
+import type { MediaProbe } from "../media/probe.js";
+import type { MediaMeasurementResult } from "@arke-studio/contracts";
 
 /**
  * Take arrival (SPEC-013 §2.2, §2.3): SPEC-009 landed verified media; this writes the
@@ -92,6 +95,9 @@ function continuedFromOf(store: WorldStore, job: Job): Take["continuedFrom"] {
 }
 
 export interface TakeArrivalOptions {
+  mediaProbe?: MediaProbe;
+  mediaSignal?: AbortSignal;
+  onMediaUnavailable?: (reason: Extract<MediaMeasurementResult, { status: "failed" }>["reason"]) => void;
   /** Absent on any build without ffmpeg, which is most of them — see takes/qc.ts. */
   analyzer?: TakeQcAnalyzer;
   /** Told why a measurement is missing, so "not measured" is explicable rather than silent. */
@@ -100,6 +106,13 @@ export interface TakeArrivalOptions {
   poster?: TakePosterMaker;
   /** Told why a video take has no picture beside it, for the same reason as the measurement. */
   onPosterUnavailable?: (reason: TakePosterUnavailableReason) => void;
+}
+
+async function measureTake(store: WorldStore, productionId: string, take: Take, options: TakeArrivalOptions): Promise<void> {
+  if (take.kind !== "clip" && take.kind !== "voice") return;
+  const result = options.mediaProbe?.info ? await measureProductionMedia(store, productionId, { kind: "take", takeId: take.id }, options.mediaProbe, take.mediaHash, options.mediaSignal)
+    : { status: "failed" as const, reason: "not-configured" as const };
+  if (result.status === "failed") try { options.onMediaUnavailable?.(result.reason); } catch { /* Diagnostic failure cannot lose a paid take. */ }
 }
 
 async function takeForJob(store: WorldStore, productionId: string, jobId: string): Promise<Take | null> {
@@ -219,7 +232,10 @@ export async function recordTakesFromJob(
   const rejoins = quoted || job.target.kind === "voice-line" || job.params["landing"] === "frame-slot";
   if (rejoins) {
     const existing = await takeForJob(store, job.productionId, job.id);
-    if (existing !== null && !(quoted && job.target.kind === "scene-pass")) return [existing];
+    if (existing !== null && !(quoted && job.target.kind === "scene-pass")) {
+      await measureTake(store, job.productionId, existing, options);
+      return [existing];
+    }
   }
   const media = job.landedFiles?.[0];
   if (media === undefined) return [];
@@ -377,5 +393,7 @@ export async function recordTakesFromJob(
       }
     }
   });
+  const primary = written[0];
+  if (primary) await measureTake(store, job.productionId, primary, options);
   return written;
 }

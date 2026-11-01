@@ -1,4 +1,5 @@
 import { PromptToolsResultSchema } from "./prompt-tools.js";
+import { MediaMeasurementResultSchema } from "./media-measurement.js";
 import { GuideVoiceLineSchema } from "./world-guide.js";
 import { OnboardingStatusSchema } from "./onboarding.js";
 import { ArkePlayerReleaseSchema } from "./arke-player-release.js";
@@ -417,6 +418,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     .strict(),
 
   z.object({ ...base, type: z.literal("prompt-tools.changed"), enabled: z.boolean() }).strict(),
+  z.object({ ...base, type: z.literal("media.measured"), worldId: UlidSchema, requestId: UlidSchema, result: MediaMeasurementResultSchema }).strict(),
   z.object({ ...base, type: z.literal("prompt-tools.result"), requestId: UlidSchema, worldId: UlidSchema, result: PromptToolsResultSchema }).strict(),
 
   /** One kept version's prose, for Compare (SPEC-056 R-13). */

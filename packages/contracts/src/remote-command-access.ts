@@ -7,6 +7,7 @@ import type { AdapterAction } from "./adapters.js";
  * credentials, installation or machine processes. Payload cases mix both and are checked below. */
 export const REMOTE_COMMAND_ACCESS = {
   "set-prompt-tools": "studio", "prompt-history-read": "studio", "prompt-history-restore": "studio", "prompt-request-inspect": "studio",
+  "measure-production-media": "studio",
   "production-spend-refresh": "studio",
   "check-onboarding": "host", "save-onboarding": "host",
   "import-world": "host",

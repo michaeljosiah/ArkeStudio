@@ -33,6 +33,8 @@ import {
   musicTakesLength,
   newId,
   orderedShots,
+  productionHasScore,
+  NO_BACKGROUND_MUSIC,
   pricedDuration,
   routeFor,
   sizeParamsFor,
@@ -959,11 +961,14 @@ export function planBenchDispatch(
     ? videoPaths.map((_, index) => `Use @Video${index + 1} as a motion reference.`).join("\n") : "";
   // On the reference route Arke writes one subject line per picture and translates the brief's
   // citations; nothing else in the brief is rewritten (design turn 179).
+  const production = session.subject ? bundle.productions.find(candidate => candidate.meta.id === session.subject!.productionId) : undefined;
+  const musicPolicy = composer.mode === "video" && production && productionHasScore(production) ? NO_BACKGROUND_MUSIC : null;
+  const compiledBody = musicPolicy ? `${body}\n\n${musicPolicy}` : body;
   const wirePrompt = referenceRoute !== undefined
-    ? [...referenceSubjectLines(referenceRoute.pictures.map((picture) => picture.who)), referencePrompt(body, laneModel)].join("\n")
+    ? [...referenceSubjectLines(referenceRoute.pictures.map((picture) => picture.who)), referencePrompt(compiledBody, laneModel)].join("\n")
     : [providerSizedShot ? `Compose for the production's ${params.kind === "image" ? params.aspect : ""} frame. Keep the main action inside a centred crop of that shape; the image dimensions are chosen by the provider.` : null,
       motionBindings || null, preamble ? referencePrompt(preamble, model, videoPaths.length, 0, true) : null,
-      referencePrompt(body, model, videoPaths.length),
+      referencePrompt(compiledBody, model, videoPaths.length),
       audioReferences ? referencePrompt(characterAudioInstructions(audioReferences), model, videoPaths.length, standaloneAudioCount) : null].filter(Boolean).join("\n\n");
   if (referenceRoute !== undefined) referenceRoute.prompt = wirePrompt;
   // The cap was held against the brief, which is what the author can shorten; the words that

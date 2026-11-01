@@ -252,3 +252,5 @@ export * from "./onboarding.js";
 
 export * from "./production-spend.js";
 export * from "./prompt-tools.js";
+export * from "./production-audio-design.js";
+export * from "./media-measurement.js";

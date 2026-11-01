@@ -19,6 +19,7 @@ import {
   orderedShots,
   resolveProductionArtifact,
   legacyCutArtifactReferences,
+  productionHasScore,
 } from "@arke-studio/contracts";
 import { supersededBy } from "../productions/continuation.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -267,22 +268,12 @@ export async function rejectTake(
 }
 
 /**
- * The production's audio design, as dispatch needs it (SPEC-019 R-11). Only one question is
- * asked of `cut.json` here: does this cut compose its own score? If it does, the model must not
- * lay music under every clip, because the take would arrive with music baked into audio that
- * cannot be separated from it. A production with no cut file yet composes no score.
+ * A master or delivery Music clip rules out a second baked-in score (SPEC-019 R-11).
+ * The legacy cut remains a fallback only until the timeline owns delivery.
  */
 export async function audioDesignFor(store: WorldStore, productionId: string): Promise<AudioDesign> {
-  const existing = await readOr(store, `productions/${productionId}/cut.json`, "");
-  if (!existing.existed) return { scoreTrack: false };
-  try {
-    const cut = CutFileSchema.parse(JSON.parse(existing.raw));
-    return { scoreTrack: cut.audio.some((track) => track.kind === "score" && track.entries.length > 0) };
-  } catch {
-    // An unreadable cut file is not a reason to refuse a dispatch, and treating it as "no score"
-    // only ever adds music the user can still remove — the reverse would bake it in.
-    return { scoreTrack: false };
-  }
+  const production = store.getBundle().productions.find(candidate => candidate.meta.id === productionId);
+  return { scoreTrack: production ? productionHasScore(production) : false };
 }
 
 /** Save the audio tracks — the only thing cut.json holds (R-16, R-17). */

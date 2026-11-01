@@ -505,6 +505,7 @@ const CLIENT_COMMAND_METADATA = {
   "music-sequence-set": action("production", "command", "production-store", "authored-change", ["production-metadata"]),
   "read-music-takes": readOnly(QUERY),
   "read-music-waveform": readOnly(QUERY),
+  "measure-production-media": humanOnly("Measure a selected source locally without generating or uploading media."),
   "list-guide-voice-lines": readOnly(QUERY),
   "reorder-chapters": action("production", "command", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   "reorder-scenes": action("production", "command", "production-store", "authored-change", ["scenes", "episodes"]),

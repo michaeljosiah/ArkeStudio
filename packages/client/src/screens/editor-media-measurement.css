@@ -1,0 +1,8 @@
+.fy-source-measurement { margin: 14px 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--muted); overflow-wrap: anywhere; }
+.fy-source-measurement strong { font: var(--type-ui); }
+.fy-source-measurement p { margin: 6px 0 10px; color: var(--muted-foreground); font: var(--type-meta); line-height: 1.5; }
+.fy-source-measurement button { max-width: 100%; white-space: normal; }
+@media (max-width: 767px) {
+  .fy-source-measurement { padding: 16px; }
+  .fy-source-measurement button { min-height: 44px; }
+}

@@ -11,6 +11,7 @@ import {
   type ReferenceKit,
 } from "./reference.js";
 import { DEFAULT_AUDIO_POLICY, type AudioPolicy, type ResolvedArtDirection } from "./art-direction.js";
+import { NO_BACKGROUND_MUSIC } from "./production-audio-design.js";
 import {
   payloadVerdict,
   carriesVideoReferences,
@@ -1134,7 +1135,7 @@ export function derivedNegatives(input: NegativeInput): string | null {
     // a world or production may now say it standing, before any cut exists. The condition is an
     // or rather than a replacement — a policy that stopped applying the moment somebody added a
     // score track would be a policy that switches itself off exactly when it matters most.
-      parts.push("No background music — environmental and action sound only.");
+      parts.push(NO_BACKGROUND_MUSIC);
     }
   }
   /*
