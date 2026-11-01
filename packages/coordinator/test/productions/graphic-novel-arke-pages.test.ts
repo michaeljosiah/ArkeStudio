@@ -78,6 +78,10 @@ describe("Arke's pages (SPEC-064 R-13, turn 249)", () => {
     assert.equal(production(store, id).comicScripts![0]!.script.pages.length, 0, "nothing is written while the draft waits");
     const staged = store.getBundle().proposals.find((entry) => entry.proposal.id === proposal.id)!;
     const drafted = Object.values(staged.comicScripts ?? {})[0]!;
+    const review = (await gate.project(proposal.id)).review.targets[0]!;
+    assert.deepEqual(review.fields.find(field => field.field === "Pages"), { field: "Pages", before: "0 pages", proposed: "1 page" });
+    assert.match(review.fields.find(field => field.field === "Page 1")!.proposed!, /Panel 1:/);
+    assert.ok(review.fields.some(field => field.field === "Script JSON"), "every detail remains available in the full review");
     assert.deepEqual(drafted.read, coldRead);
     const panel = drafted.pages[0]!.panels[0]!;
     assert.match(panel.id, /^[0-9A-HJKMNP-TV-Z]{26}$/, "a new panel is given its id");

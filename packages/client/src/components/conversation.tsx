@@ -366,6 +366,8 @@ export function ConversationPermissionCard({
 
   const body = <ConversationActionBody action={action} supported={supported} />;
   const comicDraft = action.actionKind === "world-chat-production-comic-script";
+  const comicChapter = comicDraft ? state?.world?.proposals.find(p => p.proposal.id === action.authority.id)?.proposal.targets
+    .map(target => /^productions\/[^/]+\/comic\/([^/]+)\.json$/.exec(target.path)?.[1]).find(Boolean) : undefined;
   const consequences = action.shown.ripples.length > 0 ? (
     <div className="fy-actioncard__body">
       <strong>Consequences</strong>
@@ -427,7 +429,7 @@ export function ConversationPermissionCard({
           the same question twice. */}
       {comicDraft && action.status === "pending" && state?.world ? (
         <div className="fy-actioncard__actions">
-          <Button variant="primary" onClick={() => void navigate(`/w/${state.world!.meta.worldId}/p/${action.productionId}/story/pages`)}>Open in Pages</Button>
+          <Button variant="primary" onClick={() => void navigate(`/w/${state.world!.meta.worldId}/p/${action.productionId}/story/pages${comicChapter ? `?chapter=${encodeURIComponent(comicChapter)}` : ""}`)}>Review in Pages</Button>
         </div>
       ) : null}
       {supported && !comicDraft && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
@@ -476,7 +478,7 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
           field: field.label, before: field.before, proposed: field.after, metadata: !action.sheetCreationProseFields!.includes(index),
         })) }} /> : body.fields.map((field) => <div key={field.label} className="fy-actioncard__change">
           <strong>{field.label}</strong>
-          <span className="fy-actioncard__before">{field.before ?? "Not set"}</span>
+          <span className="fy-actioncard__before">{field.before ?? (action.actionKind === "world-chat-production-comic-script" ? "New draft" : "Not set")}</span>
           <span aria-hidden="true">→</span>
           <span>{field.after ?? "Removed"}</span>
         </div>)}

@@ -4,7 +4,7 @@ import { afterEach, it } from "node:test";
 import { act, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation } from "react-router";
 import { parseHTML } from "linkedom";
 import { migrateLegacyScene, newId, orderedShots, type ConversationActionCard, type HumanDecisionCard, type WorldChatWorkspace } from "@arke-studio/contracts";
 import { ProductionStudio } from "../src/components/production-studio.js";
@@ -50,7 +50,9 @@ function DecisionProbe() {
 }
 function Thread({ action }: { action: ConversationActionCard }) {
   const [draft, setDraft] = useState("");
+  const location = useLocation();
   return <aside className="fy-arke"><header className="fy-arke__head"><StudioToggle /></header><div className="fy-arke__log">
+    <output data-testid="location">{location.pathname}{location.search}</output>
     <ConversationPermissionCard action={action} conversationSeq={1} /><DecisionProbe /></div>
     <StudioSidebar /><textarea aria-label="Unsent words" value={draft} onInput={e => setDraft(e.currentTarget.value)} /></aside>;
 }
@@ -71,6 +73,25 @@ async function setup(action = card(), docked = true) {
   await render();
   return { action, sent, update: async (actions: ConversationActionCard[]) => { current = { ...current, actions }; await render(); } };
 }
+
+it("comic drafts name the review and open the draft's chapter without deciding (#2255)", async t => {
+  const action = card();
+  action.actionKind = "world-chat-production-comic-script";
+  action.authority = { kind: "proposal-manager", id: world.proposals[0]!.proposal.id };
+  action.cardFamily = "authored-diff";
+  action.shown = { ...action.shown, productionPreview: undefined, body: { family: "authored-diff", fields: [
+    { label: "Salt: Pages", before: null, after: "4 pages" },
+  ], conflicts: [], openChoices: [] } };
+  const targets = world.proposals[0]!.proposal.targets;
+  world.proposals[0]!.proposal.targets = [{ path: `productions/${production.meta.id}/comic/salt.json`, baseVersion: null, baseHash: null }];
+  t.after(() => { world.proposals[0]!.proposal.targets = targets; });
+  const made = await setup(action);
+  assert.match(dom.document.querySelector('.fy-actioncard')!.textContent!, /Salt: PagesNew draft→4 pages/);
+  assert.equal([...dom.document.querySelectorAll("button")].some(b => b.textContent === "Approve" || b.textContent === "Deny"), false);
+  await click("Review in Pages");
+  assert.match(dom.document.querySelector('[data-testid="location"]')!.textContent!, /\/story\/pages\?chapter=salt$/);
+  assert.equal(made.sent.length, 0);
+});
 
 it("Show opens all forty pending shots without a decision and preserves the same conversation draft", async () => {
   const made = await setup();

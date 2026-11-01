@@ -1774,6 +1774,11 @@ async function proposalProjection(
   preparing = true,
 ): Promise<PreparedConversationActionAuthority> {
   const { proposal, review, ripple, scenePreview } = await gate.project(proposalId);
+  if (proposal.kind === "comic-script") for (const target of review.targets) {
+    const path = /^productions\/([^/]+)\/comic\/([^/]+)\.json$/.exec(target.path);
+    const chapter = path && store.getBundle().productions.find(p => p.meta.id === path[1])?.chapters.find(c => c.id === path[2]);
+    if (chapter) target.label = chapter.title;
+  }
   const productionPreview = scenePreview ? { kind: "scene" as const, ...scenePreview } : undefined;
   if (productionPreview) await store.ensureSchemaVersion(PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, "production-card-preview");
   const fields = review.targets.flatMap((target) =>

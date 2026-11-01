@@ -3,7 +3,7 @@ import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { Link, MemoryRouter, Route, Routes } from "react-router";
 import { DEFAULT_COMIC_SETTINGS, DEFAULT_LETTERING_THRESHOLDS, comicPageHash, ulid, type ClientMessage, type ClientState, type ComicPage, type ComicPageRecord, type ComicPageTake } from "@arke-studio/contracts";
 import { ComicPagesScreen, notChecked, sideWidth } from "../src/screens/comic-pages.js";
 import { productionPages } from "../src/lib/production-navigation.js";
@@ -52,7 +52,7 @@ afterEach(async () => {
   root = null; __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE);
   dom.document.body.innerHTML = "";
 });
-async function mount(state: ClientState) {
+async function mount(state: ClientState, reviewChapter?: string) {
   const sent: ClientMessage[] = [];
   __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
   const container = dom.document.createElement("div") as unknown as HTMLElement;
@@ -61,6 +61,7 @@ async function mount(state: ClientState) {
   await act(async () => {
     __setStateForTest(state, { connection: "open" });
     root!.render(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/low-water-drawn/story/pages`]}>
+      {reviewChapter && <Link to={`?chapter=${reviewChapter}`} data-testid="review-link">Review in Pages</Link>}
       <Routes><Route path="/w/:worldId/p/:prodId/story/pages" element={<ComicPagesScreen />} /></Routes>
     </MemoryRouter>);
   });
@@ -70,6 +71,20 @@ const props = (el: Element) => (el as unknown as Record<string, Record<string, a
 const button = (container: HTMLElement, text: string) => [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === text);
 
 describe("Pages (turn 247)", () => {
+  it("follows a review link while Pages is already open, including the same URL again", async () => {
+    const state = withBook([page()], {}), comic = state.world!.productions.at(-1)!;
+    const salt = page(); salt.panels[0]!.description = "Salt on the boards.";
+    comic.chapters.push({ ...comic.chapters[0]!, id: "salt", order: 2, title: "Salt", file: "02-salt.md" });
+    comic.comicScripts!.push({ chapter: "salt", hash: "sha256:salt", script: { version: 1, pages: [salt] } });
+    const m = await mount(state, "salt");
+    const review = async () => act(async () => props(m.container.querySelector('[data-testid="review-link"]')!).onClick({ button: 0, preventDefault() {} }));
+    await review();
+    assert.equal(props(m.container.querySelector("textarea[aria-label='Panel 1']")!).value, "Salt on the boards.");
+    const tide = [...m.container.querySelectorAll("button[role='tab']")].find(b => b.textContent?.includes("The tide"))!;
+    await act(async () => props(tide).onClick({}));
+    await review();
+    assert.equal(props(m.container.querySelector("textarea[aria-label='Panel 1']")!).value, "Salt on the boards.");
+  });
   it("puts Pages on a graphic novel's rail in place of Audiobook", () => {
     const labels = productionPages({ hasChapters: true, isEpisodic: false, isBranching: false, hasPages: true }).map(([, label]) => label);
     assert.ok(labels.includes("Pages"));
