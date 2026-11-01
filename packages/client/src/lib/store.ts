@@ -837,8 +837,8 @@ export function subscribeAudiobookTallProgress(listener: (progress: AudiobookTal
 /**
  * Each book's last run progress, kept beyond the sheet that shows it: a sheet closed and opened
  * again while a picture is being made shows the run and Stop at once, rather than waiting for
- * the next picture to land (codex on PR 2166). Cleared by every snapshot, which the replay of
- * the runs still going follows.
+ * the next picture to land (codex on PR 2166). Cleared on reconnect, before replay restores
+ * the runs still going. Ordinary refreshes carry no replay.
  */
 const lastTallProgress = new Map<string, AudiobookTallProgress>();
 export function lastAudiobookTallProgress(worldId: string, productionId: string): AudiobookTallProgress | null {
@@ -1783,9 +1783,6 @@ function handleFrame(json: string): void {
     helloFallbackTimer = null;
     frameRunQuoteListeners.clear();
     frameRunStartResultListeners.clear();
-    // A run that ended while this window was away sent its end to no one: the coordinator replays
-    // only those still going, after this snapshot, so what was kept before it is stale (codex on PR 2166).
-    lastTallProgress.clear();
     // Prune notices for proposals the snapshot no longer carries — and "the studio is still
     // drafting" for any run the snapshot says has since ended. That refusal describes the run
     // rather than the proposal, so unlike its siblings it must not wait for a resolution to
@@ -1800,6 +1797,9 @@ function handleFrame(json: string): void {
     const changedWorld = current.state?.world?.meta.worldId !== frame.state.world?.meta.worldId;
     const rejoined = rejoining;
     rejoining = false;
+    // Only hello gets a replay. Refreshes have missed no events; clearing live state here
+    // would hide permissions and Stop controls until another progress event happened.
+    if (rejoined) lastTallProgress.clear();
     if (changedWorld || rejoined) forgetDoorAsks();
     const authoring = seedLiveRuns(current.authoring, frame.state.authoringRuns);
     const durableVoiceAudio: StoreState["voiceAudio"] = {};
@@ -1854,9 +1854,7 @@ function handleFrame(json: string): void {
       state: frame.state,
       gateNotices,
       authoring,
-      // Snapshot replay is followed by current permission.pending events. Clear stale prompts
-      // first so a request that disappeared while the renderer was away does not survive reload.
-      permissions: {},
+      permissions: rejoined ? {} : current.permissions,
       // Keyed by entry id alone, and canon ids restart at CANON-001 in every world: the previous
       // world's entry would otherwise supply the history, citations and ripples for the
       // same-numbered entry in the next one, until its own answer arrived to replace them.
@@ -1873,27 +1871,26 @@ function handleFrame(json: string): void {
       // A snapshot carrying the world has ended its open, whatever event was missed on the way,
       // and a window that rejoined is told again by the replay if the open is still going.
       worldOpenProgress: rejoined || frame.state.world?.meta.worldId === current.worldOpenProgress?.worldId ? null : current.worldOpenProgress,
-      // A run still going is replayed after the snapshot (turn 129, turn 130); one that finished
-      // while this window was away is not, and would otherwise stay "casting" forever (codex on
-      // PR 914, round two). The snapshot's records say what stands.
-      deriving: {},
-      casting: {},
+      // These run maps include world id in their keys. Keep live events across navigation;
+      // only a reconnect may have missed an ending and needs to rebuild from hello's replay.
+      deriving: rejoined ? {} : Object.fromEntries(Object.entries(current.deriving).filter(([, run]) => run.state === "deriving")),
+      casting: rejoined ? {} : Object.fromEntries(Object.entries(current.casting).filter(([, run]) => run.state === "casting")),
       // The audiobook's runs (turn 146) carry what the replay cannot: the counts, and a price
       // waiting on its answer. A refresh follows every take that lands, on a connection that
       // has missed nothing, so a refresh keeps them — reset, the replayed start put `reading… 0
       // of 0` over the head and closed the price sheet (the door's live check on slice 3). A
       // window that rejoined starts from the replay, which says what is still going and nothing
       // of what ended while it was away.
-      audiobook: changedWorld || rejoined ? {} : current.audiobook,
+      audiobook: rejoined ? {} : current.audiobook,
       // A card answered — proposed, accepted, failed — is this window's to put away (turn 146):
       // a snapshot follows every accept, and would otherwise take the ✓ line with it. Only a
-      // derivation still going is dropped, since the replay restores it when it is.
-      direction: changedWorld ? {} : Object.fromEntries(Object.entries(current.direction).filter(([, held]) => held.state !== "directing")),
+      // reconnect drops a derivation still going, since hello's replay restores it when it is.
+      direction: rejoined ? Object.fromEntries(Object.entries(current.direction).filter(([, held]) => held.state !== "directing")) : current.direction,
       // A replay restores a proposal held or a run going; what ended while this window was away is not kept.
-      illustration: changedWorld || rejoined ? {} : current.illustration,
+      illustration: rejoined ? {} : current.illustration,
       audiobookRecords: changedWorld ? {} : current.audiobookRecords,
-      // As a direction: a grouping still going is dropped, and the replay restores it when it is.
-      beats: changedWorld ? {} : Object.fromEntries(Object.entries(current.beats).filter(([, held]) => held.state !== "grouping")),
+      // As a direction: reconnect alone drops a grouping before hello's replay restores it.
+      beats: rejoined ? Object.fromEntries(Object.entries(current.beats).filter(([, held]) => held.state !== "grouping")) : current.beats,
       stagedTakes: changedWorld ? {} : current.stagedTakes,
       speakerLines: changedWorld ? {} : current.speakerLines,
       narratorQuotes: changedWorld ? {} : current.narratorQuotes,
@@ -1902,7 +1899,7 @@ function handleFrame(json: string): void {
       audiobookAsks: changedWorld || rejoined ? {} : current.audiobookAsks,
       audiobookDoor: changedWorld ? {} : current.audiobookDoor,
       audiobookCredits: changedWorld ? {} : current.audiobookCredits,
-      audiobookBook: changedWorld || rejoined ? {} : current.audiobookBook,
+      audiobookBook: rejoined ? {} : current.audiobookBook,
       audiobookNotes: changedWorld ? {} : current.audiobookNotes,
       // Both are keyed by sheet slug alone, and slugs recur across worlds: a failure left over
       // from one world would otherwise surface under the same-named character in the next one
@@ -2464,9 +2461,8 @@ function handleFrame(json: string): void {
         },
       };
     } else if (event.type === "audiobook.started") {
-      // A replayed start carries no counts and reaches every refresh, not only a reconnect: a
-      // window that already holds the run keeps what it knows — its progress, or that it has
-      // finished — and one that does not learns a run is going and can be stopped.
+      // A replayed start tells a reconnecting window which run can be stopped. Keep progress
+      // already observed if an older host also replays it on ordinary refreshes.
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
       if (event.replayed !== true || audiobook[key] === undefined) {
         audiobook = {
@@ -2561,7 +2557,7 @@ function handleFrame(json: string): void {
       }
     } else if (event.type === "illustration.started") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
-      // A replay reaches every refresh: a window already making the pictures keeps what it knows.
+      // Older hosts also replay on refresh: a window already making pictures keeps its progress.
       if (illustration[key]?.state !== "making") illustration = { ...illustration, [key]: { state: "reading", skipped: [], without: [] } };
     } else if (event.type === "illustration.finished") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
@@ -2757,7 +2753,7 @@ function handleFrame(json: string): void {
       };
     } else if (event.type === "direction.started") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
-      // A replay reaches every refresh: a window that already holds the run keeps what it knows.
+      // Older hosts also replay on refresh: a window already directing keeps its progress.
       if (direction[key]?.state !== "directing" && direction[key]?.state !== "accepting") direction = { ...direction, [key]: { state: "directing", directed: 0, dropped: 0 } };
     } else if (event.type === "direction.finished") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;

@@ -1,5 +1,11 @@
 # Code map
 
+Transport snapshot refreshes coalesce in 250 ms windows before projection/serialization.
+Only hello/reconnect replays transient startup events; client world-keyed live runs and
+permissions survive ordinary refresh/navigation, and newly discovered saved downloads emit
+their own update. `transport.test.ts`, client `snapshot-transients.test.ts` and coordinator
+`productions/illustration-transport.test.ts` cover this boundary (issue 2279).
+
 Desktop `startup.ts` keeps one shutdown drain alive through slow owners and prompts after
 15 seconds, including remote cleanup. `main.ts` owns the native Wait/Close anyway choice;
 coordinator `onShutdownWait` names the pending service in the desktop log even after sockets

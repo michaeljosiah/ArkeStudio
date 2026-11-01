@@ -5086,7 +5086,18 @@ export class Coordinator {
       if (projection.status === "done") records.set(id, { ...projection, sourceFingerprint: verified.get(id)?.sourceFingerprint });
     }
     for (const projection of completed) records.set(projection.id, { ...projection, percent: 100, error: null });
-    for (const projection of records.values()) this.exportReads.set(projection.id, projection);
+    for (const projection of records.values()) {
+      const previous = this.exportReads.get(projection.id);
+      this.exportReads.set(projection.id, projection);
+      // Opening another world discovers saved downloads after hello. Publish that change
+      // once; ordinary snapshot refreshes no longer replay all startup events (issue 2279).
+      if (projection.status === "done" && (projection.id.startsWith("ms_") || projection.id.startsWith("vb_")) &&
+          projection.productionId && projection.output && (previous?.status !== "done" || previous.output !== projection.output)) {
+        this.emit({ at: this.nowIso(), type: "export.progress", worldId: projection.worldId,
+          productionId: projection.productionId, exportId: projection.id, status: "done", percent: 100,
+          output: projection.output, error: null });
+      }
+    }
     return [...records.values()];
   }
 
