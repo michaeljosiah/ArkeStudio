@@ -963,7 +963,7 @@ export function planBenchDispatch(
   // citations; nothing else in the brief is rewritten (design turn 179).
   const production = session.subject ? bundle.productions.find(candidate => candidate.meta.id === session.subject!.productionId) : undefined;
   const musicPolicy = composer.mode === "video" && production && productionHasScore(production) ? NO_BACKGROUND_MUSIC : null;
-  const compiledBody = musicPolicy && !body.includes(musicPolicy) ? `${body}\n\n${musicPolicy}` : body;
+  const compiledBody = musicPolicy ? `${body}\n\n${musicPolicy}` : body;
   const wirePrompt = referenceRoute !== undefined
     ? [...referenceSubjectLines(referenceRoute.pictures.map((picture) => picture.who)), referencePrompt(compiledBody, laneModel)].join("\n")
     : [providerSizedShot ? `Compose for the production's ${params.kind === "image" ? params.aspect : ""} frame. Keep the main action inside a centred crop of that shape; the image dimensions are chosen by the provider.` : null,

@@ -57,13 +57,13 @@ async function measure(store: WorldStore, productionId: string, source: MediaMea
     const held = await owner(store, productionId, source, expectedHash);
     const absolute = await containedWorldFilePath(store.dir, held.media), before = identity(await stat(absolute));
     const verified = await hashContainedProductionMedia(store.dir, held.media, held.expected ?? "sha256:", signal);
-    if (held.cached && (!("cachedHash" in held) || held.cachedHash === verified.sourceHash)) return { status: "measured", info: held.cached };
+    if (held.cached && Number.isFinite(held.cached.durationSec) && (!("cachedHash" in held) || held.cachedHash === verified.sourceHash)) return { status: "measured", info: held.cached };
     // A duration-only host cannot establish audio presence; never persist its conservative false.
     if (!probe?.info) throw new Refused("not-configured");
     phase = "probe-failed";
     const info = await measureMediaInfo(store, held.media, probe, { signal });
     signal.throwIfAborted();
-    if (!info || !MediaInfoSchema.safeParse(info).success) throw new Refused("probe-failed");
+    if (!info || !Number.isFinite(info.durationSec) || !MediaInfoSchema.safeParse(info).success) throw new Refused("probe-failed");
     const after = await hashContainedProductionMedia(store.dir, held.media, verified.sourceHash, signal);
     if (before !== identity(await stat(await containedWorldFilePath(store.dir, held.media))) || after.sourceHash !== verified.sourceHash) throw new Refused("source-changed");
     phase = "save-failed";

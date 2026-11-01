@@ -55,6 +55,8 @@ it("changed bytes during probing refuse the measurement without changing take hi
 it("duration-only hosts cannot persist a false claim of silence", async () => {
   const { store, job } = await fixture(), [take] = await recordTakesFromJob(store, job, null); assert.ok(take);
   assert.deepEqual(await measureProductionMedia(store, "saltlight", { kind: "take", takeId: take.id }, { durationSec: async () => 12 }), { status: "failed", reason: "not-configured" });
+  assert.deepEqual(await measureProductionMedia(store, "saltlight", { kind: "take", takeId: take.id }, { durationSec: async () => 12,
+    info: async () => ({ durationSec: Infinity, hasAudio: true }) }), { status: "failed", reason: "probe-failed" });
   await assert.rejects(readFile(join(store.dir, `productions/saltlight/takes/${take.id}/media-info.json`)), { code: "ENOENT" });
 });
 

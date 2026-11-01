@@ -6,7 +6,7 @@ function status(mode) {
  measuring:['Measuring source…','Reading the saved file locally. No generation or upload is running.','<button class="ph257-btn primary" disabled>Measuring…</button>'],
  failed:['Could not measure this source','The saved clip is still available. Try the local measurement again.',link('e','Try again',true)],
  tools:['Media tools unavailable','Measurement needs Studio’s local media tools. The saved clip is still available.',link('g','Try again')],
- changed:['Source changed','The file changed while it was being read. Select the current source before measuring again.',link('g','Select current source')],
+ changed:['Source changed','The file changed while it was being read. Choose a valid saved take before measuring again.',link('g','Choose another take')],
  success:['Source measured','12.0 seconds · video and audio','']};
  const [title,body,action]=states[mode];
  return `<section class="mm258-status" aria-label="Source measurement"><strong>${title}</strong><p>${body}</p>${action}</section>`;
