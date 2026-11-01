@@ -142,9 +142,14 @@ describe("What kind of music? (238b, R-3)", () => {
   });
 
   it("makes an album by name, and a soundtrack only once it names the production it is for", async () => {
-    const m = await mount(withMusic(), `/w/${FIXTURE_WORLD_ID}/productions/new`);
+    const state = withMusic();
+    let characters = 0;
+    state.world!.sheets = state.world!.sheets.filter(sheet => sheet.type !== "character" || ++characters === 1);
+    const m = await mount(state, `/w/${FIXTURE_WORLD_ID}/productions/new`);
     await press([...m.container.querySelectorAll(".fy-door")].find(card => /Make music/.test(card.textContent ?? "")), "Make music");
     assert.match(m.container.textContent!, /What kind of music\?/);
+    assert.match(m.container.textContent!, /1 character, every location/);
+    assert.doesNotMatch(m.container.textContent!, /1 characters/);
     assert.match(m.container.querySelector(".fy-radio--on")!.textContent!, /Album/, "an album until another is chosen");
     await type(m.container.querySelector<HTMLInputElement>("#production-name")!, "Songs of the Drowned Quarter");
     await click(m.container, "Create production");
@@ -498,11 +503,17 @@ describe("Export → Arke Player for music (238h, R-15)", () => {
     const sheet = dom.document.body.querySelector("[data-testid='music-export']")!;
     const text = sheet.textContent!;
     assert.match(text, /WorldThe Undersong/);
+    assert.match(text, /standalone music package/);
+    assert.equal(dom.document.body.querySelector('[data-testid="music-export-read-back"]'), null);
     assert.match(text, /Tracks1 · 3:42AAC · 256 kbps/);
     assert.match(text, /SequenceBack to back−14 LUFS/);
     assert.match(text, /Cover1:11024 × 1024/);
     assert.match(text, /Lyrics1 of 1 track/);
     await press(dom.document.body.querySelector("[data-testid='music-export-start']") ?? undefined, "Make package");
     assert.deepEqual(m.of("export-arke-player").map(({ productionId, options }) => [productionId, options]), [[ALBUM, { book: false, motion: false }]]);
+    const request = m.of("export-arke-player").at(-1)!;
+    await act(async () => __applyEventForTest({ at: AT, type: "arke-player.exported", requestId: request.requestId, worldId: FIXTURE_WORLD_ID, productionId: ALBUM, exportId: request.exportId,
+      result: { ok: true, file: "exports/album.zip", bytes: 100, sha256: "a".repeat(64), edition: AT, chapters: 0, pictures: 1, book: false, tracks: 1 } }));
+    assert.equal(dom.document.body.querySelector('[data-testid="music-export-read-back"]')?.textContent, "Package read back and verified");
   });
 });

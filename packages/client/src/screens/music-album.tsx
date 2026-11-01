@@ -576,7 +576,7 @@ function MusicExportSheet({ world, production, record, heard, onClose }: { world
         {made === null ? (
           <>
             <div className="fy-abv-opts">
-              {opt("World", <>{world.keyArt ? <img src={mediaUrl(world.meta.slug, world.keyArt)} alt="" /> : null}<span>{world.meta.name}</span></>, "beside its edition")}
+              {opt("World", <>{world.keyArt ? <img src={mediaUrl(world.meta.slug, world.keyArt)} alt="" /> : null}<span>{world.meta.name}</span></>, "standalone music package")}
               {opt("Tracks", <span>{record.tracks.length}{total !== null ? ` · ${musicClock(total)}` : ""}</span>, `AAC · ${MUSIC_AAC_KBPS} kbps`)}
               {opt("Sequence", <span>{musicSequenceLine(record)}</span>, musicLoudnessLabel(record.loudness))}
               {opt("Cover", cover !== undefined ? <><img className="sq" src={mediaUrl(world.meta.slug, `artifacts/${cover.file}`)} alt="" /><span>1:1</span></> : <span>None</span>, cover !== undefined ? `${MUSIC_COVER_EDGE} × ${MUSIC_COVER_EDGE}` : undefined)}
@@ -592,6 +592,7 @@ function MusicExportSheet({ world, production, record, heard, onClose }: { world
           </>
         ) : (
           <div className="fy-abv-made" data-testid="music-export-done">
+            <div className="fy-abv-back" data-testid="music-export-read-back">Package read back and verified</div>
             <div className="fy-abv-est">
               <b>1 package · {megabytes(made.bytes)}</b>
               <span className="m">{made.file}</span>
