@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { compileStoryDocument, readStory, readWorldManifest, storyRoutes, type ClientMessage, type DomainEvent, type Routing } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
@@ -147,6 +147,23 @@ describe("the read-back's route replay (SPEC-058 R-81, R-89)", () => {
 });
 
 describe("Export → Arke Player for an interactive movie (turn 245a, 245d)", () => {
+  it("does not reuse a published edition's name after its local files are removed (#2238)", async () => {
+    const { dir, store } = await lowWater();
+    const first = await exportStoryPlayer(store, "low-water", options([], 1));
+    assert.ok(first.ok);
+    await unlink(join(dir, first.file));
+    await unlink(join(dir, first.file + ".json"));
+    const second = await exportStoryPlayer(store, "low-water", options([], 2));
+    assert.ok(second.ok);
+    assert.notEqual(second.file, first.file, "same day and empty local folder still produce a new name");
+    const checked = await checkWorldPackageZip(join(dir, second.file));
+    assert.ok(checked.ok);
+    assert.equal(checked.manifest.edition, `2026-10-28-${EXPORT_ID(2)}`);
+    const repeated = await exportStoryPlayer(store, "low-water", options([], 2));
+    assert.ok(repeated.ok);
+    assert.notEqual(repeated.file, second.file, "an existing local export is also preserved");
+  });
+
   it("reads what the package would hold before anything is made: a closed choice without a reason is counted and hidden, never a blocker", async () => {
     const { store } = await lowWater();
     const state = await readStoryExport(store, "low-water", { ffmpeg: true });
@@ -165,7 +182,7 @@ describe("Export → Arke Player for an interactive movie (turn 245a, 245d)", ()
     const steps: string[] = [];
     const result = await exportStoryPlayer(store, "low-water", options(calls, 1, { onStep: (step) => steps.push(step) }));
     assert.ok(result.ok, result.ok ? "" : result.blockers.join("; "));
-    assert.equal(result.file, "exports/low-water-story-2026-10-28.zip");
+    assert.equal(result.file, `exports/low-water-story-2026-10-28-${EXPORT_ID(1)}.zip`);
     assert.deepEqual(result.story, { kind: "movie", scenes: 4, routes: 4, complete: true, endings: 2 });
     assert.ok(steps.includes("Replaying every route"));
 
@@ -305,7 +322,7 @@ describe("Export → Arke Player for a visual novel (turn 245b)", () => {
     const calls: string[][] = [];
     const result = await exportStoryPlayer(store, "the-lantern-road", options(calls, 2, { voices, pictureSize: "1280" }));
     assert.ok(result.ok, result.ok ? "" : result.blockers.join("; "));
-    assert.equal(result.file, "exports/the-lantern-road-story-2026-10-28.zip");
+    assert.equal(result.file, `exports/the-lantern-road-story-2026-10-28-${EXPORT_ID(2)}.zip`);
     assert.deepEqual(result.story, { kind: "novel", scenes: 3, routes: 2, complete: true, endings: 2 });
     // Each beat's picture at the Size chosen; the cover stays full, as the world's card shows it larger.
     const fits = calls.filter((args) => args.some((arg) => arg.startsWith("scale='min(")));
@@ -375,7 +392,7 @@ describe("Export → Arke Player through the coordinator (245c, 245d)", () => {
       // The export is named for the day it is made, which the coordinator reads from the real clock:
       // a date written here failed the run the day after it was written.
       const file = exported.result.ok ? exported.result.file : "";
-      assert.match(file, /^exports\/low-water-story-\d{4}-\d{2}-\d{2}\.zip$/);
+      assert.match(file, /^exports\/low-water-story-\d{4}-\d{2}-\d{2}-ap_[0-9A-HJKMNP-TV-Z]{26}\.zip$/);
       assert.equal(story?.file, file);
       assert.deepEqual(story?.story, { kind: "movie", scenes: 4, routes: 4, complete: true, endings: 2 });
       assert.deepEqual(listed?.running, [], "nothing is still being made, so a window that lost an answer knows it ended");

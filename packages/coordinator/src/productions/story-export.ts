@@ -54,7 +54,7 @@ import { checkWorldPackageZip, editionFingerprint, writeWorldPackageZip } from "
  * else re-encoded; each beat's picture is fitted as R-6 fits one, at the sheet's Size; each voice
  * is M4A. It is made as R-4's package is: in a staging folder, read back by the shared reader and
  * every route of the document replayed through the contracts evaluator, then the production read
- * again under the world's gate before the package is named `exports/<slug>-story-<UTC date>.zip`.
+ * again under the world's gate before the package is named `exports/<slug>-story-<UTC date>-<export id>.zip`.
  */
 
 const COMPILER = "arke-studio/arke-player-story-export";
@@ -636,8 +636,11 @@ export async function exportStoryPlayer(store: WorldStore, productionId: string,
     const slug = packageSlug(bundle.meta.slug);
     await mkdir(toExtendedLength(join(store.dir, "exports")), { recursive: true });
     const taken = new Set(await readdir(toExtendedLength(join(store.dir, "exports"))).catch(() => [] as string[]));
-    let edition = day;
-    for (let counter = 2; taken.has(`${own}-story-${edition}.zip`) || taken.has(`${own}-story-${edition}.zip.json`); counter++) edition = `${day}-${counter}`;
+    // A published ZIP may no longer be on this machine. Its name must stay unique even when
+    // the local exports folder is empty (#2238), so use the export's existing unique identity.
+    const baseEdition = `${day}-${options.exportId}`;
+    let edition = baseEdition;
+    for (let counter = 2; taken.has(`${own}-story-${edition}.zip`) || taken.has(`${own}-story-${edition}.zip.json`); counter++) edition = `${baseEdition}-${counter}`;
     const name = `${own}-story-${edition}.zip`;
     const author = options.publish?.author?.trim() || undefined;
     const manifest = {

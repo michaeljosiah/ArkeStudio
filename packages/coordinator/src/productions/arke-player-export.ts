@@ -565,7 +565,7 @@ async function releaseOfPackage(file: string, bytes: number): Promise<ArkePlayer
  */
 export async function listArkePlayerPackages(store: WorldStore): Promise<Array<ArkePlayerListed & { dir: string; file: string }>> {
   const exportsDir = join(store.dir, "exports");
-  const names = (await readdir(toExtendedLength(exportsDir)).catch(() => [] as string[])).filter((name) => /-\d{4}-\d{2}-\d{2}(?:-\d+)?\.zip$/.test(name));
+  const names = (await readdir(toExtendedLength(exportsDir)).catch(() => [] as string[])).filter((name) => /-\d{4}-\d{2}-\d{2}(?:-ap_[0-9A-HJKMNP-TV-Z]{26})?(?:-\d+)?\.zip$/.test(name));
   const out: Array<ArkePlayerListed & { dir: string; file: string }> = [];
   for (const name of names) {
     try {
