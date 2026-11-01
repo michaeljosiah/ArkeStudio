@@ -1,3 +1,15 @@
+import { describeCoordinatorError } from "../errors/user-message.js";
+
+/** A failed model check must reach both lyric-writing surfaces, without trying another model. */
+export async function draftLyrics(lyricist: (brief: string) => Promise<string | null>, input: { description: string; style?: string }): Promise<{ lyrics: string | null; reason?: string }> {
+  try {
+    const lyrics = await lyricist(lyricistBrief(input));
+    return lyrics === null ? { lyrics, reason: "The lyricist returned no usable lyrics. Try again or check its model in Settings > Harness > Advanced > Lyricist." } : { lyrics };
+  } catch (error) {
+    return { lyrics: null, reason: `${describeCoordinatorError(error).slice(0, 200)} Check Settings > Harness > Advanced > Lyricist.` };
+  }
+}
+
 /**
  * "Write for me" (design turn 73): the task text handed to the lyricist agent.
  *
