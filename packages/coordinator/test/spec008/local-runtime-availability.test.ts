@@ -68,7 +68,7 @@ it("ten idle runtime passes publish no snapshots or provider events after initia
   const events: DomainEvent[] = [];
   const coordinator = new Coordinator({ provider, adapter, changeLogPath: join(root, "changes.jsonl"), appVersion: "test",
     validators: localValidators(() => ({ available })), observeEvent: event => events.push(event) });
-  const seam = coordinator as unknown as { started: boolean; transport: { broadcastSnapshot(): void }; providerService: ProviderService; revalidateLocalRuntimes(): Promise<void> };
+  const seam = coordinator as unknown as { started: boolean; transport: { broadcastSnapshot(): void }; providerService: ProviderService; revalidateLocalRuntimes(): Promise<void>; handleClientMessage(message: ClientMessage): Promise<void> };
   seam.transport.broadcastSnapshot = () => { snapshots++; };
   try {
     await seam.providerService.init(); seam.started = true;
@@ -79,6 +79,15 @@ it("ten idle runtime passes publish no snapshots or provider events after initia
     await seam.revalidateLocalRuntimes(); assert.equal(snapshots, 1);
     available = false; await seam.revalidateLocalRuntimes();
     assert.equal(events.filter(event => event.type === "provider.status").length, 1);
+    available = true; await seam.revalidateLocalRuntimes();
+    available = false; await seam.handleClientMessage({ kind: "validate-provider", provider: "comfyui" });
+    assert.equal(coordinator.getState().app.providers.find(row => row.id === "comfyui")?.validation, "invalid");
+    events.length = 0;
+    available = true; await seam.revalidateLocalRuntimes();
+    assert.equal(events.filter(event => event.type === "provider.status").length, 1, "recovery is published after an explicit check failed");
+    assert.equal(coordinator.getState().app.providers.find(row => row.id === "comfyui")?.validation, "valid");
+    events.length = 0; await seam.revalidateLocalRuntimes();
+    assert.equal(events.filter(event => event.type === "provider.status").length, 0, "unchanged healthy checks stay silent");
   } finally { seam.started = false; await coordinator.stop(); await provider.close(); }
 });
 

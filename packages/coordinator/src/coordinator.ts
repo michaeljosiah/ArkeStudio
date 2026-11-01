@@ -1371,7 +1371,6 @@ export class Coordinator {
   }
   private readonly lifecycleTimers = new Set<NodeJS.Timeout>();
   /** Last emitted local-runtime statuses, so an unchanged poll stays off the wire (issue 462). */
-  private lastLocalRuntimeStatuses = "";
   /** The last gate result on the wire, so an unchanged re-gate stays off it. */
   private lastRuntimeStatus = "";
   /** A hardware probe in flight, shared so a burst of adapter dispatches measures once. */
@@ -5998,9 +5997,9 @@ export class Coordinator {
     }
     if (this.stopping) return;
     const statuses = this.providerService.list();
-    const fingerprint = JSON.stringify(statuses.filter((s) => local.includes(s.id)).map(({ lastValidated: _at, ...availability }) => availability));
-    if (fingerprint === this.lastLocalRuntimeStatuses) return;
-    this.lastLocalRuntimeStatuses = fingerprint;
+    const fingerprint = (rows: readonly ProviderStatus[]) => JSON.stringify(rows.filter((s) => local.includes(s.id)).map(({ lastValidated: _at, ...availability }) => availability));
+    // Explicit checks also publish failures; recovery must compare with what clients now see.
+    if (fingerprint(statuses) === fingerprint(this.readModel.getState().app.providers)) return;
     this.emit({ at: new Date().toISOString(), type: "provider.status", providers: statuses });
   }
 
