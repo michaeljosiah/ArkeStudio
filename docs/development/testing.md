@@ -2334,7 +2334,9 @@ p95 frame time; do not mistake Chrome's collection schedule for retained growth.
 For transfer size and reconnects, coordinator `test/snapshot-pages.test.ts` budgets the snapshot
 below 3 MB with 5,000 artifacts, jobs and ledger rows each, checks pages below 1.1 MiB and
 checks that an unchanged refresh sends no collection rows. Run it with `test/transport.test.ts`
-and `test/remote-access.test.ts`; these include slow-window barriers and phone negotiation.
+and `test/remote-access.test.ts`; these include slow-window barriers, a 66,000-row initial
+transfer exceeding 256 pages, and phone negotiation. `test/socket-writer.test.ts` checks
+callback-paced page delivery, ordering, disposal and the aggregate transfer/waiting budgets.
 Client `test/snapshot-pages.test.ts` and `test/snapshot-history.test.ts` cover atomic visibility,
 complete provenance/history, duplicate ledger receipts, collection shrinkage and reconnect resets.
 

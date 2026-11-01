@@ -620,3 +620,21 @@ it("coalesces unchanged paged refreshes without dropping the initial collection 
   assert.equal(window.sent[3]!.kind, "snapshot", "the first collection barrier is retained");
   assert(window.sent.every((frame, index) => !index || frame.seq > window.sent[index - 1]!.seq));
 });
+
+it("delivers an initial snapshot with more than 256 pages without overflowing the waiting queue", () => {
+  const ledger = Array.from({ length: 66_000 }, () => ({ ts: "2026-11-01T00:00:00Z", worldId: "0".repeat(26), jobId: "jb_" + "0".repeat(26),
+    provider: "test", model: "voice", outcome: "succeeded" as const, estimatedMicroUsd: 1, actualMicroUsd: 1 }));
+  const transport = new Transport({ auth: AUTH, getSnapshot: () => emptyClientState({ ledger }), getInitialEvents: () => [EVENT] });
+  const window = stalledWindow(transport);
+  window.hello(true, true);
+  assert.equal(window.closed(), false, "queuing the initial sync does not require any send callback to have completed");
+  assert.equal(window.sent.length, 1, "only one page is written at a time");
+  window.drain();
+  assert.equal(window.closed(), false);
+  const pages = window.sent.filter(frame => frame.kind === "snapshot-page");
+  assert(pages.length > 256);
+  assert.equal(pages.filter(frame => frame.page.collection === "ledger").reduce((sum, frame) => sum + frame.page.rows.length, 0), ledger.length);
+  assert.equal(window.sent.at(-2)!.kind, "snapshot");
+  assert.equal(window.sent.at(-1)!.kind, "event");
+  assert(window.sent.every((frame, index) => !index || frame.seq > window.sent[index - 1]!.seq));
+});

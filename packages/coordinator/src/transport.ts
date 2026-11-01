@@ -374,13 +374,15 @@ export class Transport {
     let outgoing = frame;
     let snapshot: { key: string; base: HistoryBase; keep?: true } | undefined;
     if (frame.kind === "snapshot" && conn.pages) {
-      const snapshotId = frame.seq; let changed = false;
-      for (const page of conn.pages.prepare(frame.state)) { changed = true; this.sendFrame(conn, { kind: "snapshot-page", seq: ++conn.seq, snapshot: snapshotId, page }); }
+      const snapshotId = frame.seq, texts: string[] = [];
+      for (const page of conn.pages.prepare(frame.state)) texts.push(JSON.stringify(FrameSchema.parse({ kind: "snapshot-page", seq: ++conn.seq, snapshot: snapshotId, page })));
+      const changed = texts.length > 0;
       const state = { ...frame.state, app: { ...frame.state.app, jobs: [], ledger: [] },
         world: frame.state.world ? { ...frame.state.world, artifacts: [] } : null };
       // Every page belongs to this barrier; dropping just the barrier could apply its patches
       // to another world's snapshot. Pages are small and later refreshes contain only deltas.
-      conn.writer.send(JSON.stringify(FrameSchema.parse({ kind: "snapshot", seq: ++conn.seq, state, collectionSnapshot: snapshotId })),
+      texts.push(JSON.stringify(FrameSchema.parse({ kind: "snapshot", seq: ++conn.seq, state, collectionSnapshot: snapshotId })));
+      conn.writer.sendBatch(texts,
         { snapshot: { key: `world:${frame.state.world?.meta.worldId ?? ""}`, keep: changed || !options.supersede } });
       return;
     }
