@@ -87,6 +87,15 @@ describe("Arke's pages (SPEC-064 R-13, turn 249)", () => {
     assert.deepEqual(production(store, id).comicScripts![0]!.script.plan?.pages, PLAN.pages, "the pages keep the plan they were drafted from");
   });
 
+  it("tells Arke the plan's exact shape, and never offers it read to send (installed 0.5.77, 2026-11-01)", async () => {
+    // Shown only "passages: array<object>", Arke sent {paragraphs, treatment} twice and the turn failed.
+    const { actionGuideEntry } = await import("../../src/world-chat/action-guide.js");
+    const entry = actionGuideEntry("production-comic-script")!;
+    assert.match(entry.description, /"passages":\[\{"where":"¶ 1–6","what":"what happens","verdict":"keep","why"/);
+    assert.match(entry.description, /"pages":\[\{"change":/);
+    assert.ok(!entry.fields.some((field) => field.startsWith("read")), "the read is the studio's");
+  });
+
   it("refuses a plan sent with pages, and pages sent with a plan", async () => {
     const { store, id, chapter, gate, intent } = await book();
     const both = action(id, chapter, null, [{ layout: "splash", panels: [{ description: "x" }] }], PLAN);

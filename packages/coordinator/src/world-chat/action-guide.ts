@@ -127,7 +127,8 @@ function buildEntries(): readonly ActionGuideEntry[] {
       reads: readToolsFor(descriptor.requiredReads),
       unavailable: unavailableReason(kind),
       fields: modelActionFields(option)
-        .filter((field) => field.name !== "checkReceiptIds")
+        // A comic draft's read is the studio's, never Arke's to send (SPEC-064 R-64).
+        .filter((field) => field.name !== "checkReceiptIds" && !(kind === "production-comic-script" && field.name === "read"))
         .map((field) => `${field.name}${field.optional ? "?" : ""}: ${field.type}`),
       example: WORLD_CHAT_SHAPE_EXAMPLES.worldActions[kind],
     };

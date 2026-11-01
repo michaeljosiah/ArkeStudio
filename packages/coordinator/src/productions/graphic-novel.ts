@@ -363,8 +363,11 @@ export async function seeComicWarning(store: WorldStore, productionId: string, p
 /**
  * The cold read of Arke's drafted pages (R-64 – R-66, turn 254d), run while the turn is being
  * prepared so a refusal reaches Arke inside its turn. A draft a reader cannot follow is refused once
- * with the reader's questions; the redraft is read again and offered whatever it holds, the questions
- * kept on the draft. Anything Arke wrote in `read` is replaced: the read is the studio's.
+ * for its chapter in the conversation, with the reader's questions; the next draft of that chapter is
+ * offered whatever it holds, the questions kept on it. Once per turn was not enough: the refusal used
+ * the turn's one corrective attempt, so any other slip in the redraft lost the draft, and in installed
+ * 0.5.78 three asks in a row ended with nothing (a lettered line over 400 characters, then a cited
+ * search). Anything Arke wrote in `read` is replaced: the read is the studio's.
  */
 export async function readComicDrafts(
   store: WorldStore,
@@ -391,7 +394,7 @@ export async function readComicDrafts(
         const pages = production.comicScripts?.find((entry) => entry.chapter === candidate.id)?.script.pages ?? [];
         return pages.length ? [pagesForReading(pages, name, (index) => `${candidate.title}, page ${index + 1}`)] : [];
       }).join("\n");
-    const key = `${turn.conversationId}:${turn.turnId}:${production.meta.id}:${chapter.id}`;
+    const key = `${turn.conversationId}:${production.meta.id}:${chapter.id}`;
     const redrafts = refused.get(key) ?? 0;
     let answer: Awaited<ReturnType<ScriptReader["read"]>>;
     try {

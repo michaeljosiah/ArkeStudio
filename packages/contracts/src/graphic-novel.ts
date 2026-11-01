@@ -117,7 +117,7 @@ export const COMIC_PLAN_VERDICTS = ["keep", "cut", "merge", "show", "invent"] as
 export const ComicChapterPlanSchema = z.object({
   passages: z.array(z.object({
     /** Where in the prose, as the reader of the plan finds it: "¶ 1–6". */
-    where: z.string().trim().min(1).max(40),
+    where: z.string().trim().min(1).max(80),
     what: z.string().trim().min(1).max(200),
     verdict: z.enum(COMIC_PLAN_VERDICTS),
     why: z.string().trim().min(1).max(200),
