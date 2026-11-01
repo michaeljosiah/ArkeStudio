@@ -1087,7 +1087,9 @@ export function ProductionConversationBody({
   // Fix used to fill this box and wait for a second press.
   const [autoSend, setAutoSend] = useConversationState("autoSend", false);
   useEffect(() => {
-    if (!autoSend || !message.trim() || opening || running) return;
+    // Only once the box can take it: cleared while the thread was still loading, the words stayed in
+    // the box unsent (installed 0.5.80).
+    if (!autoSend || !message.trim() || !worldId || !hasContext || opening || running || echo !== null || (conversationId && loaded === null)) return;
     setAutoSend(false);
     submit();
   }); // eslint-disable-line react-hooks/exhaustive-deps

@@ -57,7 +57,9 @@ export function ComicDashboard() {
   const made = stages.reduce((sum, chapter) => sum + chapter.made, 0);
   const pages = (chapter: string) => navigate(`/w/${worldId}/p/${prodId}/story/pages?chapter=${encodeURIComponent(chapter)}`);
   return (
-    <div className="fy-prodmain fy-comic-dash" data-screen="production-dashboard">
+    // The column's wide padding is the main column's; the dashboard sits inside it, as every screen does.
+    // On the column itself, its max-width squeezed the page to a few characters (installed 0.5.80).
+    <div className="fy-prodmain" data-screen="production-dashboard"><div className="fy-comic-dash">
       <h1>{production.meta.title}</h1>
       <div className="m">{stages.length} {stages.length === 1 ? "chapter" : "chapters"} · {planned} {planned === 1 ? "page" : "pages"} planned · {made} made</div>
       {next && (
@@ -80,6 +82,6 @@ export function ComicDashboard() {
           </li>
         ))}
       </ol>
-    </div>
+    </div></div>
   );
 }
