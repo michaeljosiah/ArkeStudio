@@ -304,7 +304,7 @@ have that Player.
 visual novel goes out by the same four steps with `--story <production id>` in place of the
 production id (`npx tsx scripts/export-arke-player.mts <copy> --story <production id> <ffmpeg>`,
 `--size` for a novel's pictures, `--cover`/`--tall` for its covers), or from the Branch Map's
-Export → Arke Player. It makes `exports/<production-id>-story-<UTC date>.zip`, schema 6 and alone,
+Export → Arke Player. It makes `exports/<production-id>-story-<UTC date>-<export id>.zip`, schema 6 and alone,
 read back with every route replayed, and is blocked as the sheet is — every choice walked in
 preview, a clip or picture for each reachable scene. The script carries the voices already prepared
 for the table read and makes none: the characters' always, the narration only with `--narrator

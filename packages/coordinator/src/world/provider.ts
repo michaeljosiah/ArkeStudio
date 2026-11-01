@@ -762,7 +762,7 @@ export class FsWorldProvider implements WorldProvider {
       if (ext === ".epub") return "application/epub+zip";
       // An Arke Player package, so a paired phone can download it and hand it to the Player (233f):
       // the world's edition, or a story's package (SPEC-058 R-89; codex on PR 2205).
-      if (ext === ".zip" && /^exports\/[^/]+-(?:player|story)-\d{4}-\d{2}-\d{2}(?:-\d+)?\.zip$/.test(portable)) return "application/zip";
+      if (ext === ".zip" && /^exports\/[^/]+-(?:player|story)-\d{4}-\d{2}-\d{2}(?:-ap_[0-9A-HJKMNP-TV-Z]{26})?(?:-\d+)?\.zip$/.test(portable)) return "application/zip";
     }
     const text = FsWorldProvider.TEXT_TYPES[ext];
     if (text === undefined) return undefined;

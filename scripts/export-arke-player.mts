@@ -27,7 +27,7 @@ import { WorldStore } from "../packages/coordinator/src/world/store.js";
 // at 1:1. --no-book, --no-motion, --cover and --part do not apply; the cover is the album's own.
 // An interactive movie or a visual novel (SPEC-058 R-79, R-89; turn 245) makes its story package:
 //   npx tsx scripts/export-arke-player.mts WORLD_DIR --story PRODUCTION_ID FFMPEG [--size full|1280|960] [--cover FILE] [--tall FILE] [--narrator VOICE [--narrator-model MODEL]]
-// exports/<production-id>-story-<date>.zip, schema 6 and alone, every reachable clip or beat's
+// exports/<production-id>-story-<date>-<export id>.zip, schema 6 and alone, every reachable clip or beat's
 // picture, the routing compiled by contracts, read back with every route replayed. --size is a
 // novel's beats' long side (235d); --cover the wide cover (else the key art) and --tall its Tall
 // cover, world-relative files. Blocked as the sheet is: every choice walked in the Studio's preview,
