@@ -10,6 +10,15 @@ const make = (h: Harness, block: string, n = 0) => h.send({
   requestId: `01J0000000000000000000000${n}`,
 });
 
+it("ends the picture wait with existing local recovery when Bench finalization failed", { timeout: 10_000 }, () =>
+  withHarness(async h => {
+    await make(h, "p0.0");
+    assert.equal(h.enqueued.length, 1);
+    assert.equal(h.cancelled.length, 0, "a terminal paid result cannot be cancelled into recovery");
+    assert.ok(h.events.some(event => event.type === "audiobook.picture-made" && event.state === "failed" && /Activity.*Retry finalization/.test(event.reason ?? "")));
+    assert.equal(h.events.some(event => event.type === "audiobook.picture-made" && event.state === "made"), false);
+  }, { land: false, finalization: { status: "failed", error: "Synthetic local filing failure", updatedAt: "2026-11-01T12:00:00Z" }, pictureWait: { waitMs: 50, lateLookMs: 20 } }));
+
 it("three pictures waiting for a serial provider keep their jobs and land on their moments (#2284)", () =>
   withHarness(async h => {
     const plan = await planAudiobook(h.store()!, LEDGER, CHAPTER, { narrator: { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george" } });

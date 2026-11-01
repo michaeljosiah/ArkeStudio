@@ -67,6 +67,8 @@ export interface HarnessOptions {
   reached?: boolean;
   /** A result that completes just as cancellation is requested. */
   landOnCancel?: boolean;
+  /** A terminal queue result whose Bench completion could not be written. */
+  finalization?: Job["finalization"];
   prepare?: (worldDir: string) => Promise<void>;
   /** Motion tests exercise the same Bench reservation and filing seam with a measured video. */
   videoOutput?: boolean;
@@ -114,7 +116,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
   });
   if (options.videoOutput) (coordinator as unknown as { readModel: { apply(event: DomainEvent): void } }).readModel.apply({ at: CLOCK, type: "provider.status", providers: [{ id: "fal", configured: true, validation: "valid", probes: [{ capability: "video", available: true }], fault: null }] });
   // Every job made a submission call, as a provider refusal does: `attempt` is how a run tells one.
-  const jobs: Array<{ id: string; attempt: number }> = [];
+  const jobs: Array<{ id: string; attempt: number; status?: Job["status"]; finalization?: Job["finalization"] }> = [];
   type Input = { target: { id: string }; landing: { dir: string }; params: Record<string, unknown>; estimatedMicroUsd: number };
   const held = new Map<number, Input>();
   const landing = async (input: Input) => {
@@ -148,7 +150,8 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
       enqueued.push({ params: input.params, estimatedMicroUsd: input.estimatedMicroUsd, at: Date.now() });
       const what = behaviour(n);
       const id = `jb_01J${String(n).padStart(23, "0")}`;
-      jobs.push({ id, attempt: options.reached === false ? 0 : 1 });
+      jobs.push({ id, attempt: options.reached === false ? 0 : 1,
+        ...(options.finalization ? { status: "succeeded", finalization: options.finalization } : {}) });
       const [sessionId, takeId] = input.target.id.split("/") as [string, string];
       const bench = new BenchStore(sessionDir(worldDir, sessionId as never));
       if (what === "hold") {
