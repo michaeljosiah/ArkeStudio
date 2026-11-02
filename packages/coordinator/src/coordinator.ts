@@ -18,6 +18,8 @@ import { chapterReviewSummary } from "@arke-studio/contracts";
 import { rebuildBenchPrefill } from "@arke-studio/contracts";
 import { MUSIC_IMPORT_EXTENSIONS } from "@arke-studio/contracts";
 import { ChapterReviewService } from "./productions/chapter-review.js";
+import { ManuscriptReviewService, readManuscriptReview, refreshManuscriptReview, manuscriptReviewHistory } from "./productions/manuscript-review.js";
+import { manuscriptReviewPdf } from "./productions/manuscript-review-pdf.js";
 import { makeReviewTaskRunner } from "./harness/review-task.js";
 import { needsExpressiveDirection, directionSchemaVersion } from "@arke-studio/contracts";
 import { StoryPublicationService } from "./publications/story.js";
@@ -1884,6 +1886,21 @@ export class Coordinator {
 
   /** Review work retains its owning world independently of UI selection. */
   private chapterReviewService?: ChapterReviewService;
+  private manuscriptReviewService?: ManuscriptReviewService;
+  private manuscriptReviews(): ManuscriptReviewService {
+    return this.manuscriptReviewService ??= new ManuscriptReviewService({
+      withWorld: (worldId, work) => {
+        if (!this.opts.provider.withBackgroundWorldStore) throw new Error("Background manuscript review is unavailable on this host.");
+        return this.opts.provider.withBackgroundWorldStore(worldId, work);
+      },
+      runner: store => {
+        const adapter = this.opts.adapter;
+        if (!adapter?.readiness().ready) throw new Error("The configured writing harness is unavailable.");
+        return makeImageJsonRunner({ adapter, beforeDispatch: () => store.assertOwnership(), sessionInput: this.sessionInput, scratch: this.extractScratch(), cloudAllowed: async () => false });
+      },
+      publish: (target, review, history) => this.emit({ type: "manuscript-review.updated", at: new Date().toISOString(), ...target, review, history }),
+    });
+  }
   private chapterReviews(): ChapterReviewService {
     return this.chapterReviewService ??= new ChapterReviewService({
       withWorld: (worldId, work) => {
@@ -11389,6 +11406,35 @@ export class Coordinator {
         // The snapshot before the answer, so the sender opens a chapter its state already holds.
         await this.refreshWorldSnapshot(msg.worldId);
         answer({ disposition: "created", chapterId });
+        return;
+      }
+      case "manuscript-review-start":
+      case "manuscript-review-read":
+      case "manuscript-review-resume":
+      case "manuscript-review-cancel":
+      case "manuscript-review-decide":
+      case "manuscript-review-export": {
+        const target = { worldId: msg.worldId, productionId: msg.productionId };
+        try {
+          if (this.stopping) return;
+          const reviews = this.manuscriptReviews();
+          if (msg.kind === "manuscript-review-start") await reviews.start(target, msg.requestId, msg.brief);
+          else if (msg.kind === "manuscript-review-resume") await reviews.start(target, msg.reviewId, "", true);
+          else if (msg.kind === "manuscript-review-read") await reviews.read(target, msg.reviewId);
+          else if (msg.kind === "manuscript-review-cancel") reviews.cancel(target);
+          else if (msg.kind === "manuscript-review-decide") await reviews.decide(target, msg.reviewId, msg.findingId, msg.decision);
+          else {
+            if (!this.opts.provider.withBackgroundWorldStore) throw new Error("Report export is unavailable on this host.");
+            await this.opts.provider.withBackgroundWorldStore(target.worldId, async store => {
+              const saved = await readManuscriptReview(store, target, msg.reviewId);
+              if (!saved || saved.status === "running") throw new Error("Wait for the report to stop before exporting.");
+              const review = await refreshManuscriptReview(store, saved), pdf = (await manuscriptReviewPdf(review)).toString("base64");
+              this.emit({ type: "manuscript-review.updated", at: new Date().toISOString(), ...target, requestId: msg.requestId, review, history: await manuscriptReviewHistory(store, target), pdf });
+            });
+          }
+        } catch (error) {
+          this.emit({ type: "manuscript-review.updated", at: new Date().toISOString(), ...target, requestId: msg.requestId, review: null, history: [], error: describeCoordinatorError(error) });
+        }
         return;
       }
       case "chapter-review-start":
@@ -24391,6 +24437,7 @@ export class Coordinator {
     this.stopPromise = (async () => {
       this.opts.onShutdownWait?.("chapter reviews");
       await this.chapterReviewService?.stop();
+      await this.manuscriptReviewService?.stop();
       this.opts.onShutdownWait?.("audio previews");
       await audioStudioStopped;
       this.opts.onShutdownWait?.("audio analysis");

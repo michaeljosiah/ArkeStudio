@@ -13,6 +13,17 @@ import { voiceTargetKey, type DomainEvent, type VoiceCandidate } from "@arke-stu
  * (durableExportReads, after export.progress rows) skips as it skips every other type.
  */
 export function journalRecord(event: DomainEvent): Record<string, unknown> {
+  if (event.type === "manuscript-review.updated") {
+    // The portable review is authoritative. Checkpoint projections grow throughout a book;
+    // logging them whole duplicates private readings/PDFs and churns unrelated diagnostics.
+    const review = event.review;
+    return { type: event.type, at: event.at, worldId: event.worldId, productionId: event.productionId,
+      requestId: event.requestId, historyCount: event.history.length, pdfGenerated: event.pdf !== undefined,
+      ...(event.error ? { error: event.error.slice(0, 1000) } : {}),
+      reviewSummary: review ? { id: review.id, status: review.status, updatedAt: review.updatedAt, snapshotHash: review.snapshotHash,
+        stages: review.tasks.length, completed: review.tasks.filter(task => task.state === "complete").length,
+        findings: review.findings.length, stale: review.stale } : null };
+  }
   if (event.type === "voice.catalogue") {
     const { voices, ...rest } = event;
     return { ...rest, voicesSummary: voiceCatalogueSummary(voices) };

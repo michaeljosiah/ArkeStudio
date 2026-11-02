@@ -1,4 +1,5 @@
 import "./components/production-spend.css";
+import "./components/manuscript-review.css";
 import "./components/prompt-tools.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
