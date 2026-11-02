@@ -5,7 +5,7 @@ import { OnboardingStatusSchema } from "./onboarding.js";
 import { ArkePlayerReleaseSchema } from "./arke-player-release.js";
 import { StoryExportBlockerSchema, StoryExportMadeSchema, StoryExportStateSchema } from "./story-export.js";
 import { DramaEditionSchema } from "./audio-drama-edition.js";
-import { ChapterReviewSchema } from "./chapter-review.js";
+import { ChapterReviewSchema, ChapterReviewPreflightSchema } from "./chapter-review.js";
 import { ManuscriptReviewSchema, ManuscriptReviewHistorySchema } from "./manuscript-review.js";
 import { DramaRequestSchema } from "./audio-drama.js";
 import { ComicModeSchema } from "./graphic-novel.js";
@@ -147,7 +147,7 @@ export const QueueCommandSchema = z.enum([
   "read-bible-section",
   "read-prose",
   "read-prose-page",
-  "chapter-review-start", "chapter-review-read", "chapter-review-cancel", "chapter-review-decide",
+  "chapter-review-start", "chapter-review-read", "chapter-review-cancel", "chapter-review-decide", "chapter-review-preflight",
   "manuscript-review-start", "manuscript-review-read", "manuscript-review-resume", "manuscript-review-cancel", "manuscript-review-decide", "manuscript-review-export",
   "read-audiobook-chapter",
   "read-audiobook-book",
@@ -376,7 +376,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
    * save's base — until the next snapshot says the record moved.
    */
   z.object({ type: z.literal("chapter-review.updated"), at: z.string(), worldId: z.string(), productionId: z.string(), chapterId: z.string(),
-    review: ChapterReviewSchema.nullable(), error: z.string().optional() }).strict(),
+    review: ChapterReviewSchema.nullable(), error: z.string().optional(), preflight: ChapterReviewPreflightSchema.optional(), requestId: UlidSchema.optional() }).strict(),
   z.object({ type: z.literal("manuscript-review.updated"), at: z.string(), worldId: z.string(), productionId: z.string(),
     review: ManuscriptReviewSchema.nullable(), history: ManuscriptReviewHistorySchema, error: z.string().optional(),
     requestId: UlidSchema.optional(), pdf: z.string().max(20000000).optional() }).strict(),

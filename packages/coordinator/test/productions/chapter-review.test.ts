@@ -13,6 +13,22 @@ import { closeOnCleanup, tempDir } from "../tmp.js";
 import { makeReviewTaskRunner, type ReviewTaskRunner } from "../../src/harness/review-task.js";
 
 const quote = "Maren has the 1820 volume open on the rail desk";
+it("refuses unavailable review routes before a running report or inference and rechecks on Start", async () => {
+  const f = await fixture(); let ready = true, checks = 0, calls = 0;
+  const service = new ChapterReviewService({ withWorld: async (_id, work) => work(f.store),
+    preflight: async (_store, _target, _source, selected) => { checks++; return { checks: [...selected], ready,
+      pictures: 0, readablePictures: 0, narrationRecords: 0, models: [{ specialist: "script", model: "test/writer", source: "production",
+        ...(!ready ? { reason: "Model is unavailable" } : {}) }] }; },
+    runner: (_store, selected) => { assert.equal(selected?.models[0]?.model, "test/writer"); return async () => { calls++; return answer; }; },
+    publish: (_target, review) => f.updates.push(review) });
+  assert.equal((await service.preflight(f.target, ["script"])).ready, true);
+  ready = false;
+  await assert.rejects(service.start(f.target, "refused-start", ["script"]), /unavailable/);
+  assert.equal(await readChapterReview(f.store, f.target), null); assert.equal(calls, 0);
+  assert.equal(f.updates.filter(review => review?.status === "running").length, 0);
+  ready = true; assert.equal((await service.start(f.target, "valid-start", ["script"])).status, "complete");
+  assert.equal(calls, 1); assert.equal(checks, 3);
+});
 it("runs only selected prose checks despite unreadable media, preserves the selection on replay and checks text freshness", async () => {
   const f = await fixture(), source = await captureReviewSource(f.store, f.target);
   await writeAudiobook(f.store, f.target.productionId, source.chapter.file, emptyAudiobook(source.chapter.version, source.chapter.hash, new Date().toISOString()));

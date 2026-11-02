@@ -212,6 +212,7 @@ const CLIENT_COMMAND_METADATA = {
   "save-onboarding": globalOnly(GLOBAL_OPERATION),
   "chapter-review-start": action("production", "command", "production-store", "external-network-action", ["chapters"]),
   "chapter-review-read": readOnly("Reads retained chapter review findings."),
+  "chapter-review-preflight": readOnly("Checks chapter review models and source coverage without inference."),
   "chapter-review-cancel": humanOnly("Stopping specialist work belongs to the person."),
   "chapter-review-decide": humanOnly("Accepting intentional ambiguity or dismissing a finding belongs to the person."),
   "manuscript-review-start": humanOnly("A full manuscript review requires the author's explicit request."),

@@ -7,6 +7,13 @@ export const CHAPTER_REVIEW_CHECKS = ["script", "prose", "visual", "narration"] 
 export type ChapterReviewCheck = typeof CHAPTER_REVIEW_CHECKS[number];
 export const ChapterReviewChecksSchema = z.array(z.enum(CHAPTER_REVIEW_CHECKS)).min(1).max(4)
   .refine(checks => new Set(checks).size === checks.length, "Choose each check only once.");
+export const ChapterReviewPreflightSchema = z.object({
+  checks: ChapterReviewChecksSchema, ready: z.boolean(), pictures: z.number().int().min(0), readablePictures: z.number().int().min(0),
+  narrationRecords: z.number().int().min(0),
+  models: z.array(z.object({ specialist: z.enum(["script", "prose", "visual"]), model: z.string().nullable(),
+    source: z.enum(["specialist", "production", "default"]), reason: z.string().optional() }).strict()).max(3),
+}).strict();
+export type ChapterReviewPreflight = z.infer<typeof ChapterReviewPreflightSchema>;
 export const ChapterReviewTargetSchema = z.object({
   worldId: z.string().min(1).max(100), productionId: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
   chapterId: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/),

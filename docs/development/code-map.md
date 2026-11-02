@@ -1368,6 +1368,10 @@ commit was possible in this session.
 
 ## Chapter review
 
+Review readiness (#1784) is projected by `productions/chapter-review-preflight.ts` through
+`chapter-review-preflight`. The existing chapter dialog displays models and source coverage;
+the service repeats preflight on Start and the coordinator pins those models into its runner.
+
 See [chapter-review.md](chapter-review.md). Contracts and evidence validation live in `packages/contracts/src/chapter-review.ts`; retained workflow and sidecars in coordinator `productions/chapter-review.ts`; confined specialist sessions in `harness/review-task.ts`, with versioned guidance in `harness/skills/chapter-*-review.md`. Client `components/chapter-review.tsx` displays findings from the chapter workspace; `lib/chapter-review.ts` bounds and verifies image bytes before display and folds review-run updates without cross-run clock ordering. World Chat reaches the same service through the typed `chapter-review` action.
 
 Chapter review evidence quality (#1785): `contracts/src/chapter-review.ts` validates complete
