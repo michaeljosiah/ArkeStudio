@@ -114,7 +114,7 @@ export class WorldStore {
   private verifying = false;
   private verifyAgain = false;
   private closed = false;
-  private readonly admittedGate = new AsyncLocalStorage<{ active: boolean }>();
+  private readonly admittedGate = new AsyncLocalStorage<{ active: boolean; refreshed: boolean }>();
   private lockHeld: boolean;
   private ownershipFailure: Error | null = null;
   private closePromise: Promise<void> | null = null;
@@ -250,26 +250,32 @@ export class WorldStore {
    * commits, watcher-suppressed so our own writes never read as external, rescanned after so
    * the bundle stays honest (SPEC-004).
    */
-  async gateOp<T>(fn: () => Promise<T>, precondition?: WorldStatePrecondition): Promise<T> {
+  async gateOp<T>(fn: () => Promise<T>, precondition?: WorldStatePrecondition, options: { finalWrite?: "commit" } = {}): Promise<T> {
     this.assertWritable();
     return this.serialise(async () => {
       // Admission happened before enqueue so work already ahead of close may drain. This second
       // check proves the lock still exists when the callback actually reaches the filesystem.
       await this.verifyOwnership();
       this.watcher?.suppress();
-      const admission = { active: true };
+      const admission = { active: true, refreshed: false };
+      let succeeded = false;
       try {
         if (precondition) {
           await this.rescan();
           const detail = precondition();
           if (detail) throw new WorldStateStaleError(detail);
         }
-        return await this.admittedGate.run(admission, fn);
+        const result = await this.admittedGate.run(admission, fn);
+        succeeded = true;
+        return result;
       } finally {
         // Async-local context is inherited by timers and detached promises. Revoking the shared
         // token keeps those descendants from borrowing this invocation's close-drain permit.
         admission.active = false;
-        await this.rescan().catch(() => {});
+        // Opt in only when the callback performs no filesystem writes after its final commit.
+        // That commit already refreshed the bundle, history checks, index and scan state.
+        // Failure or a path that made no commit still needs the normal reconciliation scan.
+        if (options.finalWrite !== "commit" || !succeeded || !admission.refreshed) await this.rescan().catch(() => {});
         this.watcher?.unsuppress();
       }
     });
@@ -438,8 +444,11 @@ export class WorldStore {
     // Only that async call chain may drain under the lock; unrelated calls still see the close.
     if (this.admittedGate.getStore()?.active === true) this.assertLockHeld();
     else this.assertWritable();
+    const admission = this.admittedGate.getStore();
+    if (admission) admission.refreshed = false;
     const result = await this.committer.commit(input, hooks);
     await this.rescan([...input.files.map((f) => f.path), "world.json"]);
+    if (admission) admission.refreshed = true;
     return result;
   }
 
