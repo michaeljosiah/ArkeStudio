@@ -784,8 +784,8 @@ export function subscribeChapterReview(listener: (value: ChapterReviewUpdate) =>
   chapterReviewListeners.add(listener); return () => { chapterReviewListeners.delete(listener); };
 }
 export function requestChapterReview(kind: "chapter-review-start" | "chapter-review-read" | "chapter-review-cancel",
-  worldId: string, productionId: string, chapterId: string): boolean {
-  return send({ kind, worldId, productionId, chapterId, requestId: ulid() });
+  worldId: string, productionId: string, chapterId: string, checks?: import("@arke-studio/contracts").ChapterReviewCheck[]): boolean {
+  return send({ kind, worldId, productionId, chapterId, ...(kind === "chapter-review-start" && checks ? { checks } : {}), requestId: ulid() });
 }
 export function decideChapterReview(worldId: string, productionId: string, chapterId: string, reviewId: string,
   findingId: string, decision: "open" | "intentional" | "dismissed", note?: string): boolean {

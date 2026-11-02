@@ -95,7 +95,7 @@ for (const shape of ["1280x720", "1080x1920"] as const) it(`previews each pictur
   }] };
   await mount(<VideoPreview worldId={worldId} productionId={productionId} plan={plan}
     options={{ ...DEFAULT_VIDEO_OPTIONS, shape, titleCards: false, subtitles: "none" }} onClose={() => {}} />);
-  const frames = [...dom.document.querySelectorAll('.fy-abv-vid')].filter(frame => frame.style.height === "405px");
+  const frames = [...dom.document.querySelectorAll('.fy-abv-vid')].filter(frame => (frame as unknown as HTMLElement).style.height === "405px");
   assert.equal(frames.length, 2);
   assert.ok(frames[0]!.querySelector("img")?.getAttribute("src")?.includes("wide.png"));
   assert.ok(frames[1]!.querySelector("img")?.getAttribute("src")?.includes("tall.png"));

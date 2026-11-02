@@ -6,7 +6,7 @@ import { OnboardingPlanSchema } from "./onboarding.js";
 import { GuideVoiceLinesRequestSchema, SetGuideEntrySchema, SetGuideTeasersSchema } from "./world-guide.js";
 import { ARKE_PLAYER_PICTURE_SIZES } from "./world-package.js";
 import { ArkePlayerPartRequestSchema } from "./arke-player-release.js";
-import { ChapterReviewDecisionSchema } from "./chapter-review.js";
+import { ChapterReviewDecisionSchema, ChapterReviewChecksSchema } from "./chapter-review.js";
 import { StoryPublishActionSchema } from "./story-publication.js";
 import { valueSchema } from "./value-schema.js";
 import { BrowserMediaFilesSchema } from "./browser-media-import.js";
@@ -2304,7 +2304,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * Open a chapter: the body and its version, fetched on demand and answered by
    * `chapter.open-result` (turn 126). The summary in the bundle stays body-free on purpose.
    */
-  z.object({ kind: z.literal("chapter-review-start"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("chapter-review-start"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema, checks: ChapterReviewChecksSchema.optional() }).strict(),
   z.object({ kind: z.literal("chapter-review-read"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("chapter-review-cancel"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("chapter-review-decide"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema,
