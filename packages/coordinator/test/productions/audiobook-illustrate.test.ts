@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { acceptCharacterLook } from "../../src/references/kit.js";
+import { castLines, setVoicePin } from "../../src/productions/voices.js";
+import { openChapter, saveChapter } from "../../src/productions/ops.js";
 import { pngBytes } from "../queue/fake-provider.js";
 import { DEFAULT_NARRATOR, pictureLookChanged, pictureMarkKey, sentenceHashes, type AudiobookPicture, type ClientMessage, type DomainEvent, type IllustrationProposal } from "@arke-studio/contracts";
 import { planAudiobook, readAudiobook } from "../../src/productions/audiobook.js";
@@ -199,6 +201,27 @@ describe("Illustrate this chapter: the proposal (R-101)", () => {
       },
       { illustrate: says((input) => nearest(input, [0, 60, 130, 200])) },
     ));
+
+  it("carries the accepted portrait for a descriptive speaker pin through proposal and generation", () =>
+    withHarness(async ({ events, send, store, enqueued }) => {
+      const opened = await openChapter(store()!, LEDGER, CHAPTER);
+      await saveChapter(store()!, LEDGER, CHAPTER, '"Wait."\n\nShe stood at the rail and watched the river.', { baseHash: opened.hash });
+      await castLines(store()!, LEDGER, CHAPTER, async () => ({ lines: [{ speaker: "Unknown", quote: '"Wait."' }] }));
+      await setVoicePin(store()!, LEDGER, CHAPTER, { paragraph: 0, occurrence: 0, quote: '"Wait."', speaker: "the masked courier", sheet: "maren-kest" });
+      await illustrate(send);
+      const proposal = finished(events).proposal!;
+      assert.equal(proposal.rows.length, 1);
+      const row = proposal.rows[0]!;
+      assert.equal(row.who[0]!.key, "maren-kest");
+      assert.equal(row.who[0]!.carried, true);
+      assert.equal(row.needs, undefined);
+      assert.equal(row.estimatedMicroUsd, 45_000, "the carried reference is still priced");
+      assert.equal(row.prompt, "The masked courier waits at the rail.");
+      await accept(send, proposal);
+      assert.equal(enqueued.length, 1);
+      assert.ok(!finished(events).reason);
+      assert.equal((await openChapter(store()!, LEDGER, CHAPTER)).body, '"Wait."\n\nShe stood at the rail and watched the river.\n');
+    }, { illustrate: async (input) => ({ pictures: [{ block: input.blocks[0]!.key, title: "Waiting", prompt: "The masked courier waits at the rail.", who: ["the masked courier"], place: null }] }) }));
 
   it("holds a row whose character has a sheet and no picture, and names them; one that is only a place or has its picture is not held", () =>
     withHarness(
