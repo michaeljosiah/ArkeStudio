@@ -7632,6 +7632,11 @@ export class Coordinator {
   ): Promise<void> {
     this.handlingClientMessages++;
     try { await this.handleClientMessageInner(msg, benchTakeActionHeld, benchDispatchHeld, genesisDecisionHeld, browserImportStore, audiobookStore, browserImportSpace); }
+    catch (error) {
+      if (msg.kind !== "cast-voices" && msg.kind !== "group-chapter-beats") throw error;
+      this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind,
+        requestId: "requestId" in msg ? msg.requestId ?? null : null, reason: describeCoordinatorError(error) });
+    }
     finally {
       this.handlingClientMessages--;
       if (!this.handlingClientMessages && this.pendingSpendSnapshot) this.publishProductionSpend();
@@ -7651,7 +7656,7 @@ export class Coordinator {
     // commands and store, never a second coordinator or an unowned filesystem writer.
     if (!audiobookStore && "worldId" in msg && msg.worldId &&
       // The book as a listener hears it takes its store inside its own read, under its deadline.
-      ["read-audiobook-chapter", "read-audiobook-book", "open-audiobook", "keep-audiobook-split", "export-audiobook-player", "export-audiobook-chapters", "export-arke-player"].includes(msg.kind) &&
+      ["cast-voices", "group-chapter-beats", "read-audiobook-chapter", "read-audiobook-book", "open-audiobook", "keep-audiobook-split", "export-audiobook-player", "export-audiobook-chapters", "export-arke-player"].includes(msg.kind) &&
       this.opts.provider.withBackgroundWorldStore) {
       if (this.stopping) return;
       return this.opts.provider.withBackgroundWorldStore(msg.worldId, store =>
@@ -16211,20 +16216,22 @@ export class Coordinator {
         return;
       }
       case "stop-voices": {
-        const store = this.opts.provider.openStore?.();
-        const chapter = store?.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
-        this.castingVoices.get(`${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`)?.control.abort();
+        for (const [key, run] of this.castingVoices) {
+          if (run.worldId === msg.worldId && run.productionId === msg.productionId &&
+            (run.chapterId === msg.chapterFile || key === `${msg.worldId}/${msg.productionId}/${msg.chapterFile}`)) run.control.abort();
+        }
         return;
       }
       case "cast-voices": {
         // The cast of lines (turn 130, SPEC-012 §2.4.2): continuity's press, turned on speech —
         // one run per chapter at a time, keyed by world as well, ended with the world that began
         // it, and every ending short of cast leaving the last cast standing.
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
+        const store = audiobookStore ?? this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) throw new Error("This world's background preparation is unavailable.");
         const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
-        if (!chapter) return;
-        await this.castChapterVoices(store, msg.worldId, msg.productionId, chapter, msg.scope);
+        if (!chapter) throw new Error("This chapter is no longer available in the requested world.");
+        const result = await this.castChapterVoices(store, msg.worldId, msg.productionId, chapter, msg.scope);
+        if (result.outcome === "busy") throw new Error(result.reason);
         return;
       }
       case "set-voice-pin": {
@@ -16805,10 +16812,10 @@ export class Coordinator {
         // blocks of a beat are joined, the chapter's seams replaced. Not while the book or a
         // chapter of it is read, as the seams are not, nor while this chapter is being directed:
         // a proposal made for the blocks before would be accepted onto other blocks.
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
+        const store = audiobookStore ?? this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) throw new Error("This world's background preparation is unavailable.");
         const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
-        if (!chapter) return;
+        if (!chapter) throw new Error("This chapter is no longer available in the requested world.");
         const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
         const at = () => new Date().toISOString();
         const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
@@ -16852,7 +16859,7 @@ export class Coordinator {
             ...(grouped.summary !== undefined ? { summary: grouped.summary } : {}),
           });
           // Pictures the beats folded into a take are marks now; their takes are timed (design turn 237).
-          void this.timeMarkedTakes(store, msg.productionId, chapter.id);
+          await this.timeMarkedTakes(store, msg.productionId, chapter.id);
         } catch (err) {
           if (!(err instanceof BeatRefusal)) void this.appLog?.append({ kind: "audiobook.beats-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
           this.emit({ at: at(), type: "audiobook.beats", ...ids, outcome: err instanceof BeatRefusal ? "refused" : "failed", reason: err instanceof BeatRefusal ? err.message : describeCoordinatorError(err) });
