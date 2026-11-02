@@ -153,6 +153,12 @@ describe("the brief a picture is made from (R-99)", () => {
     assert.equal(referenceBriefLine([]), "");
   });
 
+  it("carries Wide composition in words when there is no aspect parameter", () => {
+    const prompt = "The empty harbour.";
+    assert.match(pictureBench(prompt, [], undefined, [], true), /wide, horizontal 16:9 landscape/);
+    assert.doesNotMatch(pictureBench(prompt, [], undefined), /16:9/, "explicit route aspects retain their own shape");
+  });
+
   // A detail carries no reference (rule 12), so the hand was drawn from the prompt alone, and white:
   // Ade's in Na love or Juju's second chapter. The closing lines now say whose skin it is, from the sheet.
   it("says whose hand a detail shows and the skin their sheet gives", () => {

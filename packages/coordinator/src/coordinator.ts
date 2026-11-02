@@ -22560,7 +22560,7 @@ export class Coordinator {
       else cited.push({ name: entry.name, kind: entry.kind, token: outcome.token, purpose: entry.look ? "costume" : "identity" });
     }
     if (input.signal?.aborted) return fail("stopped");
-    const brief = input.saved?.brief ?? (input.brief !== undefined ? input.brief(cited) : input.recompose !== undefined || input.motion !== undefined ? input.prompt : pictureBench(input.prompt, cited, input.mood, input.detailed ?? []));
+    const brief = input.saved?.brief ?? (input.brief !== undefined ? input.brief(cited) : input.recompose !== undefined || input.motion !== undefined ? input.prompt : pictureBench(input.prompt, cited, input.mood, input.detailed ?? [], input.aspect === undefined));
     if (input.expectedBrief !== undefined && brief !== input.expectedBrief) return fail("picture prompt changed · refresh references before accepting");
     const composed = await this.benchFor(worldId, sessionId);
     if (composed === null) return fail("the Bench session is gone");

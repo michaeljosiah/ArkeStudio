@@ -53,7 +53,7 @@ export function refreshIllustrationRow(store: WorldStore, room: PictureRoom, mod
     const block = pictureWords(room.plan.blocks.map(entry => entry.block), room.plan.record?.pictures, row.block, others.filter(other => other !== row.block))?.text ?? "";
     shot = { frame: held.frame, inFrame: held.inFrame.map(person => person.key), notInFrame: held.notInFrame, expressions: held.expressions, details: held.details, checks: pictureChecks({ held, who, people, lines, block, mood: room.mood }), checkedPrompt: row.prompt };
   }
-  return { ...rest, who, effectivePrompt: pictureBriefPreview(store, room, { prompt: row.prompt, who, ...(shot === undefined ? {} : { shot }) }), estimatedMicroUsd: pictureQuote(model, who.filter(entry => entry.carried).length), ...(needs.length ? { needs } : {}), ...(disagrees.length ? { disagrees } : {}), ...(stamp === undefined ? {} : { look: stamp }), ...(shot === undefined ? {} : { shot }) };
+  return { ...rest, who, effectivePrompt: pictureBriefPreview(store, room, { prompt: row.prompt, who, ...(shot === undefined ? {} : { shot }) }, model), estimatedMicroUsd: pictureQuote(model, who.filter(entry => entry.carried).length), ...(needs.length ? { needs } : {}), ...(disagrees.length ? { disagrees } : {}), ...(stamp === undefined ? {} : { look: stamp }), ...(shot === undefined ? {} : { shot }) };
 }
 
 export function refreshIllustrationProposal(store: WorldStore, productionId: string, room: PictureRoom, model: ManifestModel, proposal: IllustrationProposal): IllustrationProposal {

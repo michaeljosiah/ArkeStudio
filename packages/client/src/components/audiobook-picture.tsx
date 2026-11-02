@@ -242,7 +242,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
     // Whose hand a detail shows, with the skin their sheet gives: a person's key is their sheet's id.
     const sheets = world?.sheets ?? [];
     const detailed = pictureDetailSkins(picked.shot?.details ?? [], sheets.map((sheet) => ({ key: sheet.id, name: sheet.name, sheet: sheet.id })), sheets);
-    pending.current = { before: bench?.session.id ?? null, brief: pictureBench(prompt, cited, pictureMood(record?.look, productionStyleFor(production.meta, world?.artDirection.description)), detailed), refs: carried.map((who) => who.reference!),
+    pending.current = { before: bench?.session.id ?? null, brief: pictureBench(prompt, cited, pictureMood(record?.look, productionStyleFor(production.meta, world?.artDirection.description)), detailed, picked.aspect === undefined), refs: carried.map((who) => who.reference!),
       setup: { provider: picked.model.provider, model: picked.model.id, params: { kind: "image", count: 1, ...(picked.aspect !== undefined ? { aspect: picked.aspect } : {}) } } };
     sendBenchNewSession(worldId);
   };

@@ -121,7 +121,7 @@ export function briefLines(store: Pick<WorldStore, "getBundle">, look: Audiobook
 }
 
 /** A fresh picture Bench's brief, using the same reference order and composition as dispatch. */
-export function pictureBriefPreview(store: Pick<WorldStore, "getBundle">, room: PictureRoom, row: Pick<IllustrationRow, "prompt" | "who" | "shot">): string {
+export function pictureBriefPreview(store: Pick<WorldStore, "getBundle">, room: PictureRoom, row: Pick<IllustrationRow, "prompt" | "who" | "shot">, model: ManifestModel): string {
   const tokens = new Map<string, string>();
   const cited = row.who.filter((entry) => entry.carried && entry.reference !== null).map((entry) => {
     const token = tokens.get(entry.reference!) ?? benchTokenFor("image", tokens.size + 1);
@@ -130,7 +130,7 @@ export function pictureBriefPreview(store: Pick<WorldStore, "getBundle">, room: 
   });
   return pictureBench(neutralWhereLooksRide(row.prompt, row.who), cited,
     room.mood === undefined ? undefined : neutralWhereLooksRide(room.mood, row.who),
-    pictureDetailSkins(row.shot?.details ?? [], room.people, store.getBundle().sheets));
+    pictureDetailSkins(row.shot?.details ?? [], room.people, store.getBundle().sheets), pictureAspect(model) === undefined);
 }
 
 /**

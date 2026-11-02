@@ -348,6 +348,11 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   const [menuFor, setMenuFor] = useState<string | null>(null);
   /** The person a look is being made for from the menu. */
   const [newLookFor, setNewLookFor] = useState<PictureWho | null>(null);
+  const [dimensions, setDimensions] = useState<{ source: string; width: number; height: number } | null>(null);
+  const returned = dimensions?.source === picture ? dimensions : null;
+  const readDimensions = (image: HTMLImageElement) => {
+    if (picture !== null && image.naturalWidth > 0 && image.naturalHeight > 0) setDimensions({ source: picture, width: image.naturalWidth, height: image.naturalHeight });
+  };
   /**
    * Looks pressed in a menu and not yet in the chapter's record, by key: the tile rings at once
    * (after testing local.14). Held only while the menu is open, so a choice the coordinator refused
@@ -423,6 +428,9 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   }
   if (ask.state !== "suggested") return null;
   const suggestion = ask.suggestion;
+  const requestedAspect = suggestion.aspect ?? "16:9";
+  const [aspectWidth, aspectHeight] = requestedAspect.split(":").map(Number);
+  const shapeDiffers = returned !== null && aspectWidth! > 0 && aspectHeight! > 0 && Math.abs(returned.width / returned.height / (aspectWidth! / aspectHeight!) - 1) > 0.02;
   const shot = suggestion.shot;
   const prompt = state.prompt ?? suggestion.prompt;
   const busy = making?.state === "working";
@@ -582,7 +590,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
             <figure>
               {picture !== null ? (
                 <PicturePress onChoose={busy ? undefined : onChoose}>
-                  <img className="fy-pcard__img" src={picture} alt="" data-testid="picture-card-picture" />
+                  <img className="fy-pcard__img" src={picture} alt="" onLoad={(event) => readDimensions(event.currentTarget)} data-testid="picture-card-picture" />
                 </PicturePress>
               ) : (
                 <div className="fy-pcard__slot" aria-hidden="true">
@@ -606,7 +614,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
           </div>
         ) : picture !== null ? (
           <PicturePress onChoose={busy ? undefined : onChoose}>
-            <img className="fy-pcard__img" src={picture} alt="" data-testid="picture-card-picture" />
+            <img className="fy-pcard__img" src={picture} alt="" onLoad={(event) => readDimensions(event.currentTarget)} data-testid="picture-card-picture" />
           </PicturePress>
         ) : (
           <div className="fy-pcard__slot" aria-hidden="true">
@@ -614,6 +622,12 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
           </div>
         )}
         <div className="fy-pcard__facts" data-testid="picture-card-facts">
+          {returned !== null && (
+            <div className="fy-pcard__fact">
+              <span className="fy-mono">Returned image</span>
+              <b data-testid="picture-card-dimensions">{returned.width} × {returned.height}{shapeDiffers ? ` · differs from ${suggestion.aspect === undefined ? "Wide " : ""}${requestedAspect}` : ""}</b>
+            </div>
+          )}
           {shot !== undefined && shot.frame !== "" && (
             <div className="fy-pcard__fact">
               <span className="fy-mono">Frame</span>

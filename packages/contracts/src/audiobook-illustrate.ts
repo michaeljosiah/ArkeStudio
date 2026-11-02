@@ -511,15 +511,19 @@ export const TALL_PICTURE_BRIEF = [
   PICTURE_TEXT_DIRECTION,
 ].join("\n\n");
 
+export const WIDE_PICTURE_DIRECTION = "Compose a wide, horizontal 16:9 landscape picture.";
+
 export function pictureBench(
   prompt: string,
   cited: readonly PictureCitation[],
   mood: string | undefined,
   detailed: ReadonlyArray<PictureDetailSkin> = [],
+  wideIntent = false,
 ): string {
   // Main photos fix identity; only deliberately selected costume references fix clothing (#1793).
   return [
     prompt.replace(/\s+/g, " ").trim(),
+    wideIntent ? WIDE_PICTURE_DIRECTION : "",
     [referenceBriefLine(cited), pictureIdentityDirection(cited)].filter((part) => part !== "").join(" "),
     // A carried image defines the detail's identity too; old records or an explicit Without
     // choice retain the authored sheet fallback only for a person whose image does not ride.

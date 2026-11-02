@@ -619,6 +619,18 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.equal(asked(m, "suggest-audiobook-picture").length, 0, "nothing is drafted to show it");
   });
 
+  it("shows decoded image dimensions and a shape mismatch without altering the retained picture", async () => {
+    extraArtifacts = [madeArtifact()];
+    const entry = made(SHOT), before = structuredClone(entry);
+    const m = await mount(2, { "p1.0": entry });
+    const img = q(m, '[data-testid="picture-card-picture"]')!;
+    Object.defineProperties(img, { naturalWidth: { value: 1024, configurable: true }, naturalHeight: { value: 1536, configurable: true } });
+    await act(async () => void img.dispatchEvent(new dom.Event("load") as unknown as Event));
+    assert.match(text(q(m, '[data-testid="picture-card-dimensions"]')), /1024 × 1536 · differs from/);
+    assert.deepEqual(entry, before);
+    assert.equal(m.sent.length, 0);
+  });
+
   it("makes it again from the card: the same prompt, people, frame and shot, on the price it shows", async () => {
     extraArtifacts = [madeArtifact()];
     const m = await mount(2, { "p1.0": made(SHOT) });

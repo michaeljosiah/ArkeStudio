@@ -66,6 +66,12 @@ it("carries included-plan funding into the chapter illustration proposal before 
     assert.ok(proposal.rows.length > 0);
     assert.ok(proposal.rows.every(row => row.estimatedMicroUsd === 0));
     assert.equal(enqueued.length, 0);
+    assert.equal(proposal.aspect, undefined);
+    assert.ok(proposal.rows.every(row => /wide, horizontal 16:9 landscape/.test(row.effectivePrompt!)));
+    await accept(send, proposal);
+    assert.equal(enqueued.length, proposal.rows.length);
+    assert.ok(enqueued.every(job => job.params.aspect === undefined));
+    assert.deepEqual(enqueued.map(job => job.params.prompt), proposal.rows.map(row => row.effectivePrompt));
   }, { model: { ...IMAGE, id: "codex-image", provider: "codex", limits: { providerSelectedSize: true }, pricing: { kind: "included-plan" } },
     illustrate: says(input => nearest(input, [0, 60])) }));
 
