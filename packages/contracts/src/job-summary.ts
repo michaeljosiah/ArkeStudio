@@ -9,6 +9,12 @@ export const JobStorageWaitSchema = z.object({
   reason: z.enum(["space", "unavailable"]),
   observedAt: IsoDateTimeSchema,
   checking: z.boolean().optional(),
+  /**
+   * Submitted without a verified storage check: capacity or accounting could not be confirmed,
+   * which is not a measured shortage, so the job went on with this warning instead of waiting
+   * (owner, 2026-11-02; SPEC-062 R-5 amendment). Present while the job runs; never a hold.
+   */
+  advisory: z.boolean().optional(),
   detail: z.object({
     code: z.enum(["capacity-unavailable", "capacity-stale", "mapping-changed", "unbounded-output", "space", "audit-unavailable", "reconciliation-required", "reservation-limit", "stopped", "destination-unavailable", "different-volumes"]),
     roles: z.array(StorageRootRoleSchema).max(5),

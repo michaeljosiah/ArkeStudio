@@ -48,7 +48,7 @@ export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; s
     <div className="fy-ap__main">
       <div className="fy-ap__rowtitle">{audiobookActivityTitle(run)}</div>
       <div className="fy-ap__rowsub">{order !== undefined ? `Chapter ${order} · ` : ""}{run.productionTitle} · {run.worldName}</div>
-      {!blockReady && <><div className="fy-abactivity__stage" role="status">{storageWait ? storageWait.phase === "submission" ? "Waiting before submission" : "Waiting to save the result" : stage}</div>
+      {!blockReady && <><div className="fy-abactivity__stage" role="status">{storageWait && !storageWait.advisory ? storageWait.phase === "submission" ? "Waiting before submission" : "Waiting to save the result" : stage}</div>
         <div className="fy-ap__rowsub">{progress}</div></>}
       <div className="fy-ap__rowsub">{blockReady ? `${run.made} block${run.made === 1 ? "" : "s"} saved · ${cost.replace(" this re-read", " for this re-read")}` : [!uncertain && run.models.join(", "), cost].filter(Boolean).join(" · ")}</div>
       {storageWait ? <JobStorageWaitNotice wait={storageWait} connected={connection === "open"} /> : run.reason && <div className="fy-ap__reason">{activityReason(run.reason)}</div>}

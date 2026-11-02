@@ -55,6 +55,16 @@ import { ArtifactCheckpointInvalid, ArtifactResultFiles, artifactFileMatches, AR
 import { ArtifactStorageHeld, SubmissionStorageHeld, type ArtifactWriteSpace } from "../storage/job-artifacts.js";
 
 /**
+ * Submission holds that mean "could not confirm", as opposed to "measured too little" (space),
+ * "the destination is gone" (destination-unavailable) or "the service is stopping" (stopped).
+ * These become an advisory and the job submits. A hold with no typed detail stays a hold: it is
+ * an unexplained failure, not a known-unknown measurement.
+ */
+const UNVERIFIED_STORAGE: ReadonlySet<string> = new Set(["capacity-unavailable", "capacity-stale", "mapping-changed", "audit-unavailable", "reconciliation-required", "reservation-limit"]);
+const unverifiedStorage = (held: SubmissionStorageHeld) =>
+  held.result?.admission?.status !== "held" && held.detail !== undefined && UNVERIFIED_STORAGE.has(held.detail.code);
+
+/**
  * The dispatch engine (SPEC-009): durable before the network, and never trust silence. Every
  * state transition is appended to the journal before the action it authorises (D1), and a gap
  * in observation is an unknown to reconcile, never a failure to retry (D2).
@@ -565,7 +575,10 @@ export class JobQueue {
   /** Typed presentation stays outside the journal, like progress. Never parse error copy. */
   private jobObservation(job: Job): JobSummary {
     const wait = this.storageWaits.get(job.id);
-    if (wait && (wait.phase === "submission" ? job.status === "queued" : job.status === "running" || job.status === "submitting")) return { ...job, storageWait: { ...wait } };
+    // An advisory travels with the submitted job; a hold only exists while it keeps the job back.
+    const live = wait?.advisory ? job.status === "queued" || job.status === "submitting" || job.status === "running"
+      : wait?.phase === "submission" ? job.status === "queued" : job.status === "running" || job.status === "submitting";
+    if (wait && live) return { ...job, storageWait: { ...wait } };
     this.storageWaits.delete(job.id);
     return job;
   }
@@ -585,6 +598,15 @@ export class JobQueue {
       if (before?.phase === phase && before.reason === reason && !before.checking && JSON.stringify(before.detail) === JSON.stringify(error.detail)) return;
       this.storageWaits.set(job.id, { phase, reason, observedAt: this.clock(), ...(error.detail ? { detail: error.detail } : {}) });
     } else if (!this.storageWaits.delete(job.id)) return;
+    this.publishJob(current);
+  }
+
+  /** The warning that replaces an unverified submission hold: observation only, like a hold. */
+  private storageAdvisory(job: Job, held: SubmissionStorageHeld): void {
+    if (this.disposed || this.cancelling.has(job.id)) return;
+    const current = this.jobs.get(job.id);
+    if (!current || current.attempt !== job.attempt || current.resultReceiptId !== job.resultReceiptId) return;
+    this.storageWaits.set(job.id, { phase: "submission", reason: "unavailable", observedAt: this.clock(), advisory: true, ...(held.detail ? { detail: held.detail } : {}) });
     this.publishJob(current);
   }
 
@@ -1447,8 +1469,18 @@ export class JobQueue {
       return !this.disposed && !checking.signal.aborted && this.stillQueued(job) && !this.lane(job.provider).paused;
     } catch (error) {
       if (this.disposed || checking.signal.aborted || !this.stillQueued(job)) return false;
-      this.storageWaiting(job, "submission", error instanceof SubmissionStorageHeld ? error : new SubmissionStorageHeld());
-      const message = error instanceof SubmissionStorageHeld ? error.message : new SubmissionStorageHeld().message;
+      const held = error instanceof SubmissionStorageHeld ? error : new SubmissionStorageHeld();
+      // Unverified is not short (owner, 2026-11-02; SPEC-062 R-5 amendment). A check that could
+      // not confirm capacity or accounting held work for as long as its probe stayed unavailable
+      // (#2239: twelve holds in an evening on a disk with 38 GB free, each cleared only by a
+      // restart), so it now warns and submits. A measured shortage or a lost destination still
+      // holds, and the result's own landing reservation still protects the write itself.
+      if (unverifiedStorage(held)) {
+        this.storageAdvisory(job, held);
+        return !this.disposed && this.stillQueued(job) && !this.lane(job.provider).paused;
+      }
+      this.storageWaiting(job, "submission", held);
+      const message = held.message;
       const current = this.jobs.get(job.id)!;
       if (current.error !== message) {
         // This is observation, like progress: the queued identity/attempt already flushed.
