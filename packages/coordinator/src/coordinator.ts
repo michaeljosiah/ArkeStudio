@@ -11399,7 +11399,7 @@ export class Coordinator {
         try {
           if (this.stopping) return;
           const reviews = this.chapterReviews();
-          if (msg.kind === "chapter-review-start") await reviews.start(target, msg.requestId);
+          if (msg.kind === "chapter-review-start") await reviews.start(target, msg.requestId, msg.checks);
           else if (msg.kind === "chapter-review-read") await reviews.read(target);
           else if (msg.kind === "chapter-review-cancel") reviews.cancel(target);
           else await reviews.decide(target, msg.reviewId, msg.findingId, msg.decision, msg.note);

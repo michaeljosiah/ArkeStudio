@@ -4,12 +4,40 @@ import { it, afterEach, mock } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import type { ChapterReview } from "@arke-studio/contracts";
-import { ChapterReviewReport } from "../src/components/chapter-review.js";
+import type { ChapterReview, ClientMessage } from "@arke-studio/contracts";
+import { ChapterReviewReport, ChapterReviewControl } from "../src/components/chapter-review.js";
+import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { FIXTURE_STATE } from "./fixture-state.js";
+import type { ArkeBridge } from "../src/arke-bridge.js";
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root | undefined;
-afterEach(async () => { if (root) await act(async () => root!.unmount()); dom.document.body.innerHTML = ""; mock.restoreAll(); });
+afterEach(async () => { if (root) await act(async () => root!.unmount()); dom.document.body.innerHTML = ""; mock.restoreAll(); __setBridgeForTest(null); });
+it("defaults every check on, refuses an empty selection and sends only the chosen checks", async () => {
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ send: (json: string) => sent.push(JSON.parse(json)) } as unknown as ArkeBridge);
+  const container = dom.document.createElement("div"); dom.document.body.append(container); root = createRoot(container as unknown as HTMLElement);
+  await act(async () => {
+    __setStateForTest(FIXTURE_STATE, { connection: "open" });
+    root!.render(<ChapterReviewControl worldId={FIXTURE_STATE.world!.meta.worldId} productionId="book" chapterId="one" slug="world" held={false} />);
+  });
+  await act(async () => { container.querySelector("button")!.click(); });
+  const checkboxes = [...dom.document.querySelectorAll('input[type="checkbox"]')];
+  assert.equal(checkboxes.length, 4); assert.ok(checkboxes.every(input => input.checked));
+  const toggle = async (index: number, checked: boolean) => {
+    await act(async () => { checkboxes[index]!.checked = checked; checkboxes[index]!.dispatchEvent(new dom.Event("click", { bubbles: true })); });
+  };
+  for (let i = 0; i < checkboxes.length; i++) await toggle(i, false);
+  const start = [...dom.document.querySelectorAll("button")].find(button => button.textContent === "Start review")!;
+  assert.equal(start.hasAttribute("disabled"), true);
+  await toggle(0, true);
+  assert.equal(start.hasAttribute("disabled"), false);
+  await act(async () => { start.click(); });
+  const command = sent.find(msg => msg.kind === "chapter-review-start");
+  assert.equal(command?.kind, "chapter-review-start");
+  if (command?.kind === "chapter-review-start") assert.deepEqual(command.checks, ["prose"]);
+  assert.match(dom.document.body.textContent ?? "", /provisional thresholds/);
+});
 const review: ChapterReview = { worldId: "world", productionId: "book", chapterId: "one", schemaVersion: 1, id: "11111111-1111-4111-a111-111111111111", requestId: "request", title: "One", createdAt: "now", updatedAt: "now", status: "complete", sourceHash: "hash", contextHash: "context", body: "He read the tablet.", images: [{ block: "p0.0", file: "tablet.png", hash: "sha256:" + createHash("sha256").update("reviewed pixels").digest("hex") }], tasks: [{ id: "visual", specialist: "visual", state: "complete", images: ["p0.0"], skill: "chapter-visual-review@v1" }], facts: [], findings: [{ id: "22222222-2222-4222-a222-222222222222", taskId: "visual", offset: 0, category: "image", certainty: "possible-confusion", quote: "He read the tablet.", imageBlocks: ["p0.0"], observation: "The screen faces away.", impact: "Reading looks impossible.", correction: "Turn the screen toward its reader.", decision: "open" }], checks: [], rejectedFindings: 1, stale: false, staleReasons: [], audioListened: false };
 it("shows the source beside visual evidence and records a deliberate exception", async () => {
   const container = dom.document.createElement("div"); dom.document.body.append(container); root = createRoot(container as unknown as HTMLElement);

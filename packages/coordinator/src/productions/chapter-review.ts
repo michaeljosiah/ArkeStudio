@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CHAPTER_REVIEW_CHECKS, ChapterReviewChecksSchema, type ChapterReviewCheck } from "@arke-studio/contracts";
 import { randomUUID, createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
@@ -26,7 +27,7 @@ const pathOf = (target: ChapterReviewTarget, id = "latest") => {
   return `productions/${target.productionId}/.reviews/chapters/${target.chapterId}/${id}.json`;
 };
 
-export async function captureReviewSource(store: WorldStore, raw: ChapterReviewTarget, signal?: AbortSignal) {
+export async function captureReviewSource(store: WorldStore, raw: ChapterReviewTarget, signal?: AbortSignal, checks: readonly ChapterReviewCheck[] = CHAPTER_REVIEW_CHECKS) {
   signal?.throwIfAborted();
   const target = ChapterReviewTargetSchema.parse({ worldId: raw.worldId, productionId: raw.productionId, chapterId: raw.chapterId });
   if (store.worldId !== target.worldId) throw new Error("The review belongs to another world.");
@@ -36,13 +37,17 @@ export async function captureReviewSource(store: WorldStore, raw: ChapterReviewT
   if (!chapter.body.trim()) throw new Error("Save chapter prose before reviewing it.");
   if (chapter.body.length > 60_000) throw new Error("This review supports chapters up to 60,000 characters. No text has been truncated or sent.");
   signal?.throwIfAborted();
-  const record = await readAudiobook(store, target.productionId, chapter.file);
+  const media = checks.includes("visual") || checks.includes("narration");
+  const readContext = async () => ({
+    record: media ? await readAudiobook(store, target.productionId, chapter.file) : null,
+    book: media ? await readAudiobookBook(store, target.productionId) : null,
+    cast: media ? await readVoices(store, target.productionId, chapter.file) : null,
+    sheets: media ? store.getBundle().sheets.map(s => ({ id: s.id, narration: s.narration })) : [],
+  });
+  const context = await readContext(), { record, book, cast } = context;
   signal?.throwIfAborted();
-  const book = await readAudiobookBook(store, target.productionId);
-  signal?.throwIfAborted();
-  const cast = await readVoices(store, target.productionId, chapter.file);
   if (record === "unreadable" || book === "unreadable" || cast === "unreadable") throw new Error("The audiobook record is unreadable; repair it before review.");
-  const selected = Object.entries(record?.pictures ?? {}).sort(([a], [b]) => {
+  const selected = Object.entries(checks.includes("visual") ? record?.pictures ?? {} : {}).sort(([a], [b]) => {
     const pa = /^p(\d+)\.(\d+)$/.exec(a), pb = /^p(\d+)\.(\d+)$/.exec(b);
     return pa && pb ? Number(pa[1]) - Number(pb[1]) || Number(pa[2]) - Number(pb[2]) : a.localeCompare(b);
   });
@@ -68,16 +73,13 @@ export async function captureReviewSource(store: WorldStore, raw: ChapterReviewT
   // The source binding includes narration and character directions, without sending the full
   // world's lore to every specialist or treating a mutable summary as authoritative canon.
   signal?.throwIfAborted();
-  const sheets = store.getBundle().sheets.map(s => ({ id: s.id, narration: s.narration }));
-  const contextHash = jsonHash({ record, book, cast, sheets });
+  const contextHash = jsonHash(context);
   const blocks = audiobookBlocks(chapter.body, cast, audiobookHeading(chapter.order, chapter.title), audiobookBlockOptions(book, record)).blocks;
   await store.assertOwnership();
   const after = await openChapter(store, target.productionId, target.chapterId, { canonicalId: true });
   if (chapter.hash !== after.hash) throw new Error("The chapter changed while preparing its review.");
   signal?.throwIfAborted();
-  const currentContext = jsonHash({ record: await readAudiobook(store, target.productionId, chapter.file),
-    book: await readAudiobookBook(store, target.productionId), cast: await readVoices(store, target.productionId, chapter.file),
-    sheets: store.getBundle().sheets.map(s => ({ id: s.id, narration: s.narration })) });
+  const currentContext = jsonHash(await readContext());
   signal?.throwIfAborted();
   if (contextHash !== currentContext) throw new Error("Chapter media or direction changed while preparing review.");
   return { chapter, images, bytes, contextHash, record, book, cast, blocks };
@@ -117,7 +119,7 @@ export async function readChapterReview(store: WorldStore, target: ChapterReview
 export async function refreshChapterReview(store: WorldStore, review: ChapterReview, signal?: AbortSignal): Promise<ChapterReview> {
   const reasons: string[] = [];
   try {
-    const source = await captureReviewSource(store, review, signal);
+    const source = await captureReviewSource(store, review, signal, review.selectedChecks);
     if (source.chapter.hash !== review.sourceHash) reasons.push("Chapter text or metadata changed.");
     if (source.contextHash !== review.contextHash) reasons.push("Pictures, narration or character directions changed.");
     if (jsonHash(source.images) !== jsonHash(review.images)) reasons.push("Selected image bytes changed or became unavailable.");
@@ -176,8 +178,10 @@ export class ChapterReviewService {
       return review;
     });
   }
-  start(target: ChapterReviewTarget, requestId: string): Promise<ChapterReview> {
+  start(target: ChapterReviewTarget, requestId: string, checks: readonly ChapterReviewCheck[] = CHAPTER_REVIEW_CHECKS): Promise<ChapterReview> {
     ChapterReviewTargetSchema.parse({ worldId: target.worldId, productionId: target.productionId, chapterId: target.chapterId });
+    const selected = ChapterReviewChecksSchema.safeParse(checks);
+    if (!selected.success) return Promise.reject(new Error("Choose at least one valid review check, without duplicates."));
     if (!requestId || requestId.length > 200) return Promise.reject(new Error("Invalid review request identity."));
     if (this.closing) return Promise.reject(new Error("Chapter review is stopping."));
     const key = chapterReviewKey(target);
@@ -187,7 +191,7 @@ export class ChapterReviewService {
     const control = new AbortController();
     this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
     // Defer execution until the reservation exists, including when a host supplies a synchronous seam.
-    const work = Promise.resolve().then(() => this.deps.withWorld(target.worldId, store => serializeFileMutation(`${store.dir}/${pathOf(target)}`, () => this.run(store, target, requestId, control.signal))))
+    const work = Promise.resolve().then(() => this.deps.withWorld(target.worldId, store => serializeFileMutation(`${store.dir}/${pathOf(target)}`, () => this.run(store, target, requestId, control.signal, selected.data))))
       .catch(error => { this.deps.publish(target, null, error instanceof Error ? error.message : "Review failed."); throw error; })
       .finally(() => this.live.delete(key));
     this.live.set(key, { requestId, control, work });
@@ -215,7 +219,7 @@ export class ChapterReviewService {
       this.deps.publish(target, review);
     }));
   }
-  private async run(store: WorldStore, target: ChapterReviewTarget, requestId: string, signal: AbortSignal) {
+  private async run(store: WorldStore, target: ChapterReviewTarget, requestId: string, signal: AbortSignal, checks: ChapterReviewCheck[]) {
     // A request has one durable identity, even after a newer review or application restart.
     const id = requestIdentity(requestId);
     const existing = await readChapterReview(store, target, id);
@@ -230,11 +234,12 @@ export class ChapterReviewService {
       return result;
     }
     signal.throwIfAborted();
-    const source = await captureReviewSource(store, target, signal), runner = this.deps.runner(store);
+    const source = await captureReviewSource(store, target, signal, checks), runner = this.deps.runner(store);
     const prior = await readChapterReview(store, target);
     const sameSource = prior && sameChapterReviewSource(prior, { sourceHash: source.chapter.hash, contextHash: source.contextHash, images: source.images });
-    const tasks: ReviewTask[] = [{ id: "script", specialist: "script", state: "pending", images: [], skill: skillLabel(skillFor("chapter-script-review", "chapter-review")!) },
-      { id: "prose", specialist: "prose", state: "pending", images: [], skill: skillLabel(skillFor("chapter-prose-review", "chapter-review")!) }];
+    const tasks: ReviewTask[] = [];
+    if (checks.includes("script")) tasks.push({ id: "script", specialist: "script", state: "pending", images: [], skill: skillLabel(skillFor("chapter-script-review", "chapter-review")!) });
+    if (checks.includes("prose")) tasks.push({ id: "prose", specialist: "prose", state: "pending", images: [], skill: skillLabel(skillFor("chapter-prose-review", "chapter-review")!) });
     const available = source.images.filter(i => !i.error);
     for (let at = 0; at < available.length; at += 3) {
       const batch = available.slice(Math.max(0, at - 1), Math.min(available.length, at + 4));
@@ -242,19 +247,21 @@ export class ChapterReviewService {
       tasks.push({ id: `verify-${at / 3 + 1}`, specialist: "verification", state: "pending", images: batch.map(i => i.block), skill: skillLabel(skillFor("chapter-visual-review", "chapter-review")!) });
     }
     if (available.length) tasks.push({ id: "consolidation", specialist: "consolidation", state: "pending", images: [], skill: skillLabel(skillFor("chapter-script-review", "chapter-review")!) });
-    tasks.push({ id: "narration", specialist: "narration", state: "complete", images: [], skill: "record-audit@v1", detail: "Saved-record audit only. Compiled request and audio delivery were not inspected." });
+    if (checks.includes("narration")) tasks.push({ id: "narration", specialist: "narration", state: "complete", images: [], skill: "record-audit@v1", detail: "Saved-record audit only. Compiled request and audio delivery were not inspected." });
     const now = new Date().toISOString();
     let review: ChapterReview = { ...target, schemaVersion: 1, requestId, id, title: source.chapter.title,
-      createdAt: now, updatedAt: now, status: "running", sourceHash: source.chapter.hash, contextHash: source.contextHash,
+      createdAt: now, updatedAt: now, status: "running", sourceHash: source.chapter.hash, contextHash: source.contextHash, selectedChecks: checks,
       body: source.chapter.body, images: source.images, tasks, facts: [], findings: [], candidates: [], assessments: [], groups: [], conflicts: [], rejectedFindings: 0,
       stale: false, staleReasons: [], audioListened: false, checks: [
-        `${source.images.length} selected pictures; ${available.length} readable sources.`,
+        ...(checks.includes("visual") ? [`${source.images.length} selected pictures; ${available.length} readable sources.`,
+          ...source.images.filter(image => { const block = source.blocks.find(b => b.key === image.block); return !block || image.textHash !== audiobookTextHash(block.text); }).map(image => `${image.block}: picture association is missing or bound to older text.`),
+          ...source.images.filter(i => i.error).map(i => `${i.block}: ${i.error}`)] : ["Pictures not checked."]),
+        ...(checks.includes("narration") ? [
         source.record ? `${Object.keys(source.record.takes).length} saved audio block records. Their delivery was not listened to.` : "No saved chapter audio record.",
         source.cast ? (source.cast.hash === source.chapter.bodyHash ? "Speaker mapping matches the current prose hash; attribution accuracy requires review." : "Speaker mapping was saved for different prose; check attribution.") : "No speaker mapping record.",
         `${source.blocks.length} current grouped blocks; ${source.record ? Object.keys(source.record.flags).length : 0} saved audio flags.`,
-        ...source.images.filter(image => { const block = source.blocks.find(b => b.key === image.block); return !block || image.textHash !== audiobookTextHash(block.text); }).map(image => `${image.block}: picture association is missing or bound to older text.`),
         source.book?.narrator ? "Book narrator configured." : "No book narrator override; application narrator is not audited in this pass.",
-        ...source.images.filter(i => i.error).map(i => `${i.block}: ${i.error}`),
+        ] : ["Narration records not checked."]),
       ] };
     const persist = async () => {
       review.updatedAt = new Date().toISOString();

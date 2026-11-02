@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
+import { ClientMessageSchema } from "../src/frames.js";
+
+it("accepts legacy review commands and nonempty distinct check selections", () => {
+  const command = { kind: "chapter-review-start", worldId: "01K00000000000000000000000", productionId: "book", chapterId: "one", requestId: "01K00000000000000000000001" };
+  for (const checks of [undefined, ["prose"], ["script", "visual", "narration"]]) assert.equal(ClientMessageSchema.safeParse({ ...command, checks }).success, true);
+  for (const checks of [[], ["prose", "prose"], ["unknown"]]) assert.equal(ClientMessageSchema.safeParse({ ...command, checks }).success, false);
+});
 import { ReviewAnswerSchema, ReviewAnswerReadSchema, ChapterReviewSchema, verifiedReviewAnswer, ChapterReviewTargetSchema, chapterReviewSummary, sameReviewFinding, sameChapterReviewSource, validateReviewAssessments, validateReviewGroups, validateReviewConflicts, effectiveReviewVerdict, reviewHasNoCorrection, type ChapterReview } from "../src/chapter-review.js";
 
 it("requires exact prose and supplied images while preserving uncertainty", () => {

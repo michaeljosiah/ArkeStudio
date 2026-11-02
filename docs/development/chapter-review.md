@@ -88,7 +88,12 @@ kinds and what counts as one are defined in [AI tells](../research/ai-tells.md).
   passages. It calls the counts the model's reading, never a detector.
 - **Failure.** A prose answer without a tags list fails only its own task. The review is then
   partial and holds no reading.
-- **Not yet built.** The in-page marks, per-check selection, per-passage recheck and the checked
+- **Selective checks.** Choose AI tells, Clarity and continuity, Pictures, and Narration records
+  before starting. All start selected. The saved report records the requested checks; unchecked
+  specialists do not run. Prose-only checks do not read or depend on audiobook records or images.
+  Pictures retains its evidence verification and consolidation. Narration records makes no model
+  calls and does not listen to audio. Older reports and commands without a selection retain all checks.
+- **Not yet built.** The in-page marks, per-passage recheck and the checked
   Rewrite are later slices of the issue.
 
 Tests: contracts `test/chapter-tells.test.ts`; coordinator `test/productions/chapter-review.test.ts`

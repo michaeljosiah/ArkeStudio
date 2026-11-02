@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import type { ChapterReview } from "@arke-studio/contracts";
+import { CHAPTER_REVIEW_CHECKS, type ChapterReview, type ChapterReviewCheck } from "@arke-studio/contracts";
 import { EditorDialog } from "./editor-dialog.js";
 import { ChapterTellsReport } from "./chapter-tells.js";
 import { Button } from "./ui.js";
 import { acceptChapterReviewUpdate, readChapterReviewImage } from "../lib/chapter-review.js";
 import { mediaUrl } from "../lib/media.js";
 import { decideChapterReview, requestChapterReview, subscribeChapterReview, useStore } from "../lib/store.js";
+
+const checkLabels: Record<ChapterReviewCheck, string> = { script: "Clarity and continuity", prose: "AI tells", visual: "Pictures", narration: "Narration records" };
 
 function ChapterReviewEvidence({ slug, file, hash, block }: { slug: string; file: string; hash: string; block: string }) {
   const [url, setUrl] = useState<string | null>(null), [error, setError] = useState<string | null>(null), [attempt, setAttempt] = useState(0);
@@ -38,10 +40,11 @@ export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
   const supplied = new Set(review.tasks.filter(t => t.specialist === "visual" && t.state === "complete").flatMap(t => t.images));
   return <div className="fy-chreview">
     <p role="status"><strong>{review.status}</strong> · {completed}/{review.tasks.length} tasks complete · {supplied.size}/{review.images.length} pictures supplied to completed reviews</p>
-    <p>Audio delivery not listened to. Narration coverage is a saved-record audit, not an exact provider-request review.</p>
+    <p>Audio delivery not listened to. {review.selectedChecks && !review.selectedChecks.includes("narration") ? "Narration records not checked." : "Narration coverage is a saved-record audit, not an exact provider-request review."}</p>
     {review.stale && <div role="alert" className="fy-chreview__notice"><strong>Source check needed — refresh or review again.</strong><ul>{review.staleReasons.map(reason => <li key={reason}>{reason}</li>)}</ul></div>}
     <ChapterTellsReport review={review} />
     <details><summary>Coverage, models and task results</summary>
+      <p>Requested checks: {(review.selectedChecks ?? CHAPTER_REVIEW_CHECKS).map(check => checkLabels[check]).join(", ")}.</p>
       <ul>{review.checks.map((check, i) => <li key={i}>{check}</li>)}</ul>
       {review.tasks.map(task => <p key={task.id}><strong>{task.id}: {task.state}</strong> · {task.skill}{task.model ? ` · ${task.model}` : ""}<br />{task.disclosure}<br />{task.detail}</p>)}
       <p>{review.rejectedFindings} invalid citations or rejected interpretations. Exact citations establish source linkage, not correctness.</p>
@@ -84,6 +87,7 @@ export function ChapterReviewControl({ worldId, productionId, chapterId, slug, h
   const { connection } = useStore();
   const [open, setOpen] = useState(false), [review, setReview] = useState<ChapterReview | null>(null);
   const [error, setError] = useState<string | null>(null), [starting, setStarting] = useState(false);
+  const [checks, setChecks] = useState<ChapterReviewCheck[]>([...CHAPTER_REVIEW_CHECKS]);
   useEffect(() => {
     setReview(null); setError(null); setStarting(false);
     return subscribeChapterReview(event => {
@@ -99,11 +103,18 @@ export function ChapterReviewControl({ worldId, productionId, chapterId, slug, h
     <Button onClick={() => setOpen(true)}>Review chapter{busy ? " · running" : ""}</Button>
     <EditorDialog open={open} onClose={() => setOpen(false)} title="Chapter review" width={1050}>
       <div className="fy-chreview">
-        <p>Review saved prose and selected pictures using Arke’s script, AI tells and visual specialists. Findings are advisory. This uses your configured writing models; cloud image settings apply.</p>
-        <p>Up to 60,000 characters and 60 pictures. One script task, one AI tells task over the whole chapter, visual tasks with up to five neighboring pictures, separate evidence checks, then duplicate consolidation. You can leave this chapter while review continues.</p>
-        <div className="fy-chreview__controls"><Button disabled={held || busy || connection !== "open"} onClick={() => {
+        <p>Choose which checks to run on the saved chapter. Findings are advisory and do not change the chapter. Selected AI checks use your configured writing models; cloud image settings apply.</p>
+        <fieldset disabled={busy}><legend>Review checks</legend>
+          {(["prose", "script", "visual", "narration"] as const).map(check => <label key={check} style={{ display: "block" }}>
+            <input type="checkbox" checked={checks.includes(check)} onChange={e => setChecks(previous => e.target.checked ? [...previous, check] : previous.filter(value => value !== check))} /> {checkLabels[check]}
+          </label>)}
+        </fieldset>
+        <p>AI tells uses provisional thresholds, not an authorship detector. Narration records checks saved records only; it does not listen to audio.</p>
+        <p>Up to 60,000 characters and, when Pictures is selected, 60 pictures. Picture reviews include separate evidence checks and duplicate consolidation. You can leave this chapter while review continues.</p>
+        {!checks.length && <p>Choose at least one check.</p>}
+        <div className="fy-chreview__controls"><Button disabled={held || busy || connection !== "open" || !checks.length} onClick={() => {
           setError(null); setStarting(true);
-          if (!requestChapterReview("chapter-review-start", worldId, productionId, chapterId)) { setStarting(false); setError("Not connected."); }
+          if (!requestChapterReview("chapter-review-start", worldId, productionId, chapterId, checks)) { setStarting(false); setError("Not connected."); }
         }}>{review ? "Review again" : "Start review"}</Button>
         {busy && <Button onClick={() => requestChapterReview("chapter-review-cancel", worldId, productionId, chapterId)}>Stop review</Button>}
         <Button disabled={connection !== "open"} onClick={() => requestChapterReview("chapter-review-read", worldId, productionId, chapterId)}>Refresh</Button></div>

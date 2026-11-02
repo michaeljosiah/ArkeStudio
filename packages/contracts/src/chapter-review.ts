@@ -3,6 +3,10 @@ import { PictureShotSchema } from "./audiobook-illustrate.js";
 import { ReviewTellsSchema, TellDraftSchema, TELL_ANSWER_MAX } from "./chapter-tells.js";
 
 export const CHAPTER_REVIEW_VERSION = 1;
+export const CHAPTER_REVIEW_CHECKS = ["script", "prose", "visual", "narration"] as const;
+export type ChapterReviewCheck = typeof CHAPTER_REVIEW_CHECKS[number];
+export const ChapterReviewChecksSchema = z.array(z.enum(CHAPTER_REVIEW_CHECKS)).min(1).max(4)
+  .refine(checks => new Set(checks).size === checks.length, "Choose each check only once.");
 export const ChapterReviewTargetSchema = z.object({
   worldId: z.string().min(1).max(100), productionId: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
   chapterId: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/),
@@ -72,6 +76,8 @@ export const ChapterReviewSchema = ChapterReviewTargetSchema.extend({
   schemaVersion: z.literal(CHAPTER_REVIEW_VERSION), requestId: z.string().min(1).max(200), id: z.string().uuid(), title: z.string(),
   createdAt: z.string(), updatedAt: z.string(), status: z.enum(["running", "complete", "partial", "cancelled", "interrupted"]),
   sourceHash: z.string(), contextHash: z.string(), body: z.string().max(60000),
+  // Absent in older reports, which always requested every check.
+  selectedChecks: ChapterReviewChecksSchema.optional(),
   images: z.array(ReviewImageSchema).max(60), tasks: z.array(ReviewTaskSchema).max(64),
   facts: z.array(ReviewFactSchema).max(40),
   findings: z.array(ReviewFindingDraftSchema.extend({ id: z.string().uuid(), taskId: z.string(), offset: z.number().int().nonnegative(),

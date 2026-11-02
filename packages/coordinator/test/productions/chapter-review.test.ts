@@ -4,7 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { TELL_LINE, type ReviewAnswer, type ChapterReview, type HarnessAdapter, type MessagePart } from "@arke-studio/contracts";
 import { ChapterReviewService, captureReviewSource, readChapterReview, saveChapterReview, reviewPrompt, verificationPrompt, consolidationPrompt, tellsPrompt } from "../../src/productions/chapter-review.js";
-import { emptyAudiobook, writeAudiobook } from "../../src/productions/audiobook.js";
+import { emptyAudiobook, writeAudiobook, audiobookPath } from "../../src/productions/audiobook.js";
 import { saveChapter } from "../../src/productions/ops.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -13,6 +13,55 @@ import { closeOnCleanup, tempDir } from "../tmp.js";
 import { makeReviewTaskRunner, type ReviewTaskRunner } from "../../src/harness/review-task.js";
 
 const quote = "Maren has the 1820 volume open on the rail desk";
+it("runs only selected prose checks despite unreadable media, preserves the selection on replay and checks text freshness", async () => {
+  const f = await fixture(), source = await captureReviewSource(f.store, f.target);
+  await writeAudiobook(f.store, f.target.productionId, source.chapter.file, emptyAudiobook(source.chapter.version, source.chapter.hash, new Date().toISOString()));
+  await writeFile(join(f.dir, audiobookPath(f.target.productionId, source.chapter.file)), "broken record");
+  let calls = 0;
+  const service = f.service(async input => {
+    calls++; assert.equal(input.specialist, "prose"); assert.deepEqual(input.images, []);
+    return { facts: [], findings: [], tells: [] };
+  }, { prose: true });
+  const review = await service.start(f.target, "prose-only", ["prose"]);
+  assert.equal(review.status, "complete"); assert.equal(review.stale, false);
+  assert.deepEqual(review.selectedChecks, ["prose"]); assert.deepEqual(review.tasks.map(t => t.specialist), ["prose"]);
+  assert.equal(review.tells?.line, TELL_LINE); assert.deepEqual(review.images, []);
+  assert.ok(review.checks.includes("Narration records not checked."));
+  const replay = await service.start(f.target, "prose-only", ["script"]);
+  assert.deepEqual(replay.selectedChecks, ["prose"]); assert.equal(calls, 1);
+  await writeFile(join(f.dir, audiobookPath(f.target.productionId, source.chapter.file)), "another broken record");
+  assert.equal((await service.read(f.target))?.stale, false);
+  await saveChapter(f.store, f.target.productionId, source.chapter.file, source.chapter.body + "\n\nShe left.", { baseHash: source.chapter.hash });
+  assert.equal((await service.read(f.target))?.stale, true);
+});
+it("audits narration without models or image reads, and rejects an empty selection before work", async () => {
+  const f = await fixture(), source = await captureReviewSource(f.store, f.target);
+  const record = emptyAudiobook(source.chapter.version, source.chapter.hash, new Date().toISOString());
+  record.pictures = Object.fromEntries(Array.from({ length: 61 }, (_, i) => [`p${i}.0`, { file: "missing.png", source: "generated" as const, textHash: "old", at: new Date().toISOString() }]));
+  await writeAudiobook(f.store, f.target.productionId, source.chapter.file, record);
+  const service = f.service(async () => { assert.fail("No selected AI checks"); });
+  await assert.rejects(service.start(f.target, "empty", []), /Choose at least one/);
+  assert.equal(await readChapterReview(f.store, f.target), null);
+  const review = await service.start(f.target, "records-only", ["narration"]);
+  assert.equal(review.status, "complete"); assert.equal(review.stale, false);
+  assert.deepEqual(review.tasks.map(t => t.specialist), ["narration"]); assert.deepEqual(review.images, []);
+});
+it("runs picture evidence checks without requesting the script or AI tells specialists", async () => {
+  const f = await fixture(), source = await captureReviewSource(f.store, f.target);
+  const block = source.blocks.find(b => b.key !== "title")!;
+  const record = emptyAudiobook(source.chapter.version, source.chapter.hash, new Date().toISOString());
+  record.pictures = { [block.key]: { file: "selective.png", source: "generated", textHash: "old", at: new Date().toISOString() } };
+  await writeFile(join(f.dir, "selective.png"), "pixels");
+  await writeAudiobook(f.store, f.target.productionId, source.chapter.file, record);
+  let calls = 0;
+  const review = await f.service(async input => {
+    calls++; assert.equal(input.specialist, "visual"); assert.equal(input.images.length, 1);
+    return { facts: [], findings: [] };
+  }, { prose: true }).start(f.target, "pictures-only", ["visual"]);
+  assert.equal(calls, 1); assert.equal(review.status, "complete");
+  assert.deepEqual(review.tasks.map(t => t.specialist), ["visual", "verification", "consolidation"]);
+  assert.equal(review.tells, undefined); assert.deepEqual(review.selectedChecks, ["visual"]);
+});
 const answer: ReviewAnswer = { facts: [{ quote, claim: "Maren holds an old ledger", kind: "explicit" }], findings: [{ category: "clarity", certainty: "possible-confusion", quote, imageBlocks: [], observation: "An unfamiliar date needs context.", impact: "A reader may mistake the era.", correction: "Establish the current year if relevant." }] };
 async function fixture() {
   const dir = await makeTempWorld(), store = await WorldStore.open(dir);
