@@ -94,10 +94,10 @@ const SCENE_BREAK = /^[ \t]*(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})
 
 /** A paragraph shaped as a scene break; chapter callers also exclude fenced content (SPEC-047 R-2). */
 export function isSceneBreak(paragraph: string): boolean {
-  return SCENE_BREAK.test(paragraph);
+  return paragraph.trim().split(/\r?\n/).every((line) => SCENE_BREAK.test(line)) || /^\s*(?:\*\s*){3,}$/.test(paragraph);
 }
 
-/** Fenced examples can contain standalone dividers separated by blank lines; those stay literal. */
+/** Fenced examples stay literal. Pass paragraphs with source indentation retained for fence closing. */
 export function sceneBreakParagraphs(paragraphs: readonly string[]): Set<number> {
   const breaks = new Set<number>();
   let fence: string | undefined;
@@ -143,7 +143,7 @@ export function manuscriptDocument(input: {
 /** A chapter's Markdown as blocks: paragraphs of runs and scene breaks outside fenced examples. */
 export function chapterBlocks(body: string): ManuscriptBlock[] {
   const paragraphs = chapterParagraphs(body);
-  const breaks = sceneBreakParagraphs(paragraphs);
+  const breaks = sceneBreakParagraphs(chapterParagraphs(body, true));
   return paragraphs.map((paragraph, index) =>
     breaks.has(index) ? { kind: "break" as const } : { kind: "paragraph" as const, runs: paragraphRuns(paragraph) },
   );

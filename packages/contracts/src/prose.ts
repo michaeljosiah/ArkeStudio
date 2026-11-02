@@ -103,11 +103,11 @@ export type ProseReadSource = z.infer<typeof ProseReadSourceSchema>;
  * and the coordinator resolves `paragraph` against the saved file; if the two split differently
  * the position would name one paragraph and the voice read another.
  */
-export function chapterParagraphs(body: string): string[] {
+export function chapterParagraphs(body: string, preserveIndentation = false): string[] {
   return body
     .split(/\r?\n[ \t]*\r?\n/)
-    .map((paragraph) => paragraph.trim())
-    .filter((paragraph) => paragraph !== "");
+    .map((paragraph) => preserveIndentation ? paragraph : paragraph.trim())
+    .filter((paragraph) => paragraph.trim() !== "");
 }
 
 /**

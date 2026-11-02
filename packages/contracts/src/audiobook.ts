@@ -204,7 +204,7 @@ export function audiobookBlocks(
   options: AudiobookBlockOptions = {},
 ): { blocks: AudiobookBlock[]; ambiguous: number; seams: AudiobookSeamView } {
   const paragraphs = chapterParagraphs(body);
-  const sceneBreaks = sceneBreakParagraphs(paragraphs);
+  const sceneBreaks = sceneBreakParagraphs(chapterParagraphs(body, true));
   const none: AudiobookSeamView = { changed: 0, held: 0, dropped: 0, droppedSeams: [], gaps: [] };
   if (paragraphs.length === sceneBreaks.size) return { blocks: [], ambiguous: 0, seams: { ...none, dropped: options.seams?.length ?? 0, droppedSeams: (options.seams ?? []).map((_, index) => index) } };
   const voiced = voicedBlocks(body, record);

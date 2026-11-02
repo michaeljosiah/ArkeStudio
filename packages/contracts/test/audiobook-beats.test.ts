@@ -21,7 +21,7 @@ const narrator = (seams?: AudiobookSeam[]) =>
   audiobookBlocks(BODY, null, "Chapter 1", audiobookBlockOptions({ reading: "narrator" }, seams === undefined ? null : { seams }));
 
 describe("beatSeams", () => {
-  for (const divider of ["***", "* * *", "---", "- - -", "___", "_ _ _"]) {
+  for (const divider of ["***", "* * *", "---", "- - -", "___", "_ _ _", "***\n***"]) {
     it(`keeps ${divider} out of automatic and beat-grouped speech while preserving its scene boundary`, () => {
       const body = `She left.\n\nThe door closed.\n\n${divider}\n\nMorning came.`;
       const auto = audiobookBlocks(body, null, "Chapter 1");
@@ -44,6 +44,15 @@ describe("beatSeams", () => {
       assert.ok(auto.seams.gaps.every((gap) => gap.limit !== "scene break"));
       assert.equal(readBreaksFor(auto.blocks, chapterParagraphs(body)).get("p1.0"), "paragraph");
     }
+  });
+
+  it("does not close a fence on an indented literal fence marker", () => {
+    const body = "Before.\n\n```text\n\n    ```\n\n---\n\n```\n\n***\n\nAfter.";
+    const auto = audiobookBlocks(body, null, "Chapter 1");
+    assert.ok(auto.blocks.some((block) => block.text === "---"));
+    assert.ok(!auto.blocks.some((block) => block.text === "***"));
+    assert.ok(auto.seams.gaps.some((gap) => gap.limit === "scene break"));
+    assert.equal(readBreaksFor(auto.blocks, chapterParagraphs(body, true)).get("p4.0"), "scene");
   });
 
   it("keeps a chapter's beats when its lines are cast after it was grouped (2026-10-08)", () => {
