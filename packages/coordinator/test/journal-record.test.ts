@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
-import type { DomainEvent } from "@arke-studio/contracts";
+import { ManuscriptReviewSchema, type DomainEvent } from "@arke-studio/contracts";
 import { journalRecord, voiceCatalogueSummary } from "../src/journal-record.js";
 import { Coordinator } from "../src/coordinator.js";
 import { FsWorldProvider } from "../src/world/provider.js";
@@ -10,6 +10,20 @@ import { tempDir } from "./tmp.js";
 
 // Issue 1845: 1,248 whole catalogues, ~1.5 MB each, made up most of a 2.6 GB coordinator.jsonl.
 const AT = "2026-10-17T14:26:50.000Z";
+it("keeps manuscript checkpoint diagnostics bounded without mutating full client reports or PDF exports", () => {
+  const review = ManuscriptReviewSchema.parse({ version: 1, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", productionId: "book", id: "01K00000000000000000000001",
+    title: "PRIVATE TITLE", createdAt: AT, updatedAt: AT, brief: "PRIVATE BRIEF", context: "PRIVATE CANON", contextHash: "context", snapshotHash: "snapshot", status: "running",
+    sources: [], findings: [], tasks: Array.from({ length: 1000 }, (_, i) => ({ id: `read-${i}`, kind: "reading", state: i === 999 ? "running" : "complete",
+      reading: { synopsis: "PRIVATE MANUSCRIPT ".repeat(250), strengths: "", editorial: "", continuity: "", findings: [] } })) });
+  const event: Extract<DomainEvent, { type: "manuscript-review.updated" }> = { type: "manuscript-review.updated", at: AT, worldId: review.worldId, productionId: review.productionId, review,
+    history: [{ id: review.id, title: review.title, createdAt: AT, status: review.status }], pdf: "PRIVATE PDF ".repeat(10000) };
+  const before = JSON.stringify(event), record = journalRecord(event), encoded = JSON.stringify(record);
+  assert.ok(encoded.length < 600, "report size must not inflate each diagnostic checkpoint");
+  assert.doesNotMatch(encoded, /PRIVATE/);
+  assert.equal(record.pdfGenerated, true); assert.equal(record.historyCount, 1);
+  assert.deepEqual(record.reviewSummary, { id: review.id, status: "running", updatedAt: AT, snapshotHash: "snapshot", stages: 1000, completed: 999, findings: 0, stale: false });
+  assert.equal(JSON.stringify(event), before, "clients still receive the complete report and export");
+});
 const voice = (provider: string, voiceId: string) => ({ provider, model: `${provider}-model`, voiceId, label: voiceId, attributes: [], local: provider === "kokoro", canClone: false });
 
 it("journals a voice catalogue as its count, providers and digest, not the list", () => {

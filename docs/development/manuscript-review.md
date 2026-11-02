@@ -32,6 +32,8 @@ Interrupted/failed calls are never resubmitted by replay or continuation. **Cont
 stages** explicitly continues the original snapshot's pending work; unresolved reading gaps
 prevent a complete synthesis. **Start a new review** is a new, potentially paid request. Reports
 and completed readings survive restart; history is capped at 1,000 reports without deleting any.
+Diagnostic events retain only report identity, status and counts; full checkpoint projections,
+reading text, report history and exported PDFs are not duplicated into the application log.
 
 Final finding citations must match unique exact quotations in the pinned chapter. Invalid or
 ambiguous citations are counted and omitted from the actionable findings. This establishes
