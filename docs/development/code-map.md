@@ -1,5 +1,12 @@
 # Code map
 
+Manuscript review (#2198): contracts `manuscript-review.ts` owns report/coverage vocabulary;
+coordinator `productions/manuscript-review.ts` pins sources, owns bounded reading/synthesis,
+checkpoints, history and decisions, and `manuscript-review-pdf.ts` exports the retained report.
+The client `components/manuscript-review.tsx` lives on the Chapters screen, opens historical
+passages at their chapter and hands discussion to existing Chat/proposals. See
+[scope, limits and recovery](manuscript-review.md).
+
 Comic lettering observations (#2219): `scripts/measure-comic-lettering.mts` reads the portable
 comic documents without opening or changing a world. It reports current-script retained-take
 rates and source digests, while keeping qualification explicitly unestablished. See

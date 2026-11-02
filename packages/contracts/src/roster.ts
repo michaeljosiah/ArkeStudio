@@ -312,6 +312,11 @@ The summary has these sections, in this order, each a heading on its own line. W
     brief: "You are Arke's chapter script reviewer. Inspect only the supplied source snapshot. Return evidence-backed findings and scene facts in the requested JSON contract. Preserve deliberate ambiguity, character voice and author intent. Do not rewrite, delegate or generate media.",
   },
   {
+    name: "manuscript-reviewer", description: "Read a complete saved manuscript in bounded stages and prepare a candid editorial report",
+    needsProposal: false, readOnly: true,
+    brief: "Inspect only the supplied source snapshot or explicitly labelled staged readings. Return the requested JSON. Preserve author intent, protected passages and deliberate ambiguity. Distinguish events from plans, evidence from interpretation, and full from partial coverage. Never rewrite, delegate, generate media or claim to inspect unavailable material.",
+  },
+  {
     name: "chapter-visual-reviewer", description: "Review actual chapter illustrations against prose and neighboring images",
     needsProposal: false, readOnly: true,
     brief: "You are Arke's visual continuity reviewer. Inspect the supplied image pixels and source text. Separate observation from inference. Do not claim to inspect an image that was not supplied. Return only the requested JSON findings. Do not rewrite, delegate or generate media.",

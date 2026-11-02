@@ -7,6 +7,7 @@ import { GuideVoiceLinesRequestSchema, SetGuideEntrySchema, SetGuideTeasersSchem
 import { ARKE_PLAYER_PICTURE_SIZES } from "./world-package.js";
 import { ArkePlayerPartRequestSchema } from "./arke-player-release.js";
 import { ChapterReviewDecisionSchema, ChapterReviewChecksSchema } from "./chapter-review.js";
+import { ManuscriptReviewDecisionSchema } from "./manuscript-review.js";
 import { StoryPublishActionSchema } from "./story-publication.js";
 import { valueSchema } from "./value-schema.js";
 import { BrowserMediaFilesSchema } from "./browser-media-import.js";
@@ -2305,6 +2306,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * `chapter.open-result` (turn 126). The summary in the bundle stays body-free on purpose.
    */
   z.object({ kind: z.literal("chapter-review-start"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema, checks: ChapterReviewChecksSchema.optional() }).strict(),
+  z.object({ kind: z.literal("manuscript-review-start"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, brief: z.string().max(6000) }).strict(),
+  z.object({ kind: z.literal("manuscript-review-read"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, reviewId: UlidSchema.optional() }).strict(),
+  z.object({ kind: z.literal("manuscript-review-resume"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, reviewId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("manuscript-review-cancel"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("manuscript-review-decide"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, reviewId: UlidSchema, findingId: z.string().max(100), decision: ManuscriptReviewDecisionSchema }).strict(),
+  z.object({ kind: z.literal("manuscript-review-export"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, reviewId: UlidSchema }).strict(),
   z.object({ kind: z.literal("chapter-review-read"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("chapter-review-cancel"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("chapter-review-decide"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema,

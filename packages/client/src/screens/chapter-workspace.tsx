@@ -1,4 +1,5 @@
 import { ChapterReviewControl } from "../components/chapter-review.js";
+import { ManuscriptReviewPassage } from "../components/manuscript-review.js";
 import { parkedDrafts, parkedKey, type ParkedDraft } from "../lib/chapter-drafts.js";
 import { AudioStudioWorkspace } from "./audio-studio-workspace.js";
 import { AudioStudioPassagePanel } from "./audio-studio-passage-panel.js";
@@ -3459,6 +3460,7 @@ export function ChapterWorkspace({
         ) : <SceneBackRow back="Chapters" title={chapter.title} onBack={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)} {...(barArke !== null ? { press: barArke } : {})}><Button onClick={() => setNotesOpen(true)}>Notes</Button><Button onClick={() => setDock(true)}>Ask Arke</Button></SceneBackRow>)}
         {phoneRoom && (pageRead.reading || voicedRead.reading) && <div className="fy-ch__phone-read">{readControl}</div>}
         {overview}
+        <ManuscriptReviewPassage chapterId={chapter.id} hash={chapter.hash} />
         {view === "chapter" || phoneRoom ? null : room ? (
           <WritingBar
             brief={compact ? notesOpen : brief}

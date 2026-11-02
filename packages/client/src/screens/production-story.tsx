@@ -629,6 +629,7 @@ export function ChapterTreeScreen() {
         )}
       </div>
       {phone && isStory && <button type="button" className="fy-chapters-more" aria-label="Manuscript actions" onClick={() => setMenu("manuscript")}><More size={20} /></button>}
+      {isStory && worldId && prodId && <ManuscriptReviewControl worldId={worldId} productionId={prodId} chapters={chapters.length} words={bookWords} />}
       <PageSheet open={menu === "manuscript" || menuChapter !== undefined} title={menu === "manuscript" ? "Manuscript" : menuChapter?.title ?? "Chapter"} onClose={() => setMenu(null)} className="fy-chapter-menu">
         {menu === "manuscript" ? <><Button onClick={() => { setMenu(null); setSheet("publish"); }}>Publish</Button><Button onClick={() => { setMenu(null); beginImport(); }}>Import</Button></> : menuChapter && <><Button disabled={menuIndex === 0} onClick={() => { move(menuChapter, -1); setMenu(null); }}>Move up</Button><Button disabled={menuIndex === chapters.length - 1} onClick={() => { move(menuChapter, 1); setMenu(null); }}>Move down</Button><Button onClick={() => { if (worldId && prodId) setChapterRetired(worldId, prodId, menuChapter.file, true); setMenu(null); }}>Retire</Button></>}
       </PageSheet>
@@ -1085,3 +1086,4 @@ export function SceneDetailScreen() {
     </Screen>
   );
 }
+import { ManuscriptReviewControl } from "../components/manuscript-review.js";

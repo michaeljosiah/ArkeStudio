@@ -6,6 +6,7 @@ import { ArkePlayerReleaseSchema } from "./arke-player-release.js";
 import { StoryExportBlockerSchema, StoryExportMadeSchema, StoryExportStateSchema } from "./story-export.js";
 import { DramaEditionSchema } from "./audio-drama-edition.js";
 import { ChapterReviewSchema } from "./chapter-review.js";
+import { ManuscriptReviewSchema, ManuscriptReviewHistorySchema } from "./manuscript-review.js";
 import { DramaRequestSchema } from "./audio-drama.js";
 import { ComicModeSchema } from "./graphic-novel.js";
 import { StoryEditionSchema, StoryPublishResultSchema } from "./story-publication.js";
@@ -147,6 +148,7 @@ export const QueueCommandSchema = z.enum([
   "read-prose",
   "read-prose-page",
   "chapter-review-start", "chapter-review-read", "chapter-review-cancel", "chapter-review-decide",
+  "manuscript-review-start", "manuscript-review-read", "manuscript-review-resume", "manuscript-review-cancel", "manuscript-review-decide", "manuscript-review-export",
   "read-audiobook-chapter",
   "read-audiobook-book",
   "generate-world-image",
@@ -375,6 +377,9 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
    */
   z.object({ type: z.literal("chapter-review.updated"), at: z.string(), worldId: z.string(), productionId: z.string(), chapterId: z.string(),
     review: ChapterReviewSchema.nullable(), error: z.string().optional() }).strict(),
+  z.object({ type: z.literal("manuscript-review.updated"), at: z.string(), worldId: z.string(), productionId: z.string(),
+    review: ManuscriptReviewSchema.nullable(), history: ManuscriptReviewHistorySchema, error: z.string().optional(),
+    requestId: UlidSchema.optional(), pdf: z.string().max(20000000).optional() }).strict(),
   z
     .object({
       ...base,

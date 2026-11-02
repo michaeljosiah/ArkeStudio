@@ -49,6 +49,7 @@ export const REMOTE_COMMAND_ACCESS = {
   // studio
   "import-character-look": "studio",
   "chapter-review-start": "studio", "chapter-review-read": "studio", "chapter-review-cancel": "studio", "chapter-review-decide": "studio",
+  "manuscript-review-start": "studio", "manuscript-review-read": "studio", "manuscript-review-resume": "studio", "manuscript-review-cancel": "studio", "manuscript-review-decide": "studio", "manuscript-review-export": "studio",
   "decide-audio-studio-proposal": "studio",
   "read-audio-studio": "studio", "edit-audio-studio": "studio", "read-audio-studio-source": "studio", "record-audio-heard": "studio", "read-audio-heard": "studio",
   "preview-audio-studio": "studio", "stop-audio-studio-preview": "studio",

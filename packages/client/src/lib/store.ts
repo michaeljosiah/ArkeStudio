@@ -779,6 +779,10 @@ export type BriefEnhanced = Extract<DomainEvent, { type: "bench.brief-enhanced" 
 type StageConstructionResult = Extract<DomainEvent, { type: "stage.construction" }>;
 const stageConstructionListeners = new Set<(result: StageConstructionResult) => void>();
 export type ChapterReviewUpdate = Extract<DomainEvent, { type: "chapter-review.updated" }>;
+export type ManuscriptReviewUpdate = Extract<DomainEvent, { type: "manuscript-review.updated" }>;
+const manuscriptReviewListeners = new Set<(event: ManuscriptReviewUpdate) => void>();
+export function subscribeManuscriptReview(listener: (event: ManuscriptReviewUpdate) => void) { manuscriptReviewListeners.add(listener); return () => { manuscriptReviewListeners.delete(listener); }; }
+export function requestManuscriptReview(message: Extract<ClientMessage, { kind: `manuscript-review-${string}` }>): boolean { return send(message); }
 const chapterReviewListeners = new Set<(value: ChapterReviewUpdate) => void>();
 export function subscribeChapterReview(listener: (value: ChapterReviewUpdate) => void): () => void {
   chapterReviewListeners.add(listener); return () => { chapterReviewListeners.delete(listener); };
@@ -2019,6 +2023,7 @@ function handleFrame(json: string): void {
     if (event.type === "chapter-review.updated") {
       for (const listener of chapterReviewListeners) listener(event);
     }
+    if (event.type === "manuscript-review.updated") for (const listener of manuscriptReviewListeners) listener(event);
     if (event.type === "chapter.open-result") {
       for (const listener of chapterOpenListeners) listener(event);
     }
