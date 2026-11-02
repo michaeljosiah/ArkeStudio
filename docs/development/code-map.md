@@ -1,5 +1,11 @@
 # Code map
 
+Background audiobook preparation (#1777) routes `cast-voices` and `group-chapter-beats` through
+`FsWorldProvider.withBackgroundWorldStore` in coordinator `coordinator.ts`. Their existing
+progress events and stored results survive navigation; `stop-voices` resolves the active run
+without the selected world's chapter list. Regression coverage:
+`packages/coordinator/test/productions/audiobook-background-preparation.test.ts`.
+
 Audiobook scene dividers (#1775): contracts `manuscript.ts` classifies thematic breaks outside
 fenced content. Blocks, beat boundaries, request grouping and timing proposals share that rule;
 `chapterParagraphs(body, true)` retains indentation for fence tracking without changing paragraph IDs.
