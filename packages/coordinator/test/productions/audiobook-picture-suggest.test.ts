@@ -477,6 +477,8 @@ describe("Generate (R-99)", () => {
       assert.equal(enqueued[0]!.estimatedMicroUsd, 45_000);
       assert.match(String(enqueued[0]!.params.prompt), /No added captions, subtitles or text overlays\. Keep writing, markings and maps on objects in the scene when the prompt calls for them\.$/, "the provider receives the physical-writing policy");
       assert.ok(!String(enqueued[0]!.params.prompt).includes("No text in the picture."));
+      assert.match(String(enqueued[0]!.params.prompt), /main photo does not fix the outfit/, "the provider receives the identity-only role of the portrait");
+      assert.doesNotMatch(String(enqueued[0]!.params.prompt), /hair and clothes as in the references/);
       assert.deepEqual((enqueued[0]!.params as { references?: string[] }).references, ["references/maren-kest/head-front.png"], "Maren by her sheet's main picture; Bray has none and is not sent");
       const session = await new BenchStore(sessionDir(worldDir, done.sessionId as never)).fold();
       const take = session!.takes[0]!;
