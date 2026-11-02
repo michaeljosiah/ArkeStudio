@@ -39,7 +39,8 @@ it("audits narration without models or image reads, and rejects an empty selecti
   const record = emptyAudiobook(source.chapter.version, source.chapter.hash, new Date().toISOString());
   record.pictures = Object.fromEntries(Array.from({ length: 61 }, (_, i) => [`p${i}.0`, { file: "missing.png", source: "generated" as const, textHash: "old", at: new Date().toISOString() }]));
   await writeAudiobook(f.store, f.target.productionId, source.chapter.file, record);
-  const service = f.service(async () => { assert.fail("No selected AI checks"); });
+  const service = new ChapterReviewService({ withWorld: async (_id, work) => work(f.store),
+    runner: () => { throw new Error("Writing harness unavailable"); }, publish: () => {} });
   await assert.rejects(service.start(f.target, "empty", []), /Choose at least one/);
   assert.equal(await readChapterReview(f.store, f.target), null);
   const review = await service.start(f.target, "records-only", ["narration"]);

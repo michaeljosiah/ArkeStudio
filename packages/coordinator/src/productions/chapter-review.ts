@@ -234,7 +234,9 @@ export class ChapterReviewService {
       return result;
     }
     signal.throwIfAborted();
-    const source = await captureReviewSource(store, target, signal, checks), runner = this.deps.runner(store);
+    const source = await captureReviewSource(store, target, signal, checks);
+    let prepared: ReviewTaskRunner | undefined;
+    const runner: ReviewTaskRunner = (...args) => (prepared ??= this.deps.runner(store))(...args);
     const prior = await readChapterReview(store, target);
     const sameSource = prior && sameChapterReviewSource(prior, { sourceHash: source.chapter.hash, contextHash: source.contextHash, images: source.images });
     const tasks: ReviewTask[] = [];
