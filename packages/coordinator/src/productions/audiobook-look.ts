@@ -19,6 +19,7 @@ import {
   pictureSlot,
   productionStyleFor,
   shortNameOf,
+  voicedBlocks,
   type AudiobookBlock,
   type AudiobookLook,
   type ChapterAudiobook,
@@ -148,13 +149,19 @@ export function chapterPersonCandidates(store: Pick<WorldStore, "getBundle">, pl
     // and relationships from context. Being a candidate never puts someone in a picture.
     people.set(sheet.id, { ...person, first: held?.characters[sheet.id] !== undefined || pov === sheet.id ? -1 : at });
   }
-  const cast = plan.cast !== null && plan.cast !== "unreadable" ? plan.cast.lines : [];
+  const cast = plan.cast !== null && plan.cast !== "unreadable" ? voicedBlocks(plan.body, plan.cast).blocks : [];
   for (const line of cast) {
-    const first = Math.max(0, plan.body.indexOf(line.quote.slice(0, 20)));
+    if (line.speaker === undefined) continue;
+    const first = Math.max(0, plan.body.indexOf(line.text.slice(0, 20)));
     if (line.sheet !== undefined) {
       // A speaker whose sheet the prose never names by name still speaks in the chapter.
       const person = people.get(line.sheet);
-      if (person !== undefined) people.set(line.sheet, { ...person, first: Math.min(person.first, first) });
+      if (person !== undefined) people.set(line.sheet, {
+        ...person,
+        first: Math.min(person.first, first),
+        // A pinned descriptive speaker is an identity link even when the prose never names it.
+        aliases: [...new Set([...(person.aliases ?? []), line.speaker.trim()])].filter((alias) => alias !== "" && alias !== person.name),
+      });
       continue;
     }
     const speaker = resolveChapterPerson([...people.values()], line.speaker);

@@ -248,6 +248,23 @@ describe("what the look is asked, and what is kept of the answer", () => {
     assert.match(prompt, /A relative mentioned or remembered is not necessarily present/);
     assert.match(prompt, /silent or asleep/);
   }));
+
+  it("resolves descriptive speaker pins without changing prose or choosing between conflicting links", () => withHarness(async ({ store }) => {
+    const bundle = store().getBundle(), base = bundle.sheets.find((sheet) => sheet.type === "character")!;
+    const sheets = [{ ...base, id: "morgan", name: "Morgan Grey", shortName: undefined, aliases: [] }, { ...base, id: "other", name: "Alex Green", shortName: undefined, aliases: [] }];
+    const body = '"Wait."\n\n"Go."';
+    const cast = { version: 1, hash: "h", derivedAt: CLOCK, passes: 1, dropped: 0, omitted: 0,
+      lines: [{ paragraph: 0, occurrence: 0, quote: '"Wait."', speaker: "Old guess", sheet: "other" }],
+      pins: [{ paragraph: 0, occurrence: 0, quote: '"Wait."', speaker: "the masked courier", sheet: "morgan" }],
+    };
+    const candidates = () => chapterPeople({ getBundle: () => ({ ...bundle, sheets }) }, { body, cast });
+    assert.equal(resolveChapterPerson(candidates(), "the masked courier")?.sheet, "morgan");
+    assert.equal(resolveChapterPerson(candidates(), "Old guess"), undefined, "the pin replaces the derived identity");
+    assert.equal(body.includes("Morgan"), false);
+    cast.pins.push({ paragraph: 1, occurrence: 0, quote: '"Go."', speaker: "the masked courier", sheet: "other" });
+    assert.equal(resolveChapterPerson(candidates(), "the masked courier"), undefined);
+    assert.equal(resolveChapterPerson(candidates(), "morgan")?.sheet, "morgan");
+  }));
 });
 
 it("keeps alias collisions unresolved when the other claimant is outside the 24-person prompt bound", () => withHarness(async ({ store }) => {
