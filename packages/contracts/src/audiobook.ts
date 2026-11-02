@@ -3,7 +3,7 @@ import { AudioArrangementSchema, AudioStudioProposalSchema } from "./audio-arran
 import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX, CadencePlanSchema, isPointCue, normalizeSpeechText, VoiceDirectionInputSchema, type CadenceCue, type CadencePlan } from "./cadence.js";
 import { orderCues } from "./direction-tags.js";
 import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema } from "./ids.js";
-import { isSceneBreak } from "./manuscript.js";
+import { sceneBreakParagraphs } from "./manuscript.js";
 import { DeliverySchema } from "./voice.js";
 import { NARRATOR_UNAVAILABLE_MAX } from "./narrator-availability.js";
 import { chapterParagraphs, voicedBlocks, type VoicedBlock } from "./prose.js";
@@ -204,8 +204,9 @@ export function audiobookBlocks(
   options: AudiobookBlockOptions = {},
 ): { blocks: AudiobookBlock[]; ambiguous: number; seams: AudiobookSeamView } {
   const paragraphs = chapterParagraphs(body);
+  const sceneBreaks = sceneBreakParagraphs(chapterParagraphs(body, true));
   const none: AudiobookSeamView = { changed: 0, held: 0, dropped: 0, droppedSeams: [], gaps: [] };
-  if (paragraphs.every((paragraph) => isSceneBreak(paragraph))) return { blocks: [], ambiguous: 0, seams: { ...none, dropped: options.seams?.length ?? 0, droppedSeams: (options.seams ?? []).map((_, index) => index) } };
+  if (paragraphs.length === sceneBreaks.size) return { blocks: [], ambiguous: 0, seams: { ...none, dropped: options.seams?.length ?? 0, droppedSeams: (options.seams ?? []).map((_, index) => index) } };
   const voiced = voicedBlocks(body, record);
   // The chapter's turns in order, each with its place (design turn 198): a scene break is in no
   // block (turn 190), so it is no turn here, and the turn after it remembers that it was there.
@@ -216,7 +217,7 @@ export function audiobookBlocks(
   for (const turn of voiced.blocks) {
     const at = counted.get(turn.paragraph) ?? 0;
     counted.set(turn.paragraph, at + 1);
-    if (isSceneBreak(turn.text)) {
+    if (sceneBreaks.has(turn.paragraph)) {
       scene = true;
       continue;
     }

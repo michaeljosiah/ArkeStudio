@@ -685,7 +685,7 @@ export interface PreparedGroup {
  * nowhere else — not between a line and its tag, not inside an exchange.
  */
 export function readBreaks(plan: Pick<AudiobookPlan, "blocks" | "body">): Map<string, ReadBreak> {
-  return readBreaksFor(plan.blocks.map((planned) => planned.block), chapterParagraphs(plan.body));
+  return readBreaksFor(plan.blocks.map((planned) => planned.block), chapterParagraphs(plan.body, true));
 }
 
 /** Whether a block can ride in a grouped request: a cloud read of a reader that groups, in WAV, with nothing refused or cloned. */

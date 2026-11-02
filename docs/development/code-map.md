@@ -1,5 +1,9 @@
 # Code map
 
+Audiobook scene dividers (#1775): contracts `manuscript.ts` classifies thematic breaks outside
+fenced content. Blocks, beat boundaries, request grouping and timing proposals share that rule;
+`chapterParagraphs(body, true)` retains indentation for fence tracking without changing paragraph IDs.
+
 Manuscript review (#2198): contracts `manuscript-review.ts` owns report/coverage vocabulary;
 coordinator `productions/manuscript-review.ts` pins sources, owns bounded reading/synthesis,
 checkpoints, history and decisions, and `manuscript-review-pdf.ts` exports the retained report.
