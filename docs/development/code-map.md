@@ -1,5 +1,10 @@
 # Code map
 
+Comic lettering observations (#2219): `scripts/measure-comic-lettering.mts` reads the portable
+comic documents without opening or changing a world. It reports current-script retained-take
+rates and source digests, while keeping qualification explicitly unestablished. See
+[measurement limits and invocation](comic-lettering-measurement.md).
+
 Tall pictures (#2164): the existing `set-audiobook-picture` command accepts `picture.tallFrom`
 and routes through `setAudiobookPictureTall`, retaining its expected-Wide and catalogue checks.
 Contracts `videoSegments` selects Tall for portrait output; both the client preview and coordinator

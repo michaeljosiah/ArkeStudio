@@ -26,6 +26,7 @@ Start with the root [AGENTS.md](../../AGENTS.md) and shared [operational rules](
 | What is implemented versus planned? | [Bounded implementation status](status.md), then the relevant spec |
 | Which recovery guardrails can an operator adjust? | [Advanced recovery settings](recovery-settings.md) |
 | How do I test recovery as a user, and what remains unqualified? | [Recovery acceptance and user journeys](recovery-acceptance.md) |
+| What do saved comic lettering checks establish? | [Comic lettering measurement](comic-lettering-measurement.md) |
 | Why is the product structured this way? | [Architecture guide](../architecture/index.html); for requirements, the master specification in the private document set (see below) |
 | Which disk writes does an operation perform? | [Filesystem operations](../filesystem-operations.md) |
 
