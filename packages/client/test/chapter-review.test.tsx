@@ -6,7 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import type { ChapterReview, ClientMessage } from "@arke-studio/contracts";
 import { ChapterReviewReport, ChapterReviewControl } from "../src/components/chapter-review.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -31,6 +31,12 @@ it("defaults every check on, refuses an empty selection and sends only the chose
   const start = [...dom.document.querySelectorAll("button")].find(button => button.textContent === "Start review")!;
   assert.equal(start.hasAttribute("disabled"), true);
   await toggle(0, true);
+  assert.equal(start.hasAttribute("disabled"), true, "waits for current readiness");
+  const readiness = sent.filter(msg => msg.kind === "chapter-review-preflight").at(-1)!;
+  await act(async () => __applyEventForTest({ type: "chapter-review.updated", at: new Date().toISOString(),
+    worldId: FIXTURE_STATE.world!.meta.worldId, productionId: "book", chapterId: "one", requestId: readiness.requestId!, review: null,
+    preflight: { checks: ["prose"], ready: true, pictures: 0, readablePictures: 0, narrationRecords: 0,
+      models: [{ specialist: "prose", model: "test/writer", source: "production" }] } }));
   assert.equal(start.hasAttribute("disabled"), false);
   await act(async () => { start.click(); });
   const command = sent.find(msg => msg.kind === "chapter-review-start");

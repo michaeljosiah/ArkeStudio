@@ -4,6 +4,15 @@ Chapter review is an advisory workflow for saved prose and selected audiobook st
 
 ## Ownership and specialist roles
 
+Before Start, the dialog reads current source coverage and the effective models for the selected
+checks. Specialist overrides take precedence, followed by the production's explicit writing model,
+then the configured/default harness model. Unavailable choices are refused, never substituted.
+Picture reviews also require the script role for consolidation. Narration-only checks need no
+model. Refresh readiness waits for discovery and reports missing picture or narration coverage.
+Start repeats this check before creating a running report and pins the resolved routes for the run;
+the existing per-session capability, ownership and cloud-policy checks still apply at dispatch.
+Readiness makes no inference call and does not guarantee a later provider call will succeed.
+
 The coordinator's `ChapterReviewService` owns the run. The conversation prepares a typed action; it cannot create arbitrary child agents. A read-only `chapter-script-reviewer` session extracts quoted scene facts and reader-facing concerns. Separate read-only `chapter-visual-reviewer` sessions inspect image renditions against the original text and those advisory facts. Each role receives a shipped, versioned review skill. Settings can choose its model and brief; normal harness tool confinement still applies. Native model delegation remains disabled.
 
 The review uses a retained world store, independent of which world is selected. Each session receives the saved chapter snapshot and explicitly supplied images, without the currently selected world's query tools or memory. Source loading observes cancellation; review work drains on shutdown and per-task scratch is removed after interruption/listener cleanup. There is one active review per chapter and at most three across the coordinator.

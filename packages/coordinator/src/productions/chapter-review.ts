@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CHAPTER_REVIEW_CHECKS, ChapterReviewChecksSchema, type ChapterReviewCheck } from "@arke-studio/contracts";
+import { CHAPTER_REVIEW_CHECKS, ChapterReviewChecksSchema, type ChapterReviewCheck, type ChapterReviewPreflight } from "@arke-studio/contracts";
 import { randomUUID, createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
@@ -151,9 +151,19 @@ export class ChapterReviewService {
   private readonly generations = new Map<string, number>();
   constructor(private readonly deps: {
     withWorld<T>(worldId: string, work: (store: WorldStore) => Promise<T>): Promise<T>;
-    runner(store: WorldStore): ReviewTaskRunner;
+    runner(store: WorldStore, preflight?: ChapterReviewPreflight): ReviewTaskRunner;
+    preflight?(store: WorldStore, target: ChapterReviewTarget, source: ReviewSource, checks: readonly ChapterReviewCheck[]): Promise<ChapterReviewPreflight>;
     publish(target: ChapterReviewTarget, review: ChapterReview | null, error?: string): void;
   }) {}
+  async preflight(target: ChapterReviewTarget, checks: readonly ChapterReviewCheck[] = CHAPTER_REVIEW_CHECKS) {
+    const selected = ChapterReviewChecksSchema.parse(checks);
+    if (this.closing) throw new Error("Chapter review is stopping.");
+    return this.deps.withWorld(target.worldId, async store => {
+      const source = await captureReviewSource(store, target, undefined, selected);
+      if (!this.deps.preflight) throw new Error("Review readiness is unavailable on this host.");
+      return this.deps.preflight(store, target, source, selected);
+    });
+  }
   async read(target: ChapterReviewTarget, requestId?: string) {
     const key = chapterReviewKey(target), generation = this.generations.get(key) ?? 0;
     return this.deps.withWorld(target.worldId, async store => {
@@ -235,8 +245,11 @@ export class ChapterReviewService {
     }
     signal.throwIfAborted();
     const source = await captureReviewSource(store, target, signal, checks);
+    const preflight = await this.deps.preflight?.(store, target, source, checks);
+    signal.throwIfAborted();
+    if (preflight && !preflight.ready) throw new Error(preflight.models.filter(model => model.reason).map(model => model.reason).join(" "));
     let prepared: ReviewTaskRunner | undefined;
-    const runner: ReviewTaskRunner = (...args) => (prepared ??= this.deps.runner(store))(...args);
+    const runner: ReviewTaskRunner = (...args) => (prepared ??= this.deps.runner(store, preflight))(...args);
     const prior = await readChapterReview(store, target);
     const sameSource = prior && sameChapterReviewSource(prior, { sourceHash: source.chapter.hash, contextHash: source.contextHash, images: source.images });
     const tasks: ReviewTask[] = [];

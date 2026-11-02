@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
-import { CHAPTER_REVIEW_CHECKS, type ChapterReview, type ChapterReviewCheck } from "@arke-studio/contracts";
+import { useEffect, useRef, useState } from "react";
+import { CHAPTER_REVIEW_CHECKS, type ChapterReview, type ChapterReviewCheck, type ChapterReviewPreflight } from "@arke-studio/contracts";
 import { EditorDialog } from "./editor-dialog.js";
 import { ChapterTellsReport } from "./chapter-tells.js";
 import { Button } from "./ui.js";
 import { acceptChapterReviewUpdate, readChapterReviewImage } from "../lib/chapter-review.js";
 import { mediaUrl } from "../lib/media.js";
-import { decideChapterReview, requestChapterReview, subscribeChapterReview, useStore } from "../lib/store.js";
+import { decideChapterReview, requestChapterReview, requestChapterReviewPreflight, subscribeChapterReview, useStore } from "../lib/store.js";
 
 const checkLabels: Record<ChapterReviewCheck, string> = { script: "Clarity and continuity", prose: "AI tells", visual: "Pictures", narration: "Narration records" };
 
@@ -88,16 +88,31 @@ export function ChapterReviewControl({ worldId, productionId, chapterId, slug, h
   const [open, setOpen] = useState(false), [review, setReview] = useState<ChapterReview | null>(null);
   const [error, setError] = useState<string | null>(null), [starting, setStarting] = useState(false);
   const [checks, setChecks] = useState<ChapterReviewCheck[]>([...CHAPTER_REVIEW_CHECKS]);
+  const [preflight, setPreflight] = useState<ChapterReviewPreflight | null>(null), [readinessError, setReadinessError] = useState<string | null>(null);
+  const readinessRequest = useRef<string | null>(null);
+  const refreshReadiness = () => {
+    setPreflight(null); setReadinessError(null);
+    readinessRequest.current = checks.length ? requestChapterReviewPreflight(worldId, productionId, chapterId, checks) : null;
+  };
   useEffect(() => {
     setReview(null); setError(null); setStarting(false);
     return subscribeChapterReview(event => {
       if (event.worldId !== worldId || event.productionId !== productionId || event.chapterId !== chapterId) return;
+      if (event.requestId) {
+        if (event.requestId === readinessRequest.current) { setPreflight(event.preflight ?? null); setReadinessError(event.error ?? null); }
+        return;
+      }
       setStarting(false);
       if (event.error) setError(event.error);
       else { setError(null); setReview(previous => acceptChapterReviewUpdate(previous, event.review)); }
     });
   }, [worldId, productionId, chapterId]);
   useEffect(() => { if (open && connection === "open") requestChapterReview("chapter-review-read", worldId, productionId, chapterId); }, [open, connection, worldId, productionId, chapterId]);
+  useEffect(() => {
+    readinessRequest.current = null; setPreflight(null); setReadinessError(null);
+    if (open && connection === "open" && !held) refreshReadiness();
+    return () => { readinessRequest.current = null; };
+  }, [open, connection, worldId, productionId, chapterId, checks, held]);
   const busy = starting || review?.status === "running";
   return <>
     <Button onClick={() => setOpen(true)}>Review chapter{busy ? " · running" : ""}</Button>
@@ -109,10 +124,21 @@ export function ChapterReviewControl({ worldId, productionId, chapterId, slug, h
             <input type="checkbox" checked={checks.includes(check)} onChange={e => setChecks(previous => e.target.checked ? [...previous, check] : previous.filter(value => value !== check))} /> {checkLabels[check]}
           </label>)}
         </fieldset>
+        <div aria-live="polite"><strong>Models and coverage</strong>
+          {preflight ? <>
+            {preflight.models.map(route => <p key={route.specialist}>{checkLabels[route.specialist]} · {route.reason ? "Unavailable" : "Ready"}<br />
+              <span>{route.model ?? "No model selected"} · {route.source === "specialist" ? "specialist choice" : route.source === "production" ? "production model" : "inherited default"}</span>
+              {route.reason && <><br /><span role="alert">{route.reason}</span></>}
+            </p>)}
+            {checks.includes("visual") && <p>{preflight.readablePictures}/{preflight.pictures} selected pictures readable.{preflight.pictures === 0 && " No pictures will be inspected."}</p>}
+            {checks.includes("narration") && <p>{preflight.narrationRecords} saved narration records. Audio delivery is not listened to.</p>}
+          </> : readinessError ? <p role="alert">{readinessError}</p> : checks.length > 0 && !held ? <p>Checking model readiness and coverage…</p> : null}
+          <Button disabled={busy || held || connection !== "open" || !checks.length} onClick={refreshReadiness}>Refresh readiness</Button>
+        </div>
         <p>AI tells uses provisional thresholds, not an authorship detector. Narration records checks saved records only; it does not listen to audio.</p>
         <p>Up to 60,000 characters and, when Pictures is selected, 60 pictures. Picture reviews include separate evidence checks and duplicate consolidation. You can leave this chapter while review continues.</p>
         {!checks.length && <p>Choose at least one check.</p>}
-        <div className="fy-chreview__controls"><Button disabled={held || busy || connection !== "open" || !checks.length} onClick={() => {
+        <div className="fy-chreview__controls"><Button disabled={held || busy || connection !== "open" || !checks.length || !preflight?.ready} onClick={() => {
           setError(null); setStarting(true);
           if (!requestChapterReview("chapter-review-start", worldId, productionId, chapterId, checks)) { setStarting(false); setError("Not connected."); }
         }}>{review ? "Review again" : "Start review"}</Button>

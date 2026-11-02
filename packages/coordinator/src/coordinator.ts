@@ -15,6 +15,7 @@ import { RecoveryActionRegistry } from "./recovery/actions.js";
 import { restartActionHistory, reviewedActionHistory } from "./recovery/action-history.js";
 import { RECOVERY_POLICY, studioLocalNarrator, type RecoveryPolicySnapshot, type RecoveryRetryPlan, type MingCleanupSnapshot } from "@arke-studio/contracts";
 import { chapterReviewSummary } from "@arke-studio/contracts";
+import { preflightChapterReview } from "./productions/chapter-review-preflight.js";
 import { rebuildBenchPrefill } from "@arke-studio/contracts";
 import { MUSIC_IMPORT_EXTENSIONS } from "@arke-studio/contracts";
 import { ChapterReviewService } from "./productions/chapter-review.js";
@@ -1907,10 +1908,26 @@ export class Coordinator {
         if (!this.opts.provider.withBackgroundWorldStore) throw new Error("Background chapter review is unavailable on this host.");
         return this.opts.provider.withBackgroundWorldStore(worldId, work);
       },
-      runner: store => {
+      preflight: (store, target, source, checks) => preflightChapterReview(source, checks, {
+        models: () => this.modelCatalog.get(true), app: () => this.readModel.getState().app, sessionInput: this.sessionInput,
+        override: agent => this.agentOverridesInEffect()?.[agent]?.model,
+        productionModel: store.getBundle().productions.find(p => p.meta.id === target.productionId)?.meta.models?.llm,
+        cloudAllowed: async provider => {
+          const settings = this.appSettings ? await this.appSettings.load() : null;
+          return store.getBundle().meta.cloudImageInspection !== false && settings?.imageInspection.cloud === true && settings.imageInspection.providers[provider] !== false;
+        },
+      }),
+      runner: (store, preflight) => {
         const adapter = this.opts.adapter;
         if (!adapter?.readiness().ready) throw new Error("The configured writing harness is unavailable.");
-        return makeReviewTaskRunner({ adapter, beforeDispatch: () => store.assertOwnership(), sessionInput: this.sessionInput, scratch: this.extractScratch(),
+        return makeReviewTaskRunner({ adapter, beforeDispatch: () => store.assertOwnership(), sessionInput: async input => {
+          const specialist = input.agent?.replace(/^chapter-/, "").replace(/-reviewer$/, "");
+          const model = preflight?.models.find(route => route.specialist === specialist)?.model;
+          if (!model) throw new Error("Review model readiness changed. Refresh readiness.");
+          const selected = await this.validateLanguageModel(model, specialist === "visual");
+          if (selected.reason) throw new Error(selected.reason);
+          return this.sessionInput({ ...input, model });
+        }, scratch: this.extractScratch(),
           ...(this.opts.imageRenditionMaker ? { maker: this.opts.imageRenditionMaker } : {}),
           cloudAllowed: async provider => {
             const settings = this.appSettings ? await this.appSettings.load() : null;
@@ -11438,6 +11455,7 @@ export class Coordinator {
         return;
       }
       case "chapter-review-start":
+      case "chapter-review-preflight":
       case "chapter-review-read":
       case "chapter-review-cancel":
       case "chapter-review-decide": {
@@ -11445,12 +11463,15 @@ export class Coordinator {
         try {
           if (this.stopping) return;
           const reviews = this.chapterReviews();
-          if (msg.kind === "chapter-review-start") await reviews.start(target, msg.requestId, msg.checks);
+          if (msg.kind === "chapter-review-preflight") this.emit({ type: "chapter-review.updated", at: this.nowIso(), ...target, review: null,
+            requestId: msg.requestId, preflight: await reviews.preflight(target, msg.checks) });
+          else if (msg.kind === "chapter-review-start") await reviews.start(target, msg.requestId, msg.checks);
           else if (msg.kind === "chapter-review-read") await reviews.read(target);
           else if (msg.kind === "chapter-review-cancel") reviews.cancel(target);
           else await reviews.decide(target, msg.reviewId, msg.findingId, msg.decision, msg.note);
         } catch (error) {
-          this.emit({ type: "chapter-review.updated", at: new Date().toISOString(), ...target, review: null, error: describeCoordinatorError(error) });
+          this.emit({ type: "chapter-review.updated", at: new Date().toISOString(), ...target, review: null, error: describeCoordinatorError(error),
+            ...(msg.kind === "chapter-review-preflight" ? { requestId: msg.requestId } : {}) });
         }
         return;
       }

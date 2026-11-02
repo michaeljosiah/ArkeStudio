@@ -791,6 +791,11 @@ export function requestChapterReview(kind: "chapter-review-start" | "chapter-rev
   worldId: string, productionId: string, chapterId: string, checks?: import("@arke-studio/contracts").ChapterReviewCheck[]): boolean {
   return send({ kind, worldId, productionId, chapterId, ...(kind === "chapter-review-start" && checks ? { checks } : {}), requestId: ulid() });
 }
+export function requestChapterReviewPreflight(worldId: string, productionId: string, chapterId: string,
+  checks: import("@arke-studio/contracts").ChapterReviewCheck[]): string | null {
+  const requestId = ulid();
+  return send({ kind: "chapter-review-preflight", worldId, productionId, chapterId, checks, requestId }) ? requestId : null;
+}
 export function decideChapterReview(worldId: string, productionId: string, chapterId: string, reviewId: string,
   findingId: string, decision: "open" | "intentional" | "dismissed", note?: string): boolean {
   return send({ kind: "chapter-review-decide", worldId, productionId, chapterId, reviewId, findingId, decision, ...(note ? { note } : {}), requestId: ulid() });
