@@ -707,7 +707,7 @@ export async function fileGeneratedArtifact(
     await atomicWriteFile(join(store.dir, "artifacts", file), bytes);
     await writeSidecar(store, created, null);
     return { artifact: created, created: true };
-  }, input.precondition);
+  }, input.precondition, { finalWrite: "commit" });
   if (filed.created && (kind === "audio" || kind === "video")) {
     await measureInto(store, filed.artifact.file, input.mediaProbe ?? null, input.abandoned);
     return store.getBundle().artifacts.find((artifact) => artifact.id === filed.artifact.id) ?? filed.artifact;
@@ -832,7 +832,7 @@ async function measureInto(
       const kind = artifactCited(store.getBundle(), parsed.data.id) ? parsed.data.kind : measuredKind(parsed.data.kind, info);
       await writeSidecar(store, { ...parsed.data, kind, mediaInfo: info }, raw);
       return true;
-    })
+    }, undefined, { finalWrite: "commit" })
     .catch(() => false);
 }
 

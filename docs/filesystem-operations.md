@@ -296,3 +296,8 @@ costs and prompts are unchanged. Artifact measurements update their existing sid
 bytes are contained and checked before/after the bounded probe; the metadata and source identity
 are revalidated under WorldStore ownership before commit. A failed or cancelled read writes no
 measurement. Duration-only hosts cannot persist invented audio presence, and no provider is called.
+
+Generated artifact filing and single-artifact measurement finish with a journalled sidecar
+commit. Its completed refresh also serves the enclosing gate on success, avoiding a duplicate
+full scan. Failed/no-commit operations still reconcile, and audiobook chapter records still
+write and refresh after each saved block (#1794).

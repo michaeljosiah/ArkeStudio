@@ -1966,3 +1966,10 @@ Chapter-review recovery (#1788) uses `productions/chapter-review-response.ts` fo
 response retention before parsing, and `chapter-review.ts` for input-matched reuse in a separate
 report. `chapter-review-start.recoverFrom` and the existing dialog's Retry failed checks retain
 request idempotency and require unchanged pinned source and reviewer configuration.
+
+Generated artifact filing and single-artifact measurement opt into `gateOp`'s final-commit
+refresh (#1794). Their final filesystem write is a journalled sidecar commit, which already
+refreshes the bundle, history checks, search index and scan state. Successful completion can
+reuse that refresh; failure, no-commit branches and other gate users still reconcile normally.
+Per-block audiobook record writes and merge-from-current lanes remain unchanged. The synthetic
+profile is `scripts/profile-audiobook-filing.ts` in the coordinator package.
