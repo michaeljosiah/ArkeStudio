@@ -22,7 +22,7 @@ it("defaults every check on, refuses an empty selection and sends only the chose
     root!.render(<ChapterReviewControl worldId={FIXTURE_STATE.world!.meta.worldId} productionId="book" chapterId="one" slug="world" held={false} />);
   });
   await act(async () => { container.querySelector("button")!.click(); });
-  const checkboxes = [...dom.document.querySelectorAll('input[type="checkbox"]')];
+  const checkboxes = [...dom.document.querySelectorAll('input[type="checkbox"]')] as unknown as HTMLInputElement[];
   assert.equal(checkboxes.length, 4); assert.ok(checkboxes.every(input => input.checked));
   const toggle = async (index: number, checked: boolean) => {
     await act(async () => { checkboxes[index]!.checked = checked; checkboxes[index]!.dispatchEvent(new dom.Event("click", { bubbles: true })); });
