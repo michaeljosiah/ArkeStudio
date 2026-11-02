@@ -89,12 +89,30 @@ export type ManuscriptRead =
     }
   | { ok: false; fileName: string; reason: string };
 
-/** A line of three or more stars, spaced or not, is a scene break and nothing else is. */
-const SCENE_BREAK = /^\s*(?:\*\s*){3,}$/;
+/** Standalone Markdown thematic breaks: three or more of the same marker, optionally spaced. */
+const SCENE_BREAK = /^[ \t]*(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/;
 
-/** A paragraph that is a scene break — a line of three or more stars — and so a separator, not words (SPEC-047 R-2). */
+/** A paragraph shaped as a scene break; chapter callers also exclude fenced content (SPEC-047 R-2). */
 export function isSceneBreak(paragraph: string): boolean {
   return SCENE_BREAK.test(paragraph);
+}
+
+/** Fenced examples can contain standalone dividers separated by blank lines; those stay literal. */
+export function sceneBreakParagraphs(paragraphs: readonly string[]): Set<number> {
+  const breaks = new Set<number>();
+  let fence: string | undefined;
+  paragraphs.forEach((paragraph, index) => {
+    if (fence === undefined && isSceneBreak(paragraph)) breaks.add(index);
+    for (const line of paragraph.split(/\r?\n/)) {
+      const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      if (match === null) continue;
+      const marker = match[1]!;
+      if (fence !== undefined) {
+        if (marker[0] === fence[0] && marker.length >= fence.length && match[2]!.trim() === "") fence = undefined;
+      } else if (marker[0] !== "`" || !match[2]!.includes("`")) fence = marker;
+    }
+  });
+  return breaks;
 }
 
 /**
@@ -122,10 +140,12 @@ export function manuscriptDocument(input: {
   return { title: input.title, subtitle: input.worldName, chapters, leftOut, words: chapters.reduce((sum, chapter) => sum + chapter.words, 0) };
 }
 
-/** A chapter's Markdown as blocks: paragraphs of runs, scene breaks where a line of stars is. */
+/** A chapter's Markdown as blocks: paragraphs of runs and scene breaks outside fenced examples. */
 export function chapterBlocks(body: string): ManuscriptBlock[] {
-  return chapterParagraphs(body).map((paragraph) =>
-    SCENE_BREAK.test(paragraph) ? { kind: "break" as const } : { kind: "paragraph" as const, runs: paragraphRuns(paragraph) },
+  const paragraphs = chapterParagraphs(body);
+  const breaks = sceneBreakParagraphs(paragraphs);
+  return paragraphs.map((paragraph, index) =>
+    breaks.has(index) ? { kind: "break" as const } : { kind: "paragraph" as const, runs: paragraphRuns(paragraph) },
   );
 }
 

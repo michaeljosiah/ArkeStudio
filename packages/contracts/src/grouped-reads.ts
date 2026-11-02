@@ -2,7 +2,7 @@ import { renderPerformancePassage, type PerformancePassage, type PerformanceStat
 import type { ManifestModel } from "./manifest.js";
 import { deriveCapabilityAvailability, type ProviderStatus } from "./provider.js";
 import { AUDIOBOOK_TITLE_KEY } from "./audiobook.js";
-import { isSceneBreak } from "./manuscript.js";
+import { sceneBreakParagraphs } from "./manuscript.js";
 import { expectedSpeechSeconds, quoteSpeech, SPEECH_TOKEN_ESTIMATE, type SpeechQuote } from "./speech-pricing.js";
 import { speechUtf8Bytes } from "./speech-input.js";
 
@@ -72,6 +72,7 @@ export interface BlockTurns {
  */
 export function readBreaksFor(blocks: ReadonlyArray<{ key: string; paragraph: number; speaker?: string }>, paragraphs: readonly string[]): Map<string, ReadBreak> {
   const breaks = new Map<string, ReadBreak>();
+  const sceneBreaks = sceneBreakParagraphs(paragraphs);
   blocks.forEach((block, index) => {
     const next = blocks[index + 1];
     if (block.key === AUDIOBOOK_TITLE_KEY || next === undefined) {
@@ -79,7 +80,7 @@ export function readBreaksFor(blocks: ReadonlyArray<{ key: string; paragraph: nu
       return;
     }
     if (next.paragraph === block.paragraph) return;
-    if (paragraphs.slice(block.paragraph + 1, next.paragraph).some((between) => isSceneBreak(between))) {
+    if ([...sceneBreaks].some((at) => at > block.paragraph && at < next.paragraph)) {
       breaks.set(block.key, "scene");
       return;
     }
