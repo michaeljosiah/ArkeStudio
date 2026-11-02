@@ -238,7 +238,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
       return;
     }
     const carried = picked.who.filter((who) => who.carried && who.reference !== null);
-    const cited = carried.map((who, order) => ({ name: who.name, kind: who.kind, token: `Image ${order + 1}` }));
+    const cited = carried.map((who, order) => ({ name: who.name, kind: who.kind, token: `Image ${order + 1}`, purpose: who.look ? "costume" as const : "identity" as const }));
     // Whose hand a detail shows, with the skin their sheet gives: a person's key is their sheet's id.
     const sheets = world?.sheets ?? [];
     const detailed = pictureDetailSkins(picked.shot?.details ?? [], sheets.map((sheet) => ({ key: sheet.id, name: sheet.name, sheet: sheet.id })), sheets);

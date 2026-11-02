@@ -22534,7 +22534,7 @@ export class Coordinator {
     }
     // The pictures that ride, each by the name the Bench gives it; a picture it refuses is left
     // off and the take is made without it — the refusal is the Bench's own and is logged.
-    const cited: Array<{ name: string; kind: "character" | "place"; token: string }> = [];
+    const cited: Array<{ name: string; kind: "character" | "place"; token: string; purpose: "identity" | "costume" }> = [];
     for (const [index, entry] of (input.saved === undefined ? input.who : []).filter((candidate) => candidate.carried && candidate.reference !== null).entries()) {
       const bench = await this.benchFor(worldId, sessionId);
       if (bench === null) return fail("the Bench session is gone");
@@ -22545,7 +22545,7 @@ export class Coordinator {
         at: this.nowIso(),
       });
       if (outcome.outcome === "refused") void this.appLog?.append({ kind: "bench.reference-refused", worldId, reason: outcome.reason });
-      else cited.push({ name: entry.name, kind: entry.kind, token: outcome.token });
+      else cited.push({ name: entry.name, kind: entry.kind, token: outcome.token, purpose: entry.look ? "costume" : "identity" });
     }
     if (input.signal?.aborted) return fail("stopped");
     const brief = input.saved?.brief ?? (input.brief !== undefined ? input.brief(cited) : input.recompose !== undefined || input.motion !== undefined ? input.prompt : pictureBench(input.prompt, cited, input.mood, input.detailed ?? []));
