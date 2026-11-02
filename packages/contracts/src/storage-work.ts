@@ -8,7 +8,8 @@ export function storageWaitingWork(jobs: readonly JobSummary[], setup: SetupStat
   const seen = new Set<string>();
   for (const job of jobs) {
     const wait = job.storageWait;
-    if (seen.has(job.id) || job.deletedAt || !wait || Date.parse(wait.observedAt) > now || !Number.isFinite(Date.parse(wait.observedAt))) continue;
+    // An advisory is a submitted job's warning, not work held back.
+    if (seen.has(job.id) || job.deletedAt || !wait || wait.advisory || Date.parse(wait.observedAt) > now || !Number.isFinite(Date.parse(wait.observedAt))) continue;
     const submission = wait.phase === "submission" && job.status === "queued";
     const result = wait.phase === "result" && (job.status === "running" || job.status === "submitting");
     if (!submission && !result) continue;

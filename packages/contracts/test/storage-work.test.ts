@@ -30,6 +30,12 @@ it("counts owner-reported current phases, never prose, historical terminal jobs 
   assert.equal(storageWaitingWork([held], null, now + 3600_000).total, 1, "An unchanged live hold is not cleared by a presentation timer");
 });
 
+it("never counts a submitted job's unverified-storage advisory as waiting work", () => {
+  const advisory: JobSummary = { ...held, status: "running", storageWait: { phase: "submission", reason: "unavailable", observedAt: at, advisory: true, detail: { code: "capacity-unavailable", roles: ["generated-media"] } } };
+  assert.equal(JobSummarySchema.safeParse(advisory).success, true);
+  assert.deepEqual(storageWaitingWork([advisory, { ...advisory, status: "queued" }], null, now), { unsubmitted: 0, completed: 0, downloads: 0, unverified: 0, total: 0 });
+});
+
 it("counts only selected downloads currently blocked by disk, with no optional-offer or dependency false alarms", () => {
   const component = { id: "selected", displayName: "Selected model", purpose: "Fixture", sizeMb: 1, installLocation: null, state: "blocked", blockedBy: "disk" };
   const setup = SetupStatusSchema.parse({ components: [component, component,

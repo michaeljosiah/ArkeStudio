@@ -14,6 +14,12 @@ it("names the local hold, evidence age and safe destination without implying gen
   assert.doesNotMatch(html, /Resubmit|Available at check|Additional space/);
   assert.match(view({ ...wait, checking: true }), /Checking destination/);
 });
+it("shows an unverified check as a warning on submitted work, never as a hold", () => {
+  const html = view({ ...wait, advisory: true });
+  assert.match(html, /Submitted without a storage check/); assert.match(html, /Storage measurement needs updating/);
+  assert.match(html, /Working files/); assert.match(html, /href="\/settings\/diagnostics"/);
+  assert.doesNotMatch(html, /Not submitted|has not reached the provider|check this destination again/);
+});
 it("keeps completed-result storage recovery separate from provider retry and shows the measured deficit", () => {
   const html = view({ ...wait, phase: "result", reason: "space", detail: { code: "space", roles: ["generated-media"], availableBytes: 1024 ** 3, deficitBytes: 2 * 1024 ** 3 } });
   assert.match(html, /Result awaiting saving/); assert.match(html, /Available at check: 1 GiB/); assert.match(html, /Additional space needed: 2 GiB/);

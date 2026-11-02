@@ -25,6 +25,13 @@ export function JobStorageWaitNotice({ wait, now = Date.now(), connected = true 
   const at = measured ?? observed, seconds = Math.max(0, Math.floor((now - at) / 1000));
   const count = seconds < 60 ? seconds : Math.floor(seconds / 60), unit = seconds < 60 ? "second" : "minute";
   const age = at > now || !Number.isFinite(at) ? "Check time unavailable" : `${measured === undefined ? "Checked" : "Measured"} ${count} ${unit}${count === 1 ? "" : "s"} ago`;
+  // The check could not confirm space, so the job went on anyway: a warning, not a hold.
+  if (wait.advisory) return <div className="fy-ap__reason" role="status">
+    <b>Submitted without a storage check</b>
+    <div>{title}</div>
+    <div className="fy-ap__rowsub">{[...(detail?.roles.map(role => roles[role]) ?? []), age].join(" · ")}</div>
+    <Link className="fy-studio-button" to="/settings/diagnostics" onClick={closeActivityPanel}>Open Diagnostics</Link>
+  </div>;
   return <div className="fy-ap__reason" role="status">
     <b>{!connected ? "Last reported storage hold" : wait.checking ? "Checking destination…" : wait.phase === "submission" ? "Not submitted" : "Result awaiting saving"}</b>
     <div>{title}</div>
