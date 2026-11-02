@@ -357,6 +357,17 @@ export const GARMENT_WORDS =
  * sentence stays; returns the line and how many clauses went.
  */
 export function cutMoodClothing(text: string): { text: string; cut: number } {
+  return cutMoodClauses(text, GARMENT_WORDS);
+}
+
+/** These are scene facts, not reusable visual treatment. This is a bounded vocabulary check. */
+export const SCENE_MOOD_WORDS = /\b((?:street|oil|gas)?lamp(?:s|light)?|candle(?:s|light)?|fire(?:light)?|flames?|smoke|sunrise|sunset|dawn|dusk|midnight|night(?:time)?|day(?:time)?|sunlight|moonlight|torchlight|generator[- ]lit|morning|afternoon|evening|overcast|rain(?:ing)?|snow(?:ing)?|fog|injur(?:y|ies|ed)|wound(?:s|ed)?|bandag(?:e[sd]?|ing)|blood(?:y)?|bleeding|weapons?|guns?|rifles?|swords?)\b/i;
+
+export function cutMoodScene(text: string): { text: string; cut: number } {
+  return cutMoodClauses(text, new RegExp(`${GARMENT_WORDS.source}|${SCENE_MOOD_WORDS.source}`, "i"));
+}
+
+function cutMoodClauses(text: string, excluded: RegExp): { text: string; cut: number } {
   let cut = 0;
   const sentences = text.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+/);
   const kept = sentences.flatMap((sentence) => {
@@ -364,7 +375,7 @@ export function cutMoodClothing(text: string): { text: string; cut: number } {
     const body = end === "" ? sentence : sentence.slice(0, -1);
     const clauses = body.split(/\s*(?:[,;:]|\s[—–-]\s)\s*/).filter((clause) => clause.trim() !== "");
     const left = clauses.filter((clause) => {
-      if (!GARMENT_WORDS.test(clause)) return true;
+      if (!excluded.test(clause)) return true;
       cut += 1;
       return false;
     });
@@ -381,9 +392,9 @@ export function cutMoodClothing(text: string): { text: string; cut: number } {
  */
 export function pictureMood(look: Pick<AudiobookLook, "mood"> | null | undefined, art: string | null | undefined): string | undefined {
   const own = look?.mood?.text.trim();
-  if (own !== undefined && own !== "") return own;
+  if (own !== undefined && own !== "") return look?.mood?.by === "author" ? own : cutMoodScene(own).text || undefined;
   if (art === null || art === undefined) return undefined;
-  const { text } = cutMoodClothing(art);
+  const { text } = cutMoodScene(art);
   if (text === "") return undefined;
   return text.length <= LOOK_LINE_MAX ? text : `${text.slice(0, LOOK_LINE_MAX - 1).replace(/\s+\S*$/, "")}…`;
 }

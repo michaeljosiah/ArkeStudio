@@ -37,7 +37,7 @@ import { listeningBlocks } from "./audiobook-listening.js";
 import { blockSpeakers, type ChapterPerson } from "./audiobook-look.js";
 import { makeAdapterJsonDeriver } from "./continuity.js";
 import { BRIEF_EXAMPLES, briefGiven, briefRiders, briefRules, holdBrief, pictureChecks, type BriefLine } from "./audiobook-picture-brief.js";
-import { briefLines, clipPrompt, depictable, neutralWhereLooksRide, ownLooksThatRide, pictureAspect, pictureQuote, pictureWho, promptRoom, type PictureRoom } from "./audiobook-picture-suggest.js";
+import { briefLines, clipPrompt, depictable, neutralWhereLooksRide, ownLooksThatRide, pictureAspect, pictureBriefPreview, pictureQuote, pictureWho, promptRoom, type PictureRoom } from "./audiobook-picture-suggest.js";
 import { chapterReferenceCoverage } from "./audiobook-reference-coverage.js";
 import { ownLookChanges, rewritePictureClothing, type PromptRewriter } from "./audiobook-picture-rewrite.js";
 
@@ -289,6 +289,7 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
       ...(candidate.reason !== undefined ? { reason: candidate.reason } : {}),
       title: candidate.title,
       prompt: held.prompt,
+      effectivePrompt: pictureBriefPreview(store, room, { prompt: held.prompt, who, shot }),
       who,
       estimatedMicroUsd: pictureQuote(model, who.filter((entry) => entry.carried).length),
       ...(tallPrice !== undefined ? { tallMicroUsd: tallPrice } : {}),

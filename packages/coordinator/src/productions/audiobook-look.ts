@@ -7,7 +7,7 @@ import {
   chooseLook,
   characterAliasKey,
   linkLookCharacter,
-  cutMoodClothing,
+  cutMoodScene,
   editLook,
   lookClothing,
   lookKey,
@@ -264,7 +264,7 @@ Rules — each is enforced mechanically after you answer:
 - At most ${LOOK_LINE_MAX} characters a line, and short is better: a coat, a lamp, a scarf.
 - "blocks" are keys of blocks listed below, the ones the detail comes from.
 - Never rewrite the chapter. Nothing you write goes into the prose.
-- "mood" is read from "The book's look" below: where the light comes from, its colour, the grain and the lens, in one short line. Never what anyone wears, carries or how their hair is done, never a person or an object: those belong to each character's line. Any clothing in it is cut.
+- "mood" is only stable visual treatment from "The book's look": palette, contrast, grain, medium and lens. Never copy a scene's light source, weather, time of day, injury, equipment, clothing or event into it. Put scene facts in the relevant place or character line with their source block keys. Do not generalise a later change to the whole chapter. Clothing and recognised scene-state clauses are cut from derived mood.
 ${chosen ? `- A character with "the look chosen for them" is dressed by that look in the pictures. Your "text" for them is still only what the CHAPTER says they wear: never copy the look. Add "conflicts": [{"part": "<hood, hair, coat...>", "chapter": "<what the chapter says, a few words>", "look": "<what the look says, a few words>"}] for each part where the two disagree, and leave "conflicts" out where they do not.\n` : ""}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
 ## The book's look
 
@@ -347,7 +347,7 @@ export function verifyLook(raw: RawLook, input: Pick<LookDeriverInput, "people">
  */
 export function moodLine(text: string | null | undefined): { text?: string; cut: number } {
   if (text === null || text === undefined) return { cut: 0 };
-  const { text: kept, cut } = cutMoodClothing(text);
+  const { text: kept, cut } = cutMoodScene(text);
   const line = clip(kept, LOOK_LINE_MAX);
   return { ...(line !== undefined ? { text: line } : {}), cut };
 }

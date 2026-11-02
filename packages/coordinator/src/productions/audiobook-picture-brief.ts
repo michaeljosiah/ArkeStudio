@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   GARMENT_WORDS,
+  SCENE_MOOD_WORDS,
   PICTURE_CHECK_NOTE_MAX,
   PICTURE_DETAIL_PART_MAX,
   PICTURE_EXPRESSION_MAX,
@@ -72,7 +73,7 @@ export function briefRules(maxChars: number, never: readonly string[]): string {
 4. DRESS EACH PERSON FROM THEIR LOOK, NEVER FROM THE ART DIRECTION. For every person in frame use their line from "The look of this chapter": clothes, hair, jewellery, what they carry. Do not invent clothing, hairstyles or ornaments. Without a selected costume look, explicit clothing in this block overrides the main photo and inherited description. Where a line names its look (look "..."), that look's image rides and already carries the clothes: name each garment once, briefly and neutrally, by the garment and its colour ("her cream-gold silk evening dress"). Never write skin exposure, the cut of a garment or the body under it: no bare shoulders or back, no low-backed, strapless, sheer or tight, nothing beneath her braids. Without a selected costume look, describe clothing explicitly supported by the block, including protective oversuits, hoods, gloves and taped cuffs. A main photo does not fix the outfit; do not invent clothing when neither the block nor an authored look supplies it. Their identity (the shape and features of the face) is the reference's; their expression is not: see rule 5.
 5. NAME EVERY FACE'S EXPRESSION AND GAZE. For each person in "inFrame" the prompt says what their face is doing and where they are looking, in plain words, taken from what the block's words say they feel, do or react to. "She held his eyes without smiling" is a level, unsmiling, deliberate gaze, lips closed. "Tunde laughed until his chest hurt" is mouth open, eyes creased shut, head back. A block that states no emotion still gets an expression, inferred from the scene, the chapter note and what the person is doing, and written out; never leave it blank. A main photo fixes face and physical identity; only a selected costume look also fixes hair and clothes. It never fixes the expression: a reference photo's dead-pan face is not this block's, so never write "as in the reference" about a face. Put each expression in "expressions" under the person's key, in the words the prompt uses. If a face is turned away or out of frame (a wide shot from behind, a detail), say so in the prompt and write "face turned away" in "expressions"; for a detail shot name the ease or tension of the hand or arm in "details".
 6. TAKE THE ACTION AND THE OBJECTS FROM THE BLOCK. Name each action and each object the block names (a glass turned slowly on a table, a key in a closed hand) in the posture the words give. Never invent an object to fill the frame.
-7. LIGHT AND TIME COME FROM THE PLACE AND THE MOOD. One sentence from "Place" and "Mood": where the light comes from, what colour, what time. The mood is about light, colour and grain only; anything in it about people, clothes or objects is not for this picture.
+7. LIGHT AND TIME COME FROM THIS SCENE'S WORDS. State the scene's light source, weather and time only where its words support them. Mood supplies stable palette, contrast, grain and lens; it never supplies a lamp, fire, injury, equipment or a time transition. Look lines cite their source blocks: do not carry a later injury, changed clothing or equipment backwards, or a local light source into another scene. Check the combined brief against this picture's words and chronology before answering. Explicit local facts override inherited descriptions; omit uncertain scene details.
 8. PLAIN AND LITERAL. Three to six sentences, at most ${maxChars} characters. Concrete nouns, one camera, no metaphor, no story, no sound. Never ask for text, captions, titles, speech bubbles or logos. Never write the book's style or the references, and never write "keep the face as in the picture": the app adds the reference-purpose direction after your prompt.
 ${never.length > 0 ? `Never show, name or hint at: ${never.join(", ")}.\n` : ""}`;
 }
@@ -96,6 +97,7 @@ export interface BriefLine {
   text: string;
   /** The chosen look's name, when the line is a kit look's (turn 193). */
   look?: string;
+  blocks?: readonly string[];
 }
 
 /** What the brief is given (193k, "WHAT YOU ARE GIVEN"). */
@@ -114,19 +116,19 @@ export function briefGiven(input: BriefGiven): string {
   const place = input.lines.find((line) => line.key === null || line.label === "Place");
   const cast = input.lines
     .filter((line) => line !== place)
-    .map((line) => `[${line.key ?? line.label}] ${line.label}${line.look !== undefined ? `, look "${line.look}"` : ""}: ${line.text}`)
+    .map((line) => `[${line.key ?? line.label}] ${line.label}${line.look !== undefined ? `, look "${line.look}"` : ""}${line.blocks?.length ? ` (source blocks: ${line.blocks.join(", ")})` : ""}: ${line.text}`)
     .join("\n");
   const people = input.people
     .map((person) => `[${person.key}] ${person.name}${person.essence !== undefined ? ` — ${person.essence}` : ""}${person.appearance !== undefined ? ` — ${person.appearance}` : ""}${personIdentity(person)}`)
     .join("\n");
   const places = input.places.map((entry) => `[${entry.key}] ${entry.name}${entry.look !== undefined ? ` — ${entry.look}` : ""}`).join("\n");
   return `WHAT YOU ARE GIVEN
-## The book's mood (light, colour and grain only)
+## The book's mood (visual treatment only; the scene controls light and time)
 ${input.mood ?? "none stated"}
 ## The chapter (${input.title})
 ${input.synopsis ?? "no synopsis"}${input.note !== undefined ? `\n${input.note}` : ""}
 ## The look of this chapter
-Place: ${place?.text ?? "not read"}
+Place${place?.blocks?.length ? ` (source blocks: ${place.blocks.join(", ")})` : ""}: ${place?.text ?? "not read"}
 ${cast === "" ? "no lines" : cast}
 ## Characters
 Identity candidates only, not everyone in the scene. Resolve viewpoint pronouns, familiar names and relationships from this context and the chapter, and use canonical keys in every field. A remembered or mentioned relative is not automatically in frame. If an identity cannot be resolved, retain the literal name for the author to check; never guess a sheet.
@@ -343,7 +345,8 @@ export function pictureChecks(input: CheckInput): PictureCheck[] {
 
   // (5) The Mood line carries no clothing.
   const moodClothes = input.mood === undefined ? false : GARMENT_WORDS.test(input.mood);
-  checks.push({ id: "mood", ok: !moodClothes, label: "Mood", note: moodClothes ? "names clothing" : "light and colour only" });
+  const moodScene = SCENE_MOOD_WORDS.test(input.mood ?? "");
+  checks.push({ id: "mood", ok: !moodClothes && !moodScene, label: "Mood", note: moodClothes ? "names clothing" : moodScene ? "contains scene state · check against this scene" : "visual treatment only" });
 
   // (6) The closing lines are the app's: the references named and the identity line composed by the coordinator.
   checks.push({ id: "closing", ok: true, label: "Closing lines", note: "added by the app" });
