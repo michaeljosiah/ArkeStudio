@@ -1,4 +1,5 @@
-import { harnessModelReference, type ChapterReviewCheck, type ChapterReviewPreflight, type ClientState, type ModelInfo } from "@arke-studio/contracts";
+import { harnessModelReference, skillFor, type ChapterReviewCheck, type ChapterReviewPreflight, type ClientState, type ModelInfo } from "@arke-studio/contracts";
+import { createHash } from "node:crypto";
 import type { SessionInput } from "../harness/session-files.js";
 import { selectHarnessModel } from "../harness/model-catalog.js";
 import type { ReviewSource } from "./chapter-review.js";
@@ -20,6 +21,7 @@ export async function preflightChapterReview(source: Pick<ReviewSource, "images"
     catch { catalogueError = "Models could not be verified. Refresh readiness or check Settings → Harness."; }
   }
   const routes: ChapterReviewPreflight["models"] = [];
+  const configuration: unknown[] = [];
   for (const specialist of specialists) {
     const agent = `chapter-${specialist}-reviewer`, override = deps.override(agent);
     const inherited = override ?? deps.productionModel;
@@ -35,6 +37,7 @@ export async function preflightChapterReview(source: Pick<ReviewSource, "images"
       const selection = selectHarnessModel(model, models, deps.app(), specialist === "visual");
       if (selection.reason) throw new Error(selection.reason.replace("Stage designer", "Chapter visual reviewer"));
       route.model = selection.sessionModel!;
+      configuration.push({ agent, model: route.model, variant: configured.modelVariant, role: configured.agents?.[agent], skill: skillFor(`chapter-${specialist}-review`, "chapter-review") });
       const provider = models.find(value => harnessModelReference(value) === route.model)?.provider;
       if (specialist === "visual" && provider !== "ollama" && (!provider || !await deps.cloudAllowed(provider)))
         throw new Error("Cloud image inspection is disabled for this reviewer. Check Settings → Privacy.");
@@ -42,5 +45,6 @@ export async function preflightChapterReview(source: Pick<ReviewSource, "images"
     routes.push(route);
   }
   return { checks: [...checks], ready: routes.every(route => !route.reason), models: routes, pictures, readablePictures,
+    configurationHash: createHash("sha256").update(JSON.stringify(configuration)).digest("hex"),
     narrationRecords: source.record ? Object.keys(source.record.takes).length : 0 };
 }

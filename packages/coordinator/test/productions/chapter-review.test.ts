@@ -490,3 +490,50 @@ it("asks the prose reviewer once more when its answer is not JSON, and fails onl
   assert.equal(failed.status, "partial"); assert.equal(failed.tells, undefined); assert.equal(failed.findings.length, 1, "the script review is kept");
   assert.equal(twice.turns("chapter-prose-reviewer"), 2, "one resend, never a third turn");
 });
+
+it("recovers only failed consolidation, retains originals and replays recovery without more calls", async () => {
+  const f = await visualFixture(); const calls: string[] = []; let fail = true;
+  const runner: ReviewTaskRunner = async (input, _signal, receipt) => {
+    calls.push(input.phase ?? input.specialist); await receipt({ model: "test/reviewer", sessionId: `call-${calls.length}` });
+    let result: ReviewAnswer;
+    const saved = (await readChapterReview(f.store, f.target))!;
+    if (input.phase === "verification") result = { facts: [], findings: [], assessments: saved.candidates!.filter(c => c.taskId === "visual-1").map(c => ({ findingId: c.id, verdict: "supported", visibility: "visible", basis: "observed-contradiction", subject: "hand", rationale: "Supported" })) };
+    else if (input.phase === "consolidation") result = { facts: [], findings: [], conflicts: [], groups: fail ? [{ representativeId: saved.candidates![0]!.id, memberIds: saved.candidates!.map(c => c.id), rationale: "Incompatible categories" }] : [] };
+    else result = input.specialist === "script" ? answer : { facts: [], findings: [f.visual] };
+    await input.completedResponse?.(JSON.stringify(result));
+    return result;
+  };
+  const original = await f.service(runner).start(f.target, "recovery-original", ["script", "visual"]);
+  assert.equal(original.status, "partial"); assert.equal(original.tasks.at(-1)?.state, "failed");
+  const path = join(f.dir, `productions/${f.target.productionId}/.reviews/chapters/${f.target.chapterId}/${original.id}.responses/consolidation.json`);
+  const retained = JSON.parse(await readFile(path, "utf8"));
+  assert.equal(retained.responses.length, 1); assert.equal(retained.sessionId, "call-4"); assert.equal(retained.requestId, original.requestId);
+  assert.equal(JSON.parse(retained.responses[0].text).groups.length, 1, "invalid interpretation retains the paid response");
+  fail = false;
+  const recovered = await f.service(runner).start(f.target, "recovery-attempt", ["prose"], original.id);
+  assert.equal(recovered.status, "complete"); assert.equal(recovered.recoveredFrom, original.id);
+  assert.deepEqual(recovered.selectedChecks, ["script", "visual"]);
+  assert.deepEqual(calls, ["script", "visual", "verification", "consolidation", "consolidation"]);
+  assert.equal(recovered.tasks.filter(t => t.reusedFrom === original.id).length, 3);
+  assert.deepEqual(recovered.candidates, original.candidates);
+  assert.equal((await readChapterReview(f.store, f.target, original.id))?.status, "partial");
+  assert.equal((await f.service(runner).start(f.target, "recovery-attempt", undefined, original.id)).id, recovered.id);
+  assert.equal(calls.length, 5);
+  await writeFile(join(f.dir, "review-image.png"), "changed pixels");
+  await assert.rejects(f.service(runner).start(f.target, "changed-image", undefined, original.id), /Source or reviewer settings changed/);
+  assert.equal(calls.length, 5);
+});
+
+it("refuses recovery after configuration changes and never automatically retries uncertain calls", async () => {
+  const f = await fixture(); let configurationHash = "original", calls = 0;
+  const service = new ChapterReviewService({ withWorld: async (_id, work) => work(f.store), publish: () => {},
+    preflight: async () => ({ checks: ["script"], ready: true, pictures: 0, readablePictures: 0, narrationRecords: 0, models: [], configurationHash }),
+    runner: () => async () => { calls++; throw new Error("Outcome unknown; timed out"); } });
+  const original = await service.start(f.target, "uncertain", ["script"]);
+  assert.equal(original.status, "partial"); assert.equal(calls, 1);
+  await service.start(f.target, "uncertain", ["script"]); assert.equal(calls, 1);
+  configurationHash = "changed";
+  await assert.rejects(service.start(f.target, "new-config", undefined, original.id), /settings changed/); assert.equal(calls, 1);
+  configurationHash = "original";
+  assert.equal((await service.start(f.target, "explicit-retry", undefined, original.id)).status, "partial"); assert.equal(calls, 2);
+});

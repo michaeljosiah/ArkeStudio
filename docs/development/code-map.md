@@ -1961,3 +1961,8 @@ Tests: contracts `test/production-audio-design.test.ts`; coordinator
 `test/media/measurement.test.ts`, `test/media/measurement-wire.test.ts`,
 `test/productions/music-video-policy.test.ts`, existing take
 and Bench subject suites. Client `screens/editor-media-measurement.tsx` resolves the selected physical source and exposes recovery only for absent metadata or failure. `lib/store.ts` correlates and releases transient measurement requests; authoritative metadata arrives through the normal world snapshot. The existing Cut inspector and phone sheet host approved turn 258, with no new route or setting. Client `test/media-measurement.test.tsx` and root `scripts/smoke-media-measurement.mjs` cover controls, source/world invalidation, local-only commands, both themes and native sheet behavior.
+
+Chapter-review recovery (#1788) uses `productions/chapter-review-response.ts` for bounded raw
+response retention before parsing, and `chapter-review.ts` for input-matched reuse in a separate
+report. `chapter-review-start.recoverFrom` and the existing dialog's Retry failed checks retain
+request idempotency and require unchanged pinned source and reviewer configuration.

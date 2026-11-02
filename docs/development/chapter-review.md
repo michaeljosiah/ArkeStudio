@@ -108,3 +108,18 @@ kinds and what counts as one are defined in [AI tells](../research/ai-tells.md).
 Tests: contracts `test/chapter-tells.test.ts`; coordinator `test/productions/chapter-review.test.ts`
 and `test/harness/review-task.test.ts`; client `test/chapter-tells.test.tsx`.
 
+
+## Failed-stage recovery
+
+Retry failed checks creates a new report linked to the original. Completed answers are reused
+only for matching task inputs; changed dependencies require new calls. Recovery uses the original
+selection and refuses changed source, image bytes, context, reviewer models, role briefs, effort
+or skills. The UI discloses new calls and uncertain prior outcomes; request replay never spends again.
+Older reports without recovery checkpoints require Review again.
+
+Completed raw model responses are saved before parsing or validation in sibling
+`<review-id>.responses/<task-id>.json` files, with request/task/session/model provenance.
+Each task retains at most two raw responses, capped at 256 Ki characters each with an explicit
+truncation marker, within a 4 MiB file limit. Successful parsed answers support reuse. Raw text is
+not sent in report events. Original reports and response files remain auditable; retry does not
+relax validation or turn skipped/failed tasks into successful coverage.

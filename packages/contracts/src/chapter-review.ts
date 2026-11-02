@@ -10,6 +10,7 @@ export const ChapterReviewChecksSchema = z.array(z.enum(CHAPTER_REVIEW_CHECKS)).
 export const ChapterReviewPreflightSchema = z.object({
   checks: ChapterReviewChecksSchema, ready: z.boolean(), pictures: z.number().int().min(0), readablePictures: z.number().int().min(0),
   narrationRecords: z.number().int().min(0),
+  configurationHash: z.string().optional(),
   models: z.array(z.object({ specialist: z.enum(["script", "prose", "visual"]), model: z.string().nullable(),
     source: z.enum(["specialist", "production", "default"]), reason: z.string().optional() }).strict()).max(3),
 }).strict();
@@ -78,6 +79,7 @@ export const ReviewTaskSchema = z.object({ id: z.string(), specialist: z.enum(["
   images: z.array(z.string()), model: z.string().optional(), sessionId: z.string().optional(),
   provider: z.string().optional(), disclosure: z.string().optional(), detail: z.string().optional(),
   skill: z.string(), completedAt: z.string().optional(),
+  inputHash: z.string().optional(), responseSaved: z.boolean().optional(), reusedFrom: z.string().uuid().optional(),
 }).strict();
 export const ChapterReviewSchema = ChapterReviewTargetSchema.extend({
   schemaVersion: z.literal(CHAPTER_REVIEW_VERSION), requestId: z.string().min(1).max(200), id: z.string().uuid(), title: z.string(),
@@ -85,6 +87,7 @@ export const ChapterReviewSchema = ChapterReviewTargetSchema.extend({
   sourceHash: z.string(), contextHash: z.string(), body: z.string().max(60000),
   // Absent in older reports, which always requested every check.
   selectedChecks: ChapterReviewChecksSchema.optional(),
+  configurationHash: z.string().optional(), recoveredFrom: z.string().uuid().optional(),
   images: z.array(ReviewImageSchema).max(60), tasks: z.array(ReviewTaskSchema).max(64),
   facts: z.array(ReviewFactSchema).max(40),
   findings: z.array(ReviewFindingDraftSchema.extend({ id: z.string().uuid(), taskId: z.string(), offset: z.number().int().nonnegative(),

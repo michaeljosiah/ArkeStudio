@@ -136,3 +136,17 @@ it("fails with the parse error when the one resend is not JSON either", async ()
     /not valid JSON, and neither was the one resend: no JSON object in the response/);
   assert.equal(f.sent().length, 2);
 });
+
+it("retains a completed raw answer before schema validation and stops on storage failure", async () => {
+  for (const diskFails of [false, true]) {
+    const f = fake(); let saved: string | undefined, calls = 0;
+    f.adapter.streamEvents = () => ({ [Symbol.asyncIterator]: async function* () { yield { type: "message.completed" as const, sessionId: "review", text: '{"facts":[],"findings":"invalid"}' }; } });
+    const dispatch = f.adapter.dispatchAsync!;
+    f.adapter.dispatchAsync = async input => { calls++; return dispatch(input); };
+    const run = makeReviewTaskRunner({ adapter: f.adapter, beforeDispatch: async () => {}, scratch: await tempDir("review-raw-"), sessionInput: input => input, cloudAllowed: async () => true });
+    await assert.rejects(run({ specialist: "script", prompt: "Review", images: [], completedResponse: async text => {
+      saved = text; if (diskFails) throw new Error("Response disk full");
+    } }, new AbortController().signal, f.receipt), diskFails ? /Response disk full/ : /array/);
+    assert.equal(saved, '{"facts":[],"findings":"invalid"}'); assert.equal(calls, 1);
+  }
+});
