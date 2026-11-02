@@ -268,6 +268,42 @@ describe("an edit makes stale only the paragraphs it touches (design turn 198)",
     ]);
   });
 
+  for (const changed of ['"Sam." She raised her hand.', '"Sam."']) {
+    it(`casts the edited duplicate in its own paragraph: ${changed}`, async () => {
+      const { store } = await open();
+      const live = await openChapter(store, PRODUCTION, "neap");
+      await saveChapter(store, PRODUCTION, "01-neap", '"Sam."\n\nSilence.', { baseHash: live.hash });
+      await castLines(store, PRODUCTION, "neap", async () => ({ lines: [{ speaker: "Earlier", quote: '"Sam."' }] }));
+      const prior = await openChapter(store, PRODUCTION, "neap");
+      await saveChapter(store, PRODUCTION, "01-neap", `"Sam."\n\n${changed}`, { baseHash: prior.hash });
+      const result = await castLines(store, PRODUCTION, "neap", async (input) => {
+        assert.equal(input.body, changed);
+        return { lines: [{ speaker: "Later", quote: '"Sam."' }] };
+      }, undefined, "changed");
+      assert.equal(result.dropped, 0);
+      assert.deepEqual(result.record.lines.map((line) => [line.paragraph, line.speaker]), [[0, "Earlier"], [1, "Later"]]);
+    });
+  }
+
+  it("keeps paragraph and occurrence positions across changed-only passes even when an earlier duplicate was not returned", async () => {
+    const { store } = await open();
+    const live = await openChapter(store, PRODUCTION, "neap");
+    await saveChapter(store, PRODUCTION, "01-neap", "Before.", { baseHash: live.hash });
+    await castLines(store, PRODUCTION, "neap", async () => ({ lines: [] }));
+    const prior = await openChapter(store, PRODUCTION, "neap");
+    const long = `"Sam." ${"She waited. ".repeat(2100)}"Sam."`;
+    await saveChapter(store, PRODUCTION, "01-neap", `${long}\n\n"Sam."`, { baseHash: prior.hash });
+    let calls = 0;
+    const result = await castLines(store, PRODUCTION, "neap", async () => ({ lines: ++calls === 1 ? [] : [
+      { speaker: "Later", quote: '"Sam."' },
+      { speaker: "Last", quote: '"Sam."' },
+      { speaker: "Extra", quote: '"Sam."' },
+    ] }), undefined, "changed");
+    assert.equal(calls, 2);
+    assert.equal(result.dropped, 1, "an extra duplicate cannot escape into an earlier pass");
+    assert.deepEqual(result.record.lines.map((line) => [line.paragraph, line.occurrence, line.speaker]), [[0, 1, "Later"], [1, 0, "Last"]]);
+  });
+
   it("Cast 2 paragraphs sends the model those paragraphs with the chapter around them, and merges only their lines", async () => {
     const { store } = await goatWorld();
     const seen: VoicesDeriverInput[] = [];
