@@ -16845,6 +16845,8 @@ export class Coordinator {
           this.heldProposals.delete(key);
           void this.appLog?.append({ kind: "audiobook.beats", chapter: chapter.file, before: grouped.before, after: grouped.after, beats: grouped.beats.length, dropped: grouped.dropped, cut: grouped.cut });
           this.refreshIfStillOpen(store);
+          // Keep the store and the replayed grouping state until its cancellable follow-up ends.
+          await this.timeMarkedTakes(store, msg.productionId, chapter.id, control.signal);
           this.emit({ at: at(), type: "audiobook.record", ...ids, record: grouped.record });
           this.emit({
             at: at(),
@@ -16858,8 +16860,6 @@ export class Coordinator {
             cut: grouped.cut,
             ...(grouped.summary !== undefined ? { summary: grouped.summary } : {}),
           });
-          // Pictures the beats folded into a take are marks now; their takes are timed (design turn 237).
-          await this.timeMarkedTakes(store, msg.productionId, chapter.id);
         } catch (err) {
           if (!(err instanceof BeatRefusal)) void this.appLog?.append({ kind: "audiobook.beats-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
           this.emit({ at: at(), type: "audiobook.beats", ...ids, outcome: err instanceof BeatRefusal ? "refused" : "failed", reason: err instanceof BeatRefusal ? err.message : describeCoordinatorError(err) });
@@ -22139,14 +22139,15 @@ export class Coordinator {
    * stays quiet: a machine with no aligner keeps the estimate, a take already timed is left, and a
    * Prepare the author started for the book is left to do it.
    */
-  private async timeMarkedTakes(store: WorldStore, productionId: string, chapterId: string): Promise<void> {
+  private async timeMarkedTakes(store: WorldStore, productionId: string, chapterId: string, signal?: AbortSignal): Promise<void> {
     const key = `${store.worldId}/${productionId}/${chapterId}`;
     const voice = this.voiceService;
-    if (voice === undefined || voice === null || this.timingMarks.has(key) || this.preparingWordTiming.has(`${store.worldId}/${productionId}`)) return;
+    if (signal?.aborted || voice === undefined || voice === null || this.timingMarks.has(key) || this.preparingWordTiming.has(`${store.worldId}/${productionId}`)) return;
     const control = new AbortController();
     this.timingMarks.set(key, control);
     const onClose = () => control.abort();
     store.closingSignal.addEventListener("abort", onClose, { once: true });
+    signal?.addEventListener("abort", onClose, { once: true });
     try {
       const availability = await voice.wordTimingAvailability().catch(() => null);
       if (availability?.ready !== true) return;
@@ -22175,6 +22176,7 @@ export class Coordinator {
     } finally {
       store.closingSignal.removeEventListener("abort", onClose);
       this.timingMarks.delete(key);
+      signal?.removeEventListener("abort", onClose);
     }
   }
 
