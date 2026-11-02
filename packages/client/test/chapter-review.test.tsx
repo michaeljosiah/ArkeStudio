@@ -140,3 +140,19 @@ it("shows conservative verdict changes and both sides of a conflict", async () =
   assert.match(container.textContent ?? "", /Conflicting interpretations — kept uncertain/);
   assert.match(container.textContent ?? "", /No visible defect/);
 });
+
+it("discloses new calls and retries the original report with its original checks", async () => {
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ send: (json: string) => sent.push(JSON.parse(json)) } as unknown as ArkeBridge);
+  const container = dom.document.createElement("div"); dom.document.body.append(container); root = createRoot(container as unknown as HTMLElement);
+  const worldId = FIXTURE_STATE.world!.meta.worldId;
+  await act(async () => { __setStateForTest(FIXTURE_STATE, { connection: "open" }); root!.render(<ChapterReviewControl worldId={worldId} productionId="book" chapterId="one" slug="world" held={false} />); });
+  await act(async () => { container.querySelector("button")!.click(); });
+  await act(async () => __applyEventForTest({ type: "chapter-review.updated", at: "now", worldId, productionId: "book", chapterId: "one", review: { ...review, worldId, status: "partial", selectedChecks: ["script"], images: [], configurationHash: "settings" } }));
+  assert.match(dom.document.body.textContent ?? "", /new AI calls and may cost again/);
+  const retry = [...dom.document.querySelectorAll("button")].find(b => b.textContent === "Retry failed checks")!;
+  assert.equal(retry.hasAttribute("disabled"), false);
+  await act(async () => { retry.click(); });
+  const command = sent.find(msg => msg.kind === "chapter-review-start"); assert.equal(command?.kind, "chapter-review-start");
+  if (command?.kind === "chapter-review-start") { assert.equal(command.recoverFrom, review.id); assert.deepEqual(command.checks, ["script"]); }
+});

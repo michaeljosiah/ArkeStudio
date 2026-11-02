@@ -11465,7 +11465,7 @@ export class Coordinator {
           const reviews = this.chapterReviews();
           if (msg.kind === "chapter-review-preflight") this.emit({ type: "chapter-review.updated", at: this.nowIso(), ...target, review: null,
             requestId: msg.requestId, preflight: await reviews.preflight(target, msg.checks) });
-          else if (msg.kind === "chapter-review-start") await reviews.start(target, msg.requestId, msg.checks);
+          else if (msg.kind === "chapter-review-start") await reviews.start(target, msg.requestId, msg.checks, msg.recoverFrom);
           else if (msg.kind === "chapter-review-read") await reviews.read(target);
           else if (msg.kind === "chapter-review-cancel") reviews.cancel(target);
           else await reviews.decide(target, msg.reviewId, msg.findingId, msg.decision, msg.note);

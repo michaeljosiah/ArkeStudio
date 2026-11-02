@@ -40,13 +40,14 @@ export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
   const supplied = new Set(review.tasks.filter(t => t.specialist === "visual" && t.state === "complete").flatMap(t => t.images));
   return <div className="fy-chreview">
     <p role="status"><strong>{review.status}</strong> · {completed}/{review.tasks.length} tasks complete · {supplied.size}/{review.images.length} pictures supplied to completed reviews</p>
+    {review.recoveredFrom && <p>Recovery of report {review.recoveredFrom}. The original report is retained.</p>}
     <p>Audio delivery not listened to. {review.selectedChecks && !review.selectedChecks.includes("narration") ? "Narration records not checked." : "Narration coverage is a saved-record audit, not an exact provider-request review."}</p>
     {review.stale && <div role="alert" className="fy-chreview__notice"><strong>Source check needed — refresh or review again.</strong><ul>{review.staleReasons.map(reason => <li key={reason}>{reason}</li>)}</ul></div>}
     <ChapterTellsReport review={review} />
     <details><summary>Coverage, models and task results</summary>
       <p>Requested checks: {(review.selectedChecks ?? CHAPTER_REVIEW_CHECKS).map(check => checkLabels[check]).join(", ")}.</p>
       <ul>{review.checks.map((check, i) => <li key={i}>{check}</li>)}</ul>
-      {review.tasks.map(task => <p key={task.id}><strong>{task.id}: {task.state}</strong> · {task.skill}{task.model ? ` · ${task.model}` : ""}<br />{task.disclosure}<br />{task.detail}</p>)}
+      {review.tasks.map(task => <p key={task.id}><strong>{task.id}: {task.state}</strong> · {task.skill}{task.model ? ` · ${task.model}` : ""}<br />{task.disclosure}<br />{task.detail}{task.reusedFrom && " Reused completed response; no new AI call."}{task.responseSaved && !task.reusedFrom && " Response retained."}</p>)}
       <p>{review.rejectedFindings} invalid citations or rejected interpretations. Exact citations establish source linkage, not correctness.</p>
     </details>
     {!!review.assessments?.some(a => (a.effectiveVerdict ?? a.verdict) === "rejected") && <details><summary>Rejected interpretations</summary>
@@ -138,6 +139,14 @@ export function ChapterReviewControl({ worldId, productionId, chapterId, slug, h
         <p>AI tells uses provisional thresholds, not an authorship detector. Narration records checks saved records only; it does not listen to audio.</p>
         <p>Up to 60,000 characters and, when Pictures is selected, 60 pictures. Picture reviews include separate evidence checks and duplicate consolidation. You can leave this chapter while review continues.</p>
         {!checks.length && <p>Choose at least one check.</p>}
+        {review && !busy && review.status !== "complete" && <>
+          <p>Retry uses the original checks and creates a separate report. Completed steps with matching inputs are reused. Failed or dependent steps make new AI calls and may cost again, including when an earlier call's outcome is unknown. Source, pictures and reviewer settings must be unchanged.</p>
+          <Button disabled={held || connection !== "open" || review.stale || !review.configurationHash} onClick={() => {
+            setError(null); setStarting(true);
+            if (!requestChapterReview("chapter-review-start", worldId, productionId, chapterId, review.selectedChecks, review.id)) { setStarting(false); setError("Not connected."); }
+          }}>Retry failed checks</Button>
+          {!review.configurationHash && <p>This older report has no recovery checkpoint. Use Review again.</p>}
+        </>}
         <div className="fy-chreview__controls"><Button disabled={held || busy || connection !== "open" || !checks.length || !preflight?.ready} onClick={() => {
           setError(null); setStarting(true);
           if (!requestChapterReview("chapter-review-start", worldId, productionId, chapterId, checks)) { setStarting(false); setError("Not connected."); }

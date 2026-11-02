@@ -13,7 +13,8 @@ import { readContainedMediaBytes } from "../world/reference-files.js";
 import { openChapter } from "./ops.js";
 import { readAudiobook, readAudiobookBook } from "./audiobook.js";
 import { readVoices } from "./voices.js";
-import type { ReviewTaskRunner } from "../harness/review-task.js";
+import { newChapterReviewResponse, retainCompletedResponse, saveChapterReviewResponse, readChapterReviewResponse } from "./chapter-review-response.js";
+import type { ReviewTaskInput, ReviewTaskRunner } from "../harness/review-task.js";
 
 const hash = (value: string | Uint8Array) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
 const jsonHash = (value: unknown) => hash(JSON.stringify(value));
@@ -188,7 +189,7 @@ export class ChapterReviewService {
       return review;
     });
   }
-  start(target: ChapterReviewTarget, requestId: string, checks: readonly ChapterReviewCheck[] = CHAPTER_REVIEW_CHECKS): Promise<ChapterReview> {
+  start(target: ChapterReviewTarget, requestId: string, checks: readonly ChapterReviewCheck[] = CHAPTER_REVIEW_CHECKS, recoverFrom?: string): Promise<ChapterReview> {
     ChapterReviewTargetSchema.parse({ worldId: target.worldId, productionId: target.productionId, chapterId: target.chapterId });
     const selected = ChapterReviewChecksSchema.safeParse(checks);
     if (!selected.success) return Promise.reject(new Error("Choose at least one valid review check, without duplicates."));
@@ -201,7 +202,7 @@ export class ChapterReviewService {
     const control = new AbortController();
     this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
     // Defer execution until the reservation exists, including when a host supplies a synchronous seam.
-    const work = Promise.resolve().then(() => this.deps.withWorld(target.worldId, store => serializeFileMutation(`${store.dir}/${pathOf(target)}`, () => this.run(store, target, requestId, control.signal, selected.data))))
+    const work = Promise.resolve().then(() => this.deps.withWorld(target.worldId, store => serializeFileMutation(`${store.dir}/${pathOf(target)}`, () => this.run(store, target, requestId, control.signal, selected.data, recoverFrom))))
       .catch(error => { this.deps.publish(target, null, error instanceof Error ? error.message : "Review failed."); throw error; })
       .finally(() => this.live.delete(key));
     this.live.set(key, { requestId, control, work });
@@ -229,7 +230,7 @@ export class ChapterReviewService {
       this.deps.publish(target, review);
     }));
   }
-  private async run(store: WorldStore, target: ChapterReviewTarget, requestId: string, signal: AbortSignal, checks: ChapterReviewCheck[]) {
+  private async run(store: WorldStore, target: ChapterReviewTarget, requestId: string, signal: AbortSignal, checks: ChapterReviewCheck[], recoverFrom?: string) {
     // A request has one durable identity, even after a newer review or application restart.
     const id = requestIdentity(requestId);
     const existing = await readChapterReview(store, target, id);
@@ -243,11 +244,18 @@ export class ChapterReviewService {
       if ((await readChapterReview(store, target))?.id === result.id) this.deps.publish(target, result);
       return result;
     }
+    const recovery = recoverFrom ? await readChapterReview(store, target, recoverFrom) : null;
+    if (recoverFrom && (!recovery || recovery.status === "running" || recovery.status === "complete")) throw new Error("Choose an interrupted or partial review to recover.");
+    if (recovery) checks = recovery.selectedChecks ?? [...CHAPTER_REVIEW_CHECKS];
     signal.throwIfAborted();
     const source = await captureReviewSource(store, target, signal, checks);
     const preflight = await this.deps.preflight?.(store, target, source, checks);
     signal.throwIfAborted();
     if (preflight && !preflight.ready) throw new Error(preflight.models.filter(model => model.reason).map(model => model.reason).join(" "));
+    const configurationHash = preflight?.configurationHash ?? jsonHash(preflight?.models ?? []);
+    if (recovery && (!sameChapterReviewSource(recovery, { sourceHash: source.chapter.hash, contextHash: source.contextHash, images: source.images }) || recovery.configurationHash !== configurationHash))
+      throw new Error("Source or reviewer settings changed. Start a new review instead of retrying failed checks.");
+    if (recovery) for (const task of recovery.tasks.filter(t => t.state === "complete" && t.inputHash)) await readChapterReviewResponse(store, recovery, task);
     let prepared: ReviewTaskRunner | undefined;
     const runner: ReviewTaskRunner = (...args) => (prepared ??= this.deps.runner(store, preflight))(...args);
     const prior = await readChapterReview(store, target);
@@ -265,7 +273,7 @@ export class ChapterReviewService {
     if (checks.includes("narration")) tasks.push({ id: "narration", specialist: "narration", state: "complete", images: [], skill: "record-audit@v1", detail: "Saved-record audit only. Compiled request and audio delivery were not inspected." });
     const now = new Date().toISOString();
     let review: ChapterReview = { ...target, schemaVersion: 1, requestId, id, title: source.chapter.title,
-      createdAt: now, updatedAt: now, status: "running", sourceHash: source.chapter.hash, contextHash: source.contextHash, selectedChecks: checks,
+      createdAt: now, updatedAt: now, status: "running", sourceHash: source.chapter.hash, contextHash: source.contextHash, selectedChecks: checks, configurationHash, ...(recovery ? { recoveredFrom: recovery.id } : {}),
       body: source.chapter.body, images: source.images, tasks, facts: [], findings: [], candidates: [], assessments: [], groups: [], conflicts: [], rejectedFindings: 0,
       stale: false, staleReasons: [], audioListened: false, checks: [
         ...(checks.includes("visual") ? [`${source.images.length} selected pictures; ${available.length} readable sources.`,
@@ -283,6 +291,30 @@ export class ChapterReviewService {
       await saveChapterReview(store, review);
       this.deps.publish(target, structuredClone(review));
     };
+    const ask = async (task: ReviewTask, input: ReviewTaskInput): Promise<ReviewAnswer> => {
+      task.inputHash = jsonHash({ specialist: input.specialist, phase: input.phase, prompt: input.prompt, skill: task.skill,
+        images: input.images.map(image => ({ block: image.block, hash: hash(image.bytes), extension: image.extension })) });
+      const old = recovery?.tasks.find(value => value.id === task.id);
+      if (recovery && old?.state === "complete" && old.inputHash === task.inputHash && old.skill === task.skill) {
+        const saved = await readChapterReviewResponse(store, recovery, old);
+        Object.assign(task, { model: old.model, sessionId: old.sessionId, provider: old.provider, disclosure: old.disclosure, reusedFrom: recovery.id });
+        const copy = newChapterReviewResponse(review, task); copy.answer = saved.answer;
+        await saveChapterReviewResponse(store, review, task, copy);
+        task.responseSaved = true; await persist();
+        return saved.answer!;
+      }
+      await persist();
+      let record = newChapterReviewResponse(review, task);
+      const answer = await runner({ ...input, completedResponse: async text => {
+        retainCompletedResponse(record, text);
+        await saveChapterReviewResponse(store, review, task, record);
+        task.responseSaved = true; await persist();
+      } }, signal, async receipt => { Object.assign(task, receipt); record = newChapterReviewResponse(review, task); await persist(); });
+      record.answer = answer;
+      await saveChapterReviewResponse(store, review, task, record);
+      task.responseSaved = true;
+      return answer;
+    };
     await persist();
     try {
       for (const task of tasks.filter(t => t.specialist !== "narration")) {
@@ -292,7 +324,7 @@ export class ChapterReviewService {
         await persist();
         try {
           if (task.specialist === "prose") {
-            const tagged = await runner({ specialist: "prose", prompt: tellsPrompt(source), images: [] }, signal, async receipt => { Object.assign(task, receipt); await persist(); });
+            const tagged = await ask(task, { specialist: "prose", prompt: tellsPrompt(source), images: [] });
             signal.throwIfAborted();
             if (!tagged.tells) throw new Error("The prose reviewer returned no tells list.");
             const { reading, dialogue } = readTellsOutsideDialogue(source.chapter.body, tagged.tells);
@@ -320,11 +352,11 @@ export class ChapterReviewService {
             task.state = "complete"; task.detail = "Fewer than two findings; no duplicates to consolidate.";
             await persist(); continue;
           }
-          const answer: ReviewAnswer = await runner({ specialist: verification ? "visual" : consolidation ? "script" : task.specialist as "script" | "visual",
+          const answer: ReviewAnswer = await ask(task, { specialist: verification ? "visual" : consolidation ? "script" : task.specialist as "script" | "visual",
             ...(verification ? { phase: "verification" as const } : consolidation ? { phase: "consolidation" as const } : {}),
             prompt: verification ? verificationPrompt(source, candidates, task.images) : consolidation ? consolidationPrompt(review.findings, review.assessments, review.candidates) : reviewPrompt(source, review.facts, task.images),
             images: task.images.map(block => ({ block, bytes: source.bytes.get(block)!, extension: extname(source.images.find(i => i.block === block)!.file) })),
-          }, signal, async receipt => { Object.assign(task, receipt); await persist(); });
+          });
           signal.throwIfAborted();
           if (verification) {
             const assessments = validateReviewAssessments(candidates, answer);
@@ -372,8 +404,9 @@ export class ChapterReviewService {
             const linked = verifiedReviewAnswer(source.chapter.body, answer, task.images);
             review.rejectedFindings += linked.rejected;
             if (task.specialist === "script") review.facts = linked.facts;
-            for (const finding of linked.findings) {
-              const candidate = { ...finding, id: randomUUID(), taskId: task.id, offset: source.chapter.body.indexOf(finding.quote) };
+            for (const [index, finding] of linked.findings.entries()) {
+              const original = task.reusedFrom ? recovery?.candidates?.filter(value => value.taskId === task.id)[index] : undefined;
+              const candidate = { ...finding, id: original && sameReviewFinding(original, finding) ? original.id : randomUUID(), taskId: task.id, offset: source.chapter.body.indexOf(finding.quote) };
               review.candidates!.push(candidate);
               const identical = task.specialist === "script" ? review.findings.find(f => sameReviewFinding(f, finding)) : undefined;
               if (identical) {

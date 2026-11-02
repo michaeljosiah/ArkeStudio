@@ -2305,7 +2305,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * Open a chapter: the body and its version, fetched on demand and answered by
    * `chapter.open-result` (turn 126). The summary in the bundle stays body-free on purpose.
    */
-  z.object({ kind: z.literal("chapter-review-start"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema, checks: ChapterReviewChecksSchema.optional() }).strict(),
+  z.object({ kind: z.literal("chapter-review-start"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema, checks: ChapterReviewChecksSchema.optional(), recoverFrom: z.string().uuid().optional() }).strict(),
   z.object({ kind: z.literal("chapter-review-preflight"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema, checks: ChapterReviewChecksSchema.optional() }).strict(),
   z.object({ kind: z.literal("manuscript-review-start"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, brief: z.string().max(6000) }).strict(),
   z.object({ kind: z.literal("manuscript-review-read"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, reviewId: UlidSchema.optional() }).strict(),

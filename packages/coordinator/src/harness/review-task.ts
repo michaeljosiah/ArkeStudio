@@ -10,6 +10,7 @@ export interface ReviewTaskInput {
   phase?: "verification" | "consolidation";
   prompt: string;
   images: Array<{ block: string; bytes: Uint8Array; extension: string }>;
+  completedResponse?(text: string): Promise<void>;
 }
 export type ReviewTaskRunner = (input: ReviewTaskInput, signal: AbortSignal,
   receipt: (value: Pick<ReviewTask, "sessionId" | "model" | "provider" | "disclosure">) => Promise<void>) => Promise<ReviewAnswer>;
@@ -19,7 +20,7 @@ export interface ImageJsonDeps {
   beforeDispatch(): Promise<void>;
   cloudAllowed(provider: string): Promise<boolean>;
 }
-export type ImageJsonRunner = (input: { agent: string; skillFamily?: string; prompt: string; images: ReviewTaskInput["images"] }, signal: AbortSignal,
+export type ImageJsonRunner = (input: { agent: string; skillFamily?: string; prompt: string; images: ReviewTaskInput["images"]; completedResponse?: ReviewTaskInput["completedResponse"] }, signal: AbortSignal,
   receipt: (value: Pick<ReviewTask, "sessionId" | "model" | "provider" | "disclosure">) => Promise<void>) => Promise<unknown>;
 
 /** Named, bounded sessions are launched here; no model receives a general-purpose spawn tool. */
@@ -27,7 +28,7 @@ export function makeReviewTaskRunner(deps: ImageJsonDeps): ReviewTaskRunner {
   const ask = makeImageJsonRunner(deps);
   return async (input, signal, receipt) => {
     const agent = input.specialist === "script" ? "chapter-script-reviewer" : input.specialist === "prose" ? "chapter-prose-reviewer" : "chapter-visual-reviewer";
-    return ReviewAnswerReadSchema.parse(await ask({ agent, skillFamily: "chapter-review", prompt: input.prompt, images: input.images }, signal, receipt));
+    return ReviewAnswerReadSchema.parse(await ask({ agent, skillFamily: "chapter-review", prompt: input.prompt, images: input.images, completedResponse: input.completedResponse }, signal, receipt));
   };
 }
 
@@ -37,7 +38,7 @@ export function makeReviewTaskRunner(deps: ImageJsonDeps): ReviewTaskRunner {
  * both carry the same consent, byte budget, receipt and single resend.
  */
 export function makeImageJsonRunner(deps: ImageJsonDeps): ImageJsonRunner {
-  return async ({ agent, skillFamily, prompt, images }, signal, receipt) => {
+  return async ({ agent, skillFamily, prompt, images, completedResponse }, signal, receipt) => {
     signal.throwIfAborted();
     const input = { prompt, images };
     const root = resolve(deps.scratch);
@@ -116,6 +117,8 @@ export function makeImageJsonRunner(deps: ImageJsonDeps): ImageJsonRunner {
             await deps.adapter.dispatchAsync({ sessionId: session.sessionId, parts: turnParts });
             return completed;
           })(), cancelled, timeout]);
+          // Retain paid output before JSON parsing, schema validation or cancellation handling.
+          await completedResponse?.(text);
           signal.throwIfAborted();
           return text;
         } finally {
