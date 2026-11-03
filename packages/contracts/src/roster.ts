@@ -463,3 +463,10 @@ export function agentForPurpose(
 }
 
 export const ROSTER: readonly RosterAgent[] = BRIEFS.map((a) => ({ ...a, prompt: agentPromptFor(a) }));
+
+/** Roles that read pictures need a model that can, and operational roles run on a private route. */
+const OWN_MODEL_ROLES = new Set(["stage-designer", "chapter-visual-reviewer", "page-lettering-reader", "comic-page-reviewer"]);
+/** A role nobody set runs on the writer's model, not on a harness default nobody chose (issue 2419). */
+export function inheritsWriterModel(name: string): boolean {
+  return name !== "story-writer" && !OWN_MODEL_ROLES.has(name) && ROSTER.some(member => member.name === name && !member.operationalOnly);
+}

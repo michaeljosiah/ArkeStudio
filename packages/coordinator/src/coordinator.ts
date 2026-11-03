@@ -161,6 +161,7 @@ import {
   modelForCapability,
   harnessModelReference,
   ROSTER,
+  inheritsWriterModel,
   gateLocalRuntimes,
   type EngineLocalities,
   PROVIDERS,
@@ -6197,11 +6198,17 @@ export class Coordinator {
     // The page reviewer reads pictures too, and starts on the lettering reader's model until it has
     // one of its own (SPEC-064 decision 15): a separate agent, so it never shares the drafter's context.
     const lettering = withReader?.["page-lettering-reader"]?.model;
-    if (lettering === undefined) return withReader;
-    // The comic script reader starts there too (SPEC-064 decision 15).
+    if (withReader === undefined) return withReader;
     const borrowed = { ...withReader };
-    for (const name of ["comic-page-reviewer", "comic-script-reader"]) {
+    // The comic script reader starts there too (SPEC-064 decision 15).
+    if (lettering !== undefined) for (const name of ["comic-page-reviewer", "comic-script-reader"]) {
       if (borrowed[name]?.model === undefined) borrowed[name] = { ...borrowed[name], model: lettering };
+    }
+    // On the harness's own default these failed on an account that refuses it, with the reason
+    // hidden behind "no answer" (issue 2419). The writer's model is one the author already chose.
+    const writer = borrowed["story-writer"]?.model;
+    if (writer !== undefined) for (const member of ROSTER) {
+      if (inheritsWriterModel(member.name) && borrowed[member.name]?.model === undefined) borrowed[member.name] = { ...borrowed[member.name], model: writer };
     }
     return borrowed;
   }

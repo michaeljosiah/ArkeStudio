@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button, Textarea, cx } from "../components/ui.js";
 import { listHarnessModels, setAgentConfig, useStore } from "../lib/store.js";
 import { HarnessModelOptions, HarnessModelStatus, languageChoiceReason } from "../components/harness-models.js";
+import { inheritsWriterModel } from "@arke-studio/contracts";
 
 /**
  * The writing agents, behind Advanced on Harness (design 54b — this was a settings tab
@@ -17,6 +18,12 @@ import { HarnessModelOptions, HarnessModelStatus, languageChoiceReason } from ".
  * restate canon, never stamp versions. The accept gate assumes them, so an agent talked out of
  * them fails in ways that look like application bugs rather than like a changed setting.
  */
+/** The roster's names are ids; "comic-script-reader" reads as "Comic script reader". */
+function agentLabel(name: string): string {
+  const words = name.replaceAll("-", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 export function AgentsPanel({ focusAgent }: { focusAgent?: string } = {}) {
   const { state } = useStore();
   const agents = state?.app.agents ?? [];
@@ -26,6 +33,7 @@ export function AgentsPanel({ focusAgent }: { focusAgent?: string } = {}) {
   const focusTarget = useRef<HTMLSelectElement | null>(null);
   const focusedAgent = useRef<string | undefined>(undefined);
   const catalogStatus = state?.app.harnessModelStatus?.status;
+  const writerModel = agents.find(a => a.name === "story-writer")?.model ?? undefined;
 
   // Ask once when the screen opens: the list is the harness's, and it can change under us.
   useEffect(() => {
@@ -54,7 +62,7 @@ export function AgentsPanel({ focusAgent }: { focusAgent?: string } = {}) {
           <div key={a.name} className="fy-set__row fy-set__row--stack">
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
               <div className="fy-set__name fy-set__name--wide">
-                <div className="fy-set__title">{a.name}</div>
+                <div className="fy-set__title">{agentLabel(a.name)}</div>
                 <div className="fy-set__caps">{a.description}</div>
               </div>
               <select
@@ -66,8 +74,8 @@ export function AgentsPanel({ focusAgent }: { focusAgent?: string } = {}) {
                 value={a.model ?? ""}
                 onChange={(e) => setAgentConfig(a.name, { model: e.target.value === "" ? null : e.target.value })}
               >
-                {/* Empty is a real answer, not a missing one: it means the harness decides. */}
-                <option value="">Ask the harness</option>
+                {/* Empty is a real answer, not a missing one: the writer's model, or the harness's choice. */}
+                <option value="">{writerModel !== undefined && inheritsWriterModel(a.name) ? "Same as Story writer" : "Ask the harness"}</option>
                 <HarnessModelOptions state={state} selected={a.model} needsImages={a.name === "stage-designer"} />
               </select>
               <button
