@@ -28,7 +28,7 @@ const samePlace = (a: AudiobookSeamAnchor["before"], b: AudiobookSeamAnchor["bef
 
 /** The chapter's blocks under a record's seams, as placement reads them. */
 function blocksUnder(plan: Pick<AudiobookPlan, "body" | "cast" | "chapter" | "book">, record: Pick<ChapterAudiobook, "seams"> & Partial<ChapterAudiobook>) {
-  return audiobookBlocks(plan.body, plan.cast === "unreadable" ? null : plan.cast, audiobookHeading(plan.chapter.order, plan.chapter.title), audiobookBlockOptions(plan.book, record as ChapterAudiobook)).blocks.map((block) => ({ key: block.key, text: block.text, ...(block.starts !== undefined ? { starts: block.starts } : {}) }));
+  return audiobookBlocks(plan.body, plan.cast === "unreadable" ? null : plan.cast, audiobookHeading(plan.chapter.order, plan.chapter.title), audiobookBlockOptions(plan.book, record as ChapterAudiobook)).blocks;
 }
 
 /**

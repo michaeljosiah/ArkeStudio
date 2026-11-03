@@ -253,6 +253,9 @@ function otherBlockPictures(blocks: readonly ListeningInputBlock[], held: Readon
   if (occupied && occupied.textHash !== hashes[index] && matches(occupied).length > 1) throw refusal();
   const here = new Set(Object.entries(held).filter(([key, entry]) => {
     const placed = placePictures(blocks, { [key]: entry }).placed[0];
+    // Explicit replacement/removal can clear an unplaced picture at this key. A picture that
+    // still belongs elsewhere keeps the relocation protection below; its media is never deleted.
+    if (key === block && placed === undefined && matches(entry).length === 0) return true;
     return placed?.index === index && placed.sentence === 0;
   }).map(([key]) => key));
   const rest: Record<string, AudiobookPicture> = Object.fromEntries(Object.entries(held).filter(([key]) => !here.has(key)));

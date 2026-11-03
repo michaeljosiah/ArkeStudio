@@ -263,7 +263,7 @@ export function placePictures(
   }
   for (const entry of offered.sort((a, b) => a.order - b.order)) {
     if (byIndex.has(entry.index)) off.push(entry.key);
-    else byIndex.set(entry.index, { key: entry.key, index: entry.index, sentence: 0, picture: entry.picture, moved: true });
+    else byIndex.set(entry.index, { key: entry.key, index: entry.index, sentence: 0, picture: entry.picture, moved: blocks[entry.index]!.key !== entry.key });
   }
   // A mark at a sentence another picture already holds — a block's own at its first word, or a
   // mark that has not moved — is lost; the rest stand beside the block's own picture.
