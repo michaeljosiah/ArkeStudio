@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { pictureRefusal, type Job } from "@arke-studio/contracts";
+import { GENERIC_ERROR_COPY, pictureRefusal, providerName, type Job, type QueueStatus } from "@arke-studio/contracts";
 import { subscribeQueueResults } from "../lib/store.js";
 
 /**
@@ -8,13 +8,16 @@ import { subscribeQueueResults } from "../lib/store.js";
  * without a picture. A failed job never leaves a spinner (2026-10-04: a close view the safety
  * system refused stayed `Making close view…` for good).
  */
-export type LookJobState = { state: "making" } | { state: "failed"; reason: string; /** False where the picture was made and paid for and only its filing failed: Activity retries that at no charge, so no second paid request is offered. */ retry: boolean };
+export type LookJobState = { state: "making" } | { state: "waiting"; reason: string; retry: false } | { state: "failed"; reason: string; /** False where the picture was made and paid for and only its filing failed: Activity retries that at no charge, so no second paid request is offered. */ retry: boolean };
 
 const ACTIVE = new Set<Job["status"]>(["queued", "submitting", "running"]);
 
 /** One job's state for a row, or null once it succeeded (its picture is the row's). */
-export function lookJobState(job: Job | undefined): LookJobState | null {
+export function lookJobState(job: Job | undefined, queues: readonly QueueStatus[] = []): LookJobState | null {
   if (job === undefined) return null;
+  const queue = queues.find(queue => queue.provider === job.provider && queue.paused);
+  // A pause holds queued work only. Requests already sent still have an outcome to await.
+  if (job.status === "queued" && queue) return { state: "waiting", reason: `Waiting · ${providerName(job.provider)} paused${queue.reason && queue.reason !== "paused" && queue.reason !== GENERIC_ERROR_COPY ? ` · ${queue.reason}` : ""}`, retry: false };
   if (job.status === "succeeded") {
     if (job.finalization?.status === "failed") return { state: "failed", reason: "made, not filed · see Activity", retry: false };
     // Made and still being filed: the picture is on its way, not a reason to pay for another (codex on PR 1559).
