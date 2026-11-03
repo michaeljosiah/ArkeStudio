@@ -1920,6 +1920,8 @@ export type WorldChatTranscriptMessage = z.infer<typeof WorldChatTranscriptMessa
  */
 export const WorldChatWorkspaceSchema = z
   .object({
+    inputQueue: WorldChatInputQueueViewSchema.optional(),
+    runId: RunIdSchema.nullable().optional(),
     /** Live projections of existing human authorities; never part of a model turn result. */
     humanDecisions: z.array(HumanDecisionCardSchema).optional(),
     humanDecisionProblems: z.array(z.string().min(1).max(500)).optional(),

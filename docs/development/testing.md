@@ -1492,7 +1492,13 @@ and world-card-heights tests, and typecheck after changing tests.
 
 Additional conversation input (#1138) has journal, recovery and compatibility coverage in
 coordinator `test/world-chat/input-journal.test.ts`, and queued-turn execution in `run.test.ts`,
-beside the existing store, recovery, summarisation and wrap-up suites. The opt-in Codex and
+beside the existing store, recovery, summarisation and wrap-up suites. Queue activation also uses
+`test/application/conversation-inputs.test.ts` for FIFO, Stop/flush failure, route changes and restart,
+and the durable queued-input case in `test/harness/model-routing.test.ts` for real command receipts.
+Client `test/conversation-inputs.test.tsx` covers pending identity and draft recovery; keep the
+existing composer and conversation suites. Check actual World Chat and production Chat at phone
+and desktop widths: editable drafts during progress, retained words, Remove, Stop and explicit
+Continue. These checks do not qualify native mid-reply steering. The opt-in Codex and
 OpenCode native protocol probes, their environment variables and the builds they were measured
 against are in [conversation inputs](conversation-inputs.md#native-protocol-evidence). They make no
 paid model call and do not qualify an adapter for native steering.

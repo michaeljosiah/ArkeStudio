@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import {
   ConversationIdSchema, WorldChatInputAttemptSchema, WorldChatInputConstraintsSchema, WorldChatInputRequestSchema,
   WorldChatInputRoutingSchema, WorldChatRunSchema, WorldChatStoredEventSchema,
-  WORLD_CHAT_INPUT_SCHEMA_VERSION, CHAPTER_DRAFT_INTENT_SCHEMA_VERSION, newId, worldChatInputRouting,
+  WORLD_CHAT_INPUT_SCHEMA_VERSION, CHAPTER_DRAFT_INTENT_SCHEMA_VERSION, newId, worldChatInputRouting, unresolvedWorldChatInputs,
   type ConversationId, type WorldChatEventEnvelope, type WorldChatInputAttempt,
   type WorldChatInputPauseReason, type WorldChatInputQueue, type WorldChatInputRecord,
   type WorldChatInputRequest, type WorldChatInputRouting, type WorldChatRun,
@@ -103,7 +103,12 @@ export class WorldChatInputJournal {
       this.expectRevision(queue, expectedRevision);
       if (foldWorldChatInputs(events).running.size > 0) throw new WorldChatInputError("unavailable", "Wait for the active reply to settle before continuing.");
       this.openView(events, this.now());
-      return { type: "input-queue.resumed", routing: capturedRouting };
+      const waiting = unresolvedWorldChatInputs(queue), first = waiting[0];
+      // Continue approves the displayed next destination, not a silent replacement of another
+      // input's deliberately different model/effort. Those inputs keep their own route checks.
+      const firstRoute = first ? stableJson(worldChatInputRouting(queue, first)) : null;
+      const messageIds = waiting.filter(row => stableJson(worldChatInputRouting(queue, row)) === firstRoute).map(row => row.input.messageId);
+      return { type: "input-queue.resumed", routing: capturedRouting, messageIds };
     });
   }
 
@@ -206,8 +211,9 @@ export class WorldChatInputJournal {
     // The boundary commits through the world's queue, and so does ownedWrite: raising it inside
     // ownedWrite would wait on itself. Ownership is checked again by the ownedWrite below.
     const subject = first.event.type === "input.recorded" ? first.event.input.constraints.subject : undefined;
-    await this.world.raiseSchemaBoundary(subject?.kind === "chapter" && subject.intent === "draft" ? CHAPTER_DRAFT_INTENT_SCHEMA_VERSION
-      : subject?.kind === "effect-arrangement" ? 75 : WORLD_CHAT_INPUT_SCHEMA_VERSION, "world-chat-input");
+    await this.world.raiseSchemaBoundary(Math.max(WORLD_CHAT_INPUT_SCHEMA_VERSION,
+      subject?.kind === "chapter" && subject.intent === "draft" ? CHAPTER_DRAFT_INTENT_SCHEMA_VERSION
+      : subject?.kind === "effect-arrangement" ? 75 : 0), "world-chat-input");
     return this.world.ownedWrite(async () => {
       for (;;) {
         // Repeated after the boundary: lifecycle, queue and context can all move while it commits.

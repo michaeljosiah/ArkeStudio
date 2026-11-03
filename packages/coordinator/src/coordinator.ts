@@ -60,6 +60,9 @@ import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
 import { ConversationAuthoringService } from "./application/conversation-authoring.js";
+import { ConversationInputs } from "./application/conversation-inputs.js";
+import { WorldChatInputError, WorldChatInputJournal, inputCommandDigest } from "./world-chat/input-journal.js";
+import { projectWorldChatInputQueue, type WorldChatInputRequest, type WorldChatInputRouting, type WorldChatLoaded } from "@arke-studio/contracts";
 import { conversationRunDependencies } from "./application/conversation-runs.js";
 import { createEngine } from "./application/engine.js";
 import { createLocalWorldRepository } from "./application/local-worlds.js";
@@ -1313,6 +1316,7 @@ export class Coordinator {
   private readonly supervisors = new Map<HealthComponent, ChildSupervisor>();
   private readonly worldQuery: WorldQueryServer;
   private readonly worldChatRunners = new WorldChatRunnerCache<WorldChatRunner>();
+  private readonly conversationInputOwners = new WeakMap<WorldStore, ConversationInputs>();
   private readonly grants: GrantStore | null;
   private readonly authoring: AuthoringService | null;
   private readonly genesis: GenesisService | null;
@@ -8581,6 +8585,31 @@ export class Coordinator {
         await this.refreshConversationOutcome(store, msg.conversationId);
         return;
       }
+      case "world-chat-input":
+      case "world-chat-input-status":
+      case "world-chat-input-remove":
+      case "world-chat-input-continue": {
+        await this.worldOpensSettled();
+        const requestId = msg.kind === "world-chat-input" ? msg.input.submissionId : msg.requestId;
+        const answer = (admitted: boolean, detail?: string, queue?: import("@arke-studio/contracts").WorldChatInputQueueView, uncertain = false) =>
+          this.emit({ at: this.nowIso(), type: "world-chat.input-result", worldId: msg.worldId,
+            conversationId: msg.conversationId, requestId, admitted, uncertain, ...(detail ? { detail } : {}), ...(queue ? { queue } : {}) });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || this.stopping) { answer(false, "This world is no longer open. Your message is retained.", undefined, true); return; }
+        const journal = new WorldChatInputJournal(store, msg.conversationId), owner = this.conversationInputs(store);
+        try {
+          if (msg.kind === "world-chat-input") await owner.record(msg.conversationId, msg.input);
+          else if (msg.kind === "world-chat-input-remove") await owner.remove(msg.conversationId, msg.messageId, msg.revision, requestId);
+          else if (msg.kind === "world-chat-input-continue") await owner.resume(msg.conversationId, msg.revision, msg.routing, requestId);
+          const queue = msg.kind === "world-chat-input-status" ? await owner.receipt(msg.conversationId, requestId) : await journal.read();
+          const known = msg.kind !== "world-chat-input-status" || queue.inputs.some(row => row.input.request.submissionId === requestId);
+          answer(known, known ? undefined : "This message has not been queued. Your draft is retained.", projectWorldChatInputQueue(queue));
+        } catch (error) {
+          answer(false, error instanceof WorldChatInputError ? error.message : "The message could not be queued. Your draft is retained; check its status before retrying.", undefined, true);
+        }
+        await this.refreshConversationOutcome(store, msg.conversationId);
+        return;
+      }
       case "world-chat-send": {
         // Every send is answered for its request (PR 1232): taken as a turn, or not. A decline
         // appends nothing, so without this the sender can only guess from the transcript.
@@ -8609,7 +8638,7 @@ export class Coordinator {
           answer(false);
         };
         const store = this.opts.provider.openStore?.();
-        if (!store) {
+        if (!store || store.worldId !== msg.worldId) {
           answer(false);
           return;
         }
@@ -8641,12 +8670,9 @@ export class Coordinator {
         await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
         await inFlight;
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
+        await this.refreshConversationOutcome(store, msg.conversationId);
         if (naming !== null && (await naming)) {
-          await this.refreshConversations(store);
-          await this.openWorldChat(store, msg.conversationId);
+          await this.refreshConversationOutcome(store, msg.conversationId);
         }
         return;
       }
@@ -24001,9 +24027,31 @@ export class Coordinator {
 
   private conversationAuthoring(store: WorldStore): ConversationAuthoringService {
     return new ConversationAuthoringService(store, {
+      inputs: this.conversationInputs(store),
       runner: (id) => this.worldChatRunner(store, id),
       name: (id, text, title) => this.nameConversation(store, id, text, title),
     });
+  }
+
+  private inputRouting(store: WorldStore, view: WorldChatLoaded, request: Pick<WorldChatInputRequest, "modelId" | "variant">): WorldChatInputRouting {
+    const entry = view.entryContext, productionId = entry && "productionId" in entry ? entry.productionId : undefined;
+    const production = store.getBundle().productions.find(one => one.meta.id === productionId);
+    const adapter = this.opts.adapter?.id ?? "unavailable", modelId = request.modelId ?? null;
+    return { adapter, modelId, fingerprint: inputCommandDigest({ adapter, modelId, variant: request.variant,
+      agent: this.agentOverridesInEffect()?.["world-builder"], productionModel: production?.meta.models?.llm,
+      variants: production?.meta.llmVariants, localDefault: this.localHarnessDefault(false),
+      researchWeb: this.researchWeb, skillFamily: this.skillFamily, skillModelId: this.skillModelId }) };
+  }
+
+  private conversationInputs(store: WorldStore): ConversationInputs {
+    let owner = this.conversationInputOwners.get(store);
+    if (!owner) {
+      owner = new ConversationInputs(store, { runner: id => this.worldChatRunner(store, id),
+        routing: (view, request) => this.inputRouting(store, view, request),
+        changed: id => this.refreshConversationOutcome(store, id) });
+      this.conversationInputOwners.set(store, owner);
+    }
+    return owner;
   }
 
   private worldChatRunner(store: WorldStore, conversationId: ConversationId): WorldChatRunner {
@@ -24207,6 +24255,9 @@ export class Coordinator {
     const sheets = new Map(bundle.sheets.map((s) => [s.id, s]));
     const human = await projectHumanDecisions(store, loaded, bundle, this.jobQueue?.listJobs() ?? this.getState().app.jobs);
     loaded = { ...loaded, actions: await this.conversationActions(store).project(loaded.actions) };
+    const waiting = loaded.inputQueue?.inputs.find(row => row.status === "queued");
+    if (waiting && loaded.inputQueue) loaded = { ...loaded, inputQueue: { ...loaded.inputQueue,
+      resumeRouting: this.inputRouting(store, loaded, waiting.input.request) } };
     if (!this.stillOpen(store) || (onlyIfStillSelected !== undefined && this.getState().worldChat?.conversationId !== onlyIfStillSelected)) return;
     this.readModel.setStageReviews(human.stageReviews);
     this.readModel.setWorldChat(

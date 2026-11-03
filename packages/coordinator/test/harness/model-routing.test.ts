@@ -148,6 +148,29 @@ async function fixture(options: {
 }
 
 describe("coordinator harness/model routing (#1122)", () => {
+  it("publishes durable queued-input receipts and hydrates paused controls without dispatch", async () => {
+    const test = await fixture({ production: LOCAL, manifest: true });
+    try {
+      await test.send({ kind: "world-chat-create", worldId: WORLD_ID, requestId: randomUUID(), title: "Queued direction",
+        entryContext: { kind: "production", productionId: "saltlight" } });
+      const conversationId = test.coordinator.getState().worldChat!.conversationId;
+      await test.send({ kind: "world-chat-cancel", worldId: WORLD_ID, conversationId });
+      const input = { submissionId: randomUUID(), text: "Keep her motivation.", attachmentIds: [], delivery: "next" as const, expectedRunId: null, variant: "high", replyOnly: true };
+      await test.send({ kind: "world-chat-input", worldId: WORLD_ID, conversationId, input });
+      await test.send({ kind: "world-chat-input", worldId: WORLD_ID, conversationId, input });
+      const queue = test.coordinator.getState().worldChat!.inputQueue!;
+      assert.equal(queue.inputs.length, 1); assert.equal(queue.pauseReason, "stopped");
+      assert.ok(queue.resumeRouting); assert.equal(queue.inputs[0]!.input.request.variant, "high");
+      assert.equal(test.adapter.sessions.length, 0);
+      await test.send({ kind: "world-chat-input-status", worldId: WORLD_ID, conversationId, requestId: input.submissionId });
+      const receipt = test.events.findLast(event => event.type === "world-chat.input-result");
+      assert.ok(receipt?.type === "world-chat.input-result" && receipt.admitted);
+      await test.send({ kind: "world-chat-input-remove", worldId: WORLD_ID, conversationId, requestId: randomUUID(),
+        messageId: queue.inputs[0]!.input.messageId, revision: queue.revision });
+      assert.equal(test.coordinator.getState().worldChat!.inputQueue!.inputs[0]!.status, "removed");
+      assert.equal(test.adapter.sessions.length, 0);
+    } finally { await test.close(); }
+  });
   it("rechecks explicit founding models before opening a tool-using session", async () => {
     const test = await fixture();
     const genesisId = "gen-model-admission";

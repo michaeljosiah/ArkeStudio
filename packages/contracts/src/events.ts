@@ -1,4 +1,5 @@
 import { PromptToolsResultSchema } from "./prompt-tools.js";
+import { WorldChatInputQueueViewSchema } from "./world-chat-input.js";
 import { MediaMeasurementResultSchema } from "./media-measurement.js";
 import { GuideVoiceLineSchema } from "./world-guide.js";
 import { OnboardingStatusSchema } from "./onboarding.js";
@@ -2184,6 +2185,9 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       turnId: z.string().min(1).optional(),
     })
     .strict(),
+  z.object({ ...base, type: z.literal("world-chat.input-result"), worldId: z.string().min(1),
+    conversationId: z.string().min(1), requestId: z.string().min(1), admitted: z.boolean(),
+    detail: z.string().optional(), uncertain: z.boolean().optional(), queue: WorldChatInputQueueViewSchema.optional() }).strict(),
 
   z
     .object({

@@ -29,6 +29,9 @@ export interface ComposerProps {
   /** A turn is in flight: the surface is read-only and the button says so. */
   busy?: boolean;
   busyLabel?: string;
+  /** Explicit queue submission keeps supported conversations editable during a reply. */
+  sendNext?: boolean;
+  queuePaused?: boolean;
   /** Unavailable, with the reason stated beneath rather than a dead box. */
   disabledReason?: string;
   autoFocus?: boolean;
@@ -164,7 +167,7 @@ export function Composer(props: ComposerProps) {
   const hover = useMediaQuery("(hover: hover)");
   const remote = isRemoteSession();
   const off = disabledReason !== undefined;
-  const locked = off || busy;
+  const locked = off || (busy && !props.sendNext);
 
 
   // Drag state, counted rather than flagged: dragging over a child fires dragleave on the
@@ -407,17 +410,19 @@ export function Composer(props: ComposerProps) {
           type="button"
           className="fy-cx__send"
           disabled={!canSend}
-          aria-label="Send"
-          title={canSend && hover ? "Send  ↵" : undefined}
+          aria-label={props.sendNext ? "Send next" : "Send"}
+          title={canSend && hover ? `${props.sendNext ? "Send next" : "Send"}  ↵` : undefined}
           onClick={submit}
+          style={props.sendNext ? { width: "auto", paddingInline: 12 } : undefined}
         >
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          {props.sendNext ? "Send next" : <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M12 19V5M5 12l7-7 7 7" />
-          </svg>
+          </svg>}
         </button>
       </div>
 
       {off && <div className="fy-cx__reason">{disabledReason}</div>}
+      {props.sendNext && <div className="fy-cx__reason">{props.queuePaused ? "Saved in the queue until you choose Continue." : "Sent after this reply finishes. It won’t change the reply in progress."}</div>}
     </div>
   );
 }

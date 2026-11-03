@@ -1238,6 +1238,34 @@ async function queueInput(journal: WorldChatInputJournal, text: string, replyOnl
 }
 
 describe("running a durable queued input (SPEC-045 R-16)", () => {
+  it("carries the submitted effort into queued model selection", async () => {
+    let effort: string | undefined;
+    const state = await setup(fakeAdapter([JSON.stringify({ reply: "Done.", candidateOperations: [], groupOperations: [] })]), {
+      resolveLanguageModel: async ({ variant }) => { effort = variant; return {}; },
+    });
+    const receipt = await state.journal.record({ submissionId: newId("msg"), text: "Keep it quiet", attachmentIds: [],
+      delivery: "next", expectedRunId: null, variant: "high" }, { routing: QUEUE_ROUTING, constraints: { replyOnly: false } });
+    const row = receipt.queue.inputs[0]!;
+    await state.runner.sendQueued(state.journal, row.input.messageId, receipt.queue.revision, QUEUE_ROUTING);
+    assert.equal(effort, "high");
+  });
+
+  it("keeps the run slot until requested native interruption settles", async () => {
+    let dispatched!: () => void, interrupted!: () => void, settle!: () => void;
+    const sending = new Promise<void>(resolve => { dispatched = resolve; });
+    const stopping = new Promise<void>(resolve => { interrupted = resolve; });
+    const stopped = new Promise<void>(resolve => { settle = resolve; });
+    const adapter = fakeAdapter([], { hang: true });
+    adapter.dispatchAsync = async () => { dispatched(); return { ok: true } as never; };
+    adapter.interrupt = async () => { interrupted(); await stopped; };
+    const state = await setup(adapter);
+    const turn = state.runner.send(state.store, state.conversationId, "Draft");
+    await sending; state.runner.cancel(state.conversationId); await stopping;
+    assert.equal(state.runner.isRunning(state.conversationId), true);
+    settle(); assert.equal((await turn).status, "cancelled");
+    assert.equal(state.runner.isRunning(state.conversationId), false);
+  });
+
   it("retains the manuscript requirement through queued promotion and explicit retry", async () => {
     const prompts: string[] = [];
     const subject = { kind: "chapter" as const, chapterId: "neap", intent: "draft" as const };
