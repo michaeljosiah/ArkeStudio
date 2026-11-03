@@ -356,6 +356,36 @@ interface TimedWord {
   acoustic?: AcousticWord;
 }
 
+/** Read paired emphasis across the whole block, before cue cuts can separate its delimiters.
+ * Keep source offsets: display cleanup must not retime a word or change the saved transcript. */
+function captionDisplayWords(words: readonly string[]): string[] {
+  const text = words.join(" "), hidden = new Set<number>();
+  const open: { mark: string; at: number; size: number }[] = [];
+  // Consume escapes and code as whole spans so their punctuation cannot close emphasis.
+  const tokens = /\\[\s\S]|(`+)[\s\S]*?\1(?!`)|\*+|_+/g;
+  for (const match of text.matchAll(tokens)) {
+    const marks = match[0], at = match.index, size = marks.length;
+    if (!/^[*_]/.test(marks) || size > 3) continue;
+    const before = text[at - 1] ?? " ", after = text[at + size] ?? " ";
+    if (/\S/.test(before) && !/[\p{L}\p{N}*_]/u.test(after)) {
+      let remaining = size, index = open.length;
+      while (index > 0 && open[index - 1]!.mark === marks[0] && open[index - 1]!.size <= remaining) remaining -= open[--index]!.size;
+      if (remaining === 0) {
+        for (const start of open.splice(index)) for (let i = 0; i < start.size; i++) hidden.add(start.at + i);
+        for (let i = 0; i < size; i++) hidden.add(at + i);
+        continue;
+      }
+    }
+    if (!/[\p{L}\p{N}*_]/u.test(before) && /\S/.test(after)) open.push({ mark: marks[0]!, at, size });
+  }
+  let offset = 0;
+  return words.map(word => {
+    const shown = word.split("").filter((_, index) => !hidden.has(offset + index)).join("");
+    offset += word.length + 1;
+    return shown;
+  });
+}
+
 /** Verified acoustic words when present; phrase-only captions retain the existing sentence estimate. */
 function timedWords(block: ListeningChapter["blocks"][number]): TimedWord[] {
   const end = block.at + block.seconds;
@@ -363,7 +393,6 @@ function timedWords(block: ListeningChapter["blocks"][number]): TimedWord[] {
   const textEnds = new Set<number>();
   if (block.words !== undefined) {
     for (const word of block.words) words.push({ text: word.text, from: word.startSec, to: word.endSec, after: "sentence", quoted: false, acoustic: word });
-    words.forEach((word, i) => { if (ENDS_SENTENCE.test(word.text)) textEnds.add(i); });
   }
   if (block.words === undefined) {
   block.sentences.forEach((sentence, index) => {
@@ -381,6 +410,14 @@ function timedWords(block: ListeningChapter["blocks"][number]): TimedWord[] {
     textEnds.add(words.length - 1);
   });
   }
+  const displayed = captionDisplayWords(words.map(word => word.text));
+  words.forEach((word, index) => {
+    word.text = displayed[index]!;
+    if (word.acoustic) {
+      word.acoustic = { ...word.acoustic, text: word.text };
+      if (ENDS_SENTENCE.test(word.text)) textEnds.add(index);
+    }
+  });
   for (let at = 0; at < words.length - 1; at++) words[at]!.after = breakKind(words[at]!.text, words[at + 1]!.text, textEnds.has(at));
   // Straight quotes open and close by turns; a block is its own paragraph, so it starts closed.
   let open = false;
