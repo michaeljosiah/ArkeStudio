@@ -39,3 +39,8 @@
   .fy-look__meta { flex-direction: column; gap: 2px; }
   .fy-look__src { display: none; }
 }
+
+/* Keep the first-use action visible above the folded chapter details. */
+.fy-look__empty { padding: 12px 0 20px; }
+.fy-look__empty h3 { margin: 0; font: 500 var(--text-lg)/1.4 var(--font-sans); }
+.fy-look__empty p { margin: 12px 0; font: var(--type-meta); }

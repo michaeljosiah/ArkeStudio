@@ -130,7 +130,10 @@ describe("the look sheet", () => {
 
   it("derives on a press and says it is reading, then takes the answer", async () => {
     const m = await mount(undefined);
-    assert.equal(text(bodyAll('[data-testid="look-none"]')[0]), "not read");
+    assert.match(text(bodyAll('[data-testid="look-none"]')[0]), /Find this chapter’s looks/);
+    assert.equal(bodyAll('[data-testid="look-derive"]').length, 1);
+    assert.equal(bodyAll('[data-testid="look-derive"]')[0]!.closest('details'), null, 'first-use action is visible without opening Chapter details');
+    assert.equal(sentOf(m, 'derive-audiobook-look').length, 0, 'opening never spends automatically');
     assert.equal(text(bodyAll('[data-testid="look-derive"]')[0]), "Derive");
     await press(bodyAll('[data-testid="look-derive"]')[0]);
     const asked = sentOf(m, "derive-audiobook-look")[0];
