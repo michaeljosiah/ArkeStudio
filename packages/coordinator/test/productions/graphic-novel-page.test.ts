@@ -4,6 +4,7 @@ import { comicPageHash, ulid, type ComicPage, type DomainEvent, type ManifestMod
 import { createChapter, createProduction } from "../../src/productions/ops.js";
 import { changeComicPage, saveComicScript } from "../../src/productions/graphic-novel.js";
 import { IMAGE, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
+import { until } from "../wait.js";
 
 /**
  * A comic page made (SPEC-064 slice 2): one generation through the Bench, priced before the press,
@@ -138,7 +139,7 @@ describe("a comic page made (SPEC-064 R-22 – R-27)", () => {
       // And read, as a made take is: filed with no verdict, Pages said Checking over a take nothing
       // was reading (2026-10-30).
       const filed = record.takes[0]!.id;
-      for (let i = 0; i < 100 && !h.events.some((event) => event.type === "comic.page-made" && event.take === filed && event.state === "made"); i++) await new Promise((resolve) => setTimeout(resolve, 20));
+      await until(() => h.events.some((event) => event.type === "comic.page-made" && event.take === filed && event.state === "made"), "recovered page verification published");
       assert.equal(store.getBundle().productions.find((p) => p.meta.id === production)!.comicPages![0]!.record.takes[0]!.verification?.status, "unavailable", "no reader here: not checked, never a pass");
       const said = h.events.filter((event): event is Made => event.type === "comic.page-made" && event.take === filed).map((event) => event.state);
       assert.deepEqual(said, ["checking", "made"]);
@@ -154,12 +155,12 @@ describe("a comic page made (SPEC-064 R-22 – R-27)", () => {
       assert.equal(record().making.length, 1, "still queued: the admission stays");
       // Codex answers long after the wait: no quote, no page opened.
       await h.landHeld(0);
-      for (let i = 0; i < 150 && record().takes.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 20));
+      await until(() => record().takes.length > 0, "late page filed");
       assert.equal(record().takes.length, 1, "filed by the late look");
       assert.equal(record().making.length, 0);
       assert.equal(h.enqueued.length, 1, "nothing asked again");
       const filed = record().takes[0]!.id;
-      for (let i = 0; i < 100 && !h.events.some((event) => event.type === "comic.page-made" && event.take === filed && event.state === "made"); i++) await new Promise((resolve) => setTimeout(resolve, 20));
+      await until(() => h.events.some((event) => event.type === "comic.page-made" && event.take === filed && event.state === "made"), "late page verification published");
       assert.deepEqual(h.events.filter((event): event is Made => event.type === "comic.page-made" && event.take === filed).map((event) => event.state), ["checking", "made"], "and read, as an opened page's is");
     }, { model: LETTERER, land: false, pictureWait: { waitMs: 50, lateLookMs: 20 } }));
 });

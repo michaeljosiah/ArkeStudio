@@ -236,7 +236,8 @@ describe("the art direction gives light and mood only (design turn 193, rule 9, 
         assert.equal(suggestion(events).refused, undefined);
         assert.ok(seen[0]!.mood !== undefined);
         assert.doesNotMatch(seen[0]!.mood!, /agbada|lace/);
-        assert.match(seen[0]!.mood!, /^Lagos at night/);
+        assert.doesNotMatch(seen[0]!.mood!, /Lagos at night/i);
+        assert.match(seen[0]!.mood!, /sodium orange.*Fine grain/s);
       },
       { prepare: withArt },
     ));
