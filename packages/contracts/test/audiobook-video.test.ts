@@ -303,6 +303,16 @@ describe("caption emphasis across cue boundaries (#1716)", () => {
     assert.deepEqual(shown.map(({ text: _text, ...timing }) => timing), words.map(({ text: _text, ...timing }) => timing));
     assert.deepEqual(source, before);
   });
+
+  it("balances whole nested delimiter runs and preserves code inside emphasis (PR 2388)", () => {
+    for (const [text, expected] of [
+      ["*Very **quiet** words*.", "Very quiet words."],
+      ["*Very `quiet*` words*.", "Very `quiet*` words."],
+      ["**Very *quiet words***.", "Very quiet words."],
+      ["_Very __quiet__ words_.", "Very quiet words."],
+      ["*Very ``quiet ` *`` words*.", "Very ``quiet ` *`` words."],
+    ]) assert.equal(joined(chapterCues({ blocks: [block(text!)] }, 16)), expected);
+  });
 });
 
 describe("the opening caption fitted to its frame (design turn 252, codex on PR 2275)", () => {

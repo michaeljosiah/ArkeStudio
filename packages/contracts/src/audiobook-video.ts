@@ -360,17 +360,24 @@ interface TimedWord {
  * Keep source offsets: display cleanup must not retime a word or change the saved transcript. */
 function captionDisplayWords(words: readonly string[]): string[] {
   const text = words.join(" "), hidden = new Set<number>();
-  const mark = (value: string, offset: number) => {
-    // Code, escaped marks, intraword underscores and unpaired punctuation stay literal.
-    const spans = /(?<!\\)`[^`]*`|(?<![\\\p{L}\p{N}*_])(\*{1,3}|_{1,3})(?=\S)(.*?\S)(?<!\\)\1(?![\p{L}\p{N}*_])/gu;
-    for (const match of value.matchAll(spans)) {
-      if (!match[1]) continue;
-      const start = offset + match.index, size = match[1].length;
-      for (let i = 0; i < size; i++) { hidden.add(start + i); hidden.add(start + match[0].length - size + i); }
-      mark(match[2]!, start + size);
+  const open: { mark: string; at: number; size: number }[] = [];
+  // Consume escapes and code as whole spans so their punctuation cannot close emphasis.
+  const tokens = /\\[\s\S]|(`+)[\s\S]*?\1(?!`)|\*+|_+/g;
+  for (const match of text.matchAll(tokens)) {
+    const marks = match[0], at = match.index, size = marks.length;
+    if (!/^[*_]/.test(marks) || size > 3) continue;
+    const before = text[at - 1] ?? " ", after = text[at + size] ?? " ";
+    if (/\S/.test(before) && !/[\p{L}\p{N}*_]/u.test(after)) {
+      let remaining = size, index = open.length;
+      while (index > 0 && open[index - 1]!.mark === marks[0] && open[index - 1]!.size <= remaining) remaining -= open[--index]!.size;
+      if (remaining === 0) {
+        for (const start of open.splice(index)) for (let i = 0; i < start.size; i++) hidden.add(start.at + i);
+        for (let i = 0; i < size; i++) hidden.add(at + i);
+        continue;
+      }
     }
-  };
-  mark(text, 0);
+    if (!/[\p{L}\p{N}*_]/u.test(before) && /\S/.test(after)) open.push({ mark: marks[0]!, at, size });
+  }
   let offset = 0;
   return words.map(word => {
     const shown = word.split("").filter((_, index) => !hidden.has(offset + index)).join("");
