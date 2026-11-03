@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { createPreparedSession, type SessionInput } from "./session-files.js";
-import type { DomainEvent, HarnessAdapter, PermissionRequest } from "@arke-studio/contracts";
+import { harnessModelFailureReason, type DomainEvent, type HarnessAdapter, type PermissionRequest } from "@arke-studio/contracts";
 import { fromPortable } from "../world/paths.js";
 import type { ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "../world/store.js";
@@ -344,7 +344,9 @@ export class AuthoringService {
      * nothing after it — is exactly the string §2.5 warns will be mistaken for an Arke defect.
      * The proposal was already preserved above, unconditionally, so the stated reason is true.
      */
-    if (final.state === "failed" && isAuthShapedFailure(final.detail)) {
+    if (final.state === "failed" && harnessModelFailureReason(final.detail) !== null) {
+      final = { state: "failed", detail: harnessModelFailureReason(final.detail)! };
+    } else if (final.state === "failed" && isAuthShapedFailure(final.detail)) {
       final = { state: "failed", detail: AUTH_FAILURE_REASON };
       try {
         this.opts.onAuthFailure?.(input.purpose);

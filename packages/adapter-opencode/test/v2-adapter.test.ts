@@ -593,6 +593,9 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
         { id: "disabled", providerID: "openai", disabled: true },
         { id: "unavailable", providerID: "openai", enabled: false },
         { id: "deprecated", providerID: "openai", status: "deprecated" },
+        { id: "gpt-image-2", providerID: "openai" },
+        { id: "text-embedding-3-large", providerID: "openai" },
+        { id: "exo-free", providerID: "opencode", cost: { input: 0, output: 0 } },
       ];
       stub.defaultModel = { id: "gpt-5.4-mini", providerID: "openai" };
       const models = await adapter.listModels();
