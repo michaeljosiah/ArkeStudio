@@ -8854,6 +8854,8 @@ export class Coordinator {
             sessionId,
             ...(reason ? { reason } : {}),
           });
+        const opening = { worldId: store.worldId, sessionId: undefined as SessionId | undefined };
+        this.benchOpening = opening;
         const loaded = await new WorldChatService(store.dir).load(msg.conversationId);
         const candidate = loaded?.candidates.find((one) => one.id === msg.candidateId);
         if (!loaded || !candidate) {
@@ -8923,9 +8925,11 @@ export class Coordinator {
             { at: this.nowIso(), requestId: `media-handoff:${candidate.id}:${candidate.revision}` },
           );
         }
-        this.benchOpening = null;
-        this.readModel.setBench({ worldId: store.worldId, session: opened.session });
+        if (this.benchOpening !== opening || !this.stillOpen(store) || this.stopping) { answer(sessionId, medium); return; }
+        opening.sessionId = sessionId;
         await this.discoverBenchRows(store);
+        if (this.benchOpening !== opening || !this.stillOpen(store) || this.stopping) { answer(sessionId, medium); return; }
+        await this.refreshBench(store.worldId, sessionId);
         await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
         answer(sessionId, medium);
@@ -14187,6 +14191,8 @@ export class Coordinator {
           });
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return answer(null, "That world is not open.");
+        const opening = { worldId: store.worldId, sessionId: undefined as SessionId | undefined };
+        this.benchOpening = opening;
         try {
           const settings = this.appSettings ? await this.appSettings.load() : null;
           const reader = worldFileReader(store.dir);
@@ -14215,10 +14221,11 @@ export class Coordinator {
           await this.recoverBenchSubjectFilings(store, opened);
           const session = (await opened.store.fold()) ?? opened.session;
           await this.backfillBenchPosters(store, session);
-          this.benchOpening = null;
-          this.readModel.setBench({ worldId: store.worldId, session });
+          if (this.benchOpening !== opening || !this.stillOpen(store) || this.stopping) return answer(sessionId);
+          opening.sessionId = sessionId;
           await this.discoverBenchRows(store);
-          this.transport.broadcastSnapshot();
+          if (this.benchOpening !== opening || !this.stillOpen(store) || this.stopping) return answer(sessionId);
+          await this.refreshBench(store.worldId, sessionId);
           answer(sessionId);
         } catch (error) {
           answer(null, describeCoordinatorError(error));

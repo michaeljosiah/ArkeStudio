@@ -109,6 +109,33 @@ it('delayed hydration keeps freshly added references (#1703)', async () => {
   assert.equal((await fresh.store.fold())!.composer.activeTokens.length, 2, 'durable references remain');
 });
 
+it("a subject open cannot cancel a newer workspace open during hydration", { timeout: 20_000 }, async () => {
+  const { coordinator, internals, create, open } = await setup();
+  const later = await create();
+  const backfill = internals.backfillBenchPosters.bind(internals);
+  const gates = [0, 1].map(() => {
+    let release!: () => void, entered!: () => void;
+    return { waiting: new Promise<void>(resolve => { release = resolve; }), ready: new Promise<void>(resolve => { entered = resolve; }), release: () => release(), entered: () => entered() };
+  });
+  let count = 0;
+  internals.backfillBenchPosters = async (...args) => {
+    const gate = gates[count++];
+    if (gate) { gate.entered(); await gate.waiting; }
+    return backfill(...args);
+  };
+  const subject = internals.handleClientMessage({ kind: "bench-open-subject", worldId: WORLD_ID, requestId: ulid(), productionId: "saltlight", sceneId: "sc_04", subject: { kind: "shot", shotId: "sh_12" } });
+  try {
+    await gates[0]!.ready;
+    const newer = open(later.session.id);
+    await gates[1]!.ready;
+    gates[0]!.release();
+    await subject;
+    gates[1]!.release();
+    await newer;
+    assert.equal(coordinator.getState().bench?.session.id, later.session.id);
+  } finally { gates.forEach(gate => gate.release()); }
+});
+
 for (const action of ['close', 'open another'] as const) it('delayed hydration cannot undo ' + action, async () => {
   const { coordinator, internals, create, open } = await setup();
   const first = await create(), second = await create();
