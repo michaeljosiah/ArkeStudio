@@ -3141,6 +3141,25 @@ it("stages a chapter with only the brief's eligible receipts and keeps section r
 });
 
 
+it("labels a chapter excerpt while the full proposal and accepted chapter retain every character (#1743)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const body = "The river lay still.\n\n".repeat(1500) + "The last bell sounded.";
+  const receipts = [currentReceipt(w.store, "chapters", context.productionId), currentReceipt(w.store, "story", context.productionId)];
+  const one = turn(w.conversationId, context, { receipts, actions: [{ kind: "production-chapter", productionId: context.productionId,
+    change: { operation: "edit", chapterId: "neap", changes: { body } }, checkReceiptIds: receipts.map(receipt => receipt.id) }] });
+  const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+  await appendTurn(w.log, one, prepared); await bindAll(w.lifecycle, prepared);
+  const card = (await loaded(w.log)).actions[0]!;
+  assert.equal(card.shown.body.family, "authored-diff");
+  if (card.shown.body.family !== "authored-diff") throw new Error("Wrong review");
+  assert.ok(card.shown.body.fields.some(field => field.after === body.slice(0, 19_999) + "…"));
+  const full = await w.gate.project(card.authority.id);
+  assert.ok(full.review.targets.some(target => target.fields.some(field => field.proposed === body)));
+  assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+  assert.equal((await openChapter(w.store, context.productionId, "neap")).body.trim(), body);
+});
+
 describe("saved sibling proposal review (#1740)", () => {
   async function siblings() {
     const w = await setup();
