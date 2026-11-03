@@ -30,7 +30,7 @@ export async function audioStudioListening(store: WorldStore, plan: AudiobookPla
     blocks: plan.blocks.map(({ block }) => {
       const span = spans.find(passage => passage.key === block.key);
       const performance = span ? performances.find(entry => entry.clip.passageId === span.id) : undefined;
-      return { key: block.key, text: block.text, ...(block.starts ? { starts: block.starts } : {}),
+      return { ...block,
         ...(span && performance ? { take: { file: performance.clip.source!.file, seconds: audioSeconds(span.samples), grouped: true,
           ...(performance.clip.source!.artifactId ? { artifactId: performance.clip.source!.artifactId } : {}) } } : {}) };
     }),

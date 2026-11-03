@@ -60,6 +60,8 @@ export interface AudiobookBlock extends VoicedBlock {
   sources?: string[];
   /** On a shaped block: the automatic blocks whose first turn it holds — a join's, whose first picture it shows. */
   starts?: string[];
+  /** Current words of those automatic blocks, so a reused positional key cannot claim an old picture. Derived only. */
+  startHashes?: Record<string, string>;
 }
 
 /** How a chapter's turns become its blocks. */
@@ -253,10 +255,16 @@ export function audiobookBlocks(
   };
   const paragraphEdge = (seam: AudiobookSeam): number | null => {
     if (seam.before.paragraph === seam.after.paragraph) return null;
-    const before = wholeText(seam.before.paragraph), after = wholeText(seam.after.paragraph);
-    if (before === undefined || after === undefined || audiobookSeamHash(before, after) !== seam.textHash) return null;
-    const g = units.findIndex((unit, at) => at < gapCount && unit.place.paragraph === seam.before.paragraph && units[at + 1]!.place.paragraph === seam.after.paragraph);
-    return g >= 0 ? g : null;
+    const found: number[] = [];
+    for (let g = 0; g < gapCount; g += 1) {
+      const before = units[g]!.place.paragraph, after = units[g + 1]!.place.paragraph;
+      if (before === after) continue;
+      const a = wholeText(before), b = wholeText(after);
+      if (a === undefined || b === undefined || audiobookSeamHash(a, b) !== seam.textHash) continue;
+      if (before === seam.before.paragraph && after === seam.after.paragraph) return g;
+      found.push(g);
+    }
+    return found.length === 1 ? found[0]! : null;
   };
   // A seam stands where its two turns still say what they said: at its own place, else at the one
   // gap whose words are its words (a paragraph inserted above moved it), else at its paragraphs'
@@ -377,6 +385,7 @@ export function audiobookBlocks(
           shaped: true as const,
           sources: [...new Set(Array.from({ length: to - from + 1 }, (_, i) => autoKey(autoOf[from + i]!)))],
           starts: Array.from({ length: to - from + 1 }, (_, i) => from + i).filter((at) => autoKeyAt.has(at)).map((at) => autoKeyAt.get(at)!),
+          startHashes: Object.fromEntries(autoRuns.filter(([start]) => start >= from && start <= to).map(([start, end]) => [autoKeyAt.get(start)!, audiobookTextHash(textOf(start, end))])),
         }
       : {};
     if (from === to) {
