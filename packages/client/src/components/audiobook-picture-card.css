@@ -8,7 +8,7 @@
 .fy-pcard { display: flex; flex-direction: column; gap: 13px; }
 .fy-pcard__top { display: flex; gap: 14px; align-items: flex-start; }
 .fy-pcard__img, .fy-pcard__slot { flex: none; width: 182px; height: 122px; box-sizing: border-box; border-radius: 9px; }
-.fy-pcard__img { display: block; object-fit: cover; border: 1px solid var(--border); }
+.fy-pcard__img { display: block; object-fit: contain; border: 1px solid var(--border); }
 .fy-pcard__slot { border: 1px dashed var(--neutral-400); display: flex; align-items: flex-start; justify-content: flex-end; padding: 6px 8px; }
 .fy-pcard__slot .fy-mono { font-size: var(--text-2xs); color: var(--muted-foreground); }
 /* The picture, or the empty slot, is the press that picks another (194 draws no Choose): drawn as
