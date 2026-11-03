@@ -661,7 +661,7 @@ export async function prepareChapter(
   const freePlan = room.freePlanAllowance === undefined ? null : freePlanShortfall(freeReads, room.freePlanAllowance);
   // A missing local splitter must not silently turn the default into many solo requests,
   // including on a free plan. An explicitly chosen per-paragraph read needs no warning.
-  const groupingUnavailable = room.transcriber !== true && misses.some(block => groupable(block, { ...room, transcriber: true }, plan.book));
+  const groupingUnavailable = room.transcriber !== true && misses.some(block => block.reaction?.sound === undefined && groupable(block, { ...room, transcriber: true }, plan.book));
   const asks = groupingUnavailable || misses.some((block) => speechAsks(block.model, priceOf(block))) || freeCreditOverrun(creditDraw, room.creditLeftMicroUsd ?? Infinity) || freePlan !== null;
   // The world's names and the chapter's, which whisper is expected to mishear (2026-10-03): every
   // sheet's name and region, the cast's speakers, and the chapter's capitalised words.

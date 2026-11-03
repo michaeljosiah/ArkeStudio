@@ -1101,21 +1101,23 @@ describe("a chapter read grouped (design turn 185)", () => {
 
 
 it("a paid performed-v4 sound reaction retains the identity needed for crash recovery", async () => {
+  for (const transcriber of [true, false]) {
   const w = await world();
   try {
     const model = SHIPPED_MANIFEST.models.find(m => m.id === "eleven_v4")!;
     const narrator = { provider: model.provider, model: model.id, voiceId: "calen", label: "Calen" };
-    await writeAudiobookBookRaised(w.store, LEDGER, { schemaVersion: 1, reading: "performed", requests: "per-paragraph" });
+    await writeAudiobookBookRaised(w.store, LEDGER, { schemaVersion: 1, reading: "performed", ...(transcriber ? { requests: "per-paragraph" as const } : {}) });
     const plan = await planAudiobook(w.store, LEDGER, "neap", { narrator });
     const host = plan.blocks[1]!.block;
     await mkdir(join(w.worldDir, "productions", LEDGER, ".voices"), { recursive: true });
     await writeFile(join(w.worldDir, "productions", LEDGER, ".voices", "01-neap.json"), JSON.stringify({ version: plan.chapter.version, hash: plan.chapter.hash, derivedAt: "2026-10-03T09:00:00.000Z", passes: 1, dropped: 0, omitted: 0, lines: [] }));
     await updateAudiobook(w.store, LEDGER, plan.chapter, current => ({ ...current, reactions: { x1: {
       host: { key: host.key, textHash: audiobookTextHash(host.text) }, speaker: "narrator", sound: "laughs", offset: 0, by: "author", at: "2026-10-03T09:00:00.000Z" } } }));
-    const h = await harness(w.store, { model });
+    const h = await harness(w.store, { model, noTranscriber: !transcriber });
     await h.run({ only: ["x1"] });
     const quote = priced(h.events)!;
     assert.ok(quote, JSON.stringify(h.events));
+    assert.equal(quote.groupingUnavailable, undefined, "a sound needs no transcription");
     await h.run({ only: ["x1"], confirmationToken: quote.confirmationToken });
     assert.equal(h.sent.length, 1);
     const input = h.sent[0]!;
@@ -1130,6 +1132,7 @@ it("a paid performed-v4 sound reaction retains the identity needed for crash rec
     assert.equal(priorPartJob([job], { productionId: LEDGER, chapterId: "neap", block: "x1", textHash: audiobookTextHash(block.text),
       provider: model.provider, model: model.id, voiceId: "calen", parts: 1, audioFormat: "wav", directionHash: block.takeHash! }, 0)?.job.id, job.id);
   } finally { await w.close(); }
+  }
 });
 
 it("performed Gemini queues scoped character turns in both grouped and per-paragraph reads", async () => {
