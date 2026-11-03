@@ -6,6 +6,7 @@ import {
   PROVIDERS as PROVIDER_TABLE,
   comfyUiWeightsRecipeId,
   compactCount,
+  balanceFaulted,
   credentialFaulted,
   deriveCapabilityAvailability,
   formatMicroUsd,
@@ -432,7 +433,9 @@ export function ProviderKeyLine({ id }: { id: ProviderId }) {
             </ActionButton>
           }
         >
-          {status?.validation === "invalid"
+          {balanceFaulted(status)
+            ? "Out of credit"
+            : status?.validation === "invalid"
             ? "Key rejected"
             : status?.lastValidated !== undefined
               ? `${shortDateTime(status.lastValidated)}${probes ? `, ${probes}` : ""}`
@@ -448,7 +451,7 @@ export function ProviderKeyLine({ id }: { id: ProviderId }) {
               credential would send the user to try a different key. */}
           <span>
             {status.fault}
-            {stored ? " — the work was not the problem; the credential was." : ""}
+            {stored && !balanceFaulted(status) ? " — the work was not the problem; the credential was." : ""}
           </span>
         </div>
       )}
@@ -548,6 +551,7 @@ function connectionWords(id: ProviderId, status: ProviderStatus | undefined): { 
   // the fault's own words are on the pane.
   if (status?.faultKind === "not-saved") return { word: "not saved", tone: "warn" };
   if (status?.faultKind === "not-cleared") return { word: "not cleared", tone: "warn" };
+  if (balanceFaulted(status)) return { word: "out of credit", tone: "warn" };
   const troubled = credentialFaulted(status) || status?.validation === "invalid";
   if (troubled) return { word: external ? "sign-in needed" : "key rejected", tone: "warn" };
   if (status?.configured === true) {

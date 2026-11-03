@@ -256,6 +256,15 @@ describe("Providers holds the credential (SPEC-042 R-3, R-9, R-18)", () => {
     assert.match(column, /Ollama<\/span><span class="fy-src__note">(untested|not answering|answering)/);
   });
 
+  it("an account out of credit says so, never that the key was rejected (issue 2418)", () => {
+    const state = stateWith({});
+    state.app.providers = [{ id: "openai", configured: true, credentialFingerprint: "1C7D9A20", validation: "invalid", probes: [], fault: "openai: image generation failed (HTTP 429): You have no credits remaining. Add credits to continue" }];
+    __setStateForTest(state);
+    const pane = plain(providers("/settings/providers?provider=openai"));
+    assert.match(pane, /out of credit/i);
+    assert.doesNotMatch(pane, /key rejected|the credential was/i);
+  });
+
   it("a key the store could not hold is not saved, never rejected (issue 1191)", () => {
     const state = stateWith({});
     state.app.providers = [{ id: "fal", configured: false, validation: "untested", probes: [], fault: "the key was not saved — credential encryption is unavailable on this machine", faultKind: "not-saved" }];
