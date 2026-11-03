@@ -225,7 +225,7 @@ describe("making, choosing and accepting", () => {
 });
 
 /** A look job as the queue holds it: what a slot reads to say it ended without a picture. */
-const job = (id: string, params: Record<string, unknown>, status: "queued" | "running" | "succeeded" | "failed", error: string | null = null) =>
+const job = (id: string, params: Record<string, unknown>, status: "queued" | "submitting" | "running" | "succeeded" | "failed", error: string | null = null) =>
   ({ id: `jb_${id}`, target: { kind: "character-look", id: "maren-kest/x/1" }, params, status, error, createdAt: AT, updatedAt: AT }) as never;
 const SAFETY = "openai: the safety system refused the prompt (moderation blocked) — recompose the prompt away from what it flagged and try again";
 const withJobs = (state: ClientState, jobs: unknown[]): ClientState => ({ ...state, app: { ...state.app, jobs: jobs as ClientState["app"]["jobs"] } });
