@@ -23,6 +23,8 @@ import { ActivityPanel } from "../src/components/activity-panel.js";
 import {
   __resetActivityPanelForTest,
   activityReason,
+  currentAudiobookActivity,
+  inboxAttention,
   leaveProviderCalls,
   openActivityPanel,
   showActivityTab,
@@ -193,6 +195,52 @@ it("keeps an aligning chapter in Running after its provider request succeeded, a
   assert.match(finished, /1 request finished/);
   assert.match(finished, /reset time passed/);
   assert.doesNotMatch(finished, /2020-10-24T/);
+});
+
+it("reconciles kept audiobook flags from the current chapter on reopen without rewriting the receipt (#1705)", () => {
+  const state = quiet(), production = state.world!.productions[0]!;
+  const run: AudiobookActivity = {
+    id: "01J8F3K2QW9VZX4N7M0RTYB6HD", worldId: FIXTURE_WORLD_ID, productionId: production.meta.id, chapterId: "crossing", chapterFile: "01-crossing",
+    chapterTitle: "The crossing", productionTitle: production.meta.title, worldName: state.world!.meta.name, scope: "chapter", phase: "finished", startedAt: TODAY, updatedAt: TODAY,
+    toMake: 19, made: 17, flagged: 2, requests: 1, request: 1, estimatedMicroUsd: 0, models: [], local: true, jobs: [],
+  };
+  const chapter = { id: "crossing", file: "01-crossing", order: 1, title: "The crossing", status: "draft", version: 1, bodyHash: "prose", audiobook: { chapterVersion: 1, hash: "prose", updatedAt: TODAY, takes: 19, flagged: 2 } };
+  production.chapters = [chapter]; state.app.audiobookActivity = [run];
+  assert.match(render(state, "inbox"), /Needs you · 1/);
+  chapter.audiobook = { ...chapter.audiobook, flagged: 0, updatedAt: new Date(Date.parse(TODAY) + 1000).toISOString() };
+  for (const reopened of [state, structuredClone(state)]) {
+    const html = render(reopened, "inbox");
+    assert.doesNotMatch(html, /Needs you ·|blocks need review|Review blocks|17 of 19/);
+    assert.match(html, /19 of 19 blocks saved/); assert.match(html, /Open chapter/);
+    assert.equal(inboxAttention(reopened, [], reopened.app.audiobookActivity!).count, 0, "the bell and Inbox use the same reconciled count");
+  }
+  assert.equal(run.phase, "finished"); assert.equal(run.flagged, 2); assert.equal(run.made, 17);
+  const request = job({ status: "needs-reconciliation", productionId: production.meta.id, params: { purpose: "audiobook", audiobookRunId: run.id, audiobookRequest: 1 } });
+  state.app.jobs = [request]; run.local = false; run.jobs = [{ id: request.id, index: 1, reused: false }];
+  const unknown = render(state, "inbox");
+  assert.match(unknown, /Needs you · 1/); assert.match(unknown, /Resolve request/); assert.match(unknown, /charge unknown/);
+  assert.doesNotMatch(unknown, /Review blocks/);
+});
+
+it("retains audiobook review work when current resolution cannot be established (#1705)", () => {
+  const state = quiet(), production = state.world!.productions[0]!;
+  const run: AudiobookActivity = {
+    id: "01J8F3K2QW9VZX4N7M0RTYB6HD", worldId: FIXTURE_WORLD_ID, productionId: production.meta.id, chapterId: "crossing", chapterFile: "01-crossing",
+    chapterTitle: "The crossing", productionTitle: production.meta.title, worldName: state.world!.meta.name, scope: "chapter", phase: "finished", startedAt: TODAY, updatedAt: TODAY,
+    toMake: 19, made: 17, flagged: 2, requests: 1, request: 1, estimatedMicroUsd: 0, models: [], local: true, jobs: [],
+  };
+  const record = { chapterVersion: 1, hash: "prose", updatedAt: TODAY, takes: 19, flagged: 0 };
+  const chapter = { id: "crossing", file: "01-crossing", order: 1, title: "The crossing", status: "draft", version: 1, bodyHash: "prose", audiobook: record };
+  production.chapters = [chapter];
+  for (const audiobook of [undefined, { unreadable: true } as const, { ...record, flagged: 1 }, { ...record, takes: 18 }, { ...record, hash: "old" }, { ...record, chapterVersion: 2 }, { ...record, updatedAt: new Date(Date.parse(TODAY) - 1000).toISOString() }]) {
+    production.chapters = [{ ...chapter, audiobook }];
+    assert.equal(currentAudiobookActivity(state, run), run);
+  }
+  production.chapters = [chapter];
+  for (const unresolved of [{ ...run, phase: "interrupted" as const }, { ...run, made: 16 }, { ...run, worldId: "another-world" }]) assert.equal(currentAudiobookActivity(state, unresolved), unresolved);
+  const later = { ...run, id: "later", phase: "ready" as const, startedAt: new Date(Date.parse(TODAY) + 1000).toISOString() };
+  production.chapters = [];
+  assert.equal(inboxAttention(state, [], [run, later]).count, 0, "a later complete chapter read still answers the old chapter remedy");
 });
 
 it("formats recorded reset times without changing unrelated refusal evidence (#2238)", () => {

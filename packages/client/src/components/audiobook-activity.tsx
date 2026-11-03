@@ -6,13 +6,14 @@ import {
   audiobookActivityTitle, audiobookRequestCost, formatMicroUsd, type AudiobookActivity, type ClientState,
 } from "@arke-studio/contracts";
 import { resolveHeldJob, stopAudiobook, subscribeAudiobookActivity, useStore } from "../lib/store.js";
-import { activityReason, closeActivityPanel, openActivityPanel, inspectProviderCalls } from "../lib/activity-panel.js";
+import { activityReason, closeActivityPanel, openActivityPanel, inspectProviderCalls, currentAudiobookActivity } from "../lib/activity-panel.js";
 import { Button, cx } from "./ui.js";
 import { JobStorageWaitNotice } from "./job-storage-wait.js";
 
 const tone = (run: AudiobookActivity) => run.phase === "ready" ? "ok" : run.phase === "finished" ? "warn" : run.phase === "interrupted" ? "fail" : ["reading", "aligning"].includes(run.phase) ? "live" : "queued";
 
 export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; state: ClientState }) {
+  run = currentAudiobookActivity(state, run);
   const connection = useStore().connection;
   const navigate = useNavigate();
   const live = audiobookActivityLive(run);
