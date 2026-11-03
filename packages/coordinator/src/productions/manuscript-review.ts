@@ -6,7 +6,7 @@ import { ManuscriptReviewSchema, ManuscriptReviewTargetSchema, ManuscriptReviewH
 import type { WorldStore } from "../world/store.js";
 import { containedWorldFilePath } from "../world/contained-file.js";
 import { atomicWriteFile, serializeFileMutation } from "../world/atomic.js";
-import type { ImageJsonRunner } from "../harness/review-task.js";
+import { ReviewOutcomeUnknownError, type ImageJsonRunner } from "../harness/review-task.js";
 import { openChapter } from "./ops.js";
 
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -214,7 +214,7 @@ export class ManuscriptReviewService {
         if (task.kind === "synthesis") report.synthesis = ManuscriptSynthesisSchema.parse(result);
         else task.reading = ManuscriptReadingSchema.parse(result);
         task.state = "complete";
-      } catch (error) { task.state = signal.aborted ? "interrupted" : "failed"; task.error = error instanceof Error ? error.message.slice(0,1000) : "Review stage failed."; }
+      } catch (error) { task.state = signal.aborted || error instanceof ReviewOutcomeUnknownError ? "interrupted" : "failed"; task.error = error instanceof Error ? error.message.slice(0,1000) : "Review stage failed."; }
       await persist();
     };
     try {

@@ -7,7 +7,7 @@ import { ManuscriptReviewService, manuscriptReviewHistory, readManuscriptReview 
 import { manuscriptReviewPdf } from "../../src/productions/manuscript-review-pdf.js";
 import { createChapter, openChapter, saveChapter } from "../../src/productions/ops.js";
 import { WorldStore } from "../../src/world/store.js";
-import type { ImageJsonRunner } from "../../src/harness/review-task.js";
+import { ReviewOutcomeUnknownError, type ImageJsonRunner } from "../../src/harness/review-task.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
@@ -40,6 +40,12 @@ it("retries a failed stage only when the author asks, and finishes the report", 
   assert.equal(failing.status, "partial"); assert.equal(failing.tasks[0]!.state, "failed");
   const retried = await f.service(f.runner).start(f.target, id, "", true);
   assert.equal(retried.status, "complete"); assert.ok(retried.tasks.every(task => task.state === "complete" && task.error === undefined));
+});
+it("never retries a stage whose outcome is unknown", async () => {
+  const f = await fixture(), id = ulid();
+  await f.service(async () => { throw new ReviewOutcomeUnknownError("Review task timed out."); }).start(f.target, id, "");
+  const again = await f.service(async () => assert.fail("no stage may be sent again")).start(f.target, id, "", true).catch(() => null);
+  assert.equal(again?.tasks[0]!.state, "interrupted");
 });
 it("keeps a stage whose model ranks findings past priority 3 or raises too many", async () => {
   const f = await fixture(), ranked = Array.from({ length: 8 }, (_, index) => ({ ...f.findings[0]!, priority: index + 1 }));
