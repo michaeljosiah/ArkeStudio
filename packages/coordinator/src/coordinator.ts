@@ -24054,6 +24054,7 @@ export class Coordinator {
     let owner = this.conversationInputOwners.get(store);
     if (!owner) {
       owner = new ConversationInputs(store, { runner: id => this.worldChatRunner(store, id),
+        stopping: () => this.stopping, track: completion => this.trackBackground(completion),
         routing: (view, request) => this.inputRouting(store, view, request),
         changed: id => this.refreshConversationOutcome(store, id) });
       this.conversationInputOwners.set(store, owner);
@@ -24080,6 +24081,7 @@ export class Coordinator {
     if (existing) return existing;
 
     const runner = new WorldChatRunner(conversationRunDependencies(store, {
+      shutdownSignal: this.runtimeStop.signal,
       audioStudio: (productionId, chapterFile) => audioStudioSnapshot(store, productionId, chapterFile, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
       generationRoutes: () => this.benchGenerationRoutes(),
       voiceCatalogue: () => this.benchVoiceCatalogue(store),

@@ -138,11 +138,16 @@ export class WorldChatInputJournal {
   }
 
   promote(messageId: string, expectedRevision: number, run: WorldChatRun,
-    routing: WorldChatInputRouting, operationId: string): Promise<InputJournalReceipt> {
+    routing: WorldChatInputRouting, operationId: string, allowTailAdmission = false): Promise<InputJournalReceipt> {
     const capturedRun = WorldChatRunSchema.parse(run);
     const capturedRouting = WorldChatInputRoutingSchema.parse(routing);
     return this.change(`promote:${operationId}`, { messageId, expectedRevision, run: capturedRun, routing: capturedRouting }, async ({ queue, events }) => {
-      this.expectRevision(queue, expectedRevision);
+      // New waiting inputs are not transcript/context. Let the scheduler keep preparing the
+      // original first row when only FIFO tail admissions moved revision; controls stay strict.
+      const later = events.filter(({ event }) => isInputEvent(event) && event.queueRevision > expectedRevision);
+      const tailOnly = allowTailAdmission && queue.revision > expectedRevision &&
+        later.length === queue.revision - expectedRevision && later.every(({ event }) => event.type === "input.recorded");
+      if (!tailOnly) this.expectRevision(queue, expectedRevision);
       const row = queue.inputs.find(one => one.input.messageId === messageId);
       if (!row) throw new WorldChatInputError("stale", "That queued message is no longer here.");
       const expected = worldChatInputRouting(queue, row);
@@ -154,9 +159,9 @@ export class WorldChatInputJournal {
         throw new WorldChatInputError("stale", "The writing engine or model changed. Review the target before continuing.");
       }
       const view = this.openView(events, this.now());
-      // The run's context was assembled from the log at this position. Anything written since —
-      // not only another input event — means the prompt no longer matches the conversation.
-      if (capturedRun.basedOnConversationSeq !== view.seq) {
+      // A waiting tail is excluded from context. Any other intervening event still invalidates it.
+      if (capturedRun.basedOnConversationSeq !== view.seq && !(tailOnly &&
+        events.filter(one => one.seq > capturedRun.basedOnConversationSeq).every(one => one.event.type === "input.recorded"))) {
         throw new WorldChatInputError("stale", "The conversation changed. Rebuild the queued reply's context before starting it.");
       }
       // The recorded hash is only what the log claims. The bytes on disk are what the model would

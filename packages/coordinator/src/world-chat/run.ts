@@ -468,7 +468,7 @@ export class WorldChatRunner {
         throw error;
       }
       const row = queue.inputs.find(one => one.input.messageId === messageId);
-      if (!row || queue.revision !== expectedRevision) {
+      if (!row) {
         return { status: "unavailable", reason: "The queued messages changed. Look again before continuing." };
       }
       // The queue's own rules are asked before any model work (R-16): a paused queue, a later
@@ -786,7 +786,7 @@ export class WorldChatRunner {
       if (modelChoice.reason !== undefined) return { status: "unavailable", reason: modelChoice.reason };
       try {
         await queued.beforePromote?.();
-        await queued.journal.promote(queued.input.messageId, queued.revision, run, queued.routing, runId);
+        await queued.journal.promote(queued.input.messageId, queued.revision, run, queued.routing, runId, true);
       } catch (error) {
         if (error instanceof WorldChatInputError) return { status: "unavailable", reason: error.message };
         throw error;

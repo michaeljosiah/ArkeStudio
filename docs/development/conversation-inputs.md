@@ -27,7 +27,7 @@ Admission keeps the original submission identity, text, requested delivery and r
 
 The append queue and expected log sequence arbitrate concurrent journal instances. A sequence conflict repeats preflight; a disk error is never repeated, because its outcome is uncertain. A duplicate receipt flushes the log again, since a readable line may survive an earlier failed `fsync`, and the store checks for foreign writes before returning one. A torn-tail replacement is synced before it is renamed into place. These are the existing local-filesystem crash guarantees, not a new claim about directory persistence or network filesystems.
 
-Promotion appends one `input.promoted` event carrying the original message, constraints and new primary run. It refuses a changed route, a changed attachment hash or changed attachment bytes, another active run, a reused turn or run identity, a paused queue or a later FIFO input. The prepared run must also name the latest conversation sequence: any intervening event means the context has to be rebuilt. Continue records the reviewed route for inputs already present without changing their original capture. Remove keeps history and applies only to never-offered queued input.
+Promotion appends one `input.promoted` event carrying the original message, constraints and new primary run. It refuses a changed route, a changed attachment hash or changed attachment bytes, another active run, a reused turn or run identity, a paused queue or a later FIFO input. The prepared run must name the latest conversation sequence, except that the scheduler can admit a pure FIFO tail while preparing: waiting inputs are excluded from context. Any other intervening event still requires rebuilding. Continue records the reviewed route for inputs already present without changing their original capture. Remove keeps history and applies only to never-offered queued input.
 
 Native offer records name the Arke run, turn, native session, execution, input identity and attempt ordinal. Acceptance is separate from inclusion. An uncertain result pauses the queue, and only an exact correlated disposition resolves it. Startup turns unfinished offers into uncertainty and pauses waiting input without calling a harness; it leaves a conversation alone while this process has a live turn on it, and writes nothing to input history it cannot read. Archive and failed-run events also project a durable pause. A new admission never clears a pause.
 
@@ -46,6 +46,11 @@ Routing records the model the author asked for. `null` asks for the default, whi
 Stop flushes a pause before requesting interruption and the runner retains its slot until the adapter's interrupt promise settles. If the pause cannot be flushed, it still requests interruption and fences advancement in memory until a pause or explicit Continue is durable. This uses the existing adapter interruption contract; it does not qualify native steering or prove native settlement beyond what each adapter reports.
 
 The client retains only its unacknowledged submission and identity in per-window session storage, which survives reload without another window overwriting it. It queries that identity on reconnect instead of resending. A confirmed durable receipt clears only the matching draft; uncertain status leaves both words and identity intact. Closing the window can discard an unacknowledged local draft, while admitted messages remain in the world journal. Authoritative queue state comes from coordinator snapshots and receipts.
+
+Application shutdown closes scheduler admission synchronously and combines the existing runtime
+shutdown signal with each runner's world-closing signal. Every observed completion joins the
+coordinator's background-work drain, so it settles before supervised processes and adapters are
+disposed; completing a primary reply during shutdown cannot start another queued reply.
 
 Known limits owed to later slices:
 

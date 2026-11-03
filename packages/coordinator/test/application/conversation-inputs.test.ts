@@ -24,7 +24,8 @@ async function fixture() {
   let pausedBeforeCancel = false, cancelled = false;
   const turns: { text: string; finish: ReturnType<typeof deferred<TurnOutcome>>; admitted: boolean; outcome: Promise<TurnOutcome> }[] = [];
   let current: ReturnType<typeof deferred<TurnOutcome>> | null = null;
-  let changed = 0;
+  let changed = 0, stopping = false;
+  const tracked: Promise<TurnOutcome>[] = [];
   const newRun = async (): Promise<WorldChatRun> => ({ id: newId("run"), turnId: newId("turn"), adapter: "fake", model: "default",
     basedOnConversationSeq: (await journal.log.read()).events.at(-1)!.seq, status: "running", harnessCleanup: "not-required",
     contextDigest: `sha256:${"b".repeat(64)}`, startedAt: store.now() });
@@ -34,6 +35,7 @@ async function fixture() {
     running = false; return outcome;
   };
   const owner = new ConversationInputs(store, {
+    stopping: () => stopping, track: completion => { tracked.push(completion); },
     routing: () => route, changed: async () => { changed++; },
     runner: () => ({ isRunning: () => running, cancel: () => {
       cancelled = true;
@@ -67,6 +69,7 @@ async function fixture() {
   };
   const request = (text: string, expectedRunId: string | null = null): WorldChatInputRequest => ({ submissionId: newId("msg"), text, attachmentIds: [], expectedRunId: expectedRunId as never, delivery: "next" });
   return { store, id, journal, owner, turns, primary, request, route: () => route,
+    beginShutdown: () => { stopping = true; }, tracked,
     changeRoute: () => { route = { ...route, fingerprint: `sha256:${"c".repeat(64)}` }; },
     cancelled: () => cancelled, pausedBeforeCancel: () => pausedBeforeCancel, finishCurrent: (outcome = DONE) => current!.resolve(outcome), changed: () => changed };
 }
@@ -137,4 +140,21 @@ it("recovery pauses retained words and a new owner never starts them on construc
   const queue = await h.journal.read(); assert.equal(queue.pauseReason, "restart"); assert.equal(h.turns.length, 0);
   await h.owner.record(h.id, h.request("A new message")); assert.equal(h.turns.length, 0);
   assert.equal((await h.journal.read()).pauseReason, "restart");
+});
+
+it("tracks every queued completion for shutdown and admits no successor after shutdown starts", async () => {
+  const h = await fixture(), primary = await h.primary();
+  await h.owner.record(h.id, h.request("First", primary.run.id));
+  await h.owner.record(h.id, h.request("Second", primary.run.id));
+  primary.finish.resolve(DONE); await primary.completion;
+  await until(() => h.turns[0]?.admitted === true);
+  assert.equal(h.tracked.length, 2, "primary and queued completions enter the coordinator drain");
+  h.beginShutdown();
+  await assert.rejects(h.owner.record(h.id, h.request("Too late")), /shutting down/);
+  assert.equal(await h.owner.start(h.id, async () => { assert.fail("shutdown cannot start work"); }), null);
+  let drained = false; const drain = Promise.allSettled(h.tracked).then(() => { drained = true; });
+  await new Promise(resolve => setTimeout(resolve, 10)); assert.equal(drained, false);
+  h.finishCurrent(); await drain;
+  assert.equal(h.turns.length, 1, "completion during shutdown cannot dispatch the next input");
+  assert.equal((await h.journal.read()).inputs[1]!.status, "queued");
 });

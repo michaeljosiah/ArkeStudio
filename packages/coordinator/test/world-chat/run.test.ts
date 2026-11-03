@@ -95,6 +95,7 @@ async function setup(
   adapter: HarnessAdapter,
   options: {
     timeoutMs?: number;
+    closingSignal?: AbortSignal;
     summarise?: RunDeps["summarise"];
     entryContext?: import("@arke-studio/contracts").WorldChatContext;
     chapterBrief?: RunDeps["chapterBrief"];
@@ -123,6 +124,7 @@ async function setup(
   const released: RunId[] = [];
   const runner = new WorldChatRunner({
     adapter,
+    closingSignal: options.closingSignal,
     ...(options.describeEntry ? { describeEntry: (context: import("@arke-studio/contracts").WorldChatContext) => describeEntryContext(context, bundle) } : {}),
     ...(options.summarise ? { summarise: options.summarise } : {}),
     ...(options.chapterBrief ? { chapterBrief: options.chapterBrief } : {}),
@@ -1238,6 +1240,42 @@ async function queueInput(journal: WorldChatInputJournal, text: string, replyOnl
 }
 
 describe("running a durable queued input (SPEC-045 R-16)", () => {
+  it("keeps the first reply preparing when another message joins the FIFO tail", async () => {
+    const state = await setup(fakeAdapter([JSON.stringify({ reply: "Done.", candidateOperations: [], groupOperations: [] })]), {
+      resolveLanguageModel: async () => { await queueInput(state.journal, "Later input"); return {}; },
+    });
+    const first = await queueInput(state.journal, "First input");
+    assert.equal((await state.runner.sendQueued(state.journal, first.id, first.revision, QUEUE_ROUTING)).status, "completed");
+    assert.deepEqual((await state.journal.read()).inputs.map(row => row.status), ["promoted", "queued"]);
+  });
+
+  it("still refuses promotion when a queue control changes during preparation", async () => {
+    const state = await setup(fakeAdapter([]), {
+      resolveLanguageModel: async () => { await state.journal.pause("stopped", "stop-during-preparation"); return {}; },
+    });
+    const first = await queueInput(state.journal, "Retained input");
+    assert.equal((await state.runner.sendQueued(state.journal, first.id, first.revision, QUEUE_ROUTING)).status, "unavailable");
+    assert.equal((await state.journal.read()).inputs[0]!.status, "queued");
+  });
+
+  it("shutdown cancels a queued native reply and waits for interruption to settle", async () => {
+    let dispatched!: () => void, interrupted!: () => void, settle!: () => void;
+    const sending = new Promise<void>(resolve => { dispatched = resolve; });
+    const stopping = new Promise<void>(resolve => { interrupted = resolve; });
+    const stopped = new Promise<void>(resolve => { settle = resolve; });
+    const shutdown = new AbortController(), adapter = fakeAdapter([], { hang: true });
+    adapter.dispatchAsync = async () => { dispatched(); return { ok: true } as never; };
+    adapter.interrupt = async () => { interrupted(); await stopped; };
+    const state = await setup(adapter, { closingSignal: shutdown.signal });
+    const first = await queueInput(state.journal, "Draft");
+    let finished = false;
+    const turn = state.runner.sendQueued(state.journal, first.id, first.revision, QUEUE_ROUTING).then(outcome => { finished = true; return outcome; });
+    await sending; shutdown.abort(); await stopping;
+    await new Promise(resolve => setTimeout(resolve, 10)); assert.equal(finished, false);
+    settle(); assert.equal((await turn).status, "cancelled");
+    assert.equal((await state.runner.sendQueued(state.journal, first.id, first.revision, QUEUE_ROUTING)).status, "unavailable");
+  });
+
   it("carries the submitted effort into queued model selection", async () => {
     let effort: string | undefined;
     const state = await setup(fakeAdapter([JSON.stringify({ reply: "Done.", candidateOperations: [], groupOperations: [] })]), {

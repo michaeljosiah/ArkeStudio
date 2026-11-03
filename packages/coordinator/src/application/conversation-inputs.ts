@@ -14,6 +14,8 @@ interface Dependencies {
   runner(id: ConversationId): Pick<WorldChatRunner, "sendQueued" | "isRunning" | "cancel">;
   routing(view: WorldChatLoaded, request: Pick<WorldChatInputRequest, "modelId" | "variant">): WorldChatInputRouting;
   changed(id: ConversationId): Promise<void>;
+  stopping(): boolean;
+  track(completion: Promise<TurnOutcome>): void;
 }
 
 /** One owner per open WorldStore. The log owns words; this serializes decisions, never model waits. */
@@ -38,7 +40,7 @@ export class ConversationInputs {
   /** Ordinary Send and Retry share the queue's admission gate, so neither can overtake it. */
   start(id: ConversationId, work: () => Promise<StartedConversationTurn | null>, retry = false): Promise<StartedConversationTurn | null> {
     return this.exclusive(id, async () => {
-      if (this.busy(id) || this.failedStops.has(id)) return null;
+      if (this.deps.stopping() || this.busy(id) || this.failedStops.has(id)) return null;
       const journal = this.journal(id), queue = await journal.read();
       if (!retry && unresolvedWorldChatInputs(queue).length) return null;
       // A fresh primary Send with no waiting words can clear an old empty Stop. It never resumes
@@ -55,6 +57,7 @@ export class ConversationInputs {
 
   async record(id: ConversationId, request: WorldChatInputRequest) {
     return this.exclusive(id, async () => {
+      if (this.deps.stopping()) throw new WorldChatInputError("unavailable", "Arke is shutting down. Your message is retained.");
       if (request.delivery !== "next") throw new WorldChatInputError("unavailable", "Only Send next is available.");
       const journal = this.journal(id), view = await this.validView(id, request);
       const { events } = await journal.log.read();
@@ -93,6 +96,7 @@ export class ConversationInputs {
 
   async resume(id: ConversationId, revision: number, routing: WorldChatInputRouting, requestId: string) {
     return this.exclusive(id, async () => {
+      if (this.deps.stopping()) throw new WorldChatInputError("unavailable", "Arke is shutting down.");
       if (this.busy(id)) throw new WorldChatInputError("unavailable", "Wait for the active reply to settle before continuing.");
       const journal = this.journal(id), queue = await journal.read(), first = unresolvedWorldChatInputs(queue)[0];
       if (!first) throw new WorldChatInputError("stale", "There are no queued messages to continue.");
@@ -148,6 +152,7 @@ export class ConversationInputs {
       return outcome;
     });
     this.active.set(id, observed);
+    this.deps.track(observed);
     // The normal command awaits its turn; subsequent queued turns are owned here until settled.
     void observed.catch(() => {});
     return observed;
@@ -155,7 +160,7 @@ export class ConversationInputs {
 
   /** Called only inside the admission gate. sendQueued reserves the runner before its first await. */
   private async advance(id: ConversationId): Promise<void> {
-    if (this.busy(id) || this.failedStops.has(id) || this.store.closingSignal.aborted) return;
+    if (this.deps.stopping() || this.busy(id) || this.failedStops.has(id) || this.store.closingSignal.aborted) return;
     const journal = this.journal(id), queue = await journal.read(), first = unresolvedWorldChatInputs(queue)[0];
     if (queue.pauseReason || !first) return;
     const request = first.input.request;
@@ -168,6 +173,7 @@ export class ConversationInputs {
     }
     const completion = this.deps.runner(id).sendQueued(journal, first.input.messageId, queue.revision, routing,
       () => { void this.deps.changed(id).catch(() => {}); }, async () => {
+        if (this.deps.stopping()) throw new WorldChatInputError("unavailable", "Arke is shutting down.");
         const current = this.deps.routing(await this.validView(id, request), request);
         if (inputCommandDigest(current) !== inputCommandDigest(routing)) throw new WorldChatInputError("stale", "The writing destination changed before this reply started.");
       });
