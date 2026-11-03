@@ -1997,5 +1997,6 @@ Saved story proposal review (#1740):
 their story or chapter collection context changes. Chat approval remains refused; exact chapter
 reads, other cited inputs, target files and the frozen preview stay fenced. The conversation
 card opens the existing `ConnectedProposalPanel` in `PageSheet` for explicit native review,
-without regeneration. Native acceptance reconciles the original card. Regressions are in
+without regeneration. `application/local-worlds.ts` applies the card's retained non-context
+observations under the native acceptance gate too. Native acceptance reconciles the original card. Regressions are in
 coordinator `world-chat/actions.test.ts` and client `production-studio.test.tsx`.

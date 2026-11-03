@@ -1,6 +1,8 @@
 import { freezeProductionTimeline, productionTimelineBody } from "../../src/world-chat/production-timeline.js";
 import { productionEditorCardPreview, readEditorRequestByAction } from "../../src/productions/editor-requests.js";
 import { ConversationActionService } from "../../src/application/conversation-actions.js";
+import { createLocalWorldRepository } from "../../src/application/local-worlds.js";
+import type { WorldProvider } from "../../src/world-provider.js";
 import { prepareConversationTakeReview } from "../../src/application/conversation-take-review.js";
 import { applyTimelineCommand } from "../../src/productions/timeline.js";
 import { productionFrameRate, storyTimelineFingerprint } from "@arke-studio/contracts";
@@ -63,6 +65,7 @@ import { GUIDE_THEMES_SCHEMA_VERSION } from "../../src/world/commit.js";
 import {
   prepareWorldChatActions,
   worldChatActionAdapters,
+  savedStoryProposalPrecondition,
   type WorldChatActionAdapterDeps,
   type WorldChatActionTurn,
 } from "../../src/world-chat/actions.js";
@@ -3167,7 +3170,8 @@ describe("saved sibling proposal review (#1740)", () => {
       assert.deepEqual((await w.gate.project(card.authority.id)).review, before.review);
       await w.lifecycle.recoverConversation(w.conversationId);
       assert.equal((await decide(w.lifecycle, w.log, card)).reason, "validation-refused", "recovery does not approve the changed context");
-      assert.equal((await acceptDecided(w.gate, card.authority.id)).status, "accepted");
+      const precondition = await savedStoryProposalPrecondition(w.store, await w.gate.readManifest(card.authority.id));
+      assert.equal((await acceptDecided(w.gate, card.authority.id, precondition)).status, "accepted");
       await w.lifecycle.reconcileAction(w.conversationId, card.actionId);
       assert.equal((await loaded(w.log)).actions.find(action => action.actionId === card.actionId)!.status, "completed");
     }
@@ -3189,6 +3193,20 @@ describe("saved sibling proposal review (#1740)", () => {
     w.store.getBundle().sheets.find(sheet => sheet.id === "maren-kest")!.retired = true;
     assert.equal((await decide(w.lifecycle, w.log, card)).reason, "stale");
     assert.equal((await w.gate.listOpen()).some(p => p.id === card.authority.id), false);
+  });
+
+  it("rechecks cited inputs at native acceptance, even after a context-only refusal", async () => {
+    const w = await siblings(), card = w.cards[2]!;
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[0]!)).status, "completed");
+    assert.equal((await decide(w.lifecycle, w.log, card)).reason, "validation-refused");
+    const precondition = await savedStoryProposalPrecondition(w.store, await w.gate.readManifest(card.authority.id));
+    assert.ok(precondition);
+    await w.store.retire("characters/maren-kest.md", "test");
+    assert.equal((await acceptDecided(w.gate, card.authority.id, precondition)).status, "stale");
+    const worlds = createLocalWorldRepository({ openStore: () => w.store, gate: () => w.gate } as WorldProvider);
+    await assert.rejects(() => worlds.use(w.store.worldId, session => session.accept(card.authority.id, {})), /sheets changed/);
+    await worlds.close();
+    assert.equal(w.store.getBundle().productions.find(p => p.meta.id === w.productionId)!.chapters.length, 0);
   });
 });
 
