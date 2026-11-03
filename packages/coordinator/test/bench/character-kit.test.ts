@@ -16,6 +16,9 @@ async function fixture(fullHash = false) {
   const { root, worldDir } = await makeTempRoot();
   const provider = new FsWorldProvider(root, { clock: CLOCK });
   await provider.loadWorld(WORLD_ID);
+  const loadWorld = provider.loadWorld.bind(provider);
+  let worldLoads = 0;
+  provider.loadWorld = (...args) => { worldLoads++; return loadWorld(...args); };
   const sessionId = newId("sess") as SessionId, takeId = newId("tk");
   const bench = (await openBenchSession(worldDir, CLOCK, { sessionId, defaultModel: { provider: "fal", model: "test-image" }, initial: { mode: "image", brief: "Maren at the rail." } }))!;
   await bench.store.append({ type: "takes-reserved", takes: [{ id: takeId, n: 1, requestId: "fixture",
@@ -31,7 +34,7 @@ async function fixture(fullHash = false) {
   const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "changes.jsonl"), appVersion: "test", observeEvent: event => events.push(event) });
   const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(ClientMessageSchema.parse(message));
   const command = (image: "main-photo" | "character-sheet"): Extract<ClientMessage, { kind: "bench-use-reference" }> => ({ kind: "bench-use-reference", worldId: WORLD_ID, sessionId, takeId, sheetId: "maren-kest", image, requestId: ulid() });
-  return { provider, worldDir, source, send, command, events, close: () => provider.close() };
+  return { provider, worldDir, source, send, command, events, worldLoads: () => worldLoads, close: () => provider.close() };
 }
 
 for (const fullHash of [false, true]) for (const image of ["main-photo", "character-sheet"] as const) it(`uses a saved Bench image as ${image} with a ${fullHash ? "full" : "production-prefix"} hash without dispatch and replays idempotently`, async () => {
@@ -45,6 +48,7 @@ for (const fullHash of [false, true]) for (const image of ["main-photo", "charac
     await w.send(command);
     const answer = w.events.findLast(event => event.type === "bench.reference-used")!;
     assert.equal(answer.accepted, true, answer.reason);
+    assert.equal(w.worldLoads(), 0, "publishing the result must not load or reopen a world");
     const kit = store.getBundle().referenceKits.find(kit => kit.sheetId === command.sheetId)!;
     const selected = image === "main-photo" ? mainPhotoFor(kit) : characterSheetFor(kit);
     assert.ok(selected);
@@ -61,6 +65,31 @@ for (const fullHash of [false, true]) for (const image of ["main-photo", "charac
     assert.equal(w.events.findLast(event => event.type === "bench.reference-used")?.accepted, false, "a replay cannot change its destination");
     assert.equal(store.getBundle().referenceTakes.length, count);
     assert.equal(w.events.some(event => event.type.startsWith("job.")), false);
+  } finally { await w.close(); }
+});
+
+it("can accept a pending Bench sheet from the character card after its kit commit fails", async () => {
+  const w = await fixture();
+  try {
+    const store = w.provider.openStore()!;
+    const commit = store.commitUnserialised.bind(store);
+    store.commitUnserialised = async (...args) => {
+      if (args[0].kind === "reference-accept") throw new Error("fixture kit commit failure");
+      return commit(...args);
+    };
+    const command = w.command("character-sheet");
+    await w.send(command);
+    assert.equal(w.events.findLast(event => event.type === "bench.reference-used")?.accepted, false);
+    const copied = store.getBundle().referenceTakes.find(take => take.params["benchTakeId"] === command.takeId)!;
+    assert.ok(copied);
+    assert.equal(copied.provider, "fal", "the source provider remains recorded");
+    assert.equal(store.getBundle().referenceReviews.some(review => review.takeId === copied.id), false);
+    store.commitUnserialised = commit;
+    await w.send({ kind: "accept-character-sheet", worldId: WORLD_ID, sheetId: command.sheetId, takeId: copied.id });
+    const kit = store.getBundle().referenceKits.find(kit => kit.sheetId === command.sheetId)!;
+    assert.equal(characterSheetFor(kit)?.file, `takes/${copied.id}/${copied.media}`);
+    assert.equal(store.getBundle().referenceReviews.some(review => review.takeId === copied.id && review.decision === "accept"), true);
+    assert.equal(w.worldLoads(), 0, "recovering acceptance must not reopen a world either");
   } finally { await w.close(); }
 });
 
