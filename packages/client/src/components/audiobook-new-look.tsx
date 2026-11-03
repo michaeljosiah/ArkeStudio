@@ -31,9 +31,10 @@ function pendingLooks(takes: readonly Take[], reviews: ReadonlyArray<{ takeId: s
 
 const tileOf = (slug: string, sheetId: string, take: Take): string => mediaUrl(slug, `references/${sheetId}/takes/${take.id}/${take.media}`);
 
-export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile, chapterOrder, who, line }: {
+export function NewLookSheet({ open, onClose, onActivity, worldId, productionId, chapterFile, chapterOrder, who, line }: {
   open: boolean;
   onClose: () => void;
+  onActivity?: () => void;
   worldId: string;
   productionId: string;
   chapterFile: string;
@@ -213,7 +214,7 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
             </div>
           )}
         </div>
-        {held && <div><p>Queued pictures are waiting. Review or cancel them in Activity.</p><Button variant="ghost" onClick={() => { onClose(); openActivityPanel("inbox"); }}>View Activity</Button></div>}
+        {held && <div><p>Queued pictures are waiting. Review or cancel them in Activity.</p><Button variant="ghost" onClick={() => { onClose(); onActivity?.(); openActivityPanel("inbox"); }}>View Activity</Button></div>}
         <details className="fy-newlook__looks" data-testid="new-look-looks"><summary>Saved looks · {looks.length}</summary><Button variant="ghost" onClick={() => setBrowsing(true)} data-testid="new-look-browse">Browse saved looks</Button></details>
         <p className="fy-newlook__price fy-mono" data-testid="new-look-price">{LOOK_CANDIDATES} candidates{closeOn && plan ? " + close view" : ""} · {plan ? "Included in your plan" : manyCost}{closeOn && !plan ? ` · close view ${closeCost}` : ""}</p>
       </div>

@@ -146,7 +146,7 @@ export function closeViewCost(model: Parameters<typeof estimateCharacterImageMic
 }
 
 /** One character: the look chosen (or the main photo), the picker over their looks, the line, and what to do about the rest. */
-function CharacterRow({ view, row, kit, slug, orderOf, off, onWrite, onNewLook, onBrowse, closeState, onMakeClose, onAcceptClose, onDiscardClose }: {
+function CharacterRow({ view, row, kit, slug, orderOf, off, onWrite, onNewLook, onBrowse, onActivity, closeState, onMakeClose, onAcceptClose, onDiscardClose }: {
   view: "overview" | "details";
   row: Row;
   kit: ReferenceKit | null;
@@ -156,6 +156,7 @@ function CharacterRow({ view, row, kit, slug, orderOf, off, onWrite, onNewLook, 
   onWrite: (target: LookTarget, text: string | null) => void;
   onNewLook: (row: Row, conflict?: LookConflict) => void;
   onBrowse: (row: Row) => void;
+  onActivity: () => void;
   closeState: (look: CharacterLook) => CloseViewState;
   onMakeClose: (row: Row, look: CharacterLook) => void;
   onAcceptClose: (row: Row, look: CharacterLook, take: { id: string; path: string }) => void;
@@ -223,7 +224,7 @@ function CharacterRow({ view, row, kit, slug, orderOf, off, onWrite, onNewLook, 
               </button>
             </div>
           )}
-          {chosen !== null && close.kind === "waiting" && <div className="fy-look__facts fy-mono"><span>{close.reason}</span><button type="button" className="fy-sugg__make" onClick={() => openActivityPanel("inbox")}>View Activity</button></div>}
+          {chosen !== null && close.kind === "waiting" && <div className="fy-look__facts fy-mono"><span>{close.reason}</span><button type="button" className="fy-sugg__make" onClick={onActivity}>View Activity</button></div>}
           {chosen !== null && close.kind === "failed" && (
             <div className="fy-look__facts fy-mono" data-testid="look-close-failed">
               <span className="fy-ch__who-where--warn" data-testid="look-close-reason">Close view {close.reason}</span>
@@ -526,6 +527,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
       onWrite={write}
       onNewLook={(entry, conflict) => setMaking({ key: entry.id, name: entry.label ?? entry.id, sheet: entry.sheet!, line: conflict === undefined ? entry.text : newLookLine(entry, conflict) })}
       onBrowse={(entry) => setBrowsing(entry.id)}
+      onActivity={() => { onClose(); openActivityPanel("inbox"); }}
       closeState={(chosen) => closeStateFor(row.sheet!, chosen)}
       onMakeClose={makeClose}
       onAcceptClose={(entry, chosen, take) => {
@@ -591,7 +593,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
         return row?.sheet === undefined ? null : <SavedLookCollection worldId={worldId} productionId={productionId} sheetId={row.sheet} name={row.label ?? row.id} chapterOrder={chapterOrder} currentId={row.line?.lookId ?? null} sourceOrder={row.line?.from === undefined ? null : orderOf(row.line.from)} onClose={() => setBrowsing(null)} onChoose={(id) => { choose(row, id); setBrowsing(null); }} onNewLook={() => { setBrowsing(null); setMaking({ key: row.id, name: row.label ?? row.id, sheet: row.sheet!, line: row.text }); }} />;
       })()}
       {making !== null && (
-        <NewLookSheet open onClose={() => setMaking(null)} worldId={worldId} productionId={productionId} chapterFile={chapterFile} chapterOrder={chapterOrder} who={{ key: making.key, name: making.name, sheet: making.sheet }} line={making.line} />
+        <NewLookSheet open onClose={() => setMaking(null)} onActivity={onClose} worldId={worldId} productionId={productionId} chapterFile={chapterFile} chapterOrder={chapterOrder} who={{ key: making.key, name: making.name, sheet: making.sheet }} line={making.line} />
       )}
     </>
   );
