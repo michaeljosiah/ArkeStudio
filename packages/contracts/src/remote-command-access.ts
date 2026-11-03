@@ -92,7 +92,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "set-model-enabled": "studio", "set-research-web": "studio", "set-local-sampling": "studio", "set-agent-config": "studio",
   "list-harness-models": "studio", "set-spend-threshold": "studio", "detect-runtimes": "studio",
   "detect-harnesses": "studio", "comfyui-refresh": "studio", "comfyui-verify-recipe": "studio",
-  "test-local-voice": "studio", "mark-inbox-seen": "studio", "mark-whats-new-seen": "studio",
+  "test-local-voice": "studio", "mark-inbox-seen": "studio", "settle-file-problems": "studio", "mark-whats-new-seen": "studio",
   "set-appearance-theme": "studio", "set-narrator": "studio", "cancel-job": "studio",
   "list-provider-calls": "studio", "retry-job-finalization": "studio", "delete-job": "studio",
   "resolve-held-job": "studio", "queue-resume": "studio", "establish-look": "studio",

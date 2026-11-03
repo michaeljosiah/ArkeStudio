@@ -400,6 +400,7 @@ const CLIENT_COMMAND_METADATA = {
   "prompt-history-restore": humanOnly("Restoring a prompt is a direct human scene edit."),
   "set-background-notifications": globalOnly(GLOBAL_OPERATION),
   "mark-inbox-seen": globalOnly(GLOBAL_OPERATION),
+  "settle-file-problems": globalOnly(GLOBAL_OPERATION),
   "mark-whats-new-seen": globalOnly(GLOBAL_OPERATION),
   "account-sign-in": globalOnly(GLOBAL_OPERATION),
   "account-create": globalOnly(GLOBAL_OPERATION),

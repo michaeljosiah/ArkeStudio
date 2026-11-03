@@ -4456,6 +4456,11 @@ export function markInboxSeen(): void {
   send({ kind: "mark-inbox-seen" });
 }
 
+/** These file problems have been told, and raise no notice again (design turn 268). */
+export function settleFileProblems(worldId: string, paths: readonly string[]): void {
+  send({ kind: "settle-file-problems", worldId, paths: [...paths] });
+}
+
 /** What's new was read up to this bundled release (SPEC-014 R-25). */
 export function markWhatsNewSeen(version: string): void {
   send({ kind: "mark-whats-new-seen", version });

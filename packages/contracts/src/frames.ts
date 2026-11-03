@@ -1522,6 +1522,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** The Inbox was opened: the instant the bell's foreground dot measures against (SPEC-014 R-25). */
   z.object({ kind: z.literal("mark-inbox-seen") }).strict(),
+  z.object({ kind: z.literal("settle-file-problems"), worldId: z.string().min(1), paths: z.array(z.string().min(1)) }).strict(),
   /** What's new was read up to this bundled release (SPEC-014 R-25). */
   z.object({ kind: z.literal("mark-whats-new-seen"), version: z.string().min(1) }).strict(),
   /**
