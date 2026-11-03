@@ -2,10 +2,20 @@ import { useSyncExternalStore } from "react";
 import { audiobookJobRun, type AudiobookActivity, type ClientState, type NeedsYouEntry, type UpdateState } from "@arke-studio/contracts";
 import { shortDateTime } from "./format.js";
 
+/** Current chapter flags answer the remedy; the journal remains the original run receipt. */
+export function currentAudiobookActivity(state: ClientState, run: AudiobookActivity): AudiobookActivity {
+  if (run.phase !== "finished" || run.flagged === 0 || run.made + run.flagged !== run.toMake || state.world?.meta.worldId !== run.worldId) return run;
+  const chapter = state.world.productions.find(production => production.meta.id === run.productionId)?.chapters.find(candidate => candidate.id === run.chapterId);
+  const record = chapter?.audiobook;
+  if (!record || "unreadable" in record || record.chapterVersion !== chapter.version || record.hash !== chapter.bodyHash
+    || Date.parse(record.updatedAt) < Date.parse(run.updatedAt) || record.flagged > 0 || record.takes < run.toMake) return run;
+  return { ...run, phase: "ready", made: run.toMake, flagged: 0, reason: undefined };
+}
+
 /** Count the rows Inbox actually shows, after grouping audiobook requests into their read. */
 export function inboxAttention(state: ClientState, needsYou: NeedsYouEntry[], reads: AudiobookActivity[]) {
   const attentionReads = reads.filter(run => state.app.jobs.some(job => job.status === "needs-reconciliation" && audiobookJobRun(job, [run]))
-    || (["interrupted", "finished"].includes(run.phase) && !reads.some(later => later.worldId === run.worldId && later.productionId === run.productionId && later.chapterId === run.chapterId && later.scope === "chapter" && later.phase === "ready" && later.startedAt > run.startedAt)));
+    || (["interrupted", "finished"].includes(currentAudiobookActivity(state, run).phase) && !reads.some(later => later.worldId === run.worldId && later.productionId === run.productionId && later.chapterId === run.chapterId && later.scope === "chapter" && later.phase === "ready" && later.startedAt > run.startedAt)));
   const ordinaryNeeds = needsYou.filter(entry => !state.app.jobs.some(job => job.id === entry.ref && audiobookJobRun(job, attentionReads)));
   return { attentionReads, ordinaryNeeds, count: attentionReads.length + ordinaryNeeds.length };
 }
