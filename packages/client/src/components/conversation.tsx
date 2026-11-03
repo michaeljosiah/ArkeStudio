@@ -373,6 +373,15 @@ export function ConversationPermissionCard({
     && ["world-chat-production-overview", "world-chat-production-prose-style", "world-chat-production-chapter"].includes(action.actionKind)
     && state?.world?.meta.worldId === action.worldId
     ? state.world.proposals.find(staged => staged.proposal.id === action.authority.id) : undefined;
+  const chapterProposal = action.actionKind === "world-chat-production-chapter";
+  const proposalReviewTitle = chapterProposal ? "Review full proposal" : "Review saved proposal";
+  // Derive display counts from the saved draft without changing old cards' frozen approval digests.
+  const excerptNotes = chapterProposal && savedProposal?.proposal.draftRevision === action.authorityRevision
+    ? savedProposal.review?.targets.flatMap(target => target.fields.flatMap(field =>
+      ([["Before", field.before], ["After", field.proposed]] as const).flatMap(([side, text]) => text !== null && text.length > 20_000
+        ? [`${target.label}: ${field.field} (${side}) — excerpt, first 19,999 of ${text.length.toLocaleString("en-GB")} characters. Review the full proposal for the complete text.`] : []))) ?? [] : [];
+  const hasExcerpt = chapterProposal && action.shown.body.family === "authored-diff"
+    && action.shown.body.fields.some(field => [field.before, field.after].some(text => text?.length === 20_000 && text.endsWith("…")));
   const comicChapter = comicDraft ? state?.world?.proposals.find(p => p.proposal.id === action.authority.id)?.proposal.targets
     .map(target => /^productions\/[^/]+\/comic\/([^/]+)\.json$/.exec(target.path)?.[1]).find(Boolean) : undefined;
   const consequences = action.shown.ripples.length > 0 ? (
@@ -413,6 +422,8 @@ export function ConversationPermissionCard({
       <ConversationFrameRunCard action={action} />
       {action.blockedReason && <p className="fy-actioncard__notice">{action.blockedReason}</p>}
       {savedProposal && proposalReviewNeeded && <p className="fy-actioncard__notice">{announcement}</p>}
+      {excerptNotes.map(note => <p key={note} className="fy-actioncard__notice">{note}</p>)}
+      {hasExcerpt && excerptNotes.length === 0 && <p className="fy-actioncard__notice">Excerpt shown.{savedProposal ? " Review the full proposal for the complete text." : ""}</p>}
       {action.decision && (
         <div className="fy-actioncard__audit">
           {action.decision.actorId === "local-user" ? "You" : action.decision.actorId}
@@ -442,7 +453,7 @@ export function ConversationPermissionCard({
       ) : null}
       {supported && !comicDraft && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
         <div className="fy-actioncard__actions">
-          {savedProposal && <Button variant={proposalReviewNeeded ? "primary" : "outline"} onClick={() => setProposalReviewOpen(true)}>Review saved proposal</Button>}
+          {savedProposal && <Button variant={proposalReviewNeeded ? "primary" : "outline"} onClick={() => setProposalReviewOpen(true)}>{proposalReviewTitle}</Button>}
           {!(savedProposal && proposalReviewNeeded) && action.status === "pending" && (!onPC || action.availableDecisions.includes("approve")) && (onPC ? <OnYourPC>choose files and approve</OnYourPC> : <Button
             variant="primary"
             disabled={busy || !action.availableDecisions.includes("approve")}
@@ -470,7 +481,7 @@ export function ConversationPermissionCard({
         <p className="fy-actioncard__unsupported">This card type is not available in this version. Nothing can be approved.</p>
       )}
       <div className="fy-actioncard__live" aria-live="assertive" role="status">{announcement}</div>
-      {savedProposal && <PageSheet open={proposalReviewOpen} onClose={() => setProposalReviewOpen(false)} title="Review saved proposal">
+      {savedProposal && <PageSheet open={proposalReviewOpen} onClose={() => setProposalReviewOpen(false)} title={proposalReviewTitle}>
         <ConnectedProposalPanel staged={savedProposal} onAccepted={() => setProposalReviewOpen(false)} />
       </PageSheet>}
     </article></StudioCard>

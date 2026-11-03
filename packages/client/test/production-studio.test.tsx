@@ -97,6 +97,31 @@ it("opens a saved book proposal for explicit review after a refused chat approva
   assert.ok([...dom.document.querySelectorAll('dialog button')].some(button => button.textContent?.includes("Accept")));
 });
 
+it("opens complete chapter prose from an explicitly labelled excerpt (#1743)", async t => {
+  const staged = world.proposals[0]!, previous = staged.review;
+  const body = "The river lay still. ".repeat(1500) + "The last bell sounded.";
+  staged.review = { targets: [{ path: staged.proposal.targets[0]!.path, label: "The crossing", kind: "chapter", action: "amend",
+    fields: [{ field: "Body", before: "The old chapter.", proposed: body }] }] };
+  t.after(() => { staged.review = previous; });
+  const action = card();
+  action.actionKind = "world-chat-production-chapter";
+  action.authority = { kind: "proposal-manager", id: staged.proposal.id };
+  action.authorityRevision = staged.proposal.draftRevision;
+  action.cardFamily = "authored-diff";
+  action.shown = { ...action.shown, productionPreview: undefined, body: { family: "authored-diff", fields: [
+    { label: "Body", before: "The old chapter.", after: body.slice(0, 19_999) + "…" },
+  ], conflicts: [], openChoices: [] } };
+  const made = await setup(action);
+  assert.match(dom.document.querySelector('.fy-actioncard')!.textContent!, /excerpt, first 19,999/);
+  assert.ok(dom.document.querySelector('.fy-actioncard')!.textContent!.includes(`of ${body.length.toLocaleString("en-GB")} characters`));
+  assert.doesNotMatch(dom.document.querySelector('.fy-actioncard')!.textContent!, /The last bell sounded/);
+  await click("Review full proposal");
+  assert.ok(dom.document.querySelector('dialog')!.textContent!.includes(body));
+  assert.equal(made.sent.length, 0);
+  await made.update([{ ...action, status: "completed", availableDecisions: [] }]);
+  assert.match(dom.document.querySelector('.fy-actioncard')!.textContent!, /Excerpt shown/);
+});
+
 it("comic drafts name the review and open the draft's chapter without deciding (#2255)", async t => {
   const action = card();
   action.actionKind = "world-chat-production-comic-script";
