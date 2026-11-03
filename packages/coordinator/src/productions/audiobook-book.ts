@@ -317,7 +317,7 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
       estimatedMicroUsd: toRead.reduce((sum, prepared) => sum + prepared.estimate, 0),
       voices: bookPriceLines(bookNarrators(room), speaking, misses, priceOf, sheetName, store.getBundle()),
       // Requests counted where reads are priced (design turn 185a), when any chapter groups.
-      ...(toRead.some((prepared) => prepared.groups.length > 0)
+      ...(toRead.some((prepared) => prepared.groups.length > 0 || prepared.groupingUnavailable)
         ? { requests: toRead.reduce((sum, prepared) => sum + prepared.requests, 0), perParagraph: toRead.reduce((sum, prepared) => sum + prepared.perParagraph, 0) }
         : {}),
     },
@@ -329,7 +329,7 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
 
 export type AudiobookBookEvent =
   | { type: "started"; chapters: number; blocks: number }
-  | { type: "priced"; chapters: number; blocks: number; cloudBlocks: number; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: AudiobookPriceLine[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number }
+  | { type: "priced"; chapters: number; blocks: number; cloudBlocks: number; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: AudiobookPriceLine[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number; groupingUnavailable?: true }
   | { type: "progress"; chapterId: string; done: number; chapters: number }
   | { type: "finished"; outcome: "read" | "stopped" | "unavailable" | "failed"; chaptersRead: number; chaptersRefused: number; made: number; flagged: number; reason?: string };
 
@@ -445,8 +445,9 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
         // chapter's read is the one that makes the slot, and the book asks once for all of them.
         notices: [...firstReadNotices(toRead.flatMap((entry) => entry.prepared.clones)), ...dailyQuotaNotices(quotaReads, room.dailyQuota)],
         ...(freePlan !== null ? { freePlan: freePlan.short } : {}),
+        ...(toRead.some(entry => entry.prepared.groupingUnavailable) ? { groupingUnavailable: true as const } : {}),
         // Requests counted where reads are priced (design turn 185a).
-        ...(toRead.some((entry) => entry.prepared.groups.length > 0)
+        ...(toRead.some((entry) => entry.prepared.groups.length > 0 || entry.prepared.groupingUnavailable)
           ? { requests: toRead.reduce((sum, entry) => sum + entry.prepared.requests, 0), perParagraph: toRead.reduce((sum, entry) => sum + entry.prepared.perParagraph, 0) }
           : {}),
       });

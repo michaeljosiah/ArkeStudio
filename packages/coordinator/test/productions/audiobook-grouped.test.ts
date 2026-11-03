@@ -1242,3 +1242,54 @@ describe("the audiobook's credits (design turn 252, SPEC-047 R-214, R-215)", () 
     }
   });
 });
+
+
+it("quotes missing grouping explicitly even on a free plan, without buying unchecked speech", async () => {
+  const w = await world();
+  try {
+    const model: ManifestModel = { ...GROUPABLE, speechPlan: "free-plan" };
+    const h = await harness(w.store, { model, noTranscriber: true });
+    await h.run();
+    const quote = priced(h.events)!;
+    assert.equal(quote.groupingUnavailable, true);
+    assert.equal(quote.requests, quote.perParagraph);
+    assert.ok(quote.requests! > 1);
+    assert.equal(quote.estimatedMicroUsd, 0);
+    assert.equal(h.sent.length, 0);
+    await h.run({ confirmationToken: quote.confirmationToken });
+    assert.equal(h.sent.length, 0, "the existing word-check guard still prevents purchases");
+  } finally { await w.close(); }
+});
+
+it("reprices a grouped answer when local transcription disappears", async () => {
+  const w = await world();
+  try {
+    const grouped = await harness(w.store);
+    await grouped.run();
+    const solo = await harness(w.store, { noTranscriber: true });
+    await solo.run({ confirmationToken: priced(grouped.events)!.confirmationToken });
+    assert.equal(priced(solo.events)?.groupingUnavailable, true);
+    assert.notEqual(priced(solo.events)?.confirmationToken, priced(grouped.events)?.confirmationToken);
+    assert.equal(solo.sent.length, 0);
+    await writeAudiobookBookRaised(w.store, LEDGER, { schemaVersion: 1, reading: "narrator", requests: "per-paragraph" });
+    const explicit = await harness(w.store, { noTranscriber: true });
+    await explicit.run();
+    assert.equal(priced(explicit.events)?.groupingUnavailable, undefined);
+  } finally { await w.close(); }
+});
+
+it("the whole book names unavailable grouping and counts requests before starting any chapter", async () => {
+  const w = await world();
+  try {
+    const events: AudiobookBookEvent[] = [];
+    await runAudiobookBook({ store: w.store, worldId: WORLD_ID, productionId: LEDGER,
+      room: { narrator: READER, models: [{ ...GROUPABLE, speechPlan: "free-plan" }], catalogue: [KORE], transcriber: false },
+      signal: new AbortController().signal, requireUploadConfirmation: () => false,
+      runChapter: async () => { throw new Error("must quote before starting a chapter"); },
+      emit: event => events.push(event), now: () => "2026-10-03T09:00:00.000Z" });
+    const quote = events.find(event => event.type === "priced")!;
+    assert.equal(quote.groupingUnavailable, true);
+    assert.equal(quote.requests, quote.perParagraph);
+    assert.ok(quote.requests! > 1);
+  } finally { await w.close(); }
+});
