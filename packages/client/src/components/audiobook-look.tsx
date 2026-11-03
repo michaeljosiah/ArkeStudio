@@ -23,6 +23,7 @@ import { BookReferenceCoverage } from "./reference-coverage.js";
 import { NewLookSheet } from "./audiobook-new-look.js";
 import { mediaUrl } from "../lib/media.js";
 import { acceptChapterLook, chooseAudiobookLook, deriveAudiobookLook, makeChapterLook, rejectReferenceTake, setAudiobookLook, linkAudiobookCharacter, useAudiobookRecords, useStore } from "../lib/store.js";
+import { openActivityPanel } from "../lib/activity-panel.js";
 import { lookJobState, lookJobs, useQueueRefusals } from "./look-jobs.js";
 import { Button, Select, Textarea } from "./ui.js";
 
@@ -134,6 +135,7 @@ const kitOf = (world: { referenceKits: readonly ReferenceKit[] } | null, sheet: 
 export type CloseViewState =
   | { kind: "none" }
   | { kind: "making" }
+  | { kind: "waiting"; reason: string }
   | { kind: "failed"; reason: string; retry: boolean }
   | { kind: "made"; take: { id: string; path: string } }
   | { kind: "accepted"; path: string };
@@ -221,6 +223,7 @@ function CharacterRow({ view, row, kit, slug, orderOf, off, onWrite, onNewLook, 
               </button>
             </div>
           )}
+          {chosen !== null && close.kind === "waiting" && <div className="fy-look__facts fy-mono"><span>{close.reason}</span><button type="button" className="fy-sugg__make" onClick={() => openActivityPanel("inbox")}>View Activity</button></div>}
           {chosen !== null && close.kind === "failed" && (
             <div className="fy-look__facts fy-mono" data-testid="look-close-failed">
               <span className="fy-ch__who-where--warn" data-testid="look-close-reason">Close view {close.reason}</span>
@@ -463,7 +466,8 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
     if (request !== undefined && queueRefused[request] !== undefined) return { kind: "failed", reason: queueRefused[request]!.reason, retry: true };
     // A request asked here is followed by its own job; otherwise the newest close job of this look.
     const job = request !== undefined ? lookJobs(jobs, (params) => params["lookBatch"] === request)[0] : lookJobs(jobs, (params) => params["lookFraming"] === "close" && params["lookOfLook"] === chosen.id)[0];
-    const ended = lookJobState(job);
+    const ended = lookJobState(job, store.state?.app.queues ?? []);
+    if (ended?.state === "waiting") return { kind: "waiting", reason: ended.reason };
     if (ended?.state === "failed") return { kind: "failed", reason: ended.reason, retry: ended.retry };
     return ended?.state === "making" || request !== undefined ? { kind: "making" } : { kind: "none" };
   };

@@ -3,6 +3,7 @@ import { chapterLooksOf, estimateCharacterImageMicroUsd, mainPhotoFor, priceLabe
 import { resolveModel, worldModel } from "./dispatch-bar.js";
 import { ChapterLookSheet } from "./chapter-look-sheet.js";
 import { SavedLookCollection } from "./saved-look-collection.js";
+import { openActivityPanel } from "../lib/activity-panel.js";
 import { mediaUrl } from "../lib/media.js";
 import { acceptChapterLook, chooseAudiobookLook, makeChapterLook, useStore } from "../lib/store.js";
 import { lookJobState, lookJobs, useQueueRefusals, type LookJobState } from "./look-jobs.js";
@@ -75,18 +76,20 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
   const chosenTake = candidates.find((take) => take.id === chosen) ?? null;
   const closeTake = chosenTake === null ? null : (pending.find((take) => take.params["lookFraming"] === "close" && take.params["lookOfTake"] === chosenTake.id) ?? null);
   const jobs = store.state?.app.jobs ?? [];
+  const queues = store.state?.app.queues ?? [];
   // The batch's jobs and the close view's: a job that ended without a picture is a slot that says
   // why, never one left making (2026-10-04, a close view the safety system refused).
   const batchJobs = batch === null ? [] : lookJobs(jobs, (params) => params["lookBatch"] === batch && params["lookFraming"] === "full-body");
-  const batchFailures = batchJobs.map(lookJobState).filter((state): state is Extract<LookJobState, { state: "failed" }> => state?.state === "failed");
+  const batchFailures = batchJobs.map(job => lookJobState(job, queues)).filter((state): state is Extract<LookJobState, { state: "failed" | "waiting" }> => state?.state === "failed" || state?.state === "waiting");
   const batchRefused = batch === null ? undefined : queueRefused[batch];
   const closeRequest = chosenTake === null ? undefined : asked[chosenTake.id];
   const closeJob = closeRequest === undefined ? undefined : lookJobs(jobs, (params) => params["lookBatch"] === closeRequest)[0];
-  const closeEnded = lookJobState(closeJob);
+  const closeEnded = lookJobState(closeJob, queues);
   const closeFailed = closeTake !== null || closeRequest === undefined ? null : (queueRefused[closeRequest]?.reason ?? (closeEnded?.state === "failed" ? closeEnded.reason : null));
   // A picture made and paid for whose filing failed is Activity's to retry, at no charge: no paid Try again.
   const closeRetry = closeFailed !== null && !(closeEnded?.state === "failed" && !closeEnded.retry && queueRefused[closeRequest ?? ""] === undefined);
   const closeWaiting = closeOn && chosenTake !== null && closeTake === null && closeRequest !== undefined && closeFailed === null;
+  const held = batchFailures.some(state => state.state === "waiting") || closeEnded?.state === "waiting";
   const looks = chapterLooksOf(kit);
 
   const plan = model?.pricing.kind === "included-plan" ? "included-plan" : undefined;
@@ -131,7 +134,7 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
             Cancel
           </Button>
           {batch !== null && (
-            <Button variant="outline" disabled={!canMake} onClick={make} data-testid="new-look-again">
+            <Button variant="outline" disabled={!canMake || held} onClick={make} data-testid="new-look-again">
               {plan ? "Make again" : `Make again · ${againCost}`}
             </Button>
           )}
@@ -175,13 +178,13 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
                 // A picture the coordinator would not queue has no job: counted from its answer, not left making.
                 const left = LOOK_CANDIDATES - candidates.length;
                 const unqueued = batchRefused === undefined ? 0 : batchRefused.whole ? LOOK_CANDIDATES : batchRefused.count;
-                const reasons = [...batchFailures.map((failure) => failure.reason), ...Array.from({ length: unqueued }, () => batchRefused!.reason)];
+                const reasons = [...batchFailures, ...Array.from({ length: unqueued }, () => ({ state: "failed" as const, reason: batchRefused!.reason }))];
                 const failedSlots = Math.min(reasons.length, left);
                 if (take === undefined && index >= LOOK_CANDIDATES - failedSlots) {
-                  const reason = reasons[index - (LOOK_CANDIDATES - failedSlots)] ?? "not made";
+                  const failure = reasons[index - (LOOK_CANDIDATES - failedSlots)]!;
                   return (
-                    <div key={`failed-${index}`} className="fy-newlook__cand fy-newlook__cand--wait" data-testid="new-look-candidate" data-state="failed">
-                      <span className="fy-mono fy-ch__who-where--warn" data-testid="new-look-candidate-reason">{reason}</span>
+                    <div key={`failed-${index}`} className="fy-newlook__cand fy-newlook__cand--wait" data-testid="new-look-candidate" data-state={failure.state}>
+                      <span className="fy-mono fy-ch__who-where--warn" data-testid="new-look-candidate-reason">{failure.reason}</span>
                     </div>
                   );
                 }
@@ -194,9 +197,9 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
                 );
               })}
           {closeOn && chosenTake !== null && (
-            <div className="fy-newlook__close" data-testid="new-look-close" data-state={closeTake !== null ? "made" : closeFailed !== null ? "failed" : closeWaiting ? "making" : "none"}>
+            <div className="fy-newlook__close" data-testid="new-look-close" data-state={closeTake !== null ? "made" : closeFailed !== null ? "failed" : closeEnded?.state === "waiting" ? "waiting" : closeWaiting ? "making" : "none"}>
               {closeTake !== null ? <img src={tileOf(slug, who.sheet, closeTake)} alt="" /> : <i aria-hidden="true" />}
-              <span className="fy-mono">{closeTake !== null ? "Close view ready" : closeWaiting ? "Making close view…" : "Close view"}</span>
+              <span className="fy-mono">{closeTake !== null ? "Close view ready" : closeEnded?.state === "waiting" ? closeEnded.reason : closeWaiting ? "Making close view…" : "Close view"}</span>
               {closeFailed !== null && (
                 <>
                   <span className="fy-mono fy-ch__who-where--warn" data-testid="new-look-close-reason">{closeFailed}</span>
@@ -210,6 +213,7 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
             </div>
           )}
         </div>
+        {held && <div><p>Queued pictures are waiting. Review or cancel them in Activity.</p><Button variant="ghost" onClick={() => { onClose(); openActivityPanel("inbox"); }}>View Activity</Button></div>}
         <details className="fy-newlook__looks" data-testid="new-look-looks"><summary>Saved looks · {looks.length}</summary><Button variant="ghost" onClick={() => setBrowsing(true)} data-testid="new-look-browse">Browse saved looks</Button></details>
         <p className="fy-newlook__price fy-mono" data-testid="new-look-price">{LOOK_CANDIDATES} candidates{closeOn && plan ? " + close view" : ""} · {plan ? "Included in your plan" : manyCost}{closeOn && !plan ? ` · close view ${closeCost}` : ""}</p>
       </div>
