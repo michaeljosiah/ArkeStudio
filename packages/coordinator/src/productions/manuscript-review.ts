@@ -179,6 +179,8 @@ export class ManuscriptReviewService {
       if (digest(raw) !== review.snapshotHash) throw new Error("The retained source snapshot changed; continuation refused.");
       snapshot = SnapshotSchema.parse(raw);
       review.tasks.forEach(task => { if (task.state === "running") { task.state = "interrupted"; task.error = "Outcome uncertain; not retried."; } });
+      // A stage that reported its failure is retried only because the author pressed Try again.
+      if (resume) review.tasks.forEach(task => { if (task.state === "failed") { task.state = "pending"; delete task.error; } });
       if (review.status === "complete") { this.deps.publish(target, await refreshManuscriptReview(store, review), await manuscriptReviewHistory(store, target)); return review; }
     } else {
       const captured = await capture(store, target, signal);

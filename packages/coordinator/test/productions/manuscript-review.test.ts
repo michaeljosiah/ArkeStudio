@@ -34,6 +34,13 @@ async function fixture() {
   };
   return { dir, store, target, chapters, findings, reading, synthesis, updates, service, runner };
 }
+it("retries a failed stage only when the author asks, and finishes the report", async () => {
+  const f = await fixture(), id = ulid();
+  const failing = await f.service(async () => { throw new Error("Upstream refused"); }).start(f.target, id, "");
+  assert.equal(failing.status, "partial"); assert.equal(failing.tasks[0]!.state, "failed");
+  const retried = await f.service(f.runner).start(f.target, id, "", true);
+  assert.equal(retried.status, "complete"); assert.ok(retried.tasks.every(task => task.state === "complete" && task.error === undefined));
+});
 it("keeps a stage whose model ranks findings past priority 3 or raises too many", async () => {
   const f = await fixture(), ranked = Array.from({ length: 8 }, (_, index) => ({ ...f.findings[0]!, priority: index + 1 }));
   const review = await f.service(async input => input.prompt.includes('"verdict"') ? f.synthesis : { ...f.reading, findings: ranked }).start(f.target, ulid(), "");

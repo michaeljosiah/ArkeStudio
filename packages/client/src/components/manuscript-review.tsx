@@ -17,22 +17,27 @@ export function ManuscriptReviewReport({ review, disabled = false, onDecision, o
 }) {
   const coverage = manuscriptReviewCoverage(review);
   const section = (index: number) => `manuscript-${review.id}-${index}`;
+  const done = review.synthesis !== undefined, failed = review.tasks.filter(task => task.state === "failed");
+  const stages = <details><summary>Stages, models and failures</summary>{review.tasks.map(task => <p key={task.id}><strong>{task.id} · {task.state}</strong><br />{task.model ?? "Model not recorded"} · {task.provider ?? "Provider not separately reported by harness"}<br />{task.sessionId}<br />{task.disclosure ?? "Configured writing harness; manuscript text may be sent to its provider."}<br />{task.error}</p>)}</details>;
   return <article className="fy-manuscript-review">
-    <nav aria-label="Report sections">{sections.map((name, i) => <Button key={name} onClick={() => document.getElementById(section(i))?.scrollIntoView({ block: "start" })}>{name}</Button>)}</nav>
+    {done && <nav aria-label="Report sections">{sections.map((name, i) => <Button key={name} onClick={() => document.getElementById(section(i))?.scrollIntoView({ block: "start" })}>{name}</Button>)}</nav>}
     <section id={section(0)}><h2>At a glance</h2><h3>{review.title}</h3>
       <p role="status"><strong>{review.status}</strong> · {coverage.chapters}/{coverage.totalChapters} chapters fully supplied · {coverage.stages}/{coverage.totalStages} reading stages complete · {coverage.words.toLocaleString()} words</p>
-      {review.status !== "complete" && <p>No complete manuscript review is claimed. Completed readings remain available below.</p>}
+      {failed.length > 0 && <p role="alert">{failed.length} of {review.tasks.length} stages failed. {failed[0]!.error}</p>}
+      {review.status !== "complete" && failed.length === 0 && <p>No complete manuscript review is claimed. Completed readings remain available below.</p>}
       {review.stale && <div role="alert"><strong>Sources changed since review.</strong><Text>{review.staleReasons.join("\n")}</Text></div>}
-      <h3>Author brief</h3><Text>{review.brief || "No author brief supplied."}</Text><Text>{review.synthesis?.verdict}</Text>
+      <h3>Author brief</h3><Text>{review.brief || "No author brief supplied."}</Text>{review.synthesis && <Text>{review.synthesis.verdict}</Text>}
+      {!done && stages}
     </section>
-    <section id={section(1)}><h2>Full synopsis</h2><Text>{review.synthesis?.synopsis}</Text>
+    {(done || review.tasks.some(task => task.reading)) && <section id={section(1)}><h2>Full synopsis</h2>{review.synthesis && <Text>{review.synthesis.synopsis}</Text>}
       {review.sources.map(source => <details key={source.id}><summary>{source.title}</summary>
         {review.tasks.filter(task => task.kind === "reading" && task.chapterId === source.id).map(task => <div key={task.id}>
           <p>{task.id} · {task.state}</p><Text>{task.reading?.synopsis ?? task.error ?? "This source segment has not been read."}</Text>
           {task.reading && <details><summary>Retained editorial reading</summary><Text>{task.reading.strengths}</Text><Text>{task.reading.editorial}</Text><Text>{task.reading.continuity}</Text></details>}
         </div>)}
       </details>)}
-    </section>
+    </section>}
+    {done && <>
     <section id={section(2)}><h2>Candid editorial review</h2><h3>Strengths worth preserving</h3><Text>{review.synthesis?.strengths}</Text><Text>{review.synthesis?.editorial}</Text></section>
     <section id={section(3)}><h2>Continuity and unresolved intent</h2><Text>{review.synthesis?.continuity}</Text></section>
     <section id={section(4)}><h2>Prioritised revision plan</h2>
@@ -55,8 +60,9 @@ export function ManuscriptReviewReport({ review, disabled = false, onDecision, o
       <Text>{review.synthesis?.limitations}</Text><p>{review.rejectedCitations} findings omitted for invalid or ambiguous citations.</p>
       <p>Saved {review.createdAt} · Report {review.id} · Source snapshot {review.snapshotHash}</p>
       <details><summary>Exact sources and approved context</summary><ul>{review.sources.map(source => <li key={source.id}>{source.title} · {source.file} · {source.hash}</li>)}</ul><Text>{review.context}</Text></details>
-      <details><summary>Stages, models and failures</summary>{review.tasks.map(task => <p key={task.id}><strong>{task.id} · {task.state}</strong><br />{task.model ?? "Model not recorded"} · {task.provider ?? "Provider not separately reported by harness"}<br />{task.sessionId}<br />{task.disclosure ?? "Configured writing harness; manuscript text may be sent to its provider."}<br />{task.error}</p>)}</details>
+      {stages}
     </section>
+    </>}
   </article>;
 }
 
@@ -91,7 +97,7 @@ export function ManuscriptReviewControl({ worldId, productionId, chapters, words
     if (connection !== "open") { setStarting(false); setExporting(false); exportRequest.current = null; }
   }, [open, connection, worldId, productionId]);
   const busy = starting || review?.status === "running", offline = connection !== "open";
-  const canContinue = review && review.status !== "complete" && !busy && (review.tasks.some(t => t.state === "pending") || (review.tasks.every(t => t.state === "complete") && !review.synthesis));
+  const canContinue = review && review.status !== "complete" && !busy && (review.tasks.some(t => t.state === "pending" || t.state === "failed") || (review.tasks.every(t => t.state === "complete") && !review.synthesis));
   const evidence = (cite: Citation) => { setOpen(false); navigate(`/w/${worldId}/p/${productionId}/story/chapters/${encodeURIComponent(cite.chapterId)}`, { state: { manuscriptReviewPassage: cite } }); };
   const discuss = globalChat ? (finding: ManuscriptReview["findings"][number]) => {
     const cite = finding.citations[0]!, entry = { kind: "production" as const, productionId }, props = conversationProps(worldId, entry);
@@ -109,11 +115,10 @@ export function ManuscriptReviewControl({ worldId, productionId, chapters, words
         <p>Up to 24,000 characters per reading stage, 1,000 stages and 64,000 characters of approved context. Model limits or failed stages are reported. You can leave while work continues.</p>
         <div className="fy-manuscript-review__actions"><Button disabled={busy || offline || !chapters} onClick={() => { const id = ulid(); selected.current = id; setStarting(true); send({ kind: "manuscript-review-start", worldId, productionId, requestId: id, brief }); }}>{review ? "Start a new review" : "Start review"}</Button>
           {busy && <Button disabled={offline} onClick={() => send({ kind: "manuscript-review-cancel", worldId, productionId, requestId: ulid() })}>Stop review</Button>}
-          {canContinue && <Button disabled={offline} onClick={() => { selected.current = review.id; setStarting(true); send({ kind: "manuscript-review-resume", worldId, productionId, requestId: ulid(), reviewId: review.id }); }}>Continue unstarted stages</Button>}
+          {canContinue && <Button disabled={offline} onClick={() => { selected.current = review.id; setStarting(true); send({ kind: "manuscript-review-resume", worldId, productionId, requestId: ulid(), reviewId: review.id }); }}>Try again</Button>}
           <Button disabled={offline} onClick={() => send({ kind: "manuscript-review-read", worldId, productionId, requestId: ulid(), ...(selected.current ? { reviewId: selected.current } : {}) })}>Refresh</Button>
-          {review && <Button disabled={busy || offline || exporting} onClick={() => { const id = ulid(); exportRequest.current = id; setExporting(true); send({ kind: "manuscript-review-export", worldId, productionId, requestId: id, reviewId: review.id }); }}>{exporting ? "Preparing PDF…" : "Export PDF"}</Button>}
+          {review?.synthesis && <Button disabled={busy || offline || exporting} onClick={() => { const id = ulid(); exportRequest.current = id; setExporting(true); send({ kind: "manuscript-review-export", worldId, productionId, requestId: id, reviewId: review.id }); }}>{exporting ? "Preparing PDF…" : "Export PDF"}</Button>}
         </div>
-        {canContinue && <p>Continues the original pinned sources. Failed or uncertain model calls are not retried. A new review is a separate request and may incur new charges.</p>}
         {error && <p role="alert">{error}</p>}
         {!!history.length && <label>Past reports<select value={review?.id ?? ""} disabled={starting} onChange={e => { selected.current = e.target.value; send({ kind: "manuscript-review-read", worldId, productionId, requestId: ulid(), reviewId: e.target.value }); }}><option value="" disabled>Choose a report</option>{history.map(item => <option key={item.id} value={item.id}>{item.createdAt} · {item.status}</option>)}</select></label>}
       </div>

@@ -11448,7 +11448,13 @@ export class Coordinator {
         try {
           if (this.stopping) return;
           const reviews = this.manuscriptReviews();
-          if (msg.kind === "manuscript-review-start") await reviews.start(target, msg.requestId, msg.brief);
+          if (msg.kind === "manuscript-review-start") {
+            // Said before a report exists, as Review chapter does: a report of failed stages tells the author less.
+            const model = this.agentOverridesInEffect()?.["manuscript-reviewer"]?.model;
+            const selected = model === undefined ? undefined : await this.validateLanguageModel(model, false);
+            if (selected?.reason) throw new Error(selected.reason);
+            await reviews.start(target, msg.requestId, msg.brief);
+          }
           else if (msg.kind === "manuscript-review-resume") await reviews.start(target, msg.reviewId, "", true);
           else if (msg.kind === "manuscript-review-read") await reviews.read(target, msg.reviewId);
           else if (msg.kind === "manuscript-review-cancel") reviews.cancel(target);
