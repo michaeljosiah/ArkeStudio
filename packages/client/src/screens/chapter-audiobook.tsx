@@ -2817,6 +2817,12 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   const [pending, setPendingState] = useState<PendingDirection | null>(null);
   const pendingRef = useRef<PendingDirection | null>(null);
   const setPending = (next: PendingDirection | null) => { pendingRef.current = next; setPendingState(next); };
+  const connection = useStoreSelector(store => store.connection);
+  useEffect(() => {
+    // Reconnect sends a snapshot, not missed command answers. Do not keep an unacknowledged
+    // plan over the authoritative record that the reopened chapter will supply.
+    if (connection !== "open") setPending(null);
+  }, [connection]);
   useEffect(() => {
     setPhraseDraft(null);
     setPending(null);

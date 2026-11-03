@@ -1089,6 +1089,12 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(note(), "accepted note");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, record: { ...saved, direction: { "p0.0": directed(text, "cold", { note: "another window" }) }, updatedAt: "2026-11-03T12:00:03.000Z" } }));
     assert.equal(note(), "another window", "own success releases the pending plan");
+    await act(async () => props().onChange({ target: { value: "answer lost" } }));
+    await act(async () => props().onBlur());
+    assert.equal(note(), "answer lost");
+    await act(async () => __connectionStatusForTest("closed"));
+    await act(async () => __connectionStatusForTest("open"));
+    assert.equal(note(), "another window", "reconnect releases a request whose answer may never arrive");
   });
 
   it("edits compose before the record answers, and the panel reads the reader that will speak (codex on PR 1186)", async () => {
