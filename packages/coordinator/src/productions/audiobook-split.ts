@@ -119,6 +119,21 @@ const DIRECTION_WORDS = new Set(["pause", "paused", "pauses", "breath", "breaths
 const spokeDirection = (runWritten: readonly string[], runSaid: readonly string[]) =>
   runSaid.some((token) => DIRECTION_WORDS.has(token) && !runWritten.includes(token));
 
+/**
+ * A pause spoken and written by whisper as a near word (2026-11-03): Gemini read the long-pause
+ * tag after "Love would explain it later." in Na Love or Juju's chapter 8, whisper wrote "long
+ * pass", and the take was filed as made and published. "Pass" is no direction word — a block may
+ * say it — so it counts only straight after a pause's length, and only where the block's own
+ * words are not that pair. Read over the whole cut, not a run: a "long" elsewhere in the block can
+ * anchor the heard one and leave "pass" alone in its run.
+ */
+const PAUSE_LENGTHS: ReadonlySet<string> = new Set(["short", "long", "brief"]);
+const PAUSE_HEARD_AS: ReadonlySet<string> = new Set(["pass", "paws", "pours", "pores"]);
+function spokePause(want: readonly string[], said: readonly string[]): boolean {
+  const written = new Set(want.slice(1).map((token, at) => `${want[at]} ${token}`));
+  return said.some((token, at) => PAUSE_LENGTHS.has(token) && PAUSE_HEARD_AS.has(said[at + 1] ?? "") && !written.has(`${token} ${said[at + 1]}`));
+}
+
 /** How close a cut's edge must read to its neighbour's words — a name's more loosely — to be taken for them. */
 const NEIGHBOUR = 0.6;
 const NEIGHBOUR_LOOSE = 0.4;
@@ -187,6 +202,7 @@ export function heardAsWritten(written: string, heard: string, context: SplitCon
   if (said.length === 0) return got.length > 0 && want.every((token) => lexicon.has(token));
   if (context.before !== undefined && carriesNeighbour(want, said, tokens(context.before), lexicon, "start")) return false;
   if (context.after !== undefined && carriesNeighbour(want, said, tokens(context.after), lexicon, "end")) return false;
+  if (spokePause(want, said)) return false;
   // The runs lie between the words heard exactly: where the near matches fell inside a run of
   // mishearings is the aligner's guess ("glass" took "is glass", leaving "up his" unheard), and
   // the run's letters as a whole are the better witness.

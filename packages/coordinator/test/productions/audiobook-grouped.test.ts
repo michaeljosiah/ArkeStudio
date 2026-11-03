@@ -166,6 +166,19 @@ describe("names and words not in English (2026-10-03)", () => {
     assert.equal(judgeSplit("He laughed until he coughed.", "*laughs* He laughed until he coughed.", hash).matched, true, "whisper's note of a laugh is the sound, not a word");
   });
 
+  it("flags a spoken pause whisper wrote as a near word, and keeps a block's own “long pass”", () => {
+    // Na Love or Juju, chapter 8's last block (2026-11-03): the long-pause tag after "Love would
+    // explain it later." was spoken, whisper wrote "long pass", and the take was filed as made.
+    const written = "He left it. He left it, and that night after she had gone, he lay in the dark and turned it over, carefully, the way he turned over a contract with a clause in it that he did not like. Ilorin. Osogbo. A cousin who was a nurse. A balance. A hospital holding something. None of it was impossible. All of it was the kind of thing that happened in Nigeria every day. Private hospitals did operate first and hold property after. Aunts did go to their cousins to rest. He knew three people this had happened to. He put it, carefully, where he had begun to put such things. Under *later*. Love would explain it later. He turned over. The other pillow smelt of coconut and smoke. He put his face in it and slept.";
+    const heard = "He left it. He left it. And that night, after she had gone, he leaned the dark and turned it over. Carefully, the way he turned over a contract with a clause in it that he did not like. Eloren, or Shubo, a cousin who was in us, a balance, a hospital holding something. None of it was impossible. All of it was the... kind of thing that happened in Nigeria every day. Private hospitals did operate first and hold property after. Ernst did go to their cousins to rest. He knew three people this had happened to. He put it carefully where he had begun to put such things. Under later. Love would explain it later. long pass. He turned over the other pillow's melt of coconut and smoke. He put his face in it and slept.";
+    const lexicon = splitLexicon([], [written]);
+    assert.equal(judgeSplit(written, heard, hash, { lexicon }).matched, false);
+    assert.equal(judgeSplit(written, heard.replace("long pass. ", ""), hash, { lexicon }).matched, true, "the rest of the reading is its block, misheard");
+    assert.equal(judgeSplit("“Wait.”", "Wait. Short paws.", hash).matched, false);
+    assert.equal(judgeSplit("Tunde hit a long pass down the wing.", "Tundi hit a long pass down the wing.", hash, { lexicon: NAMES }).matched, true, "written, they are the words");
+    assert.equal(judgeSplit("He let the remark pass.", "He let the remark pass, long.", hash).matched, true, "a pause is the length before the word");
+  });
+
   it("still flags a cut in the wrong place: its last sentence or its first missing, or the block beside's words in it", () => {
     const stared = "Tunde stared at him. Then he put a hand flat on the table and laughed until he coughed.";
     assert.equal(judgeSplit(stared, "to this dead atom. then he put a hand flat on the table.", hash, { lexicon: NAMES }).matched, false, "its last words are missing");
