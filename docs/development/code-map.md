@@ -1,5 +1,12 @@
 # Code map
 
+Audiobook edit anchors (#1668): contracts `audiobook.ts` relocates cast paragraph seams by
+unique whole-paragraph hashes and derives `startHashes` for shaped blocks. `audiobook-beats.ts`
+uses unique unchanged text to recover moved beat names. `audiobook-listening.ts` uses those
+derived hashes for pictures inside joins; unmatched pictures remain saved and counted as lost,
+never assigned by a reused positional key. Client and coordinator listening projections carry
+the derived block metadata; no persisted schema changes.
+
 Background audiobook preparation (#1777) routes `cast-voices` and `group-chapter-beats` through
 `FsWorldProvider.withBackgroundWorldStore` in coordinator `coordinator.ts`. Their existing
 progress events and stored results survive navigation; `stop-voices` resolves the active run

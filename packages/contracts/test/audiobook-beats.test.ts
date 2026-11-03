@@ -21,6 +21,28 @@ const narrator = (seams?: AudiobookSeam[]) =>
   audiobookBlocks(BODY, null, "Chapter 1", audiobookBlockOptions({ reading: "narrator" }, seams === undefined ? null : { seams }));
 
 describe("beatSeams", () => {
+  it("carries named beats and cast paragraph seams through an insertion (#1668)", () => {
+    const before = narrator();
+    const grouped = beatSeams(before.blocks, before.seams.gaps, new Set(["p0.0", "p5.0"]), AT);
+    const old = narrator(grouped.seams);
+    const beats = grouped.beats.map(beat => ({ start: beat.start, name: "Saved beat", textHash: audiobookTextHash(old.blocks.find(block => block.key === beat.start)!.text) }));
+    const body = "A new first paragraph.\n\n" + BODY;
+    const moved = audiobookBlocks(body, null, "Chapter 1", audiobookBlockOptions({ reading: "narrator" }, { seams: grouped.seams }));
+    assert.equal(moved.seams.dropped, 0);
+    assert.equal(audiobookBeatCount(beats, moved.blocks), beats.length);
+    const cast = { version: 4, hash: "h", derivedAt: AT, passes: 1, dropped: 0, omitted: 0, lines: [
+      { speaker: "Ade", paragraph: 2, occurrence: 0, quote: "It is not possible," },
+      { speaker: "Tunde", paragraph: 3, occurrence: 0, quote: "The goat was in the boot," },
+    ] };
+    const shifted = audiobookBlocks(body, cast, "Chapter 1", audiobookBlockOptions({ reading: "performed" }, { seams: grouped.seams }));
+    assert.equal(shifted.seams.dropped, 0);
+    assert.equal(audiobookBeatCount(beats, shifted.blocks), beats.length);
+    const repeated = [...moved.blocks, { ...moved.blocks[2]!, key: "p99.0" }];
+    assert.equal(audiobookBeatAt(beats, repeated[2]!, repeated), null, "duplicated words do not identify a moved beat");
+    const edited = moved.blocks.map(block => block.key === "p1.0" ? { ...block, text: "Changed beat." } : block);
+    assert.equal(audiobookBeatCount(beats, edited), beats.length - 1);
+  });
+
   for (const divider of ["***", "* * *", "---", "- - -", "___", "_ _ _", "***\n***"]) {
     it(`keeps ${divider} out of automatic and beat-grouped speech while preserving its scene boundary`, () => {
       const body = `She left.\n\nThe door closed.\n\n${divider}\n\nMorning came.`;

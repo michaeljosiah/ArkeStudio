@@ -17765,7 +17765,7 @@ export class Coordinator {
           for (const chapter of [...production.chapters].filter((c) => c.retired !== true).sort((a, b) => a.order - b.order)) {
             const plan = await planAudiobook(store, msg.productionId, chapter.id, { narrator }).catch(() => null);
             if (plan === null || plan.record === "unreadable" || plan.record === null) continue;
-            const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+            const blocks = plan.blocks.map((candidate) => candidate.block);
             for (const placed of placePictures(blocks, plan.record.pictures).placed) {
               // A Tall made from this picture and still showable is done; one whose file is gone is
               // left out of the plan, so the sheet counts it to make and so must this (codex on PR 2166).
@@ -22197,7 +22197,7 @@ export class Coordinator {
     // A route that takes its size from the brief is sent none; the Tall brief says the shape.
     const offered = model.limits.providerSelectedSize !== true;
     const plan = await planAudiobook(store, input.productionId, input.chapter.id, { narrator: await anyNarrator(store, input.productionId) });
-    const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+    const blocks = plan.blocks.map((candidate) => candidate.block);
     // `block` is a picture key, a block's own or a mark's (design turn 237): the picture that stands there.
     const slot = pictureSlot(blocks, plan.record === "unreadable" ? undefined : plan.record?.pictures, input.block);
     if (slot === null) return { ok: false, reason: "that block is no longer in the chapter" };

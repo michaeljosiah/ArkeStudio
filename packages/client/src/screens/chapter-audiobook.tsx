@@ -529,7 +529,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       }
       const recorded = take?.source === "recorded";
       const byPerson = recordedKeys.has(audiobookRecordingKey(block));
-      const named = audiobookBeatAt(recordOrNull?.beats, block);
+      const named = audiobookBeatAt(recordOrNull?.beats, block, derived.blocks);
       const direction = rowDirection(recordOrNull, block);
       const speakerModel = modelOf(speaker);
       const note = audiobookNoteFor({ reading, ...(notes !== undefined ? { notes: { ...notes } } : {}) }, block, narrations);

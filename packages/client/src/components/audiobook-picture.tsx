@@ -106,7 +106,7 @@ export function useChapterPictures(world: WorldBundle | null, rows: readonly Blo
       // The take's word timing, when it is this take's: a picture set inside the take starts on its word (design turn 237, R-204).
       const timing = current ? record?.wordTiming?.[row.block.key] : undefined;
       const words = timing !== undefined && timing.artifactId === take?.artifactId && timing.textHash === take.textHash ? timing.words.map((word) => word.startSec) : undefined;
-      return { key: row.block.key, text: row.block.text, seconds, ...(words !== undefined ? { words } : {}) };
+      return { ...row.block, seconds, ...(words !== undefined ? { words } : {}) };
     });
     const { spans, lost, estimated, startOf } = pictureSpans(blocks, record?.pictures, (file) => listed.has(file));
     // Every picture by its key as the blocks now name it: a block's own under the block's key, a

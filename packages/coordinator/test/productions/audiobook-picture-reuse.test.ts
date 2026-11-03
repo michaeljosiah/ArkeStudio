@@ -151,7 +151,8 @@ describe("saved Bench pictures retain their real inputs (#2143)", () => {
     await writeFile(file, text.replace("OUTLINE ONLY", "REVISED OUTLINE ONLY"));
     await make(h);
     assert.equal(last(h.events).state, "failed");
-    assert.match(last(h.events).reason!, /passage changed/);
+    // Changed words now leave the saved picture unplaced before repeat resolves its passage.
+    assert.match(last(h.events).reason!, /picture changed/);
     assert.equal(h.enqueued.length, 0);
     assert.deepEqual(await readAudiobook(h.store()!, LEDGER, CHAPTER), before);
   }, { prepare }));

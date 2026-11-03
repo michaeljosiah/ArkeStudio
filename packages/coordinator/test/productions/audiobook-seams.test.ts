@@ -139,6 +139,20 @@ describe("picture choices after paragraph shifts (#2120)", () => {
     return placePictures(current.blocks.map(row => row.block), (current.record as ChapterAudiobook).pictures).placed.map(entry => ({ block: current.blocks[entry.index]!.block.key, picture: entry.picture }));
   };
 
+  it("can replace or remove an unplaced picture after its passage is edited (#1668)", () => withHarness(async ({ store, send }) => {
+    await save(send, oldBody);
+    await choose(store, "p0.0");
+    await save(send, oldBody.replace("The first lamp stays lit.", "The first lamp goes out."));
+    assert.equal((await placed(store)).length, 0);
+    const replaced = await choose(store, "p0.0");
+    assert.equal(replaced.pictures?.["p0.0"]?.textHash, audiobookTextHash("The first lamp goes out."));
+    assert.equal((await placed(store)).length, 1);
+    await save(send, oldBody);
+    const removed = await setAudiobookPicture(store, LEDGER, "01-neap", "p0.0", null);
+    assert.equal(removed.pictures?.["p0.0"], undefined);
+    assert.ok((await readFile(join(store.dir, "world-art.png"))).length > 0, "the world picture remains available");
+  }));
+
   it("inserts, joins and chooses a new picture without losing displaced picture objects or narration", () => withHarness(async ({ store, send }) => {
     await save(send, oldBody);
     await read(send);
@@ -295,6 +309,15 @@ describe("picture marks (turn 237)", () => {
   it("refuses a mark at a sentence the block no longer says", () => withHarness(async ({ store, send }) => {
     await save(send, body);
     await assert.rejects(setAudiobookPicture(store, LEDGER, "01-neap", at("p0.0", "The fourth lamp is gone."), { file: "world-art.png", source: "world" }), /no longer in the block/);
+  }));
+
+  it("keeps a picture at its words through successive joins (#1668)", () => withHarness(async ({ store, send }) => {
+    await save(send, "The first lamp stays lit.\n\nThe harbour bell rings twice.\n\nThe last lamp goes out.");
+    await setAudiobookPicture(store, LEDGER, "01-neap", "p1.0", { file: "artifacts/board-v2.png", source: "generated" });
+    await seam(send, "join", await gapAt(store, "join", "p2.0"));
+    assert.deepEqual(await shown(store), [["p1.0", 0, "artifacts/board-v2.png"]]);
+    await seam(send, "join", await gapAt(store, "join", "p1.0"));
+    assert.deepEqual(await shown(store), [["p0.0", 1, "artifacts/board-v2.png"]]);
   }));
 
   it("files the picture a join would take off as a mark at its first sentence in the joined block (R-203)", () => withHarness(async ({ store, send }) => {

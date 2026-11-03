@@ -516,7 +516,7 @@ export async function chooseChapterLook(
  * nothing changes.
  */
 function ownLooksAfter(current: ChapterAudiobook, plan: AudiobookPlan, block: string, key: string, lookId: string | null): Record<string, PictureOwnLooks> | undefined {
-  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+  const blocks = plan.blocks.map((candidate) => candidate.block);
   // `block` is a picture key, a block's own or a mark's (design turn 237).
   const made = pictureSlot(blocks, current.pictures ?? {}, block)?.placed?.picture.look;
   const pending = current.ownLooks?.[block];
