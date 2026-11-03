@@ -1107,13 +1107,14 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
         {vendors.length > 0 && <div className="fy-ms__line">words and the voice to {vendors.join(", ")} · text in Activity</div>}
         {(price.notices ?? []).map((notice) => <div key={notice} className="fy-ms__line" data-testid="read-book-notice">{notice}</div>)}
         {free !== null && <div className="fy-ms__line fy-ch__who-where--warn" data-testid="read-book-free-plan">{free.line}</div>}
+        {price.groupingUnavailable && <div className="fy-ms__line" role="note"><b>Grouping unavailable</b><p>Local transcription is unavailable. Cancel and try Read again when it reconnects.</p></div>}
         {price.requests !== undefined && <div className="fy-ms__line" data-testid="read-book-requests">{price.requests} request{price.requests === 1 ? "" : "s"} · {price.perParagraph ?? price.cloudBlocks} per paragraph</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={onConfirm} data-testid="read-book-confirm">
-            {free !== null && price.estimatedMicroUsd === 0 ? free.confirm : price.requests !== undefined ? `Confirm · ${price.requests} request${price.requests === 1 ? "" : "s"} · ${speechPricePrefix(models, price.voices.map((line) => line.provider))}${formatMicroUsd(price.estimatedMicroUsd)}` : `Confirm ${price.characters.toLocaleString()} characters · ${speechPricePrefix(models, price.voices.map((line) => line.provider))}${formatMicroUsd(price.estimatedMicroUsd)}`}
+          <Button variant="primary" onClick={onConfirm} disabled={price.groupingUnavailable === true} data-testid="read-book-confirm">
+            {price.groupingUnavailable ? "Waiting for local transcription" : free !== null && price.estimatedMicroUsd === 0 ? free.confirm : price.requests !== undefined ? `Confirm · ${price.requests} request${price.requests === 1 ? "" : "s"} · ${speechPricePrefix(models, price.voices.map((line) => line.provider))}${formatMicroUsd(price.estimatedMicroUsd)}` : `Confirm ${price.characters.toLocaleString()} characters · ${speechPricePrefix(models, price.voices.map((line) => line.provider))}${formatMicroUsd(price.estimatedMicroUsd)}`}
           </Button>
         </div>
       </div>

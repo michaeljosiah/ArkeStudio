@@ -1227,6 +1227,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         notices: run.price.notices,
         destinations: run.price.voices.map((voice) => `${voice.label} · ${readerPlace(voice.provider)}`).join(" · "),
         requests: run.price.requests,
+        groupingUnavailable: run.price.groupingUnavailable === true,
         perParagraph: run.price.perParagraph ?? run.toMake,
         voice: run.price.voices.map((voice) => voice.label).join(" · "),
         ...(run.price.freePlan !== undefined ? { freeDay: run.price.freePlan } : {}),
@@ -2105,14 +2106,15 @@ export function ReadSheet({ sheet, headless = false, footer = true }: { sheet: R
         {sheet.recovery !== null && <p className="fy-mono fy-ab__card-line">{sheet.recovery.chapter}</p>}
         {sheet.recovery === null && <p className="fy-mono fy-ab__card-line">{sheet.blocks} block{sheet.blocks === 1 ? "" : "s"}{sheet.requests !== undefined ? ` · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"}` : ""}{sheet.voice !== "" ? ` · ${sheet.voice}` : ""}</p>}
       </div>}
+      {sheet.groupingUnavailable && <div role="note"><b>Grouping unavailable</b><p>Local transcription is unavailable. Cancel and try Read again when it reconnects.</p></div>}
       <div className="fy-ab__reads" data-testid="read-sheet-reads">
         {sheet.recovery !== null ? <>
           {row("Ready", `${sheet.recovery.ready} of ${sheet.recovery.total} blocks`)}
           {row("To read", `${sheet.blocks} blocks`)}
           {row("Estimated total", sheet.estimate)}
         </> : <>{sheet.requests !== undefined ? <>
-          {row("Requests", `${sheet.requests} · grouped`)}
-          {row("Per paragraph", `${sheet.perParagraph} request${sheet.perParagraph === 1 ? "" : "s"}`)}
+          {row("Requests", `${sheet.requests} · ${sheet.groupingUnavailable ? "per paragraph" : "grouped"}`)}
+          {!sheet.groupingUnavailable && row("Per paragraph", `${sheet.perParagraph} request${sheet.perParagraph === 1 ? "" : "s"}`)}
         </> : row("Characters", sheet.characters.toLocaleString())}
         {sheet.destinations !== "" && row("Readers", sheet.destinations)}
         {sheet.freeDay !== undefined && row("Google today", `${sheet.freeDay.allowed} a day · ${sheet.freeDay.allowed - sheet.freeDay.left} used`)}
@@ -2138,8 +2140,8 @@ export function ReadSheetActions({ sheet }: { sheet: ReadSheetState }) {
     <div className="fy-ab__control fy-ab__directsheet-foot">
         <span className="fy-ch__panelpush" />
         <Button variant="ghost" onClick={sheet.cancel}>{sheet.recovery !== null ? "Back to export" : "Cancel"}</Button>
-        <Button variant="primary" data-testid="audiobook-confirm" disabled={sheet.starting || (sheet.castFirst !== undefined && !sheet.castFirst.on)} onClick={sheet.confirm}>
-          {sheet.starting ? "starting…" : sheet.recovery !== null ? `Read ${sheet.blocks} blocks · ${sheet.estimate}` : sheet.freeDay !== undefined && sheet.free ? freePlanAskCopy(sheet.freeDay).confirm : sheet.requests !== undefined ? `Confirm · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"} · ${sheet.estimate}` : `Confirm ${sheet.characters.toLocaleString()} characters · ${sheet.estimate}`}
+        <Button variant="primary" data-testid="audiobook-confirm" disabled={sheet.groupingUnavailable || sheet.starting || (sheet.castFirst !== undefined && !sheet.castFirst.on)} onClick={sheet.confirm}>
+          {sheet.groupingUnavailable ? "Waiting for local transcription" : sheet.starting ? "starting…" : sheet.recovery !== null ? `Read ${sheet.blocks} blocks · ${sheet.estimate}` : sheet.freeDay !== undefined && sheet.free ? freePlanAskCopy(sheet.freeDay).confirm : sheet.requests !== undefined ? `Confirm · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"} · ${sheet.estimate}` : `Confirm ${sheet.characters.toLocaleString()} characters · ${sheet.estimate}`}
         </Button>
       </div>
   );

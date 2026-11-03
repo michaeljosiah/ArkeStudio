@@ -85,7 +85,7 @@ class FreePlanEnded extends Error {
 
 export type AudiobookRunEvent =
   | { type: "started"; toMake: number; blocks: number; requests?: number; groups?: string[][] }
-  | { type: "priced"; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number; toCast?: number; previews?: Extract<import("@arke-studio/contracts").DomainEvent, { type: "audiobook.priced" }>["previews"] }
+  | { type: "priced"; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number; groupingUnavailable?: true; toCast?: number; previews?: Extract<import("@arke-studio/contracts").DomainEvent, { type: "audiobook.priced" }>["previews"] }
   | { type: "request"; index: number; of: number; keys: string[] }
   | { type: "progress"; block: string; outcome: "made" | "adopted" | "flagged"; reason?: string; made: number; toMake: number }
   | { type: "finished"; outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; record?: ChapterAudiobook; reason?: string };
@@ -324,6 +324,7 @@ export interface PreparedChapter {
   requests: number;
   /** As many as they would make a block a request. */
   perParagraph: number;
+  groupingUnavailable: boolean;
   /** The names and words not in English the grouped split expects whisper to mishear (`splitLexicon`). */
   lexicon: ReadonlySet<string>;
 }
@@ -658,13 +659,16 @@ export async function prepareChapter(
   const requests = freeReads.reduce((sum, read) => sum + read.requests, 0);
   const perParagraph = misses.reduce((sum, block) => sum + block.parts.length, 0);
   const freePlan = room.freePlanAllowance === undefined ? null : freePlanShortfall(freeReads, room.freePlanAllowance);
-  const asks = misses.some((block) => speechAsks(block.model, priceOf(block))) || freeCreditOverrun(creditDraw, room.creditLeftMicroUsd ?? Infinity) || freePlan !== null;
+  // A missing local splitter must not silently turn the default into many solo requests,
+  // including on a free plan. An explicitly chosen per-paragraph read needs no warning.
+  const groupingUnavailable = room.transcriber !== true && misses.some(block => block.reaction?.sound === undefined && groupable(block, { ...room, transcriber: true }, plan.book));
+  const asks = groupingUnavailable || misses.some((block) => speechAsks(block.model, priceOf(block))) || freeCreditOverrun(creditDraw, room.creditLeftMicroUsd ?? Infinity) || freePlan !== null;
   // The world's names and the chapter's, which whisper is expected to mishear (2026-10-03): every
   // sheet's name and region, the cast's speakers, and the chapter's capitalised words.
   const names = store.getBundle().sheets.filter((sheet) => sheet.retired !== true).flatMap((sheet) => [sheet.name, ...(sheet.region !== undefined ? [sheet.region] : [])]);
   const speakers = plan.cast === null || plan.cast === "unreadable" ? [] : [...new Set(plan.cast.lines.map((line) => line.speaker))];
   const lexicon = splitLexicon([...names, ...speakers], plan.blocks.map((planned) => planned.block.text));
-  return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate, asks, creditDraw, freeReads, freePlan, groups, requests, perParagraph, lexicon, toCast: options.castPending === true ? castLeftToCast(plan) : [] } };
+  return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate, asks, creditDraw, freeReads, freePlan, groups, requests, perParagraph, groupingUnavailable, lexicon, toCast: options.castPending === true ? castLeftToCast(plan) : [] } };
 }
 
 /** A grouped request as a run sends it (design turn 185): its blocks, the ones it keeps, its turns and its one quote. */
@@ -849,7 +853,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     await finish(preparation.kind, { reason: preparation.reason });
     return;
   }
-  const { plan, toMake, speaking, misses, clones, priceOf, estimate, asks, freePlan, groups, requests, perParagraph, toCast } = preparation.prepared;
+  const { plan, toMake, speaking, misses, clones, priceOf, estimate, asks, freePlan, groups, requests, perParagraph, groupingUnavailable, toCast } = preparation.prepared;
   const quotaRefusal = dailyQuotaRefusal(preparation.prepared.freeReads, deps.dailyQuota);
   if (quotaRefusal !== null && !hasRecoverableAudio(preparation.prepared, deps.findJobs(), productionId, deps.worldId)) {
     await finish("failed", { reason: quotaRefusal, record: preparation.prepared.record });
@@ -878,7 +882,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     const priced = chapterPriceToken(deps.worldId, productionId, chapterId, plan.chapter, misses, groups);
     const asked = freePlan !== null ? createHash("sha256").update(`${priced}\n${JSON.stringify(freePlan.short)}`).digest("hex") : priced;
     if (asks && deps.confirmationToken !== asked) {
-      emit({ type: "priced", previews, characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: asked, voices: priceLines(misses, priceOf, store.getBundle()), notices, ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}), toCast: toCast.length });
+      emit({ type: "priced", previews, characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: asked, voices: priceLines(misses, priceOf, store.getBundle()), notices, ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 || groupingUnavailable ? { requests, perParagraph } : {}), ...(groupingUnavailable ? { groupingUnavailable: true as const } : {}), toCast: toCast.length });
       return;
     }
     const refused = await deps.castFirst();
@@ -935,7 +939,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   // token: the day moves as the book reads, and the book's answer covered it.
   const answer = freePlan !== null ? createHash("sha256").update(`${token}\n${JSON.stringify(freePlan.short)}`).digest("hex") : token;
   if (asks && deps.priced === undefined && deps.confirmationToken !== answer) {
-    emit({ type: "priced", previews, characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: answer, voices: priceLines(misses, priceOf, store.getBundle()), notices, ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}) });
+    emit({ type: "priced", previews, characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: answer, voices: priceLines(misses, priceOf, store.getBundle()), notices, ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 || groupingUnavailable ? { requests, perParagraph } : {}), ...(groupingUnavailable ? { groupingUnavailable: true as const } : {}) });
     return;
   }
 

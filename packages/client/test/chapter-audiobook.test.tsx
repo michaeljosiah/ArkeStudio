@@ -2267,6 +2267,18 @@ describe("grouped reads (design turn 185)", () => {
     assert.equal(answered.confirmationToken, "tok");
   });
 
+  it("names unavailable grouping and waits for local transcription", async () => {
+    const m = await mountGrouped(grouped(undefined, false));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 4_600, confirmationToken: "tok", voices: [], requests: 4, perParagraph: 4, groupingUnavailable: true }));
+    const sheet = q(m, '[data-testid="read-sheet"]')!;
+    assert.match(sheet.textContent!, /Grouping unavailable/);
+    assert.match(sheet.textContent!, /Requests4 · per paragraph/);
+    const confirm = q(m, '[data-testid="read-sheet"] [data-testid="audiobook-confirm"]')!;
+    assert.equal((confirm as HTMLButtonElement).disabled, true);
+    assert.equal(confirm.textContent, "Waiting for local transcription");
+  });
+
   it("Gemini display turns retain one solo request and its estimate", async () => {
     const { compileAudiobookPerformance, quoteGroupedSpeech } = await import("@arke-studio/contracts");
     const { performedDirectionView, soloRowEstimate } = await import("../src/screens/chapter-audiobook.js");
