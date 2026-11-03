@@ -951,6 +951,13 @@ export function subscribeBenchSubjectOpened(listener: (answer: BenchSubjectOpene
   return () => benchSubjectOpenedListeners.delete(listener);
 }
 
+type BenchReferenceUsed = Extract<DomainEvent, { type: "bench.reference-used" }>;
+const benchReferenceUsedListeners = new Set<(answer: BenchReferenceUsed) => void>();
+export function subscribeBenchReferenceUsed(listener: (answer: BenchReferenceUsed) => void): () => void {
+  benchReferenceUsedListeners.add(listener);
+  return () => benchReferenceUsedListeners.delete(listener);
+}
+
 export type BenchSubjectAccepted = Extract<DomainEvent, { type: "bench.subject-accepted" }>;
 const benchSubjectAcceptedListeners = new Set<(answer: BenchSubjectAccepted) => void>();
 export function subscribeBenchSubjectAccepted(listener: (answer: BenchSubjectAccepted) => void): () => void {
@@ -2168,6 +2175,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "bench.subject-opened") {
       for (const listener of benchSubjectOpenedListeners) listener(event);
+    }
+    if (event.type === "bench.reference-used") {
+      for (const listener of benchReferenceUsedListeners) listener(event);
     }
     if (event.type === "bench.subject-accepted") {
       for (const listener of benchSubjectAcceptedListeners) listener(event);
@@ -7900,6 +7910,11 @@ export function sendBenchUpscale(worldId: string, sessionId: string, takeId: str
 
 export function sendBenchKeep(worldId: string, sessionId: string, takeId: string): void {
   send({ kind: "bench-keep", worldId, sessionId, requestId: ulid(), takeId } as ClientMessage);
+}
+
+export function sendBenchUseReference(worldId: string, sessionId: string, takeId: string, sheetId: string, image: "main-photo" | "character-sheet"): string | null {
+  const requestId = ulid();
+  return send({ kind: "bench-use-reference", worldId, sessionId, takeId, sheetId, image, requestId } as ClientMessage) ? requestId : null;
 }
 
 export function sendBenchAccept(worldId: string, sessionId: string, takeId: string): string | null {

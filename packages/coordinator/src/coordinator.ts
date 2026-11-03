@@ -1,3 +1,4 @@
+import { useBenchCharacterImage } from "./bench/character-kit.js";
 import { readShotPromptHistory, restoreShotPrompt, readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
 import { measureProductionMedia } from "./media/measurement.js";
 import { foldBenchSession as foldPromptBench, type PromptToolsResult, type PromptInspection, type PromptInspectSource } from "@arke-studio/contracts";
@@ -14732,6 +14733,24 @@ export class Coordinator {
         await this.refreshBench(msg.worldId, msg.sessionId);
         return;
       }
+      case "bench-use-reference": {
+        const answer = (accepted: boolean, reason?: string) => this.emit({ at: this.nowIso(), type: "bench.reference-used",
+          worldId: msg.worldId, sessionId: msg.sessionId, takeId: msg.takeId, requestId: msg.requestId, accepted, ...(reason ? { reason } : {}) });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) { answer(false, "That world is no longer open."); return; }
+        try {
+          const bench = await this.benchFor(msg.worldId, msg.sessionId);
+          const take = bench?.session.takes.find(take => take.id === msg.takeId);
+          if (!bench || !take) throw new Error("That Bench image is unavailable.");
+          await useBenchCharacterImage(store, bench.session, take, msg.sheetId, msg.image, msg.requestId, () =>
+            !this.stillOpen(store) || this.stopping ? "That world is no longer open." :
+            msg.image === "character-sheet" && this.characterSheetJobRunning(msg.worldId, msg.sheetId)
+              ? "A character sheet is still being generated. Wait for it or settle it in Activity." : null);
+          this.refreshIfStillOpen(store);
+          answer(true);
+        } catch (error) { answer(false, describeCoordinatorError(error)); }
+        return;
+      }
       case "bench-accept": {
         const answer = (accepted: boolean, reason?: string) =>
           this.emit({
@@ -21138,12 +21157,11 @@ export class Coordinator {
         const frozen = take.params["provenance"] as
           { sheets?: Record<string, number>; anchorFile?: string } | undefined;
         const sheetVersion = frozen?.sheets?.[msg.sheetId] ?? take.provenance.sheets[msg.sheetId];
-        // A generated take must name the main photo it was conditioned on — without it there is
-        // no telling what the composite depicts. An uploaded one has no such lineage and never
-        // will, so requiring one here left the "Accept this sheet" button on an upload whose
-        // first commit failed permanently inert: pressed, and nothing (PR #241 review).
-        const uploaded = take.provider === "user";
-        if (sheetVersion === undefined || (!uploaded && !frozen?.anchorFile)) return;
+        // Kit generation needs its frozen anchor. Uploads and explicit Bench copies have no
+        // required anchor; their pending takes must remain acceptable after a failed commit.
+        const benchCopy = typeof take.params["requestId"] === "string" && take.params["requestId"].startsWith("bench-kit:") && typeof take.params["benchTakeId"] === "string";
+        const selectedImage = take.provider === "user" || benchCopy;
+        if (sheetVersion === undefined || (!selectedImage && !frozen?.anchorFile)) return;
         await acceptCharacterSheet(store, sheet, {
           file: `takes/${take.id}/${take.media}`,
           takeId: take.id,
@@ -21156,7 +21174,7 @@ export class Coordinator {
         // not: the usual answer to one is to run it again, and running it again with the
         // picture you had just chosen is the point of having staged it.
         await this.dropStagedReference(store, stagedReferenceKey("character-sheet", msg.sheetId));
-        await this.refreshWorldSnapshot(msg.worldId);
+        this.refreshIfStillOpen(store);
         return;
       }
       case "generate-character-looks": {
