@@ -47,6 +47,10 @@
 .fy-ills__reason { display: inline-block; padding: 0 6px; border: 1px solid var(--border); border-radius: 5px; color: var(--foreground); }
 .fy-ills__wh { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; font-size: var(--text-xs); color: var(--muted-foreground); }
 .fy-ills__who { display: inline-flex; align-items: center; gap: 6px; }
+.fy-ills__prompt { min-width: 0; grid-column: 1 / -1; border-top: 1px solid var(--border); font-size: var(--text-xs); }
+.fy-ills__prompt summary { cursor: pointer; padding-block: 10px; font-weight: 500; }
+.fy-ills__prompt summary:focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; border-radius: 4px; }
+.fy-ills__prompt p { margin: 0 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; color: var(--muted-foreground); }
 .fy-ills__note { font: 400 var(--text-2xs) var(--font-mono); color: var(--muted-foreground); }
 .fy-ills__wh .ui-btn { height: auto; min-height: 0; padding: 0 2px; font: 400 var(--text-2xs) var(--font-mono); color: var(--muted-foreground); text-decoration: underline; text-underline-offset: 3px; background: transparent; }
 .fy-ills__fig { width: 22px; height: 30px; flex: none; box-sizing: border-box; border-radius: 6px; border: 1px solid var(--border); object-fit: cover; object-position: top; display: block; background: var(--secondary); }

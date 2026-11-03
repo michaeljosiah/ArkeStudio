@@ -10,7 +10,8 @@ Scene-scoped illustration treatment (#1773): contracts `audiobook-look.ts` filte
 scene state from derived shared mood while preserving author overrides. Coordinator
 `audiobook-picture-suggest.ts` composes each proposal's `effectivePrompt`; illustration refresh
 and `makeBenchPicture` require a refreshed acceptance when the composed brief changes.
-Tests live in the existing audiobook look, picture brief and illustration suites.
+Client `components/audiobook-illustrate.tsx` shows the complete brief in a collapsed disclosure.
+Tests live in the existing audiobook look, picture brief, illustration and chapter-audiobook suites.
 
 Audiobook scene dividers (#1775): contracts `manuscript.ts` classifies thematic breaks outside
 fenced content. Blocks, beat boundaries, request grouping and timing proposals share that rule;
