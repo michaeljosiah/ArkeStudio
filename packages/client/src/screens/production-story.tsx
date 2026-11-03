@@ -269,6 +269,7 @@ function OverviewStoryScreen() {
         <div className="fy-story__chathead">
           <div className="fy-eyebrow-sm">
             OVERVIEW · {production ? productionShape(production.meta).displayLabel.toLowerCase() : ""}
+            {story?.targetLength?.trim() ? ` · Target: ${story.targetLength.trim()}` : ""}
           </div>
           <h1 className="fy-story__h1">{story || style ? "The story, as it stands" : "Nothing settled yet"}</h1>
           {/* Page scale (issue 859): the cards below, read through in the order drawn. Only once
