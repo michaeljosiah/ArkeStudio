@@ -120,7 +120,7 @@ export function AudiobookActivityReceipts() {
     if (ended) finished.current.add(run.id);
     const id = `audiobook:${run.id}`;
     toast.custom(() => <ReadReceipt key={`${id}:${ended ? "end" : "start"}`} initial={run} dismiss={() => toast.dismiss(id)} />, {
-      id, duration: Infinity, position: "top-right", style: { width: "min(420px, calc(100vw - 24px))" },
+      id, duration: Infinity, position: window.innerWidth <= 600 ? "top-right" : "bottom-right", style: { width: "min(420px, calc(100vw - 24px))" },
     });
   }), []);
   return null;
