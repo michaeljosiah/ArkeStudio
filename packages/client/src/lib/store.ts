@@ -6385,8 +6385,9 @@ export function useStagedTakes(): StoreState["stagedTakes"] {
 }
 
 /** One block's direction, set or cleared (SPEC-047 R-6): the coordinator answers with the record, or why not. */
-export function setAudiobookBlock(worldId: string, productionId: string, chapterFile: string, block: string, direction: import("@arke-studio/contracts").AudiobookDirectionInput | null): boolean {
-  return send({ kind: "set-audiobook-block", worldId, productionId, chapterFile, block, direction });
+export function setAudiobookBlock(worldId: string, productionId: string, chapterFile: string, block: string, direction: import("@arke-studio/contracts").AudiobookDirectionInput | null): string | null {
+  const requestId = ulid();
+  return send({ kind: "set-audiobook-block", worldId, productionId, chapterFile, block, direction, requestId }) ? requestId : null;
 }
 
 /** Join or Split pressed on a gap between two lines (design turn 198): answered with the record, or why not. */
