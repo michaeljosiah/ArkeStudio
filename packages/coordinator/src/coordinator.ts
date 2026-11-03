@@ -3518,7 +3518,7 @@ export class Coordinator {
       .openStore?.()
       ?.getBundle()
       .productions.find((candidate) => candidate.meta.id === productionId);
-    const modelId = requestedId ?? this.agentOverrides?.[agent]?.model ?? production?.meta.models?.llm;
+    const modelId = requestedId ?? this.agentOverridesInEffect()?.[agent]?.model ?? production?.meta.models?.llm;
     if (modelId !== undefined) {
       const selected = await this.validateLanguageModel(modelId, agent === "stage-designer", signal, requestedVariant);
       // Kept per model: the effort a production left a model at follows that model, whichever way
@@ -4451,7 +4451,7 @@ export class Coordinator {
             // harness default as the vendor to mark.
             onAuthFailure: (purpose) => {
               const agent = opts.authoring?.agentForPurpose(purpose);
-              const override = agent !== undefined ? this.agentOverrides?.[agent]?.model : undefined;
+              const override = agent !== undefined ? this.agentOverridesInEffect()?.[agent]?.model : undefined;
               const hint = override?.split("/")[0] ?? null;
               void this.vendorAuth.noteAuthFailure(hint).catch(() => {});
             },

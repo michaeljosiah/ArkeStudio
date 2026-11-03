@@ -33,7 +33,10 @@ export function AgentsPanel({ focusAgent }: { focusAgent?: string } = {}) {
   const focusTarget = useRef<HTMLSelectElement | null>(null);
   const focusedAgent = useRef<string | undefined>(undefined);
   const catalogStatus = state?.app.harnessModelStatus?.status;
-  const writerModel = agents.find(a => a.name === "story-writer")?.model ?? undefined;
+  const modelOf = (name: string) => agents.find(a => a.name === name)?.model ?? undefined;
+  const writerModel = modelOf("story-writer");
+  // The comic script reader starts on the lettering reader's model before the writer's (SPEC-064 decision 15).
+  const lettering = modelOf("page-lettering-reader") ?? modelOf("chapter-visual-reviewer");
 
   // Ask once when the screen opens: the list is the harness's, and it can change under us.
   useEffect(() => {
@@ -75,7 +78,8 @@ export function AgentsPanel({ focusAgent }: { focusAgent?: string } = {}) {
                 onChange={(e) => setAgentConfig(a.name, { model: e.target.value === "" ? null : e.target.value })}
               >
                 {/* Empty is a real answer, not a missing one: the writer's model, or the harness's choice. */}
-                <option value="">{writerModel !== undefined && inheritsWriterModel(a.name) ? "Same as Story writer" : "Ask the harness"}</option>
+                <option value="">{a.name === "comic-script-reader" && lettering !== undefined ? "Same as Page lettering reader"
+                  : writerModel !== undefined && inheritsWriterModel(a.name) ? "Same as Story writer" : "Ask the harness"}</option>
                 <HarnessModelOptions state={state} selected={a.model} needsImages={a.name === "stage-designer"} />
               </select>
               <button
