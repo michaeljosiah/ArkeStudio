@@ -34,7 +34,7 @@ import { Button, Select, Textarea } from "./ui.js";
  * and the look disagree. Every line is the author's to change and is theirs from then on. The
  * look's image is the reference that rides in this chapter's pictures; the words never override it.
  * Chapter details starts folded. Existing field-blur writes, close-view operations and derivation
- * remain in that disclosure after first use; the empty sheet exposes Derive (#1704).
+ * remain in that disclosure after first use; the empty sheet exposes Derive.
  */
 
 /** `blocks 3, 9` · `block 31` — the numbers the margin shows, by position in the chapter. */
