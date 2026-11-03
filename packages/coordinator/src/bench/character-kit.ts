@@ -33,7 +33,8 @@ export async function useBenchCharacterImage(store: WorldStore, session: BenchSe
   if (!copied) {
     const file = relative(store.dir, benchTakeMediaPath(store.dir, session.id, take)).replace(/\\/g, "/");
     const image = (await readContainedImageReferences(store.dir, [file]))[0]!;
-    if (sha256(image.data) !== take.media.hash) throw new Error("The saved Bench image changed. Choose it again.");
+    // Bench finalization records a 16-digit digest prefix; imports may retain the full digest.
+    if (sha256(image.data).slice(0, take.media.hash.length) !== take.media.hash) throw new Error("The saved Bench image changed. Choose it again.");
     const record = kind === "main-photo" ? recordUploadedMainPhotoTake : recordUploadedCharacterSheetTake;
     copied = await record(store, sheetId, take.media.file, image.data, { requestId: identity, precondition,
       source: { provider: take.request.provider, model: take.request.model, ...(take.jobId ? { jobId: take.jobId } : {}),

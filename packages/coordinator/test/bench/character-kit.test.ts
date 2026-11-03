@@ -12,7 +12,7 @@ import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 const CLOCK = () => "2026-11-03T10:00:00.000Z";
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6S1sAAAAASUVORK5CYII=", "base64");
-async function fixture() {
+async function fixture(fullHash = false) {
   const { root, worldDir } = await makeTempRoot();
   const provider = new FsWorldProvider(root, { clock: CLOCK });
   await provider.loadWorld(WORLD_ID);
@@ -24,7 +24,9 @@ async function fixture() {
   await mkdir(media, { recursive: true });
   const source = join(media, "picture.png");
   await writeFile(source, PNG);
-  await bench.store.append({ type: "take-completed", takeId, media: { file: "picture.png", hash: sha256(PNG) }, cost: { estimatedMicroUsd: 80, actualMicroUsd: 73 }, completedAt: CLOCK() });
+  // Match the shortened hash emitted by the production bench-take finalizer.
+  const hash = fullHash ? sha256(PNG) : sha256(PNG).slice(0, "sha256:".length + 16);
+  await bench.store.append({ type: "take-completed", takeId, media: { file: "picture.png", hash }, cost: { estimatedMicroUsd: 80, actualMicroUsd: 73 }, completedAt: CLOCK() });
   const events: DomainEvent[] = [];
   const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "changes.jsonl"), appVersion: "test", observeEvent: event => events.push(event) });
   const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(ClientMessageSchema.parse(message));
@@ -32,8 +34,8 @@ async function fixture() {
   return { provider, worldDir, source, send, command, events, close: () => provider.close() };
 }
 
-for (const image of ["main-photo", "character-sheet"] as const) it(`uses a saved Bench image as ${image} without dispatch and replays idempotently`, async () => {
-  const w = await fixture();
+for (const fullHash of [false, true]) for (const image of ["main-photo", "character-sheet"] as const) it(`uses a saved Bench image as ${image} with a ${fullHash ? "full" : "production-prefix"} hash without dispatch and replays idempotently`, async () => {
+  const w = await fixture(fullHash);
   try {
     const store = w.provider.openStore()!;
     const old = store.getBundle().referenceKits.find(kit => kit.sheetId === "maren-kest");
