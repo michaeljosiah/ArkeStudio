@@ -34,6 +34,13 @@ async function fixture() {
   };
   return { dir, store, target, chapters, findings, reading, synthesis, updates, service, runner };
 }
+it("keeps a stage whose model ranks findings past priority 3 or raises too many", async () => {
+  const f = await fixture(), ranked = Array.from({ length: 8 }, (_, index) => ({ ...f.findings[0]!, priority: index + 1 }));
+  const review = await f.service(async input => input.prompt.includes('"verdict"') ? f.synthesis : { ...f.reading, findings: ranked }).start(f.target, ulid(), "");
+  assert.equal(review.status, "complete");
+  const reading = review.tasks.find(task => task.kind === "reading")!.reading!;
+  assert.equal(reading.findings.length, 6); assert.deepEqual(reading.findings.map(finding => finding.priority), [1, 2, 3, 3, 3, 3]);
+});
 it("pins all saved chapters, retains evidence/intent and author decisions, and leaves source/media bytes unchanged", async () => {
   const f = await fixture(), files = f.chapters.map(c => join(f.dir, "productions", f.target.productionId, "chapters", `${c.file}.md`));
   await writeFile(join(f.dir,"untouched-media.bin"), "media"); files.push(join(f.dir,"untouched-media.bin"));

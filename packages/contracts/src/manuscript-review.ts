@@ -6,7 +6,8 @@ export type ManuscriptReviewTarget = z.infer<typeof ManuscriptReviewTargetSchema
 export const ManuscriptReviewDecisionSchema = z.enum(["open", "intentional", "dismissed", "resolved"]);
 const citation = z.object({ chapterId: z.string().min(1).max(200), quote: z.string().min(1).max(1200) }).strict();
 export const ManuscriptFindingDraftSchema = z.object({
-  title: z.string().min(1).max(200), priority: z.number().int().min(1).max(3),
+  // A model ranks findings 1…n as often as it scores them 1–3; a rank past 3 must not cost the stage.
+  title: z.string().min(1).max(200), priority: z.number().transform(n => Math.min(3, Math.max(1, Math.round(n)))),
   kind: z.enum(["contradiction", "interpretation", "author-decision"]),
   observation: z.string().min(1).max(1600), recommendation: z.string().min(1).max(1600),
   preserve: z.string().max(1000), dependencies: z.string().max(1000),
@@ -15,7 +16,7 @@ export const ManuscriptFindingDraftSchema = z.object({
 export const ManuscriptReadingSchema = z.object({
   synopsis: z.string().min(1).max(6000), strengths: z.string().max(3000),
   editorial: z.string().max(6000), continuity: z.string().max(6000),
-  findings: z.array(ManuscriptFindingDraftSchema).max(6),
+  findings: z.array(ManuscriptFindingDraftSchema).transform(list => list.slice(0, 6)),
 }).strip().refine(value => JSON.stringify(value).length <= 16000, "Reading exceeds the 16,000-character stage budget.");
 export const ManuscriptSynthesisSchema = z.object({
   verdict: z.string().min(1).max(3000), synopsis: z.string().min(1).max(16000),
