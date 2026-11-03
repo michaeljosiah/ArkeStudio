@@ -479,7 +479,7 @@ function CutEditorScreen() {
    * timeline record blocks editing.
    */
   const renderError = renderPlan !== null && !renderPlan.ok ? renderPlan.reason : view.kind === "unavailable" && timelineState.status !== "ready" ? view.reason : null;
-  const planTotalSec = previewPlan?.totalSec ?? null;
+  const planTotalSec = effectProjection.canonicalPlan?.totalSec ?? null;
   /*
    * Two lengths. The CANVAS is how much timeline to draw and must extend past the last clip or
    * there is nowhere to drop the next one; the FILM is how long the thing actually is. Trailing
@@ -492,7 +492,8 @@ function CutEditorScreen() {
     ? spineCut.trackDurationSec
     : Math.max(cut?.totalSec ?? 0, planTotalSec ?? 0, mediaOnly ? (planTotalSec ?? 0) + MEDIA_CANVAS_HEADROOM_SEC : 0);
   const canvasSec = Math.max(mediaCanvasSec, ...(effectTimeline?.tracks.flatMap(track => (track.effects ?? []).map(effect => (effect.startFrame + effect.durationFrames) / frameRate)) ?? []));
-  const filmSec = planTotalSec ?? mediaCanvasSec;
+  // The live film can grow under a trim; its canvas scale must keep the pointerdown geometry.
+  const filmSec = previewPlan?.totalSec ?? mediaCanvasSec;
   /** Lane layout and scrubbing get the canvas; playback and the readout get the film. */
   const totalSec = canvasSec;
   const transport = useCutTransport(filmSec);

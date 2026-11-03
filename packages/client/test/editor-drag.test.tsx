@@ -269,6 +269,8 @@ describe("a trim the viewer follows (issue 1036)", () => {
       const clip = screen.container.querySelector<HTMLElement>("[data-clip='cl_plate']")!;
       const span = spanFrom(clip, 96);
       const grip = clip.querySelector<HTMLElement>(`.fy-pictclip__grip--${edge}`)!;
+      const ruler = screen.container.querySelector("[role='slider'][aria-label='Seek']")!;
+      const canvasEnd = ruler.getAttribute("aria-valuemax");
       const delta = edge === "start" ? -24 : 24;
       await act(async () => {
         pointer(grip, "pointerdown", { clientX: 300 });
@@ -276,6 +278,7 @@ describe("a trim the viewer follows (issue 1036)", () => {
       });
       const expected = edge === "start" ? 24 : 119;
       assert.equal(screen.container.querySelector("[role='slider'][aria-label='Seek']")?.getAttribute("aria-valuetext"), formatFrames(expected, 24));
+      assert.equal(ruler.getAttribute("aria-valuemax"), canvasEnd, "the canvas keeps its pointerdown scale while the film grows");
       assert.equal(screen.container.querySelector(".fy-cutviewer__empty"), null, "the extended draft supplies the viewer's picture");
       assert.equal(commandsSent(screen).length, 0, "the picture is visible before the command is sent");
       await act(async () => pointer(grip, "pointercancel"));
