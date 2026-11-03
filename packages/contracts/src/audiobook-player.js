@@ -276,7 +276,8 @@ export function mountAudiobookPlayer(root, options) {
 .abp-transport>.abp-grow{display:none}
 .abp-now{grid-area:now}.abp-len{grid-area:len}
 .abp-ctl{grid-area:ctl;justify-content:space-between}
-.abp-labs{grid-area:labs;justify-content:space-between}
+.abp-labs{grid-area:labs;justify-content:space-between;flex-wrap:wrap}
+.abp-labs .abp-lab{height:auto;min-height:44px;max-width:100%;flex-shrink:1;white-space:normal;text-align:center}
 .abp-play{width:64px;height:64px}
 .abp-sheet{left:12px;right:12px;width:auto;top:72px;max-height:calc(100% - 272px)}
 .abp-poster{padding:0 24px 64px}
