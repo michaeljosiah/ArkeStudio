@@ -6790,8 +6790,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ab__request--now::before { background: var(--foreground); }
 /* Inside a request its bracket is the one bar; the blocks' own would stand beside it. */
 .fy-ab__request .fy-ab__block:not(.fy-ab__block--selected)::before { content: none; }
-.fy-ab__split { display: flex; align-items: center; gap: 10px; margin: 0 0 8px 146px; font-size: 12px; }
-.fy-ab__split-heard { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); }
+.fy-ab__split { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 8px 146px; font-size: 12px; }
+.fy-ab__split-heard { flex: 1 0 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); }
 .fy-ab__splitpanel { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .fy-ab__readsheet .fy-ab__read b, .fy-ab__splitpanel .fy-ab__read b { width: 84px; }
 .fy-ab__readsheet .fy-ab__directsheet-foot, .fy-ab__splitpanel .fy-ab__control { flex-wrap: wrap; justify-content: flex-end; }
