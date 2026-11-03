@@ -2345,6 +2345,11 @@ describe("grouped reads (design turn 185)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, outcome: "read", made: 3, flagged: 1, record: held }));
     const line = q(m, '[data-testid="audiobook-split"]')!;
     assert.match(line.textContent!, /split did not match · “six and the tide not called”/);
+    const sentBefore = m.sent.length;
+    await act(async () => (line.querySelector('[data-testid="audiobook-keep-split-inline"]') as HTMLElement).click());
+    assert.deepEqual(m.sent.slice(sentBefore).map(message => message.kind), ["keep-audiobook-split"], "Keep accepts existing audio without a new read");
+    assert.equal((m.sent.at(-1) as Extract<ClientMessage, { kind: "keep-audiobook-split" }>).block, "p3.0");
+    assert.equal(q(m, '[data-testid="audiobook-split-panel"]'), null, "the inline action does not open the block panel");
     await act(async () => all(m, ".fy-ab__block")[3]!.click());
     const panel = q(m, '[data-testid="audiobook-split-panel"]')!;
     assert.match(panel.textContent!, /grouped · 1:12–1:31/);
