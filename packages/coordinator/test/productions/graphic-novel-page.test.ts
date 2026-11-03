@@ -145,6 +145,14 @@ describe("a comic page made (SPEC-064 R-22 – R-27)", () => {
       assert.deepEqual(said, ["checking", "made"]);
     }, { model: LETTERER }));
 
+  it("says why and takes the job back when the provider's lane is paused (issue 2415)", () =>
+    withHarness(async (h) => {
+      const { production, page } = await book(h);
+      await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, confirmedMicroUsd: 1_000_000 });
+      assert.match((last(h.events, "comic.page-made") as Made).reason ?? "", /no credits remaining/);
+      assert.equal(h.cancelled.length, 1, "the job does not wait on behind the pause");
+    }, { model: LETTERER, land: false, pausedLane: "openai: You have no credits remaining." }));
+
   it("files a page that lands after its press stopped waiting, with nobody opening it", () =>
     withHarness(async (h) => {
       const { production, page } = await book(h);

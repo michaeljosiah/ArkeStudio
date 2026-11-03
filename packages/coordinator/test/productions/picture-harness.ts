@@ -77,6 +77,8 @@ export interface HarnessOptions {
   videoOutput?: boolean;
   /** How long a press waits on its picture and how often a late page looks again. */
   pictureWait?: { waitMs: number; lateLookMs: number };
+  /** The provider's lane stands paused for this reason, as after it refused a job. */
+  pausedLane?: string;
 }
 
 export async function withHarness(run: (h: Harness) => Promise<void>, options: HarnessOptions = {}): Promise<void> {
@@ -148,12 +150,14 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
   };
   (coordinator as unknown as { jobQueue: unknown }).jobQueue = {
     listJobs: () => jobs,
+    queueStatus: (provider: string) => ({ provider, held: 0, ...(options.pausedLane !== undefined ? { paused: true, pauseKind: "fault", reason: options.pausedLane } : { paused: false }) }),
     enqueue: async (input: Input) => {
       const n = enqueued.length;
       enqueued.push({ params: input.params, estimatedMicroUsd: input.estimatedMicroUsd, at: Date.now() });
       const what = behaviour(n);
       const id = `jb_01J${String(n).padStart(23, "0")}`;
       jobs.push({ id, attempt: options.reached === false ? 0 : 1,
+        ...(options.pausedLane !== undefined ? { status: "queued", provider: "openai" } : {}),
         ...(options.storageWait ? { status: "running", storageWait: options.storageWait } : {}),
         ...(options.finalization ? { status: "succeeded", finalization: options.finalization } : {}) });
       const [sessionId, takeId] = input.target.id.split("/") as [string, string];
