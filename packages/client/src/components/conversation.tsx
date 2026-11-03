@@ -325,6 +325,8 @@ export function ConversationPermissionCard({
   const request = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  const [proposalReviewOpen, setProposalReviewOpen] = useState(false);
+  const [proposalReviewNeeded, setProposalReviewNeeded] = useState(false);
   const needsProductionPreview = ["world-chat-production-create", "world-chat-production-metadata", "world-chat-production-scene-command", "world-chat-production-scene"].includes(action.actionKind);
   const supported = DECIDABLE_CARD_FAMILIES.has(action.shown.body.family) && (!needsProductionPreview || !!action.shown.productionPreview);
   const onPC = isRemoteSession() && isRemoteHostConversationAction(action.actionKind);
@@ -335,6 +337,7 @@ export function ConversationPermissionCard({
       if (answer.requestId !== request.current || answer.actionId !== action.actionId) return;
       request.current = null;
       setBusy(false);
+      setProposalReviewNeeded(answer.disposition === "refused" && answer.reason === "validation-refused");
       setAnnouncement(
         answer.disposition === "recorded"
           ? `${action.shown.title}: ${answer.decision === "approve" ? "approved" : "denied"}.`
@@ -366,6 +369,10 @@ export function ConversationPermissionCard({
 
   const body = <ConversationActionBody action={action} supported={supported} />;
   const comicDraft = action.actionKind === "world-chat-production-comic-script";
+  const savedProposal = action.status === "pending" && action.authority.kind === "proposal-manager"
+    && ["world-chat-production-overview", "world-chat-production-prose-style", "world-chat-production-chapter"].includes(action.actionKind)
+    && state?.world?.meta.worldId === action.worldId
+    ? state.world.proposals.find(staged => staged.proposal.id === action.authority.id) : undefined;
   const comicChapter = comicDraft ? state?.world?.proposals.find(p => p.proposal.id === action.authority.id)?.proposal.targets
     .map(target => /^productions\/[^/]+\/comic\/([^/]+)\.json$/.exec(target.path)?.[1]).find(Boolean) : undefined;
   const consequences = action.shown.ripples.length > 0 ? (
@@ -405,6 +412,7 @@ export function ConversationPermissionCard({
       <StagePlayblastReceipt action={action} />
       <ConversationFrameRunCard action={action} />
       {action.blockedReason && <p className="fy-actioncard__notice">{action.blockedReason}</p>}
+      {savedProposal && proposalReviewNeeded && <p className="fy-actioncard__notice">{announcement}</p>}
       {action.decision && (
         <div className="fy-actioncard__audit">
           {action.decision.actorId === "local-user" ? "You" : action.decision.actorId}
@@ -434,7 +442,8 @@ export function ConversationPermissionCard({
       ) : null}
       {supported && !comicDraft && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
         <div className="fy-actioncard__actions">
-          {action.status === "pending" && (!onPC || action.availableDecisions.includes("approve")) && (onPC ? <OnYourPC>choose files and approve</OnYourPC> : <Button
+          {savedProposal && <Button variant={proposalReviewNeeded ? "primary" : "outline"} onClick={() => setProposalReviewOpen(true)}>Review saved proposal</Button>}
+          {!(savedProposal && proposalReviewNeeded) && action.status === "pending" && (!onPC || action.availableDecisions.includes("approve")) && (onPC ? <OnYourPC>choose files and approve</OnYourPC> : <Button
             variant="primary"
             disabled={busy || !action.availableDecisions.includes("approve")}
             onClick={() => decide("approve")}
@@ -461,6 +470,9 @@ export function ConversationPermissionCard({
         <p className="fy-actioncard__unsupported">This card type is not available in this version. Nothing can be approved.</p>
       )}
       <div className="fy-actioncard__live" aria-live="assertive" role="status">{announcement}</div>
+      {savedProposal && <PageSheet open={proposalReviewOpen} onClose={() => setProposalReviewOpen(false)} title="Review saved proposal">
+        <ConnectedProposalPanel staged={savedProposal} onAccepted={() => setProposalReviewOpen(false)} />
+      </PageSheet>}
     </article></StudioCard>
   );
 }

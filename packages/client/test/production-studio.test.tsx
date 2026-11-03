@@ -12,7 +12,7 @@ import { StudioCard, StudioInlineContext, StudioSidebar, StudioToggle, useProduc
 import { ConversationPermissionCard } from "../src/components/conversation.js";
 import { HumanDecisionCardView } from "../src/components/human-decision-card.js";
 import { studioActionFocus } from "../src/lib/production-studio.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -73,6 +73,29 @@ async function setup(action = card(), docked = true) {
   await render();
   return { action, sent, update: async (actions: ConversationActionCard[]) => { current = { ...current, actions }; await render(); } };
 }
+
+it("opens a saved book proposal for explicit review after a refused chat approval (#1740)", async () => {
+  const action = card();
+  action.actionKind = "world-chat-production-prose-style";
+  action.authority = { kind: "proposal-manager", id: world.proposals[0]!.proposal.id };
+  action.cardFamily = "authored-diff";
+  action.shown = { ...action.shown, productionPreview: undefined, body: { family: "authored-diff", fields: [
+    { label: "Voice", before: null, after: "Spare and direct." },
+  ], conflicts: [], openChoices: [] } };
+  const made = await setup(action);
+  await click("Approve");
+  const request = JSON.parse(made.sent[0] as string);
+  await act(async () => __applyEventForTest({ type: "conversation-action.decision-result", at: action.createdAt,
+    worldId: action.worldId, conversationId: action.conversationId, actionId: action.actionId, requestId: request.requestId,
+    decision: "approve", disposition: "refused", reason: "validation-refused", status: "pending", deduplicated: false,
+    detail: "Story context changed. Review the saved proposal before accepting. No regeneration is needed." }));
+  assert.match(dom.document.querySelector('.fy-actioncard__notice')!.textContent!, /No regeneration is needed/);
+  assert.equal([...dom.document.querySelectorAll("button")].some(button => button.textContent === "Approve"), false);
+  await click("Review saved proposal");
+  assert.ok(dom.document.querySelector('dialog .dom-connected-proposal'));
+  assert.equal(made.sent.length, 1, "opening the native review neither accepts nor regenerates");
+  assert.ok([...dom.document.querySelectorAll('dialog button')].some(button => button.textContent?.includes("Accept")));
+});
 
 it("comic drafts name the review and open the draft's chapter without deciding (#2255)", async t => {
   const action = card();

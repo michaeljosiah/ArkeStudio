@@ -1990,3 +1990,12 @@ refreshes the bundle, history checks, search index and scan state. Successful co
 reuse that refresh; failure, no-commit branches and other gate users still reconcile normally.
 Per-block audiobook record writes and merge-from-current lanes remain unchanged. The synthetic
 profile is `scripts/profile-audiobook-filing.ts` in the coordinator package.
+
+Saved story proposal review (#1740):
+
+`world-chat/actions.ts` retains unchanged overview, prose-style and chapter proposals when only
+their story or chapter collection context changes. Chat approval remains refused; exact chapter
+reads, other cited inputs, target files and the frozen preview stay fenced. The conversation
+card opens the existing `ConnectedProposalPanel` in `PageSheet` for explicit native review,
+without regeneration. Native acceptance reconciles the original card. Regressions are in
+coordinator `world-chat/actions.test.ts` and client `production-studio.test.tsx`.

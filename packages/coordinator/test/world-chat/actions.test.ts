@@ -2927,7 +2927,7 @@ describe("authored chapter inventory freshness (#2065)", () => {
     other.audiobook = { chapterVersion: other.version, hash: other.bodyHash!, updatedAt: AT, takes: 2, flagged: 1 };
     other.voices = { unreadable: true };
     other.continuity = { unreadable: true };
-    assert.equal((await decide(w.lifecycle, w.log, w.card)).status, full ? "stale" : "completed");
+    assert.equal((await decide(w.lifecycle, w.log, w.card)).status, full ? "pending" : "completed");
     const after = await openChapter(w.store, context.productionId, target.file);
     assert.equal(after.body, before.body, "a status-only edit preserves every manuscript character");
     assert.equal(w.production().chapters.find(c => c.id === target.id)!.status, full ? target.status : "reviewed");
@@ -2944,8 +2944,11 @@ describe("authored chapter inventory freshness (#2065)", () => {
       if (change === "membership") chapters.pop();
       if (change === "retirement") chapters[1]!.retired = true;
       if (change === "target-audio") target.audiobook = { chapterVersion: target.version, hash: target.bodyHash!, updatedAt: AT, takes: 1, flagged: 0 };
-      assert.equal((await decide(w.lifecycle, w.log, w.card)).status, "stale",
-        "authored dependencies and the explicitly cited full target read remain authoritative");
+      const result = await decide(w.lifecycle, w.log, w.card);
+      const targetChanged = ["prose", "title", "target-audio"].includes(change);
+      assert.equal(result.status, targetChanged ? "stale" : "pending",
+        "target changes stale the card; changed context requires an explicit saved-proposal review");
+      assert.equal(result.disposition, "refused", "changed context never authorizes chat approval");
     });
   }
 
@@ -3134,6 +3137,60 @@ it("stages a chapter with only the brief's eligible receipts and keeps section r
   assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, oneTurn), /story read is no longer current/);
 });
 
+
+describe("saved sibling proposal review (#1740)", () => {
+  async function siblings() {
+    const w = await setup();
+    const productionId = await createProduction(w.store, { title: "Sibling review", medium: "story" });
+    const receipts = [currentReceipt(w.store, "story", productionId), currentReceipt(w.store, "chapters", productionId), currentReceipt(w.store, "sheets")];
+    const checkReceiptIds = receipts.map(receipt => receipt.id);
+    const oneTurn = turn(w.conversationId, { kind: "production", productionId }, { receipts, actions: [
+      { kind: "production-overview", productionId, changes: { logline: "A bell rings early." }, checkReceiptIds },
+      { kind: "production-prose-style", productionId, changes: { voice: "Spare and direct." }, checkReceiptIds },
+      { kind: "production-chapter", productionId, change: { operation: "outline", chapters: [{ title: "The bell", synopsis: "A bell rings." }] }, checkReceiptIds },
+    ] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    return { ...w, productionId, cards: (await loaded(w.log)).actions };
+  }
+
+  it("retains unchanged style and outline for explicit review after overview acceptance, including recovery", async () => {
+    const w = await siblings();
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[0]!)).status, "completed");
+    for (const card of w.cards.slice(1)) {
+      const before = await w.gate.project(card.authority.id);
+      const result = await decide(w.lifecycle, w.log, card);
+      assert.equal(result.reason, "validation-refused");
+      assert.match(result.detail!, /Review the saved proposal/);
+      assert.equal((await loaded(w.log)).actions.find(action => action.actionId === card.actionId)!.status, "pending");
+      assert.deepEqual((await w.gate.project(card.authority.id)).review, before.review);
+      await w.lifecycle.recoverConversation(w.conversationId);
+      assert.equal((await decide(w.lifecycle, w.log, card)).reason, "validation-refused", "recovery does not approve the changed context");
+      assert.equal((await acceptDecided(w.gate, card.authority.id)).status, "accepted");
+      await w.lifecycle.reconcileAction(w.conversationId, card.actionId);
+      assert.equal((await loaded(w.log)).actions.find(action => action.actionId === card.actionId)!.status, "completed");
+    }
+    const production = w.store.getBundle().productions.find(p => p.meta.id === w.productionId)!;
+    assert.equal(production.proseStyle!.voice, "Spare and direct.");
+    assert.equal(production.chapters[0]!.title, "The bell");
+  });
+
+  it("still discards a draft whose own target changed", async () => {
+    const w = await siblings(), card = w.cards[0]!;
+    const target = (await w.gate.readManifest(card.authority.id)).targets[0]!.path;
+    await w.store.ownedWrite(() => writeFile(join(w.store.dir, target), JSON.stringify({ version: 1, logline: "A human edit." })));
+    assert.equal((await decide(w.lifecycle, w.log, card)).reason, "stale");
+    assert.equal((await w.gate.listOpen()).some(p => p.id === card.authority.id), false);
+  });
+
+  it("still discards a chapter whose cited cast changed", async () => {
+    const w = await siblings(), card = w.cards[2]!;
+    w.store.getBundle().sheets.find(sheet => sheet.id === "maren-kest")!.retired = true;
+    assert.equal((await decide(w.lifecycle, w.log, card)).reason, "stale");
+    assert.equal((await w.gate.listOpen()).some(p => p.id === card.authority.id), false);
+  });
+});
 
 it("reports sheets and canon together for a chapter with draws (#1911, #1741)", async () => {
   const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };

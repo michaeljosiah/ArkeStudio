@@ -4878,7 +4878,13 @@ export function worldChatActionAdapters(
     validate: async (action) => {
       if (!gate) return { ok: false, reason: "blocked", detail: "The proposal authority is unavailable." };
       const current = observationsCurrent(store, action);
-      if (!current.ok) {
+      // An accepted sibling can move the story/chapters collection without changing this draft.
+      // Keep that draft for an explicit native review; chat approval still requires its reads.
+      const canReviewSaved = ["world-chat-production-overview", "world-chat-production-prose-style", "world-chat-production-chapter"].includes(action.actionKind)
+        && observationsCurrent(store, { baseObservations: action.baseObservations.filter(observation =>
+          !((observation.requirement === "story" && [action.productionId, `${action.productionId}:overview`].includes(observation.target))
+            || (observation.requirement === "chapters" && [action.productionId, `${action.productionId}::plan`].includes(observation.target)))) }).ok;
+      if (!current.ok && !canReviewSaved) {
         await gate.discard(action.authority.id);
         return current;
       }
@@ -4892,6 +4898,7 @@ export function worldChatActionAdapters(
         await gate.discard(action.authority.id);
         return { ok: false, reason: "stale", detail: "The proposal preview changed after this card was prepared." };
       }
+      if (!current.ok) return { ok: false, reason: "blocked", detail: "Story context changed. Review the saved proposal before accepting. No regeneration is needed." };
       return { ok: true };
     },
     execute: async (action) => {
