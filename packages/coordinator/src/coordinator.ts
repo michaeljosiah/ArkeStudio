@@ -2030,6 +2030,7 @@ export class Coordinator {
           }
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${row.block === "title" ? "title" : row.title}`,
+            ...(row.effectivePrompt === undefined ? {} : { expectedBrief: row.effectivePrompt }),
             // Held to rule 4 again: a look chosen since the proposal rides now, and its image carries the clothes (codex on PR 1559).
             prompt: neutralWhereLooksRide(row.prompt, who),
             // The Mood line rides after the prompt, so it is held to rule 4 the same way (codex on PR 1559).
@@ -22499,6 +22500,8 @@ export class Coordinator {
        * the picture it recomposes already fixes who is in it.
        */
       recompose?: string;
+      /** A reviewed illustration must not dispatch a different reference or inherited-mood brief. */
+      expectedBrief?: string;
       /**
        * The whole brief, written once the Bench has named the references that ride (SPEC-064
        * R-23). A comic page is lettered, so the audiobook's closing lines — no added text — must
@@ -22558,6 +22561,7 @@ export class Coordinator {
     }
     if (input.signal?.aborted) return fail("stopped");
     const brief = input.saved?.brief ?? (input.brief !== undefined ? input.brief(cited) : input.recompose !== undefined || input.motion !== undefined ? input.prompt : pictureBench(input.prompt, cited, input.mood, input.detailed ?? []));
+    if (input.expectedBrief !== undefined && brief !== input.expectedBrief) return fail("picture prompt changed · refresh references before accepting");
     const composed = await this.benchFor(worldId, sessionId);
     if (composed === null) return fail("the Bench session is gone");
     if (input.saved === undefined) await composed.store.append({ type: "composer-set", mode, provider: input.model.provider, model: input.model.id, params, brief }, { at: this.nowIso(), requestId: `pic-brief:${input.requestId}` });

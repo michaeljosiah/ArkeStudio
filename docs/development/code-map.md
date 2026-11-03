@@ -6,6 +6,13 @@ progress events and stored results survive navigation; `stop-voices` resolves th
 without the selected world's chapter list. Regression coverage:
 `packages/coordinator/test/productions/audiobook-background-preparation.test.ts`.
 
+Scene-scoped illustration treatment (#1773): contracts `audiobook-look.ts` filters recognised
+scene state from derived shared mood while preserving author overrides. Coordinator
+`audiobook-picture-suggest.ts` composes each proposal's `effectivePrompt`; illustration refresh
+and `makeBenchPicture` require a refreshed acceptance when the composed brief changes.
+Client `components/audiobook-illustrate.tsx` shows the complete brief in a collapsed disclosure.
+Tests live in the existing audiobook look, picture brief, illustration and chapter-audiobook suites.
+
 Audiobook scene dividers (#1775): contracts `manuscript.ts` classifies thematic breaks outside
 fenced content. Blocks, beat boundaries, request grouping and timing proposals share that rule;
 `chapterParagraphs(body, true)` retains indentation for fence tracking without changing paragraph IDs.

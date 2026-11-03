@@ -309,7 +309,7 @@ describe("what the chapter is asked", () => {
       cap: 3,
       maxChars: 900,
     });
-    for (const part of ["[p1.0] 1:15 Bray", "p1.0#0 1:15 Bray tells a story.", "At most 3 pictures", "a ceiling, never an aim", "at least 5 seconds apart", "(at 2:30)", "\"reason\": \"<place | arrives | leaves | action | object | time | feeling>\"", "\"at\": \"<the id of the sentence", "Maren: Oilskin.", "[maren-kest] Maren — Wiry.", "Never show, name or hint at: Odile", "at most 900 characters", "## The book's mood (light, colour and grain only)\nGrey dawn light, fine grain.", "1. THE BLOCK IS THE PICTURE.", "\"expressions\": {\"<key>\""]) assert.ok(prompt.includes(part), part);
+    for (const part of ["[p1.0] 1:15 Bray", "p1.0#0 1:15 Bray tells a story.", "At most 3 pictures", "a ceiling, never an aim", "at least 5 seconds apart", "(at 2:30)", "\"reason\": \"<place | arrives | leaves | action | object | time | feeling>\"", "\"at\": \"<the id of the sentence", "Maren: Oilskin.", "[maren-kest] Maren — Wiry.", "Never show, name or hint at: Odile", "at most 900 characters", "## The book's mood (visual treatment only; the scene controls light and time)\nGrey dawn light, fine grain.", "1. THE BLOCK IS THE PICTURE.", "\"expressions\": {\"<key>\""]) assert.ok(prompt.includes(part), part);
     assert.ok(prompt.includes("ends at 4:00 (recorded narration duration)"), "the final hold has an explicit end, rather than stopping at the last sentence's start");
     assert.ok(prompt.includes("sentence positions on this clock are estimated"), "recorded take lengths do not imply measured sentence anchors");
     assert.ok(prompt.includes("including the opening and the last picture"));
@@ -345,6 +345,7 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
         assert.equal(last.spentMicroUsd, total, "spent what the one confirm said");
         assert.equal(last.confirmedMicroUsd, total);
         assert.equal(h.enqueued.length, proposal.rows.length, "a job for each, through the Bench");
+        assert.deepEqual(h.enqueued.map((job) => job.params.prompt), proposal.rows.map((row) => row.effectivePrompt), "the complete reviewed briefs are dispatched unchanged");
         assert.equal(h.concurrent(), 1, "one at a time: the next is not asked for while one is in flight");
         // Each landed on its block, with its look, and the record was sent as it was made.
         const record = await readAudiobook(h.store()!, LEDGER, CHAPTER);

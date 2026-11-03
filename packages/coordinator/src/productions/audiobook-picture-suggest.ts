@@ -1,5 +1,8 @@
 import {
   MAIN_PHOTO_LOOK,
+  benchTokenFor,
+  pictureBench,
+  pictureDetailSkins,
   PICTURE_PROMPT_MAX,
   kitLookLibrary,
   lookLinesFor,
@@ -25,6 +28,7 @@ import {
   type HarnessAdapter,
   type LookView,
   type ManifestModel,
+  type IllustrationRow,
   type PictureOwnLooks,
   type PictureSuggestion,
   type PictureWho,
@@ -111,8 +115,22 @@ export function briefLines(store: Pick<WorldStore, "getBundle">, look: Audiobook
     // Given before the frame is known, so a detail shot (no image rides) reads the neutral line too:
     // a hand or a cuff loses nothing to it, and the cut words are what the safety check refuses. A
     // model that takes no reference picture carries no look image, so its lines stay whole (`carries`).
-    return { label: line.label, key: line.key, text: chosen !== undefined && carries ? neutralClothing(line.text) : line.text, ...(chosen !== undefined ? { look: lookName(chosen) } : {}) };
+    const source = line.key === null ? look?.place : look?.characters[line.key];
+    return { label: line.label, key: line.key, text: chosen !== undefined && carries ? neutralClothing(line.text) : line.text, ...(chosen !== undefined ? { look: lookName(chosen) } : {}), ...(chosen === undefined && source?.by !== "author" && source?.blocks?.length ? { blocks: source.blocks } : {}) };
   });
+}
+
+/** A fresh picture Bench's brief, using the same reference order and composition as dispatch. */
+export function pictureBriefPreview(store: Pick<WorldStore, "getBundle">, room: PictureRoom, row: Pick<IllustrationRow, "prompt" | "who" | "shot">): string {
+  const tokens = new Map<string, string>();
+  const cited = row.who.filter((entry) => entry.carried && entry.reference !== null).map((entry) => {
+    const token = tokens.get(entry.reference!) ?? benchTokenFor("image", tokens.size + 1);
+    tokens.set(entry.reference!, token);
+    return { name: entry.name, kind: entry.kind, token, purpose: entry.look === undefined ? "identity" as const : "costume" as const };
+  });
+  return pictureBench(neutralWhereLooksRide(row.prompt, row.who), cited,
+    room.mood === undefined ? undefined : neutralWhereLooksRide(room.mood, row.who),
+    pictureDetailSkins(row.shot?.details ?? [], room.people, store.getBundle().sheets));
 }
 
 /**

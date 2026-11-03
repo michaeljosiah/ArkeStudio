@@ -1812,6 +1812,20 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.17", "priced for the Wide and the Tall of each");
   });
 
+  it("shows the complete composed prompt without accepting or inventing one for older proposals", async () => {
+    const m = await proposedMount();
+    const effectivePrompt = "Maren beneath an overcast sky.\n\nReference 1: Maren — face and identity only.\n\nVisual treatment: muted colours and fine grain.\nNo added captions, subtitles or text overlays.";
+    const proposal = { ...PROPOSAL, rows: [row("p0.0", { effectivePrompt }), row("p3.0")] };
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal }));
+    const disclosure = q(m, '[data-testid="illustration-full-prompt"]') as HTMLDetailsElement;
+    assert.equal(disclosure.hasAttribute("open"), false, "the full brief starts folded");
+    assert.equal(all(m, '[data-testid="illustration-full-prompt"]').length, 1, "an older row does not claim its scene prompt is complete");
+    const sent = m.sent.length;
+    await act(async () => disclosure.querySelector("summary")!.click());
+    assert.equal(disclosure.querySelector("p")!.textContent, effectivePrompt, "reference and treatment directions remain verbatim");
+    assert.equal(m.sent.length, sent, "reviewing the prompt makes no request");
+  });
+
   it("opens the proposal as the active modal above the dock: its pace, what needs a look, the dashed chips on the blocks, one Accept", async () => {
     const m = await proposedMount();
     assert.deepEqual(all(m, '[data-testid="illustration-chip"]').map((chip) => chip.textContent), ["The bell", "The line", "The tide"], "a dashed chip on each block it would go on");

@@ -224,7 +224,7 @@ describe("the art direction gives light and mood only (design turn 193, rule 9, 
         const session = await new BenchStore(sessionDir(worldDir, done.sessionId as never)).fold();
         const brief = session!.takes[0]!.request.brief;
         assert.doesNotMatch(brief, /agbada|lace/);
-        assert.match(brief, /Light and mood: .*sodium orange/i);
+        assert.match(brief, /Visual treatment: .*sodium orange/i);
       },
       { prepare: withArt, look: async () => ({ place: { text: "The rail desk at dawn." }, mood: "Sodium orange and generator blue-green, lace-trimmed agbada catching the light, fine grain.", characters: [{ who: "maren-kest", text: "Oilskin coat." }] }) },
     ));
@@ -485,7 +485,7 @@ describe("Generate (R-99)", () => {
       assert.equal(take.request.references.length, 1);
       assert.match(take.request.brief, /Maren on the rail at dawn\./);
       assert.match(take.request.brief, /Maren Kest is shown in @Image 1\./);
-      assert.match(take.request.brief, /Light and mood: /);
+      assert.match(take.request.brief, /Visual treatment: /);
       assert.equal(take.disposition, "filed", "kept as an artifact of the world");
       assert.ok(store()!.getBundle().artifacts.some((artifact) => `artifacts/${artifact.file}` === picture.file));
       // The look has since changed: the picture is marked, never remade.

@@ -367,6 +367,8 @@ export const IllustrationRowSchema = z
     prompt: z.string().min(1).max(PICTURE_PROMPT_MAX),
     who: z.array(PictureWhoSchema).max(24),
     estimatedMicroUsd: z.number().int().min(0),
+    /** The composed generation brief shown before acceptance, including inherited treatment. */
+    effectivePrompt: z.string().min(1).max(20_000).optional(),
     look: PictureLookSchema.optional(),
     /**
      * Characters with a sheet and no picture to send (R-100): the row is held until they have one
@@ -396,7 +398,7 @@ export type IllustrationRow = z.infer<typeof IllustrationRowSchema>;
 
 /** A held price and reference selection must be shown again before changed inputs can be sent. */
 export function illustrationReferencesChanged(before: IllustrationRow, after: IllustrationRow): boolean {
-  return JSON.stringify(before.who) !== JSON.stringify(after.who) || before.estimatedMicroUsd !== after.estimatedMicroUsd;
+  return JSON.stringify(before.who) !== JSON.stringify(after.who) || before.estimatedMicroUsd !== after.estimatedMicroUsd || (before.effectivePrompt !== undefined && before.effectivePrompt !== after.effectivePrompt);
 }
 
 export const IllustrationProposalSchema = z
@@ -522,7 +524,7 @@ export function pictureBench(
     // A carried image defines the detail's identity too; old records or an explicit Without
     // choice retain the authored sheet fallback only for a person whose image does not ride.
     detailSkinLine(detailed.filter((detail) => !cited.some((entry) => entry.kind === "character" && entry.name === detail.name))),
-    mood !== undefined && mood !== "" ? `Light and mood: ${mood}` : "",
+    mood !== undefined && mood !== "" ? `Visual treatment: ${mood}\nThe scene brief controls light, time, weather and current character state. Do not import events, objects or injuries from other scenes through this treatment.` : "",
     PICTURE_TEXT_DIRECTION,
   ]
     .filter((part) => part !== "")

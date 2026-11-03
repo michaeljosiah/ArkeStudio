@@ -284,7 +284,8 @@ describe("the Mood line (design turn 193, rule 9)", () => {
     assert.equal(pictureMood({ mood: { text: "Purple club light, warm gold, fine grain." } }, ART), "Purple club light, warm gold, fine grain.");
     const fallback = pictureMood({}, ART)!;
     assert.doesNotMatch(fallback, /agbada/);
-    assert.match(fallback, /^Lagos at night/);
+    assert.doesNotMatch(fallback, /night|streetlamps|generator-lit|lamp/i);
+    assert.match(fallback, /shot close and handheld/);
     assert.equal(pictureMood(null, undefined), undefined);
   });
 

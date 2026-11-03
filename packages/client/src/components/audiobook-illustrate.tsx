@@ -222,6 +222,12 @@ function Card({ row, estimated, words, beat, skipped, without, reason, slug, dis
           </Button>
         )}
       </div>
+      {row.effectivePrompt !== undefined && (
+        <details className="fy-ills__prompt" data-testid="illustration-full-prompt">
+          <summary>Full picture prompt</summary>
+          <p>{row.effectivePrompt}</p>
+        </details>
+      )}
       {said !== undefined && (
         <div className="fy-ills__wh">
           <p className="fy-mono fy-ch__who-where--warn" data-testid="illustration-row-reason">{said}</p>
