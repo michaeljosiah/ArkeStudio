@@ -1437,6 +1437,7 @@ export class Coordinator {
   /** Reservations read and advance one session take counter. */
   private readonly benchDispatchActions = new Map<string, Promise<void>>();
   private readonly benchRefreshes = new Map<string, symbol>();
+  private benchOpening: { worldId: string; sessionId: SessionId | undefined } | null = null;
   /** Documents being read for facts right now, so the reading can be stopped (SPEC-015 §2). */
   private readonly reading = new Map<string, AbortController>();
   /** Chapters whose continuity is being derived right now, by `worldId/productionId/chapterFile` (turn 129). */
@@ -8922,6 +8923,7 @@ export class Coordinator {
             { at: this.nowIso(), requestId: `media-handoff:${candidate.id}:${candidate.revision}` },
           );
         }
+        this.benchOpening = null;
         this.readModel.setBench({ worldId: store.worldId, session: opened.session });
         await this.discoverBenchRows(store);
         await this.refreshConversations(store);
@@ -14213,6 +14215,7 @@ export class Coordinator {
           await this.recoverBenchSubjectFilings(store, opened);
           const session = (await opened.store.fold()) ?? opened.session;
           await this.backfillBenchPosters(store, session);
+          this.benchOpening = null;
           this.readModel.setBench({ worldId: store.worldId, session });
           await this.discoverBenchRows(store);
           this.transport.broadcastSnapshot();
@@ -14299,6 +14302,7 @@ export class Coordinator {
         return;
       }
       case "bench-close": {
+        this.benchOpening = null;
         this.readModel.setBench(null);
         this.transport.broadcastSnapshot();
         return;
@@ -22700,6 +22704,8 @@ export class Coordinator {
    * windows their answer (issue 305 §6).
    */
   private async openBenchWorkspace(store: WorldStore, sessionId?: SessionId, fresh = false, initial?: { mode: "image"; brief: string; aspect: string }): Promise<void> {
+    const opening = { worldId: store.worldId, sessionId };
+    this.benchOpening = opening;
     const settings = this.appSettings ? await this.appSettings.load() : null;
     const routed = this.opts.manifest ? imageModelFor(settings, this.opts.manifest, undefined, store.getBundle().meta.models) : null;
     const opened = await openBenchSession(store.dir, () => this.nowIso(), {
@@ -22708,11 +22714,14 @@ export class Coordinator {
       ...(routed ? { defaultModel: { provider: routed.provider, model: routed.id } } : {}),
       ...(initial !== undefined ? { initial } : {}),
     }).catch(() => null);
+    if (this.benchOpening !== opening || !this.stillOpen(store) || this.stopping) return;
     if (!opened) {
+      this.benchOpening = null;
       this.readModel.setBench(null);
       this.transport.broadcastSnapshot();
       return;
     }
+    opening.sessionId = opened.session.id;
     const touched = await recoverBenchSession(opened, this.benchJobFacts(store.worldId), () =>
       this.nowIso(),
     ).catch(() => false);
@@ -22727,9 +22736,11 @@ export class Coordinator {
         }
       }
     });
-    this.readModel.setBench({ worldId: store.worldId, session });
     await this.discoverBenchRows(store);
-    this.transport.broadcastSnapshot();
+    if (this.benchOpening !== opening || !this.stillOpen(store) || this.stopping) return;
+    // Recovery and posters can await while references are added. Publish a fresh fold through
+    // the same ordering guard as edits, never the snapshot captured before hydration (#1703).
+    await this.refreshBench(store.worldId, opened.session.id);
   }
 
   /** Complete the small crash window between an atomic production commit and the Bench event. */
@@ -22903,7 +22914,8 @@ export class Coordinator {
       // results belong in the session list, not in the workspace the author is reviewing.
       // A slower refresh must not restore an older selection after a newer command answered.
       const active = this.readModel.getState().bench;
-      if (bench && active?.worldId === worldId && active.session.id === sessionId) {
+      const opening = this.benchOpening?.worldId === worldId && this.benchOpening.sessionId === sessionId;
+      if (bench && ((active?.worldId === worldId && active.session.id === sessionId) || opening)) {
         this.readModel.setBench({ worldId, session: bench.session });
       }
       const sessions = store.getBundle().benchSessions.filter(session => session.id !== sessionId);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { it } from "node:test";
-import { newId, ulid, type ClientMessage, type SessionId } from "@arke-studio/contracts";
+import { newId, ulid, type ClientMessage, type SessionId, type BenchSession } from "@arke-studio/contracts";
 import { openBenchSession, type OpenedBench } from "../../src/bench/service.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -21,6 +21,7 @@ async function setup() {
     refreshBench(worldId: string, sessionId: SessionId): Promise<void>;
     refreshWorldSnapshot(worldId: string): Promise<void>;
     benchFor(worldId: string, sessionId: SessionId): Promise<OpenedBench | null>;
+    backfillBenchPosters(store: NonNullable<ReturnType<FsWorldProvider["openStore"]>>, session: BenchSession): Promise<void>;
   };
   const create = async () => {
     const opened = await openBenchSession(worldDir, CLOCK, { fresh: true });
@@ -83,4 +84,47 @@ it("an older filing refresh cannot replace a newer explicit take selection", asy
   } finally { release(); }
   await oldRefresh;
   assert.equal(coordinator.getState().bench?.session.selectedTakeId, reviewing.ids[1]);
+});
+
+it('delayed hydration keeps freshly added references (#1703)', async () => {
+  const { coordinator, internals, create, open } = await setup();
+  const fresh = await create();
+  await open(fresh.session.id);
+  const control = internals;
+  const backfill = control.backfillBenchPosters.bind(control);
+  let release!: () => void, captured!: () => void;
+  const entered = new Promise<void>(resolve => { captured = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let first = true;
+  control.backfillBenchPosters = async (...args: Parameters<typeof control.backfillBenchPosters>) => { if (first) { first = false; captured(); await held; } return backfill(...args); };
+  const hydration = open(fresh.session.id);
+  await entered;
+  try {
+    for (let i = 1; i <= 2; i++) await fresh.store.append({ type: 'reference-added', entry: { token: 'Image ' + i, kind: 'image', source: { source: 'world-file', path: 'references/test-' + i + '.png', hash: 'sha256:' + 'a'.repeat(64) } } }, { at: CLOCK() });
+    await internals.refreshBench(WORLD_ID, fresh.session.id);
+    assert.equal(coordinator.getState().bench!.session.composer.activeTokens.length, 2);
+  } finally { release(); }
+  await hydration;
+  assert.equal(coordinator.getState().bench!.session.composer.activeTokens.length, 2, 'fresh references remain visible after hydration');
+  assert.equal((await fresh.store.fold())!.composer.activeTokens.length, 2, 'durable references remain');
+});
+
+for (const action of ['close', 'open another'] as const) it('delayed hydration cannot undo ' + action, async () => {
+  const { coordinator, internals, create, open } = await setup();
+  const first = await create(), second = await create();
+  await open(first.session.id);
+  const backfill = internals.backfillBenchPosters.bind(internals);
+  let release!: () => void, entered!: () => void;
+  const captured = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let hold = true;
+  internals.backfillBenchPosters = async (...args) => { if (hold) { hold = false; entered(); await gate; } return backfill(...args); };
+  const hydration = open(first.session.id);
+  await captured;
+  try {
+    if (action === 'close') await internals.handleClientMessage({kind:'bench-close',worldId:WORLD_ID});
+    else await open(second.session.id);
+  } finally { release(); }
+  await hydration;
+  assert.equal(coordinator.getState().bench?.session.id ?? null, action === 'close' ? null : second.session.id);
 });
