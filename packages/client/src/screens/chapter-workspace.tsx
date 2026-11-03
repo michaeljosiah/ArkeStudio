@@ -2437,6 +2437,7 @@ export function ChapterWorkspace({
     onKeepSplit: audiobook.keepSplit,
     reReadPrice: audiobook.reReadPrice,
     refused: audiobook.lastRecord?.refused ?? null,
+    answeredRequestId: audiobook.lastRecord?.requestId,
     onUpload: audiobook.uploadTake,
     onRecorded: (speaker, on) => setAudiobookRecorded(worldId, prodId, speaker, on),
     onLines: (speaker, label) => setLinesFor({ speaker, label }),

@@ -917,8 +917,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const discard = useCallback(() => dismissDirection(worldId, prodId, chapter.id, chapter.file), [worldId, prodId, chapter.id, chapter.file]);
   const setDirection = useCallback(
     (key: string, direction: AudiobookDirectionInput | null) => {
-      if (locked || connection !== "open") return;
-      setAudiobookBlock(worldId, prodId, chapter.file, key, direction);
+      if (locked || connection !== "open") return null;
+      return setAudiobookBlock(worldId, prodId, chapter.file, key, direction);
     },
     [locked, connection, worldId, prodId, chapter.file],
   );
@@ -2762,7 +2762,7 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
 }
 
 /** The side in the Audiobook view: the block pressed, its direction, then its takes. */
-export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle, modelOf, onSetDirection, onMakeAgain, onUpload, onRecorded, onLines, onMarker, refused, blockHost, capturedSelection, choices, onPin, inSheet = false, hear, onKeepSplit, reReadPrice }: {
+export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle, modelOf, onSetDirection, onMakeAgain, onUpload, onRecorded, onLines, onMarker, refused, answeredRequestId, blockHost, capturedSelection, choices, onPin, inSheet = false, hear, onKeepSplit, reReadPrice }: {
   /** A grouped read's cut that did not match, kept as it is (design turn 185c). */
   onKeepSplit?: (key: string) => void;
   /** What reading the block again with its neighbours would cost, as the button says it. */
@@ -2778,7 +2778,8 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   chapterId: string;
   chapterTitle: string;
   modelOf: (reader: AudiobookReader) => ManifestModel | null;
-  onSetDirection: (key: string, direction: AudiobookDirectionInput | null) => void;
+  onSetDirection: (key: string, direction: AudiobookDirectionInput | null) => string | null;
+  answeredRequestId?: string | undefined;
   onMakeAgain: (key: string) => void;
   /** A recording for the block, from the host's picker (SPEC-047 R-35). */
   onUpload?: (key: string) => void;
@@ -2810,8 +2811,12 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   // Edits compose while the record's answer is on its way (codex on PR 1186): a delivery then
   // a speed pressed before the first write answers would otherwise both be built from the same
   // record, the second undoing the first. The pending plan is this panel's until the record
-  // answers — with its own word, or with a refusal — or another block is chosen.
-  const [pending, setPending] = useState<{ key: string; plan: AudiobookDirectionInput | null } | null>(null);
+  // answers its latest request — other writes can answer first. The ref also composes a blur
+  // and a control press in the same render, before React has committed the note's new state.
+  type PendingDirection = { key: string; plan: AudiobookDirectionInput | null; requestId: string };
+  const [pending, setPendingState] = useState<PendingDirection | null>(null);
+  const pendingRef = useRef<PendingDirection | null>(null);
+  const setPending = (next: PendingDirection | null) => { pendingRef.current = next; setPendingState(next); };
   useEffect(() => {
     setPhraseDraft(null);
     setPending(null);
@@ -2819,7 +2824,9 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
     setSupportNotice(null);
     setMarkerMenu(null);
   }, [selected]);
-  useEffect(() => setPending(null), [record?.updatedAt, refused]);
+  useEffect(() => {
+    if (answeredRequestId !== undefined && pendingRef.current?.requestId === answeredRequestId) setPending(null);
+  }, [answeredRequestId]);
   if (row === null) return null;
   const take = record?.takes[row.block.key];
   const flag = record?.flags[row.block.key];
@@ -2838,12 +2845,13 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   const held = pending !== null && pending.key === row.block.key ? pending.plan : (row.direction?.input ?? null);
   const text = normalizeSpeechText(row.block.text);
   const heldCues = new Set(row.held.flatMap((control) => (control.cueIndex !== undefined ? [control.cueIndex] : [])));
-  const base: AudiobookDirectionInput = held ?? { delivery: "measured", speed: 1, cues: [] };
+  const latestPlan = (): AudiobookDirectionInput => (pendingRef.current?.key === row.block.key ? pendingRef.current.plan : row.direction?.input) ?? { delivery: "measured", speed: 1, cues: [] };
+  const base = latestPlan();
   const send = (next: AudiobookDirectionInput | null) => {
-    setPending({ key: row.block.key, plan: next });
-    onSetDirection(row.block.key, next);
+    const requestId = onSetDirection(row.block.key, next);
+    if (requestId !== null) setPending({ key: row.block.key, plan: next, requestId });
   };
-  const write = (next: Partial<AudiobookDirectionInput>) => send({ ...base, ...next });
+  const write = (next: Partial<AudiobookDirectionInput>) => send({ ...latestPlan(), ...next });
   // Both offsets and source words were captured before the sheet moved focus. A changed block
   // invalidates them rather than applying the old span to a newer version of its prose.
   const captured = capturedSelection?.key === row.block.key && capturedSelection.text === row.block.text ? capturedSelection : null;
@@ -2857,9 +2865,10 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
     if (phraseDraft === null) return;
     const trimmed = phraseDraft.trim();
     setPhraseDraft(null);
-    if (trimmed === (base.note ?? "")) return;
+    const latest = latestPlan();
+    if (trimmed === (latest.note ?? "")) return;
     if (trimmed === "") {
-      const { note: _gone, ...rest } = base;
+      const { note: _gone, ...rest } = latest;
       send(rest);
     } else write({ note: trimmed.slice(0, noteMax) });
   };

@@ -1054,6 +1054,43 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct this chapter"), false);
   });
 
+  it("pending note edits compose through blur, unrelated records and earlier answers (#1702)", async () => {
+    const state = voiced(inkbound());
+    const reader = { provider: "elevenlabs", model: "eleven-v3", voiceId: "test", label: "Test" };
+    state.world = { ...state.world!, productions: state.world!.productions.map(p => p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1, reading: "narrator", narrator: reader } } : p) };
+    const m = await mount(state), text = "Maren counted the bells.";
+    const held = record([], {});
+    held.direction["p0.0"] = directed(text, "cold", { note: "old note" });
+    await answerOpen(m, { audiobook: held });
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...reader, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    await act(async () => q(m, '[data-block="p0.0"]')!.click());
+    const input = q(m, 'input[aria-label="Note"]')!;
+    const props = () => (input as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void; onBlur: () => void }>)[Object.keys(input).find(k => k.startsWith("__reactProps$"))!]!;
+    await act(async () => props().onChange({ target: { value: "new note" } }));
+    // Both handlers can run before React commits the blur's pending note.
+    await act(async () => { props().onBlur(); all(m, '[aria-label="Speed"] button').find(b => b.textContent === "1.0")!.click(); });
+    const writes = m.sent.filter(message => message.kind === "set-audiobook-block") as Extract<ClientMessage, { kind: "set-audiobook-block" }>[];
+    assert.equal(writes.length, 2);
+    assert.equal(writes[1]!.direction?.note, "new note");
+    assert.notEqual(writes[0]!.requestId, writes[1]!.requestId);
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    const note = () => (q(m, 'input[aria-label="Note"]') as HTMLInputElement).value;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, record: { ...held, updatedAt: "2026-11-03T12:00:01.000Z" } }));
+    assert.equal(note(), "new note", "unrelated record cannot discard the pending edit");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, requestId: writes[0]!.requestId!, refused: "earlier write refused" }));
+    assert.equal(note(), "new note", "earlier refusal cannot discard the latest edit");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, requestId: writes[1]!.requestId!, refused: "latest write refused" }));
+    assert.equal(note(), "old note", "its own refusal restores the saved direction");
+    await act(async () => props().onChange({ target: { value: "accepted note" } }));
+    await act(async () => props().onBlur());
+    const accepted = m.sent.findLast(message => message.kind === "set-audiobook-block") as Extract<ClientMessage, { kind: "set-audiobook-block" }>;
+    const saved = { ...held, direction: { "p0.0": directed(text, "cold", { note: "accepted note" }) }, updatedAt: "2026-11-03T12:00:02.000Z" };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, requestId: accepted.requestId!, record: saved }));
+    assert.equal(note(), "accepted note");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, record: { ...saved, direction: { "p0.0": directed(text, "cold", { note: "another window" }) }, updatedAt: "2026-11-03T12:00:03.000Z" } }));
+    assert.equal(note(), "another window", "own success releases the pending plan");
+  });
+
   it("edits compose before the record answers, and the panel reads the reader that will speak (codex on PR 1186)", async () => {
     const m = await mount(voiced(inkbound("cast")));
     const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": "“You hear it too,”", "p1.1": "she said.", "p3.0": "Six, and the tide <br> not yet called." };
