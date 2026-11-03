@@ -68,7 +68,7 @@ function takeSeconds(store: WorldStore, artifactId: string, take: { grouped?: { 
 export function listeningBlocks(store: WorldStore, plan: Pick<AudiobookPlan, "blocks" | "record" | "present">): ListeningInputBlock[] {
   const record = plan.record === "unreadable" ? null : plan.record;
   return plan.blocks.map((planned) => {
-    const block = { key: planned.block.key, text: planned.block.text, ...(planned.block.starts !== undefined ? { starts: planned.block.starts } : {}) };
+    const block = { ...planned.block };
     const take = record?.takes[planned.block.key];
     if (take === undefined || !plan.present.has(take.artifactId) || take.textHash !== audiobookTextHash(planned.block.text)) return block;
     const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === take.artifactId);
@@ -112,7 +112,7 @@ async function usablePictures(store: WorldStore, pictures: Readonly<Record<strin
 export async function chapterFirstPicture(store: WorldStore, plan: Pick<AudiobookPlan, "blocks" | "record">, listed: ReadonlySet<string>): Promise<string | null> {
   const record = plan.record === "unreadable" ? null : plan.record;
   if (record?.pictures === undefined) return null;
-  const blocks = plan.blocks.map((planned) => ({ key: planned.block.key, text: planned.block.text }));
+  const blocks = plan.blocks.map(planned => planned.block);
   for (const placed of placePictures(blocks, record.pictures, (file) => listed.has(file)).placed) {
     if (await onShelf(store, placed.picture.file)) return placed.picture.file;
   }
@@ -225,7 +225,7 @@ export async function setAudiobookPictureFocus(store: WorldStore, productionId: 
   const summary = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
   if (summary === undefined) throw new Error("that chapter is no longer in this production");
   const plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId, summary.id) });
-  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+  const blocks = plan.blocks.map((candidate) => candidate.block);
   if (pictureSlot(blocks, {}, block) === null) throw new Error("that block is no longer in the chapter");
   const round = (share: number) => Math.round(Math.min(1, Math.max(0, share)) * 1000) / 1000;
   return updateAudiobook(store, productionId, plan.chapter, (current) => {
@@ -329,7 +329,7 @@ export async function setAudiobookPicture(
     const listed = worldImageReferences(store.getBundle()).some((reference) => reference.file === picture.file);
     if (!listed || !(await onShelf(store, picture.file))) throw new Error("that picture is not in this world");
   }
-  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+  const blocks = plan.blocks.map((candidate) => candidate.block);
   const record = plan.record === "unreadable" ? null : plan.record;
   const index = blocks.findIndex(candidate => candidate.key === home);
   const slot = pictureSlot(blocks, record?.pictures, block);
@@ -365,7 +365,7 @@ export async function setAudiobookPicture(
     return { ...without, updatedAt: store.now(), ...(Object.keys(next).length > 0 ? { pictures: next } : {}), ...(Object.keys(owned).length > 0 ? { ownLooks: owned } : {}) };
   }, { requireReadable: true, beforeWrite: async () => {
     const fresh = await planAudiobook(store, productionId, summary.id, { narrator });
-    const currentBlocks = fresh.blocks.map(candidate => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+    const currentBlocks = fresh.blocks.map(candidate => candidate.block);
     if (JSON.stringify(currentBlocks) !== JSON.stringify(blocks)) throw new Error("The chapter's blocks changed; choose the picture again.");
     checkReview(fresh.record === "unreadable" ? null : fresh.record);
     if (reaffirm && picture !== null && !(await onShelf(store, picture.file))) throw new Error("that picture is not in this world");
@@ -385,7 +385,7 @@ export async function moveAudiobookPicture(store: WorldStore, productionId: stri
   if (summary === undefined) throw new Error("that chapter is no longer in this production");
   const narrator = await anyNarrator(store, productionId, summary.id);
   const plan = await planAudiobook(store, productionId, summary.id, { narrator });
-  const layout = (planned: AudiobookPlan) => planned.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+  const layout = (planned: AudiobookPlan) => planned.blocks.map((candidate) => candidate.block);
   const blocks = layout(plan);
   return updateAudiobook(store, productionId, plan.chapter, (current) => {
     const source = pictureSlot(blocks, current.pictures, from);
@@ -429,7 +429,7 @@ export async function setAudiobookPictureTall(store: WorldStore, productionId: s
   const listed = worldImageReferences(store.getBundle()).some((reference) => reference.file === tall);
   if (!listed || !(await onShelf(store, tall))) throw new Error("that picture is not in this world");
   const plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId) });
-  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+  const blocks = plan.blocks.map((candidate) => candidate.block);
   // `block` is a picture key, a block's own or a mark's (design turn 237): its Tall lands beside it.
   if (pictureSlot(blocks, {}, block) === null) throw new Error("that block is no longer in the chapter");
   return updateAudiobook(store, productionId, plan.chapter, (current) => {

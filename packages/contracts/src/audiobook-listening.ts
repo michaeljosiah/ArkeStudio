@@ -147,6 +147,7 @@ export interface ListeningInputBlock {
   text: string;
   /** A block joined by hand (design turn 198): the automatic blocks whose first turn it holds, whose first picture it shows. */
   starts?: readonly string[];
+  startHashes?: Readonly<Record<string, string>>;
   take?: { file: string; seconds: number; grouped: boolean; artifactId?: string };
 }
 
@@ -193,8 +194,8 @@ export function sentenceStart(text: string, sentence: number): { share: number; 
 
 /**
  * Where each picture stands now (R-69). A picture follows its block's words: on its own key while
- * that block still says what it said, else on the one block that does, else on its key whatever
- * it says now. A picture whose key is gone and whose words are nowhere is `lost` — named, so the
+ * that block still says what it said, else on the one block that does. Without matching words
+ * it is `lost`, even when the positional key was reused by an edit — named, so the
  * chapter's view can say so, never shown on a block it was not set on. Two pictures on one block
  * keep the one set there.
  *
@@ -204,7 +205,7 @@ export function sentenceStart(text: string, sentence: number): { share: number; 
  * picture always keeps its first word.
  */
 export function placePictures(
-  blocks: readonly Pick<ListeningInputBlock, "key" | "text" | "starts">[],
+  blocks: readonly Pick<ListeningInputBlock, "key" | "text" | "starts" | "startHashes">[],
   pictures: Readonly<Record<string, AudiobookPicture>> | undefined,
   usable: (file: string) => boolean = () => true,
 ): { placed: PlacedPicture[]; lost: string[]; /** Pictures a join took off their block (design turn 198): kept on the record under it, shown nowhere, never lost. */ off: string[] } {
@@ -215,8 +216,7 @@ export function placePictures(
   // A block joined by hand shows the first picture among the blocks it was made of (design turn
   // 198, rule 6); a later one comes off its block and stays on the record under it, so a split or
   // Reset puts it back.
-  const joinedInto = new Map<string, { index: number; order: number }>();
-  blocks.forEach((block, index) => block.starts?.forEach((key, order) => joinedInto.set(key, { index, order })));
+  const joined = blocks.flatMap((block, index) => (block.starts ?? []).flatMap((key, order) => block.startHashes?.[key] === undefined ? [] : [{ key, index, order, hash: block.startHashes[key] }]));
   const offered: Array<{ key: string; index: number; order: number; picture: AudiobookPicture }> = [];
   const marks: PlacedPicture[] = [];
   const sentenceLists = new Map<number, string[]>();
@@ -244,14 +244,14 @@ export function placePictures(
       const found = hashes.flatMap((hash, at) => (hash === picture.textHash ? [at] : []));
       if (found.length === 1) index = found[0]!;
     }
-    // An insertion can reuse this old key inside an unrelated join. Exact surviving words
-    // still own their picture; only a picture without that match follows the join's first image.
-    const into = own < 0 ? joinedInto.get(key) : undefined;
-    if (index < 0 && into !== undefined && into.order > 0) {
-      offered.push({ key, ...into, picture });
+    // A join carries its original blocks' current hashes. Their keys alone are no evidence
+    // after an insertion; exact words can also move into a join under another key.
+    const parts = joined.filter(part => part.hash === picture.textHash);
+    const into = parts.find(part => part.key === key) ?? (parts.length === 1 ? parts[0] : undefined);
+    if (index < 0 && into !== undefined) {
+      offered.push({ ...into, key, picture });
       continue;
     }
-    if (index < 0) index = own;
     if (index < 0) {
       lost.push(key);
       continue;
@@ -294,8 +294,8 @@ export function placedKey(blocks: readonly Pick<ListeningInputBlock, "key" | "te
  * not stand at its own words before the change is left as it is (call 5). Null when nothing changes.
  */
 export function picturesKeptOnJoin(
-  before: readonly Pick<ListeningInputBlock, "key" | "text" | "starts">[],
-  after: readonly Pick<ListeningInputBlock, "key" | "text" | "starts">[],
+  before: readonly Pick<ListeningInputBlock, "key" | "text" | "starts" | "startHashes">[],
+  after: readonly Pick<ListeningInputBlock, "key" | "text" | "starts" | "startHashes">[],
   pictures: Readonly<Record<string, AudiobookPicture>> | undefined,
 ): Record<string, AudiobookPicture> | null {
   if (pictures === undefined) return null;
@@ -335,7 +335,7 @@ export function picturesKeptOnJoin(
  * is that block's own place.
  */
 export function pictureSlot(
-  blocks: readonly Pick<ListeningInputBlock, "key" | "text" | "starts">[],
+  blocks: readonly Pick<ListeningInputBlock, "key" | "text" | "starts" | "startHashes">[],
   pictures: Readonly<Record<string, AudiobookPicture>> | undefined,
   key: string,
   usable?: (file: string) => boolean,
@@ -356,7 +356,7 @@ export function pictureSlot(
  * its own moment and not the next one's (codex on PR 2178).
  */
 export function pictureWords(
-  blocks: readonly Pick<ListeningInputBlock, "key" | "text" | "starts">[],
+  blocks: readonly Pick<ListeningInputBlock, "key" | "text" | "starts" | "startHashes">[],
   pictures: Readonly<Record<string, AudiobookPicture>> | undefined,
   key: string,
   also: readonly string[] = [],
@@ -560,7 +560,7 @@ export function listeningChapter(input: {
  */
 export function pictureSpans(
   blocks: ReadonlyArray<
-    Pick<ListeningInputBlock, "key" | "text" | "starts"> & {
+    Pick<ListeningInputBlock, "key" | "text" | "starts" | "startHashes"> & {
       seconds: number | null;
       /** Where each of the take's words starts, from its word timing when that is current (design turn 237, R-204). */
       words?: readonly number[];
