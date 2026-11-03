@@ -897,11 +897,11 @@ export async function saveChapter(
     const file = toExtendedLength(join(store.dir, fromPortable(path)));
     const live = await readFile(file, "utf8");
     const doc = MarkdownFile.parse(live);
-    // The manuscript editor has no status picker. Replacing outline notes starts a draft,
-    // counted from zero manuscript words; unchanged or cleared notes remain an outline.
+    // The manuscript editor has no status picker. New prose starts a planned or outlined
+    // chapter as a draft; unchanged or cleared notes keep their preparation status.
     const status = typeof doc.data["status"] === "string" ? doc.data["status"] : undefined;
-    const replacesOutline = status === "outlined" && body.trim() !== "" && body.trim() !== doc.body.trim();
-    const added = Math.max(0, chapterManuscriptWords(body, replacesOutline ? "drafted" : status) - chapterManuscriptWords(doc.body, status));
+    const startsDraft = (status === "planned" || status === "outlined") && body.trim() !== "" && body.trim() !== doc.body.trim();
+    const added = Math.max(0, chapterManuscriptWords(body, startsDraft ? "drafted" : status) - chapterManuscriptWords(doc.body, status));
     const progressFiles: CommitFileInput[] = [];
     if (added > 0) {
       const progressPath = `productions/${productionId}/progress.json`;
@@ -919,7 +919,7 @@ export async function saveChapter(
     // `words` (the chapter tree, the story dashboard) would otherwise report the count the
     // chapter had when it was last stamped by hand, indefinitely.
     doc.setData({ words: countWords(body) });
-    if (replacesOutline) doc.setData({ status: "drafted" });
+    if (startsDraft) doc.setData({ status: "drafted" });
     // An imported chapter is the author's from its first save (turn 131): the mark comes off.
     doc.dropData("source");
     // The base is the file the editor read when the caller says so (turn 126), not the file as

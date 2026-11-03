@@ -233,6 +233,25 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     );
   });
 
+  it("saving new prose starts a planned chapter as a draft and survives reopening", async () => {
+    const { dir, store } = await open();
+    await createProduction(store, { title: "Inkbound", format: "story" });
+    const file = await createChapter(store, "inkbound", { title: "Manual draft", order: 1 });
+    const before = await openChapter(store, "inkbound", file);
+    const blank = await saveChapter(store, "inkbound", file, "  ", { baseHash: before.hash });
+    assert.equal((await chaptersOf(dir, "inkbound"))[0]!.status, "planned");
+    await assert.rejects(saveChapter(store, "inkbound", file, "A stale draft.", { baseHash: "sha256:" + "0".repeat(64) }));
+    assert.equal((await chaptersOf(dir, "inkbound"))[0]!.status, "planned");
+    await saveChapter(store, "inkbound", file, "Maren closed the ledger.", { baseHash: blank.hash });
+    await store.close();
+    const reopened = await WorldStore.open(dir, { clock: CLOCK });
+    closeOnCleanup(() => reopened.close());
+    const production = reopened.getBundle().productions.find(p => p.meta.id === "inkbound")!;
+    assert.equal(production.chapters[0]!.status, "drafted");
+    assert.equal(production.chapters[0]!.words, 4);
+    assert.deepEqual(production.progress, { days: { "2026-08-01": 4 } });
+  });
+
   it("replaces an outline through a fenced manuscript save without leaving its count at zero", async () => {
     for (const body of ["", "Maren closed the ledger."]) {
       const { dir, store } = await open();
