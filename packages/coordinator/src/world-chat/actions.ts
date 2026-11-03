@@ -166,6 +166,7 @@ import {
   type ModelEditorRequest,
   type ModelSceneEdit,
   type ProposalId,
+  type Proposal,
   type TurnId,
   type WorldChangeCandidate,
   type WorldChatContext,
@@ -1942,6 +1943,25 @@ async function editorRequestForAction(store: WorldStore, actionId: string) {
     store.getBundle().productions.map(async (production) =>
       readEditorRequestByAction(store, production.meta.id, actionId).catch(() => null)),
   )).find((request) => request?.actionId === actionId) ?? null;
+}
+
+function savedStoryReviewObservations(action: Pick<ConversationActionCard, "productionId" | "baseObservations">) {
+  return { baseObservations: action.baseObservations.filter(observation =>
+    !((observation.requirement === "story" && [action.productionId, `${action.productionId}:overview`].includes(observation.target))
+      || (observation.requirement === "chapters" && [action.productionId, `${action.productionId}::plan`].includes(observation.target)))) };
+}
+
+/** Native review relaxes only collection context; cited cast and exact chapter reads still fence the write. */
+export async function savedStoryProposalPrecondition(store: WorldStore, proposal: Proposal): Promise<WorldStatePrecondition | undefined> {
+  if (!proposal.source.startsWith("world-chat-action:") || !["story-overview", "prose-style", "chapter-draft"].includes(proposal.kind)) return undefined;
+  const owner = proposal.decision?.mode === "attended" ? proposal.decision.owner : undefined;
+  if (owner?.kind !== "world-chat") return () => "The proposal's conversation cannot be verified.";
+  const log = new WorldChatStore(conversationDir(store.dir, owner.conversationId));
+  const meta = await log.readMeta();
+  const card = meta && foldConversation(meta.id, meta.createdAt, (await log.read()).events).view.actions.find(action =>
+    proposal.source === `world-chat-action:${action.actionId}` && action.authority.id === proposal.id);
+  if (!card || card.status !== "pending") return () => "The proposal no longer has a pending conversation action.";
+  return observationPrecondition(store, savedStoryReviewObservations(card));
 }
 
 function observationsCurrent(
@@ -4878,7 +4898,11 @@ export function worldChatActionAdapters(
     validate: async (action) => {
       if (!gate) return { ok: false, reason: "blocked", detail: "The proposal authority is unavailable." };
       const current = observationsCurrent(store, action);
-      if (!current.ok) {
+      // An accepted sibling can move the story/chapters collection without changing this draft.
+      // Keep that draft for an explicit native review; chat approval still requires its reads.
+      const canReviewSaved = ["world-chat-production-overview", "world-chat-production-prose-style", "world-chat-production-chapter"].includes(action.actionKind)
+        && observationsCurrent(store, savedStoryReviewObservations(action)).ok;
+      if (!current.ok && !canReviewSaved) {
         await gate.discard(action.authority.id);
         return current;
       }
@@ -4892,6 +4916,7 @@ export function worldChatActionAdapters(
         await gate.discard(action.authority.id);
         return { ok: false, reason: "stale", detail: "The proposal preview changed after this card was prepared." };
       }
+      if (!current.ok) return { ok: false, reason: "blocked", detail: "Story context changed. Review the saved proposal before accepting. No regeneration is needed." };
       return { ok: true };
     },
     execute: async (action) => {
