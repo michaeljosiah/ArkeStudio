@@ -310,7 +310,8 @@ export function PictureTrack({
     let command: TimelineClipCommand | null = null;
     let lastScrub: number | null = null;
     const scrub = (frame: number) => {
-      const clamped = Math.max(0, Math.min(span, frame));
+      // A validated tail trim may extend the film beyond this gesture's original canvas.
+      const clamped = Math.max(0, frame);
       if (clamped === lastScrub) return;
       lastScrub = clamped;
       onScrub?.(clamped);
@@ -339,8 +340,8 @@ export function PictureTrack({
         onPreview(command === null ? null : previewTimeline(timeline, [command], sourceLength));
         setDrag(update);
         // The frame at the edge in hand, in the record as it stands: a head trim shows its new
-        // first frame, a tail trim its new last one. The source frame is the same either way,
-        // so the viewer's committed spans answer without a draft.
+        // first frame, a tail trim its new last one. The viewer resolves the same draft so an
+        // outward extension can show picture where the committed plan still has a gap.
         const delta = command !== null && command.kind === "trim" ? command.deltaFrames : 0;
         scrub(gesture === "trim-start" ? clip.startFrame + delta : clip.startFrame + clip.durationFrames + delta - 1);
       },
