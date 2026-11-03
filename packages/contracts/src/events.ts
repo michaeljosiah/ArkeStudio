@@ -2452,6 +2452,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       reason: z.string().optional(),
     })
     .strict(),
+  z.object({ ...base, type: z.literal("bench.reference-used"), worldId: UlidSchema, sessionId: SessionIdSchema,
+    takeId: TakeIdSchema, requestId: UlidSchema, accepted: z.boolean(), reason: z.string().optional() }).strict(),
   /** Correlated result of filing a subject take into production. */
   z
     .object({

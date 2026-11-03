@@ -1,3 +1,4 @@
+import { useBenchCharacterImage } from "./bench/character-kit.js";
 import { readShotPromptHistory, restoreShotPrompt, readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
 import { measureProductionMedia } from "./media/measurement.js";
 import { foldBenchSession as foldPromptBench, type PromptToolsResult, type PromptInspection, type PromptInspectSource } from "@arke-studio/contracts";
@@ -14730,6 +14731,24 @@ export class Coordinator {
         // Keeping changed the world's artifacts, so the whole snapshot refreshes, not just the bench.
         await this.refreshWorldSnapshot(msg.worldId);
         await this.refreshBench(msg.worldId, msg.sessionId);
+        return;
+      }
+      case "bench-use-reference": {
+        const answer = (accepted: boolean, reason?: string) => this.emit({ at: this.nowIso(), type: "bench.reference-used",
+          worldId: msg.worldId, sessionId: msg.sessionId, takeId: msg.takeId, requestId: msg.requestId, accepted, ...(reason ? { reason } : {}) });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) { answer(false, "That world is no longer open."); return; }
+        try {
+          const bench = await this.benchFor(msg.worldId, msg.sessionId);
+          const take = bench?.session.takes.find(take => take.id === msg.takeId);
+          if (!bench || !take) throw new Error("That Bench image is unavailable.");
+          await useBenchCharacterImage(store, bench.session, take, msg.sheetId, msg.image, msg.requestId, () =>
+            !this.stillOpen(store) || this.stopping ? "That world is no longer open." :
+            msg.image === "character-sheet" && this.characterSheetJobRunning(msg.worldId, msg.sheetId)
+              ? "A character sheet is still being generated. Wait for it or settle it in Activity." : null);
+          await this.refreshWorldSnapshot(msg.worldId);
+          answer(true);
+        } catch (error) { answer(false, describeCoordinatorError(error)); }
         return;
       }
       case "bench-accept": {

@@ -1,3 +1,4 @@
+import { BenchCharacterKit } from "../components/bench-character-kit.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
 import { estimateSpeechMicroUsd, freeCreditLeft, SAMPLING_CHOICE_NAMES, samplingSummary, speechPriceCopy } from "@arke-studio/contracts";
 import { castVoiceSummary, planCastCharacterAudio, planSubjectCharacterAudio } from "@arke-studio/contracts";
@@ -2859,6 +2860,7 @@ function BenchWorkspace({
                     : `filed on ${subject.members.length} shots`}
               </Badge>
             )}
+            {selected?.media && selected.status === "succeeded" && selected.request.mode === "image" && selected.disposition !== "discarded" && <BenchCharacterKit key={selected.id} worldId={worldId} sessionId={session.id} take={selected} />}
             {selected && selected.disposition === "discarded" && <Badge tone="neutral">discarded</Badge>}
             {selected && selected.disposition === "open" && selected.media && (
               <>

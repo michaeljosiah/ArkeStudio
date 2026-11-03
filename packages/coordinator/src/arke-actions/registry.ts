@@ -763,6 +763,7 @@ const CLIENT_COMMAND_METADATA = {
   "bench-dispatch": action("world", "generation", "bench", "spend-and-compute", ["bench", "references", "artifacts", "voices", "jobs"]),
   "bench-rerun": action("world", "generation", "bench", "spend-and-compute", ["bench", "takes", "jobs"], { preparation: GENERATION_QUOTE }),
   "bench-keep": action("world", "command", "bench", "authored-change", ["bench", "takes", "artifacts"]),
+  "bench-use-reference": humanOnly("Selecting an existing Bench image into a character kit is an explicit author choice."),
   "bench-accept": action("production", "take-review", "bench", "authored-change", ["bench", "takes", "scenes", "shots", "boards"]),
   "bench-discard": action("world", "destructive", "bench", "destructive-change", ["bench", "takes"]),
   "bench-clear-view": action("world", "destructive", "bench", "destructive-change", ["bench", "takes"]),

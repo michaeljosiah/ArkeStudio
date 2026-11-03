@@ -525,6 +525,7 @@ export class ReadModel {
       case "artifact.notice":
       case "env.check":
       case "diagnostics.ready":
+      case "bench.reference-used":
         // Signals only in SPEC-001: the bundle arrives via a fresh snapshot, and proposals
         // are static fixtures until the gate lands in SPEC-004.
         return;

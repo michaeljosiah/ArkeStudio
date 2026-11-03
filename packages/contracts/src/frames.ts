@@ -4611,6 +4611,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       takeId: TakeIdSchema,
     })
     .strict(),
+  z.object({ kind: z.literal("bench-use-reference"), worldId: UlidSchema, sessionId: SessionIdSchema,
+    takeId: TakeIdSchema, sheetId: SlugSchema, image: z.enum(["main-photo", "character-sheet"]), requestId: UlidSchema }).strict(),
   /** Subject sessions file into production; the world-scoped bench keeps using bench-keep. */
   z
     .object({

@@ -2007,3 +2007,5 @@ card opens the existing `ConnectedProposalPanel` in `PageSheet` for explicit nat
 without regeneration. `application/local-worlds.ts` applies the card's retained non-context
 observations under the native acceptance gate too. Native acceptance reconciles the original card. Regressions are in
 coordinator `world-chat/actions.test.ts` and client `production-studio.test.tsx`.
+
+Bench images can be selected into a character kit through `bench-use-reference`: coordinator `bench/character-kit.ts` verifies the contained saved image/hash and reuses reference take recording plus main-photo/character-sheet acceptance. Client `components/bench-character-kit.tsx` owns the destination dialog and correlated result. Regression: coordinator `test/bench/character-kit.test.ts`, client `test/bench-character-kit.test.tsx` (issue #1657).
