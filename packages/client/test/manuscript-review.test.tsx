@@ -24,10 +24,14 @@ it("shows all report sections, pinned evidence and author decisions without chan
   assert.deepEqual(decisions,[["finding","intentional"]]);assert.deepEqual(evidence,[review.findings[0]!.citations[0]]);
   assert.match(host.textContent??"",/not an age classification/);
 });
-it("distinguishes partial coverage and disables decisions only for changed evidence",async()=>{
-  const review=manuscriptReviewFixture();review.status="partial";delete review.synthesis;review.tasks[1]!.state="interrupted";delete review.tasks[1]!.reading;review.findings[0]!.stale=true;
+it("says what failed, shows no empty sections on a partial report, and disables decisions only for changed evidence",async()=>{
+  const partial=manuscriptReviewFixture();partial.status="partial";delete partial.synthesis;partial.tasks[1]!.state="failed";partial.tasks[1]!.error="Upstream refused";delete partial.tasks[1]!.reading;
+  const first=await mount(<ManuscriptReviewReport review={partial} onDecision={()=>assert.fail()} onEvidence={()=>{}} />);
+  assert.match(first.textContent??"",/1 of \d+ stages failed\. Upstream refused/);assert.match(first.textContent??"",/1\/2 chapters fully supplied/);
+  assert.doesNotMatch(first.textContent??"",/Not available in this report|Candid editorial review/);
+  await act(async()=>root!.unmount());
+  const review=manuscriptReviewFixture();review.findings[0]!.stale=true;
   const host=await mount(<ManuscriptReviewReport review={review} onDecision={()=>assert.fail()} onEvidence={()=>{}} />);
-  assert.match(host.textContent??"",/No complete manuscript review is claimed/);assert.match(host.textContent??"",/1\/2 chapters fully supplied/);
   assert.equal([...host.querySelectorAll("button")].find(b=>b.textContent==="Mark resolved")!.hasAttribute("disabled"),true);
 });
 it("starts with an explicit brief and keeps a new review selected when an older result arrives late",async()=>{
