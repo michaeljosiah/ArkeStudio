@@ -391,6 +391,18 @@ describe("coordinator harness/model routing (#1122)", () => {
     } finally { await own.close(); }
   });
 
+  it("runs a text role on the writer's model until it has one of its own (issue 2419)", async () => {
+    const test = await fixture({ production: TEXT, agents: { "stage-designer": { model: STAGE }, "story-writer": { model: TEXT }, lyricist: { model: CHAT } } });
+    try {
+      await test.stage();
+      const agents = test.adapter.sessions.find(session => session.agent === "stage-designer")?.config.agents;
+      assert.equal(agents?.["manuscript-reviewer"]?.model, TEXT, "nothing chosen takes the writer's");
+      assert.equal(agents?.lyricist?.model, CHAT, "its own choice stands");
+      assert.notEqual(agents?.["chapter-visual-reviewer"]?.model, TEXT, "a picture reader never takes a writer's model");
+      assert.notEqual(agents?.["studio-assistant"]?.model, TEXT, "nor does an operational role");
+    } finally { await test.close(); }
+  });
+
   it("runs the page reviewer on the lettering reader's model until it has one of its own (SPEC-064 decision 15)", async () => {
     const test = await fixture({ production: TEXT, agents: { "stage-designer": { model: STAGE }, "chapter-visual-reviewer": { model: STAGE } } });
     try {

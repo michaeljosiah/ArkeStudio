@@ -281,6 +281,11 @@ export function ollamaLlmAvailable(providers: readonly ProviderStatus[]): boolea
 }
 
 /** A fault about the credential in use, which disables what it unlocked; a store's fault is not one. */
+/** The account's balance, not the key: "key rejected" would send the person to replace a key that works (issue 2418). */
+export function balanceFaulted(status: Pick<ProviderStatus, "fault"> | undefined): boolean {
+  return /no credits|out of credit|insufficient.?quota|credit.?balance|quota (is )?(exhausted|used up)/i.test(status?.fault ?? "");
+}
+
 export function credentialFaulted(status: Pick<ProviderStatus, "fault" | "faultKind"> | undefined): boolean {
   return status !== undefined && status.fault !== null && (status.faultKind === undefined || status.faultKind === "credential");
 }
