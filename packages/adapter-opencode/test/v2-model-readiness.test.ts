@@ -202,6 +202,15 @@ describe("Copilot per-location readiness (#1696)", () => {
     });
   }
 
+  it("checks an unpinned default's output capabilities from its full catalogue row", async () => {
+    await fixture(async (stub, adapter, traces) => {
+      stub.defaultModel = { providerID: "custom", id: "picture-maker" };
+      stub.modelResponse = () => ({ models: [{ providerID: "custom", id: "picture-maker", package: "custom", capabilities: { output: ["image"] } }] });
+      await assert.rejects(adapter.createSession({ purpose: "extraction", cwd: "/scratch/default", agent: "canon-author" }), /cannot answer a chat/);
+      assertRetiredWithoutPrompt(stub, traces);
+    });
+  });
+
   it("uses the returned session location when a direct caller supplies no cwd", async () => {
     await fixture(async (stub, adapter) => {
       stub.echoLocation = "/runtime/location";

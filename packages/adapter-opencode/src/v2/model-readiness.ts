@@ -48,7 +48,6 @@ export async function waitForSessionModel(
     for (;;) {
       signal.throwIfAborted();
       try {
-        if (model !== null && !["github-copilot", "opencode"].includes(model.providerID)) return null;
         const rows = await scoped<WireModel[]>("/api/model");
         if (!Array.isArray(rows)) throw new Error("OpenCode returned an invalid model catalog");
         if (model === null) {
