@@ -344,12 +344,13 @@ function OverviewStoryScreen() {
               )}
               {production?.treatment && (
                 <div className="fy-draftcard fy-texthost">
-                  <div className="fy-eyebrow-sm">TREATMENT</div>
+                  <div className="fy-eyebrow-sm">TREATMENT · REFERENCE</div>
                   <div
                     style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4, whiteSpace: "pre-wrap" }}
                   >
                     {production.treatment}
                   </div>
+                  <p style={{ color: "var(--muted-foreground)" }}>Not automatically included in chapter drafts. Put chapter-specific guidance in the chapter plan.</p>
                   <ReadAloud
                     source={{ of: "story", productionId: prodId ?? "", field: "treatment" }}
                     title={`${production.meta.title} · treatment`}

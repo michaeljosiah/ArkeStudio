@@ -48,7 +48,9 @@ export function CompactOverview({ worldId, production, staged, read }: {
           </div></article>)}</div>
         <ReadAloud source={{ of: "story", productionId: id, field: "acts" }} title="Acts" text={story!.acts!.map(act => `${act.title} — ${act.summary ?? ""}`).join("\n")} />
       </section>}
-      {production.treatment && <ProseCard label="Treatment"><ClampedText>{production.treatment}</ClampedText>{actions("treatment", production.treatment)}</ProseCard>}
+      {production.treatment && <ProseCard label="Treatment · Reference"><ClampedText>{production.treatment}</ClampedText>
+        <p style={{ color: "var(--muted-foreground)" }}>Not automatically included in chapter drafts. Put chapter-specific guidance in the chapter plan.</p>
+        {actions("treatment", production.treatment)}</ProseCard>}
       {style ? <><div className="fy-overview-style-head"><b>Style</b><span>v{style.version} · settled in Develop</span></div>
         {style.pov && <ProseCard label="Point of view"><p>{style.pov}</p></ProseCard>}
         {style.tense && <ProseCard label="Tense"><p>{style.tense}</p></ProseCard>}
