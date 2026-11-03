@@ -1,4 +1,5 @@
 import {
+  harnessModelFailureReason,
   newId,
   advanceWorldChatInputQueue,
   worldChatInputRouting,
@@ -1457,6 +1458,8 @@ function runFrom(events: ReadonlyArray<{ event: { type: string } }>, runId: RunI
  */
 function safeDetail(err: unknown): string {
   if (!(err instanceof Error)) return "the turn did not complete";
+  const modelReason = harnessModelFailureReason(err.message);
+  if (modelReason !== null) return modelReason;
   if (err.message === "timeout") return "the studio took too long to answer";
   // The one cause worth naming (SPEC-030 R-13): a vendor token the harness could not refresh
   // is the person's to fix, and "could not complete" sends them everywhere but Settings. The

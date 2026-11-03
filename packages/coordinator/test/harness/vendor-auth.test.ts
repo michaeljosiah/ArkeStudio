@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { harnessModelFailureReason, OPENCODE_FREE_MODEL_REASON } from "@arke-studio/contracts";
 import { describe, it } from "node:test";
 import {
   agentForPurpose,
@@ -590,6 +591,13 @@ describe("review round 2026-08-26: races, releases and retained refusals", () =>
 });
 
 describe("R-13's classifier", () => {
+  it("treats the OpenCode free-tier restriction as a model choice rather than expired credentials", () => {
+    const detail = "provider.auth: Provider request failed with HTTP 403: OpenCode's free tier can only be used from within OpenCode";
+    assert.equal(isAuthShapedFailure(detail), false);
+    assert.equal(harnessModelFailureReason(detail), OPENCODE_FREE_MODEL_REASON);
+    assert.equal(harnessModelFailureReason(`Error: ${OPENCODE_FREE_MODEL_REASON}`), OPENCODE_FREE_MODEL_REASON);
+    assert.equal(harnessModelFailureReason("HTTP 403: private provider details"), null);
+  });
   it("matches exactly the refresh-failure shapes and nothing broader", () => {
     assert.equal(isAuthShapedFailure("provider.auth"), true);
     assert.equal(isAuthShapedFailure("provider.auth: something"), true);

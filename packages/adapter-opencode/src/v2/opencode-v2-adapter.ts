@@ -27,7 +27,7 @@ import {
 import { assessV2Permission, buildSessionConfigV2 } from "./config.js";
 import { PreparedSessionPolicies, type SessionPermissionPolicy } from "../permission-policy.js";
 import { parseSse, SseFrameLimitError } from "../sse.js";
-import { modelEnabled, modelMetadata, providerNameOf, type WireModel } from "../model-metadata.js";
+import { modelEnabled, modelMetadata, modelWritingRefusal, providerNameOf, type WireModel } from "../model-metadata.js";
 import { OpenCodeV2Http, sameDirectory, wireDirectory } from "./http.js";
 import { OpenCodeError } from "../http.js";
 import { OPENCODE2_PINNED_VERSION } from "../discovery.js";
@@ -384,6 +384,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       // Only a pinned selection identifies where these bytes will go. A global default or a
       // model name is not evidence for this location; failed/unknown metadata stays unreadable.
       if (model !== null) {
+        let writingRefusal: string | null = null;
         try {
           const signal = AbortSignal.any([AbortSignal.timeout(writer ? 30_000 : 5_000), ...(input.signal ? [input.signal] : [])]);
           const scopedLocation = location ?? session.location?.directory;
@@ -395,10 +396,12 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
           const rows = envelope?.data;
           const matches = Array.isArray(rows) ? rows.filter(item => item.providerID === model.providerID && item.id === model.id) : [];
           const selected = matches.length === 1 ? matches[0] : undefined;
+          writingRefusal = selected ? modelWritingRefusal(selected) : null;
           image = await qualifySessionImageInput(selected ?? null, model.providerID, signal);
         } catch {
           input.signal?.throwIfAborted();
         }
+        if (writingRefusal) throw new Error(writingRefusal);
       }
       input.signal?.throwIfAborted();
       if (privateSession && (this.runtimeRevision !== revision || this.disposed)) throw new Error("The private writing owner changed during creation.");
@@ -812,7 +815,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     this.lastKnownWindow = null;
     this.modelWindows.clear();
     for (const row of rows) {
-      if (!row.id || !row.providerID || !modelEnabled(row)) continue;
+      if (!row.id || !row.providerID || !modelEnabled(row) || modelWritingRefusal(row) !== null) continue;
       const key = `${row.providerID}/${row.id}`;
       const metadata = modelMetadata(row);
       if (metadata.inputTokenLimit !== undefined) this.modelWindows.set(key, metadata.inputTokenLimit);
