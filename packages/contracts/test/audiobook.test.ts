@@ -16,6 +16,7 @@ import {
   audiobookDirectionHash,
   audiobookDoorLine,
   audiobookHeading,
+  publishedChapterTitle,
   audiobookRowLabel,
   audiobookTextHash,
   AudiobookDoorSchema,
@@ -66,6 +67,8 @@ describe("audiobook blocks (R-2)", () => {
     assert.equal(audiobookHeading(1, "Chapter 1"), "Chapter 1");
     assert.equal(audiobookHeading(1, " chapter 1 "), "Chapter 1");
     assert.equal(audiobookHeading(2, "Untitled"), "Chapter 2");
+    assert.equal(publishedChapterTitle(2, " untitled "), "Chapter 2");
+    assert.equal(publishedChapterTitle(2, "Neap"), "Neap");
     assert.equal(audiobookHeading(3, "Neap"), "Chapter 3 · Neap");
   });
 
