@@ -1169,15 +1169,15 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
           </div>
           <div className="fy-gate__body" style={{ gap: 14 }}>
             {Object.entries(drafts).some(([, draft]) => (draft.turns.length || draft.blueprint?.name || draft.attachments.length) && !draft.worldId) && (
-              <label style={{ display: "grid", gap: 6 }}>
-                Continue a draft
+              <details>
+                <summary>Earlier drafts</summary>
                 <Select label="Continue a draft" value={genesisId} disabled={chatRunning || myBuild?.status === "running"}
                   onChange={event => setParams({ draft: event.target.value })}>
                   <option value={genesisId}>{blueprint?.name ?? "This conversation"}</option>
                   {Object.entries(drafts).filter(([id, draft]) => id !== genesisId && (draft.turns.length || draft.blueprint?.name || draft.attachments.length) && !draft.worldId)
                     .map(([id, draft]) => <option key={id} value={id}>{draft.blueprint?.name ?? draft.turns[0]?.text.slice(0, 80) ?? "Untitled world"}</option>)}
                 </Select>
-              </label>
+              </details>
             )}
             {(turns.length > 0 || blueprint?.name || handed.length > 0) && !g?.worldId && !g?.founding && !myBuild && (
               <Button variant="ghost" disabled={chatRunning} onClick={() => {
@@ -1335,7 +1335,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
                     // A world that does not exist yet has nowhere to remember a model, so the chip
                     // picks for this conversation only, and letting go of it is the author's default.
-                    modelControl={<ModelChip state={state} value={writingModel} set={writingModel !== undefined}
+                    modelControl={<ModelChip state={state} value={writingModel ?? state?.app.agents.find(agent => agent.name === "story-writer")?.model ?? undefined} set={writingModel !== undefined}
                       onPick={setWritingModel} needsTools unsetLabel="Use the default"
                       disabled={chatRunning || buildPressed || !!g?.founding} />}
                     {...(hostCanAttach()
@@ -1503,12 +1503,10 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
               }}
             >
               {/*
-                A label and nothing else. There was a button here for months that could never be
-                pressed — an image job needs a world folder to land in, and on this screen there
-                is no world yet — and then a sentence in its place saying where key art actually
-                comes from, which is the same explanation with the control removed (issue 1008).
+                A picture and no control: an image job needs a world folder to land in, and on this
+                screen there is no world yet (issue 1008).
               */}
-              <span style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)" }}>No world image yet</span>
+              <img className="fy-portrait fy-portrait--plate" src="./worlds/new-world.webp" alt="" />
             </div>
             <div style={{ padding: "12px 8px 0" }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 9 }}>
@@ -1603,6 +1601,10 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
               variant="primary"
               disabled={!canCreate || buildCardOpen}
               onClick={() => {
+                // Begin is the author's yes to what is proposed. Left pending, it ran through the look
+                // to "approve … in the conversation" and a disabled Begin (issue 2482).
+                const pending = g?.review?.cards.filter(card => card.status === "pending") ?? [];
+                if (pending.length > 0) decideGenesisDraft(genesisId, pending.slice(0, 300).map(card => ({ key: card.key, digest: card.digest })), "approve");
                 const proposed = blueprint?.look?.trim();
                 const approvedLook = look.trim() || proposed;
                 if (approvedLook) {
