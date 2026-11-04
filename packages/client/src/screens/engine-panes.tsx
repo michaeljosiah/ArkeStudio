@@ -632,6 +632,9 @@ export function OllamaDetail({ components }: { components: readonly SetupCompone
   const managed = runtime?.source !== "user-url";
   const component = components.find(row => row.id === "ollama-runtime");
   useEffect(() => { refreshOllama(); }, []);
+  // The switch stops the old service first, about nine seconds with nothing on screen to say it took (issue 2562).
+  const [switching, setSwitching] = useState(false);
+  useEffect(() => { if (managed) setSwitching(false); }, [managed]);
   return (
     <>
       <RuntimeHead
@@ -643,7 +646,7 @@ export function OllamaDetail({ components }: { components: readonly SetupCompone
       />
       <RuntimeSection label="ENGINE">
         <span className="fy-rt__path">{managed ? "Arke-managed" : "Your service"}{runtime?.version ? ` · v${runtime.version}` : ""}{runtime?.url ? ` · ${runtime.url}` : ""}</span>
-        {!managed && <ActionButton icon={<RotateCcw size={13} />} hint="The Studio assistant only runs on Arke's own Ollama" onClick={useManagedOllama}>Use Arke-managed</ActionButton>}
+        {!managed && <ActionButton icon={<RotateCcw size={13} />} hint="The Studio assistant only runs on Arke's own Ollama" disabled={switching} onClick={() => { setSwitching(true); useManagedOllama(); }}>{switching ? "Switching…" : "Use Arke-managed"}</ActionButton>}
       </RuntimeSection>
       {runtime?.detail && (
         <div className="fy-set__why">
