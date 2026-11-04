@@ -18,7 +18,7 @@ export async function benchImageResult(store: WorldStore, source: BenchImageSour
   if (!(KEY_ART_EXTENSIONS as readonly string[]).includes(extension)) throw new Error("That image format cannot be used here.");
   const mediaPath = `${sessionMediaDir(source.sessionId, take.id)}/${take.media.file}`;
   const bytes = await readContainedMediaBytes(store.dir, mediaPath, store.closingSignal);
-  if (sha256(bytes) !== take.media.hash) throw new Error("That Bench image changed after generation.");
+  if (sha256(bytes).slice(0, take.media.hash.length) !== take.media.hash) throw new Error("That Bench image changed after generation.");
   return { bytes, extension, mediaPath };
 }
 

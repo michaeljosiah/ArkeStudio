@@ -52,7 +52,7 @@ const music = (): Extract<ModelWorldChatAction, { kind: "bench-generation" }> =>
   params: { kind: "music", lyrics: "[instrumental]", count: 1 }, references: [],
 }, checkReceiptIds: [newId("check")] });
 
-it("adopts a verified Bench image into world slots only after approval, refuses changed bytes and retains look history", async t => {
+it("adopts a verified short-hash Bench image only after approval, refuses changed bytes and retains look history", async t => {
   const { store, worldDir, deps } = await setup(t);
   // conversation-runs raises this boundary before issuing the run's leased reads.
   await store.ensureSchemaVersion(122, "world-chat-result-use");
@@ -60,7 +60,7 @@ it("adopts a verified Bench image into world slots only after approval, refuses 
   await bench.create(sessionId, AT);
   await bench.append({ type: "takes-reserved", takes: [{ id: takeId, n: 1, requestId: "image", createdAt: AT,
     request: { mode: "image", brief: "A tide clock", provider: IMAGE.provider, model: IMAGE.id, params: { kind: "image", count: 1 }, references: [], keyframes: [] } }] }, { at: AT });
-  const bytes = pngBytes(), hash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+  const bytes = pngBytes(), hash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
   const media = join(sessionDir(worldDir, sessionId), "media", takeId, "result.png");
   await mkdir(join(sessionDir(worldDir, sessionId), "media", takeId), { recursive: true });
   await writeFile(media, bytes);
