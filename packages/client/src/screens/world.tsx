@@ -78,6 +78,7 @@ import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
 import { artifactDisplayName, artifactOpenLabel, artifactUses, linkNameResolver } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
 import { ComicStylePicker } from "../components/comic-style-picker.js";
+import { productionPlate } from "../lib/production-plate.js";
 import { draftFromStyle, styleFromDraft, type ComicStyleDraft } from "../lib/comic-styles.js";
 import { clearQueue, enqueueClip, playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
@@ -842,6 +843,7 @@ function WorldProductions({ worldId, world }: { worldId: string; world: WorldBun
                     worldSlug={world.meta.slug}
                     path={art}
                     label={`${p.meta.title}: frame`}
+                    fallbackSrc={productionPlate(p.meta)}
                     radius={7}
                   />
                 </div>
@@ -4634,6 +4636,7 @@ export function ProductionsScreen() {
                     worldSlug={world?.meta.slug}
                     path={artOf(p)}
                     label={`${p.meta.title}: frame`}
+                    fallbackSrc={productionPlate(p.meta)}
                     radius={0}
                   />
                 </div>
@@ -4802,7 +4805,7 @@ type KindChoice = { id: string; label: string; body: string; aspect?: string };
  * `interactive` is still one of them and still reads back the same way — it just arrives from
  * the door now rather than from the kind row (turn 113a).
  */
-const STORED_KINDS = new Set(["microdrama", "music-video", "interactive", "visual-novel", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, "album", "single", "soundtrack"]);
+const STORED_KINDS = new Set(["microdrama", "music-video", "interactive", "visual-novel", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, "album", "single", "soundtrack", "other"]);
 
 /*
  * The kinds with a plate in `public/video-kinds`. Other is deliberately absent: an image of
@@ -5051,7 +5054,7 @@ export function NewProductionScreen() {
                       alt=""
                       style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                     />
-                  ) : null /* Other is the empty box (issue 1883): a "·" in it read as a stray mark. */}
+                  ) : null}
                 </div>
                 <div className="fy-radio__head">
                   <span className="fy-radio__dot" />
