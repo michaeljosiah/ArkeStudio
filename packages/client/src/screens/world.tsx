@@ -1902,6 +1902,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const kit = world.referenceKits.find((k) => k.sheetId === sheet.id);
   const sheetPath = `${sheet.type === "character" ? "characters" : `${sheet.type}s`}/${sheet.id}.md`;
   const refs = sheetRefsMap[sheet.id];
+  const sheetTakes = refs ? Object.values(refs.takesByVersion).reduce((a, b) => a + b, 0) : 0;
   const references = referenceSummary(kit);
   const isCharacter = sheet.type === "character";
   const aliasNames = aliasesDraft.split(/\r?\n/).map(name => name.trim()).filter(Boolean);
@@ -2017,7 +2018,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           <div className="fy-designcard__caption">
             <span className="fy-designcard__title">Main photo</span>
             <span className={`fy-dot fy-designcard__desktop-dot fy-dot--${mainPhoto ? "ok" : "sketch"}`} />
-            <span className="fy-designcard__note"><span className={`fy-dot fy-designcard__compact-dot fy-dot--${mainPhoto ? "ok" : "sketch"}`} />{mainPhoto ? "identity anchor" : "outstanding"}</span>
+            <span className="fy-designcard__note"><span className={`fy-dot fy-designcard__compact-dot fy-dot--${mainPhoto ? "ok" : "sketch"}`} />{mainPhoto ? "Chosen" : "Not made yet"}</span>
           </div>
         </div>
       </div>
@@ -2030,12 +2031,12 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           <Portrait
             worldSlug={slug}
             path={characterSheet ? `references/${sheet.id}/${characterSheet.file}` : ""}
-            label="Character sheet outstanding"
+            label="Not made yet"
             radius={9}
           />
         </span>
         <strong>Character sheet</strong>
-        <small>{characterSheet ? "accepted · current" : "outstanding"}</small>
+        <small className={characterSheet ? undefined : "fy-overview-sheet__missing"}>{characterSheet ? "Current" : "Not made yet"}</small>
         <span className="fy-overview-sheet__chevron"><ChevronRight /></span>
       </button>
     </div>
@@ -2072,11 +2073,10 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         className="fy-sheet__grid"
         style={isCharacter ? undefined : { gridTemplateColumns: "1fr", gap: 14 }}
       >
-        {gridSections.map((s) => {
+        {gridSections.filter((s) => s.body.trim() !== "" && s.body.trim() !== "—").map((s) => {
           // Every section carries authored prose, so every one earns the hover read-aloud — once
-          // it holds real text, not the empty-section placeholder. It used to be Appearance
-          // alone, which meant a location sheet or a faction sheet had no readable block at all.
-          const readable = s.body.trim() !== "" && s.body.trim() !== "—";
+          // it holds real text. It used to be Appearance alone, which meant a location sheet or a
+          // faction sheet had no readable block at all.
           const body = <div className="fy-sheet__secbody"><ReadOnlyMarkdown value={s.body} ariaLabel={`${sheet.name} · ${s.heading}`} /></div>;
           return (
             <div key={s.heading}>
@@ -2084,7 +2084,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
                   the same colour on all of them, saying once per section what the badge under the
                   name says once for the record (issue 1010, U3). */}
               <div className="fy-sheet__sechead">{s.heading}</div>
-              {readable ? readableProse(s.heading, s.body, body) : body}
+              {readableProse(s.heading, s.body, body)}
             </div>
           );
         })}
@@ -2145,35 +2145,33 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           </div>
         </Section>
       )}
-      <Section title="From this sheet">
+      {[references.total, refs?.productions.length ?? 0, refs?.artifacts.length ?? 0, sheetTakes].some((n) => n > 0) && <Section title="From this sheet">
         <div className="lay-stats">
-          <div className="lay-stats__item">
+          {references.total > 0 && <div className="lay-stats__item">
             <div className="lay-stats__value">{references.total}</div>
-            <div className="lay-stats__label" title={references.detail}>accepted references</div>
-          </div>
+            <div className="lay-stats__label" title={references.detail}>accepted {references.total === 1 ? "reference" : "references"}</div>
+          </div>}
           {refs && <>
-            <div className="lay-stats__item">
+            {refs.productions.length > 0 && <div className="lay-stats__item">
               <div className="lay-stats__value">{refs.productions.length}</div>
-              <div className="lay-stats__label">productions</div>
-            </div>
-            <div className="lay-stats__item">
+              <div className="lay-stats__label">{refs.productions.length === 1 ? "production" : "productions"}</div>
+            </div>}
+            {refs.artifacts.length > 0 && <div className="lay-stats__item">
               <div className="lay-stats__value">{refs.artifacts.length}</div>
-              <div className="lay-stats__label">artifacts</div>
-            </div>
-            <div className="lay-stats__item">
-              <div className="lay-stats__value">
-                {Object.values(refs.takesByVersion).reduce((a, b) => a + b, 0)}
-              </div>
+              <div className="lay-stats__label">{refs.artifacts.length === 1 ? "artifact" : "artifacts"}</div>
+            </div>}
+            {sheetTakes > 0 && <div className="lay-stats__item">
+              <div className="lay-stats__value">{sheetTakes}</div>
               <div className="lay-stats__label">
-                takes
+                {sheetTakes === 1 ? "take" : "takes"}
                 {Object.keys(refs.takesByVersion).length > 1
                   ? ` across v${Object.keys(refs.takesByVersion).sort().join(", v")}`
                   : ""}
               </div>
-            </div>
+            </div>}
           </>}
         </div>
-      </Section>
+      </Section>}
     </>
   );
   const main = (

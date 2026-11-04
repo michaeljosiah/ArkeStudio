@@ -511,7 +511,7 @@ describe("screen inventory", () => {
     const reference = renderAt(`${base}/kit`);
     for (const copy of [
       "Main photo",
-      "ACCEPTED · IDENTITY ANCHOR",
+      "ACCEPTED",
       "Character sheet",
       "multiple views · one composite image",
       "1 reference: Character sheet",

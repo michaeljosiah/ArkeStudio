@@ -1186,6 +1186,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-overview-sheet > span:first-child { display: block; width: 320px; height: 168px; overflow: hidden; }
 .fy-overview-sheet strong { display: inline-block; margin: 9px 0 0 12px; font: 600 12px var(--font-sans); }
 .fy-overview-sheet small { float: right; margin: 11px 12px 0 0; font: 400 9px var(--font-mono); color: var(--success); }
+.fy-overview-sheet small.fy-overview-sheet__missing { color: var(--muted-foreground); }
 
 /* ---- page-corner action -------------------------------------------------- */
 .fy-corner {
