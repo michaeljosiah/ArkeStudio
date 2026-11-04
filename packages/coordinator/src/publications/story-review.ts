@@ -112,7 +112,8 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
       }
       if (chapter.title.includes("—")) warnings.push(`${chapter.title}: the heading contains an em dash. Review the title in the manuscript.`);
     }
-    chapters.push({ ...chapter, id: summary.id, audioProblems, plan, mix, studio });
+    // A reader's contents page should not say Untitled, nor an M4B's chapter list (issue 2504).
+    chapters.push({ ...chapter, title: chapter.title.trim().toLowerCase() === "untitled" ? `Chapter ${summary.order}` : chapter.title, id: summary.id, audioProblems, plan, mix, studio });
   }
   // The credits as the M4B's first and last chapters (design turn 252, SPEC-047 R-217): each made
   // credit timed as a chapter of one block is, a credit not read left out. Beside the chapters, so

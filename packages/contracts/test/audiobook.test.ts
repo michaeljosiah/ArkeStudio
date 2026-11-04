@@ -65,6 +65,7 @@ describe("audiobook blocks (R-2)", () => {
   it("reads a chapter titled only by its number once (turn 188)", () => {
     assert.equal(audiobookHeading(1, "Chapter 1"), "Chapter 1");
     assert.equal(audiobookHeading(1, " chapter 1 "), "Chapter 1");
+    assert.equal(audiobookHeading(2, "Untitled"), "Chapter 2");
     assert.equal(audiobookHeading(3, "Neap"), "Chapter 3 · Neap");
   });
 

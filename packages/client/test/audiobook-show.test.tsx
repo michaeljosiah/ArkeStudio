@@ -267,7 +267,7 @@ describe("the hero (199a, 199b, rule 4)", () => {
     const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound" };
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 2, blocks: 120 }));
     assert.equal(q('[data-testid="read-book"]'), null);
-    assert.match(q('[data-testid="audiobook-run"]')!.textContent!, /^reading… 0 of 2 chaptersStop$/);
+    assert.match(q('[data-testid="audiobook-run"]')!.textContent!, /^reading… 0 of 2Stop$/);
     await press(all('[data-testid="audiobook-run"] button').find((button) => button.textContent === "Stop")!);
     assert.ok(m.sent.some((message) => message.kind === "stop-audiobook-book"));
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-finished", ...ids, outcome: "stopped", chaptersRead: 0, chaptersRefused: 0, made: 3, flagged: 0 }));
