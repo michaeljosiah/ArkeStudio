@@ -639,6 +639,15 @@ describe("Adapt before drawing (turn 254)", () => {
     assert.ok(button(m.container, "Close"));
   });
 
+  it("sends what a reader could not follow back to Arke with Fix with Arke (issue 2457)", async () => {
+    const read = { status: "read", reader: { id: "harness", version: "1:m" }, findings: [{ kind: "who", page: 1, panel: 1, question: "Who is Jory?" }], redrafts: 1, at: AT };
+    const state = drafting({ pages: [page()], read });
+    const owner = new GlobalChatController(); owner.setCurrent(chatSurfaceForPage(state, `/w/${FIXTURE_WORLD_ID}/p/low-water-drawn/story/pages`));
+    const m = await mount(state, undefined, owner);
+    await act(async () => props(button(m.container, "Fix with Arke")!).onClick({}));
+    assert.ok(m.sent.some((message) => message.kind === "proposal-discard"), "the waiting draft goes first");
+  });
+
   it("marks what a reader could not follow and keeps it only as Keep anyway (254d)", async () => {
     const one = page();
     const read = { status: "read", reader: { id: "harness", version: "1:m" }, findings: [{ kind: "who", page: 1, panel: 1, question: "Who is Jory?" }, { kind: "where", page: 1, question: "Is this the same night?" }], redrafts: 1, at: AT };

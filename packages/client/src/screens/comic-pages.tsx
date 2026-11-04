@@ -395,6 +395,12 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
                 {kept(draftRead) > 0 && <span className="fy-comic__keptchip">{kept(draftRead)} kept {kept(draftRead) === 1 ? "mystery" : "mysteries"}</span>}
                 <span className="grow" />
                 <Button size="sm" onClick={() => discardProposal(worldId, drafted.proposal.id)}>Discard</Button>
+                {/* What the reader asked goes back to Arke; a waiting draft has to go first, or its next one is refused. */}
+                {chatSurface && draftRead?.status === "read" && readHolds(draftRead) && <Button size="sm" variant="primary" onClick={() => {
+                  discardProposal(worldId, drafted.proposal.id);
+                  pressedDraft.current = true;
+                  ask(`Draft chapter ${chapter?.order}, ${chapter?.title}, again from its kept plan${from}, so the pages answer what a reader asked: ${draftRead.findings.filter((finding) => SCRIPT_READ_BLOCKING.has(finding.kind)).map((finding) => finding.question).join(" ").slice(0, 4000)}`);
+                }}><Sparkle size={13} />Fix with Arke</Button>}
                 {/* Something a reader could not follow, or no read at all, is kept only as Keep anyway (turn 254d, 254e). */}
                 <Button size="sm" variant={readHolds(draftRead) ? undefined : "primary"} onClick={() => acceptProposal(worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision)}>{readHolds(draftRead) ? "Keep anyway" : "Keep"}</Button>
               </div>
