@@ -1,7 +1,7 @@
 import { AudiobookActivityRow } from "./audiobook-activity.js";
 import { JobStorageWaitNotice } from "./job-storage-wait.js";
 import { useWordTimingActivity, WordTimingActivityRow } from "./audiobook-timing-activity.js";
-import { audiobookActivityLive, audiobookJobRun, audiobookRequestCost } from "@arke-studio/contracts";
+import { audiobookActivityLive, audiobookJobRun, audiobookRequestCost, groupTakesToReview } from "@arke-studio/contracts";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, type NavigateFunction } from "react-router";
 import {
@@ -355,6 +355,7 @@ function Inbox({
     }
     return null;
   };
+  const needRows = groupTakesToReview(ordinaryNeeds);
   const quiet = ordinaryRunning.length === 0 && liveReads.length === 0 && timing.length === 0 && ordinaryNeeds.length === 0 && attentionReads.length === 0;
   const worldSlug = state.world?.meta.slug ?? null;
 
@@ -398,9 +399,9 @@ function Inbox({
         <div className="fy-ap__empty">Nothing running, nothing waiting on you</div>
       ) : (
         <>
-          {ordinaryNeeds.length + attentionReads.length > 0 && <Eyebrow first>Needs you · {ordinaryNeeds.length + attentionReads.length}</Eyebrow>}
+          {ordinaryNeeds.length + attentionReads.length > 0 && <Eyebrow first>Needs you · {needRows.length + attentionReads.length}</Eyebrow>}
           {attentionReads.map(run => <AudiobookActivityRow key={run.id} run={run} state={state} />)}
-          {ordinaryNeeds.map((entry, i) => (
+          {needRows.map((entry, i) => (
             <NeedsYouRow
               key={`${entry.kind}-${entry.ref ?? entry.worldId ?? i}`}
               entry={entry}
@@ -480,7 +481,7 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
           <span>{entry.title}</span>
           {entry.asOf && <Badge tone="outline">as of {shortDateTime(entry.asOf)} — not current</Badge>}
         </div>
-        <div className="fy-ap__rowsub">{entry.detail}</div>
+        {entry.detail && <div className="fy-ap__rowsub">{entry.detail}</div>}
         <div className="fy-ap__actions">
           {isJob && ref && (
             <IconButton label="Provider calls" onClick={() => inspectProviderCalls(ref)}>
@@ -499,7 +500,7 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
           )}
           {entry.actions.includes("retry-finalization") && ref && (
             <Button size="sm" onClick={() => retryJobFinalization(ref)}>
-              Retry finalization · no regeneration or charge
+              Try again · no charge
             </Button>
           )}
           {entry.actions.includes("settings") && ref && (

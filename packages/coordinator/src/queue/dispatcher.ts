@@ -2668,10 +2668,10 @@ export class JobQueue {
       error: job.providerResultKind === "inline"
         ? `The provider accepted this request, but its inline result was not saved before restart. No automatic retry was made. Resubmitting ${duplicateCost}.`
         : usesCodexImagePlan(job)
-        ? `Arke did not witness the image result. Codex may have used your allowance; how much is unknown. No automatic retry was made. Resubmitting ${duplicateCost}.`
+        ? `Arke lost track of this picture. Codex may have used your allowance; how much is unknown. Nothing was retried. Resubmitting ${duplicateCost}.`
         : local
-        ? `Arke did not witness the submission result — the engine kept running while Arke restarted, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}.`
-        : `Arke did not witness the submission result. ${job.provider} may have accepted and charged it, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}; the prior actual cost is unknown.`,
+        ? `Arke restarted while this was running, so it can't tell what happened. Nothing was retried. Resubmitting ${duplicateCost}.`
+        : `Arke lost track of this request. ${job.provider} may have accepted and charged it. Nothing was retried. Resubmitting ${duplicateCost}; the earlier cost is unknown.`,
       updatedAt: this.clock(),
     };
     await this.transition(held);

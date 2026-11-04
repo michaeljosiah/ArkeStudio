@@ -113,6 +113,27 @@ export interface NeedsYouEntry {
   ref?: string;
   /** Exact in-app review destination when the derived item owns one. */
   reviewPath?: string;
+  productionTitle?: string;
+}
+
+/**
+ * One row per place to go: ten takes of one production are one trip to Generate, and each had its
+ * own row and its own Review, which all went to the same screen (issue 2496). Keeps the first row's
+ * position, so the order of everything else is unchanged.
+ */
+export function groupTakesToReview(entries: readonly NeedsYouEntry[]): NeedsYouEntry[] {
+  const counts = new Map<string, number>();
+  for (const entry of entries) if (entry.kind === "unreviewed-take" && entry.reviewPath) counts.set(entry.reviewPath, (counts.get(entry.reviewPath) ?? 0) + 1);
+  const shown = new Set<string>();
+  const rows: NeedsYouEntry[] = [];
+  for (const entry of entries) {
+    const count = entry.kind === "unreviewed-take" && entry.reviewPath ? counts.get(entry.reviewPath) ?? 0 : 0;
+    if (count < 2) { rows.push(entry); continue; }
+    if (shown.has(entry.reviewPath!)) continue;
+    shown.add(entry.reviewPath!);
+    rows.push({ ...entry, title: `${count} ${entry.reviewPath!.includes("view=stills") ? "pictures" : "takes"} to review · ${entry.productionTitle}`, detail: "" });
+  }
+  return rows;
 }
 
 /**
@@ -168,11 +189,12 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
       // Every kind the queue can replay gets the action, or the row strands: a failed
       // finalization cannot be deleted, so an entry with no retry has no way out at all.
       const retryable = isReplayableFinalization(job);
+      const model = state.app.manifest?.models.find((candidate) => candidate.id === job.model && candidate.provider === job.provider)?.displayName ?? job.model;
       entries.push({
         urgency: 1,
         kind: "job-finalization-failed",
-        title: `${job.model} output needs attention`,
-        detail: job.finalization.error ?? "generation completed, but its result is not ready",
+        title: `${model}: result not saved`,
+        detail: retryable ? "It came back but couldn't be saved. Trying again costs nothing." : job.finalization.error ?? "generation completed, but its result is not ready",
         at: job.finalization.updatedAt,
         ...(job.worldId === VOICE_PREVIEW_SCOPE ? {} : { worldId: job.worldId }),
         actions: retryable ? ["retry-finalization"] : [],
@@ -271,7 +293,8 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
         entries.push({
           urgency: 4,
           kind: "unreviewed-take",
-          title: `take awaiting review · ${production.meta.title}`,
+          title: `Take to review · ${production.meta.title}`,
+          productionTitle: production.meta.title,
           // Shots by number and title, not id (issue 1403): "voice for sh_12" was the take's
           // storage key read aloud to the person who has to decide on it.
           detail: `${take.kind.replace(/-/g, " ")} for ${take.coversShots.map((shotId) => shotLabel(production.scenes ?? [], shotId)).join(", ")}`,

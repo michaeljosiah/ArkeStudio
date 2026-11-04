@@ -591,7 +591,7 @@ describe("the Inbox's order and its history (R-22)", () => {
     const failed = job({ ...preparing, finalization: { status: "failed", error: "the file could not be filed", updatedAt: TODAY } });
     state.app.jobs = [failed];
     const attention = render(state, "inbox");
-    assert.ok(attention.includes("output needs attention"), "it is Needs you");
+    assert.ok(attention.includes("result not saved"), "it is Needs you");
     assert.equal(attention.includes("look ready"), false);
     const done = job({ ...preparing, finalization: { status: "complete", error: null, updatedAt: TODAY } });
     state.app.jobs = [done];
