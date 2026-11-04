@@ -42,7 +42,10 @@
 .fy-global-chat-owner-body { height: 100%; width: 100%; min-height: 0; display: flex; flex-direction: column; }
 .fy-global-chat-owner-body > .fy-production-studio-owner { flex: 1; height: 100%; min-height: 0; }
 .fy-global-chat .fy-cx__busy { flex: 0 1 auto; min-width: 0; max-width: 60px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fy-story > .fy-global-chat-slot > .fy-global-chat-expand, .fy-scene-dock-content .fy-global-chat-expand { display: none; }
+/* With nothing parked here the slot is a column holding one button, beside the sparkle that does the same thing. */
+.fy-arkewrap > div > div > .fy-global-chat-slot:has(> div:empty),
+.bm-side:has(> div > div > .fy-global-chat-slot > div:empty):not(:has(.bm-insp)),
+.fy-scene-dock-content .fy-global-chat-expand { display: none; }
 .fy-global-chat-expand { align-self: flex-end; flex: none; font: var(--type-label); padding: 6px 10px; margin: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); cursor: pointer; }
 [data-global-chat-hosted] .fy-production-studio { grid-template-columns: minmax(0, 1fr); }
 [data-global-chat-hosted] :is(.fy-production-studio__thread, .fy-production-studio__divider) { display: none; }
