@@ -220,10 +220,10 @@ function MasterLookHero({
 
   const caption = <div className="fy-artdirection__master-caption">
     <div><strong>Master look</strong><span>v{direction.version}</span></div>
-    <p>{direction.acceptedAt ? `set ${shortDate(direction.acceptedAt)}` : "derived from tone and genre"} · used by new generations</p>
+    <p>{direction.acceptedAt ? `set ${shortDate(direction.acceptedAt)} · ` : ""}used by new pictures</p>
   </div>;
   const picture = <div className={direction.masterLook ? "fy-artdirection__master fy-imghost" : "fy-artdirection__master fy-artdirection__master--empty"}>
-    {direction.masterLook ? directionImage(world.meta.slug, direction.masterLook, `${world.meta.name} master look`, 0, true) : <div className="fy-artdirection__empty-mark">NO MASTER LOOK</div>}
+    {direction.masterLook ? directionImage(world.meta.slug, direction.masterLook, `${world.meta.name} master look`, 0, true) : <><img className="fy-artdirection__plate" src="./worlds/new-world.webp" alt="" /><div className="fy-artdirection__empty-mark">No master look yet</div></>}
     {!touch && controls}
     {!card && direction.masterLook && caption}
   </div>;
@@ -357,7 +357,7 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
               downloadName={`${world.meta.name} key art`}
             />
           ) : (
-            <div className="fy-artdirection__empty-mark">NO KEY ART</div>
+            <><img className="fy-artdirection__plate" src="./worlds/new-world.webp" alt="" /><div className="fy-artdirection__empty-mark">No key art yet</div></>
           )}
           {!touch && doors}
           {card && candidates.length > 0 && <span className="fy-artpicture__tag">{candidates.length} previews waiting</span>}
@@ -641,12 +641,6 @@ export function ArtDirectionScreen() {
         {/* Only when there is one. A one-line look used to print the same sentence twice: once
             as the heading and again as its own description. */}
         {display.body !== "" && <p className="fy-artdirection__description">{display.body}</p>}
-        <div className="fy-artdirection__badges">
-          <span>WORLD LOOK · v{direction.version}</span>
-          <span>CARRIES AS TEXT TOO</span>
-        </div>
-        {/* A state, not a case for one: what "derived" means is the dv-rule's to say. */}
-        {direction.derived && <div className="fy-artdirection__derived">derived from tone and genre</div>}
         {/*
           The one thing this page owes that is not a label (SPEC-017 §2.5, codex round four):
           a reference carries its subject as well as its treatment, so a look with a face in it
@@ -654,7 +648,7 @@ export function ArtDirectionScreen() {
           the surface with Upload on it — the one path that can put a portrait here without a
           dialog. The paragraph arguing it is the spec's; the clause is the screen's.
         */}
-        <p className="fy-artdirection__safety">A plate travels safely. A face travels with it.</p>
+        <p className="fy-artdirection__safety">Keep faces out of the look. A face here shows up on everyone.</p>
         {/* The door says what pressing it does (issue 747). Behind it, the person's own commit
             is `Set the look · v2` and lands on the press — nothing is queued and no approvals
             screen sees it — so "Propose a change" set up a review step that never came. The
@@ -664,7 +658,7 @@ export function ArtDirectionScreen() {
             {proposed
               ? "Review proposed change"
               : direction.derived
-                ? "Make it concrete"
+                ? "Set the look"
                 : "Change the look"}
           </Button>
         </div>
