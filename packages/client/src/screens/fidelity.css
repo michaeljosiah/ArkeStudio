@@ -1262,6 +1262,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   flex-direction: column;
   gap: 4px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 /* 82a: the rail folds to marks so the Cut can open the world's artifacts beside it. Every
    destination stays; only the words are spent, and each keeps its name on a tooltip. */
