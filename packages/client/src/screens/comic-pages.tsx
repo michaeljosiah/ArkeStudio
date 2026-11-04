@@ -16,7 +16,7 @@ import {
   panelRects,
   priceLabel,
   REVIEW_BLOCKING,
-  SCRIPT_READ_BLOCKING,
+  SCRIPT_READ_SERIOUS,
   takeBlocking,
   takeClears,
   ulid,
@@ -270,9 +270,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const from = sourceStory && sourceChapter ? ` from chapter ${sourceChapter.order} of ${sourceStory.meta.title}` : "";
   const planWithArke = () => chapter && ask(`Plan chapter ${chapter.order}, ${chapter.title}, as pages${from}.`);
   const fixLean = (lean: ComicChapterPlan["leans"][number]) => chapter && ask(`In the plan for chapter ${chapter.order}, ${chapter.title}: page ${lean.page}, "${lean.line}" ${lean.why}. Settle it in the plan, and leave it out of leans once it is settled.`);
-  // A press from this window, so a failure seen on reopening a page never starts a turn by itself.
-  const pressedDraft = useRef(false);
-  const draftWithArke = () => { if (chapter) { pressedDraft.current = true; ask(`Draft chapter ${chapter.order}, ${chapter.title}, from its kept plan${from}.`); } };
+  const draftWithArke = () => chapter && ask(`Draft chapter ${chapter.order}, ${chapter.title}, from its kept plan${from}.`);
   // Arke at work on this chapter is said on the chapter itself (turn 256b): pressed from here, or the
   // pilot Start the pilot asked for, while a turn runs.
   const workspace = useStore().state?.worldChat ?? null;
@@ -287,15 +285,6 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const refused = conversation?.messages.findLast(message => message.role === "studio" && message.turnId === lastAsk?.turnId && message.refusals.length > 0);
   const failure = namesChapter ? conversation?.lastFailure?.turnId === lastAsk?.turnId ? conversation?.lastFailure
     : refused ? { detail: refused.refusals.join(" · ") } : undefined : undefined;
-  // The cold read sends a first draft back once (SPEC-064 R-64). On the turn's last attempt that ended
-  // the press in a refusal, and the next press worked: so it is pressed once more here (issue 2456).
-  useEffect(() => {
-    if (!pressedDraft.current || !failure?.detail?.includes(COLD_READ_REFUSAL)) return;
-    pressedDraft.current = false;
-    // Words the author has started typing stay theirs; Draft with Arke is still there to press.
-    if (chat && chatSurface && chat.value(chatSurface.key, "draft", "") !== "") return;
-    if (chapter) ask(`Draft chapter ${chapter.order}, ${chapter.title}, from its kept plan${from}.`);
-  }, [failure?.detail]); // eslint-disable-line react-hooks/exhaustive-deps
   const turnRunning = conversation?.runStatus === "running";
   const working = turnRunning && chapter !== undefined && drafted === undefined && pages.length === 0
     && ((asked !== undefined && Date.now() - asked < 30 * 60_000) || chapter.id === (new URLSearchParams(search).get("chapter") ?? chapters[0]?.id));
@@ -381,7 +370,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
                 <button key={candidate.id} type="button" className={cx("fy-comic__thumb fy-comic__thumb--draft", candidate.id === draftPage?.id && "on")} aria-label={`Draft page ${firstNumber + index}`} onClick={() => setDraftPageId(candidate.id)}>
                   <span className="d">draft</span>
                   {askedOn(draftRead, index + 1).length > 0 && (
-                    <span className={cx("s", askedOn(draftRead, index + 1).some((finding) => SCRIPT_READ_BLOCKING.has(finding.kind)) ? "x" : "w")}><TriangleAlert size={10} /></span>
+                    <span className={cx("s", askedOn(draftRead, index + 1).some((finding) => SCRIPT_READ_SERIOUS.has(finding.kind)) ? "x" : "w")}><TriangleAlert size={10} /></span>
                   )}
                   <span className="n">{firstNumber + index}</span>
                 </button>
@@ -396,14 +385,12 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
                 {kept(draftRead) > 0 && <span className="fy-comic__keptchip">{kept(draftRead)} kept {kept(draftRead) === 1 ? "mystery" : "mysteries"}</span>}
                 <span className="grow" />
                 <Button size="sm" onClick={() => discardProposal(worldId, drafted.proposal.id)}>Discard</Button>
-                {/* What the reader asked goes back to Arke; a waiting draft has to go first, or its next one is refused. */}
-                {chatSurface && draftRead?.status === "read" && readHolds(draftRead) && <Button size="sm" variant="primary" onClick={() => {
-                  discardProposal(worldId, drafted.proposal.id);
-                  pressedDraft.current = true;
-                  ask(`Draft chapter ${chapter?.order}, ${chapter?.title}, again from its kept plan${from}, so the pages answer what a reader asked: ${draftRead.findings.filter((finding) => SCRIPT_READ_BLOCKING.has(finding.kind)).map((finding) => finding.question).join(" ").slice(0, 4000)}`);
+                {/* Arke asks before adding a word: a question can be what the book holds back. The draft stays up until a redraft replaces it. */}
+                {chatSurface && draftRead?.status === "read" && draftRead.findings.some((finding) => finding.kind !== "kept") && <Button size="sm" onClick={() => {
+                  ask(`A reader of the draft of chapter ${chapter?.order}, ${chapter?.title}, asked: ${draftRead.findings.filter((finding) => finding.kind !== "kept").map((finding) => finding.question).join(" ").slice(0, 4000)} Tell me which you would answer on the page, in the book's own words, and which you would leave open because the book holds them back. Change nothing until I choose.`);
                 }}><Sparkle size={13} />Fix with Arke</Button>}
-                {/* Something a reader could not follow, or no read at all, is kept only as Keep anyway (turn 254d, 254e). */}
-                <Button size="sm" variant={readHolds(draftRead) ? undefined : "primary"} onClick={() => acceptProposal(worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision)}>{readHolds(draftRead) ? "Keep anyway" : "Keep"}</Button>
+                {/* The reader's questions are advice; only a draft nobody read is kept as Keep anyway (turn 254e). */}
+                <Button size="sm" variant={draftRead?.status === "not-read" ? undefined : "primary"} onClick={() => acceptProposal(worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision)}>{draftRead?.status === "not-read" ? "Keep anyway" : "Keep"}</Button>
               </div>
               {draftRead?.status === "not-read" && (
                 <div className="fy-comic__needs"><TriangleAlert size={15} /><span>{draftRead.reason === "no-reader" ? "No script reader" : "The read failed"}</span><span className="grow" />
@@ -413,7 +400,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
                 <div className="fy-comic__finds">
                   {draftRead.findings.filter((finding) => finding.kind !== "kept").map((finding, index) => (
                     <button key={index} type="button" className="fy-comic__find as-button" onClick={() => { const at = draftPages[finding.page - 1]; if (at) setDraftPageId(at.id); }}>
-                      <span className={cx("k", !SCRIPT_READ_BLOCKING.has(finding.kind) && "w")}>{READ_KIND[finding.kind]}</span>
+                      <span className={cx("k", !SCRIPT_READ_SERIOUS.has(finding.kind) && "w")}>{READ_KIND[finding.kind]}</span>
                       <span className="what">Page {firstNumber + finding.page - 1} · “{finding.question}”</span>
                     </button>
                   ))}
@@ -523,7 +510,6 @@ const UNDER_PAGE = 272;
  * the page's own shape, but never so wide the script falls under its minimum, nor narrower than a
  * page anyone could read.
  */
-const COLD_READ_REFUSAL = "A reader who has only the pages could not follow";
 
 export function sideWidth(room: { width: number; height: number }, [across, down]: [number, number]): number {
   const tall = Math.round((room.height - UNDER_PAGE) * across / down) + 36;
@@ -984,7 +970,7 @@ function DraftPage({ world, page, number, selected, pick, asked = [] }: { world:
     <>
       <h3>Page {number} <span className="m">{LAYOUT_LABEL[page.layout] ?? page.layout}</span></h3>
       {page.panels.map((panel, index) => (
-        <div key={panel.id} className={cx("fy-comic__panel fy-comic__panel--draft", panel.id === selected && "on", asked.some((finding) => finding.panel === index + 1 && SCRIPT_READ_BLOCKING.has(finding.kind)) && "flag")} role="button" tabIndex={0} aria-pressed={panel.id === selected}
+        <div key={panel.id} className={cx("fy-comic__panel fy-comic__panel--draft", panel.id === selected && "on", asked.some((finding) => finding.panel === index + 1 && SCRIPT_READ_SERIOUS.has(finding.kind)) && "flag")} role="button" tabIndex={0} aria-pressed={panel.id === selected}
           onClick={() => pick(panel.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") pick(panel.id); }}>
           <div className="fy-comic__ph"><b>Panel {index + 1}</b><span className="grow" />{panel.source && <span className="fy-comic__src">{paragraphLabel(panel.source.paragraphs)}</span>}</div>
           <div className="fy-comic__desc">{panel.description}</div>
@@ -995,7 +981,7 @@ function DraftPage({ world, page, number, selected, pick, asked = [] }: { world:
             <div key={item.id} className="fy-comic__row"><span className="kind">{KIND_LABEL[item.kind]}</span><span className="who">{item.speaker ? name(item.speaker) : "—"}</span><span className="words">{item.text}</span></div>
           ))}
           {asked.filter((finding) => finding.panel === index + 1).map((finding, n) => (
-            <div key={n} className={cx("fy-comic__asked", !SCRIPT_READ_BLOCKING.has(finding.kind) && "w")}><span className="k">{READ_KIND[finding.kind]}</span>“{finding.question}”</div>
+            <div key={n} className={cx("fy-comic__asked", !SCRIPT_READ_SERIOUS.has(finding.kind) && "w")}><span className="k">{READ_KIND[finding.kind]}</span>“{finding.question}”</div>
           ))}
         </div>
       ))}
@@ -1202,14 +1188,14 @@ function ReadPage({ world, page, number, asked }: { world: WorldBundle; page: Co
       {page.panels.map((panel, index) => {
         const questions = asked.filter((finding) => finding.panel === index + 1);
         return (
-          <div key={panel.id} className={cx("fy-comic__readpanel", questions.some((finding) => SCRIPT_READ_BLOCKING.has(finding.kind)) && "flag")}>
+          <div key={panel.id} className={cx("fy-comic__readpanel", questions.some((finding) => SCRIPT_READ_SERIOUS.has(finding.kind)) && "flag")}>
             <span className="n">{index + 1}</span>
             <div>
               <div className="d">{panel.description}</div>
               {panel.lettering.map((item) => (
                 <div key={item.id} className="l"><b>{item.speaker ? name(item.speaker) : KIND_LABEL[item.kind]}</b>{item.text}</div>
               ))}
-              {questions.map((finding, n) => <div key={n} className={cx("fy-comic__asked", !SCRIPT_READ_BLOCKING.has(finding.kind) && "w")}><span className="k">{READ_KIND[finding.kind]}</span>“{finding.question}”</div>)}
+              {questions.map((finding, n) => <div key={n} className={cx("fy-comic__asked", !SCRIPT_READ_SERIOUS.has(finding.kind) && "w")}><span className="k">{READ_KIND[finding.kind]}</span>“{finding.question}”</div>)}
             </div>
           </div>
         );
@@ -1218,17 +1204,10 @@ function ReadPage({ world, page, number, asked }: { world: WorldBundle; page: Co
   );
 }
 
-/** A draft a reader could not follow, or that nobody read, is kept only as Keep anyway (R-65, R-66). */
-export function readHolds(read: ComicScriptRead | undefined): boolean {
-  return read !== undefined && (read.status === "not-read" || read.findings.some((finding) => SCRIPT_READ_BLOCKING.has(finding.kind)));
-}
-
 /** The cold read on the draft bar, in a word or two (turn 254d, 254e). */
 function ReadChip({ read }: { read: ComicScriptRead | undefined }) {
   if (read === undefined) return null;
   if (read.status === "not-read") return <span className="fy-comic__read warn"><TriangleAlert size={13} />Not read</span>;
-  const blocking = read.findings.filter((finding) => SCRIPT_READ_BLOCKING.has(finding.kind)).length;
-  if (blocking > 0) return <span className="fy-comic__read bad"><CircleAlert size={13} />{blocking} to fix</span>;
   // Kept mysteries are the book's on purpose (turn 256d): shown apart, never as something to look at.
   const looks = read.findings.filter((finding) => finding.kind !== "kept").length;
   if (looks > 0) return <span className="fy-comic__read warn"><TriangleAlert size={13} />{looks} to look at</span>;

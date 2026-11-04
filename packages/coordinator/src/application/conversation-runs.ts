@@ -153,8 +153,6 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
   });
 
   const actionLifecycle = deps.actions;
-  // Drafts refused once for what the reader asked, by turn and chapter: the redraft is offered.
-  const refusedComicDrafts = new Map<string, number>();
   const summarise = deps.adapter?.readiness().ready
     ? makeConversationSummariser(
         deps.adapter,
@@ -214,9 +212,9 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     validateSceneEdits: ({ entryContext, edits, baseVersion }) =>
       applySceneEdits(store, { entryContext, edits, baseVersion, dryRun: true }),
     prepareActions: async (turn) => {
-      // Arke's comic drafts are read cold before they are prepared, so a draft a reader cannot
-      // follow goes back to Arke inside its turn (SPEC-064 R-64, R-65).
-      await readComicDrafts(store, turn, deps.comicScriptReader?.() ?? null, refusedComicDrafts, store.closingSignal, () => new Date().toISOString());
+      // Arke's comic drafts are read cold before they are prepared, so the author sees the reader's
+      // questions beside the draft (SPEC-064 R-64, R-65).
+      await readComicDrafts(store, turn, deps.comicScriptReader?.() ?? null, store.closingSignal, () => new Date().toISOString());
       const prepared = await prepareWorldChatActions(store, actionLifecycle, turn, { getGenerationRouteRows: deps.generationRoutes, getExports: () => deps.actionExports(), getJobs: () => deps.jobs(), getBuildItems: () => deps.buildItems?.() ?? [] });
       if (turn.actions.some(action => action.kind === "production-timeline-operation") || prepared.some(item => item.payload.kind === "world-chat-editor-request")) await store.ensureSchemaVersion(PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION, "production-chat-timeline");
       if (turn.actions.some(action => action.kind.startsWith("production-audio-") || action.kind === "production-performance-command") || prepared.some(item => item.payload.kind === "world-chat-bench-generation" && item.payload.action.productionId)) await store.ensureSchemaVersion(PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, "world-chat");

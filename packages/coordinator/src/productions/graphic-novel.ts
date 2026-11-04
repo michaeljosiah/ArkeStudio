@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  SCRIPT_READ_BLOCKING, compareLettering, comicBook, type DraftComicPage, type WorldChatCheckReceipt, pageReading, sheetReferencePicture, takeBlocking, takeClears, type LetteringVerification, type PageReview, type ReviewWarning,
+  compareLettering, comicBook, type DraftComicPage, type WorldChatCheckReceipt, pageReading, sheetReferencePicture, takeBlocking, takeClears, type LetteringVerification, type PageReview, type ReviewWarning,
   COMIC_LIMITS, COMIC_PROMPT_MAX, ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema, DEFAULT_COMIC_SETTINGS, EMPTY_COMIC_PAGE_RECORD,
   comicPageHash, comicPagePrompt, makesShape, pageAspect, pictureQuote, productionShape,
   type ComicCited, type ComicMode, type ComicPage, type ComicPageRecord, type ComicSettings, type ManifestModel, type PictureWho, type ProductionBundle,
@@ -11,7 +11,6 @@ import { artDirectionFor } from "./audiobook-look.js";
 import type { PageReader } from "./graphic-novel-reader.js";
 import type { PageReviewer } from "./graphic-novel-reviewer.js";
 import { pagesForReading, type ScriptReader } from "./graphic-novel-script-reader.js";
-import { ConversationActionPreparationError } from "../arke-actions/lifecycle.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
@@ -361,19 +360,17 @@ export async function seeComicWarning(store: WorldStore, productionId: string, p
 }
 
 /**
- * The cold read of Arke's drafted pages (R-64 – R-66, turn 254d), run while the turn is being
- * prepared so a refusal reaches Arke inside its turn. A draft a reader cannot follow is refused once
- * for its chapter in the conversation, with the reader's questions; the next draft of that chapter is
- * offered whatever it holds, the questions kept on it. Once per turn was not enough: the refusal used
- * the turn's one corrective attempt, so any other slip in the redraft lost the draft, and in installed
- * 0.5.78 three asks in a row ended with nothing (a lettered line over 400 characters, then a cited
- * search). Anything Arke wrote in `read` is replaced: the read is the studio's.
+ * The cold read of Arke's drafted pages (R-64 – R-66, turn 254d): the draft is offered with the
+ * reader's questions on it, and the author judges them. It used to be refused once, telling Arke to
+ * answer every question on the page. A reader who has only the pages cannot tell a gap from what the
+ * book holds back, so Dumah's chapter 1 (4 November 2026) was given a caption naming Brackus a Celestial,
+ * a chapter 6 reveal, and the refusal's one pass was spent whenever a later check lost the redraft.
+ * Anything Arke wrote in `read` is replaced: the read is the studio's.
  */
 export async function readComicDrafts(
   store: WorldStore,
-  turn: { conversationId: string; turnId: string; actions: readonly unknown[]; receipts?: readonly WorldChatCheckReceipt[] },
+  turn: { actions: readonly unknown[]; receipts?: readonly WorldChatCheckReceipt[] },
   reader: ScriptReader | null,
-  refused: Map<string, number>,
   signal: AbortSignal,
   at: () => string,
 ): Promise<void> {
@@ -395,8 +392,6 @@ export async function readComicDrafts(
         const pages = production.comicScripts?.find((entry) => entry.chapter === candidate.id)?.script.pages ?? [];
         return pages.length ? [pagesForReading(pages, name, (index) => `${candidate.title}, page ${index + 1}`)] : [];
       }).join("\n");
-    const key = `${turn.conversationId}:${production.meta.id}:${chapter.id}`;
-    const redrafts = refused.get(key) ?? 0;
     let answer: Awaited<ReturnType<ScriptReader["read"]>>;
     try {
       // The plan's kept mysteries go to the reader, so it does not count them as faults (turn 256c).
@@ -407,13 +402,7 @@ export async function readComicDrafts(
       action.read = { status: "not-read", reason: "reader-failed", detail: (err instanceof Error ? err.message : String(err)).slice(0, 400), at: at() };
       continue;
     }
-    const blocking = answer.findings.filter((finding) => SCRIPT_READ_BLOCKING.has(finding.kind));
-    if (blocking.length > 0 && redrafts === 0) {
-      refused.set(key, 1);
-      throw new ConversationActionPreparationError(`A reader who has only the pages could not follow ${chapter.title}: ${blocking.map((finding) => `page ${finding.page}${finding.panel ? ` panel ${finding.panel}` : ""}, ${finding.question}`).join("; ")}. Redraft the pages whole so the pages themselves answer each question.`);
-    }
-    refused.delete(key);
-    action.read = { status: "read", reader: answer.reader, findings: answer.findings, redrafts, at: at() };
+    action.read = { status: "read", reader: answer.reader, findings: answer.findings, redrafts: 0, at: at() };
   }
 }
 

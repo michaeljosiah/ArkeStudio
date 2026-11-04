@@ -141,12 +141,12 @@ export const ComicChapterPlanSchema = z.object({
 export type ComicChapterPlan = z.infer<typeof ComicChapterPlanSchema>;
 
 /**
- * What a reader with only the pages asked of a draft (R-64 – R-66, turn 254d). `who`, `what`, `why`
- * and `voice` block; the rest warn. Kept on the chapter's script with the draft, so a draft kept
- * past them carries what it was kept with.
+ * What a reader with only the pages asked of a draft (R-64 – R-66, turn 254d). All of it is advice;
+ * `who`, `what`, `why` and `voice` are only marked more strongly than the rest. Kept on the chapter's
+ * script with the draft, so a draft kept past them carries what it was kept with.
  */
 export const SCRIPT_READ_KINDS = ["who", "what", "why", "where", "voice", "picture", "load", "kept"] as const;
-export const SCRIPT_READ_BLOCKING: ReadonlySet<string> = new Set(["who", "what", "why", "voice"]);
+export const SCRIPT_READ_SERIOUS: ReadonlySet<string> = new Set(["who", "what", "why", "voice"]);
 export const ComicScriptReadFindingSchema = z.object({
   kind: z.enum(SCRIPT_READ_KINDS),
   page: z.number().int().min(1).max(COMIC_LIMITS.pagesPerChapter),
@@ -160,7 +160,7 @@ export const ComicScriptReadSchema = z.discriminatedUnion("status", [
     status: z.literal("read"),
     reader: z.object({ id: z.string().min(1).max(80), version: z.string().min(1).max(80) }).strict(),
     findings: z.array(ComicScriptReadFindingSchema).max(60),
-    /** Drafts read before this one in the same turn: the redrafts Arke made for the reader (R-65). */
+    /** Redrafts the read itself forced, from when it refused a draft; always 0 now, kept so older scripts read (R-65). */
     redrafts: z.number().int().min(0).max(5).default(0),
     at: IsoDateTimeSchema,
   }).strict(),

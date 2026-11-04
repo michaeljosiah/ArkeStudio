@@ -150,10 +150,16 @@ describe("Arke's pages (SPEC-064 R-13, turn 249)", () => {
     assert.equal(drafted.pages[0]!.id, page.id);
     assert.equal(comicPageHash(drafted.pages[0]!, { reading: "ltr", aspect: "2:3" }, "baked"), comicPageHash(page, { reading: "ltr", aspect: "2:3" }, "baked"), "an unchanged page is still the page its takes were made from");
     assert.notEqual(drafted.pages[1]!.id, "guessed", "a guessed id is never taken");
-    // One draft of a chapter at a time.
+    // One draft of a chapter at a time: a redraft takes the waiting draft's place, and a plan does not.
     const again = action(id, chapter, baseHash, [{ layout: "splash", panels: [{ description: "The bell." }] }]);
     again.worldId = store.worldId;
-    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, again), /is waiting/);
+    const redraft = await stageWorldChatProductionAuthoredAction(store, gate, intent, again);
+    const waiting = store.getBundle().proposals.filter((entry) => entry.proposal.kind === "comic-script");
+    assert.deepEqual(waiting.map((entry) => entry.proposal.id), [redraft.id]);
+    const plan = action(id, chapter, baseHash, []);
+    (plan.action as Record<string, unknown>).plan = { passages: [{ where: "¶ 1", what: "x", verdict: "keep", why: "y" }], pages: [{ change: "a", turn: "b" }], knows: [], leans: [], mysteries: [] };
+    plan.worldId = store.worldId;
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, plan), /is waiting/);
   });
 
   it("names an emptied chapter's own base, and drafts no pages for a retired chapter (codex on PR 2246)", async () => {
