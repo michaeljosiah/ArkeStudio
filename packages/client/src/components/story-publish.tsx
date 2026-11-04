@@ -11,7 +11,7 @@ import { waitForChapterSaves } from "../lib/chapter-drafts.js";
 import { Loading } from "./loading.js";
 
 const steps = ["Edition", "Chapters", "Formatting & style", "Preview", "Files"] as const;
-const LANGUAGES = ["en", "fr", "es", "pt", "de", "it", "nl", "ar", "sw", "yo", "ig", "ha", "zh", "ja", "hi"];
+const LANGUAGES = ["en", "en-GB", "en-US", "fr", "fr-CA", "es", "es-MX", "pt", "pt-BR", "de", "it", "nl", "sv", "no", "da", "fi", "pl", "cs", "ro", "hu", "el", "ru", "uk", "tr", "ar", "he", "fa", "ur", "hi", "bn", "ta", "zh", "zh-Hant", "ja", "ko", "vi", "th", "id", "ms", "tl", "sw", "am", "zu", "yo", "ig", "ha"];
 function languageName(code: string): string {
   try { return new Intl.DisplayNames(["en"], { type: "language" }).of(code) ?? code; } catch { return code; }
 }
@@ -239,7 +239,7 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
           <label>Title<input value={settings.title} onChange={event => update({ title: event.target.value })} /></label>
           {settings.outputs.includes("pdf") && <label>Subtitle · optional<input value={settings.subtitle ?? ""} onChange={event => update({ subtitle: event.target.value })} /></label>}
           <label>Author or pen name<input value={settings.author} onChange={event => update({ author: event.target.value })} /></label>
-          <label>Language<select value={settings.language} onChange={event => update({ language: event.target.value })}>{[...new Set([settings.language, ...LANGUAGES])].map(code => <option key={code} value={code}>{languageName(code)}</option>)}</select></label>
+          <label>Language<select value={settings.language} onChange={event => update({ language: event.target.value })}>{[...new Set([settings.language, ...LANGUAGES])].sort((a, b) => languageName(a).localeCompare(languageName(b))).map(code => <option key={code} value={code}>{languageName(code)}</option>)}</select></label>
           <label>Edition label<input value={settings.label} onChange={event => update({ label: event.target.value })} /></label>
           {settings.outputs.includes("pdf") && <label>Title-page edition label · optional<input value={settings.editionLabel ?? ""} onChange={event => update({ editionLabel: event.target.value })} /></label>}
           <div className="fy-publish-cover"><span>Cover</span><div role="radiogroup" aria-label="Cover" className="fy-publish-covers">
