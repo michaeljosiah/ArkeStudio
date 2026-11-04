@@ -856,10 +856,10 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
   const sourceNote = state.app.ledgerUnavailable
     ? "ledger could not be read"
     : spend.mixed
-      ? `mixed · ${spend.reportedEntries} measured, ${spend.derivedEntries} derived`
+      ? "part estimated"
       : spend.derivedEntries > 0
-        ? "derived from the manifest"
-        : "provider-reported";
+        ? "estimated"
+        : "";
   // A fired alert outranks everything: `alerted` is only ever computed from entries that were
   // read, so the crossing is real even when a later read failed. Then the un-evaluated case — a
   // status whose read failed has an un-fired alert, which is not an all-clear (SPEC-008 R-19).
@@ -909,7 +909,7 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
                   ...(row.characters > 0 ? [`${compactCount(row.characters)} characters`] : []),
                 ].join(" · ")}
               </span>
-              <span>{row.plan === "included-plan" ? "Codex allowance used is unknown" : row.plan === "free-plan" ? formatMicroUsd(row.microUsd) : `${formatMicroUsd(row.microUsd)} of credit`}</span>
+              <span>{row.plan === "included-plan" ? "on your plan" : row.plan === "free-plan" ? formatMicroUsd(row.microUsd) : `${formatMicroUsd(row.microUsd)} of credit`}</span>
             </div>
           ))}
         </div>
