@@ -63,6 +63,9 @@ export function languageChoiceReason(
   if (state?.app.harnessModelStatus?.status === "loading") return "Checking language models…";
   if (state?.app.harnessModelStatus?.status === "error") return state.app.harnessModelStatus.reason ?? "Model discovery failed. Retry models to check this choice.";
   if (state?.app.harnessModelStatus?.status !== "ready") return "Language models need to be refreshed.";
+  // An empty list says nothing about this model: a harness still starting lists none for a moment,
+  // and "no longer available" sent people off to change a choice that was fine (issue 2557).
+  if ((state?.app.harnessModels ?? []).length === 0) return "Checking language models…";
   const model = findHarnessModel(modelId, state?.app.harnessModels ?? [], state?.app.manifest?.models);
   if (!model) return `${modelId} is no longer available through the running harness. Choose another model or clear the saved choice.`;
   if (state?.app.health.harness.status !== "healthy") return state?.app.health.harness.reason ?? "The harness is not running.";
