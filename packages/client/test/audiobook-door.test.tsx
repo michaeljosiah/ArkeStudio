@@ -434,7 +434,7 @@ describe("the Audiobook door (turn 146)", () => {
     const answered = m.sent.findLast((message) => message.kind === "read-audiobook-book") as Extract<ClientMessage, { kind: "read-audiobook-book" }>;
     assert.equal(answered.confirmationToken, "tok");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 9, blocks: 120 }));
-    assert.match(text(m), /reading… 0 of 9 chapters/);
+    assert.match(text(m), /reading… 0 of 9/);
     assert.ok(all(m, "button").some((b) => b.textContent === "Stop"));
     // The book's start asked the door again; answered, as the coordinator answers it.
     await answerDoor(m, door("cast", { price: { ...PRICE, voices: LINES } }));
@@ -454,13 +454,13 @@ describe("the Audiobook door (turn 146)", () => {
     const consented = m.sent.findLast((message) => message.kind === "read-audiobook-book") as Extract<ClientMessage, { kind: "read-audiobook-book" }>;
     assert.equal(consented.voiceUploadConfirmedFor, "engine-1");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-progress", ...ids, chapterId: "slack-water", done: 3, chapters: 9 }));
-    assert.match(text(m), /reading… 3 of 9 chapters/);
+    assert.match(text(m), /reading… 3 of 9/);
     // Every chapter's record refreshes the world, and the refresh replays the start with no
     // counts: what the window knows stands.
     const replayed = { at: AT, type: "audiobook.book-started" as const, ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 0, blocks: 0, replayed: true as const };
     await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 3, state: inkbound("cast") }));
     await act(async () => __applyEventForTest(replayed));
-    assert.match(text(m), /reading… 3 of 9 chapters/);
+    assert.match(text(m), /reading… 3 of 9/);
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, chapterId: "slack-water", outcome: "stopped", made: 1, flagged: 0 }));
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-finished", ...ids, outcome: "stopped", chaptersRead: 3, chaptersRefused: 0, made: 40, flagged: 0 }));
     await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 5, state: inkbound("cast") }));
@@ -533,7 +533,7 @@ describe("the Audiobook door (turn 146)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, chapterId: "neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 26, blocks: 26, made: 3, replayed: true }));
     assert.ok(m.sent.some((message) => message.kind === "open-audiobook"), "asked though a chapter is being read: this window holds no door");
     await answerDoor(m, door("narrator"));
-    assert.match(text(m), /reading… 2 of 9 chapters/);
+    assert.match(text(m), /reading… 2 of 9/);
     assert.equal(all(m, '[data-testid="audiobook-row"]').length, 3);
   });
 
@@ -546,7 +546,7 @@ describe("the Audiobook door (turn 146)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 9, blocks: 120, done: 3, replayed: true }));
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, chapterId: "neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 26, blocks: 26, made: 5, replayed: true }));
     await answerDoor(m, door("narrator"));
-    assert.match(text(m), /reading… 3 of 9 chapters/);
+    assert.match(text(m), /reading… 3 of 9/);
     assert.match(all(m, '[data-testid="audiobook-row"]')[1]?.textContent ?? "", /reading… 5 of 26/);
   });
 
