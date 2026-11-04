@@ -40,7 +40,7 @@ it("starts with an explicit brief and keeps a new review selected when an older 
   const review=manuscriptReviewFixture();
   await mount(<ManuscriptReviewControl worldId={review.worldId} productionId={review.productionId} chapters={2} words={3900}/>);
   const button=(text:string)=>[...dom.document.querySelectorAll("button")].find(b=>b.textContent===text)!;
-  await act(async()=>{button("Review manuscript").click();});
+  await act(async()=>{button("Review").click();});
   await act(async()=>{__applyEventForTest({type:"manuscript-review.updated",at:review.updatedAt,worldId:review.worldId,productionId:review.productionId,review,history:[{id:review.id,title:review.title,createdAt:review.createdAt,status:review.status}]});});
   await act(async()=>{button("Start a new review").click();});
   const command=sent.findLast(message=>message.kind==="manuscript-review-start");

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { manuscriptReviewCoverage, ManuscriptFindingSchema, ulid, type ManuscriptReview, type ManuscriptReviewHistory, type ClientMessage } from "@arke-studio/contracts";
+import { harnessModelReference, manuscriptReviewCoverage, ManuscriptFindingSchema, ulid, type ManuscriptReview, type ManuscriptReviewHistory, type ClientMessage } from "@arke-studio/contracts";
 import { EditorDialog } from "./editor-dialog.js";
+import { BookOpen } from "./icons.js";
 import { Button } from "./ui.js";
 import { useGlobalChat } from "./global-chat-context.js";
 import { chatKey, conversationProps } from "../lib/global-chat.js";
@@ -55,10 +56,13 @@ export function ManuscriptReviewReport({ review, disabled = false, onDecision, o
       <p>Decisions record your assessment. Changes to prose use the existing chapter conversation and proposal review.</p>
     </section>
     <section id={section(5)}><h2>Method and limitations</h2>
-      <p>Each completed reading stage received its entire pinned source segment. Cross-chapter synthesis uses retained readings, with bounded intermediate synthesis for long books. Exact citations prove linkage, not correctness. Models may omit or misinterpret details.</p>
-      <p>Context includes saved production/chapter planning and settled canon explicitly referenced by chapters. Other world canon, character sheets, pictures and narration were not inspected. Editorial judgment is not an age classification. Review and export do not edit the manuscript or media.</p>
-      <Text>{review.synthesis?.limitations}</Text><p>{review.rejectedCitations} findings omitted for invalid or ambiguous citations.</p>
-      <p>Saved {review.createdAt} · Report {review.id} · Source snapshot {review.snapshotHash}</p>
+      <Text>{review.synthesis?.limitations}</Text>
+      <p>Saved {new Date(review.createdAt).toLocaleString()}{review.rejectedCitations > 0 ? ` · ${review.rejectedCitations} findings left out: their quotes could not be found` : ""}</p>
+      <details><summary>How this was read</summary>
+        <p>Each completed reading stage received its entire pinned source segment. Cross-chapter synthesis uses retained readings, with bounded intermediate synthesis for long books. Exact citations prove linkage, not correctness. Models may omit or misinterpret details.</p>
+        <p>Context includes saved production/chapter planning and settled canon explicitly referenced by chapters. Other world canon, character sheets, pictures and narration were not inspected. Editorial judgment is not an age classification. Review and export do not edit the manuscript or media.</p>
+        <p>Report {review.id} · Source snapshot {review.snapshotHash}</p>
+      </details>
       <details><summary>Exact sources and approved context</summary><ul>{review.sources.map(source => <li key={source.id}>{source.title} · {source.file} · {source.hash}</li>)}</ul><Text>{review.context}</Text></details>
       {stages}
     </section>
@@ -97,6 +101,8 @@ export function ManuscriptReviewControl({ worldId, productionId, chapters, words
     if (connection !== "open") { setStarting(false); setExporting(false); exportRequest.current = null; }
   }, [open, connection, worldId, productionId]);
   const busy = starting || review?.status === "running", offline = connection !== "open";
+  const agents = state?.app.agents ?? [], reviewerModel = agents.find(agent => agent.name === "manuscript-reviewer")?.model ?? agents.find(agent => agent.name === "story-writer")?.model;
+  const reviewer = !reviewerModel ? "the harness's own model" : state?.app.harnessModels.find(model => harnessModelReference(model) === reviewerModel)?.displayName ?? reviewerModel;
   const canContinue = review && review.status !== "complete" && !busy && (review.tasks.some(t => t.state === "pending" || t.state === "failed") || (review.tasks.every(t => t.state === "complete") && !review.synthesis));
   const evidence = (cite: Citation) => { setOpen(false); navigate(`/w/${worldId}/p/${productionId}/story/chapters/${encodeURIComponent(cite.chapterId)}`, { state: { manuscriptReviewPassage: cite } }); };
   const discuss = globalChat ? (finding: ManuscriptReview["findings"][number]) => {
@@ -106,21 +112,18 @@ export function ManuscriptReviewControl({ worldId, productionId, chapters, words
     evidence(cite); globalChat.open({ key: chatKey(worldId, entry), worldId, worldName: state?.world?.meta.name ?? "World", kind: "production", title: "Builder Chat", label: finding.title, entry, path: `/w/${worldId}/p/${productionId}/story/chapters/${cite.chapterId}`, props });
   } : undefined;
   return <>
-    <Button onClick={() => setOpen(true)}>Review manuscript{busy ? " · running" : ""}</Button>
+    <Button onClick={() => setOpen(true)}><BookOpen size={13} />Review{busy ? " · running" : ""}</Button>
     <EditorDialog open={open} title="Manuscript review" onClose={() => setOpen(false)} width={1050}>
       <div className="fy-manuscript-review">
-        <p>{chapters} saved chapters · {words.toLocaleString()} words. Reviews the complete saved manuscript, including the ending.</p>
+        <p>{chapters} {chapters === 1 ? "chapter" : "chapters"} · {words.toLocaleString()} words · read by {reviewer}. Your text goes to that model, and cloud models may charge.</p>
         <label>Author brief <span>(optional)</span><textarea rows={4} maxLength={6000} value={brief} disabled={busy} onChange={e => { briefEdited.current = true; setBrief(e.target.value); }} placeholder="Genre, audience/intensity, editorial concerns, protected passages and deliberate ambiguity" /></label>
-        <p>Uses your configured writing model. Cloud models receive manuscript text and approved context; usage may incur charges. No manuscript, canon or media edits are made.</p>
-        <p>Up to 24,000 characters per reading stage, 1,000 stages and 64,000 characters of approved context. Model limits or failed stages are reported. You can leave while work continues.</p>
         <div className="fy-manuscript-review__actions"><Button disabled={busy || offline || !chapters} onClick={() => { const id = ulid(); selected.current = id; setStarting(true); send({ kind: "manuscript-review-start", worldId, productionId, requestId: id, brief }); }}>{review ? "Start a new review" : "Start review"}</Button>
           {review?.status === "running" && <Button disabled={offline} onClick={() => send({ kind: "manuscript-review-cancel", worldId, productionId, requestId: ulid() })}>Stop review</Button>}
           {canContinue && <Button disabled={offline} onClick={() => { selected.current = review.id; setStarting(true); send({ kind: "manuscript-review-resume", worldId, productionId, requestId: ulid(), reviewId: review.id }); }}>Try again</Button>}
-          <Button disabled={offline} onClick={() => send({ kind: "manuscript-review-read", worldId, productionId, requestId: ulid(), ...(selected.current ? { reviewId: selected.current } : {}) })}>Refresh</Button>
           {review?.synthesis && <Button disabled={busy || offline || exporting} onClick={() => { const id = ulid(); exportRequest.current = id; setExporting(true); send({ kind: "manuscript-review-export", worldId, productionId, requestId: id, reviewId: review.id }); }}>{exporting ? "Preparing PDF…" : "Export PDF"}</Button>}
         </div>
         {error && <p role="alert">{error}</p>}
-        {!!history.length && <label>Past reports<select value={review?.id ?? ""} disabled={starting} onChange={e => { selected.current = e.target.value; send({ kind: "manuscript-review-read", worldId, productionId, requestId: ulid(), reviewId: e.target.value }); }}><option value="" disabled>Choose a report</option>{history.map(item => <option key={item.id} value={item.id}>{item.createdAt} · {item.status}</option>)}</select></label>}
+        {!!history.length && <label>Past reports<select value={review?.id ?? ""} disabled={starting} onChange={e => { selected.current = e.target.value; send({ kind: "manuscript-review-read", worldId, productionId, requestId: ulid(), reviewId: e.target.value }); }}><option value="" disabled>Choose a report</option>{history.map(item => <option key={item.id} value={item.id}>{new Date(item.createdAt).toLocaleString()} · {item.status}</option>)}</select></label>}
       </div>
       {review && <ManuscriptReviewReport review={review} disabled={busy || offline} onEvidence={evidence} onDiscuss={discuss} onDecision={(findingId, decision) => send({ kind: "manuscript-review-decide", worldId, productionId, requestId: ulid(), reviewId: review.id, findingId, decision })} />}
     </EditorDialog>
