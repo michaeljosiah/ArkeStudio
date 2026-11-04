@@ -91,7 +91,7 @@ export function PromptTools({ worldId, target, source, revision, disabled = fals
         {open === "history" && review ? <><Button variant="outline" disabled={busy} onClick={() => setReview(false)}>Cancel</Button><Button disabled={!canRestore || busy} onClick={() => void restore()}>{entry?.prompt ? `Restore ${target?.capability} prompt` : "Use assembled prompt"}</Button></>
           : <>{open === "history" && <Button disabled={!canRestore || busy} onClick={() => setReview(true)}>Review restore</Button>}<Button variant="outline" onClick={close}>Done</Button></>}
       </>}>
-      {error && <p className="fy-prompt-notice" role="alert">{error}</p>}
+      {error && <p className="fy-prompt-notice" role="alert">{error}{error.includes("image model") && <> <a href="#/settings/models" onClick={close}>AI models</a></>}</p>}
       {notice && <p role="status">{notice}</p>}
       {open === "history" && history && <>
         {(history.partial || history.entries.length === 1) && <p className="fy-prompt-notice">{history.entries.length === 1 ? "Current prompt only. No earlier retained prompt changes are available." : "Some history is unavailable. These are the retained changes that can be read."}</p>}
