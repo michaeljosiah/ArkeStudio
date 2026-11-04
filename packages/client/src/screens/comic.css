@@ -60,15 +60,15 @@
 .fy-comic__panel { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; flex: none; }
 .fy-comic__ph { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 0 8px 0 12px; background: var(--secondary); font: var(--type-label); }
 .fy-comic__ph b { font-weight: 600; }
-.fy-comic__desc { display: block; width: 100%; min-height: 44px; padding: 10px 12px; border: 0; border-top: 1px solid var(--border); font: var(--type-body); font-size: var(--text-sm); resize: vertical; background: var(--background); color: var(--foreground); }
+.fy-comic__desc { display: block; width: 100%; field-sizing: content; min-height: 44px; padding: 10px 12px; border: 0; border-top: 1px solid var(--border); font: var(--type-body); font-size: var(--text-sm); resize: vertical; background: var(--background); color: var(--foreground); }
 .fy-comic__row { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 4px 8px 4px 12px; border-top: 1px solid var(--border); font-size: var(--text-sm); flex-wrap: wrap; }
 .fy-comic__row > b { width: 62px; flex: none; font-weight: 500; color: var(--muted-foreground); font-size: var(--text-xs); }
 .fy-comic__chip { height: 24px; padding: 0 4px 0 9px; border: 1px solid var(--border); border-radius: 999px; display: inline-flex; align-items: center; gap: 4px; font: var(--type-label); font-size: var(--text-xs); }
 .fy-comic__chip button { border: 0; background: none; color: var(--muted-foreground); cursor: pointer; display: grid; place-items: center; padding: 2px; }
-.fy-comic__row select, .fy-comic__row input { height: 28px; border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; font: var(--type-label); font-size: var(--text-xs); background: var(--background); color: var(--foreground); }
+.fy-comic__row select, .fy-comic__row input, .fy-comic__row textarea { height: 28px; border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; font: var(--type-label); font-size: var(--text-xs); background: var(--background); color: var(--foreground); }
 .fy-comic__row .kind { width: 86px; flex: none; }
-.fy-comic__row .who { width: 104px; flex: none; }
-.fy-comic__row .words { flex: 1; min-width: 120px; font: var(--type-body); font-size: var(--text-sm); }
+.fy-comic__row .who { width: 128px; flex: none; padding-right: 24px; text-overflow: ellipsis; }
+.fy-comic__row .words { flex: 1; min-width: 120px; font: var(--type-body); font-size: var(--text-sm); field-sizing: content; resize: none; }
 .fy-comic__row .words.bad { border-color: color-mix(in srgb, var(--destructive) 60%, var(--border)); }
 .fy-comic__more { display: flex; gap: 6px; padding: 6px 12px; border-top: 1px solid var(--border); }
 .fy-comic__link { border: 0; background: none; font: var(--type-label); color: var(--muted-foreground); cursor: pointer; padding: 0; }

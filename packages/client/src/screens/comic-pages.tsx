@@ -249,6 +249,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const [planOpen, setPlanOpen] = useState(false);
   // A draft opens as the reader will meet it (turn 256d); Details is the script as 254d drew it.
   const [detail, setDetail] = useState(false);
+  const [editing, setEditing] = useState<ReadonlySet<string>>(new Set());
   const [draftPageId, setDraftPageId] = useState<string | null>(null);
   const draftPage = draftPages?.find((candidate) => candidate.id === draftPageId) ?? draftPages?.[0];
   const [draftPanelId, setDraftPanelId] = useState<string | null>(null);
@@ -485,7 +486,16 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               </>}
             </div>
           ) : (
-            <PageEditor world={world} page={page} number={firstNumber + pages.indexOf(page)} change={setPage}
+            !editing.has(page.id) && page.panels.some((panel) => panel.source !== undefined) ? (
+              // Arke's pages read as pages; the form is one press away (issue 2458). A page started by hand has nothing to read yet.
+              <div className="fy-comic__edit">
+                <div className="fy-comic__pagehead">
+                  <span className="grow" />
+                  <Button variant="ghost" size="sm" onClick={() => setEditing(new Set([...editing, page.id]))}>Edit</Button>
+                </div>
+                <ReadPage world={world} page={page} number={firstNumber + pages.indexOf(page)} asked={[]} />
+              </div>
+            ) : <PageEditor world={world} page={page} number={firstNumber + pages.indexOf(page)} change={setPage}
               remove={() => { edit(pages.filter((candidate) => candidate.id !== page.id)); setPageId(null); }} />
           )}
           {page === undefined ? null : (
@@ -585,7 +595,9 @@ function LetteringRow({ item, characters, change, remove }: { item: LetteringIte
           {characters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       ) : <span className="who m">—</span>}
-      <input className="words" aria-label="Words" value={item.text} onChange={(event) => change((current) => { current.text = event.target.value; })} />
+      {/* Grows with its words: a one-line input cut them off. Lettering stays one line, so Enter adds nothing. */}
+      <textarea className="words" aria-label="Words" rows={1} value={item.text} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }}
+        onChange={(event) => change((current) => { current.text = event.target.value; })} />
       <button type="button" className="fy-comic__link" aria-label="Remove line" onClick={remove}><X size={13} /></button>
     </div>
   );
