@@ -4672,6 +4672,10 @@ select.fy-set__pill { padding-right: 26px; }
      columns that each scroll are exactly what the fill is for. */
   .fy-content--fill > .fy-chat__wrap > .fy-gate { min-height: calc(100vh - 132px); }
   .fy-chat__wrap .fy-gate { flex-direction: column; }
+  /* The side keeps its width and the conversation has no minimum, so a phone got no conversation (issue 2487). */
+  [data-screen="new-world"] > .fy-gate { flex-direction: column; min-height: 0; overflow-y: auto; }
+  [data-screen="new-world"] > .fy-gate > .fy-gate__main { flex: none; min-height: 70vh; border-right: none; border-bottom: 1px solid var(--border); }
+  [data-screen="new-world"] > .fy-gate > .fy-gate__side { flex: none; width: auto; }
   .fy-chat__wrap .fy-gate__main { border-right: none; border-bottom: 1px solid var(--border); }
   .fy-chat__wrap .fy-gate__side { width: auto; }
   /* There is no column to give the history here, so it becomes a strip across the top — and its
