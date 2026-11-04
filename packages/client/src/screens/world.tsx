@@ -4453,7 +4453,7 @@ export function ArtifactsScreen() {
                     downloadName={filename}
                   />
                 </div>
-              ) : compact && a.kind === "video" ? (
+              ) : a.kind === "video" ? (
                 <div className="fy-imghost fy-artifact-frame">
                   <Portrait worldSlug={world?.meta.slug} path={artifactPosterPath(a.id)} label={name} radius={8} />
                   {a.mediaInfo && <span className="fy-artifact-duration">{formatSeconds(a.mediaInfo.durationSec)}</span>}
