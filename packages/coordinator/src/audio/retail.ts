@@ -65,7 +65,8 @@ export function retailProblems(report: RetailMeasurements): string[] {
   if (!Number.isFinite(report.rmsDb) || report.rmsDb < -23 || report.rmsDb > -18) problems.push(`RMS ${report.rmsDb.toFixed(1)} dBFS is outside -23 to -18`);
   // ebur128 prints tenths: retain 0.1 dB so rounding cannot conceal a peak above -3.
   if (!Number.isFinite(report.truePeakDb) || !Number.isFinite(report.peakDb) || report.truePeakDb > -3.1 || report.peakDb > -3) problems.push("peaks exceed the -3 dBFS safety margin or could not be measured");
-  if (report.noiseFloorDb > -60 || Number.isNaN(report.noiseFloorDb)) problems.push("noise floor exceeds -60 dBFS or could not be measured");
+  if (Number.isNaN(report.noiseFloorDb)) problems.push("the noise floor could not be measured");
+  else if (report.noiseFloorDb > -60) problems.push(`noise floor ${report.noiseFloorDb.toFixed(1)} dBFS is above -60`);
   if (!Number.isFinite(report.seconds) || report.seconds <= 0 || report.seconds > 7200) problems.push("duration is unavailable or exceeds 120 minutes");
   if (!Number.isFinite(report.headSeconds) || !Number.isFinite(report.tailSeconds) || report.headSeconds < 1 || report.headSeconds > 5 || report.tailSeconds < 1 || report.tailSeconds > 5) problems.push("needs 1 to 5 seconds of quiet at the beginning and end");
   return problems;
@@ -73,6 +74,8 @@ export function retailProblems(report: RetailMeasurements): string[] {
 
 /** Gain/limiter mastering converges on measured delivery RMS, including the encoder and padding.
  * Each attempt starts from the original PCM, never from a previously encoded MP3. */
+const MEASURABLE_QUIET_SECONDS = 30;
+
 export async function masterRetailFile(tools: RetailAudioTools, input: string, output: string, options: {
   from: number; to: number; channels: number; sourceRmsDb: number;
 }, signal: AbortSignal, onCheck: () => void = () => {}): Promise<RetailMeasurements> {
@@ -84,9 +87,13 @@ export async function masterRetailFile(tools: RetailAudioTools, input: string, o
     onCheck();
     const frameSeconds = await verifyRetailMp3(output, options.channels, signal);
     const measured = await tools.inspect(output, signal);
-    // Exclude our added padding: it cannot hide noise in the original programme.
-    const content = await tools.inspect(output, signal, { from: 1.1, to: 1.1 + options.to - options.from });
-    measured.noiseFloorDb = content.noiseFloorDb;
+    // Exclude our added padding: it cannot hide noise in the original programme. A credit is too
+    // short to hold a quiet window, so its reading is the voice's, not noise (issue 2417), and the
+    // same voice's chapters were measured properly.
+    if (options.to - options.from >= MEASURABLE_QUIET_SECONDS) {
+      const content = await tools.inspect(output, signal, { from: 1.1, to: 1.1 + options.to - options.from });
+      measured.noiseFloorDb = content.noiseFloorDb;
+    }
     const problems = retailProblems(measured);
     if (measured.channels !== options.channels || Math.abs(measured.seconds - (options.to - options.from + 3.2)) > 0.15 || Math.abs(measured.seconds - frameSeconds) > 0.15) problems.push("the encoded duration or channel count changed");
     if (!problems.length) return measured;
