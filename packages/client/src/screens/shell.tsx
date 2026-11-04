@@ -2206,6 +2206,8 @@ export function SettingsHarnessScreen() {
             <label><input type="checkbox" checked={state?.app.imageInspection?.cloud !== false}
               onChange={event => setImageInspection(event.target.checked)} /> Allow cloud image inspection</label>
           </div>
+          {/* The switch answers it for most people: the rest fold, and only matter while it is on (issue 2467). */}
+          {state?.app.imageInspection?.cloud !== false && <details><summary className="fy-set__link">By world and provider</summary>
           <p>When Arke inspects an image, the conversation names the images that may be shared with the selected provider. Local inspection stays on this device.</p>
           {state?.world && <div className="fy-set__row"><label><input type="checkbox"
             checked={state.world.meta.cloudImageInspection !== false}
@@ -2214,6 +2216,7 @@ export function SettingsHarnessScreen() {
             ...Object.keys(state?.app.imageInspection?.providers ?? {})])].map(provider => <div className="fy-set__row" key={provider}><label><input type="checkbox"
             checked={state?.app.imageInspection?.providers[provider] !== false}
             onChange={event => setImageInspection(event.target.checked, provider)} /> Allow cloud image inspection by {provider === "anthropic" ? "Anthropic" : provider === "openai" ? "OpenAI" : provider === "ollama" ? "Ollama on another device" : provider}</label></div>)}
+          </details>}
           {/*
            * Which model runs each writing agent (SPEC-033 R-65).
            *
