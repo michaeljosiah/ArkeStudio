@@ -353,14 +353,16 @@ export function WorldPickerScreen() {
             <p className="fy-hero__lede" style={{ margin: worlds.length ? "10px 0 0" : 0, maxWidth: 540 }}>
               {lede}
             </p>
+          </div>
+          <div className="fy-home-import">
             <Button variant="ghost" className="fy-home-pub fy-home-action" onClick={() => navigate("/publications")}>
               <Book size={18} />
               Open publication
             </Button>
-          </div>
-            {!isRemoteSession() && <div className="fy-home-import"><Button variant="ghost" className="fy-home-action" disabled={importing} onClick={() => {
+            {!isRemoteSession() && <Button variant="ghost" className="fy-home-action" disabled={importing} onClick={() => {
               setImportNote(null); importRequest.current = importWorld(); setImporting(importRequest.current !== null);
-            }}><Upload size={18} />{importing ? "Importing world…" : "Import a world"}</Button></div>}
+            }}><Upload size={18} />{importing ? "Importing world…" : "Import a world"}</Button>}
+          </div>
           {archiveNote && (
             <div className="fy-set__why" style={{ marginTop: 10 }}>
               <span className={cx("fy-set__dot", archiveNote.refused ? "fy-set__dot--warn" : "fy-set__dot--ok")} />
