@@ -272,7 +272,6 @@ export function DevelopmentWorkspace() {
           {episodes.length} episode{episodes.length === 1 ? "" : "s"}
         </span>
       </div>
-      <ProductionSpend production={production} />
       {/* The season record itself, in the header rather than behind a tab of its own (turn 91).
           Inheritance is shown, not hidden (turn 48): the Series engine is read-only here, and
           editing it is the Series' own accept, never a side effect of a season edit. */}
@@ -322,6 +321,7 @@ export function DevelopmentWorkspace() {
         says what is missing; the panel is what to do about it.
       */}
       <EpisodesBoard />
+      <ProductionSpend production={production} />
       {compact && <button type="button" className="fy-production-setup-row" aria-haspopup="dialog" aria-expanded={modelsOpen} onClick={() => setModelsOpen(true)}>Models</button>}
       {worldId !== undefined && prodId !== undefined && (compact ? (
         <PageSheet open={modelsOpen} title="Production models" className="fy-production-settings-sheet" onClose={() => setModelsOpen(false)}>
