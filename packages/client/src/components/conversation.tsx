@@ -489,6 +489,17 @@ export function ConversationPermissionCard({
   );
 }
 
+/** A page plan or script is read in Pages; on the card its full text was JSON in a narrow column (issue 2421). */
+function comicDraftSummary(after: string | null | undefined): string {
+  const text = after?.trim() ?? "";
+  if (text.length <= 60) return text || "Removed";
+  try {
+    const plan = JSON.parse(text) as { pages?: unknown };
+    if (Array.isArray(plan.pages)) return `Page plan · ${plan.pages.length} ${plan.pages.length === 1 ? "page" : "pages"}`;
+  } catch { /* A drafted script is words, not JSON. */ }
+  return "Drafted pages";
+}
+
 function ConversationActionBody({ action, supported }: { action: ConversationActionCard; supported: boolean }) {
   const body = action.shown.body;
   if (!supported) return null;
@@ -504,7 +515,7 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
           <strong>{field.label}</strong>
           <span className="fy-actioncard__before">{field.before ?? (action.actionKind === "world-chat-production-comic-script" ? "New draft" : "Not set")}</span>
           <span aria-hidden="true">→</span>
-          <span>{field.after ?? "Removed"}</span>
+          <span>{action.actionKind === "world-chat-production-comic-script" ? comicDraftSummary(field.after) : field.after ?? "Removed"}</span>
         </div>)}
         {[...body.conflicts, ...body.openChoices].map((line) => <p key={line} className="fy-actioncard__notice">{line}</p>)}
       </div>;
