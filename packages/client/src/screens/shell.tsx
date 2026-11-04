@@ -1053,7 +1053,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                   <p className="fy-artstep__lede">Pick a starting look.</p>
                 </div>
                 <div className="fy-artstep__aside">
-                  <div className="fy-artstep__asidehead">SAME FORMS, NINE TREATMENTS</div>
+                  <div className="fy-artstep__asidehead">SAME SCENE, NINE TREATMENTS</div>
                 </div>
               </div>
               <ArtStyleGrid
