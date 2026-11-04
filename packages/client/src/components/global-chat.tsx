@@ -87,9 +87,13 @@ export function GlobalWorldChatEntry({ worldId, conversationId }: { worldId: str
   useLayoutEffect(() => {
     const page = latest.current;
     if (page && owner.getSnapshot().selected?.key !== page.key) owner.select(page);
-    // The side panel would take a world conversation off its own page and leave the page blank (issue 2488).
-    if (page?.kind === "world" && owner.getSnapshot().open) owner.close();
   }, [owner, conversationId, surface?.key]);
+  // The side panel would take a world conversation off its own page and leave the page blank (issue 2488).
+  // Only once it is this page's conversation: a selection held for dictation still needs that panel.
+  const held = useSyncExternalStore(owner.subscribe, owner.getSnapshot, owner.getSnapshot);
+  useLayoutEffect(() => {
+    if (latest.current?.kind === "world" && held.open && held.selected?.key === latest.current.key) owner.close();
+  }, [owner, held.open, held.selected?.key, surface?.key]);
   useLayoutEffect(() => { if (host.current && latest.current) owner.refresh(latest.current, host.current); });
   const rows = [...(state?.world?.conversations ?? [])].sort(byPendingConsequence), menuRow = rows.find(row => row.id === menu?.id);
   return <div className="fy-global-chat-slot fy-global-chat-slot--world">
