@@ -24,6 +24,7 @@ import { PageSheet } from "../components/page-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { EmptyState } from "../components/layout.js";
 import { Loading } from "../components/loading.js";
+import { productionPlate } from "../lib/production-plate.js";
 import { Badge } from "../components/ui.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-card.js";
 import { ReadAloud } from "../components/read-aloud.js";
@@ -459,7 +460,7 @@ function EpisodesBoard() {
             number={episode.order}
             title={episode.title}
             state="written"
-            frame={episodeFrame(production!, artifacts, slug, episode)}
+            frame={episodeFrame(production!, artifacts, slug, episode) ?? (production ? productionPlate(production.meta) : null)}
             {...(episode.promise?.opens ? { hook: episode.promise.opens } : {})}
             {...(episode.promise?.closes ? { cliff: episode.promise.closes } : {})}
             scenes={episode.scenes.length}
