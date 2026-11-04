@@ -7,6 +7,11 @@ import { ConversationFrameRunCard } from "./conversation-frame-run-card.js";
 import { GenerationReferences, GenerationResults } from "./generation-card-body.js";
 import { TakeMediaFigure } from "./take-comparison-card.js";
 
+function shotCount(scene: Parameters<typeof orderedShots>[0]): string {
+  const count = orderedShots(scene).length;
+  return `${count} shot${count === 1 ? "" : "s"}`;
+}
+
 export function ProductionStudioCanvas({ world, production, focus, actions, onFocus }: {
   world: WorldBundle; production?: ProductionBundle; focus: StudioFocus; actions: readonly ConversationActionCard[]; onFocus(focus: StudioFocus): void;
 }) {
@@ -47,8 +52,8 @@ export function ProductionStudioCanvas({ world, production, focus, actions, onFo
     {production.story && <p>{production.story.logline}</p>}
     {production.episodes.map(episode => <section key={episode.id}><h3>{episode.order}. {episode.title}</h3>
       <ul>{episode.scenes.map(id => production.scenes.find(s => s.id === id)).filter(s => !!s).map(s => <li key={s.id}>
-        <button type="button" onClick={() => onFocus({ view: "scene", sceneId: s.id })}>{s.title} · {orderedShots(s).length} shots</button></li>)}</ul></section>)}
-    <ul>{sortScenes(production.scenes).map(s => <li key={s.id}><button type="button" onClick={() => onFocus({ view: "scene", sceneId: s.id })}>
-      {s.number}. {s.title} · {orderedShots(s).length} shots</button></li>)}</ul>
+        <button type="button" onClick={() => onFocus({ view: "scene", sceneId: s.id })}>{s.title} · {shotCount(s)}</button></li>)}</ul></section>)}
+    {production.episodes.length === 0 && <ul>{sortScenes(production.scenes).map(s => <li key={s.id}><button type="button" onClick={() => onFocus({ view: "scene", sceneId: s.id })}>
+      {s.number}. {s.title} · {shotCount(s)}</button></li>)}</ul>}
   </section>;
 }
