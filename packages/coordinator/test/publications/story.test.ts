@@ -235,6 +235,14 @@ describe("private story publication", () => {
     await rename(h.dir, h.dir + "-moved");
     assert.ok(await new StoryPublicationService(h.root).serve(ready.id, "story.epub"));
   });
+  it("names a chapter left Untitled by its number in what a reader gets", async () => {
+    const h = await setup();
+    const path = join(h.dir, "productions", h.productionId, "chapters", h.chapter.file + ".md");
+    await writeFile(path, (await readFile(path, "utf8")).replace(/^title:.*$/m, "title: Untitled"));
+    const result = await h.store.ownedRead(() => readStoryPublication(h.store, h.productionId, h.settings));
+    assert.equal(result.review.chapters[0]!.title, `Chapter ${h.chapter.order}`);
+  });
+
   it("uses the exact source selection and flags unsupported formatting as a blocker", async () => {
     const h = await setup();
     const opened = await openChapter(h.store, h.productionId, h.chapter.id);
