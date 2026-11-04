@@ -73,7 +73,7 @@ plus one-line entries for any cast or places you have not yet written files for:
  "keyArt": {"prompt": "one complete prompt for an image model", "subject": "what the world's one image holds", "moment": "the moment it catches",
   "stakes": "what is at stake in it", "characters": ["names in frame"], "location": "the place in frame"}}
 
-Preserve existing canon and entity identities. Omit anything not discussed. If nothing has been discussed yet, return {}.`;
+Preserve existing canon and entity identities. Omit anything not discussed, except "name": give a working name once there is an idea to name. If nothing has been discussed yet, return {}.`;
 
 /** Repeated on author turns so a hidden JSON recovery turn cannot set the conversation's register. */
 const CONVERSATION = `You are shaping a brand-new story world with its author. Think with them about the
@@ -100,7 +100,9 @@ const PROTOCOL = `You keep the plan for this world as small files, so the studio
 the author says go. On EVERY author turn, bring the files up to date with what was actually
 discussed before finishing your conversational reply — and touch only the files that turn changed.
 
-./draft.json — the world itself (overwrite it), omitting fields you have not settled yet:
+./draft.json — the world itself (overwrite it), omitting fields you have not settled yet. Always
+include "name", from the first turn: a working name is enough, and the author can change it, but a
+world with no name cannot begin:
 
 {"name": "...", "logline": "one sentence", "tone": "two or three words", "genre": "...",
  "look": "how everything this world renders should look, in your own words — palette, light, medium, mood",
