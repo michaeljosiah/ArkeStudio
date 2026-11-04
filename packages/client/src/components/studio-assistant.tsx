@@ -108,7 +108,7 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
     : pending?.state === "interrupted" ? "Interrupted request · review above"
     : view.draft.length > STUDIO_ASSISTANT_LIMITS.requestChars ? `${STUDIO_ASSISTANT_LIMITS.requestChars.toLocaleString()} character limit`
     : !studioDocumentsFit(view.draft, view.attachments) ? "Request too large · shorten text or remove a document"
-    : !models.length ? "Local Studio model unavailable · check Providers"
+    : !models.length ? "Studio runs on Arke's own Ollama"
     : !model || !models.includes(model) ? "Choose a Studio model" : undefined;
   const busy = view.attaching || view.submitting || !!working || !!view.state?.busy || dictationPhase !== "idle";
   const submit = () => { if (model && !unavailable && !busy) void client.send(model); };
@@ -174,7 +174,7 @@ export function StudioAssistantView({ view, client, appState, model, modelSet = 
       }} />
       {attachmentTrouble && <p className="fy-studio-note" role="status">{attachmentTrouble}<button type="button" className="fy-studio-button" onClick={() => setAttachmentTrouble(null)}>Dismiss</button></p>}
       {view.attachments.length > 0 && <details className="fy-studio-fact-card"><summary>Review unsent documents</summary>{view.attachments.map(row => <div key={row.id}><b>{row.name}</b><pre>{row.text}</pre></div>)}</details>}
-      {view.fresh && !models.length && <p className="fy-studio-note"><a href="#/settings/providers" onClick={client.close}>Open Providers settings</a>{" · "}<button type="button" className="fy-studio-button" onClick={client.refreshModels}>Check Studio models again</button></p>}
+      {view.fresh && !models.length && <p className="fy-studio-note"><a href="#/settings/providers?provider=ollama" onClick={client.close}>Set up Ollama</a>{" · "}<button type="button" className="fy-studio-button" onClick={client.refreshModels}>Check again</button></p>}
     </footer>
   </>;
 }

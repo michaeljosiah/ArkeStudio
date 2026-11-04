@@ -314,7 +314,7 @@ export function ModelPicker(props: ModelPickerProps) {
         onMouseDown={(event) => event.preventDefault()}
         onMouseLeave={() => { clearTimeout(timer.current); wanted.current = null; setCardKey(null); }}
       >
-        {rows.length === 0 && <div className="fy-mpick__empty" role="presentation">No model matches</div>}
+        {rows.length === 0 && <div className="fy-mpick__empty" role="presentation">{searching ? "No model matches" : "No models here yet"}</div>}
         {sections.map((section) => section.heading === undefined ? (
           <div key={section.key} role="presentation" className="fy-mpick__section">{section.rows.map(renderRow)}</div>
         ) : (
