@@ -656,6 +656,15 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.equal(asked(m, "make-audiobook-picture").length, 0, "the picture itself is not made again");
   });
 
+  it("offers a Tall slot on a picture chosen from the world, which has no card", async () => {
+    bookShapes = ["wide", "tall"];
+    const m = await mount(2, { "p1.0": picture(2, "world-art.png") });
+    assert.deepEqual(all(m, '[data-testid="picture-card-shapes"] figcaption').map(text), ["Wide", "Tall"]);
+    await press(q(m, '[data-testid="picture-card-tall-slot"]')?.closest("button"));
+    assert.ok(q(m, '[aria-label="Tall pictures"]'), "the slot opens the world's pictures");
+    assert.equal(asked(m, "make-audiobook-picture").length, 0);
+  });
+
   it("chooses an existing Tall without replacing Wide or buying an image (#2164)", async () => {
     extraArtifacts = [madeArtifact()];
     bookShapes = ["wide", "tall"];
