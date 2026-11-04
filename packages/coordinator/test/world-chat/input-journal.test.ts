@@ -74,11 +74,21 @@ async function active() {
 }
 
 describe("durable additional conversation inputs (SPEC-045)", () => {
+  it("Continue does not reroute a later input with a deliberately different model", async () => {
+    const { journal } = await setup();
+    await journal.record(request("First"), CAPTURE);
+    const other = { ...ROUTING, modelId: "other-model", fingerprint: `sha256:${"b".repeat(64)}` };
+    await journal.record(request("Second", { modelId: other.modelId }), { ...CAPTURE, routing: other });
+    await journal.pause("stopped", "stop");
+    const before = await journal.read(), resumed = await journal.continue(before.revision, ROUTING, "resume");
+    const { worldChatInputRouting } = await import("@arke-studio/contracts");
+    assert.deepEqual(worldChatInputRouting(resumed.queue, resumed.queue.inputs[1]!), other);
+  });
   it("fences explicit manuscript intent before recording it and preserves it on reopen", async () => {
     const state = await setup();
     const subject = { kind: "chapter" as const, chapterId: "neap", intent: "draft" as const };
     await state.journal.record(request("Draft the rest", { subject }), { ...CAPTURE, constraints: { replyOnly: false, subject } });
-    assert.equal(state.boundary, 102);
+    assert.equal(state.boundary, WORLD_CHAT_INPUT_SCHEMA_VERSION);
     const reopened = await state.other().read();
     assert.deepEqual(reopened.inputs[0]!.input.constraints.subject, subject);
     assert.deepEqual(reopened.inputs[0]!.input.request.subject, subject);

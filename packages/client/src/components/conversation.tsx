@@ -33,6 +33,7 @@ import { CODEX_IMAGE_PLAN_LABEL, usesCodexImagePlan, findHarnessModel, harnessMo
 import { isRemoteSession } from "../lib/remote-session.js";
 import { OnYourPC } from "./on-your-pc.js";
 import { Composer } from "./composer.js";
+import { useConversationInputs } from "./conversation-inputs.js";
 import { HeldBar } from "./held-bar.js";
 import { PageSheet } from "./page-sheet.js";
 import { ResponsiveSheet } from "./responsive-sheet.js";
@@ -1019,6 +1020,14 @@ export function ProductionConversationBody({
   loadedRef.current = loaded;
   const progress = useWorldChatProgress(conversationId ?? undefined, loaded?.runStartedAt ?? null);
   const running = loaded?.runStatus === "running";
+  const inputs = useConversationInputs(worldId, loaded, setMessage, (input, draft) => {
+    if (languageModelId === input.modelId && chatVariant === input.variant) {
+      setLanguageModelId(undefined); setChatVariants({});
+    }
+    const ask = dock?.ask;
+    if (ask?.draft && input.text === `${ask.text.slice(0, ask.text.length - ask.line.length).trimEnd()} ${draft.trim()}` &&
+      JSON.stringify(input.subject) === JSON.stringify(ask.subject)) dock?.onAsk?.(null);
+  });
   const failure = loaded?.lastFailure ?? null;
 
   /*
@@ -1123,6 +1132,14 @@ export function ProductionConversationBody({
     if (!text || !worldId || !hasContext) return;
     // The field keeps its words while a thread is still opening; say() would drop them.
     if (opening) return;
+    if (inputs.queueing) {
+      const about = draftAsk?.subject ?? subject;
+      const prefix = draftAsk ? draftAsk.text.slice(0, draftAsk.text.length - draftAsk.line.length).trimEnd() : dock?.subjectPrefix;
+      inputs.sendNext({ text: prefix ? `${prefix} ${text}` : text, attachmentIds: turnAttachments.map(attachment => attachment.id),
+        ...(about ? { subject: about } : {}), replyOnly: draftAsk?.replyOnly === true,
+        ...(languageModelId ? { modelId: languageModelId } : {}), ...(chatVariant ? { variant: chatVariant } : {}) }, message);
+      return;
+    }
     // The words leave the box only once they have gone (codex on PR 1232): a line held back —
     // a turn running, one just sent — stays where the author typed it.
     // A line a menu press started is about the passage it was pressed on (codex on PR 1232).
@@ -1529,6 +1546,7 @@ export function ProductionConversationBody({
             </div>
           )}
           {!chapterPanel && promptButtons}
+          {inputs.panel}
           {/* The scene dock has no model chip (design turn 143): the production's language model
               is chosen in Settings and remembered from the other docks, which keep theirs. */}
           <Composer
@@ -1538,6 +1556,8 @@ export function ProductionConversationBody({
             placeholder={placeholder}
             {...(dock.conversationFirst ? {} : { agentLabel: "story author" })}
             busy={running || opening !== null || echo !== null}
+            sendNext={inputs.queueing && opening === null && echo === null}
+            queuePaused={inputs.paused}
             busyLabel={opening !== null ? openingNote ?? "opening…" : "reading the world…"}
             focusRequest={focusRequest}
             disabledReason={presentation?.scopeMissing ? "Choose this page to restore the saved subject before sending." : languageUnavailableReason}
@@ -1589,7 +1609,9 @@ export function ProductionConversationBody({
           <span><b>{sideTitle}{!side && " · " + pointCount + " so far"}</b><span>{side ? "Open the proposed changes" : [...groups.map(group => group.subject), ...(openCount ? [openCount + " still open"] : [])].join(" · ") || "Nothing understood yet"}</span></span><ChevronUp size={18} />
         </button>}
         {modelStatus}
+        {inputs.panel}
         <Composer value={message} onChange={setMessage} onSubmit={submit} placeholder={responsive && compact && !historyPage ? "Keep shaping the story…" : placeholder}
+          sendNext={inputs.queueing} queuePaused={inputs.paused}
           agentLabel="story author" busy={running} busyLabel="reading the world…" disabledReason={presentation?.scopeMissing ? "Choose this page to restore the saved subject before sending." : languageUnavailableReason}
           onDictate={text => setMessage(prev => prev ? prev + " " + text : text)} readReplies={readReplies.composer}
           {...(modelChip !== null ? { modelControl: modelChip } : {})} {...attachProps} />

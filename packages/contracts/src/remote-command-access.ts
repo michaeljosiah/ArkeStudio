@@ -68,6 +68,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "proposal-mark-seen": "studio", "proposal-resolve-choice": "studio", "proposal-update-field": "studio",
   "proposal-update-passage": "studio", "world-chat-open": "studio", "conversation-action-decide": "resolved", "conversation-take-review-prepare": "studio",
   "world-chat-send": "studio", "world-chat-send-status": "studio", "world-chat-wrap-up": "studio",
+  "world-chat-input": "studio", "world-chat-input-status": "studio", "world-chat-input-remove": "studio", "world-chat-input-continue": "studio",
   "world-chat-save-point": "studio", "world-chat-reject-point": "studio", "world-chat-open-media": "studio",
   "world-chat-retry-turn": "studio", "proposal-send-back": "studio", "world-chat-cancel": "studio",
   "world-chat-create": "studio", "world-chat-delete": "studio", "world-chat-set-initiative": "studio",

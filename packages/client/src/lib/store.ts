@@ -1355,6 +1355,26 @@ export function forgetGateRequest(requestId: string): void {
 }
 
 export type WorldChatSendResult = Extract<DomainEvent, { type: "world-chat.send-result" }>;
+export type WorldChatInputResult = Extract<DomainEvent, { type: "world-chat.input-result" }>;
+const inputResultListeners = new Set<(result: WorldChatInputResult) => void>();
+export function subscribeWorldChatInputResults(listener: (result: WorldChatInputResult) => void): () => void {
+  inputResultListeners.add(listener);
+  return () => inputResultListeners.delete(listener);
+}
+export function sendWorldChatInput(worldId: string, conversationId: string, input: import("@arke-studio/contracts").WorldChatInputRequest): boolean {
+  return send({ kind: "world-chat-input", worldId, conversationId: conversationId as never, input });
+}
+export function worldChatInputStatus(worldId: string, conversationId: string, requestId: string): boolean {
+  return send({ kind: "world-chat-input-status", worldId, conversationId: conversationId as never, requestId });
+}
+export function removeWorldChatInput(worldId: string, conversationId: string, messageId: string, revision: number): string | null {
+  const requestId = crypto.randomUUID();
+  return send({ kind: "world-chat-input-remove", worldId, conversationId: conversationId as never, requestId, messageId, revision }) ? requestId : null;
+}
+export function continueWorldChatInputs(worldId: string, conversationId: string, revision: number, routing: import("@arke-studio/contracts").WorldChatInputRouting): string | null {
+  const requestId = crypto.randomUUID();
+  return send({ kind: "world-chat-input-continue", worldId, conversationId: conversationId as never, requestId, revision, routing }) ? requestId : null;
+}
 const sendResultListeners = new Set<(result: WorldChatSendResult) => void>();
 /**
  * The last answers, by request id, kept past the moment they arrive (codex on PR 1232): a screen
@@ -2918,6 +2938,13 @@ function handleFrame(json: string): void {
       dictation = { ...dictation, [event.requestId]: { text: event.text, error: event.error } };
     } else if (event.type === "world-chat.create-result") {
       for (const listener of worldChatCreateListeners) listener(event);
+    } else if (event.type === "world-chat.input-result") {
+      const workspace = current.state?.worldChat;
+      if (event.queue && current.state?.world?.meta.worldId === event.worldId && workspace?.conversationId === event.conversationId &&
+        event.queue.revision >= (workspace.inputQueue?.revision ?? 0)) {
+        emitChange({ ...current, state: { ...current.state!, worldChat: { ...workspace, inputQueue: event.queue } } });
+      }
+      for (const listener of inputResultListeners) listener(event);
     } else if (event.type === "world-chat.send-result") {
       sendResults = new Map([...sendResults, [event.requestId, event] as const].slice(-50));
       for (const listener of sendResultListeners) listener(event);

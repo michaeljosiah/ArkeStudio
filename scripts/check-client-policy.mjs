@@ -157,6 +157,9 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
     [join("lib", "dev-session.ts"), "sessionStorage"],
     // SPEC-051 / approved turn 224: thread/draft/model presentation only, never credentials or authority.
     [join("lib", "global-chat.ts"), "sessionStorage"],
+    // SPEC-045: a validated pending user input and submission id, removed after its durable
+    // receipt. This is draft recovery, not credentials or authority to dispatch/retry a model.
+    [join("components", "conversation-inputs.tsx"), "sessionStorage"],
     [join("screens", "editor-effect-review.ts"), "sessionStorage"],
     // SPEC-054: a version/Review grant reference only; server verification owns authority.
     [join("lib", "editor-transition-review.ts"), "sessionStorage"],

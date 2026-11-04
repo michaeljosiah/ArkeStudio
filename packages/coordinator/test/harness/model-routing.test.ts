@@ -148,6 +148,58 @@ async function fixture(options: {
 }
 
 describe("coordinator harness/model routing (#1122)", () => {
+  it("drains a queued native reply before disposing its adapter during shutdown", async t => {
+    const adapter = new CaptureAdapter();
+    let dispatched = false, interrupted = false, release!: () => void;
+    const interruptSettled = new Promise<void>(resolve => { release = resolve; });
+    t.mock.method(adapter, "createSession", async () => ({ sessionId: "queued-shutdown" }));
+    t.mock.method(adapter, "sendMessage", async () => { dispatched = true; await interruptSettled; throw new Error("cancelled"); });
+    t.mock.method(adapter, "streamEvents", async function* (signal?: AbortSignal) {
+      if (!signal) return;
+      if (!signal.aborted) await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+      yield { type: "session.ended", sessionId: "queued-shutdown", reason: "cancelled" };
+    });
+    (adapter as HarnessAdapter).interrupt = async () => { interrupted = true; await interruptSettled; };
+    const test = await fixture({ adapter, production: LOCAL, manifest: true });
+    try {
+      await until(() => test.coordinator.getState().app.harnessModelStatus.status === "ready", "catalog ready");
+      await test.send({ kind: "world-chat-create", worldId: WORLD_ID, requestId: randomUUID(), title: "Queue shutdown",
+        entryContext: { kind: "production", productionId: "saltlight" } });
+      const conversationId = test.coordinator.getState().worldChat!.conversationId;
+      await test.send({ kind: "world-chat-input", worldId: WORLD_ID, conversationId,
+        input: { submissionId: randomUUID(), text: "Draft", attachmentIds: [], delivery: "next", expectedRunId: null, modelId: LOCAL } });
+      await until(() => dispatched, "queued native dispatch");
+      let stopped = false; const stopping = test.coordinator.stop().then(() => { stopped = true; });
+      await until(() => interrupted, "shutdown interruption");
+      await new Promise(resolve => setTimeout(resolve, 30));
+      assert.equal(stopped, false); assert.equal(adapter.disposeCalls, 0);
+      release(); await stopping; assert.equal(adapter.disposeCalls, 1);
+    } finally { release(); await test.close(); }
+  });
+
+  it("publishes durable queued-input receipts and hydrates paused controls without dispatch", async () => {
+    const test = await fixture({ production: LOCAL, manifest: true });
+    try {
+      await test.send({ kind: "world-chat-create", worldId: WORLD_ID, requestId: randomUUID(), title: "Queued direction",
+        entryContext: { kind: "production", productionId: "saltlight" } });
+      const conversationId = test.coordinator.getState().worldChat!.conversationId;
+      await test.send({ kind: "world-chat-cancel", worldId: WORLD_ID, conversationId });
+      const input = { submissionId: randomUUID(), text: "Keep her motivation.", attachmentIds: [], delivery: "next" as const, expectedRunId: null, variant: "high", replyOnly: true };
+      await test.send({ kind: "world-chat-input", worldId: WORLD_ID, conversationId, input });
+      await test.send({ kind: "world-chat-input", worldId: WORLD_ID, conversationId, input });
+      const queue = test.coordinator.getState().worldChat!.inputQueue!;
+      assert.equal(queue.inputs.length, 1); assert.equal(queue.pauseReason, "stopped");
+      assert.ok(queue.resumeRouting); assert.equal(queue.inputs[0]!.input.request.variant, "high");
+      assert.equal(test.adapter.sessions.length, 0);
+      await test.send({ kind: "world-chat-input-status", worldId: WORLD_ID, conversationId, requestId: input.submissionId });
+      const receipt = test.events.findLast(event => event.type === "world-chat.input-result");
+      assert.ok(receipt?.type === "world-chat.input-result" && receipt.admitted);
+      await test.send({ kind: "world-chat-input-remove", worldId: WORLD_ID, conversationId, requestId: randomUUID(),
+        messageId: queue.inputs[0]!.input.messageId, revision: queue.revision });
+      assert.equal(test.coordinator.getState().worldChat!.inputQueue!.inputs[0]!.status, "removed");
+      assert.equal(test.adapter.sessions.length, 0);
+    } finally { await test.close(); }
+  });
   it("rechecks explicit founding models before opening a tool-using session", async () => {
     const test = await fixture();
     const genesisId = "gen-model-admission";
