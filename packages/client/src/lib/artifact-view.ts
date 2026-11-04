@@ -1,3 +1,4 @@
+import { artifactDisplayName, type LinkName } from "@arke-studio/contracts";
 import { mediaExtension, orderedShots, type ArtifactSidecar, type WorldBundle } from "@arke-studio/contracts";
 
 /**
@@ -149,6 +150,16 @@ const VIEWER_LABEL: Record<ArtifactViewerKind, string> = {
  * lists another world's shelf. Re-exported so every screen keeps importing it from here.
  */
 export { artifactDisplayName, linkNameResolver, type LinkName } from "@arke-studio/contracts";
+
+/**
+ * A made file's name is its prompt cut to a slug, often mid-word: `a-single-finished-comic-book-page-2-3-one-larg-take-1.png`.
+ * On a shelf people read, the prompt itself says the same thing in words (issue 2561). The file keeps its name for downloads.
+ */
+export function artifactShelfName(artifact: ArtifactSidecar, linkName: LinkName): string {
+  const name = artifactDisplayName(artifact, linkName);
+  const prompt = artifact.generation && "prompt" in artifact.generation ? artifact.generation.prompt.trim() : "";
+  return prompt !== "" && name === artifact.file.split("/").pop() ? prompt.slice(0, 90) : name;
+}
 
 /** The visible name and viewer are also the open button's accessible name. */
 export function artifactOpenLabel(artifact: Pick<ArtifactSidecar, "file">, name = artifact.file.split("/").pop() ?? artifact.file): string {

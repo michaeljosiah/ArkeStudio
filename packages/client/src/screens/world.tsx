@@ -75,7 +75,7 @@ import { episodeThumbnailPath } from "./production-episode-picker.js";
 import { takeMediaPath } from "../lib/take-presentation.js";
 import { Wave } from "../components/wave.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
-import { artifactDisplayName, artifactOpenLabel, artifactUses, linkNameResolver } from "../lib/artifact-view.js";
+import { artifactDisplayName, artifactOpenLabel, artifactShelfName, artifactUses, linkNameResolver } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
 import { ComicStylePicker } from "../components/comic-style-picker.js";
 import { productionPlate } from "../lib/production-plate.js";
@@ -4410,7 +4410,7 @@ export function ArtifactsScreen() {
         {cards.map((a) => {
           if (a === null) return addFilesCard;
           const filename = a.file.split("/").pop() ?? a.file;
-          const name = artifactDisplayName(a, linkName);
+          const name = artifactShelfName(a, linkName);
           const isImage = a.kind === "image" || /\.(png|jpe?g|webp|gif)$/i.test(a.file);
           // One line, the design's vocabulary (68a): type · made here · duration · linked. An
           // uploaded file carries no provenance token — where it came from is not what it is.
