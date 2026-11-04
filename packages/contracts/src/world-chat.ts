@@ -38,6 +38,7 @@ import {
   SlugSchema,
   TakeIdSchema,
   TurnIdSchema,
+  WorldFilePathSchema,
 } from "./ids.js";
 import { BIBLE_EDIT_BOUNDS, BibleEditRecordSchema, BibleEditSchema, type BibleEdit } from "./bible.js";
 import {
@@ -1886,6 +1887,8 @@ export const WorldChatTranscriptMessageSchema = z
     turnId: TurnIdSchema.optional(),
     role: z.enum(["user", "studio"]),
     text: z.string(),
+    /** Attachments sent with this message, retained when the conversation is reopened. */
+    attachmentIds: z.array(ChatAttachmentIdSchema).optional(),
     /** Persisted receipts, already worded for a person: "read Maren Kest v4". */
     receipts: z.array(z.string().max(200)),
     /**
@@ -1986,6 +1989,8 @@ export const WorldChatWorkspaceSchema = z
             kind: z.enum(["document", "image", "audio", "video", "other"]),
             readability: z.enum(["text-readable", "not-readable", "extracted-text-available"]),
             promoted: z.boolean(),
+            /** Portable preview address; the client adds its current media authorization. */
+            imagePath: WorldFilePathSchema.optional(),
             imageInspection: z.literal("prepared").optional(),
           })
           .strict(),
