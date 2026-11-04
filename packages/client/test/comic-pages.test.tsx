@@ -511,7 +511,7 @@ describe("Style (turn 248)", () => {
     await act(async () => props(button(m.container, "StyleWorld look")!).onClick({}));
     const names = [...dom.document.querySelectorAll(".fy-comic-style__name")].map((el) => el.textContent);
     assert.deepEqual(names, ["World look", "Manga", "Superhero", "Clean line", "Noir", "Webtoon", "Painted", "Watercolour", "Ink and wash", "Vintage print", "Your own"]);
-    assert.equal(dom.document.querySelectorAll(".fy-comic-style img[src^='./comic-styles/']").length, 9);
+    assert.equal(dom.document.querySelectorAll(".fy-comic-style img[src^='./comic-styles/']").length, 10);
     assert.equal(words(), null, "World look has no words of its own");
 
     await act(async () => props(card("Noir")).onClick({}));

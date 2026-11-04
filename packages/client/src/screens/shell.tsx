@@ -383,7 +383,7 @@ export function WorldPickerScreen() {
             >
               <div className="fy-homefeature__art">
                 {featured.keyArt ? <Portrait worldSlug={featured.slug} path={featured.keyArt} label={featured.name} radius={0} /> :
-                  <div className="fy-worldcard__empty">No key art yet.</div>}
+                  <img className="fy-portrait fy-portrait--plate" src="./worlds/new-world.webp" alt="" />}
                 {/* The featured world leaves the grid on a phone, so it carries its own ⋯. */}
                 <button
                   type="button"
@@ -428,7 +428,7 @@ export function WorldPickerScreen() {
                 >
                   <div className="fy-worldcard__frame">
                     {w.keyArt ? <Portrait worldSlug={w.slug} path={w.keyArt} label={w.name} radius={10} /> :
-                      <div className="fy-worldcard__empty">No key art yet.</div>}
+                      <img className="fy-portrait fy-portrait--plate" src="./worlds/new-world.webp" alt="" style={{ borderRadius: 10 }} />}
                   </div>
                   {/* Archiving is two clicks and no dialog: the second click is the consent,
                       and the words say what actually happens to the folder. */}

@@ -78,6 +78,7 @@ import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
 import { artifactDisplayName, artifactOpenLabel, artifactUses, linkNameResolver } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
 import { ComicStylePicker } from "../components/comic-style-picker.js";
+import { productionPlate } from "../lib/production-plate.js";
 import { draftFromStyle, styleFromDraft, type ComicStyleDraft } from "../lib/comic-styles.js";
 import { clearQueue, enqueueClip, playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
@@ -842,6 +843,7 @@ function WorldProductions({ worldId, world }: { worldId: string; world: WorldBun
                     worldSlug={world.meta.slug}
                     path={art}
                     label={`${p.meta.title}: frame`}
+                    fallbackSrc={productionPlate(p.meta)}
                     radius={7}
                   />
                 </div>
@@ -4634,6 +4636,7 @@ export function ProductionsScreen() {
                     worldSlug={world?.meta.slug}
                     path={artOf(p)}
                     label={`${p.meta.title}: frame`}
+                    fallbackSrc={productionPlate(p.meta)}
                     radius={0}
                   />
                 </div>
@@ -4809,7 +4812,7 @@ const STORED_KINDS = new Set(["microdrama", "music-video", "interactive", "visua
  * "nothing assumed" would be a picture of something, and the empty box saying so is the truer
  * one. A kind added without a plate falls back to that same empty box rather than breaking.
  */
-export const KIND_PLATES = new Set(["microdrama", "film", "music-video", "interactive", "visual-novel", "book", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, "album", "single", "soundtrack"]);
+export const KIND_PLATES = new Set(["microdrama", "film", "music-video", "interactive", "visual-novel", "book", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, "album", "single", "soundtrack", "other"]);
 
 /** The episode-length ranges step two offers, and the seconds each one means (turn 53). */
 export const EPISODE_LENGTH_CHOICES = [
@@ -5051,7 +5054,7 @@ export function NewProductionScreen() {
                       alt=""
                       style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                     />
-                  ) : null /* Other is the empty box (issue 1883): a "·" in it read as a stray mark. */}
+                  ) : null}
                 </div>
                 <div className="fy-radio__head">
                   <span className="fy-radio__dot" />

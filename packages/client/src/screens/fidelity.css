@@ -9020,3 +9020,5 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-production-plan details { margin: 12px 0; }
 .fy-production-plan summary { cursor: pointer; }
 .fy-production-plan__note { font-size: .85em; opacity: .7; }
+/* A shipped picture standing in for one not made yet (issue 2461). */
+.fy-portrait--plate { display: block; width: 100%; height: 100%; object-fit: cover; filter: saturate(.85) brightness(.92); }
