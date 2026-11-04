@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { linearizeSceneFlow, orderedShots, sceneCommandBatchCandidate, SceneRecordSchema, type SceneRecord, type ShotStaging } from "@arke-studio/contracts";
+import { linearizeSceneFlow, orderedShots, sceneBeats, sceneCommandBatchCandidate, SceneRecordSchema, type SceneRecord, type ShotStaging } from "@arke-studio/contracts";
 import {
   applySceneCommand,
   applySceneCommands,
@@ -66,6 +66,47 @@ async function worldPrint(dir: string): Promise<string> {
 }
 
 const shotIds = (record: SceneRecord): string[] => orderedShots(record).map((shot) => shot.id);
+
+describe("manual beat lines (#1384)", () => {
+  it("adds and edits the scene script without changing shot identity or refreshing old coverage", async () => {
+    const { store } = await open();
+    const before = await sceneOnDisk(store), shotId = shotIds(before)[0]!;
+    const input = { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID };
+    const text = "Somebody lit a lamp down there.";
+    await applySceneCommand(store, { ...input, baseVersion: before.version,
+      command: sceneCommandFrom({ kind: "set-beat-line", shotId, text, speaker: "maren-kest" }) });
+    const added = await sceneOnDisk(store), block = added.script!.blocks.find(one => one.text === text)!;
+    assert.equal(block.kind, "dialogue");
+    assert.equal(block.speaker, "maren-kest");
+    assert.deepEqual(shotIds(added), shotIds(before));
+    const covers = orderedShots(added)[0]!.covers;
+    assert.deepEqual(covers?.find(cover => cover.blockId === block.id), { blockId: block.id, textDigest: sha256(text) });
+    assert.ok(sceneBeats(added).some(beat => beat.blockId === block.id && beat.text === text));
+    await applySceneCommand(store, { ...input, baseVersion: added.version,
+      command: sceneCommandFrom({ kind: "set-beat-line", shotId, blockId: block.id, text: "A lamp burned below." }) });
+    const edited = await sceneOnDisk(store);
+    assert.equal(edited.script!.blocks.length, added.script!.blocks.length);
+    assert.deepEqual(edited.script!.blocks.find(one => one.id === block.id), { id: block.id, kind: "action", text: "A lamp burned below." });
+    assert.deepEqual(orderedShots(edited)[0]!.covers, covers, "old picture/script citations must still become stale");
+    assert.ok(sceneBeats(edited).some(beat => beat.blockId === block.id && beat.kind === "narration"));
+    const stable = await worldPrint(store.dir);
+    await assert.rejects(applySceneCommand(store, { ...input, baseVersion: added.version,
+      command: sceneCommandFrom({ kind: "set-beat-line", shotId, blockId: block.id, text: "Stale words" }) }), SceneVersionMoved);
+    assert.equal(await worldPrint(store.dir), stable);
+  });
+
+  it("refuses a missing/unrelated line or an unknown speaker without writing", async () => {
+    const { store } = await open();
+    const before = await sceneOnDisk(store), shotId = shotIds(before)[0]!;
+    const input = { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version };
+    const stable = await worldPrint(store.dir);
+    for (const fields of [{ blockId: "blk-missing" }, { speaker: "missing-character" }]) {
+      await assert.rejects(applySceneCommand(store, { ...input,
+        command: sceneCommandFrom({ kind: "set-beat-line", shotId, text: "A line", ...fields }) }));
+      assert.equal(await worldPrint(store.dir), stable);
+    }
+  });
+});
 
 const nodeIdOf = (record: SceneRecord, shotId: string): string => {
   const sequence = linearizeSceneFlow(record);

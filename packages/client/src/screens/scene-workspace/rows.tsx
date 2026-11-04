@@ -242,7 +242,7 @@ export function StoryboardRows({
                 })
               }
             >
-              Add first shot
+              {beats === undefined ? "Add first shot" : "Add first beat"}
             </Button>
           </div>
         </div>
@@ -403,7 +403,7 @@ export function StoryboardRows({
             }
           >
             <span className="fy-swaddshot__ring" aria-hidden="true"><Plus size={12} /></span>
-            Add shot
+            {beats === undefined ? "Add shot" : "Add beat"}
           </button>
         </li>
       </ol>

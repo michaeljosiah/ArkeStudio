@@ -509,7 +509,7 @@ export function SceneWorkspace({
                     setGenerateTarget({});
                   }}
                 >
-                  Generate frames
+                  {playsAsBeats ? "Generate pictures" : "Generate frames"}
                 </Button>
               </div>
             </div>
@@ -807,7 +807,7 @@ export function SceneWorkspace({
               },
               prompts: focused === undefined
                 // A scene begins Untitled (R-37), and the dock is where it gets a name (R-38).
-                ? [...(scene.title === "Untitled" ? ["Name this scene"] : []), "What is missing from this scene?", "Which shots need a frame?"]
+                ? [...(scene.title === "Untitled" ? ["Name this scene"] : []), "What is missing from this scene?", playsAsBeats ? "Which beats need a picture?" : "Which shots need a frame?"]
                 : [`Tighten shot ${focused.number}`, `What does shot ${focused.number} need?`],
               shotLabel,
               ...(focused === undefined ? {} : { subjectPrefix: `About shot ${focused.number}:`, about: `shot ${focused.number}` }),
