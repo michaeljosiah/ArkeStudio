@@ -91,7 +91,6 @@ export function StoryEditionFiles({ edition }: { edition: StoryEdition }) {
     </PageSheet>}
     {handoff === "kindle" && <div className="fy-publish-card"><strong>Read on Kindle</strong><ol><li>Save the EPUB file.</li><li>Open Amazon’s Send to Kindle and sign in to your Amazon account.</li><li>Upload the EPUB, then open your Kindle app after Amazon finishes processing it.</li></ol><a className="fy-publish-link" href="https://www.amazon.com/sendtokindle" target="_blank" rel="noreferrer">Open Send to Kindle</a><p>Arke cannot confirm that Amazon has received or delivered your book.</p></div>}
     {handoff === "audio" && <div className="fy-publish-card"><strong>Listen with Arke’s voices</strong><ol><li>Save the M4B file to your phone’s Files or Downloads.</li><li>Import it into an audiobook app that accepts M4B files.</li><li>Check playback and offline access in that app.</li></ol><p>The audiobook includes the chosen narration and character voices. Your listening position is separate from your Kindle reading position.</p></div>}
-    {edition.status === "ready" && <p className="fy-publish-muted">Files ready. Sharing a copy is a separate step; copies you share cannot be recalled by Arke.</p>}
   </div>;
 }
 
@@ -278,7 +277,7 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
       </>)}
       {preparing && <StoryEditionPreparation edition={edition} onClose={onClose} />}
       {(step === "Preview" || step === "Files") && edition && !preparing && <>
-        {edition.status === "ready" ? <><StoryReadyEdition edition={edition} />{edition.files.some(file => file.format === "pdf") && <StoryPdfPreview edition={edition} />}</> : <>
+        {edition.status === "ready" ? <><StoryReadyEdition edition={edition} /><p className="fy-publish-muted">Files ready. Sharing a copy is a separate step; copies you share cannot be recalled by Arke.</p>{edition.files.some(file => file.format === "pdf") && <StoryPdfPreview edition={edition} />}</> : <>
           <p>{edition.settings.title} · {edition.settings.author || "No author set"} · {languageName(edition.settings.language)}</p>
           {edition.status === "preview" && <p>Review the captured files below. These exact files become the edition when you choose Create edition.</p>}
           {edition.files.some(file => file.format === "epub") && <StoryBookPreview edition={edition} />}
