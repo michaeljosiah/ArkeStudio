@@ -137,8 +137,7 @@
   [data-screen="production-dashboard"] .fy-dashrow > :only-child { grid-column: 1 / -1; }
   [data-screen="production-dashboard"] .fy-threadcard { flex: 1.15 1 0; min-width: min(100%, 220px); }
   [data-screen="production-dashboard"] .fy-nextcard { flex: 1 1 0; min-width: min(100%, 200px); }
-  [data-screen="production-dashboard"] .fy-cliprow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-  [data-screen="production-dashboard"] .fy-clip__frame { height: auto; aspect-ratio: 16/9; }
+  [data-screen="production-dashboard"] .fy-cliprow { gap: 10px; }
   [data-screen="production-dashboard"] .fy-threadcard { padding: 14px 16px; background: var(--card); box-shadow: none; display: grid; gap: 8px; align-content: start; }
   [data-screen="production-dashboard"] .fy-threadcard__label { font: var(--type-label); letter-spacing: .12em; }
   [data-screen="production-dashboard"] .fy-threadcard__title { margin: 0; font: 600 var(--text-lg)/1.25 var(--font-sans); }
