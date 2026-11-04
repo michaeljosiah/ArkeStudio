@@ -81,12 +81,12 @@ export function GlobalWorldChatEntry({ worldId, conversationId }: { worldId: str
   }, [conversationId, location.pathname, state?.world?.meta.worldId, surface?.conversationId, worldId, navigate]);
   const latest = useRef(surface); latest.current = surface;
   useLayoutEffect(() => host.current && latest.current ? owner.register(latest.current, host.current) : undefined, [owner, worldId, conversationId, surface?.key]);
-  // A route that names its conversation is the author going to it (issue 1888). Registering only
-  // selects when nothing is selected, and the last conversation is remembered across sessions, so
-  // Plan with Arke landed on a page whose body stayed parked until "Open Builder Chat" was pressed.
+  // Coming to a chat page is the author going to it (issue 1888, 2460). Registering only selects when
+  // nothing is selected, and the last conversation is remembered across sessions, so Plan with Arke
+  // and the World Chat tab landed on a page whose body stayed parked until "Open …" was pressed.
   useLayoutEffect(() => {
     const page = latest.current;
-    if (conversationId && page && owner.getSnapshot().selected?.key !== page.key) owner.select(page);
+    if (page && owner.getSnapshot().selected?.key !== page.key) owner.select(page);
   }, [owner, conversationId, surface?.key]);
   useLayoutEffect(() => { if (host.current && latest.current) owner.refresh(latest.current, host.current); });
   const rows = [...(state?.world?.conversations ?? [])].sort(byPendingConsequence), menuRow = rows.find(row => row.id === menu?.id);
