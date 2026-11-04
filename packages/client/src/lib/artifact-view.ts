@@ -157,7 +157,9 @@ export { artifactDisplayName, linkNameResolver, type LinkName } from "@arke-stud
  */
 export function artifactShelfName(artifact: ArtifactSidecar, linkName: LinkName): string {
   const name = artifactDisplayName(artifact, linkName);
-  const prompt = artifact.generation && "prompt" in artifact.generation ? artifact.generation.prompt.trim() : "";
+  // The Bench keeps its words as the take's brief; every other maker calls them its prompt.
+  const made = artifact.generation;
+  const prompt = (made && "brief" in made ? made.brief : made && "prompt" in made ? made.prompt : "").trim();
   return prompt !== "" && name === artifact.file.split("/").pop() ? prompt.slice(0, 90) : name;
 }
 
