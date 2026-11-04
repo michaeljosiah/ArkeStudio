@@ -195,7 +195,7 @@ describe("step two offers every kind and every default (design turn 53)", () => 
    * point of the step — and it fails quietly: the box falls back to bare `--muted`, which is
    * exactly what an unpicked card already looks like. Nothing on screen says the art is missing.
    */
-  it("every kind that offers a plate has one on disk, and Other deliberately has none", () => {
+  it("every kind that offers a plate has one on disk, Other included", () => {
     const plates = fileURLToPath(new URL("../public/video-kinds/", import.meta.url));
     for (const kind of VIDEO_KIND_CHOICES) {
       const shipped = existsSync(`${plates}${kind.id}.webp`);
@@ -207,7 +207,7 @@ describe("step two offers every kind and every default (design turn 53)", () => 
           : `${kind.id} points at ./video-kinds/${kind.id}.webp, which is not there`,
       );
     }
-    assert.ok(!KIND_PLATES.has("other"), "nothing assumed is drawn as an empty box, not as a picture");
+    assert.ok(KIND_PLATES.has("other"), "a blank card read as broken, so Other has its own picture");
   });
 
   it("each kind carries the frame it delivers in, and only a micro drama is vertical", () => {
