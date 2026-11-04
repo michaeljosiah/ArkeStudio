@@ -176,7 +176,8 @@ describe("Pages (turn 247)", () => {
     assert.equal(quote.page, one.id);
     await act(async () => __applyEventForTest({ at: AT, type: "comic.page-quote", requestId: quote.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", page: one.id,
       quote: { ok: true, model: "gpt-image-2", modelName: "GPT Image 2", mode: "baked", aspect: "2:3", microUsd: 250_000, brief: "A page.", riding: ["Maren Kest"], missing: [] } }));
-    assert.match(m.container.textContent!, /GPT Image 2 · 2:3 · Maren Kest ride · ~\$0\.25 · up to 3 · ~\$0\.75/);
+    assert.match(m.container.textContent!, /GPT Image 2 · 2:3 · Maren Kest ride · up to 3 takes/);
+    assert.equal(m.container.querySelector(".fy-comic__price")?.textContent, "~$0.75", "the most it may spend, beside the press");
     await act(async () => props(button(m.container, "Make page")!).onClick({}));
     const make = m.sent.find((message): message is Extract<ClientMessage, { kind: "make-comic-page" }> => message.kind === "make-comic-page")!;
     assert.equal(make.untilPasses, true);
