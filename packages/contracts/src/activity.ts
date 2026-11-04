@@ -334,7 +334,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
         urgency: 5,
         kind: "open-proposal",
         title: staged.proposal.summary,
-        detail: `proposal · ${staged.proposal.kind}`,
+        detail: "Proposed change",
         at: staged.proposal.created,
         worldId: world.meta.worldId,
         actions: ["open-proposal"],
