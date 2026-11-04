@@ -77,6 +77,7 @@
 .fy-comic__hit.w span { background: var(--warning); color: var(--foreground); }
 .fy-comic__make { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .fy-comic__make .m { flex-basis: 100%; }
+.fy-comic__price { font: var(--type-label); font-weight: 600; white-space: nowrap; }
 .fy-comic__check { display: inline-flex; align-items: center; gap: 6px; font: var(--type-label); cursor: pointer; }
 .fy-comic__brief { margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font: var(--type-mono); font-size: var(--text-2xs); white-space: pre-wrap; max-height: 220px; overflow-y: auto; }
 .fy-comic__takes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

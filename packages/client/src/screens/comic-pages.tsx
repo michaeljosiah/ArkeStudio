@@ -715,6 +715,8 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
     makeComicPage(worldId, productionId, page.id, until ? Math.max(quote.microUsd, Math.min(total, Math.round(settings.cap.usd * 1_000_000))) : quote.microUsd, undefined, until);
   };
   const press = busy ? "Making" : takes.length ? "Make again" : "Make page";
+  // Beside the press, since one press spends: the cap's price when it may try again.
+  const cost = quote?.ok !== true ? "" : quote.model === "codex-image" ? priceLabel(0, "included-plan") : priceLabel(until ? total : quote.microUsd);
   // An accepted take a re-check failed is kept only by covering what it found now.
   const covered = shown?.override !== undefined && takeBlocking(shown).every((id) => shown.override!.findings.includes(id));
   const reason = notChecked(verification);
@@ -806,6 +808,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
         {shown !== undefined && !held && shown.id !== accepted && !outOfDate && passed && <Button variant="primary" onClick={() => acceptComicTake(worldId, productionId, page.id, shown.id)}>Accept</Button>}
         <Button variant={shown !== undefined && !held && !outOfDate && ((passed && shown.id !== accepted) || (!lettered && reason.reader) || (lettered && unreviewed.reviewer)) ? "secondary" : "primary"} disabled={!usable || busy || !connected} onClick={make}
           title={quote && !quote.ok ? quote.reason : undefined}>{busy ? <Spin size={13} /> : <Sparkle size={13} />}{press}</Button>
+        {usable && !busy && <span className="fy-comic__price">{cost}</span>}
         {shown !== undefined && !held && !outOfDate && !passed && (shown.id !== accepted || !covered) && (
           <Button title="Keeps this take with what was found on the record" onClick={() => acceptComicTake(worldId, productionId, page.id, shown.id, { findings: takeBlocking(shown) })}>Accept anyway</Button>
         )}
@@ -820,8 +823,9 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
         <label className="fy-comic__check"><input type="checkbox" checked={until} onChange={(event) => setUntil(event.target.checked)} />Until it passes</label>
         <span className="grow" />
         <Button variant="ghost" size="sm" aria-expanded={brief} onClick={() => setBrief(!brief)}>Brief</Button>
-        <span className="m">{quote === null ? "…" : !quote.ok ? quote.reason : !usable ? `${quote.modelName} can't run · choose another` : `${quote.modelName} · ${quote.aspect}${quote.riding.length ? ` · ${quote.riding.join(", ")} ride` : ""}${quote.missing.length ? ` · no picture: ${quote.missing.join(", ")}` : ""} · ${priceLabel(quote.microUsd)}${until ? ` · up to ${cap} · ${priceLabel(total)}` : ""}`}</span>
+        <span className="m">{quote === null ? "…" : !quote.ok ? quote.reason : !usable ? `${quote.modelName} can't run · choose another` : `${quote.modelName} · ${quote.aspect}${quote.riding.length ? ` · ${quote.riding.join(", ")} ride` : ""}${until ? ` · up to ${cap} takes` : ""}`}</span>
       </div>
+      {usable && quote?.ok && quote.missing.length > 0 && <div className="fy-comic__verdict warn"><TriangleAlert size={15} /><span>No picture of {quote.missing.join(", ")}</span></div>}
       {brief && quote?.ok && <pre className="fy-comic__brief">{quote.brief}</pre>}
       {(said ?? problem) !== null && <div className="fy-comic__verdict bad"><CircleAlert size={15} /><span>{said ?? problem}</span></div>}
       {/* The findings follow the actions, so Accept never falls below the window (turn 251a). */}
