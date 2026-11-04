@@ -519,7 +519,7 @@ export function AudiobookScreen() {
     if (readingNow) {
       return (
         <span className="fy-abshow__run" data-testid="audiobook-run">
-          reading… {book.done} of {book.chapters} chapter{book.chapters === 1 ? "" : "s"}
+          reading… {book.done} of {book.chapters}
           <button type="button" className="fy-abshow__btn" onClick={() => stopAudiobookBook(worldId, prodId)}>
             Stop
           </button>
