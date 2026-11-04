@@ -717,10 +717,10 @@ describe("the model chip on a conversation page (turn 190e)", () => {
       await pickModel(OPUS); assert.equal(effortChip()?.textContent, "Effort", "the previous choice was spent");
       await chooseEffort("High"); await say("Use high again");
       const second = sent.findLast(message => message.kind === "world-chat-input");
-      assert.ok(second?.kind === "world-chat-input"); await chooseEffort("Max");
+      assert.ok(second?.kind === "world-chat-input"); await chooseEffort("Low");
       await act(async () => __applyEventForTest({ type: "world-chat.input-result", at: "2026-11-04T00:00:01Z",
         worldId: state.world!.meta.worldId, conversationId: CV, requestId: second.input.submissionId, admitted: true }));
-      assert.equal(effortChip()?.textContent, "Max");
+      assert.equal(effortChip()?.textContent, "Low");
     });
 
     /** Opus offers three efforts, none of them the harness's default. */
