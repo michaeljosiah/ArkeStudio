@@ -52,12 +52,12 @@ export function GlobalConversationEntry({ props, world }: { props: ProductionCon
   useLayoutEffect(() => {
     if (props.dock?.ask?.quiet === true && props.dock.ask.declined === true) owner.open(latest.current);
   }, [owner, props.dock?.ask?.declined, props.dock?.ask?.press]);
-  return <div className="fy-global-chat-slot"><ChatExpand owner={owner} surface={surface} /><ChatPageCanvas owner={owner} surface={surface} props={props} /><div ref={host} /></div>;
+  return <div className="fy-global-chat-slot">{props.dock && <ChatExpand owner={owner} surface={surface} />}<ChatPageCanvas owner={owner} surface={surface} props={props} /><div ref={host} /></div>;
 }
 
 function ChatExpand({ owner, surface }: { owner: GlobalChatController; surface: ChatSurface }) {
   const snapshot = useSyncExternalStore(owner.subscribe, owner.getSnapshot, owner.getSnapshot);
-  return snapshot.open && snapshot.selected?.key === surface.key ? null : <button type="button" className="fy-global-chat-expand" onClick={() => owner.open(surface)}>Open {surface.title}</button>;
+  return snapshot.selected?.key === surface.key ? null : <button type="button" className="fy-global-chat-expand" onClick={() => owner.open(surface)}>Open {surface.title}</button>;
 }
 
 function ChatPageCanvas({ owner, surface, props }: { owner: GlobalChatController; surface: ChatSurface; props: ProductionConversationProps }) {
@@ -88,6 +88,12 @@ export function GlobalWorldChatEntry({ worldId, conversationId }: { worldId: str
     const page = latest.current;
     if (page && owner.getSnapshot().selected?.key !== page.key) owner.select(page);
   }, [owner, conversationId, surface?.key]);
+  // The side panel would take a world conversation off its own page and leave the page blank (issue 2488).
+  // Only once it is this page's conversation: a selection held for dictation still needs that panel.
+  const held = useSyncExternalStore(owner.subscribe, owner.getSnapshot, owner.getSnapshot);
+  useLayoutEffect(() => {
+    if (latest.current?.kind === "world" && held.open && held.selected?.key === latest.current.key) owner.close();
+  }, [owner, held.open, held.selected?.key, surface?.key]);
   useLayoutEffect(() => { if (host.current && latest.current) owner.refresh(latest.current, host.current); });
   const rows = [...(state?.world?.conversations ?? [])].sort(byPendingConsequence), menuRow = rows.find(row => row.id === menu?.id);
   return <div className="fy-global-chat-slot fy-global-chat-slot--world">
