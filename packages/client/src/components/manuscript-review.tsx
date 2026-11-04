@@ -21,9 +21,9 @@ export function ManuscriptReviewReport({ review, disabled = false, onDecision, o
   const done = review.synthesis !== undefined, failed = review.tasks.filter(task => task.state === "failed");
   const stages = <details><summary>Stages, models and failures</summary>{review.tasks.map(task => <p key={task.id}><strong>{task.id} · {task.state}</strong><br />{task.model ?? "Model not recorded"} · {task.provider ?? "Provider not separately reported by harness"}<br />{task.sessionId}<br />{task.disclosure ?? "Configured writing harness; manuscript text may be sent to its provider."}<br />{task.error}</p>)}</details>;
   return <article className="fy-manuscript-review">
-    {done && <nav aria-label="Report sections">{sections.map((name, i) => <Button key={name} onClick={() => document.getElementById(section(i))?.scrollIntoView({ block: "start" })}>{name}</Button>)}</nav>}
+    {done && <nav aria-label="Report sections">{sections.map((name, i) => <Button key={name} variant="ghost" size="sm" onClick={() => document.getElementById(section(i))?.scrollIntoView({ block: "start" })}>{name}</Button>)}</nav>}
     <section id={section(0)}><h2>At a glance</h2><h3>{review.title}</h3>
-      <p role="status"><strong>{review.status}</strong> · {coverage.chapters}/{coverage.totalChapters} chapters fully supplied · {coverage.stages}/{coverage.totalStages} reading stages complete · {coverage.words.toLocaleString()} words</p>
+      <p role="status">{review.status === "complete" ? "" : <><strong>{review.status}</strong> · </>}Read {coverage.chapters} of {coverage.totalChapters} chapters · {coverage.words.toLocaleString()} words</p>
       {failed.length > 0 && <p role="alert">{failed.length} of {review.tasks.length} stages failed. {failed[0]!.error}</p>}
       {review.status !== "complete" && failed.length === 0 && <p>No complete manuscript review is claimed. Completed readings remain available below.</p>}
       {review.stale && <div role="alert"><strong>Sources changed since review.</strong><Text>{review.staleReasons.join("\n")}</Text></div>}
@@ -116,8 +116,12 @@ export function ManuscriptReviewControl({ worldId, productionId, chapters, words
     <EditorDialog open={open} title="Manuscript review" onClose={() => setOpen(false)} width={1050}>
       <div className="fy-manuscript-review">
         <p>{chapters} {chapters === 1 ? "chapter" : "chapters"} · {words.toLocaleString()} words · read by {reviewer}. Your text goes to that model, and cloud models may charge.</p>
+        {/* The report comes first once there is one: the form folds until it is wanted (issue 2463). */}
+        <details open={!review}><summary>{review ? "New review" : "Your brief"}</summary>
         <label>Author brief <span>(optional)</span><textarea rows={4} maxLength={6000} value={brief} disabled={busy} onChange={e => { briefEdited.current = true; setBrief(e.target.value); }} placeholder="Genre, audience/intensity, editorial concerns, protected passages and deliberate ambiguity" /></label>
-        <div className="fy-manuscript-review__actions"><Button disabled={busy || offline || !chapters} onClick={() => { const id = ulid(); selected.current = id; setStarting(true); send({ kind: "manuscript-review-start", worldId, productionId, requestId: id, brief }); }}>{review ? "Start a new review" : "Start review"}</Button>
+        <div className="fy-manuscript-review__actions"><Button disabled={busy || offline || !chapters} onClick={() => { const id = ulid(); selected.current = id; setStarting(true); send({ kind: "manuscript-review-start", worldId, productionId, requestId: id, brief }); }}>{review ? "Start a new review" : "Start review"}</Button></div>
+        </details>
+        <div className="fy-manuscript-review__actions">
           {review?.status === "running" && <Button disabled={offline} onClick={() => send({ kind: "manuscript-review-cancel", worldId, productionId, requestId: ulid() })}>Stop review</Button>}
           {canContinue && <Button disabled={offline} onClick={() => { selected.current = review.id; setStarting(true); send({ kind: "manuscript-review-resume", worldId, productionId, requestId: ulid(), reviewId: review.id }); }}>Try again</Button>}
           {review?.synthesis && <Button disabled={busy || offline || exporting} onClick={() => { const id = ulid(); exportRequest.current = id; setExporting(true); send({ kind: "manuscript-review-export", worldId, productionId, requestId: id, reviewId: review.id }); }}>{exporting ? "Preparing PDF…" : "Export PDF"}</Button>}

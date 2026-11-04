@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CHAPTER_REVIEW_CHECKS, type ChapterReview, type ChapterReviewCheck, type ChapterReviewPreflight } from "@arke-studio/contracts";
+import { CHAPTER_REVIEW_CHECKS, harnessModelReference, type ChapterReview, type ChapterReviewCheck, type ChapterReviewPreflight } from "@arke-studio/contracts";
 import { EditorDialog } from "./editor-dialog.js";
 import { ChapterTellsReport } from "./chapter-tells.js";
 import { Button } from "./ui.js";
@@ -85,7 +85,7 @@ export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
 export function ChapterReviewControl({ worldId, productionId, chapterId, slug, held }: {
   worldId: string; productionId: string; chapterId: string; slug: string; held: boolean;
 }) {
-  const { connection } = useStore();
+  const { connection, state } = useStore();
   const [open, setOpen] = useState(false), [review, setReview] = useState<ChapterReview | null>(null);
   const [error, setError] = useState<string | null>(null), [starting, setStarting] = useState(false);
   const [checks, setChecks] = useState<ChapterReviewCheck[]>([...CHAPTER_REVIEW_CHECKS]);
@@ -137,7 +137,7 @@ export function ChapterReviewControl({ worldId, productionId, chapterId, slug, h
         <div aria-live="polite"><strong>Models and coverage</strong>
           {preflight ? <>
             {preflight.models.map(route => <p key={route.specialist}>{checkLabels[route.specialist]} · {route.reason ? "Unavailable" : "Ready"}<br />
-              <span>{route.model ?? "No model selected"} · {route.source === "specialist" ? "specialist choice" : route.source === "production" ? "production model" : "inherited default"}</span>
+              <span>{state?.app.harnessModels.find(model => harnessModelReference(model) === route.model)?.displayName ?? route.model ?? "No model selected"}</span>
               {route.reason && <><br /><span role="alert">{route.reason}</span></>}
             </p>)}
             {checks.includes("visual") && <p>{preflight.readablePictures}/{preflight.pictures} selected pictures readable.{preflight.pictures === 0 && " No pictures will be inspected."}</p>}
