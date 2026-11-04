@@ -1,10 +1,20 @@
 import PDFDocument from "pdfkit";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { manuscriptReviewCoverage, type ManuscriptReview } from "@arke-studio/contracts";
 
+/**
+ * The build copies the fonts beside the bundle, so `../publications/fonts` is only right from
+ * source: packaged, every export said "That file no longer exists" while tests passed (issue 2528).
+ */
+export function manuscriptReviewFont(from: string = import.meta.url): string {
+  const beside = new URL("./fonts/DejaVuSans.ttf", from);
+  return fileURLToPath(existsSync(beside) ? beside : new URL("../publications/fonts/DejaVuSans.ttf", from));
+}
+
 /** Private export of the selected retained report; never reads or changes authored files. */
 export async function manuscriptReviewPdf(review: ManuscriptReview): Promise<Buffer> {
-  const pdf = new PDFDocument({ font: fileURLToPath(new URL("../publications/fonts/DejaVuSans.ttf", import.meta.url)), size: "A4", margins: { top: 50, bottom: 55, left: 50, right: 50 }, bufferPages: true,
+  const pdf = new PDFDocument({ font: manuscriptReviewFont(), size: "A4", margins: { top: 50, bottom: 55, left: 50, right: 50 }, bufferPages: true,
     info: { Title: `${review.title} — Manuscript review`, Author: "Arke Studio", Subject: "Private editorial report" } });
   const chunks: Buffer[] = [];
   const finished = new Promise<Buffer>((resolve, reject) => { pdf.on("data", chunk => chunks.push(chunk)); pdf.on("end", () => resolve(Buffer.concat(chunks))); pdf.on("error", reject); });

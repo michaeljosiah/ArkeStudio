@@ -643,7 +643,7 @@ export function OllamaDetail({ components }: { components: readonly SetupCompone
       />
       <RuntimeSection label="ENGINE">
         <span className="fy-rt__path">{managed ? "Arke-managed" : "Your service"}{runtime?.version ? ` · v${runtime.version}` : ""}{runtime?.url ? ` · ${runtime.url}` : ""}</span>
-        {!managed && <ActionButton icon={<RotateCcw size={13} />} onClick={useManagedOllama}>Use Arke-managed</ActionButton>}
+        {!managed && <ActionButton icon={<RotateCcw size={13} />} hint="The Studio assistant only runs on Arke's own Ollama" onClick={useManagedOllama}>Use Arke-managed</ActionButton>}
       </RuntimeSection>
       {runtime?.detail && (
         <div className="fy-set__why">

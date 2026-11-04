@@ -11,6 +11,7 @@ import { useMediaQuery } from "../lib/media-query.js";
 import { relativeDate } from "../lib/format.js";
 import { useReadReplies } from "../components/read-replies.js";
 import { Composer } from "../components/composer.js";
+import { useConversationInputs } from "../components/conversation-inputs.js";
 import { ModelChip } from "../components/model-chip.js";
 import { FoundingProgressCard } from "../components/genesis-readiness.js";
 import { attachmentChipLabel, ConversationTranscript } from "../components/conversation.js";
@@ -766,6 +767,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
     : wrapUpRefusal && !wrappingUp ? "Review needed"
     : mediaRefusal ? "Media could not open" : null;
   const running = loaded?.runStatus === "running";
+  const inputs = useConversationInputs(worldId, loaded, setDraft);
   const failure = loaded?.lastFailure;
   const starting = opening !== null;
   /**
@@ -996,13 +998,16 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
               <span><b>{points.length > 0 ? <>What I’ve understood <span>· {carried} of {points.length} ready</span></> : notesFeedback}</b><span>{(notesFeedback && (points.length > 0 ? notesFeedback : "View details"))
                 ?? [...groups.map(group => group.subject), ...(openThreads.length ? [`${openThreads.length} still open`] : [])].join(" · ")}</span></span><ChevronUp size={18} />
             </button>}
+            {inputs.panel}
             <Composer
               value={draft}
               focusRequest={composerFocusRequest}
               onChange={setDraft}
               onSubmit={() => {
                 const text = draft.trim();
-                if (!text || !worldId || running || wrappingUp || starting) return;
+                if (!text || !worldId || wrappingUp || starting) return;
+                if (inputs.queueing) { inputs.sendNext({ text, attachmentIds: chips.map(c => c.id) }, draft); return; }
+                if (running) return;
                 if (!conversationId) {
                   hold({ kind: "say", text });
                   return;
@@ -1012,6 +1017,8 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
               }}
               placeholder={conversationId ? "Keep going…" : "Say something about this world…"}
               busy={running || starting}
+              sendNext={inputs.queueing && !starting && !wrappingUp}
+              queuePaused={inputs.paused}
               busyLabel={starting ? "Starting…" : "Thinking…"}
               attachments={chips}
               refusals={[...refusals, ...deferredTrouble]}

@@ -84,7 +84,7 @@ it("shows a healthy Ollama runtime as ready even when no language model is insta
   __setStateForTest(state);
   const html = providers("/settings/providers?provider=ollama");
   const column = html.slice(0, html.indexOf('data-testid="provider-pane"'));
-  assert.match(column, /Ollama<\/span><span class="fy-src__note">ready/);
+  assert.match(column, /Ollama<\/span><span class="fy-src__note fy-src__note--ok">ready/);
   assert.doesNotMatch(column, /Ollama<\/span><span class="fy-src__note">not answering/);
 });
 const models = (path = "/settings/models?half=cloud&kind=image") => at(path);
@@ -251,9 +251,18 @@ describe("Providers holds the credential (SPEC-042 R-3, R-9, R-18)", () => {
     __setStateForTest(state);
     const html = providers("/settings/providers?provider=voxa");
     const column = html.slice(0, html.indexOf('data-testid="provider-pane"'));
-    assert.match(column, /Voxa<\/span><span class="fy-src__note">running/);
+    assert.match(column, /Voxa<\/span><span class="fy-src__note fy-src__note--ok">running/);
     assert.match(column, /ComfyUI<\/span><span class="fy-src__note">not started/, "an engine nothing has launched says so, on the standalone host too");
-    assert.match(column, /Ollama<\/span><span class="fy-src__note">(untested|not answering|answering)/);
+    assert.match(column, /Ollama<\/span><span class="fy-src__note(?: fy-src__note--ok)?">(untested|not answering|answering)/);
+  });
+
+  it("an account out of credit says so, never that the key was rejected (issue 2418)", () => {
+    const state = stateWith({});
+    state.app.providers = [{ id: "openai", configured: true, credentialFingerprint: "1C7D9A20", validation: "invalid", probes: [], fault: "openai: image generation failed (HTTP 429): You have no credits remaining. Add credits to continue" }];
+    __setStateForTest(state);
+    const pane = plain(providers("/settings/providers?provider=openai"));
+    assert.match(pane, /out of credit/i);
+    assert.doesNotMatch(pane, /key rejected|the credential was/i);
   });
 
   it("a key the store could not hold is not saved, never rejected (issue 1191)", () => {

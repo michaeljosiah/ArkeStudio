@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { DEFAULT_STORY_PDF_SETTINGS, StoryPublicationSettingsSchema, worldImageReferences, type ProductionBundle, type StoryEdition, type StoryPublicationReview, type StoryPublicationSettings, type StoryStyleFinding, type StoryPublishAction } from "@arke-studio/contracts";
 import { listStoryPublications, publishStory, subscribeStoryPublications, useStore, useWorld } from "../lib/store.js";
-import { storyEditionMediaUrl, storyPreviewMediaUrl } from "../lib/media.js";
+import { mediaUrl, storyEditionMediaUrl, storyPreviewMediaUrl } from "../lib/media.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { PageSheet } from "./page-sheet.js";
 import { Button } from "./ui.js";
@@ -11,6 +11,14 @@ import { waitForChapterSaves } from "../lib/chapter-drafts.js";
 import { Loading } from "./loading.js";
 
 const steps = ["Edition", "Chapters", "Formatting & style", "Preview", "Files"] as const;
+const LANGUAGES = ["en", "en-GB", "en-US", "fr", "fr-CA", "es", "es-MX", "pt", "pt-BR", "de", "it", "nl", "sv", "no", "da", "fi", "pl", "cs", "ro", "hu", "el", "ru", "uk", "tr", "ar", "he", "fa", "ur", "hi", "bn", "ta", "zh", "zh-Hant", "ja", "ko", "vi", "th", "id", "ms", "tl", "sw", "am", "zu", "yo", "ig", "ha"];
+function languageName(code: string): string {
+  try { return new Intl.DisplayNames(["en"], { type: "language" }).of(code) ?? code; } catch { return code; }
+}
+/** A very small book is still more than nothing: 0.0 MB read as an empty file. */
+function fileSize(bytes: number): string {
+  return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
 type Step = typeof steps[number];
 /** Turn 224e: the saved edition is the preparation's identity, even after reopening. */
 function StoryEditionPreparation({ edition, onClose }: { edition: StoryEdition; onClose: () => void }) {
@@ -46,7 +54,7 @@ function StoryReadyEdition({ edition }: { edition: StoryEdition }) {
     <div className="fy-publish-preparation__details">
       <div className="fy-publish-preparation__summary"><h4>{settings.title}</h4>
         <p className="fy-publish-muted">{[settings.author, settings.label].filter(Boolean).join(" · ") || "Private edition"}</p>
-        <p className="fy-publish-muted">{settings.chapterIds.length} {settings.chapterIds.length === 1 ? "chapter" : "chapters"} · {settings.language}</p>
+        <p className="fy-publish-muted">{settings.chapterIds.length} {settings.chapterIds.length === 1 ? "chapter" : "chapters"} · {languageName(settings.language)}</p>
       </div>
       <StoryEditionFiles edition={edition} />
     </div>
@@ -61,7 +69,7 @@ export function StoryEditionFiles({ edition }: { edition: StoryEdition }) {
     {saved && <p role="status">{saved}</p>}
     {edition.error && <p role="alert">{edition.error}</p>}
     {edition.files.map(file => <article className="fy-publish-card" key={file.format}>
-      <div><strong>{file.format === "pdf" ? "Book · PDF" : file.format === "epub" ? "Book · EPUB" : "Audiobook · M4B"}</strong><p>{(file.bytes / 1024 / 1024).toFixed(1)} MB · {edition.settings.chapterIds.length} chapters{file.pdf ? ` · ${file.pdf.pageCount} pages` : ""}</p>{file.format === "epub" && edition.settings.includeIllustrations && <p>{edition.settings.epubImageSize === "reading" ? "Reading size · up to 2048 px" : "Original images"}</p>}</div>
+      <div><strong>{file.format === "pdf" ? "Book · PDF" : file.format === "epub" ? "Book · EPUB" : "Audiobook · M4B"}</strong><p>{fileSize(file.bytes)} · {edition.settings.chapterIds.length} chapters{file.pdf ? ` · ${file.pdf.pageCount} pages` : ""}</p>{file.format === "epub" && edition.settings.includeIllustrations && <p>{edition.settings.epubImageSize === "reading" ? "Reading size · up to 2048 px" : "Original images"}</p>}</div>
       {edition.status === "ready" && <a className="fy-publish-link" href={storyEditionMediaUrl(edition.id, file.name)} download={edition.settings.title + "." + file.format} onClick={async event => {
         const host = window.arke?.saveStoryPublication;
         if (!host) return;
@@ -231,10 +239,14 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
           <label>Title<input value={settings.title} onChange={event => update({ title: event.target.value })} /></label>
           {settings.outputs.includes("pdf") && <label>Subtitle · optional<input value={settings.subtitle ?? ""} onChange={event => update({ subtitle: event.target.value })} /></label>}
           <label>Author or pen name<input value={settings.author} onChange={event => update({ author: event.target.value })} /></label>
-          <label>Language<input value={settings.language} onChange={event => update({ language: event.target.value })} placeholder="en" /></label>
+          <label>Language<select value={settings.language} onChange={event => update({ language: event.target.value })}>{[...new Set([settings.language, ...LANGUAGES])].sort((a, b) => languageName(a).localeCompare(languageName(b))).map(code => <option key={code} value={code}>{languageName(code)}</option>)}</select></label>
           <label>Edition label<input value={settings.label} onChange={event => update({ label: event.target.value })} /></label>
           {settings.outputs.includes("pdf") && <label>Title-page edition label · optional<input value={settings.editionLabel ?? ""} onChange={event => update({ editionLabel: event.target.value })} /></label>}
-          <label>Cover<select value={settings.cover ?? ""} onChange={event => update({ cover: event.target.value || null })}><option value="">No cover</option>{world && worldImageReferences(world).filter(ref => /\.(png|jpe?g)$/i.test(ref.file)).map(ref => <option key={ref.file} value={ref.file}>{ref.name}</option>)}</select></label>
+          <div className="fy-publish-cover"><span>Cover</span><div role="radiogroup" aria-label="Cover" className="fy-publish-covers">
+            <button type="button" role="radio" aria-checked={settings.cover === null} onClick={() => update({ cover: null })}>None</button>
+            {/* Pictures rather than names: a generated file's name is a job id. A boundary frame is a video's working part, not a cover. */}
+            {world && worldImageReferences(world).filter(ref => /\.(png|jpe?g)$/i.test(ref.file) && !ref.name.endsWith("Boundary frame")).map(ref => <button key={ref.file} type="button" role="radio" aria-checked={settings.cover === ref.file} aria-label={ref.name} title={ref.name} onClick={() => update({ cover: ref.file })}><img src={mediaUrl(world.meta.slug, ref.file)} alt="" loading="lazy" /></button>)}
+          </div></div>
           <label>Description<textarea value={settings.description} onChange={event => update({ description: event.target.value })} /></label>
         </div>
         <fieldset><legend>Create files for</legend>{(["epub", "pdf", "m4b"] as const).map(format => <label className="fy-publish-choice" key={format}><input type="checkbox" checked={settings.outputs.includes(format)} onChange={event => update({ outputs: event.target.checked ? [...settings.outputs, format] : settings.outputs.filter(value => value !== format), ...(format === "epub" && !event.target.checked ? { includeIllustrations: false, epubImageSize: undefined } : {}), ...(format === "pdf" && event.target.checked ? { pdf: settings.pdf ?? { ...DEFAULT_STORY_PDF_SETTINGS } } : {}) })} /><span><strong>{format === "pdf" ? "PDF — fixed pages" : format === "epub" ? "Read · EPUB" : "Listen · M4B"}</strong><small>{format === "pdf" ? "A formatted book with selectable text and chapter navigation" : format === "epub" ? "Send to Kindle or use another book reader" : "Arke’s chosen narration and character voices, as produced"}</small></span></label>)}</fieldset>
@@ -267,7 +279,7 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
       {preparing && <StoryEditionPreparation edition={edition} onClose={onClose} />}
       {(step === "Preview" || step === "Files") && edition && !preparing && <>
         {edition.status === "ready" ? <><StoryReadyEdition edition={edition} />{edition.files.some(file => file.format === "pdf") && <StoryPdfPreview edition={edition} />}</> : <>
-          <p>{edition.settings.title} · {edition.settings.author || "No author set"} · {edition.settings.language}</p>
+          <p>{edition.settings.title} · {edition.settings.author || "No author set"} · {languageName(edition.settings.language)}</p>
           {edition.status === "preview" && <p>Review the captured files below. These exact files become the edition when you choose Create edition.</p>}
           {edition.files.some(file => file.format === "epub") && <StoryBookPreview edition={edition} />}
           {edition.files.some(file => file.format === "pdf") && <StoryPdfPreview edition={edition} />}

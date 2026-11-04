@@ -1292,6 +1292,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     grouping,
     readSheet,
     keepSplit,
+    keepSplitDisabled: locked || connection !== "open",
     reReadPrice,
     brackets,
     filter,
@@ -1578,7 +1579,7 @@ function SpeakerMenu({ row, choices, onPick, onClose }: {
   );
 }
 
-export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, onSelect, onPlayOne, slug, filter = null, choices, onPin, marker = null, onMarker, modelOf, onDirect, brackets = [], onReRead, reReadPrice, pictures, seams, madeAgain, pictureKey = null, onPicture, onMove }: {
+export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, onSelect, onPlayOne, slug, filter = null, choices, onPin, marker = null, onMarker, modelOf, onDirect, brackets = [], onReRead, onKeepSplit, keepSplitDisabled = false, reReadPrice, pictures, seams, madeAgain, pictureKey = null, onPicture, onMove }: {
   /**
    * The picture the block's panel shows (design turn 237c): a mark's key, drawn pressed, or one
    * `+ Picture` placed that has no picture yet, drawn dashed until it has.
@@ -1603,6 +1604,8 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
   brackets?: ReadonlyArray<{ keys: readonly string[]; label: string; now: boolean }>;
   /** A flagged split read again with its neighbours, one request (design turn 185c). */
   onReRead?: (key: string) => void;
+  onKeepSplit?: (key: string) => void;
+  keepSplitDisabled?: boolean;
   sounding: BlockRow | null;
   selected: string | null;
   onSelect: (key: string) => void;
@@ -2046,6 +2049,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
           {split !== null && (
             <div className="fy-ab__split" data-testid="audiobook-split">
               <span className="fy-ab__split-heard fy-mono">split did not match · “{split.heard}”</span>
+              {onKeepSplit !== undefined && <Button variant="ghost" data-testid="audiobook-keep-split-inline" disabled={keepSplitDisabled} onClick={(event) => { event.stopPropagation(); onKeepSplit(row.block.key); }}>Keep</Button>}
               {onReRead !== undefined && (
                 <Button variant="ghost" onClick={(event) => { event.stopPropagation(); onReRead(row.block.key); }}>
                   Re-read · 1 request{(reReadPrice?.(row.block.key) ?? null) !== null ? ` · ${reReadPrice!(row.block.key)}` : ""}

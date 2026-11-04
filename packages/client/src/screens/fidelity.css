@@ -1186,6 +1186,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-overview-sheet > span:first-child { display: block; width: 320px; height: 168px; overflow: hidden; }
 .fy-overview-sheet strong { display: inline-block; margin: 9px 0 0 12px; font: 600 12px var(--font-sans); }
 .fy-overview-sheet small { float: right; margin: 11px 12px 0 0; font: 400 9px var(--font-mono); color: var(--success); }
+.fy-overview-sheet small.fy-overview-sheet__missing { color: var(--muted-foreground); }
 
 /* ---- page-corner action -------------------------------------------------- */
 .fy-corner {
@@ -1262,6 +1263,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   flex-direction: column;
   gap: 4px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 /* 82a: the rail folds to marks so the Cut can open the world's artifacts beside it. Every
    destination stays; only the words are spent, and each keeps its name on a tooltip. */
@@ -1550,6 +1552,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   flex-direction: column;
   gap: 22px;
 }
+.fy-prodmain[data-screen="production-dashboard"] { overflow-x: hidden; }
 /* The surfaces that use the whole width: boards, the takes workspace, the stills sheet. */
 .fy-prodmain--wide { padding-inline: 44px; }
 
@@ -1594,9 +1597,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-nextcard__title { display: flex; align-items: center; gap: 8px; font: 600 13.5px var(--font-sans); }
 .fy-nextcard__sub { font: 400 11.5px/1.5 var(--font-sans); color: var(--muted-foreground); margin-top: 3px; }
 
-.fy-cliprow { display: flex; gap: 14px; }
-.fy-clip { flex: 1; min-width: 0; }
-.fy-clip__frame { width: 100%; height: 96px; }
+.fy-cliprow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.fy-clip { min-width: 0; }
+.fy-clip__frame { width: 100%; aspect-ratio: 16 / 9; }
 .fy-clip__meta { display: flex; align-items: center; gap: 6px; margin-top: 6px; font: 400 11px var(--font-sans); }
 .fy-clip__meta .fy-mono { margin-left: auto; }
 .fy-listhead { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; font: 600 13px var(--font-sans); }
@@ -4671,6 +4674,10 @@ select.fy-set__pill { padding-right: 26px; }
      columns that each scroll are exactly what the fill is for. */
   .fy-content--fill > .fy-chat__wrap > .fy-gate { min-height: calc(100vh - 132px); }
   .fy-chat__wrap .fy-gate { flex-direction: column; }
+  /* The side keeps its width and the conversation has no minimum, so a phone got no conversation (issue 2487). */
+  [data-screen="new-world"] > .fy-gate { flex-direction: column; min-height: 0; overflow-y: auto; }
+  [data-screen="new-world"] > .fy-gate > .fy-gate__main { flex: none; min-height: 70vh; border-right: none; border-bottom: 1px solid var(--border); }
+  [data-screen="new-world"] > .fy-gate > .fy-gate__side { flex: none; width: auto; }
   .fy-chat__wrap .fy-gate__main { border-right: none; border-bottom: 1px solid var(--border); }
   .fy-chat__wrap .fy-gate__side { width: auto; }
   /* There is no column to give the history here, so it becomes a strip across the top — and its
@@ -6790,8 +6797,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ab__request--now::before { background: var(--foreground); }
 /* Inside a request its bracket is the one bar; the blocks' own would stand beside it. */
 .fy-ab__request .fy-ab__block:not(.fy-ab__block--selected)::before { content: none; }
-.fy-ab__split { display: flex; align-items: center; gap: 10px; margin: 0 0 8px 146px; font-size: 12px; }
-.fy-ab__split-heard { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); }
+.fy-ab__split { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 8px 146px; font-size: 12px; }
+.fy-ab__split-heard { flex: 1 0 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); }
 .fy-ab__splitpanel { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .fy-ab__readsheet .fy-ab__read b, .fy-ab__splitpanel .fy-ab__read b { width: 84px; }
 .fy-ab__readsheet .fy-ab__directsheet-foot, .fy-ab__splitpanel .fy-ab__control { flex-wrap: wrap; justify-content: flex-end; }
@@ -8392,6 +8399,7 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-src.is-current { background: var(--secondary); color: var(--foreground); font-weight: 500; }
 .fy-src__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-src__note { font: 400 12px var(--font-sans); color: var(--warning); white-space: nowrap; }
+.fy-src__note--ok { color: var(--success); }
 
 /*
  * A provider's mark (R-20), on one light plate in both themes. Half of the marks are a black glyph
@@ -9020,3 +9028,5 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-production-plan details { margin: 12px 0; }
 .fy-production-plan summary { cursor: pointer; }
 .fy-production-plan__note { font-size: .85em; opacity: .7; }
+/* A shipped picture standing in for one not made yet (issue 2461). */
+.fy-portrait--plate { display: block; width: 100%; height: 100%; object-fit: cover; filter: saturate(.85) brightness(.92); }

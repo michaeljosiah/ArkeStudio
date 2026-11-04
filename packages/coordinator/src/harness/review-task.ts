@@ -37,6 +37,9 @@ export function makeReviewTaskRunner(deps: ImageJsonDeps): ReviewTaskRunner {
  * the chapter review's specialists and a comic page's lettering reader (SPEC-064 R-29) share it, so
  * both carry the same consent, byte budget, receipt and single resend.
  */
+/** The model may have finished and charged with no answer reaching us: never a reason to send it again. */
+export class ReviewOutcomeUnknownError extends Error {}
+
 export function makeImageJsonRunner(deps: ImageJsonDeps): ImageJsonRunner {
   return async ({ agent, skillFamily, prompt, images, completedResponse }, signal, receipt) => {
     signal.throwIfAborted();
@@ -97,7 +100,7 @@ export function makeImageJsonRunner(deps: ImageJsonDeps): ImageJsonRunner {
             if (event.type === "message.completed") return event.text ?? "";
             if (event.type === "session.error") throw new Error(event.message);
           }
-          throw new Error("The review session ended without a completed answer.");
+          throw new ReviewOutcomeUnknownError("The review session ended without a completed answer.");
         })();
         void completed.catch(() => {});
         let stop!: () => void;
@@ -107,7 +110,7 @@ export function makeImageJsonRunner(deps: ImageJsonDeps): ImageJsonRunner {
           if (signal.aborted) stop();
         });
         const timeout = new Promise<never>((_, reject) => {
-          timer = setTimeout(() => { interrupt(); reject(new Error("Review task timed out. It was not retried.")); }, sessionTurnTimeoutMs(session.model, 180_000));
+          timer = setTimeout(() => { interrupt(); reject(new ReviewOutcomeUnknownError("Review task timed out. It was not retried.")); }, sessionTurnTimeoutMs(session.model, 180_000));
         });
         try {
           const text = await Promise.race([(async () => {

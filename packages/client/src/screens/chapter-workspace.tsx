@@ -3640,6 +3640,8 @@ export function ChapterWorkspace({
                 <AudiobookBlocks
                   brackets={audiobook.brackets}
                   onReRead={audiobook.makeAgain}
+                  onKeepSplit={audiobook.keepSplit}
+                  keepSplitDisabled={audiobook.keepSplitDisabled}
                   reReadPrice={audiobook.reReadPrice}
                   {...(pinChoices !== null ? { choices: pinChoices, onPin: pinBlock } : {})}
                   filter={audiobook.filter}

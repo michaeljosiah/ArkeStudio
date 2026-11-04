@@ -164,8 +164,8 @@ it("captures attached pictures in manuscript order with exact prose, alt text an
 it("refuses missing and changed bindings only when illustrations are explicitly selected", async () => {
   const h = await setup();
   await updateAudiobook(h.store, h.productionId, h.plan.chapter, record => ({ ...record, pictures: { ...record.pictures, "p0.0": { ...record.pictures!["p0.0"]!, textHash: "text-v1:old" } } }));
-  // Changed words leave the picture unplaced before the review reaches its own text check (#2393).
-  assert.ok((await h.service.review(h.store, h.productionId, h.settings)).blockers.some(row => row.includes("no longer has a manuscript position")));
+  // Placement finds a block's picture by its words, so changed words lose it before the text check runs.
+  assert.ok((await h.service.review(h.store, h.productionId, h.settings)).blockers.some(row => row.includes("p0.0") && row.includes("no longer has a manuscript position")));
   await rename(join(h.dir, "world-art.png"), join(h.dir, "gone.png"));
   const missing = await h.service.review(h.store, h.productionId, h.settings);
   assert.ok(missing.blockers.some(row => row.includes("picture title")));

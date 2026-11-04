@@ -24,6 +24,7 @@ import { PageSheet } from "../components/page-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { EmptyState } from "../components/layout.js";
 import { Loading } from "../components/loading.js";
+import { productionPlate } from "../lib/production-plate.js";
 import { Badge } from "../components/ui.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-card.js";
 import { ReadAloud } from "../components/read-aloud.js";
@@ -271,7 +272,6 @@ export function DevelopmentWorkspace() {
           {episodes.length} episode{episodes.length === 1 ? "" : "s"}
         </span>
       </div>
-      <ProductionSpend production={production} />
       {/* The season record itself, in the header rather than behind a tab of its own (turn 91).
           Inheritance is shown, not hidden (turn 48): the Series engine is read-only here, and
           editing it is the Series' own accept, never a side effect of a season edit. */}
@@ -300,23 +300,19 @@ export function DevelopmentWorkspace() {
             text={season?.ending ?? ""}
           />
         </div>
-        <div className="fy-texthost">
-          <div className="fy-mono">Series engine · read-only</div>
+        {series?.engine && <div className="fy-texthost">
+          <div className="fy-mono">Series engine</div>
           <div
             style={{ font: "400 12.5px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}
           >
-            {series
-              ? (series.engine ?? `${series.title} has no engine written yet.`)
-              : "This production belongs to no Series."}
+            {series.engine}
           </div>
-          {series && (
-            <ReadAloud
-              source={{ of: "series", seriesId: series.id }}
-              title={`${series.title} · engine`}
-              text={series.engine ?? ""}
-            />
-          )}
-        </div>
+          <ReadAloud
+            source={{ of: "series", seriesId: series.id }}
+            title={`${series.title} · engine`}
+            text={series.engine}
+          />
+        </div>}
       </div>
       {/*
         This screen is the production's front page (turn 93), so it is also its day one — and the
@@ -325,6 +321,7 @@ export function DevelopmentWorkspace() {
         says what is missing; the panel is what to do about it.
       */}
       <EpisodesBoard />
+      <ProductionSpend production={production} />
       {compact && <button type="button" className="fy-production-setup-row" aria-haspopup="dialog" aria-expanded={modelsOpen} onClick={() => setModelsOpen(true)}>Models</button>}
       {worldId !== undefined && prodId !== undefined && (compact ? (
         <PageSheet open={modelsOpen} title="Production models" className="fy-production-settings-sheet" onClose={() => setModelsOpen(false)}>
@@ -463,7 +460,7 @@ function EpisodesBoard() {
             number={episode.order}
             title={episode.title}
             state="written"
-            frame={episodeFrame(production!, artifacts, slug, episode)}
+            frame={episodeFrame(production!, artifacts, slug, episode) ?? (production ? productionPlate(production.meta) : null)}
             {...(episode.promise?.opens ? { hook: episode.promise.opens } : {})}
             {...(episode.promise?.closes ? { cliff: episode.promise.closes } : {})}
             scenes={episode.scenes.length}
@@ -511,9 +508,8 @@ function FindingsPanel({ findings }: { findings: SeasonFinding[] }) {
       ) : (
         findings.map((finding, i) => (
           <div key={`${finding.kind}-${finding.about}-${i}`} className="fy-listrow">
-            <Badge tone="outline">{finding.kind}</Badge>
+            <Badge tone="outline">{finding.kind.replaceAll("-", " ")}</Badge>
             <span className="fy-listrow__text">{finding.message}</span>
-            <span className="fy-mono">{finding.about}</span>
           </div>
         ))
       )}

@@ -353,14 +353,16 @@ export function WorldPickerScreen() {
             <p className="fy-hero__lede" style={{ margin: worlds.length ? "10px 0 0" : 0, maxWidth: 540 }}>
               {lede}
             </p>
-            <Button variant="ghost" className={cx("fy-home-pub", worlds.length === 0 && "fy-home-action")} onClick={() => navigate("/publications")}>
+          </div>
+          <div className="fy-home-import">
+            <Button variant="ghost" className="fy-home-pub fy-home-action" onClick={() => navigate("/publications")}>
               <Book size={18} />
               Open publication
             </Button>
-          </div>
-            {!isRemoteSession() && <div className="fy-home-import"><Button variant="ghost" className="fy-home-action" disabled={importing} onClick={() => {
+            {!isRemoteSession() && <Button variant="ghost" className="fy-home-action" disabled={importing} onClick={() => {
               setImportNote(null); importRequest.current = importWorld(); setImporting(importRequest.current !== null);
-            }}><Upload size={18} />{importing ? "Importing world…" : "Import a world"}</Button></div>}
+            }}><Upload size={18} />{importing ? "Importing world…" : "Import a world"}</Button>}
+          </div>
           {archiveNote && (
             <div className="fy-set__why" style={{ marginTop: 10 }}>
               <span className={cx("fy-set__dot", archiveNote.refused ? "fy-set__dot--warn" : "fy-set__dot--ok")} />
@@ -383,7 +385,7 @@ export function WorldPickerScreen() {
             >
               <div className="fy-homefeature__art">
                 {featured.keyArt ? <Portrait worldSlug={featured.slug} path={featured.keyArt} label={featured.name} radius={0} /> :
-                  <div className="fy-worldcard__empty">No key art yet.</div>}
+                  <img className="fy-portrait fy-portrait--plate" src="./worlds/new-world.webp" alt="" />}
                 {/* The featured world leaves the grid on a phone, so it carries its own ⋯. */}
                 <button
                   type="button"
@@ -428,7 +430,7 @@ export function WorldPickerScreen() {
                 >
                   <div className="fy-worldcard__frame">
                     {w.keyArt ? <Portrait worldSlug={w.slug} path={w.keyArt} label={w.name} radius={10} /> :
-                      <div className="fy-worldcard__empty">No key art yet.</div>}
+                      <img className="fy-portrait fy-portrait--plate" src="./worlds/new-world.webp" alt="" style={{ borderRadius: 10 }} />}
                   </div>
                   {/* Archiving is two clicks and no dialog: the second click is the consent,
                       and the words say what actually happens to the folder. */}
@@ -992,8 +994,6 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   };
 
   const canCreate = connection === "open" && shownName.length > 0 && submittedName === null && !chatRunning;
-  const entries =
-    1 + railCharacters.length + railLocations.length + railFactions.length + (blueprint?.threads.length ?? 0);
 
   const begin = (artDirection?: string) => {
     if (turns.length || buildMode) {
@@ -1053,7 +1053,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                   <p className="fy-artstep__lede">Pick a starting look.</p>
                 </div>
                 <div className="fy-artstep__aside">
-                  <div className="fy-artstep__asidehead">SAME FORMS, NINE TREATMENTS</div>
+                  <div className="fy-artstep__asidehead">SAME SCENE, NINE TREATMENTS</div>
                 </div>
               </div>
               <ArtStyleGrid
@@ -1169,18 +1169,18 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
           </div>
           <div className="fy-gate__body" style={{ gap: 14 }}>
             {Object.entries(drafts).some(([, draft]) => (draft.turns.length || draft.blueprint?.name || draft.attachments.length) && !draft.worldId) && (
-              <label style={{ display: "grid", gap: 6 }}>
-                Continue a draft
+              <details>
+                <summary>Earlier drafts</summary>
                 <Select label="Continue a draft" value={genesisId} disabled={chatRunning || myBuild?.status === "running"}
                   onChange={event => setParams({ draft: event.target.value })}>
                   <option value={genesisId}>{blueprint?.name ?? "This conversation"}</option>
                   {Object.entries(drafts).filter(([id, draft]) => id !== genesisId && (draft.turns.length || draft.blueprint?.name || draft.attachments.length) && !draft.worldId)
                     .map(([id, draft]) => <option key={id} value={id}>{draft.blueprint?.name ?? draft.turns[0]?.text.slice(0, 80) ?? "Untitled world"}</option>)}
                 </Select>
-              </label>
+              </details>
             )}
             {(turns.length > 0 || blueprint?.name || handed.length > 0) && !g?.worldId && !g?.founding && !myBuild && (
-              <Button variant="ghost" disabled={chatRunning} onClick={() => {
+              <Button variant="ghost" style={{ alignSelf: "flex-start" }} disabled={chatRunning} onClick={() => {
                 if (!confirmDiscard) { setConfirmDiscard(true); return; }
                 genesisDiscard(genesisId);
                 setParams({ draft: `gen-${ulid().toLowerCase()}` });
@@ -1326,7 +1326,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     value={message}
                     onChange={setMessage}
                     onSubmit={sendGenesis}
-                    placeholder="Keep going, or ask it to surprise you…"
+                    placeholder={turns.length === 0 ? "Describe your world, or ask Arke to surprise you…" : "Keep going…"}
                     agentLabel="world author"
                     disabledReason={writingModelReason}
                     busy={chatRunning || buildPressed || !!g?.founding || myBuild?.status === "running" || sizingBuild || !!g?.decisionPending || !!g?.readinessPending}
@@ -1335,7 +1335,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
                     // A world that does not exist yet has nowhere to remember a model, so the chip
                     // picks for this conversation only, and letting go of it is the author's default.
-                    modelControl={<ModelChip state={state} value={writingModel} set={writingModel !== undefined}
+                    modelControl={<ModelChip state={state} value={writingModel ?? state?.app.agents.find(agent => agent.name === "world-author")?.model ?? state?.app.agents.find(agent => agent.name === "story-writer")?.model ?? undefined} set={writingModel !== undefined}
                       onPick={setWritingModel} needsTools unsetLabel="Use the default"
                       disabled={chatRunning || buildPressed || !!g?.founding} />}
                     {...(hostCanAttach()
@@ -1448,12 +1448,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
           </div>
         </div>
         <div className="fy-gate__side">
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-            <div style={{ font: "600 15px var(--font-sans)" }}>The world so far</div>
-            <span className="fy-mono" style={{ color: "var(--warning)" }}>
-              {entries} entr{entries === 1 ? "y" : "ies"} · all proposed
-            </span>
-          </div>
+          <div style={{ font: "600 15px var(--font-sans)" }}>The world so far</div>
           {/* Coverage (SPEC-031 R-7): what is covered and what is open, as labels and counts.
               The world's one image is on the list so a missing key-art brief is visible while
               it can still be answered, not as a line on the completion notice. */}
@@ -1477,7 +1472,6 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                   style={c.covered ? undefined : { opacity: 0.55 }}
                 >
                   {c.label}
-                  {c.covered ? "" : " · open"}
                 </span>
               ))}
             </div>
@@ -1503,22 +1497,18 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
               }}
             >
               {/*
-                A label and nothing else. There was a button here for months that could never be
-                pressed — an image job needs a world folder to land in, and on this screen there
-                is no world yet — and then a sentence in its place saying where key art actually
-                comes from, which is the same explanation with the control removed (issue 1008).
+                A picture and no control: an image job needs a world folder to land in, and on this
+                screen there is no world yet (issue 1008).
               */}
-              <span style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)" }}>No world image yet</span>
+              <img className="fy-portrait fy-portrait--plate" src="./worlds/new-world.webp" alt="" />
             </div>
             <div style={{ padding: "12px 8px 0" }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 9 }}>
-                <div style={{ font: "650 20px var(--font-sans)", letterSpacing: "-0.02em" }}>
-                  {shownName || "Unnamed world"}
-                </div>
-                <span className="fy-mono" style={{ color: "var(--warning)", fontSize: 9.5 }}>
-                  proposed
-                </span>
-              </div>
+              {/* Arke offers a working name; until it has, typing one is what lets Begin go (issue 2552). */}
+              {genMode === "chat" && (!shownName || name) ? (
+                <Input placeholder="Name this world" aria-label="Name this world" value={name} onChange={(e) => setName(e.target.value)} />
+              ) : (
+                <div style={{ font: "650 20px var(--font-sans)", letterSpacing: "-0.02em" }}>{shownName || "Unnamed world"}</div>
+              )}
               <div style={{ font: "400 12.5px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}>
                 {shownLogline}
               </div>
@@ -1589,20 +1579,27 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
           <div style={{ flex: 1, minHeight: 16 }} />
           {/* The models this world will make with, chosen where the world is begun (design turn
               153) — last in the world so far, above the press that spends on them. Locked once
-              the build is pressed: the run froze its route. */}
-          <ModelsCard
-            state={state}
-            capabilities={WORLD_MODEL_CAPABILITIES}
-            choices={models}
-            scopeWord="this world"
-            disabled={buildPressed || submittedName !== null || !!g?.founding}
-            onChange={(capability, modelId) => setModels((current) => withModelChoice(current, capability, modelId))}
-          />
+              the build is pressed: the run froze its route. Folded: most worlds keep the defaults. */}
+          <details>
+            <summary className="fy-set__link">Models</summary>
+            <ModelsCard
+              state={state}
+              capabilities={WORLD_MODEL_CAPABILITIES}
+              choices={models}
+              scopeWord="this world"
+              disabled={buildPressed || submittedName !== null || !!g?.founding}
+              onChange={(capability, modelId) => setModels((current) => withModelChoice(current, capability, modelId))}
+            />
+          </details>
           <div style={{ display: "grid", gap: 8 }}>
             <Button
               variant="primary"
               disabled={!canCreate || buildCardOpen}
               onClick={() => {
+                // Begin is the author's yes to what is proposed. Left pending, it ran through the look
+                // to "approve … in the conversation" and a disabled Begin (issue 2482).
+                const pending = g?.review?.cards.filter(card => card.status === "pending") ?? [];
+                if (pending.length > 0) decideGenesisDraft(genesisId, pending.slice(0, 300).map(card => ({ key: card.key, digest: card.digest })), "approve");
                 const proposed = blueprint?.look?.trim();
                 const approvedLook = look.trim() || proposed;
                 if (approvedLook) {
@@ -2206,6 +2203,8 @@ export function SettingsHarnessScreen() {
             <label><input type="checkbox" checked={state?.app.imageInspection?.cloud !== false}
               onChange={event => setImageInspection(event.target.checked)} /> Allow cloud image inspection</label>
           </div>
+          {/* The switch answers it for most people: the rest fold, and only matter while it is on (issue 2467). */}
+          {state?.app.imageInspection?.cloud !== false && <details><summary className="fy-set__link">By world and provider</summary>
           <p>When Arke inspects an image, the conversation names the images that may be shared with the selected provider. Local inspection stays on this device.</p>
           {state?.world && <div className="fy-set__row"><label><input type="checkbox"
             checked={state.world.meta.cloudImageInspection !== false}
@@ -2214,6 +2213,7 @@ export function SettingsHarnessScreen() {
             ...Object.keys(state?.app.imageInspection?.providers ?? {})])].map(provider => <div className="fy-set__row" key={provider}><label><input type="checkbox"
             checked={state?.app.imageInspection?.providers[provider] !== false}
             onChange={event => setImageInspection(event.target.checked, provider)} /> Allow cloud image inspection by {provider === "anthropic" ? "Anthropic" : provider === "openai" ? "OpenAI" : provider === "ollama" ? "Ollama on another device" : provider}</label></div>)}
+          </details>}
           {/*
            * Which model runs each writing agent (SPEC-033 R-65).
            *

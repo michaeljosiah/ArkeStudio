@@ -45,6 +45,7 @@ import type { SessionInput } from "../harness/session-files.js";
 import type { ConversationActionLifecycle } from "../arke-actions/lifecycle.js";
 
 export interface ConversationRunDependencies {
+  shutdownSignal?: AbortSignal;
   audioStudio?: NonNullable<RetrievalDeps["getAudioStudio"]>;
   adapter: RunDeps["adapter"];
   sessionInput: SessionInput;
@@ -162,7 +163,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       )
     : undefined;
   return {
-    closingSignal: store.closingSignal,
+    closingSignal: deps.shutdownSignal ? AbortSignal.any([store.closingSignal, deps.shutdownSignal]) : store.closingSignal,
     adapter: deps.adapter ?? null,
     /*
      * A look can only be rewritten by something that can read it — see currentLookContext.

@@ -267,7 +267,7 @@ describe("the hero (199a, 199b, rule 4)", () => {
     const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound" };
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 2, blocks: 120 }));
     assert.equal(q('[data-testid="read-book"]'), null);
-    assert.match(q('[data-testid="audiobook-run"]')!.textContent!, /^reading… 0 of 2 chaptersStop$/);
+    assert.match(q('[data-testid="audiobook-run"]')!.textContent!, /^reading… 0 of 2Stop$/);
     await press(all('[data-testid="audiobook-run"] button').find((button) => button.textContent === "Stop")!);
     assert.ok(m.sent.some((message) => message.kind === "stop-audiobook-book"));
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-finished", ...ids, outcome: "stopped", chaptersRead: 0, chaptersRefused: 0, made: 3, flagged: 0 }));
@@ -295,7 +295,7 @@ describe("the cast as pictures (rule 6)", () => {
     assert.match(cards[3]!.querySelector("img")!.getAttribute("src")!, /references\/maren-kest\/head-front\.png/, "the character's own main photo");
     assert.ok(cards[0]!.querySelector(".fy-abshow__wv"), "the narrator's voice mark");
     assert.equal(cards[4]!.querySelector("img"), null, "no sheet: its initial on a card");
-    assert.equal(cards[4]!.querySelector(".fy-abshow__ini")!.textContent, "T");
+    assert.ok(cards[4]!.querySelector(".fy-abshow__ini svg"), "someone with no picture is a person, not a letter");
     assert.equal((cards[4] as HTMLButtonElement).disabled, true, "nowhere to go");
     await press(cards[1]!);
     assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/cast/odile-sarn`, "a card opens the character's page");

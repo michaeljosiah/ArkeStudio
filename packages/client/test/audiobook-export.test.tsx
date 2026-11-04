@@ -125,7 +125,7 @@ describe("Export audiobook (turn 186e)", () => {
     const identity = () => q(m, '[aria-label="Captured edition"]')!;
     assert.match(text(identity()), /The captured title/);
     assert.match(text(identity()), new RegExp(edition.settings.label));
-    assert.match(text(identity()), /2 chapters · en/);
+    assert.match(text(identity()), /2 chapters · English/);
     assert.doesNotMatch(text(identity()), /No author set/);
     const image = identity().querySelector("img");
     if (cover) assert.match(image!.getAttribute("src")!, /story-preview-media\/00000000-0000-4000-8000-000000000003\/cover/);

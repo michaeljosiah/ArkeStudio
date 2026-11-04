@@ -188,10 +188,15 @@ export async function updateAudiobookCredits(
  * one year still matches its take in the next. The author is the credits file's own, written there
  * from Publish (`creditsAuthor` in the coordinator), never looked up here.
  */
+/** Credits read a name aloud: a voice's label also carries its description ("Undersong — the harbour witness"). */
+function creditName(label: string | undefined): string | null {
+  return label?.split(/\s+[—·]\s+/)[0] ?? null;
+}
+
 export function audiobookCreditDefaults(production: { meta: { title: string } }, narrator: AudiobookReader | null): AudiobookCreditDefaults {
   const created = (production.meta as { created?: string }).created;
   const year = Number((created ?? new Date().toISOString()).slice(0, 4));
-  return { title: production.meta.title, author: "", voiceLabel: narrator?.label ?? null, year: Number.isFinite(year) ? year : new Date().getFullYear() };
+  return { title: production.meta.title, author: "", voiceLabel: creditName(narrator?.label), year: Number.isFinite(year) ? year : new Date().getFullYear() };
 }
 
 async function writeOwned(store: WorldStore, rel: string, value: unknown, supersedes?: string, beforeWrite?: () => Promise<void>): Promise<void> {

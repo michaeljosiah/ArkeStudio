@@ -1,3 +1,4 @@
+import { useBenchCharacterImage } from "./bench/character-kit.js";
 import { readShotPromptHistory, restoreShotPrompt, readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
 import { measureProductionMedia } from "./media/measurement.js";
 import { foldBenchSession as foldPromptBench, type PromptToolsResult, type PromptInspection, type PromptInspectSource } from "@arke-studio/contracts";
@@ -59,6 +60,9 @@ import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
 import { ConversationAuthoringService } from "./application/conversation-authoring.js";
+import { ConversationInputs } from "./application/conversation-inputs.js";
+import { WorldChatInputError, WorldChatInputJournal, inputCommandDigest } from "./world-chat/input-journal.js";
+import { projectWorldChatInputQueue, type WorldChatInputRequest, type WorldChatInputRouting, type WorldChatLoaded } from "@arke-studio/contracts";
 import { conversationRunDependencies } from "./application/conversation-runs.js";
 import { createEngine } from "./application/engine.js";
 import { createLocalWorldRepository } from "./application/local-worlds.js";
@@ -160,6 +164,7 @@ import {
   modelForCapability,
   harnessModelReference,
   ROSTER,
+  inheritsWriterModel,
   gateLocalRuntimes,
   type EngineLocalities,
   PROVIDERS,
@@ -1312,6 +1317,7 @@ export class Coordinator {
   private readonly supervisors = new Map<HealthComponent, ChildSupervisor>();
   private readonly worldQuery: WorldQueryServer;
   private readonly worldChatRunners = new WorldChatRunnerCache<WorldChatRunner>();
+  private readonly conversationInputOwners = new WeakMap<WorldStore, ConversationInputs>();
   private readonly grants: GrantStore | null;
   private readonly authoring: AuthoringService | null;
   private readonly genesis: GenesisService | null;
@@ -3516,7 +3522,7 @@ export class Coordinator {
       .openStore?.()
       ?.getBundle()
       .productions.find((candidate) => candidate.meta.id === productionId);
-    const modelId = requestedId ?? this.agentOverrides?.[agent]?.model ?? production?.meta.models?.llm;
+    const modelId = requestedId ?? this.agentOverridesInEffect()?.[agent]?.model ?? production?.meta.models?.llm;
     if (modelId !== undefined) {
       const selected = await this.validateLanguageModel(modelId, agent === "stage-designer", signal, requestedVariant);
       // Kept per model: the effort a production left a model at follows that model, whichever way
@@ -4449,7 +4455,7 @@ export class Coordinator {
             // harness default as the vendor to mark.
             onAuthFailure: (purpose) => {
               const agent = opts.authoring?.agentForPurpose(purpose);
-              const override = agent !== undefined ? this.agentOverrides?.[agent]?.model : undefined;
+              const override = agent !== undefined ? this.agentOverridesInEffect()?.[agent]?.model : undefined;
               const hint = override?.split("/")[0] ?? null;
               void this.vendorAuth.noteAuthFailure(hint).catch(() => {});
             },
@@ -6196,11 +6202,17 @@ export class Coordinator {
     // The page reviewer reads pictures too, and starts on the lettering reader's model until it has
     // one of its own (SPEC-064 decision 15): a separate agent, so it never shares the drafter's context.
     const lettering = withReader?.["page-lettering-reader"]?.model;
-    if (lettering === undefined) return withReader;
-    // The comic script reader starts there too (SPEC-064 decision 15).
+    if (withReader === undefined) return withReader;
     const borrowed = { ...withReader };
-    for (const name of ["comic-page-reviewer", "comic-script-reader"]) {
+    // The comic script reader starts there too (SPEC-064 decision 15).
+    if (lettering !== undefined) for (const name of ["comic-page-reviewer", "comic-script-reader"]) {
       if (borrowed[name]?.model === undefined) borrowed[name] = { ...borrowed[name], model: lettering };
+    }
+    // On the harness's own default these failed on an account that refuses it, with the reason
+    // hidden behind "no answer" (issue 2419). The writer's model is one the author already chose.
+    const writer = borrowed["story-writer"]?.model;
+    if (writer !== undefined) for (const member of ROSTER) {
+      if (inheritsWriterModel(member.name) && borrowed[member.name]?.model === undefined) borrowed[member.name] = { ...borrowed[member.name], model: writer };
     }
     return borrowed;
   }
@@ -8580,6 +8592,31 @@ export class Coordinator {
         await this.refreshConversationOutcome(store, msg.conversationId);
         return;
       }
+      case "world-chat-input":
+      case "world-chat-input-status":
+      case "world-chat-input-remove":
+      case "world-chat-input-continue": {
+        await this.worldOpensSettled();
+        const requestId = msg.kind === "world-chat-input" ? msg.input.submissionId : msg.requestId;
+        const answer = (admitted: boolean, detail?: string, queue?: import("@arke-studio/contracts").WorldChatInputQueueView, uncertain = false) =>
+          this.emit({ at: this.nowIso(), type: "world-chat.input-result", worldId: msg.worldId,
+            conversationId: msg.conversationId, requestId, admitted, uncertain, ...(detail ? { detail } : {}), ...(queue ? { queue } : {}) });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || this.stopping) { answer(false, "This world is no longer open. Your message is retained.", undefined, true); return; }
+        const journal = new WorldChatInputJournal(store, msg.conversationId), owner = this.conversationInputs(store);
+        try {
+          if (msg.kind === "world-chat-input") await owner.record(msg.conversationId, msg.input);
+          else if (msg.kind === "world-chat-input-remove") await owner.remove(msg.conversationId, msg.messageId, msg.revision, requestId);
+          else if (msg.kind === "world-chat-input-continue") await owner.resume(msg.conversationId, msg.revision, msg.routing, requestId);
+          const queue = msg.kind === "world-chat-input-status" ? await owner.receipt(msg.conversationId, requestId) : await journal.read();
+          const known = msg.kind !== "world-chat-input-status" || queue.inputs.some(row => row.input.request.submissionId === requestId);
+          answer(known, known ? undefined : "This message has not been queued. Your draft is retained.", projectWorldChatInputQueue(queue));
+        } catch (error) {
+          answer(false, error instanceof WorldChatInputError ? error.message : "The message could not be queued. Your draft is retained; check its status before retrying.", undefined, true);
+        }
+        await this.refreshConversationOutcome(store, msg.conversationId);
+        return;
+      }
       case "world-chat-send": {
         // Every send is answered for its request (PR 1232): taken as a turn, or not. A decline
         // appends nothing, so without this the sender can only guess from the transcript.
@@ -8608,7 +8645,7 @@ export class Coordinator {
           answer(false);
         };
         const store = this.opts.provider.openStore?.();
-        if (!store) {
+        if (!store || store.worldId !== msg.worldId) {
           answer(false);
           return;
         }
@@ -8640,12 +8677,9 @@ export class Coordinator {
         await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
         await inFlight;
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
+        await this.refreshConversationOutcome(store, msg.conversationId);
         if (naming !== null && (await naming)) {
-          await this.refreshConversations(store);
-          await this.openWorldChat(store, msg.conversationId);
+          await this.refreshConversationOutcome(store, msg.conversationId);
         }
         return;
       }
@@ -11453,7 +11487,13 @@ export class Coordinator {
         try {
           if (this.stopping) return;
           const reviews = this.manuscriptReviews();
-          if (msg.kind === "manuscript-review-start") await reviews.start(target, msg.requestId, msg.brief);
+          if (msg.kind === "manuscript-review-start") {
+            // Said before a report exists, as Review chapter does: a report of failed stages tells the author less.
+            const model = this.agentOverridesInEffect()?.["manuscript-reviewer"]?.model;
+            const selected = model === undefined ? undefined : await this.validateLanguageModel(model, false);
+            if (selected?.reason) throw new Error(selected.reason);
+            await reviews.start(target, msg.requestId, msg.brief);
+          }
           else if (msg.kind === "manuscript-review-resume") await reviews.start(target, msg.reviewId, "", true);
           else if (msg.kind === "manuscript-review-read") await reviews.read(target, msg.reviewId);
           else if (msg.kind === "manuscript-review-cancel") reviews.cancel(target);
@@ -14736,6 +14776,24 @@ export class Coordinator {
         // Keeping changed the world's artifacts, so the whole snapshot refreshes, not just the bench.
         await this.refreshWorldSnapshot(msg.worldId);
         await this.refreshBench(msg.worldId, msg.sessionId);
+        return;
+      }
+      case "bench-use-reference": {
+        const answer = (accepted: boolean, reason?: string) => this.emit({ at: this.nowIso(), type: "bench.reference-used",
+          worldId: msg.worldId, sessionId: msg.sessionId, takeId: msg.takeId, requestId: msg.requestId, accepted, ...(reason ? { reason } : {}) });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) { answer(false, "That world is no longer open."); return; }
+        try {
+          const bench = await this.benchFor(msg.worldId, msg.sessionId);
+          const take = bench?.session.takes.find(take => take.id === msg.takeId);
+          if (!bench || !take) throw new Error("That Bench image is unavailable.");
+          await useBenchCharacterImage(store, bench.session, take, msg.sheetId, msg.image, msg.requestId, () =>
+            !this.stillOpen(store) || this.stopping ? "That world is no longer open." :
+            msg.image === "character-sheet" && this.characterSheetJobRunning(msg.worldId, msg.sheetId)
+              ? "A character sheet is still being generated. Wait for it or settle it in Activity." : null);
+          this.refreshIfStillOpen(store);
+          answer(true);
+        } catch (error) { answer(false, describeCoordinatorError(error)); }
         return;
       }
       case "bench-accept": {
@@ -21144,12 +21202,11 @@ export class Coordinator {
         const frozen = take.params["provenance"] as
           { sheets?: Record<string, number>; anchorFile?: string } | undefined;
         const sheetVersion = frozen?.sheets?.[msg.sheetId] ?? take.provenance.sheets[msg.sheetId];
-        // A generated take must name the main photo it was conditioned on — without it there is
-        // no telling what the composite depicts. An uploaded one has no such lineage and never
-        // will, so requiring one here left the "Accept this sheet" button on an upload whose
-        // first commit failed permanently inert: pressed, and nothing (PR #241 review).
-        const uploaded = take.provider === "user";
-        if (sheetVersion === undefined || (!uploaded && !frozen?.anchorFile)) return;
+        // Kit generation needs its frozen anchor. Uploads and explicit Bench copies have no
+        // required anchor; their pending takes must remain acceptable after a failed commit.
+        const benchCopy = typeof take.params["requestId"] === "string" && take.params["requestId"].startsWith("bench-kit:") && typeof take.params["benchTakeId"] === "string";
+        const selectedImage = take.provider === "user" || benchCopy;
+        if (sheetVersion === undefined || (!selectedImage && !frozen?.anchorFile)) return;
         await acceptCharacterSheet(store, sheet, {
           file: `takes/${take.id}/${take.media}`,
           takeId: take.id,
@@ -21162,7 +21219,7 @@ export class Coordinator {
         // not: the usual answer to one is to run it again, and running it again with the
         // picture you had just chosen is the point of having staged it.
         await this.dropStagedReference(store, stagedReferenceKey("character-sheet", msg.sheetId));
-        await this.refreshWorldSnapshot(msg.worldId);
+        this.refreshIfStillOpen(store);
         return;
       }
       case "generate-character-looks": {
@@ -22468,6 +22525,8 @@ export class Coordinator {
         onSession: async (sessionId) => {
           await changeComicPage(store, input.productionId, input.page, (record) => ({ ...record,
             making: record.making.map((entry) => entry.requestId === input.requestId ? { ...entry, session: sessionId } : entry) }));
+          // Pages finds the job to cancel through this session, so the client needs it now.
+          await this.refreshWorldSnapshot(store.worldId);
         },
       });
       const take = made.ok ? ulid() : undefined;
@@ -22660,6 +22719,16 @@ export class Coordinator {
       const job = jobId === undefined ? undefined : this.jobQueue?.listJobs().find(candidate => candidate.id === jobId);
       if (job?.status === "succeeded" && job.finalization?.status === "failed") {
         return fail("The picture was generated but could not be filed. Open Activity and choose Retry finalization; no regeneration or charge is needed.");
+      }
+      // A comic page's press is waiting in front of the author, and a lane the provider paused (no
+      // credit, a rejected key) will not move: say why and take the job back. It read as Making,
+      // with the clock running and no reason anywhere (issue 2415).
+      if (input.onSession !== undefined && job?.status === "queued" && jobId !== undefined) {
+        const lane = this.jobQueue?.queueStatus(job.provider);
+        if (lane?.paused === true && lane.pauseKind !== "offline") {
+          await this.jobQueue?.cancel(jobId).catch(() => {});
+          return fail(lane.reason ?? job.error ?? "the provider refused the picture");
+        }
       }
       // A queued picture has not used any generation time. Keep its original job until it lands
       // or cancellation settles; abandoning the waiter used to strand paid results behind retries.
@@ -23989,9 +24058,32 @@ export class Coordinator {
 
   private conversationAuthoring(store: WorldStore): ConversationAuthoringService {
     return new ConversationAuthoringService(store, {
+      inputs: this.conversationInputs(store),
       runner: (id) => this.worldChatRunner(store, id),
       name: (id, text, title) => this.nameConversation(store, id, text, title),
     });
+  }
+
+  private inputRouting(store: WorldStore, view: WorldChatLoaded, request: Pick<WorldChatInputRequest, "modelId" | "variant">): WorldChatInputRouting {
+    const entry = view.entryContext, productionId = entry && "productionId" in entry ? entry.productionId : undefined;
+    const production = store.getBundle().productions.find(one => one.meta.id === productionId);
+    const adapter = this.opts.adapter?.id ?? "unavailable", modelId = request.modelId ?? null;
+    return { adapter, modelId, fingerprint: inputCommandDigest({ adapter, modelId, variant: request.variant,
+      agent: this.agentOverridesInEffect()?.["world-builder"], productionModel: production?.meta.models?.llm,
+      variants: production?.meta.llmVariants, localDefault: this.localHarnessDefault(false),
+      researchWeb: this.researchWeb, skillFamily: this.skillFamily, skillModelId: this.skillModelId }) };
+  }
+
+  private conversationInputs(store: WorldStore): ConversationInputs {
+    let owner = this.conversationInputOwners.get(store);
+    if (!owner) {
+      owner = new ConversationInputs(store, { runner: id => this.worldChatRunner(store, id),
+        stopping: () => this.stopping, track: completion => this.trackBackground(completion),
+        routing: (view, request) => this.inputRouting(store, view, request),
+        changed: id => this.refreshConversationOutcome(store, id) });
+      this.conversationInputOwners.set(store, owner);
+    }
+    return owner;
   }
 
   private worldChatRunner(store: WorldStore, conversationId: ConversationId): WorldChatRunner {
@@ -24013,6 +24105,7 @@ export class Coordinator {
     if (existing) return existing;
 
     const runner = new WorldChatRunner(conversationRunDependencies(store, {
+      shutdownSignal: this.runtimeStop.signal,
       audioStudio: (productionId, chapterFile) => audioStudioSnapshot(store, productionId, chapterFile, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
       generationRoutes: () => this.benchGenerationRoutes(),
       voiceCatalogue: () => this.benchVoiceCatalogue(store),
@@ -24195,6 +24288,9 @@ export class Coordinator {
     const sheets = new Map(bundle.sheets.map((s) => [s.id, s]));
     const human = await projectHumanDecisions(store, loaded, bundle, this.jobQueue?.listJobs() ?? this.getState().app.jobs);
     loaded = { ...loaded, actions: await this.conversationActions(store).project(loaded.actions) };
+    const waiting = loaded.inputQueue?.inputs.find(row => row.status === "queued");
+    if (waiting && loaded.inputQueue) loaded = { ...loaded, inputQueue: { ...loaded.inputQueue,
+      resumeRouting: this.inputRouting(store, loaded, waiting.input.request) } };
     if (!this.stillOpen(store) || (onlyIfStillSelected !== undefined && this.getState().worldChat?.conversationId !== onlyIfStillSelected)) return;
     this.readModel.setStageReviews(human.stageReviews);
     this.readModel.setWorldChat(

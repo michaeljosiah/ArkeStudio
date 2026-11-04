@@ -82,6 +82,8 @@ const NEVER_QUEUES = new Set([
 
 function jobNoun(job: Job, count: number): string {
   if (job.target.kind === "voice-preview" && job.params.purpose === "audiobook") return job.params.hear === true ? "block preview" : `narration request${count === 1 ? "" : "s"}`;
+  // A shot's job is a clip unless it is making the shot's picture (issue 2497).
+  if (job.target.kind === "shot" && job.capability === "image") return count === 1 ? "picture" : "pictures";
   return noun(job.target.kind, count);
 }
 

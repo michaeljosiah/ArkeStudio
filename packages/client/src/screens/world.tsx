@@ -78,6 +78,7 @@ import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
 import { artifactDisplayName, artifactOpenLabel, artifactUses, linkNameResolver } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
 import { ComicStylePicker } from "../components/comic-style-picker.js";
+import { productionPlate } from "../lib/production-plate.js";
 import { draftFromStyle, styleFromDraft, type ComicStyleDraft } from "../lib/comic-styles.js";
 import { clearQueue, enqueueClip, playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
@@ -148,6 +149,8 @@ import {
   useWorld,
   type AuthoringActivity,
   renameWorld,
+  sendBenchNewSession,
+  useBench,
 } from "../lib/store.js";
 
 /** World screens (§2.9): the world is the home, productions are lenses over it. */
@@ -602,6 +605,7 @@ export function WorldOverviewScreen() {
                 worldSlug={slug}
                 path={hasChapters ? (world.keyArt ?? "") : `productions/${production.meta.id}/${production.scenes[0]?.board?.image ?? "board-v2.png"}`}
                 label={production.meta.title}
+                fallbackSrc={productionPlate(production.meta)}
                 radius={8}
               />
             </div>
@@ -620,7 +624,7 @@ export function WorldOverviewScreen() {
         )}
         <div className="fy-cta" onClick={() => navigate(`/w/${worldId}/canon`)}>
           <div className="fy-cta__frame">
-            <Portrait worldSlug={slug} path={sheetPortraitPath("the-saltmarket")} label="Canon" radius={8} />
+            <Portrait worldSlug={slug} path={world.keyArt ?? ""} label="Canon" fallbackSrc="./worlds/new-world.webp" radius={8} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="fy-cta__title">Grow the canon</div>
@@ -816,6 +820,7 @@ function WorldProductions({ worldId, world }: { worldId: string; world: WorldBun
                     worldSlug={world.meta.slug}
                     path={art}
                     label={`${p.meta.title}: frame`}
+                    fallbackSrc={productionPlate(p.meta)}
                     radius={7}
                   />
                 </div>
@@ -1871,6 +1876,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const kit = world.referenceKits.find((k) => k.sheetId === sheet.id);
   const sheetPath = `${sheet.type === "character" ? "characters" : `${sheet.type}s`}/${sheet.id}.md`;
   const refs = sheetRefsMap[sheet.id];
+  const sheetTakes = refs ? Object.values(refs.takesByVersion).reduce((a, b) => a + b, 0) : 0;
   const references = referenceSummary(kit);
   const isCharacter = sheet.type === "character";
   const aliasNames = aliasesDraft.split(/\r?\n/).map(name => name.trim()).filter(Boolean);
@@ -1986,7 +1992,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           <div className="fy-designcard__caption">
             <span className="fy-designcard__title">Main photo</span>
             <span className={`fy-dot fy-designcard__desktop-dot fy-dot--${mainPhoto ? "ok" : "sketch"}`} />
-            <span className="fy-designcard__note"><span className={`fy-dot fy-designcard__compact-dot fy-dot--${mainPhoto ? "ok" : "sketch"}`} />{mainPhoto ? "identity anchor" : "outstanding"}</span>
+            <span className="fy-designcard__note"><span className={`fy-dot fy-designcard__compact-dot fy-dot--${mainPhoto ? "ok" : "sketch"}`} />{mainPhoto ? "Chosen" : "Not made yet"}</span>
           </div>
         </div>
       </div>
@@ -1999,12 +2005,12 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           <Portrait
             worldSlug={slug}
             path={characterSheet ? `references/${sheet.id}/${characterSheet.file}` : ""}
-            label="Character sheet outstanding"
+            label="Not made yet"
             radius={9}
           />
         </span>
         <strong>Character sheet</strong>
-        <small>{characterSheet ? "accepted · current" : "outstanding"}</small>
+        <small className={characterSheet ? undefined : "fy-overview-sheet__missing"}>{characterSheet ? "Current" : "Not made yet"}</small>
         <span className="fy-overview-sheet__chevron"><ChevronRight /></span>
       </button>
     </div>
@@ -2041,11 +2047,10 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         className="fy-sheet__grid"
         style={isCharacter ? undefined : { gridTemplateColumns: "1fr", gap: 14 }}
       >
-        {gridSections.map((s) => {
+        {gridSections.filter((s) => s.body.trim() !== "" && s.body.trim() !== "—").map((s) => {
           // Every section carries authored prose, so every one earns the hover read-aloud — once
-          // it holds real text, not the empty-section placeholder. It used to be Appearance
-          // alone, which meant a location sheet or a faction sheet had no readable block at all.
-          const readable = s.body.trim() !== "" && s.body.trim() !== "—";
+          // it holds real text. It used to be Appearance alone, which meant a location sheet or a
+          // faction sheet had no readable block at all.
           const body = <div className="fy-sheet__secbody"><ReadOnlyMarkdown value={s.body} ariaLabel={`${sheet.name} · ${s.heading}`} /></div>;
           return (
             <div key={s.heading}>
@@ -2053,7 +2058,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
                   the same colour on all of them, saying once per section what the badge under the
                   name says once for the record (issue 1010, U3). */}
               <div className="fy-sheet__sechead">{s.heading}</div>
-              {readable ? readableProse(s.heading, s.body, body) : body}
+              {readableProse(s.heading, s.body, body)}
             </div>
           );
         })}
@@ -2114,35 +2119,33 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           </div>
         </Section>
       )}
-      <Section title="From this sheet">
+      {[references.total, refs?.productions.length ?? 0, refs?.artifacts.length ?? 0, sheetTakes].some((n) => n > 0) && <Section title="From this sheet">
         <div className="lay-stats">
-          <div className="lay-stats__item">
+          {references.total > 0 && <div className="lay-stats__item">
             <div className="lay-stats__value">{references.total}</div>
-            <div className="lay-stats__label" title={references.detail}>accepted references</div>
-          </div>
+            <div className="lay-stats__label" title={references.detail}>accepted {references.total === 1 ? "reference" : "references"}</div>
+          </div>}
           {refs && <>
-            <div className="lay-stats__item">
+            {refs.productions.length > 0 && <div className="lay-stats__item">
               <div className="lay-stats__value">{refs.productions.length}</div>
-              <div className="lay-stats__label">productions</div>
-            </div>
-            <div className="lay-stats__item">
+              <div className="lay-stats__label">{refs.productions.length === 1 ? "production" : "productions"}</div>
+            </div>}
+            {refs.artifacts.length > 0 && <div className="lay-stats__item">
               <div className="lay-stats__value">{refs.artifacts.length}</div>
-              <div className="lay-stats__label">artifacts</div>
-            </div>
-            <div className="lay-stats__item">
-              <div className="lay-stats__value">
-                {Object.values(refs.takesByVersion).reduce((a, b) => a + b, 0)}
-              </div>
+              <div className="lay-stats__label">{refs.artifacts.length === 1 ? "artifact" : "artifacts"}</div>
+            </div>}
+            {sheetTakes > 0 && <div className="lay-stats__item">
+              <div className="lay-stats__value">{sheetTakes}</div>
               <div className="lay-stats__label">
-                takes
+                {sheetTakes === 1 ? "take" : "takes"}
                 {Object.keys(refs.takesByVersion).length > 1
                   ? ` across v${Object.keys(refs.takesByVersion).sort().join(", v")}`
                   : ""}
               </div>
-            </div>
+            </div>}
           </>}
         </div>
-      </Section>
+      </Section>}
     </>
   );
   const main = (
@@ -4227,13 +4230,19 @@ export function ArtifactsScreen() {
     </button>
   );
   // Turn 164 keeps the picker in the fifth slot; later artifacts continue in shelf order.
+  const benchSessionId = useBench()?.session.id;
   const cards = compact ? [...visible.slice(0, 4), null, ...visible.slice(4)] : [...visible, null];
   const doors = (<div className="fy-artifacts-door">
         <Button variant="outline" onClick={() => upload()}>{compact && <Upload size={16} />}Add files</Button>
         <Button
           variant="primary"
           data-testid="artifacts-generate"
-          onClick={() => void navigate(`/w/${worldId}/artifacts/bench`)}
+          onClick={() => {
+            // A new picture starts blank: resuming dropped the author into the last session's brief,
+            // a whole comic page's on this run (issue 2480). The last session is on the Bench's own list.
+            if (worldId) sendBenchNewSession(worldId);
+            void navigate(`/w/${worldId}/artifacts/bench`, { state: { leaving: benchSessionId ?? "" } });
+          }}
         >
           {compact && <Sparkle size={16} />}Generate
         </Button>
@@ -4425,7 +4434,7 @@ export function ArtifactsScreen() {
                     downloadName={filename}
                   />
                 </div>
-              ) : compact && a.kind === "video" ? (
+              ) : a.kind === "video" ? (
                 <div className="fy-imghost fy-artifact-frame">
                   <Portrait worldSlug={world?.meta.slug} path={artifactPosterPath(a.id)} label={name} radius={8} />
                   {a.mediaInfo && <span className="fy-artifact-duration">{formatSeconds(a.mediaInfo.durationSec)}</span>}
@@ -4578,7 +4587,9 @@ export function ProductionsScreen() {
         {productions.map((p, i) => {
           const chapters = p.chapters.filter(chapter => !chapter.retired);
           const drafted = chapters.filter(chapter => (chapter.words ?? 0) > 0).length;
-          const story = phone && productionShape(p.meta).hasChapters;
+          const shape = productionShape(p.meta);
+          const story = shape.hasChapters;
+          const tracks = p.music?.tracks.length ?? 0;
           const shots = p.scenes.flatMap((s) => orderedShots(s));
           const covered = coveredProductionShots(p, world?.artifacts ?? []);
           const active = p.meta.status !== "complete" && shots.length > 0 && covered < shots.length;
@@ -4608,6 +4619,7 @@ export function ProductionsScreen() {
                     worldSlug={world?.meta.slug}
                     path={artOf(p)}
                     label={`${p.meta.title}: frame`}
+                    fallbackSrc={productionPlate(p.meta)}
                     radius={0}
                   />
                 </div>
@@ -4616,11 +4628,11 @@ export function ProductionsScreen() {
                     <Badge tone="outline">{productionShape(p.meta).displayLabel}</Badge>
                     {active && <span className="fy-dot fy-dot--warn" />}
                     <span style={{ marginLeft: "auto" }} className="fy-mono">
-                      {story ? `${drafted} of ${chapters.length} chapters` : p.audioDrama ? `${p.audioDrama.plan.episodes} episodes` : shots.length > 0 ? `${covered} of ${shots.length} ${productionShape(p.meta).playsAsBeats ? "pictures" : "shots"}` : `${p.takes.length} takes`}
+                      {shape.hasPages ? `${chapters.length} chapter${chapters.length === 1 ? "" : "s"}` : story ? (chapters.length > 0 ? `${drafted} of ${chapters.length} chapters` : "") : p.audioDrama ? `${p.audioDrama.plan.episodes} episodes` : shape.isMusic ? `${tracks} track${tracks === 1 ? "" : "s"}` : shots.length > 0 ? `${covered} of ${shots.length} ${shape.playsAsBeats ? "pictures" : "shots"}` : p.takes.length > 0 ? `${p.takes.length} takes` : ""}
                     </span>
                   </div>
                   <div className="fy-prodcard__name">{p.meta.title}</div>
-                  <div className="fy-prodcard__sub">{p.meta.logline ?? p.meta.status}</div>
+                  {p.meta.logline && <div className="fy-prodcard__sub">{p.meta.logline}</div>}
                   {!phone && progress}
                   {!phone && <div style={{ marginTop: 14 }}>
                     <Button variant={active ? "primary" : "secondary"} onClick={event => { event.stopPropagation(); navigate(`/w/${worldId}/p/${p.meta.id}`); }}>Open the workspace</Button>
@@ -4783,7 +4795,7 @@ const STORED_KINDS = new Set(["microdrama", "music-video", "interactive", "visua
  * "nothing assumed" would be a picture of something, and the empty box saying so is the truer
  * one. A kind added without a plate falls back to that same empty box rather than breaking.
  */
-export const KIND_PLATES = new Set(["microdrama", "film", "music-video", "interactive", "visual-novel", "book", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, "album", "single", "soundtrack"]);
+export const KIND_PLATES = new Set(["microdrama", "film", "music-video", "interactive", "visual-novel", "book", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, "album", "single", "soundtrack", "other"]);
 
 /** The episode-length ranges step two offers, and the seconds each one means (turn 53). */
 export const EPISODE_LENGTH_CHOICES = [
@@ -5025,7 +5037,7 @@ export function NewProductionScreen() {
                       alt=""
                       style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                     />
-                  ) : null /* Other is the empty box (issue 1883): a "·" in it read as a stray mark. */}
+                  ) : null}
                 </div>
                 <div className="fy-radio__head">
                   <span className="fy-radio__dot" />

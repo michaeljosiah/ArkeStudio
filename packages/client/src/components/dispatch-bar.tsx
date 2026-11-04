@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useParams } from "react-router";
 import {
   aspectOffered,
+  balanceFaulted,
   estimateCharacterImageMicroUsd,
   estimateImageMicroUsd,
   imagePriceCopy,
@@ -268,6 +269,7 @@ export function strandReason(state: ReturnType<typeof useStore>["state"], model:
     return `this ${info.displayName} account does not unlock this`;
   }
   if (status?.configured !== true) return `no ${info.displayName} key`;
+  if (balanceFaulted(status)) return `${info.displayName} is out of credit`;
   return `the ${info.displayName} key does not unlock this`;
 }
 

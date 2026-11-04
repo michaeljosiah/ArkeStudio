@@ -1,5 +1,5 @@
 import { AudiobookActivityReceipts } from "./audiobook-activity.js";
-import { memo, useEffect, useMemo, useRef, type CSSProperties } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useNavigate } from "react-router";
 import { toast, Toaster } from "sonner";
 import { recoveryIncidentSummary, type Job, type ModelManifest } from "@arke-studio/contracts";
@@ -54,10 +54,12 @@ function useThumb(note: QueueNote): string | null {
 
 export function Note({ note, onAct, onDismiss }: { note: QueueNote; onAct: () => void; onDismiss: () => void }) {
   const thumb = useThumb(note);
+  // A file that has since moved is a broken-image icon; the dot says the same thing without one.
+  const [missing, setMissing] = useState(false);
   return (
     <div className={cx("fy-note", `fy-note--${note.tone}`)} role="status">
-      {thumb ? (
-        <img className="fy-note__thumb" src={thumb} alt="" />
+      {thumb && !missing ? (
+        <img className="fy-note__thumb" src={thumb} alt="" onError={() => setMissing(true)} />
       ) : (
         <span className={cx("fy-note__dot", note.live && "fy-note__dot--live")} aria-hidden />
       )}

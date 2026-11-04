@@ -269,6 +269,7 @@ function OverviewStoryScreen() {
         <div className="fy-story__chathead">
           <div className="fy-eyebrow-sm">
             OVERVIEW · {production ? productionShape(production.meta).displayLabel.toLowerCase() : ""}
+            {story?.targetLength?.trim() ? ` · Target: ${story.targetLength.trim()}` : ""}
           </div>
           <h1 className="fy-story__h1">{story || style ? "The story, as it stands" : "Nothing settled yet"}</h1>
           {/* Page scale (issue 859): the cards below, read through in the order drawn. Only once
@@ -344,12 +345,13 @@ function OverviewStoryScreen() {
               )}
               {production?.treatment && (
                 <div className="fy-draftcard fy-texthost">
-                  <div className="fy-eyebrow-sm">TREATMENT</div>
+                  <div className="fy-eyebrow-sm">TREATMENT · REFERENCE</div>
                   <div
                     style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4, whiteSpace: "pre-wrap" }}
                   >
                     {production.treatment}
                   </div>
+                  <p style={{ color: "var(--muted-foreground)" }}>Not automatically included in chapter drafts. Put chapter-specific guidance in the chapter plan.</p>
                   <ReadAloud
                     source={{ of: "story", productionId: prodId ?? "", field: "treatment" }}
                     title={`${production.meta.title} · treatment`}
@@ -614,6 +616,7 @@ export function ChapterTreeScreen() {
         <span className="fy-h1row__push" />
         {isStory && (
           <>
+            {worldId && prodId && <ManuscriptReviewControl worldId={worldId} productionId={prodId} chapters={chapters.length} words={bookWords} />}
             <Button className="fy-chapters-wide-action" onClick={() => setSheet("publish")} data-testid="export-manuscript">
               <Download size={13} />
               Publish
@@ -629,7 +632,6 @@ export function ChapterTreeScreen() {
         )}
       </div>
       {phone && isStory && <button type="button" className="fy-chapters-more" aria-label="Manuscript actions" onClick={() => setMenu("manuscript")}><More size={20} /></button>}
-      {isStory && worldId && prodId && <ManuscriptReviewControl worldId={worldId} productionId={prodId} chapters={chapters.length} words={bookWords} />}
       <PageSheet open={menu === "manuscript" || menuChapter !== undefined} title={menu === "manuscript" ? "Manuscript" : menuChapter?.title ?? "Chapter"} onClose={() => setMenu(null)} className="fy-chapter-menu">
         {menu === "manuscript" ? <><Button onClick={() => { setMenu(null); setSheet("publish"); }}>Publish</Button><Button onClick={() => { setMenu(null); beginImport(); }}>Import</Button></> : menuChapter && <><Button disabled={menuIndex === 0} onClick={() => { move(menuChapter, -1); setMenu(null); }}>Move up</Button><Button disabled={menuIndex === chapters.length - 1} onClick={() => { move(menuChapter, 1); setMenu(null); }}>Move down</Button><Button onClick={() => { if (worldId && prodId) setChapterRetired(worldId, prodId, menuChapter.file, true); setMenu(null); }}>Retire</Button></>}
       </PageSheet>

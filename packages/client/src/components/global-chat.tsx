@@ -38,7 +38,7 @@ export function GlobalConversationEntry({ props, world }: { props: ProductionCon
   const latest = useRef(surface); latest.current = surface;
   useLayoutEffect(() => host.current ? owner.register(latest.current, host.current) : undefined, [owner, key]);
   useLayoutEffect(() => {
-    if (!props.dock && location.pathname.endsWith("/chat")) owner.select(latest.current);
+    if (!props.dock) owner.select(latest.current);
   }, [owner, key, location.pathname, props.dock]);
   useLayoutEffect(() => { if (host.current) owner.refresh(latest.current, host.current); });
   // An ask opens Chat unless it is a quiet one, whose answer comes back on the page (SPEC-056 R-24).
@@ -52,12 +52,12 @@ export function GlobalConversationEntry({ props, world }: { props: ProductionCon
   useLayoutEffect(() => {
     if (props.dock?.ask?.quiet === true && props.dock.ask.declined === true) owner.open(latest.current);
   }, [owner, props.dock?.ask?.declined, props.dock?.ask?.press]);
-  return <div className="fy-global-chat-slot"><ChatExpand owner={owner} surface={surface} /><ChatPageCanvas owner={owner} surface={surface} props={props} /><div ref={host} /></div>;
+  return <div className="fy-global-chat-slot">{props.dock && <ChatExpand owner={owner} surface={surface} />}<ChatPageCanvas owner={owner} surface={surface} props={props} /><div ref={host} /></div>;
 }
 
 function ChatExpand({ owner, surface }: { owner: GlobalChatController; surface: ChatSurface }) {
   const snapshot = useSyncExternalStore(owner.subscribe, owner.getSnapshot, owner.getSnapshot);
-  return snapshot.open && snapshot.selected?.key === surface.key ? null : <button type="button" className="fy-global-chat-expand" onClick={() => owner.open(surface)}>Open {surface.title}</button>;
+  return snapshot.selected?.key === surface.key ? null : <button type="button" className="fy-global-chat-expand" onClick={() => owner.open(surface)}>Open {surface.title}</button>;
 }
 
 function ChatPageCanvas({ owner, surface, props }: { owner: GlobalChatController; surface: ChatSurface; props: ProductionConversationProps }) {
@@ -81,13 +81,19 @@ export function GlobalWorldChatEntry({ worldId, conversationId }: { worldId: str
   }, [conversationId, location.pathname, state?.world?.meta.worldId, surface?.conversationId, worldId, navigate]);
   const latest = useRef(surface); latest.current = surface;
   useLayoutEffect(() => host.current && latest.current ? owner.register(latest.current, host.current) : undefined, [owner, worldId, conversationId, surface?.key]);
-  // A route that names its conversation is the author going to it (issue 1888). Registering only
-  // selects when nothing is selected, and the last conversation is remembered across sessions, so
-  // Plan with Arke landed on a page whose body stayed parked until "Open Builder Chat" was pressed.
+  // Coming to a chat page is the author going to it (issue 1888, 2460). Registering only selects when
+  // nothing is selected, and the last conversation is remembered across sessions, so Plan with Arke
+  // and the World Chat tab landed on a page whose body stayed parked until "Open …" was pressed.
   useLayoutEffect(() => {
     const page = latest.current;
-    if (conversationId && page && owner.getSnapshot().selected?.key !== page.key) owner.select(page);
+    if (page && owner.getSnapshot().selected?.key !== page.key) owner.select(page);
   }, [owner, conversationId, surface?.key]);
+  // The side panel would take a world conversation off its own page and leave the page blank (issue 2488).
+  // Only once it is this page's conversation: a selection held for dictation still needs that panel.
+  const held = useSyncExternalStore(owner.subscribe, owner.getSnapshot, owner.getSnapshot);
+  useLayoutEffect(() => {
+    if (latest.current?.kind === "world" && held.open && held.selected?.key === latest.current.key) owner.close();
+  }, [owner, held.open, held.selected?.key, surface?.key]);
   useLayoutEffect(() => { if (host.current && latest.current) owner.refresh(latest.current, host.current); });
   const rows = [...(state?.world?.conversations ?? [])].sort(byPendingConsequence), menuRow = rows.find(row => row.id === menu?.id);
   return <div className="fy-global-chat-slot fy-global-chat-slot--world">

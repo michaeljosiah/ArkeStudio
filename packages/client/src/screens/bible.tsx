@@ -412,8 +412,7 @@ export function BibleScreen() {
                 {saving ? "Saving…" : bible?.present ? `Saved · v${bible.version}` : "Not saved yet"}
               </span>
               <span className="fy-mono">
-                {size.words.toLocaleString()} words · ~{size.approxTokens.toLocaleString()} tokens a
-                turn
+                {size.words.toLocaleString()} words
               </span>
             </div>
             {compact ? <details className="fy-bar-menu"><summary aria-label="Bible options">⋯</summary><div>

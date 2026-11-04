@@ -1,8 +1,10 @@
-import { ComicModelChoice } from "../components/comic-model-choice.js";
+import { ComicModelChoice, comicModelRefused } from "../components/comic-model-choice.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import {
+  balanceFaulted,
   BLOCKING_FINDINGS,
+  harnessModelReference,
   chapterParagraphs,
   ComicScriptSchema,
   DEFAULT_COMIC_SETTINGS,
@@ -47,6 +49,7 @@ import { comicStylePicture, comicStylePreset, draftFromStyle, styleFromDraft, ty
 import { useProduction } from "../lib/selectors.js";
 import {
   acceptComicTake,
+  cancelJob,
   cancelWorldChat,
   seeComicWarning,
   acceptProposal,
@@ -97,7 +100,7 @@ export function ComicPagesScreen() {
   return <ComicPages key={`${world.meta.worldId}/${production.meta.id}`} world={world} production={production} />;
 }
 
-function takeFile(world: WorldBundle, take: ComicPageTake | undefined): string | null {
+export function takeFile(world: WorldBundle, take: ComicPageTake | undefined): string | null {
   const artifact = take === undefined ? undefined : world.artifacts.find((candidate) => candidate.id === take.artifact);
   return artifact === undefined ? null : mediaUrl(world.meta.slug, `artifacts/${artifact.file}`);
 }
@@ -246,6 +249,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const [planOpen, setPlanOpen] = useState(false);
   // A draft opens as the reader will meet it (turn 256d); Details is the script as 254d drew it.
   const [detail, setDetail] = useState(false);
+  const [editing, setEditing] = useState<ReadonlySet<string>>(new Set());
   const [draftPageId, setDraftPageId] = useState<string | null>(null);
   const draftPage = draftPages?.find((candidate) => candidate.id === draftPageId) ?? draftPages?.[0];
   const [draftPanelId, setDraftPanelId] = useState<string | null>(null);
@@ -265,8 +269,10 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   // Plan first (turn 254a): Arke drafts pages only from a plan the author kept.
   const from = sourceStory && sourceChapter ? ` from chapter ${sourceChapter.order} of ${sourceStory.meta.title}` : "";
   const planWithArke = () => chapter && ask(`Plan chapter ${chapter.order}, ${chapter.title}, as pages${from}.`);
-  const fixLean = (lean: ComicChapterPlan["leans"][number]) => chapter && ask(`In the plan for chapter ${chapter.order}, ${chapter.title}: page ${lean.page}, "${lean.line}" ${lean.why}. Settle it in the plan.`);
-  const draftWithArke = () => chapter && ask(`Draft chapter ${chapter.order}, ${chapter.title}, from its kept plan${from}.`);
+  const fixLean = (lean: ComicChapterPlan["leans"][number]) => chapter && ask(`In the plan for chapter ${chapter.order}, ${chapter.title}: page ${lean.page}, "${lean.line}" ${lean.why}. Settle it in the plan, and leave it out of leans once it is settled.`);
+  // A press from this window, so a failure seen on reopening a page never starts a turn by itself.
+  const pressedDraft = useRef(false);
+  const draftWithArke = () => { if (chapter) { pressedDraft.current = true; ask(`Draft chapter ${chapter.order}, ${chapter.title}, from its kept plan${from}.`); } };
   // Arke at work on this chapter is said on the chapter itself (turn 256b): pressed from here, or the
   // pilot Start the pilot asked for, while a turn runs.
   const workspace = useStore().state?.worldChat ?? null;
@@ -281,6 +287,15 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const refused = conversation?.messages.findLast(message => message.role === "studio" && message.turnId === lastAsk?.turnId && message.refusals.length > 0);
   const failure = namesChapter ? conversation?.lastFailure?.turnId === lastAsk?.turnId ? conversation?.lastFailure
     : refused ? { detail: refused.refusals.join(" · ") } : undefined : undefined;
+  // The cold read sends a first draft back once (SPEC-064 R-64). On the turn's last attempt that ended
+  // the press in a refusal, and the next press worked: so it is pressed once more here (issue 2456).
+  useEffect(() => {
+    if (!pressedDraft.current || !failure?.detail?.includes(COLD_READ_REFUSAL)) return;
+    pressedDraft.current = false;
+    // Words the author has started typing stay theirs; Draft with Arke is still there to press.
+    if (chat && chatSurface && chat.value(chatSurface.key, "draft", "") !== "") return;
+    if (chapter) ask(`Draft chapter ${chapter.order}, ${chapter.title}, from its kept plan${from}.`);
+  }, [failure?.detail]); // eslint-disable-line react-hooks/exhaustive-deps
   const turnRunning = conversation?.runStatus === "running";
   const working = turnRunning && chapter !== undefined && drafted === undefined && pages.length === 0
     && ((asked !== undefined && Date.now() - asked < 30 * 60_000) || chapter.id === (new URLSearchParams(search).get("chapter") ?? chapters[0]?.id));
@@ -309,9 +324,10 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
     return () => observer.disconnect();
   }, [draftPages === null]); // eslint-disable-line react-hooks/exhaustive-deps
   const shape = pageAspect(page ?? draftPage ?? newPage(), settings).split(":").map(Number) as [number, number];
-  // Too narrow for the strip, the script's minimum and a readable page: the stylesheet's columns
-  // stand, as before turn 251 (codex on PR 2264).
-  const columns = room === null || room.width < 136 + SCRIPT_MIN + 320 ? undefined : `136px minmax(${SCRIPT_MIN}px, 1fr) ${sideWidth(room, shape)}px`;
+  // Too narrow for the strip, the script's minimum and a readable page, as with the chat open: the
+  // page goes under the script, or the script broke mid-word in a 130-pixel column (issue 2422).
+  const narrow = room !== null && room.width < 136 + SCRIPT_MIN + 320;
+  const columns = room === null || narrow ? undefined : `136px minmax(${SCRIPT_MIN}px, 1fr) ${sideWidth(room, shape)}px`;
 
   if (chapters.length === 0) {
     return <Screen id="comic-pages"><EmptyState title="No chapters yet" action={<Button onClick={() => navigate(`${base}/story/chapters`)}>Chapters</Button>} /></Screen>;
@@ -344,8 +360,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
           <Button disabled={unsaved} onClick={() => { send(); setExporting(true); }}>Export</Button>
         </div>
         {(draftPlan !== null && drafted !== undefined) || (planOpen && keptPlan !== undefined && draftPages === null) ? (
-          <div className="fy-comic__body" ref={body} style={{ gridTemplateColumns: columns }}>
-            <div className="fy-comic__strip" />
+          <div className={`fy-comic__body${narrow ? " narrow" : ""}`} ref={body} style={{ gridTemplateColumns: columns }}>
             <PlanView plan={(draftPlan ?? keptPlan)!} chapterOrder={chapter?.order ?? 1} fix={chatSurface ? fixLean : null}
               actions={draftPlan !== null && drafted !== undefined ? (
                 <>
@@ -360,7 +375,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               )} />
           </div>
         ) : draftPages !== null && drafted !== undefined ? (
-          <div className="fy-comic__body" ref={body} style={{ gridTemplateColumns: columns }}>
+          <div className={`fy-comic__body${narrow ? " narrow" : ""}`} ref={body} style={{ gridTemplateColumns: columns }}>
             <div className="fy-comic__strip">
               {draftPages.map((candidate, index) => (
                 <button key={candidate.id} type="button" className={cx("fy-comic__thumb fy-comic__thumb--draft", candidate.id === draftPage?.id && "on")} aria-label={`Draft page ${firstNumber + index}`} onClick={() => setDraftPageId(candidate.id)}>
@@ -381,6 +396,12 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
                 {kept(draftRead) > 0 && <span className="fy-comic__keptchip">{kept(draftRead)} kept {kept(draftRead) === 1 ? "mystery" : "mysteries"}</span>}
                 <span className="grow" />
                 <Button size="sm" onClick={() => discardProposal(worldId, drafted.proposal.id)}>Discard</Button>
+                {/* What the reader asked goes back to Arke; a waiting draft has to go first, or its next one is refused. */}
+                {chatSurface && draftRead?.status === "read" && readHolds(draftRead) && <Button size="sm" variant="primary" onClick={() => {
+                  discardProposal(worldId, drafted.proposal.id);
+                  pressedDraft.current = true;
+                  ask(`Draft chapter ${chapter?.order}, ${chapter?.title}, again from its kept plan${from}, so the pages answer what a reader asked: ${draftRead.findings.filter((finding) => SCRIPT_READ_BLOCKING.has(finding.kind)).map((finding) => finding.question).join(" ").slice(0, 4000)}`);
+                }}><Sparkle size={13} />Fix with Arke</Button>}
                 {/* Something a reader could not follow, or no read at all, is kept only as Keep anyway (turn 254d, 254e). */}
                 <Button size="sm" variant={readHolds(draftRead) ? undefined : "primary"} onClick={() => acceptProposal(worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision)}>{readHolds(draftRead) ? "Keep anyway" : "Keep"}</Button>
               </div>
@@ -415,7 +436,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
             {draftPage === undefined ? <div className="fy-comic__side" /> : <DraftSide key={draftPage.id} world={world} page={draftPage} panel={draftPanel} settings={settings} />}
           </div>
         ) : (
-        <div className="fy-comic__body" ref={body} style={{ gridTemplateColumns: columns }}>
+        <div className={`fy-comic__body${narrow ? " narrow" : ""}`} ref={body} style={{ gridTemplateColumns: columns }}>
           <div className="fy-comic__strip">
             {pages.map((candidate, index) => {
               const held = record(candidate.id);
@@ -434,7 +455,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
                 </button>
               );
             })}
-            <button type="button" className="fy-comic__add" onClick={() => { const next = newPage(); edit([...pages, next]); setPageId(next.id); }}>+ Page</button>
+            {pages.length > 0 && <button type="button" className="fy-comic__add" onClick={() => { const next = newPage(); edit([...pages, next]); setPageId(next.id); }}>+ Page</button>}
           </div>
           {page === undefined ? (
             // A chapter with no pages (turns 249c, 254a, 254c): Arke plans it, then drafts it from the kept plan, or a page is started by hand.
@@ -449,7 +470,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               ) : <>
               {failure ? <div role="status">
                 <h3>Arke did not finish {chapter?.order} · {chapter?.title}</h3>
-                <p>{failure.detail ?? "The writing turn did not complete. Open Builder Chat to review the result and try again."}</p>
+                <p>{failure.detail?.replace(/^(rejected:\s*)?(The requested change could not be prepared:\s*)?/, "") ?? "The writing turn did not complete. Open Builder Chat to review the result and try again."}</p>
                 {chatSurface && <Button onClick={() => chat?.open({ ...chatSurface, conversationId: conversation!.conversationId, newThread: false })}>Open Builder Chat</Button>}
               </div> : <h3>{chapter?.order} · {chapter?.title} has no pages</h3>}
               {keptPlan !== undefined && <span className="fy-comic__plankept"><Check size={12} />Plan kept · {keptPlan.pages.length} {keptPlan.pages.length === 1 ? "page" : "pages"}</span>}
@@ -465,7 +486,16 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               </>}
             </div>
           ) : (
-            <PageEditor world={world} page={page} number={firstNumber + pages.indexOf(page)} change={setPage}
+            !editing.has(page.id) && page.panels.some((panel) => panel.source !== undefined) ? (
+              // Arke's pages read as pages; the form is one press away (issue 2458). A page started by hand has nothing to read yet.
+              <div className="fy-comic__edit">
+                <div className="fy-comic__pagehead">
+                  <span className="grow" />
+                  <Button variant="ghost" size="sm" onClick={() => setEditing(new Set([...editing, page.id]))}>Edit</Button>
+                </div>
+                <ReadPage world={world} page={page} number={firstNumber + pages.indexOf(page)} asked={[]} />
+              </div>
+            ) : <PageEditor world={world} page={page} number={firstNumber + pages.indexOf(page)} change={setPage}
               remove={() => { edit(pages.filter((candidate) => candidate.id !== page.id)); setPageId(null); }} />
           )}
           {page === undefined ? null : (
@@ -493,6 +523,8 @@ const UNDER_PAGE = 272;
  * the page's own shape, but never so wide the script falls under its minimum, nor narrower than a
  * page anyone could read.
  */
+const COLD_READ_REFUSAL = "A reader who has only the pages could not follow";
+
 export function sideWidth(room: { width: number; height: number }, [across, down]: [number, number]): number {
   const tall = Math.round((room.height - UNDER_PAGE) * across / down) + 36;
   return Math.max(320, Math.min(tall, room.width - 136 - SCRIPT_MIN));
@@ -563,7 +595,9 @@ function LetteringRow({ item, characters, change, remove }: { item: LetteringIte
           {characters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       ) : <span className="who m">—</span>}
-      <input className="words" aria-label="Words" value={item.text} onChange={(event) => change((current) => { current.text = event.target.value; })} />
+      {/* Grows with its words: a one-line input cut them off. Lettering stays one line, so Enter adds nothing. */}
+      <textarea className="words" aria-label="Words" rows={1} value={item.text} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }}
+        onChange={(event) => change((current) => { current.text = event.target.value; })} />
       <button type="button" className="fy-comic__link" aria-label="Remove line" onClick={remove}><X size={13} /></button>
     </div>
   );
@@ -640,7 +674,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
       else if (event.attempt !== undefined) setAttempt(event.attempt);
       // The landed take is the one shown, unless the author picked another meanwhile.
       if ((event.state === "checking" || event.state === "made") && event.take !== undefined && !picked.current) setShownId(event.take);
-      setSaid(event.state === "failed" ? event.reason ?? "not made" : null);
+      setSaid(event.state !== "failed" ? null : balanceFaulted({ fault: event.reason ?? null }) ? "Out of credit. Choose another model or add credit." : event.reason ?? "not made");
     }
     if (event.type === "comic.take-result" && event.page === page.id) {
       if (event.disposition !== "accepted") setRechecking(null);
@@ -701,8 +735,11 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
   // Accept waits for both checks (turn 253a); a take made before there was a review is unreviewed, not failed.
   const held = checking || reviewing;
   const passed = shown !== undefined && !held && takeClears(shown);
+  const usable = quote?.ok === true && !comicModelRefused(state, quote.model);
+  const modelLabel = (reference: string) => state?.app.harnessModels.find(model => harnessModelReference(model) === reference)?.displayName ?? reference.split("/").at(-1)!;
+  const makingJob = making[0] === undefined ? undefined : state?.app.jobs.find(job => job.target.kind === "bench-take" && job.target.id?.startsWith(`${making[0]!.session}/`) && job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled");
   const make = () => {
-    if (!quote?.ok) return;
+    if (!usable || !quote?.ok) return;
     setSaid(null);
     setPressed(true);
     setAttempt(1);
@@ -711,6 +748,8 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
     makeComicPage(worldId, productionId, page.id, until ? Math.max(quote.microUsd, Math.min(total, Math.round(settings.cap.usd * 1_000_000))) : quote.microUsd, undefined, until);
   };
   const press = busy ? "Making" : takes.length ? "Make again" : "Make page";
+  // Beside the press, since one press spends: the cap's price when it may try again.
+  const cost = quote?.ok !== true ? "" : quote.model === "codex-image" ? priceLabel(0, "included-plan") : priceLabel(until ? total : quote.microUsd);
   // An accepted take a re-check failed is kept only by covering what it found now.
   const covered = shown?.override !== undefined && takeBlocking(shown).every((id) => shown.override!.findings.includes(id));
   const reason = notChecked(verification);
@@ -751,6 +790,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
             <Spin size={22} />
             <b>Making</b>
             <span className="m">{attempt === null ? `Take ${takes.length + 1}` : until ? `Take ${attempt} of up to ${cap}` : "One take"}{making[0] !== undefined && <Since at={making[0].at} />}</span>
+            {makingJob !== undefined && <Button size="sm" onClick={() => cancelJob(makingJob.id)}>Cancel</Button>}
           </div>
         )}
         {!busy && held && <div className="fy-comic__band" role="status"><Spin size={14} />{checking ? "Checking lettering" : "Checking picture"}</div>}
@@ -765,7 +805,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
           <b>{lettered ? "Lettering" : `${blocking.length} to fix`}</b>
           {lettered && <span>{lines} of {lines}</span>}
           <span className="grow" />
-          <span className="m">{lettered ? "" : `${lines - new Set(blocking.map((finding) => finding.item)).size} of ${lines} lines · `}read by {verification.reader.version.split(":")[1] ?? verification.reader.id}</span>
+          <span className="m">{lettered ? "" : `${lines - new Set(blocking.map((finding) => finding.item)).size} of ${lines} lines · `}read by {modelLabel(verification.reader.version.split(":")[1] ?? verification.reader.id)}</span>
         </div>
       ) : (
         <div className="fy-comic__verdict warn"><TriangleAlert size={15} /><b>Not checked</b><span>{reason.text}</span></div>
@@ -779,7 +819,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
           <b>Picture</b>
           <span>{pictureFaults.length ? `${pictureFaults.length} to fix` : toLook.length ? `${toLook.length} to look at` : "as written"}</span>
           <span className="grow" />
-          <span className="m">{review.reviewer.version.split(":")[1] ?? review.reviewer.id}</span>
+          <span className="m">{modelLabel(review.reviewer.version.split(":")[1] ?? review.reviewer.id)}</span>
         </div>
       ) : (
         <div className="fy-comic__verdict pic warn"><TriangleAlert size={15} /><b>Picture</b><span>not checked</span><span className="grow" /><span className="m">{unreviewed.text === "not checked" ? "" : unreviewed.text}</span></div>
@@ -799,8 +839,9 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
         {shown !== undefined && !held && !outOfDate && !lettered && reason.reader && <Button variant="primary" onClick={chooseReader}>Choose reader</Button>}
         {shown !== undefined && !held && !outOfDate && lettered && unreviewed.reviewer && <Button variant="primary" onClick={onReviewer}>Choose reviewer</Button>}
         {shown !== undefined && !held && shown.id !== accepted && !outOfDate && passed && <Button variant="primary" onClick={() => acceptComicTake(worldId, productionId, page.id, shown.id)}>Accept</Button>}
-        <Button variant={shown !== undefined && !held && !outOfDate && ((passed && shown.id !== accepted) || (!lettered && reason.reader) || (lettered && unreviewed.reviewer)) ? "secondary" : "primary"} disabled={!quote?.ok || busy || !connected} onClick={make}
+        <Button variant={shown !== undefined && !held && !outOfDate && ((passed && shown.id !== accepted) || (!lettered && reason.reader) || (lettered && unreviewed.reviewer)) ? "secondary" : "primary"} disabled={!usable || busy || !connected} onClick={make}
           title={quote && !quote.ok ? quote.reason : undefined}>{busy ? <Spin size={13} /> : <Sparkle size={13} />}{press}</Button>
+        {usable && !busy && <span className="fy-comic__price">{cost}</span>}
         {shown !== undefined && !held && !outOfDate && !passed && (shown.id !== accepted || !covered) && (
           <Button title="Keeps this take with what was found on the record" onClick={() => acceptComicTake(worldId, productionId, page.id, shown.id, { findings: takeBlocking(shown) })}>Accept anyway</Button>
         )}
@@ -815,8 +856,9 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
         <label className="fy-comic__check"><input type="checkbox" checked={until} onChange={(event) => setUntil(event.target.checked)} />Until it passes</label>
         <span className="grow" />
         <Button variant="ghost" size="sm" aria-expanded={brief} onClick={() => setBrief(!brief)}>Brief</Button>
-        <span className="m">{quote === null ? "…" : !quote.ok ? quote.reason : `${quote.modelName} · ${quote.aspect}${quote.riding.length ? ` · ${quote.riding.join(", ")} ride` : ""}${quote.missing.length ? ` · no picture: ${quote.missing.join(", ")}` : ""} · ${priceLabel(quote.microUsd)}${until ? ` · up to ${cap} · ${priceLabel(total)}` : ""}`}</span>
+        <span className="m">{quote === null ? "…" : !quote.ok ? quote.reason : !usable ? `${quote.modelName} can't run · choose another` : `${quote.modelName} · ${quote.aspect}${quote.riding.length ? ` · ${quote.riding.join(", ")} ride` : ""}${until ? ` · up to ${cap} takes` : ""}`}</span>
       </div>
+      {usable && quote?.ok && quote.missing.length > 0 && <div className="fy-comic__verdict warn"><TriangleAlert size={15} /><span>No picture of {quote.missing.join(", ")}</span></div>}
       {brief && quote?.ok && <pre className="fy-comic__brief">{quote.brief}</pre>}
       {(said ?? problem) !== null && <div className="fy-comic__verdict bad"><CircleAlert size={15} /><span>{said ?? problem}</span></div>}
       {/* The findings follow the actions, so Accept never falls below the window (turn 251a). */}
@@ -1084,6 +1126,7 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
   const blockers = book.filter((entry) => entry.take === undefined || entry.outOfDate || !entry.cleared);
   const toggle = (format: "cbz" | "pdf" | "epub") => setFormats(formats.includes(format) ? formats.filter((f) => f !== format) : [...formats, format]);
   const chapters = production.chapters.filter((chapter) => !chapter.retired).length;
+  const empty = production.chapters.filter((chapter) => !chapter.retired && !book.some((entry) => entry.chapter === chapter.id));
   return (
     <EditorDialog open onClose={onClose} width={760} title={`Export · ${production.meta.title}`}>
       <div className="fy-comic-sheet">
@@ -1100,7 +1143,8 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
         </div>
         <div className="fy-comic-opts">
           <div className="fy-comic-opt"><b>Pages</b><span>{accepted} of {book.length} accepted</span><span className="grow" />{blockers.length > 0 && <i>{blockers.length} to clear</i>}</div>
-          <div className="fy-comic-opt"><b>Lettering</b><span>{checked} checked</span><span className="grow" />{anyway > 0 && <i>{anyway} accepted anyway</i>}</div>
+          <div className="fy-comic-opt"><b>Checks</b><span>{checked} passed</span><span className="grow" />{anyway > 0 && <i>{anyway} accepted anyway</i>}</div>
+          {empty.length > 0 && <div className="fy-comic-opt"><b>Not in this book</b><span>{empty.map((chapter) => `Chapter ${chapter.order}`).join(", ")}</span><span className="grow" /><i>no pages yet</i></div>}
           <div className="fy-comic-opt"><b>Reading</b><span>{READING.find(([value]) => value === settings.reading)?.[1]}</span></div>
           <div className="fy-comic-opt"><b>Edition</b><span>{new Date().toISOString().slice(0, 10)}</span></div>
         </div>

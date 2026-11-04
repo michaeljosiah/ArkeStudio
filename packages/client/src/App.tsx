@@ -390,7 +390,7 @@ function AppRoutes() {
           <Route path="stills" element={<Navigate to="../generate?view=stills" replace />} />
         </Route>
 
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/worlds" replace />} />
       </Routes>
       </RouteErrorBoundary>
       {inSettings && (

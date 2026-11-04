@@ -3,7 +3,7 @@
 /* Pages has the whole content area (turn 251a), as an audio drama's script does: not the 1,080
    column `Screen` gives a page of reading. */
 .fy-comic-screen { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.fy-comic { display: flex; flex-direction: column; flex: 1; height: 100%; min-height: 0; }
+.fy-comic { display: flex; flex-direction: column; flex: 1; height: 100%; min-height: 0; container-type: inline-size; }
 .fy-comic .grow { flex: 1; }
 .fy-comic .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-comic__head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-height: 56px; padding: 12px 20px; border-bottom: 1px solid var(--border); flex: none; }
@@ -16,6 +16,8 @@
 .fy-comic__sel select { border: 0; background: none; font: var(--type-label); color: var(--foreground); cursor: pointer; }
 .fy-comic__chapter { max-width: min(320px, 100%); min-width: 0; box-sizing: border-box; }
 .fy-comic__chapter select { min-width: 0; text-overflow: ellipsis; }
+/* The picker's own value says what it is; dropping the word keeps Export on the title's line. */
+@container (max-width: 860px) { .fy-comic__sel b { display: none; } }
 @media (max-width: 720px) {
   .fy-comic__chapter { flex: 1 1 100%; max-width: 100%; }
   .fy-comic__chapter select { flex: 1; }
@@ -23,6 +25,11 @@
 }
 
 .fy-comic__body { flex: 1; min-height: 0; display: grid; grid-template-columns: 136px minmax(0, 1fr) 420px; }
+/* Narrow, as with the chat open: strip beside the script, the page beneath it, one scroll for both. */
+.fy-comic__body.narrow { grid-template-columns: 96px minmax(0, 1fr); grid-auto-rows: min-content; overflow-y: auto; }
+.fy-comic__body.narrow .fy-comic__strip { grid-row: 1 / span 2; overflow: visible; }
+.fy-comic__body.narrow .fy-comic__edit { overflow: visible; }
+.fy-comic__body.narrow .fy-comic__side { grid-column: 2; border-left: 0; border-top: 1px solid var(--border); overflow: visible; }
 .fy-comic__strip { border-right: 1px solid var(--border); padding: 14px 12px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
 .fy-comic__thumb { position: relative; width: 100%; aspect-ratio: 2 / 3; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--secondary); padding: 0; cursor: pointer; flex: none; }
 .fy-comic__thumb.on { outline: 2px solid var(--foreground); outline-offset: 1px; }
@@ -35,7 +42,7 @@
 .fy-comic__thumb.busy .fy-comic__spin { position: relative; color: var(--foreground); }
 .fy-comic__over { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: color-mix(in srgb, var(--background) 72%, transparent); font: var(--type-label); color: var(--foreground); }
 .fy-comic__over b { font-weight: 600; font-size: var(--text-sm); }
-.fy-comic__band { position: absolute; z-index: 3; left: 0; right: 0; bottom: 0; height: 30px; display: flex; align-items: center; justify-content: center; gap: 8px; background: color-mix(in srgb, var(--background) 86%, transparent); font: var(--type-label); color: var(--foreground); }
+.fy-comic__band { position: absolute; z-index: 3; left: 8px; top: 8px; height: 28px; padding: 0 12px; border-radius: 999px; display: flex; align-items: center; justify-content: center; gap: 8px; background: color-mix(in srgb, var(--background) 86%, transparent); font: var(--type-label); color: var(--foreground); }
 .fy-comic__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .fy-comic__thumb .n { position: absolute; left: 5px; bottom: 4px; font: var(--type-mono); font-size: var(--text-2xs); color: var(--foreground); background: var(--background); border-radius: 4px; padding: 0 4px; }
 .fy-comic__thumb .s { position: absolute; right: 5px; top: 4px; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; background: var(--background); color: var(--success); }
@@ -53,15 +60,15 @@
 .fy-comic__panel { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; flex: none; }
 .fy-comic__ph { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 0 8px 0 12px; background: var(--secondary); font: var(--type-label); }
 .fy-comic__ph b { font-weight: 600; }
-.fy-comic__desc { display: block; width: 100%; min-height: 44px; padding: 10px 12px; border: 0; border-top: 1px solid var(--border); font: var(--type-body); font-size: var(--text-sm); resize: vertical; background: var(--background); color: var(--foreground); }
+.fy-comic__desc { display: block; width: 100%; field-sizing: content; min-height: 44px; padding: 10px 12px; border: 0; border-top: 1px solid var(--border); font: var(--type-body); font-size: var(--text-sm); resize: vertical; background: var(--background); color: var(--foreground); }
 .fy-comic__row { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 4px 8px 4px 12px; border-top: 1px solid var(--border); font-size: var(--text-sm); flex-wrap: wrap; }
 .fy-comic__row > b { width: 62px; flex: none; font-weight: 500; color: var(--muted-foreground); font-size: var(--text-xs); }
 .fy-comic__chip { height: 24px; padding: 0 4px 0 9px; border: 1px solid var(--border); border-radius: 999px; display: inline-flex; align-items: center; gap: 4px; font: var(--type-label); font-size: var(--text-xs); }
 .fy-comic__chip button { border: 0; background: none; color: var(--muted-foreground); cursor: pointer; display: grid; place-items: center; padding: 2px; }
-.fy-comic__row select, .fy-comic__row input { height: 28px; border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; font: var(--type-label); font-size: var(--text-xs); background: var(--background); color: var(--foreground); }
+.fy-comic__row select, .fy-comic__row input, .fy-comic__row textarea { height: 28px; border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; font: var(--type-label); font-size: var(--text-xs); background: var(--background); color: var(--foreground); }
 .fy-comic__row .kind { width: 86px; flex: none; }
-.fy-comic__row .who { width: 104px; flex: none; }
-.fy-comic__row .words { flex: 1; min-width: 120px; font: var(--type-body); font-size: var(--text-sm); }
+.fy-comic__row .who { width: 128px; flex: none; padding-right: 24px; text-overflow: ellipsis; }
+.fy-comic__row .words { flex: 1; min-width: 120px; font: var(--type-body); font-size: var(--text-sm); field-sizing: content; resize: none; }
 .fy-comic__row .words.bad { border-color: color-mix(in srgb, var(--destructive) 60%, var(--border)); }
 .fy-comic__more { display: flex; gap: 6px; padding: 6px 12px; border-top: 1px solid var(--border); }
 .fy-comic__link { border: 0; background: none; font: var(--type-label); color: var(--muted-foreground); cursor: pointer; padding: 0; }
@@ -77,6 +84,7 @@
 .fy-comic__hit.w span { background: var(--warning); color: var(--foreground); }
 .fy-comic__make { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .fy-comic__make .m { flex-basis: 100%; }
+.fy-comic__price { font: var(--type-label); font-weight: 600; white-space: nowrap; }
 .fy-comic__check { display: inline-flex; align-items: center; gap: 6px; font: var(--type-label); cursor: pointer; }
 .fy-comic__brief { margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font: var(--type-mono); font-size: var(--text-2xs); white-space: pre-wrap; max-height: 220px; overflow-y: auto; }
 .fy-comic__takes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -208,8 +216,8 @@
 .fy-comic__find .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; }
 
 /* The page plan and the cold read (turn 254). */
-.fy-comic__plan { grid-column: 2 / 4; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; overflow: auto; min-height: 0; }
-.fy-comic__plancols { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 24px; }
+.fy-comic__plan { grid-column: 1 / -1; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; overflow: auto; min-height: 0; }
+.fy-comic__plancols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 24px; }
 .fy-comic__plancols section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .fy-comic__plan h4 { margin: 0; font: var(--type-label); font-weight: 600; color: var(--muted-foreground); }
 .fy-comic__planlist { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
@@ -220,7 +228,9 @@
 .fy-comic__planrow .why { display: block; font: var(--type-meta); color: var(--muted-foreground); }
 .fy-comic__planrow .n { width: 16px; flex: none; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-comic__planrow .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; }
-.fy-comic__planrow.kn { min-height: 34px; }
+.fy-comic__planrow.kn { min-height: 34px; flex-wrap: wrap; }
+.fy-comic__planrow.kn .t { min-width: 120px; }
+.fy-comic__planrow.kn .m { white-space: normal; }
 .fy-comic__verdictchip { flex: none; height: 22px; padding: 0 8px; border-radius: 999px; display: inline-flex; align-items: center; font: var(--type-label); font-size: var(--text-xs); border: 1px solid var(--border); }
 .fy-comic__verdictchip.keep { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, var(--border)); }
 .fy-comic__verdictchip.cut { color: var(--muted-foreground); text-decoration: line-through; }
@@ -275,6 +285,9 @@
 .fy-comic-dash > .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); margin-top: -8px; }
 .fy-comic-dash__next { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--foreground) 4%, transparent); font-size: var(--text-sm); }
 .fy-comic-dash__next b { font-weight: 600; }
+.fy-comic-dash__pages { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.fy-comic-dash__pages button { flex: none; width: 132px; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: none; cursor: pointer; }
+.fy-comic-dash__pages img { display: block; width: 100%; height: auto; }
 .fy-comic-dash__rows { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .fy-comic-dash__rows li + li { border-top: 1px solid var(--border); }
 .fy-comic-dash__rows button { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 5px 12px; border: 0; background: none; color: inherit; font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; }

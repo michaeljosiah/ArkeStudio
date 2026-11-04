@@ -1,4 +1,5 @@
 import { PromptTargetSchema, PromptInspectSourceSchema } from "./prompt-tools.js";
+import { WorldChatInputRequestSchema, WorldChatInputRoutingSchema } from "./world-chat-input.js";
 import { MediaMeasurementSourceSchema } from "./media-measurement.js";
 import { Sha256Schema as MeasurementHashSchema } from "./ids.js";
 import { TraversalEvidenceSchema } from "./routing.js";
@@ -732,6 +733,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       conversationId: ConversationIdSchema,
     })
     .strict(),
+  z.object({ kind: z.literal("world-chat-input"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    input: WorldChatInputRequestSchema }).strict(),
+  z.object({ kind: z.literal("world-chat-input-status"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    requestId: z.string().min(1).max(200) }).strict(),
+  z.object({ kind: z.literal("world-chat-input-remove"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    requestId: z.string().min(1).max(200), messageId: z.string().min(1), revision: z.number().int().min(0) }).strict(),
+  z.object({ kind: z.literal("world-chat-input-continue"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    requestId: z.string().min(1).max(200), revision: z.number().int().min(0), routing: WorldChatInputRoutingSchema }).strict(),
   /**
    * #70 §10.1.1: turn the conversation into proposals and close it.
    *
@@ -4612,6 +4621,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       takeId: TakeIdSchema,
     })
     .strict(),
+  z.object({ kind: z.literal("bench-use-reference"), worldId: UlidSchema, sessionId: SessionIdSchema,
+    takeId: TakeIdSchema, sheetId: SlugSchema, image: z.enum(["main-photo", "character-sheet"]), requestId: UlidSchema }).strict(),
   /** Subject sessions file into production; the world-scoped bench keeps using bench-keep. */
   z
     .object({

@@ -295,7 +295,9 @@ async function askOnce(
   if (signal.aborted) throw new Error("cancelled");
   let finalText = "";
   const abort = new AbortController();
-  const onAbort = () => abort.abort();
+  let interruption: Promise<void> | undefined;
+  const interrupt = () => interruption ??= adapter.interrupt?.(sessionId) ?? Promise.resolve();
+  const onAbort = () => { abort.abort(); void interrupt().catch(() => {}); };
   signal.addEventListener("abort", onAbort, { once: true });
 
   const events = adapter.streamEvents(abort.signal);
@@ -362,6 +364,9 @@ async function askOnce(
     clearTimeout(deadline);
     abort.abort();
     signal.removeEventListener("abort", onAbort);
+    // Releasing an event listener does not stop generation. Keep this conversation's slot until
+    // its requested interruption settles; a queued reply must not overtake native cancellation.
+    if (signal.aborted || finalText === "") await interrupt();
   }
   return finalText;
 }
@@ -372,6 +377,7 @@ interface QueuedTurn {
   input: WorldChatInputRecord;
   revision: number;
   routing: WorldChatInputRouting;
+  beforePromote?: () => Promise<void>;
 }
 
 export class WorldChatRunner {
@@ -450,7 +456,8 @@ export class WorldChatRunner {
    * A promoted turn that fails is retried through ordinary Retry, never promoted again.
    */
   async sendQueued(journal: WorldChatInputJournal, messageId: MessageId,
-    expectedRevision: number, routing: WorldChatInputRouting): Promise<TurnOutcome> {
+    expectedRevision: number, routing: WorldChatInputRouting,
+    onAdmitted?: (turnId: TurnId) => void, beforePromote?: () => Promise<void>): Promise<TurnOutcome> {
     const capturedRouting = structuredClone(routing);
     return this.runExclusive(journal.conversationId, async controller => {
       let queue;
@@ -461,7 +468,7 @@ export class WorldChatRunner {
         throw error;
       }
       const row = queue.inputs.find(one => one.input.messageId === messageId);
-      if (!row || queue.revision !== expectedRevision) {
+      if (!row) {
         return { status: "unavailable", reason: "The queued messages changed. Look again before continuing." };
       }
       // The queue's own rules are asked before any model work (R-16): a paused queue, a later
@@ -474,10 +481,10 @@ export class WorldChatRunner {
         return { status: "unavailable", reason: "The writing engine or model changed. Review the target before continuing." };
       }
       if (controller.signal.aborted) return this.stopQueued(journal, controller, messageId);
-      const queued: QueuedTurn = { journal, input: row.input, revision: expectedRevision, routing: capturedRouting };
+      const queued: QueuedTurn = { journal, input: row.input, revision: expectedRevision, routing: capturedRouting, beforePromote };
       return this.runRegisteredTurn(controller, journal.log, journal.conversationId, row.input.request.text,
         row.input.request.attachmentIds, undefined, row.input.constraints.subject,
-        capturedRouting.modelId ?? undefined, row.input.constraints.replyOnly, undefined, queued);
+        capturedRouting.modelId ?? undefined, row.input.constraints.replyOnly, onAdmitted, queued, row.input.request.variant);
     });
   }
 
@@ -778,7 +785,8 @@ export class WorldChatRunner {
       if (controller.signal.aborted) return this.stopQueued(queued.journal, controller, queued.input.messageId);
       if (modelChoice.reason !== undefined) return { status: "unavailable", reason: modelChoice.reason };
       try {
-        await queued.journal.promote(queued.input.messageId, queued.revision, run, queued.routing, runId);
+        await queued.beforePromote?.();
+        await queued.journal.promote(queued.input.messageId, queued.revision, run, queued.routing, runId, true);
       } catch (error) {
         if (error instanceof WorldChatInputError) return { status: "unavailable", reason: error.message };
         throw error;

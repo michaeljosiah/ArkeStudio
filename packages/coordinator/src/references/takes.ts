@@ -323,7 +323,7 @@ export async function recordUploadedCharacterSheetTake(
   sheetId: string,
   media: string,
   data: Uint8Array,
-  options: { requestId?: string; precondition?: WorldStatePrecondition } = {},
+  options: { requestId?: string; precondition?: WorldStatePrecondition; source?: Partial<Pick<Take, "provider" | "model" | "jobId" | "prompt" | "params" | "cost" | "dispatchedAt">> } = {},
 ): Promise<Take> {
   return recordUploadedImageTake(store, sheetId, "sheet", media, data, options);
 }
@@ -333,7 +333,7 @@ export async function recordUploadedMainPhotoTake(
   sheetId: string,
   media: string,
   data: Uint8Array,
-  options: { requestId?: string; precondition?: WorldStatePrecondition } = {},
+  options: { requestId?: string; precondition?: WorldStatePrecondition; source?: Partial<Pick<Take, "provider" | "model" | "jobId" | "prompt" | "params" | "cost" | "dispatchedAt">> } = {},
 ): Promise<Take> {
   return recordUploadedImageTake(store, sheetId, "main-photo", media, data, options);
 }
@@ -372,7 +372,7 @@ async function recordUploadedImageTake(
   kind: Take["kind"],
   media: string,
   data: Uint8Array,
-  options: { requestId?: string; precondition?: WorldStatePrecondition },
+  options: { requestId?: string; precondition?: WorldStatePrecondition; source?: Partial<Pick<Take, "provider" | "model" | "jobId" | "prompt" | "params" | "cost" | "dispatchedAt">> },
   params: Record<string, unknown> = {},
 ): Promise<Take> {
   // A plain filename and nothing else. `basename` alone lets "." and ".." through — basename("..")
@@ -393,11 +393,13 @@ async function recordUploadedImageTake(
         throw new Error("The import request changed.");
       return existing;
     }
-    const take = uploadedTake(store, sheetId, kind, media, {
+    const metadata = {
+      ...options.source?.params,
       ...params,
       uploadedFile: media,
       ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
-    });
+    };
+    const take = { ...uploadedTake(store, sheetId, kind, media, metadata), ...options.source, params: metadata };
     await writeTakeDirectory(store, sheetId, take, async (dir) => {
       // Staged and renamed like every other write here, so a half-written 40 MB sheet cannot be
       // mistaken for a finished one (SPEC-002 R-13).

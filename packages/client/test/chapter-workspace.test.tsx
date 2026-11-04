@@ -1608,7 +1608,7 @@ describe("the craft loop (turn 128)", () => {
     }
   });
 
-  it("a line started while the dock is busy is focused once it frees (codex on PR 1232)", async () => {
+  it("a line started while the dock is busy is focused at once, since a busy box takes the next message", async () => {
     const styled = inkbound([], STYLE);
     const workspace = {
       conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
@@ -1629,9 +1629,9 @@ describe("the craft loop (turn 128)", () => {
       await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
       await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
       const editorFocused = () => focused.filter((name) => name.includes("fy-cx__editor")).length;
-      assert.equal(editorFocused(), 0, "a locked box takes no focus");
+      assert.equal(editorFocused(), 1, "a running conversation queues what is typed, so the box is open (#2438)");
       await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, runStatus: null } } as ClientState));
-      assert.equal(editorFocused(), 1, "and takes it once it unlocks");
+      assert.equal(editorFocused(), 1, "and the run ending is not a second request");
       await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, runStatus: "running" } } as ClientState));
       await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, runStatus: null } } as ClientState));
       assert.equal(editorFocused(), 1, "once: unlocking again later is not a new request");

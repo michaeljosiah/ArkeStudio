@@ -1,7 +1,7 @@
 import { AudiobookActivityRow } from "./audiobook-activity.js";
 import { JobStorageWaitNotice } from "./job-storage-wait.js";
 import { useWordTimingActivity, WordTimingActivityRow } from "./audiobook-timing-activity.js";
-import { audiobookActivityLive, audiobookJobRun, audiobookRequestCost } from "@arke-studio/contracts";
+import { audiobookActivityLive, audiobookJobRun, audiobookRequestCost, groupTakesToReview } from "@arke-studio/contracts";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, type NavigateFunction } from "react-router";
 import {
@@ -385,6 +385,7 @@ function Inbox({
     }
     return null;
   };
+  const needRows = groupTakesToReview(ordinaryNeeds);
   const quiet = ordinaryRunning.length === 0 && liveReads.length === 0 && timing.length === 0 && ordinaryNeeds.length === 0 && attentionReads.length === 0;
   const worldSlug = state.world?.meta.slug ?? null;
 
@@ -428,9 +429,9 @@ function Inbox({
         <div className="fy-ap__empty">Nothing running, nothing waiting on you</div>
       ) : (
         <>
-          {ordinaryNeeds.length + attentionReads.length > 0 && <Eyebrow first>Needs you · {ordinaryNeeds.length + attentionReads.length}</Eyebrow>}
+          {ordinaryNeeds.length + attentionReads.length > 0 && <Eyebrow first>Needs you · {needRows.length + attentionReads.length}</Eyebrow>}
           {attentionReads.map(run => <AudiobookActivityRow key={run.id} run={run} state={state} />)}
-          {ordinaryNeeds.map((entry, i) => (
+          {needRows.map((entry, i) => (
             <NeedsYouRow
               key={`${entry.kind}-${entry.ref ?? entry.worldId ?? i}`}
               entry={entry}
@@ -500,6 +501,9 @@ function Inbox({
 
 function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: boolean; navigate: NavigateFunction }) {
   const ref = entry.ref;
+  // A local engine has no bill to double, and the row above it says "no charge".
+  const heldProvider = useStore().state?.app.jobs.find(job => job.id === ref)?.provider;
+  const local = (PROVIDERS as Record<string, { local?: boolean } | undefined>)[heldProvider ?? ""]?.local === true;
   return (
     <div className="fy-ap__row fy-ap__row--top">
       <span className="fy-ap__dot fy-ap__dot--warn" />
@@ -508,7 +512,7 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
           <span>{entry.title}</span>
           {entry.asOf && <Badge tone="outline">as of {shortDateTime(entry.asOf)} — not current</Badge>}
         </div>
-        <div className="fy-ap__rowsub">{entry.detail}</div>
+        {entry.detail && <div className="fy-ap__rowsub">{entry.detail}</div>}
         <div className="fy-ap__actions">
           {isJob && ref && (
             <IconButton label="Provider calls" onClick={() => inspectProviderCalls(ref)}>
@@ -518,22 +522,22 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
           {entry.actions.includes("resolve") && ref && (
             <>
               <Button size="sm" onClick={() => resolveHeldJob(ref, "resubmit")}>
-                Resubmit · may charge again
+                {local ? "Resubmit" : "Resubmit · may charge again"}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => resolveHeldJob(ref, "discard")}>
-                Abandon · prior cost unknown
+                {local ? "Abandon" : "Abandon · prior cost unknown"}
               </Button>
             </>
           )}
           {entry.actions.includes("retry-finalization") && ref && (
             <Button size="sm" onClick={() => retryJobFinalization(ref)}>
-              Retry finalization · no regeneration or charge
+              Try again · no charge
             </Button>
           )}
           {entry.actions.includes("settings") && ref && (
             <>
               <Button size="sm" onClick={() => resumeQueue(ref)}>
-                Resume {ref}
+                Resume {(PROVIDERS as Record<string, { displayName: string } | undefined>)[ref]?.displayName ?? ref}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => navigate("/settings/providers")}>
                 Settings
@@ -587,7 +591,7 @@ function RunningRow({ entry, activeWorldId }: { entry: RunningEntry; activeWorld
   const { state, connection } = useStore();
   const wait = state?.app.jobs.find(job => entry.kind === "job" && job.id === entry.ref)?.storageWait;
   const compact = useMediaQuery("(max-width: 1099px)");
-  const queued = /\b(queued|submitting)$/.test(entry.detail);
+  const queued = /\b(queued|submitting|paused)$/.test(entry.detail);
   return (
     <div className="fy-ap__row">
       <span className={cx("fy-ap__dot", queued ? "fy-ap__dot--queued" : "fy-ap__dot--live")} />
@@ -884,10 +888,10 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
   const sourceNote = state.app.ledgerUnavailable
     ? "ledger could not be read"
     : spend.mixed
-      ? `mixed · ${spend.reportedEntries} measured, ${spend.derivedEntries} derived`
+      ? "part estimated"
       : spend.derivedEntries > 0
-        ? "derived from the manifest"
-        : "provider-reported";
+        ? "estimated"
+        : "";
   // A fired alert outranks everything: `alerted` is only ever computed from entries that were
   // read, so the crossing is real even when a later read failed. Then the un-evaluated case — a
   // status whose read failed has an un-fired alert, which is not an all-clear (SPEC-008 R-19).
@@ -937,7 +941,7 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
                   ...(row.characters > 0 ? [`${compactCount(row.characters)} characters`] : []),
                 ].join(" · ")}
               </span>
-              <span>{row.plan === "included-plan" ? "Codex allowance used is unknown" : row.plan === "free-plan" ? formatMicroUsd(row.microUsd) : `${formatMicroUsd(row.microUsd)} of credit`}</span>
+              <span>{row.plan === "included-plan" ? "on your plan" : row.plan === "free-plan" ? formatMicroUsd(row.microUsd) : `${formatMicroUsd(row.microUsd)} of credit`}</span>
             </div>
           ))}
         </div>

@@ -138,7 +138,7 @@ export function AppChrome({
             <span className="fy-titlebar__context">{context.label}</span>
           ))}
         {menu}
-        {controls && contextual && <button type="button" className="fy-iconbtn" title={contextual.title} aria-label={`Open ${contextual.title}`}
+        {controls && contextual && !(contextual.kind === "world" && /\/chat(\/|$)/.test(contextual.path)) && <button type="button" className="fy-iconbtn" title={contextual.title} aria-label={`Open ${contextual.title}`}
           aria-expanded={contextualView?.open === true && contextualView.selected?.key === contextual.key}
           data-contextual-chat-trigger="" data-global-chat-trigger=""
           onClick={() => { closeSystemPanel(); studio?.close(); chat?.open(contextual); }}><Sparkle size={13} /></button>}

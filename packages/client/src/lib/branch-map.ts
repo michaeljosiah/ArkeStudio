@@ -10,7 +10,7 @@ export const NODE_W = 148;
 export const THUMB_H = 83;
 export const NODE_H = THUMB_H + 48;
 /** Wide enough for a two-line label between layers; the layout pitch is card plus gap. */
-export const LAYER_GAP = 120;
+export const LAYER_GAP = 150;
 export const ROW_GAP = 89;
 const PAD_X = 24;
 /** Room above the first row for tags and for the arc of a choice that skips a layer. */

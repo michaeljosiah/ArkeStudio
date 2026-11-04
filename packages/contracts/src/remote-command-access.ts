@@ -68,6 +68,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "proposal-mark-seen": "studio", "proposal-resolve-choice": "studio", "proposal-update-field": "studio",
   "proposal-update-passage": "studio", "world-chat-open": "studio", "conversation-action-decide": "resolved", "conversation-take-review-prepare": "studio",
   "world-chat-send": "studio", "world-chat-send-status": "studio", "world-chat-wrap-up": "studio",
+  "world-chat-input": "studio", "world-chat-input-status": "studio", "world-chat-input-remove": "studio", "world-chat-input-continue": "studio",
   "world-chat-save-point": "studio", "world-chat-reject-point": "studio", "world-chat-open-media": "studio",
   "world-chat-retry-turn": "studio", "proposal-send-back": "studio", "world-chat-cancel": "studio",
   "world-chat-create": "studio", "world-chat-delete": "studio", "world-chat-set-initiative": "studio",
@@ -166,7 +167,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "bench-add-reference": "studio", "bench-remove-reference": "studio", "bench-enhance-brief": "studio",
   "bench-draft-lyrics": "studio", "bench-preset-save": "studio",
   "bench-preset-delete": "studio", "bench-dispatch": "studio", "bench-rerun": "studio",
-  "bench-keep": "studio", "bench-accept": "studio", "bench-discard": "studio",
+  "bench-keep": "studio", "bench-accept": "studio", "bench-discard": "studio", "bench-use-reference": "studio",
   "bench-clear-view": "studio", "bench-take-files": "studio", "bench-delete": "studio", "bench-upscale": "studio", "bench-select-take": "studio", "stage-artifact-reference": "studio",
 } as const satisfies Record<ClientMessage["kind"], "host" | "payload" | "resolved" | "studio">;
 

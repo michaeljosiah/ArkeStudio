@@ -558,7 +558,7 @@ describe("key art on the art-direction page (design 64)", () => {
     assert.ok(from > 0 && to > from, "the master frame renders, and the key-art band after it");
     const hero = html.slice(from, to);
     assert.ok(!hero.includes("world-art.png"), "the master frame does not borrow the key art");
-    assert.match(hero, /NO MASTER LOOK/, "an unset picture says it is unset");
+    assert.match(hero, /No master look yet/, "an unset picture says it is unset");
     // And the key art is still on the page — in its own frame, below.
     assert.match(html.slice(to), /world-art\.png/);
   });
@@ -571,7 +571,7 @@ describe("key art on the art-direction page (design 64)", () => {
   it("names each of the two pictures, and argues for neither", () => {
     const html = renderArtDirection({ keyArt: "world-art.png" });
     assert.match(html, /WORLD KEY ART/, "the second picture is named");
-    assert.match(html, /Master look|NO MASTER LOOK/, "and so is the first");
+    assert.match(html, /Master look|No master look yet/, "and so is the first");
     assert.doesNotMatch(html, /Nothing sends it to a model/i, "without the paragraph explaining why");
   });
 
@@ -587,7 +587,7 @@ describe("key art on the art-direction page (design 64)", () => {
       { keyArt: "world-art.png", artDirection: { ...WORLD.artDirection, derived: true } },
     ]) {
       const html = renderArtDirection(bundle);
-      assert.match(html, /A plate travels safely\. A face travels with it\./, "SPEC-017 §2.5");
+      assert.match(html, /Keep faces out of the look\. A face here shows up on everyone\./, "SPEC-017 §2.5");
     }
   });
 
@@ -605,7 +605,7 @@ describe("key art on the art-direction page (design 64)", () => {
 
   it("states the empty case rather than hiding the block", () => {
     const html = renderArtDirection({ keyArt: null });
-    assert.match(html, /NO KEY ART/);
+    assert.match(html, /No key art yet/);
     assert.match(html, /fy-artdirection__keyart--empty/, "and the doors are still reachable on it");
   });
 });

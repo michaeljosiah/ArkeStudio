@@ -276,7 +276,7 @@ describe("the season page (design turn 91)", () => {
     assert.match(html, /The question it answers/, "what the season is sits in the header");
     assert.match(html, /Who is ringing the drowned bell\?/);
     assert.match(html, /How it ends/);
-    assert.match(html, /Series engine · read-only/, "inheritance is shown, not hidden");
+    assert.match(html, /Series engine/, "inheritance is shown, not hidden");
     assert.match(html, /Every episode answers one bell/);
   });
 

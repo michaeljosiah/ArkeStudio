@@ -32,7 +32,7 @@ import { NarratorDialog } from "./audiobook-narrator.js";
 import { CreditRow, CreditsSheet } from "./audiobook-credits.js";
 import { BookRequests, NoteRow, SpeakerNoteInput } from "./chapter-audiobook.js";
 import { EditorDialog } from "../components/editor-dialog.js";
-import { ChevronLeft, ChevronRight, More, PlaySolid, Waveform, X } from "../components/icons.js";
+import { ChevronLeft, ChevronRight, More, PlaySolid, User, Waveform, X } from "../components/icons.js";
 import { Portrait } from "../components/portrait.js";
 import { EmptyState } from "../components/layout.js";
 import { AudiobookPlayerView, bookHasTakes } from "../components/audiobook-player.js";
@@ -519,7 +519,7 @@ export function AudiobookScreen() {
     if (readingNow) {
       return (
         <span className="fy-abshow__run" data-testid="audiobook-run">
-          reading… {book.done} of {book.chapters} chapter{book.chapters === 1 ? "" : "s"}
+          reading… {book.done} of {book.chapters}
           <button type="button" className="fy-abshow__btn" onClick={() => stopAudiobookBook(worldId, prodId)}>
             Stop
           </button>
@@ -859,7 +859,7 @@ function CastCard({ name, role, slug, picture, onPress }: { name: string; role?:
   return (
     <button type="button" className={cx("fy-abshow__card", role !== undefined && "fy-abshow__card--narrator")} disabled={onPress === undefined} onClick={onPress} data-testid="audiobook-card">
       <span className="fy-abshow__card-im">
-        {picture !== null ? <Portrait worldSlug={slug} path={picture} label="" radius={0} loading="lazy" /> : <span className="fy-abshow__ini" aria-hidden="true">{name.trim().charAt(0).toUpperCase()}</span>}
+        {picture !== null ? <Portrait worldSlug={slug} path={picture} label="" radius={0} loading="lazy" /> : <span className="fy-abshow__ini" aria-hidden="true"><User size={30} stroke={1.5} /></span>}
         {role !== undefined && (
           <span className="fy-abshow__wv" aria-hidden="true">
             <Waveform size={15} stroke={2} />

@@ -1,5 +1,5 @@
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, rename, rm } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import PDFDocument from "pdfkit";
@@ -163,7 +163,9 @@ export async function exportComic(store: WorldStore, productionId: string, forma
   await mkdir(toExtendedLength(dir), { recursive: true });
   const made: Array<{ format: ComicExportFormat; file: string }> = [];
   for (const format of formats) {
-    const file = `exports/${productionId}-comic-${date}.${format}`;
+    // A second export the same day keeps the first file, as the Player package does.
+    let file = `exports/${productionId}-comic-${date}.${format}`;
+    for (let n = 2; await access(toExtendedLength(join(store.dir, fromPortable(file)))).then(() => true, () => false); n++) file = `exports/${productionId}-comic-${date}-${n}.${format}`;
     const target = join(store.dir, fromPortable(file));
     const partial = `${target}.${requestId}.partial`;
     try {
