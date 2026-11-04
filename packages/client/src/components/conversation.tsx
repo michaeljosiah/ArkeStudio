@@ -76,6 +76,7 @@ import { ARKE_HALF_QUERY } from "../lib/arke-half.js";
 import { ReplyRead } from "./read-aloud.js";
 import { useReadReplies } from "./read-replies.js";
 import { ConversationReply } from "./conversation-reply.js";
+import { ConversationAttachments } from "./conversation-attachments.js";
 
 /**
  * One conversation, drawn once (design turn 86).
@@ -127,7 +128,8 @@ export function ConversationTranscript({
   about?: string;
 }) {
   const navigate = useNavigate();
-  const worldId = useStore().state?.world?.meta.worldId;
+  const world = useStore().state?.world;
+  const worldId = world?.meta.worldId;
   const messages = workspace?.messages ?? [];
   const visibleTurns = new Set(messages.filter((message) => message.role === "studio").map((message) => message.turnId));
   const humanDecisions = workspace?.humanDecisions ?? [];
@@ -172,6 +174,7 @@ export function ConversationTranscript({
         >
           <div className="fy-chat__bubble">
             {m.role === "studio" ? <ConversationReply key={m.id} text={m.text} /> : about === undefined ? m.text : withoutSubject(m.text, about)}
+            {m.role === "user" && <ConversationAttachments ids={m.attachmentIds ?? []} attachments={workspace?.attachments ?? []} worldSlug={world?.meta.slug} />}
             {m.role === "studio" && m.receipts.length > 0 && (
               // One tick for the row, not one per receipt: the tick means "this is what was
               // read", and repeating it turned a footnote into a checklist.

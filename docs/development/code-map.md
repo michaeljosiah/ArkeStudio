@@ -1926,6 +1926,14 @@ Client `components/system-panel.tsx`/CSS and `lib/system-panel.ts` own the round
 authenticated event/snapshot path, without becoming journal or support-export data. The existing
 Diagnostics route receives a finding reference for warning focus. See [system status](system-status.md)
 for collection limits, ownership, unavailable data and validation.
+### Sent conversation attachments (#1412)
+
+Coordinator `world-chat/project.ts` preserves each message's attachment IDs and supplies portable
+image preview paths from its conversation's attachment records. Client `conversation.tsx` and
+`conversation-attachments.tsx` show the saved membership with authenticated media and a named
+fallback for missing previews. Coverage: coordinator `world-chat/attachments.test.ts` and client
+`conversation-attachments.test.tsx`; SPEC-050 R-56.
+
 ### Manual visual-novel lines (#1384)
 
 Client `screens/scene-workspace/beat-line-editor.tsx` edits a beat's narration or character line
