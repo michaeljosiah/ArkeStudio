@@ -81,6 +81,11 @@ changing assignments or deleting audio. The saved library in the design dialog p
 locally, including expired ones. A replacement is a new explicit identity and assignment; no
 automatic regeneration or rebinding occurs. Remote deletion and replication remain separate work.
 
+Verifying an already saved ID refreshes its expiry under the world transaction. The stored name,
+description, language, acoustic revision and accepted audition stay unchanged; a changed design,
+expired identity or failed lookup is refused without rewriting the record. Refresh needs no new
+provider audition where the world already keeps one. It does not renew or recreate a remote voice.
+
 On 2026-09-28 the [Voices reference](https://ai.google.dev/api/voices) and
 [voice-design guide](https://ai.google.dev/gemini-api/docs/voice-design) document `CreateVoice`
 and its token usage. At the author's direction, creation estimates use the selected model's
