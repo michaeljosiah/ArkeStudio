@@ -100,7 +100,7 @@ export function ComicPagesScreen() {
   return <ComicPages key={`${world.meta.worldId}/${production.meta.id}`} world={world} production={production} />;
 }
 
-function takeFile(world: WorldBundle, take: ComicPageTake | undefined): string | null {
+export function takeFile(world: WorldBundle, take: ComicPageTake | undefined): string | null {
   const artifact = take === undefined ? undefined : world.artifacts.find((candidate) => candidate.id === take.artifact);
   return artifact === undefined ? null : mediaUrl(world.meta.slug, `artifacts/${artifact.file}`);
 }
