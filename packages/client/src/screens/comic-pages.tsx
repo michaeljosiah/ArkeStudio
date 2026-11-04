@@ -1093,6 +1093,7 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
   const blockers = book.filter((entry) => entry.take === undefined || entry.outOfDate || !entry.cleared);
   const toggle = (format: "cbz" | "pdf" | "epub") => setFormats(formats.includes(format) ? formats.filter((f) => f !== format) : [...formats, format]);
   const chapters = production.chapters.filter((chapter) => !chapter.retired).length;
+  const empty = production.chapters.filter((chapter) => !chapter.retired && !book.some((entry) => entry.chapter === chapter.id));
   return (
     <EditorDialog open onClose={onClose} width={760} title={`Export · ${production.meta.title}`}>
       <div className="fy-comic-sheet">
@@ -1109,7 +1110,8 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
         </div>
         <div className="fy-comic-opts">
           <div className="fy-comic-opt"><b>Pages</b><span>{accepted} of {book.length} accepted</span><span className="grow" />{blockers.length > 0 && <i>{blockers.length} to clear</i>}</div>
-          <div className="fy-comic-opt"><b>Lettering</b><span>{checked} checked</span><span className="grow" />{anyway > 0 && <i>{anyway} accepted anyway</i>}</div>
+          <div className="fy-comic-opt"><b>Checks</b><span>{checked} passed</span><span className="grow" />{anyway > 0 && <i>{anyway} accepted anyway</i>}</div>
+          {empty.length > 0 && <div className="fy-comic-opt"><b>Not in this book</b><span>{empty.map((chapter) => `Chapter ${chapter.order}`).join(", ")}</span><span className="grow" /><i>no pages yet</i></div>}
           <div className="fy-comic-opt"><b>Reading</b><span>{READING.find(([value]) => value === settings.reading)?.[1]}</span></div>
           <div className="fy-comic-opt"><b>Edition</b><span>{new Date().toISOString().slice(0, 10)}</span></div>
         </div>
