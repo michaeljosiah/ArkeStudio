@@ -799,7 +799,7 @@ export function SettingsProvidersScreen() {
       >
         <ProviderMark id={r.id} label={r.label} />
         <span className="fy-src__name">{r.label}</span>
-        {r.note !== null && <span className="fy-src__note">{r.note}</span>}
+        {r.note !== null && <span className={cx("fy-src__note", ["ready", "running", "answering", "healthy"].includes(r.note) && "fy-src__note--ok")}>{r.note}</span>}
       </button>
     ));
 
