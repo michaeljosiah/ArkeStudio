@@ -4654,11 +4654,11 @@ export function ProductionsScreen() {
                     <Badge tone="outline">{productionShape(p.meta).displayLabel}</Badge>
                     {active && <span className="fy-dot fy-dot--warn" />}
                     <span style={{ marginLeft: "auto" }} className="fy-mono">
-                      {shape.hasPages ? `${chapters.length} chapter${chapters.length === 1 ? "" : "s"}` : story ? `${drafted} of ${chapters.length} chapters` : p.audioDrama ? `${p.audioDrama.plan.episodes} episodes` : shape.isMusic ? `${tracks} track${tracks === 1 ? "" : "s"}` : shots.length > 0 ? `${covered} of ${shots.length} ${shape.playsAsBeats ? "pictures" : "shots"}` : p.takes.length > 0 ? `${p.takes.length} takes` : ""}
+                      {shape.hasPages ? `${chapters.length} chapter${chapters.length === 1 ? "" : "s"}` : story ? (chapters.length > 0 ? `${drafted} of ${chapters.length} chapters` : "") : p.audioDrama ? `${p.audioDrama.plan.episodes} episodes` : shape.isMusic ? `${tracks} track${tracks === 1 ? "" : "s"}` : shots.length > 0 ? `${covered} of ${shots.length} ${shape.playsAsBeats ? "pictures" : "shots"}` : p.takes.length > 0 ? `${p.takes.length} takes` : ""}
                     </span>
                   </div>
                   <div className="fy-prodcard__name">{p.meta.title}</div>
-                  <div className="fy-prodcard__sub">{p.meta.logline ?? p.meta.status}</div>
+                  {p.meta.logline && <div className="fy-prodcard__sub">{p.meta.logline}</div>}
                   {!phone && progress}
                   {!phone && <div style={{ marginTop: 14 }}>
                     <Button variant={active ? "primary" : "secondary"} onClick={event => { event.stopPropagation(); navigate(`/w/${worldId}/p/${p.meta.id}`); }}>Open the workspace</Button>
