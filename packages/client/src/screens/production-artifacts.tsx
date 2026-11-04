@@ -1,7 +1,7 @@
 import { ExtractionReviewCandidates } from "../components/extraction-review.js";
 import { useRef, useState } from "react";
 import { useParams } from "react-router";
-import { formatSeconds, isGeneratedArtifact, type ArtifactSidecar } from "@arke-studio/contracts";
+import { artifactPosterPath, formatSeconds, isGeneratedArtifact, type ArtifactSidecar } from "@arke-studio/contracts";
 import { EmptyState, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, cx } from "../components/ui.js";
 import { Plus } from "../components/icons.js";
@@ -336,6 +336,11 @@ export function ProductionArtifactsScreen() {
                     download
                     downloadName={filename}
                   />
+                </div>
+              ) : a.kind === "video" ? (
+                <div className="fy-imghost fy-artifact-frame">
+                  <Portrait worldSlug={world.meta.slug} path={artifactPosterPath(a.id)} label={name} radius={8} />
+                  {a.mediaInfo && <span className="fy-artifact-duration">{formatSeconds(a.mediaInfo.durationSec)}</span>}
                 </div>
               ) : a.kind === "audio" ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
