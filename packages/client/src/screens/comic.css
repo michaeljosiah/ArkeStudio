@@ -3,7 +3,7 @@
 /* Pages has the whole content area (turn 251a), as an audio drama's script does: not the 1,080
    column `Screen` gives a page of reading. */
 .fy-comic-screen { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.fy-comic { display: flex; flex-direction: column; flex: 1; height: 100%; min-height: 0; }
+.fy-comic { display: flex; flex-direction: column; flex: 1; height: 100%; min-height: 0; container-type: inline-size; }
 .fy-comic .grow { flex: 1; }
 .fy-comic .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-comic__head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-height: 56px; padding: 12px 20px; border-bottom: 1px solid var(--border); flex: none; }
@@ -16,6 +16,8 @@
 .fy-comic__sel select { border: 0; background: none; font: var(--type-label); color: var(--foreground); cursor: pointer; }
 .fy-comic__chapter { max-width: min(320px, 100%); min-width: 0; box-sizing: border-box; }
 .fy-comic__chapter select { min-width: 0; text-overflow: ellipsis; }
+/* The picker's own value says what it is; dropping the word keeps Export on the title's line. */
+@container (max-width: 860px) { .fy-comic__sel b { display: none; } }
 @media (max-width: 720px) {
   .fy-comic__chapter { flex: 1 1 100%; max-width: 100%; }
   .fy-comic__chapter select { flex: 1; }
@@ -23,6 +25,11 @@
 }
 
 .fy-comic__body { flex: 1; min-height: 0; display: grid; grid-template-columns: 136px minmax(0, 1fr) 420px; }
+/* Narrow, as with the chat open: strip beside the script, the page beneath it, one scroll for both. */
+.fy-comic__body.narrow { grid-template-columns: 96px minmax(0, 1fr); grid-auto-rows: min-content; overflow-y: auto; }
+.fy-comic__body.narrow .fy-comic__strip { grid-row: 1 / span 2; overflow: visible; }
+.fy-comic__body.narrow .fy-comic__edit { overflow: visible; }
+.fy-comic__body.narrow .fy-comic__side { grid-column: 2; border-left: 0; border-top: 1px solid var(--border); overflow: visible; }
 .fy-comic__strip { border-right: 1px solid var(--border); padding: 14px 12px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
 .fy-comic__thumb { position: relative; width: 100%; aspect-ratio: 2 / 3; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--secondary); padding: 0; cursor: pointer; flex: none; }
 .fy-comic__thumb.on { outline: 2px solid var(--foreground); outline-offset: 1px; }
@@ -208,8 +215,8 @@
 .fy-comic__find .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; }
 
 /* The page plan and the cold read (turn 254). */
-.fy-comic__plan { grid-column: 2 / 4; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; overflow: auto; min-height: 0; }
-.fy-comic__plancols { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 24px; }
+.fy-comic__plan { grid-column: 1 / -1; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; overflow: auto; min-height: 0; }
+.fy-comic__plancols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 24px; }
 .fy-comic__plancols section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .fy-comic__plan h4 { margin: 0; font: var(--type-label); font-weight: 600; color: var(--muted-foreground); }
 .fy-comic__planlist { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
@@ -220,7 +227,9 @@
 .fy-comic__planrow .why { display: block; font: var(--type-meta); color: var(--muted-foreground); }
 .fy-comic__planrow .n { width: 16px; flex: none; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-comic__planrow .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; }
-.fy-comic__planrow.kn { min-height: 34px; }
+.fy-comic__planrow.kn { min-height: 34px; flex-wrap: wrap; }
+.fy-comic__planrow.kn .t { min-width: 120px; }
+.fy-comic__planrow.kn .m { white-space: normal; }
 .fy-comic__verdictchip { flex: none; height: 22px; padding: 0 8px; border-radius: 999px; display: inline-flex; align-items: center; font: var(--type-label); font-size: var(--text-xs); border: 1px solid var(--border); }
 .fy-comic__verdictchip.keep { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, var(--border)); }
 .fy-comic__verdictchip.cut { color: var(--muted-foreground); text-decoration: line-through; }
