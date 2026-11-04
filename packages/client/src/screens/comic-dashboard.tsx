@@ -1,6 +1,7 @@
 import { comicBook, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
 import { useNavigate, useParams } from "react-router";
 import { EmptyState, Screen } from "../components/layout.js";
+import { takeFile } from "./comic-pages.js";
 import { Button, cx } from "../components/ui.js";
 import { Sparkle } from "../components/icons.js";
 import { useProduction } from "../lib/selectors.js";
@@ -55,6 +56,7 @@ export function ComicDashboard() {
   const next = nextStep(stages);
   const planned = stages.reduce((sum, chapter) => sum + (chapter.stage === "none" ? 0 : chapter.pages), 0);
   const made = stages.reduce((sum, chapter) => sum + chapter.made, 0);
+  const book = comicBook(production).filter((entry) => entry.take !== undefined && takeFile(world, entry.take) !== null);
   const pages = (chapter: string) => navigate(`/w/${worldId}/p/${prodId}/story/pages?chapter=${encodeURIComponent(chapter)}`);
   return (
     // The column's wide padding is the main column's; the dashboard sits inside it, as every screen does.
@@ -70,6 +72,10 @@ export function ComicDashboard() {
           <Button size="sm" variant="primary" onClick={() => pages(next.chapter.id)}>Open in Pages</Button>
         </div>
       )}
+      {/* The book so far, as pictures: a list of "Untitled · Pages made" showed none of it (issue 2466). */}
+      {book.length > 0 && <div className="fy-comic-dash__pages">
+        {book.map((entry) => <button key={entry.id} type="button" aria-label={`Page ${entry.number}`} onClick={() => pages(entry.chapter)}><img src={takeFile(world, entry.take)!} alt="" /></button>)}
+      </div>}
       <ol className="fy-comic-dash__rows">
         {stages.map((chapter) => (
           <li key={chapter.id}>
