@@ -267,7 +267,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   // Plan first (turn 254a): Arke drafts pages only from a plan the author kept.
   const from = sourceStory && sourceChapter ? ` from chapter ${sourceChapter.order} of ${sourceStory.meta.title}` : "";
   const planWithArke = () => chapter && ask(`Plan chapter ${chapter.order}, ${chapter.title}, as pages${from}.`);
-  const fixLean = (lean: ComicChapterPlan["leans"][number]) => chapter && ask(`In the plan for chapter ${chapter.order}, ${chapter.title}: page ${lean.page}, "${lean.line}" ${lean.why}. Settle it in the plan.`);
+  const fixLean = (lean: ComicChapterPlan["leans"][number]) => chapter && ask(`In the plan for chapter ${chapter.order}, ${chapter.title}: page ${lean.page}, "${lean.line}" ${lean.why}. Settle it in the plan, and leave it out of leans once it is settled.`);
   const draftWithArke = () => chapter && ask(`Draft chapter ${chapter.order}, ${chapter.title}, from its kept plan${from}.`);
   // Arke at work on this chapter is said on the chapter itself (turn 256b): pressed from here, or the
   // pilot Start the pilot asked for, while a turn runs.
