@@ -145,6 +145,22 @@ environments. Transport capture redacts the key and summarises nested audio data
 and digest while keeping usage counters. Returned text/audio quantities are journalled before
 settlement and priced separately from provider-reported charges.
 
+### Grouped request bounds (#1335)
+
+Grouped audiobook requests now share the solo reader's 7,000-byte allowance, counting packed
+words, every style and separators. The chapter preview, run planner and Google client enforce
+the same bound. Neighbour retakes obey the normal grouping limits and fall back to the selected
+block's bounded parts when their context does not fit. Quotes and recovery identities already
+include the resulting requests, so a changed grouping requires fresh confirmation.
+
+An offline Japanese/style-heavy fixture previously grouped 23,372 bytes using a 5,967-token
+estimate. Byte/4 remains a pricing estimate; it no longer justifies a larger grouped request.
+Google's [model limits](https://aistudio.google.com/docs/models/gemini-3.8-flash-tts), checked
+2026-11-04, still list 8,192 input and 16,384 output tokens. The local byte bound is not an exact
+tokenizer or proof of acoustic completeness. Output controls and incomplete-audio refusal stay
+in place; paid multilingual/listening qualification remains #1337. No provider calls were used
+to validate this correction.
+
 ## Verification
 
 From the repository root:

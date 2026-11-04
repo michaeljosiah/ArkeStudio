@@ -674,7 +674,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       rows.map((row) => {
         if (!toRead(row) || !grouped(row)) return null;
         const breakAfter = breaks.get(row.block.key);
-        return { key: row.block.key, reader: `${row.speaker.provider}/${row.speaker.model}/${row.speaker.voiceId}`, maxCharacters: modelOf(row.speaker)?.limits.maxPromptChars, ...row.turns, ...(breakAfter !== undefined ? { breakAfter } : {}) };
+        return { key: row.block.key, reader: `${row.speaker.provider}/${row.speaker.model}/${row.speaker.voiceId}`, maxCharacters: modelOf(row.speaker)?.limits.maxPromptChars,
+          maxSpeechUtf8Bytes: modelOf(row.speaker)?.limits.maxSpeechUtf8Bytes, ...row.turns, ...(breakAfter !== undefined ? { breakAfter } : {}) };
       }),
       DEFAULT_GROUP_PACKING,
     ).filter((group) => group.keys.length >= 2);

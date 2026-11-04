@@ -9,6 +9,8 @@ import {
   GOOGLE_DAILY_LIMIT,
   type DailySpeechQuota,
   soloTurns,
+  groupedSpeechInputFits,
+  speechUtf8Bytes,
   SPLIT_DID_NOT_MATCH,
   type AudiobookReader,
   type AudiobookActivityUpdate,
@@ -1058,6 +1060,28 @@ describe("a chapter read grouped (design turn 185)", () => {
     } finally {
       await close();
     }
+  });
+
+  it("bounds full runs and neighbour retakes after packing every style (#1335)", async () => {
+    const { store, close } = await world();
+    try {
+      await writeAudiobookBookRaised(store, LEDGER, { schemaVersion: 1, reading: "narrator", note: "穏やかに".repeat(50) });
+      const plan = await planAudiobook(store, LEDGER, "neap", { narrator: READER });
+      const window = plan.blocks.slice(1, 4);
+      const model = geminiSpeechModel("flash");
+      model.limits.maxSpeechUtf8Bytes = Math.max(...window.map(block => speechUtf8Bytes(block.block.text))) + 610;
+      const room = { narrator: READER, models: [model], catalogue: [KORE], transcriber: true };
+      const all = await prepareChapter(store, LEDGER, "neap", room, () => "2026-10-03T09:00:00.000Z");
+      assert.equal(all.kind, "ready");
+      if (all.kind !== "ready") return;
+      assert.ok(all.prepared.groups.every(group => groupedSpeechInputFits(group.turns, model.limits)));
+      const retake = await prepareChapter(store, LEDGER, "neap", room, () => "2026-10-03T09:00:00.000Z", [window[1]!.block.key]);
+      assert.equal(retake.kind, "ready");
+      if (retake.kind !== "ready") return;
+      assert.equal(retake.prepared.groups.length, 0, "oversized neighbour context falls back to the selected block's bounded parts");
+      assert.equal(retake.prepared.misses.length, 1);
+      assert.ok(retake.prepared.misses[0]!.parts.length > 0);
+    } finally { await close(); }
   });
 
   it("sends each block's turn with exactly the style a solo read sends, the notes once and its own direction after", async () => {
