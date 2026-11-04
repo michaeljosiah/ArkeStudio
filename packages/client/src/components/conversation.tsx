@@ -402,13 +402,14 @@ export function ConversationPermissionCard({
     >
       <div className="fy-actioncard__head">
         <div>
-          <div className="fy-actioncard__reason">{action.shown.permissionReason.replaceAll("-", " ")}</div>
+          {!comicDraft && <div className="fy-actioncard__reason">{action.shown.permissionReason.replaceAll("-", " ")}</div>}
           <h3>{action.shown.title}</h3>
         </div>
         <span className="fy-actioncard__status">{comicDraft && action.status === "pending" ? "Waiting in Pages" : ACTION_STATUS[action.status]}</span>
       </div>
-      <StudioShow action={action} />
-      <p className="fy-actioncard__consequence">{action.shown.consequence}</p>
+      {/* A comic draft is read in Pages: its card names it and goes there (issue 2459). */}
+      {!comicDraft && <StudioShow action={action} />}
+      {!comicDraft && <p className="fy-actioncard__consequence">{action.shown.consequence}</p>}
       {terminal ? (
         <details className="fy-actioncard__details">
           <summary>Review details</summary>
@@ -508,14 +509,18 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
     {body.family === "authored-diff" && [...body.conflicts, ...body.openChoices].map(line => <p key={line} className="fy-actioncard__notice">{line}</p>)}</>;
   switch (body.family) {
     case "authored-diff":
+      if (action.actionKind === "world-chat-production-comic-script") return <div className="fy-actioncard__body">
+        {body.fields.filter(field => field.after && field.after !== "0 pages").map(field => <p key={field.label} className="fy-actioncard__line">{comicDraftSummary(field.after)}</p>)}
+        {[...body.conflicts, ...body.openChoices].map((line) => <p key={line} className="fy-actioncard__notice">{line}</p>)}
+      </div>;
       return <div className="fy-actioncard__body">
         {action.sheetCreationProseFields ? <ProposalReviewFields target={{ action: "create", fields: body.fields.map((field, index) => ({
           field: field.label, before: field.before, proposed: field.after, metadata: !action.sheetCreationProseFields!.includes(index),
         })) }} /> : body.fields.map((field) => <div key={field.label} className="fy-actioncard__change">
           <strong>{field.label}</strong>
-          <span className="fy-actioncard__before">{field.before ?? (action.actionKind === "world-chat-production-comic-script" ? "New draft" : "Not set")}</span>
+          <span className="fy-actioncard__before">{field.before ?? "Not set"}</span>
           <span aria-hidden="true">→</span>
-          <span>{action.actionKind === "world-chat-production-comic-script" ? comicDraftSummary(field.after) : field.after ?? "Removed"}</span>
+          <span>{field.after ?? "Removed"}</span>
         </div>)}
         {[...body.conflicts, ...body.openChoices].map((line) => <p key={line} className="fy-actioncard__notice">{line}</p>)}
       </div>;
