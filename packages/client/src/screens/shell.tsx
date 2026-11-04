@@ -1180,7 +1180,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
               </details>
             )}
             {(turns.length > 0 || blueprint?.name || handed.length > 0) && !g?.worldId && !g?.founding && !myBuild && (
-              <Button variant="ghost" disabled={chatRunning} onClick={() => {
+              <Button variant="ghost" style={{ alignSelf: "flex-start" }} disabled={chatRunning} onClick={() => {
                 if (!confirmDiscard) { setConfirmDiscard(true); return; }
                 genesisDiscard(genesisId);
                 setParams({ draft: `gen-${ulid().toLowerCase()}` });
@@ -1503,9 +1503,12 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
               <img className="fy-portrait fy-portrait--plate" src="./worlds/new-world.webp" alt="" />
             </div>
             <div style={{ padding: "12px 8px 0" }}>
-              <div style={{ font: "650 20px var(--font-sans)", letterSpacing: "-0.02em" }}>
-                {shownName || "Unnamed world"}
-              </div>
+              {/* Arke offers a working name; until it has, typing one is what lets Begin go (issue 2552). */}
+              {genMode === "chat" && (!shownName || name) ? (
+                <Input placeholder="Name this world" aria-label="Name this world" value={name} onChange={(e) => setName(e.target.value)} />
+              ) : (
+                <div style={{ font: "650 20px var(--font-sans)", letterSpacing: "-0.02em" }}>{shownName || "Unnamed world"}</div>
+              )}
               <div style={{ font: "400 12.5px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}>
                 {shownLogline}
               </div>
