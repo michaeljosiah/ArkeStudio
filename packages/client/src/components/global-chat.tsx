@@ -38,7 +38,7 @@ export function GlobalConversationEntry({ props, world }: { props: ProductionCon
   const latest = useRef(surface); latest.current = surface;
   useLayoutEffect(() => host.current ? owner.register(latest.current, host.current) : undefined, [owner, key]);
   useLayoutEffect(() => {
-    if (!props.dock && location.pathname.endsWith("/chat")) owner.select(latest.current);
+    if (!props.dock) owner.select(latest.current);
   }, [owner, key, location.pathname, props.dock]);
   useLayoutEffect(() => { if (host.current) owner.refresh(latest.current, host.current); });
   // An ask opens Chat unless it is a quiet one, whose answer comes back on the page (SPEC-056 R-24).
