@@ -994,8 +994,6 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   };
 
   const canCreate = connection === "open" && shownName.length > 0 && submittedName === null && !chatRunning;
-  const entries =
-    1 + railCharacters.length + railLocations.length + railFactions.length + (blueprint?.threads.length ?? 0);
 
   const begin = (artDirection?: string) => {
     if (turns.length || buildMode) {
@@ -1328,7 +1326,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     value={message}
                     onChange={setMessage}
                     onSubmit={sendGenesis}
-                    placeholder="Keep going, or ask it to surprise you…"
+                    placeholder={turns.length === 0 ? "Describe your world, or ask Arke to surprise you…" : "Keep going…"}
                     agentLabel="world author"
                     disabledReason={writingModelReason}
                     busy={chatRunning || buildPressed || !!g?.founding || myBuild?.status === "running" || sizingBuild || !!g?.decisionPending || !!g?.readinessPending}
@@ -1450,12 +1448,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
           </div>
         </div>
         <div className="fy-gate__side">
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-            <div style={{ font: "600 15px var(--font-sans)" }}>The world so far</div>
-            <span className="fy-mono" style={{ color: "var(--warning)" }}>
-              {entries} entr{entries === 1 ? "y" : "ies"} · all proposed
-            </span>
-          </div>
+          <div style={{ font: "600 15px var(--font-sans)" }}>The world so far</div>
           {/* Coverage (SPEC-031 R-7): what is covered and what is open, as labels and counts.
               The world's one image is on the list so a missing key-art brief is visible while
               it can still be answered, not as a line on the completion notice. */}
@@ -1479,7 +1472,6 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                   style={c.covered ? undefined : { opacity: 0.55 }}
                 >
                   {c.label}
-                  {c.covered ? "" : " · open"}
                 </span>
               ))}
             </div>
@@ -1511,13 +1503,8 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
               <img className="fy-portrait fy-portrait--plate" src="./worlds/new-world.webp" alt="" />
             </div>
             <div style={{ padding: "12px 8px 0" }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 9 }}>
-                <div style={{ font: "650 20px var(--font-sans)", letterSpacing: "-0.02em" }}>
-                  {shownName || "Unnamed world"}
-                </div>
-                <span className="fy-mono" style={{ color: "var(--warning)", fontSize: 9.5 }}>
-                  proposed
-                </span>
+              <div style={{ font: "650 20px var(--font-sans)", letterSpacing: "-0.02em" }}>
+                {shownName || "Unnamed world"}
               </div>
               <div style={{ font: "400 12.5px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}>
                 {shownLogline}
@@ -1589,15 +1576,18 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
           <div style={{ flex: 1, minHeight: 16 }} />
           {/* The models this world will make with, chosen where the world is begun (design turn
               153) — last in the world so far, above the press that spends on them. Locked once
-              the build is pressed: the run froze its route. */}
-          <ModelsCard
-            state={state}
-            capabilities={WORLD_MODEL_CAPABILITIES}
-            choices={models}
-            scopeWord="this world"
-            disabled={buildPressed || submittedName !== null || !!g?.founding}
-            onChange={(capability, modelId) => setModels((current) => withModelChoice(current, capability, modelId))}
-          />
+              the build is pressed: the run froze its route. Folded: most worlds keep the defaults. */}
+          <details>
+            <summary className="fy-set__link">Models</summary>
+            <ModelsCard
+              state={state}
+              capabilities={WORLD_MODEL_CAPABILITIES}
+              choices={models}
+              scopeWord="this world"
+              disabled={buildPressed || submittedName !== null || !!g?.founding}
+              onChange={(capability, modelId) => setModels((current) => withModelChoice(current, capability, modelId))}
+            />
+          </details>
           <div style={{ display: "grid", gap: 8 }}>
             <Button
               variant="primary"
