@@ -1,7 +1,8 @@
-import { ComicModelChoice } from "../components/comic-model-choice.js";
+import { ComicModelChoice, comicModelRefused } from "../components/comic-model-choice.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import {
+  balanceFaulted,
   BLOCKING_FINDINGS,
   chapterParagraphs,
   ComicScriptSchema,
@@ -47,6 +48,7 @@ import { comicStylePicture, comicStylePreset, draftFromStyle, styleFromDraft, ty
 import { useProduction } from "../lib/selectors.js";
 import {
   acceptComicTake,
+  cancelJob,
   cancelWorldChat,
   seeComicWarning,
   acceptProposal,
@@ -640,7 +642,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
       else if (event.attempt !== undefined) setAttempt(event.attempt);
       // The landed take is the one shown, unless the author picked another meanwhile.
       if ((event.state === "checking" || event.state === "made") && event.take !== undefined && !picked.current) setShownId(event.take);
-      setSaid(event.state === "failed" ? event.reason ?? "not made" : null);
+      setSaid(event.state !== "failed" ? null : balanceFaulted({ fault: event.reason ?? null }) ? "Out of credit. Choose another model or add credit." : event.reason ?? "not made");
     }
     if (event.type === "comic.take-result" && event.page === page.id) {
       if (event.disposition !== "accepted") setRechecking(null);
@@ -701,8 +703,10 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
   // Accept waits for both checks (turn 253a); a take made before there was a review is unreviewed, not failed.
   const held = checking || reviewing;
   const passed = shown !== undefined && !held && takeClears(shown);
+  const usable = quote?.ok === true && !comicModelRefused(state, quote.model);
+  const makingJob = making[0] === undefined ? undefined : state?.app.jobs.find(job => job.target.kind === "bench-take" && job.target.id?.startsWith(`${making[0]!.session}/`) && job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled");
   const make = () => {
-    if (!quote?.ok) return;
+    if (!usable || !quote?.ok) return;
     setSaid(null);
     setPressed(true);
     setAttempt(1);
@@ -751,6 +755,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
             <Spin size={22} />
             <b>Making</b>
             <span className="m">{attempt === null ? `Take ${takes.length + 1}` : until ? `Take ${attempt} of up to ${cap}` : "One take"}{making[0] !== undefined && <Since at={making[0].at} />}</span>
+            {makingJob !== undefined && <Button size="sm" onClick={() => cancelJob(makingJob.id)}>Cancel</Button>}
           </div>
         )}
         {!busy && held && <div className="fy-comic__band" role="status"><Spin size={14} />{checking ? "Checking lettering" : "Checking picture"}</div>}
@@ -799,7 +804,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
         {shown !== undefined && !held && !outOfDate && !lettered && reason.reader && <Button variant="primary" onClick={chooseReader}>Choose reader</Button>}
         {shown !== undefined && !held && !outOfDate && lettered && unreviewed.reviewer && <Button variant="primary" onClick={onReviewer}>Choose reviewer</Button>}
         {shown !== undefined && !held && shown.id !== accepted && !outOfDate && passed && <Button variant="primary" onClick={() => acceptComicTake(worldId, productionId, page.id, shown.id)}>Accept</Button>}
-        <Button variant={shown !== undefined && !held && !outOfDate && ((passed && shown.id !== accepted) || (!lettered && reason.reader) || (lettered && unreviewed.reviewer)) ? "secondary" : "primary"} disabled={!quote?.ok || busy || !connected} onClick={make}
+        <Button variant={shown !== undefined && !held && !outOfDate && ((passed && shown.id !== accepted) || (!lettered && reason.reader) || (lettered && unreviewed.reviewer)) ? "secondary" : "primary"} disabled={!usable || busy || !connected} onClick={make}
           title={quote && !quote.ok ? quote.reason : undefined}>{busy ? <Spin size={13} /> : <Sparkle size={13} />}{press}</Button>
         {shown !== undefined && !held && !outOfDate && !passed && (shown.id !== accepted || !covered) && (
           <Button title="Keeps this take with what was found on the record" onClick={() => acceptComicTake(worldId, productionId, page.id, shown.id, { findings: takeBlocking(shown) })}>Accept anyway</Button>
@@ -815,7 +820,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
         <label className="fy-comic__check"><input type="checkbox" checked={until} onChange={(event) => setUntil(event.target.checked)} />Until it passes</label>
         <span className="grow" />
         <Button variant="ghost" size="sm" aria-expanded={brief} onClick={() => setBrief(!brief)}>Brief</Button>
-        <span className="m">{quote === null ? "…" : !quote.ok ? quote.reason : `${quote.modelName} · ${quote.aspect}${quote.riding.length ? ` · ${quote.riding.join(", ")} ride` : ""}${quote.missing.length ? ` · no picture: ${quote.missing.join(", ")}` : ""} · ${priceLabel(quote.microUsd)}${until ? ` · up to ${cap} · ${priceLabel(total)}` : ""}`}</span>
+        <span className="m">{quote === null ? "…" : !quote.ok ? quote.reason : !usable ? `${quote.modelName} can't run · choose another` : `${quote.modelName} · ${quote.aspect}${quote.riding.length ? ` · ${quote.riding.join(", ")} ride` : ""}${quote.missing.length ? ` · no picture: ${quote.missing.join(", ")}` : ""} · ${priceLabel(quote.microUsd)}${until ? ` · up to ${cap} · ${priceLabel(total)}` : ""}`}</span>
       </div>
       {brief && quote?.ok && <pre className="fy-comic__brief">{quote.brief}</pre>}
       {(said ?? problem) !== null && <div className="fy-comic__verdict bad"><CircleAlert size={15} /><span>{said ?? problem}</span></div>}

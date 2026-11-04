@@ -22493,6 +22493,8 @@ export class Coordinator {
         onSession: async (sessionId) => {
           await changeComicPage(store, input.productionId, input.page, (record) => ({ ...record,
             making: record.making.map((entry) => entry.requestId === input.requestId ? { ...entry, session: sessionId } : entry) }));
+          // Pages finds the job to cancel through this session, so the client needs it now.
+          await this.refreshWorldSnapshot(store.worldId);
         },
       });
       const take = made.ok ? ulid() : undefined;
@@ -22685,6 +22687,16 @@ export class Coordinator {
       const job = jobId === undefined ? undefined : this.jobQueue?.listJobs().find(candidate => candidate.id === jobId);
       if (job?.status === "succeeded" && job.finalization?.status === "failed") {
         return fail("The picture was generated but could not be filed. Open Activity and choose Retry finalization; no regeneration or charge is needed.");
+      }
+      // A comic page's press is waiting in front of the author, and a lane the provider paused (no
+      // credit, a rejected key) will not move: say why and take the job back. It read as Making,
+      // with the clock running and no reason anywhere (issue 2415).
+      if (input.onSession !== undefined && job?.status === "queued" && jobId !== undefined) {
+        const lane = this.jobQueue?.queueStatus(job.provider);
+        if (lane?.paused === true && lane.pauseKind !== "offline") {
+          await this.jobQueue?.cancel(jobId).catch(() => {});
+          return fail(lane.reason ?? job.error ?? "the provider refused the picture");
+        }
       }
       // A queued picture has not used any generation time. Keep its original job until it lands
       // or cancellation settles; abandoning the waiter used to strand paid results behind retries.
