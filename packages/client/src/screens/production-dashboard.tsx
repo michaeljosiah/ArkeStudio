@@ -270,11 +270,11 @@ export function ProductionDashboardScreen() {
             <div className="fy-threadcard">
               <div className="fy-threadcard__head">
                 <span className="fy-threadcard__label">
-                  {pending.length > 0 ? `TO REVIEW · ${pending.length}` : "ALL REVIEWED"}
+                  {pending.length > 0 ? `TO REVIEW · ${pending.length}` : takes.length > 0 ? "ALL REVIEWED" : "NOTHING MADE YET"}
                 </span>
               </div>
               <div className="fy-threadcard__title">
-                {pending.length > 0 ? `${pending.length} ${beats ? "picture" : "clip"}${pending.length === 1 ? "" : "s"} ready to look at` : "Nothing waits on you"}
+                {pending.length > 0 ? `${pending.length} ${beats ? "picture" : "clip"}${pending.length === 1 ? "" : "s"} ready to look at` : takes.length > 0 ? "Nothing waits on you" : `Make the first ${beats ? "picture" : "clip"}`}
               </div>
               <div className="fy-threadcard__sub">
                 {pending.length > 0
@@ -328,7 +328,7 @@ export function ProductionDashboardScreen() {
               </div>
             )}
           </div>
-          <div>
+          {takes.length > 0 && <div>
             <div className="fy-listhead">
               <span className="fy-dashsection-label">{beats ? "Latest pictures" : "Latest clips"}</span>
               {/* The same keyboard rule as the chapter link: a destination is a button, not a span. */}
@@ -383,13 +383,12 @@ export function ProductionDashboardScreen() {
                 </div>
               ))}
             </div>
-          </div>
+          </div>}
           {/* The pending queue is stated once, in the card above, which links to where it is
               decided (design 55). Re-listing the same takes here was a second copy to keep true. */}
-          <div className="fy-dashrow">
+          {recentDecided.length > 0 && <div className="fy-dashrow">
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-listhead"><span className="fy-dashsection-label">Activity</span></div>
-              {recentDecided.length === 0 && <div className="fy-mono">no decisions yet</div>}
               {recentDecided.map((t) => (
                 <div key={t.id} className="fy-listrow">
                   <span className={`fy-dot fy-dot--${decisions[t.id] === "accepted" ? "ok" : "sketch"}`} />
@@ -400,7 +399,7 @@ export function ProductionDashboardScreen() {
                 </div>
               ))}
             </div>
-          </div>
+          </div>}
           <ProductionSpend production={production} scenesOnly />
           <ProductionSpend production={production} />
           <ProductionSetup production={production} worldId={worldId} prodId={prodId} />

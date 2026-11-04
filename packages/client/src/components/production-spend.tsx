@@ -81,6 +81,7 @@ export function ProductionSpend({ production, sceneId, shotId, compact = false, 
   const detail = scopeValue(rollup, scope);
   const shape = productionShape(production.meta);
   if (!shape.hasScenes || shape.dispatchCapability !== "video") return null;
+  if (current?.coverage === "empty") return null;
   const show = () => { setScope(initial); setOpen(true); };
   const refresh = () => { if (worldId) { setRefreshing(true); refreshProductionSpend(worldId); } };
   const shots = production.scenes.flatMap(scene => orderedShots(scene));
