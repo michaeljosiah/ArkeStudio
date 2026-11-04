@@ -383,10 +383,12 @@ export function computeRunning(
     const finalizing = job.status === "succeeded" && job.finalization?.status === "pending";
     if (!RUNNING_JOB.has(job.status) && !finalizing) continue;
     const labels = activityJobLabels(state, job);
+    // Behind a paused lane "queued" reads as next in line, and nothing moves until someone acts (issue 2426).
+    const paused = job.status === "queued" && state.app.queues.some(queue => queue.provider === job.provider && queue.paused);
     entries.push({
       kind: "job",
       title: job.worldId === VOICE_PREVIEW_SCOPE ? `Voice preview · ${job.params["voiceLabel"] ?? job.params["voiceId"] ?? "Narrator"}` : labels.target,
-      detail: `${labels.model} · ${finalizing ? "generated · preparing result" : job.status}`,
+      detail: `${labels.model} · ${finalizing ? "generated · preparing result" : paused ? `waiting · ${providerName(job.provider)} paused` : job.status}`,
       diagnostic: [job.id, job.target.id, `${job.provider}/${job.model}`].filter(Boolean).join(" · "),
       percent: null,
       ref: job.id,

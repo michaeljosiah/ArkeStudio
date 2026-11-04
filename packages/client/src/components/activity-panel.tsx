@@ -556,7 +556,7 @@ function RunningRow({ entry, activeWorldId }: { entry: RunningEntry; activeWorld
   const { state, connection } = useStore();
   const wait = state?.app.jobs.find(job => entry.kind === "job" && job.id === entry.ref)?.storageWait;
   const compact = useMediaQuery("(max-width: 1099px)");
-  const queued = /\b(queued|submitting)$/.test(entry.detail);
+  const queued = /\b(queued|submitting|paused)$/.test(entry.detail);
   return (
     <div className="fy-ap__row">
       <span className={cx("fy-ap__dot", queued ? "fy-ap__dot--queued" : "fy-ap__dot--live")} />
