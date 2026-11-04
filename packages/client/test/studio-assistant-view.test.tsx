@@ -42,7 +42,7 @@ it("explains unavailable private routes before Send and offers an explicit model
     await act(async () => root.render(<View client={h.client} />));
     assert.match(container.textContent!, /Studio runs on Arke's own Ollama/);
     assert(container.querySelector<HTMLButtonElement>('.fy-studio-prompt')!.disabled);
-    const refresh = [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Check Studio models again")!;
+    const refresh = [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Check again")!;
     assert(refresh); const before = h.sent.length;
     await act(async () => refresh.click());
     assert.equal(h.sent.length, before + 1); assert.equal(h.sent.at(-1)!.command.action, "watch");
