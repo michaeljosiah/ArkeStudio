@@ -278,7 +278,7 @@ a.fy-chat__retry { text-decoration: none; }
  * keyboard goes.
  */
 @media (min-width: 600px) and (max-width: 1099px) and (max-height: 700px) {
-  .fy-content--fill:has(> .fy-chat__wrap) > .fy-worldnav { display: none; }
+  .fy-content--fill:has(> .fy-global-chat-slot--world) > .fy-worldnav { display: none; }
   .fy-content--fill > .fy-chat__wrap { margin-top: 8px; }
   .fy-chat__wrap .fy-gate__head { padding-top: 10px; }
   .fy-chat__wrap .fy-gate__head .fy-eyebrow-sm { display: none; }
