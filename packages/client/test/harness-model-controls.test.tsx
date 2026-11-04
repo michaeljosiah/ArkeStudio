@@ -13,6 +13,7 @@ import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
+const pendingInputs = new Map<string, string>();
 dom.HTMLElement.prototype.scrollIntoView = () => {};
 // linkedom has no innerText; the composer reads and writes its editor through it.
 Object.defineProperty(dom.HTMLElement.prototype, "innerText", {
@@ -27,6 +28,8 @@ Object.assign(globalThis, {
   Node: dom.Node,
   Event: dom.Event,
   IS_REACT_ACT_ENVIRONMENT: true,
+  sessionStorage: { getItem: (key: string) => pendingInputs.get(key) ?? null,
+    setItem: (key: string, value: string) => pendingInputs.set(key, value), removeItem: (key: string) => pendingInputs.delete(key) },
 });
 
 const CLAUDE = "anthropic/sonnet";
@@ -92,6 +95,7 @@ async function mount(state: ClientState, children: ReactNode, path = "/settings/
 }
 
 afterEach(async () => {
+  pendingInputs.clear();
   __clearWorldChatHoldsForTest();
   if (root) await act(async () => root!.unmount());
   root = undefined;
@@ -610,6 +614,25 @@ describe("round-64 harness regressions (#1154)", () => {
  * both.
  */
 describe("the model chip on a conversation page (turn 190e)", () => {
+  it("spends a queued model choice only after its receipt and preserves a newer choice", async () => {
+    const state = modelState(); state.worldChat!.runStatus = "running";
+    await mount(state, pageConversation());
+    await pickModel(OPUS); await say("Use this model next");
+    const first = sent.findLast(message => message.kind === "world-chat-input");
+    assert.ok(first?.kind === "world-chat-input"); assert.equal(first.input.modelId, OPUS);
+    assert.equal(isSet(), true, "keep the override while admission is unacknowledged");
+    await act(async () => __applyEventForTest({ type: "world-chat.input-result", at: "2026-11-04T00:00:00Z",
+      worldId: state.world!.meta.worldId, conversationId: CV, requestId: first.input.submissionId, admitted: true }));
+    assert.equal(isSet(), false); assert.match(chip().textContent ?? "", /Sonnet/);
+    await pickModel(OPUS); await say("Use Opus for this message");
+    const second = sent.findLast(message => message.kind === "world-chat-input");
+    assert.ok(second?.kind === "world-chat-input");
+    await pickModel(SPARK);
+    await act(async () => __applyEventForTest({ type: "world-chat.input-result", at: "2026-11-04T00:00:01Z",
+      worldId: state.world!.meta.worldId, conversationId: CV, requestId: second.input.submissionId, admitted: true }));
+    assert.equal(isSet(), true); assert.match(chip().textContent ?? "", /Spark/);
+  });
+
   const OLD_ROW = /THIS TURN|CHAT AGENT|THIS PRODUCTION|DEFAULT|Ask the harness|Use saved choice|Remember for this production|Clear production default|models? from Claude Code/;
 
   it("is a chip in the composer's row, with no select, row or scope word above it", async () => {
@@ -683,6 +706,23 @@ describe("the model chip on a conversation page (turn 190e)", () => {
   });
 
   describe("the effort (design turn 195)", () => {
+    it("spends acknowledged queue effort and retains an effort changed while awaiting receipt", async () => {
+      const state = effortState(); state.worldChat!.runStatus = "running";
+      await mount(state, pageConversation()); await pickModel(OPUS); await chooseEffort("High");
+      await say("Use high effort next");
+      const first = sent.findLast(message => message.kind === "world-chat-input");
+      assert.ok(first?.kind === "world-chat-input"); assert.equal(first.input.variant, "high");
+      await act(async () => __applyEventForTest({ type: "world-chat.input-result", at: "2026-11-04T00:00:00Z",
+        worldId: state.world!.meta.worldId, conversationId: CV, requestId: first.input.submissionId, admitted: true }));
+      await pickModel(OPUS); assert.equal(effortChip()?.textContent, "Effort", "the previous choice was spent");
+      await chooseEffort("High"); await say("Use high again");
+      const second = sent.findLast(message => message.kind === "world-chat-input");
+      assert.ok(second?.kind === "world-chat-input"); await chooseEffort("Max");
+      await act(async () => __applyEventForTest({ type: "world-chat.input-result", at: "2026-11-04T00:00:01Z",
+        worldId: state.world!.meta.worldId, conversationId: CV, requestId: second.input.submissionId, admitted: true }));
+      assert.equal(effortChip()?.textContent, "Max");
+    });
+
     /** Opus offers three efforts, none of them the harness's default. */
     function effortState(production?: { llm: string; kept?: Record<string, string> }): ClientState {
       const state = modelState();

@@ -1021,6 +1021,9 @@ export function ProductionConversationBody({
   const progress = useWorldChatProgress(conversationId ?? undefined, loaded?.runStartedAt ?? null);
   const running = loaded?.runStatus === "running";
   const inputs = useConversationInputs(worldId, loaded, setMessage, (input, draft) => {
+    if (languageModelId === input.modelId && chatVariant === input.variant) {
+      setLanguageModelId(undefined); setChatVariants({});
+    }
     const ask = dock?.ask;
     if (ask?.draft && input.text === `${ask.text.slice(0, ask.text.length - ask.line.length).trimEnd()} ${draft.trim()}` &&
       JSON.stringify(input.subject) === JSON.stringify(ask.subject)) dock?.onAsk?.(null);
