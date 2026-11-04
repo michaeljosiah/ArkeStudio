@@ -4614,7 +4614,9 @@ export function ProductionsScreen() {
         {productions.map((p, i) => {
           const chapters = p.chapters.filter(chapter => !chapter.retired);
           const drafted = chapters.filter(chapter => (chapter.words ?? 0) > 0).length;
-          const story = phone && productionShape(p.meta).hasChapters;
+          const shape = productionShape(p.meta);
+          const story = shape.hasChapters;
+          const tracks = p.music?.tracks.length ?? 0;
           const shots = p.scenes.flatMap((s) => orderedShots(s));
           const covered = coveredProductionShots(p, world?.artifacts ?? []);
           const active = p.meta.status !== "complete" && shots.length > 0 && covered < shots.length;
@@ -4653,7 +4655,7 @@ export function ProductionsScreen() {
                     <Badge tone="outline">{productionShape(p.meta).displayLabel}</Badge>
                     {active && <span className="fy-dot fy-dot--warn" />}
                     <span style={{ marginLeft: "auto" }} className="fy-mono">
-                      {story ? `${drafted} of ${chapters.length} chapters` : p.audioDrama ? `${p.audioDrama.plan.episodes} episodes` : shots.length > 0 ? `${covered} of ${shots.length} ${productionShape(p.meta).playsAsBeats ? "pictures" : "shots"}` : `${p.takes.length} takes`}
+                      {shape.hasPages ? `${chapters.length} chapter${chapters.length === 1 ? "" : "s"}` : story ? `${drafted} of ${chapters.length} chapters` : p.audioDrama ? `${p.audioDrama.plan.episodes} episodes` : shape.isMusic ? `${tracks} track${tracks === 1 ? "" : "s"}` : shots.length > 0 ? `${covered} of ${shots.length} ${shape.playsAsBeats ? "pictures" : "shots"}` : p.takes.length > 0 ? `${p.takes.length} takes` : ""}
                     </span>
                   </div>
                   <div className="fy-prodcard__name">{p.meta.title}</div>
