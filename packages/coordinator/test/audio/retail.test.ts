@@ -46,6 +46,22 @@ describe("retail delivery checks", () => {
 
 const ffmpeg = process.env.ARKE_FFMPEG;
 describe("native retail encoding", { skip: !ffmpeg }, () => {
+  it("does not read a short credit's voice as noise, and still fails a long read's (issue 2417)", async () => {
+    assert.deepEqual(retailProblems({ ...good, noiseFloorDb: -50 }), ["noise floor -50.0 dBFS is above -60"]);
+    assert.deepEqual(retailProblems({ ...good, noiseFloorDb: Number.NaN }), ["the noise floor could not be measured"]);
+    const dir = await tempDir("arke-retail-credit-"), signal = new AbortController().signal;
+    const tools = createRetailAudioTools(createNodeMediaProcessRunner({ ffmpeg: ffmpeg!, ffprobe: process.env.ARKE_FFPROBE ?? join(dirname(ffmpeg!), process.platform === "win32" ? "ffprobe.exe" : "ffprobe") }));
+    const read = async (seconds: number, name: string) => {
+      const input = join(dir, `${name}.wav`), samples = new Float32Array(24000 * seconds);
+      for (let index = 0; index < samples.length; index++) samples[index] = Math.sin(2 * Math.PI * 440 * index / 24000) * 0.08;
+      await writeFile(input, writeSpeechWav({ rate: 24000, samples }));
+      const source = await tools.inspect(input, signal);
+      return masterRetailFile(tools, input, join(dir, `${name}.mp3`), { from: 0, to: seconds, channels: 1, sourceRmsDb: source.rmsDb }, signal);
+    };
+    assert.ok((await read(5, "credit")).seconds > 8);
+    await assert.rejects(read(40, "chapter"), /noise floor/);
+  });
+
   for (const channels of [1, 2]) it(`measures and validates the actual ${channels}-channel MP3 after mastering`, async () => {
     const dir = await tempDir("arke-retail-native-"), input = join(dir, "source.wav"), output = join(dir, "chapter.mp3");
     const signal = new AbortController().signal;
