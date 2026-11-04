@@ -1926,6 +1926,17 @@ Client `components/system-panel.tsx`/CSS and `lib/system-panel.ts` own the round
 authenticated event/snapshot path, without becoming journal or support-export data. The existing
 Diagnostics route receives a finding reference for warning focus. See [system status](system-status.md)
 for collection limits, ownership, unavailable data and validation.
+### Manual visual-novel lines (#1384)
+
+Client `screens/scene-workspace/beat-line-editor.tsx` edits a beat's narration or character line
+through the existing version-fenced scene writer. `set-beat-line` is a bounded scene command;
+contracts `scene-command-candidate.ts` preserves script block and shot identity, and coordinator
+`productions/scene-commands.ts` supplies the text digest for new coverage. Existing coverage
+digests remain unchanged when a line is edited, so stale coverage and voice reads stay derived.
+The editor retains a refused draft and waits for the saved snapshot before reporting success.
+See SPEC-023 R-13 and SPEC-029 R-36/R-61/R-62; coordinator `test/productions/scene-commands.test.ts`
+and client `test/visual-novel-beats.test.tsx` cover persistence and the author controls.
+
 ### Remembered interactive story state (SPEC-063, approved turn 240)
 
 For issue #2238, `routing.ts` carries verified traversal evidence across unused-fact and ending edits only when the transition/presentation rules are unchanged. Coordinator `readTraversalFromDirectory` verifies the original routing identity against its versioned history before projecting the old walk onto the current defaults. The journal remains unchanged, and absent or invalid history keeps the proof stale. Legacy edge-only proof remains usable when an unused first fact opts the story into schema 2 without adding state-dependent rules. Regression coverage lives in contracts and coordinator `test/productions/story-state.test.ts` (contracts: `test/story-state.test.ts`).

@@ -370,6 +370,13 @@
 .fy-sw .fy-sw__full, .fy-sw .fy-sw__fullexit { width: 32px; height: 32px; box-sizing: border-box; padding: 0; display: inline-grid; place-items: center; border: 1px solid var(--border); border-radius: 8px; background: var(--secondary); color: var(--foreground); }
 
 /* A visual novel's beats (turn 174): the lines a row carries, and the toolbar's Voice lines. */
+.fy-beat-editor { display: grid; gap: 12px; min-width: 0; }
+.fy-beat-editor form, .fy-beat-editor label { display: grid; gap: 8px; }
+.fy-beat-editor form { gap: 16px; }
+.fy-beat-editor select, .fy-beat-editor textarea { width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: var(--type-ui); }
+.fy-beat-editor textarea { min-height: 130px; resize: vertical; }
+.fy-beat-editor__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.fy-beat-editor .ui-btn { min-height: 44px; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swbeat { display: grid; gap: 6px; margin: 2px 0 0; padding: 0; list-style: none; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swbeat__line { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 14px; row-gap: 2px; align-items: baseline; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swbeat__who { grid-column: 1; font: 600 11px/1.2 var(--font-sans); letter-spacing: .12em; text-transform: uppercase; color: var(--foreground); }
