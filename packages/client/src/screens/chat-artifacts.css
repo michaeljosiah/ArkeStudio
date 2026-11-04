@@ -264,7 +264,7 @@
   .fy-chat__composer .fy-cx__attachclip { display: block; }
 }
 
-.fy-chat-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.fy-chat-attachments { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-top: 10px; }
 .fy-chat-attachment { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 100%; padding: 8px; border: 1px solid currentColor; border-radius: 8px; font: var(--type-meta); overflow-wrap: anywhere; }
 .fy-chat-attachment img { display: block; width: 160px; max-width: 100%; height: 100px; object-fit: contain; border-radius: 4px; }
 .fy-chat-attachment__notice { opacity: .8; }
