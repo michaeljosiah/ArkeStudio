@@ -4,6 +4,7 @@ import { useLocation, useNavigate, useParams } from "react-router";
 import {
   balanceFaulted,
   BLOCKING_FINDINGS,
+  harnessModelReference,
   chapterParagraphs,
   ComicScriptSchema,
   DEFAULT_COMIC_SETTINGS,
@@ -704,6 +705,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
   const held = checking || reviewing;
   const passed = shown !== undefined && !held && takeClears(shown);
   const usable = quote?.ok === true && !comicModelRefused(state, quote.model);
+  const modelLabel = (reference: string) => state?.app.harnessModels.find(model => harnessModelReference(model) === reference)?.displayName ?? reference.split("/").at(-1)!;
   const makingJob = making[0] === undefined ? undefined : state?.app.jobs.find(job => job.target.kind === "bench-take" && job.target.id?.startsWith(`${making[0]!.session}/`) && job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled");
   const make = () => {
     if (!usable || !quote?.ok) return;
@@ -772,7 +774,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
           <b>{lettered ? "Lettering" : `${blocking.length} to fix`}</b>
           {lettered && <span>{lines} of {lines}</span>}
           <span className="grow" />
-          <span className="m">{lettered ? "" : `${lines - new Set(blocking.map((finding) => finding.item)).size} of ${lines} lines · `}read by {verification.reader.version.split(":")[1] ?? verification.reader.id}</span>
+          <span className="m">{lettered ? "" : `${lines - new Set(blocking.map((finding) => finding.item)).size} of ${lines} lines · `}read by {modelLabel(verification.reader.version.split(":")[1] ?? verification.reader.id)}</span>
         </div>
       ) : (
         <div className="fy-comic__verdict warn"><TriangleAlert size={15} /><b>Not checked</b><span>{reason.text}</span></div>
@@ -786,7 +788,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
           <b>Picture</b>
           <span>{pictureFaults.length ? `${pictureFaults.length} to fix` : toLook.length ? `${toLook.length} to look at` : "as written"}</span>
           <span className="grow" />
-          <span className="m">{review.reviewer.version.split(":")[1] ?? review.reviewer.id}</span>
+          <span className="m">{modelLabel(review.reviewer.version.split(":")[1] ?? review.reviewer.id)}</span>
         </div>
       ) : (
         <div className="fy-comic__verdict pic warn"><TriangleAlert size={15} /><b>Picture</b><span>not checked</span><span className="grow" /><span className="m">{unreviewed.text === "not checked" ? "" : unreviewed.text}</span></div>

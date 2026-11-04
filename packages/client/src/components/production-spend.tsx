@@ -9,8 +9,8 @@ import { Button } from "./ui.js";
 type Scope = { kind: "production" } | { kind: "scene" | "shot"; id: string };
 const isAllowance = (source: string) => ["included-plan", "free-plan", "free-credit"].includes(source);
 const sourceLabels: Record<ProductionSpendReceipt["source"], string> = {
-  "provider-reported": "Provider-reported", "usage-derived": "Usage-derived", "mixed-measured": "Mixed measured",
-  "manifest-derived": "Manifest-derived", "estimated": "Estimated", "unknown-actual": "Unknown source",
+  "provider-reported": "Charged", "usage-derived": "Measured", "mixed-measured": "Measured",
+  "manifest-derived": "List price", "estimated": "Estimated", "unknown-actual": "Recorded",
   "local-zero": "Unmetered", "included-plan": "ChatGPT plan", "free-plan": "Free plan", "free-credit": "Free credit", "unavailable": "Unavailable",
 };
 const outcomeLabels = { succeeded: "Made", failed: "Failed", cancelled: "Cancelled", pending: "Pending", unknown: "Unknown" };
@@ -42,14 +42,15 @@ function scopeValue(rollup: ProductionSpendRollup | undefined, scope: Scope) {
   return scope.kind === "production" ? rollup?.total : scope.kind === "scene" ? rollup?.scenes[scope.id] : rollup?.shots[scope.id];
 }
 function Receipt({ row, scope, shotName }: { row: ProductionSpendReceipt; scope: Scope; shotName: (id: string) => string }) {
+  const modelName = useStore().state?.app.manifest?.models.find(model => model.id === row.model)?.displayName ?? row.model;
   const share = scope.kind === "shot" ? row.shots.find(shot => shot.shotId === scope.id)?.microUsd : row.microUsd;
   const amount = isAllowance(row.source) ? "Plan" : row.source === "local-zero" ? "Local" : share == null ? "Unavailable" : formatMicroUsd(share);
   const label = row.shots.length > 1 ? `Board · ${row.shots.map(shot => shotName(shot.shotId)).join(", ")}`
     : row.shots.length ? `${shotName(row.shots[0]!.shotId)} · ${row.kind === "frame" ? "frame" : "video"}` : "Unassigned production work";
   return <article className="fy-spend-receipt">
-    <div className="fy-spend-work">{label}<span className="fy-spend-meta">{row.model}</span></div>
+    <div className="fy-spend-work">{label}<span className="fy-spend-meta">{modelName}</span></div>
     <span className="fy-spend-outcome">{outcomeLabels[row.outcome]}</span><span className="fy-spend-source">{sourceLabels[row.source]}</span><span className="fy-spend-price">{amount}</span>
-    <details><summary>Receipt and allocation</summary><div className="fy-spend-evidence">
+    <details><summary>Details</summary><div className="fy-spend-evidence">
       <p>{row.provider} · {row.model}</p><p className="fy-spend-job">Job {row.jobId}</p>
       {row.source === "estimated" && <p>Estimate used; no actual amount was recorded.</p>}
       {row.source === "unknown-actual" && <p>The amount is recorded; its historical source is unknown.</p>}
@@ -120,9 +121,8 @@ export function ProductionSpend({ production, sceneId, shotId, compact = false, 
         : isAllowance(source.source) ? `${source.entries} ${sourceLabels[source.source]} attempt${source.entries === 1 ? "" : "s"} · allowance used unknown`
           : `${formatMicroUsd(source.microUsd)} ${sourceLabels[source.source].toLowerCase()}`}</span>)}</div>}
       {detail?.coverage === "empty" ? <div className="fy-spend-empty"><h3>No generation work yet</h3><p>Shot frames and video attempts will appear here as you make them.</p></div>
-        : rows.length > 0 ? <section aria-label="Contributing work"><div className="fy-spend-columns" aria-hidden="true"><span>Work</span><span>Outcome</span><span>Cost source</span><span>{scope.kind === "shot" ? "Shot share" : "Billed spend"}</span></div>
+        : rows.length > 0 ? <section aria-label="Contributing work"><div className="fy-spend-columns" aria-hidden="true"><span>Work</span><span>Outcome</span><span>Based on</span><span>{scope.kind === "shot" ? "Shot share" : "Billed spend"}</span></div>
           {rows.map(row => <Receipt key={row.jobId} row={row} scope={scope} shotName={shotName} />)}</section> : null}
-      <p className="fy-spend-note">Spend includes frames and video attempts. Generated counts video candidates; selected counts shots with a current video take. Board charges appear once and are shared by duration.</p>
     </PageSheet>
   </>;
 }
