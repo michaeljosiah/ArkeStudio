@@ -8393,6 +8393,7 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-src.is-current { background: var(--secondary); color: var(--foreground); font-weight: 500; }
 .fy-src__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-src__note { font: 400 12px var(--font-sans); color: var(--warning); white-space: nowrap; }
+.fy-src__note--ok { color: var(--success); }
 
 /*
  * A provider's mark (R-20), on one light plate in both themes. Half of the marks are a black glyph
