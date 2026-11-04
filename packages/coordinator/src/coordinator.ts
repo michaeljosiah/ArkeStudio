@@ -266,6 +266,7 @@ import {
   engineFloorClause,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
+import { benchImageResult, type BenchImageSource } from "./world-chat/bench-image-result.js";
 import {
   discoverBenchSessions,
   openBenchSession,
@@ -593,7 +594,7 @@ import { musicWaveform } from "./productions/music-waveform.js";
 import { musicHeardIn } from "./productions/music-heard.js";
 import { renderMusicAlbum } from "./productions/music-render.js";
 import { KEY_ART_EXTENSIONS, WORLD_IMAGE_DIR, worldImagePrompt, worldImageRequest } from "./references/world-image.js";
-import { adoptKeyArtCandidate } from "./references/key-art.js";
+import { adoptKeyArtCandidate, adoptKeyArtResult } from "./references/key-art.js";
 import { assembleKeyArt, keyArtComposition, readKeyArtBrief } from "./references/key-art-references.js";
 import {
   LOOK_PREVIEW_DIR,
@@ -23387,11 +23388,14 @@ export class Coordinator {
 
   private async useWorldImageForConversationAction(
     store: WorldStore,
-    candidateIndex: number,
+    candidateIndex: number | undefined,
     mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+    benchTake?: BenchImageSource,
   ): Promise<boolean> {
-    const candidate = store.getBundle().keyArtCandidates[candidateIndex - 1];
-    if (!candidate || !await adoptKeyArtCandidate(store, candidate, mutation.precondition, mutation)) return false;
+    const image = benchTake ? await benchImageResult(store, benchTake) : null;
+    const candidate = store.getBundle().keyArtCandidates[(candidateIndex ?? 0) - 1];
+    if (image ? !await adoptKeyArtResult(store, image.bytes, image.extension, mutation.precondition, mutation)
+      : !candidate || !await adoptKeyArtCandidate(store, candidate, mutation.precondition, mutation)) return false;
     await this.dropStagedReference(store, stagedReferenceKey("world-image"));
     this.refreshIfStillOpen(store);
     await this.refreshWorldList();
@@ -23400,18 +23404,22 @@ export class Coordinator {
 
   private async useMasterLookForConversationAction(
     store: WorldStore,
-    candidateIndex: number,
+    candidateIndex: number | undefined,
     mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+    benchTake?: BenchImageSource,
   ): Promise<boolean> {
     const gate = this.opts.provider.gate?.();
-    const candidate = store.getBundle().masterLookCandidates[candidateIndex - 1];
-    if (!gate || !candidate) return false;
+    if (!gate) return false;
+    const image = benchTake ? await benchImageResult(store, benchTake) : null;
+    const candidate = store.getBundle().masterLookCandidates[(candidateIndex ?? 0) - 1];
+    if (!image && !candidate) return false;
     const direction = store.getBundle().artDirection;
-    const file = masterLookFile(direction.version + 1, extname(candidate).toLowerCase() || ".png");
+    const file = masterLookFile(direction.version + 1, image?.extension ?? (extname(candidate!).toLowerCase() || ".png"));
     await store.gateOp(async () => {
       await mkdir(toExtendedLength(join(store.dir, MASTER_LOOK_DIR_ACCEPTED)), { recursive: true });
-      await copyFile(
-        toExtendedLength(join(store.dir, fromPortable(candidate))),
+      if (image) await atomicWriteFile(toExtendedLength(join(store.dir, fromPortable(file))), Buffer.from(image.bytes));
+      else await copyFile(
+        toExtendedLength(join(store.dir, fromPortable(candidate!))),
         toExtendedLength(join(store.dir, fromPortable(file))),
       );
     }, mutation.precondition);
@@ -23886,10 +23894,10 @@ export class Coordinator {
         this.importReferenceForConversationAction(store, change, mutation),
       importReferenceImage: (target, mutation) =>
         this.importReferenceImageForConversationAction(store, target, mutation),
-      useWorldImage: (candidateIndex, mutation) =>
-        this.useWorldImageForConversationAction(store, candidateIndex, mutation),
-      useMasterLook: (candidateIndex, mutation) =>
-        this.useMasterLookForConversationAction(store, candidateIndex, mutation),
+      useWorldImage: (candidateIndex, mutation, benchTake) =>
+        this.useWorldImageForConversationAction(store, candidateIndex, mutation, benchTake),
+      useMasterLook: (candidateIndex, mutation, benchTake) =>
+        this.useMasterLookForConversationAction(store, candidateIndex, mutation, benchTake),
       useReferenceCandidate: (change, mutation) =>
         this.useReferenceCandidateForConversationAction(store, change, mutation),
       discardReferenceImage: (target, mutation) =>

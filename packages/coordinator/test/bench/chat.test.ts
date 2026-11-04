@@ -15,7 +15,7 @@ import { WorldChatService } from "../../src/world-chat/service.js";
 import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { productionReadFence } from "../../src/world-chat/production-reads.js";
-import { jobsFence, artifactsFence, timelineFence } from "../../src/world-chat/target-reads.js";
+import { jobsFence, artifactsFence, timelineFence, referencesFence, worldMetadataFence, artDirectionFence } from "../../src/world-chat/target-reads.js";
 import { assembleStory } from "../productions/assemble.js";
 import { applyTimelineCommand } from "../../src/productions/timeline.js";
 import { decideEditorRequest } from "../../src/productions/editor-requests.js";
@@ -51,6 +51,67 @@ const music = (): Extract<ModelWorldChatAction, { kind: "bench-generation" }> =>
   mode: "music", brief: "A slow solo piano cue for the title. Instrumental; no vocals.", provider: MUSIC.provider, model: MUSIC.id,
   params: { kind: "music", lyrics: "[instrumental]", count: 1 }, references: [],
 }, checkReceiptIds: [newId("check")] });
+
+it("adopts a verified Bench image into world slots only after approval, refuses changed bytes and retains look history", async t => {
+  const { store, worldDir, deps } = await setup(t);
+  // conversation-runs raises this boundary before issuing the run's leased reads.
+  await store.ensureSchemaVersion(122, "world-chat-result-use");
+  const sessionId = newId("sess"), takeId = newId("tk"), bench = new BenchStore(sessionDir(worldDir, sessionId));
+  await bench.create(sessionId, AT);
+  await bench.append({ type: "takes-reserved", takes: [{ id: takeId, n: 1, requestId: "image", createdAt: AT,
+    request: { mode: "image", brief: "A tide clock", provider: IMAGE.provider, model: IMAGE.id, params: { kind: "image", count: 1 }, references: [], keyframes: [] } }] }, { at: AT });
+  const bytes = pngBytes(), hash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+  const media = join(sessionDir(worldDir, sessionId), "media", takeId, "result.png");
+  await mkdir(join(sessionDir(worldDir, sessionId), "media", takeId), { recursive: true });
+  await writeFile(media, bytes);
+  await bench.append({ type: "take-completed", takeId, media: { file: "result.png", hash }, completedAt: AT }, { at: AT });
+  const conversationId = newId("cv"), log = new WorldChatStore(conversationDir(worldDir, conversationId));
+  await log.create(conversationId, AT); await log.append({ type: "conversation.created", title: "World images", entryContext: { kind: "world" } }, { at: AT });
+  const dependencies = deps(), lifecycle = new ConversationActionLifecycle({ worldPath: worldDir, worldId: store.worldId,
+    adapters: worldChatActionAdapters(store, null, () => AT, dependencies), now: () => AT });
+  const view = async () => foldConversation(conversationId, AT, (await log.read()).events).view;
+  const bind = async (kind: "reference-world-image-result-use" | "reference-master-look-result-use", includeBench = true) => {
+    const bundle = store.getBundle();
+    const reads = [{ requirement: "references" as const, id: store.worldId, fence: referencesFence(bundle) },
+      kind === "reference-world-image-result-use" ? { requirement: "world-metadata" as const, id: store.worldId, fence: worldMetadataFence(bundle) }
+        : { requirement: "art-direction" as const, id: "art-direction", fence: artDirectionFence(bundle) },
+      ...(includeBench ? [{ requirement: "bench" as const, id: sessionId, fence: productionReadFence(benchReadRows(worldDir, sessionId)) }] : [])];
+    const receipts = reads.map(read => ({ id: newId("check"), runId: newId("run"), tool: "target-read" as const, status: "complete" as const,
+      consulted: [], target: { requirement: read.requirement, id: read.id }, observedRevisionOrDigest: read.fence, complete: true, nextCursor: null, at: AT }));
+    const prepared = prepareWorldChatActions(store, lifecycle, { conversationId, turnId: newId("turn"), entryContext: { kind: "world" },
+      candidates: [], groups: [], existingCandidates: [], existingGroups: [], bibleEdits: [], bibleBaseVersion: 1, sceneEdits: [], sceneBaseVersion: null, editorRequests: [],
+      actions: [{ kind, benchTake: { sessionId, takeId }, checkReceiptIds: receipts.map(receipt => receipt.id) }], receipts, at: AT }, dependencies);
+    for (const item of prepared) { await log.append({ type: "action.prepare-intent", intent: item.intent }, { at: AT }); await lifecycle.bindIntent(item.intent, item.payload); }
+    return (await view()).actions.at(-1)!;
+  };
+  const decide = async (card: ConversationActionCard, decision: "approve" | "deny" = "approve") => lifecycle.decide({ kind: "conversation-action-decide", worldId: store.worldId, conversationId,
+    actionId: card.actionId, expectedConversationSeq: (await view()).seq, expectedStatus: "pending", decision, requestId: ulid() });
+  await assert.rejects(bind("reference-world-image-result-use", false), /bench|target/i);
+  const firstUse = await bind("reference-world-image-result-use");
+  assert.equal((await decide(firstUse)).status, "completed", JSON.stringify((await view()).actions.at(-1)));
+  const before = store.getBundle().keyArt, denied = await bind("reference-world-image-result-use");
+  assert.equal(store.getBundle().keyArt, before);
+  assert.equal(denied.shown.body.family, "take-review");
+  assert.equal((await decide(denied, "deny")).status, "denied");
+  assert.equal(store.getBundle().keyArt, before);
+  const keyArt = await bind("reference-world-image-result-use");
+  assert.equal((await decide(keyArt)).status, "completed", JSON.stringify((await view()).actions.at(-1)));
+  assert.deepEqual(await readFile(join(worldDir, store.getBundle().keyArt!)), Buffer.from(bytes));
+  assert.equal((await readWorldMeta(worldDir)).schemaVersion, 122);
+  await assert.rejects(readWorldMeta(worldDir, { supports: 121 }), /newer|schema|version/i);
+  const oldLook = store.getBundle().artDirection;
+  const look = await bind("reference-master-look-result-use");
+  assert.equal((await decide(look)).status, "completed", JSON.stringify((await view()).actions.at(-1)));
+  const current = store.getBundle().artDirection;
+  assert.equal(current.version, oldLook.version + 1);
+  assert.ok(current.history.some(row => row.version === oldLook.version));
+  assert.deepEqual(await readFile(join(worldDir, current.masterLook!)), Buffer.from(bytes));
+  const tampered = await bind("reference-world-image-result-use");
+  await writeFile(media, encodePng(solidImage(4, 4, [255, 0, 0, 255])));
+  assert.notEqual((await decide(tampered)).status, "completed");
+  assert.deepEqual(await readFile(join(worldDir, store.getBundle().keyArt!)), Buffer.from(bytes));
+});
+
 async function setup(t: TestContext, mediaProbe?: MediaProbe) {
   const { root, worldDir } = await makeTempRoot();
   const provider = new FsWorldProvider(root, { clock: () => AT });

@@ -461,14 +461,16 @@ const ReferenceImageImportActionSchema = z
 const ReferenceWorldImageResultUseActionSchema = z
   .object({
     kind: z.literal("reference-world-image-result-use"),
-    candidateIndex: z.number().int().min(1),
+    candidateIndex: z.number().int().min(1).optional(),
+    benchTake: z.object({ sessionId: SessionIdSchema, takeId: TakeIdSchema }).strict().optional(),
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
 const ReferenceMasterLookResultUseActionSchema = z
   .object({
     kind: z.literal("reference-master-look-result-use"),
-    candidateIndex: z.number().int().min(1),
+    candidateIndex: z.number().int().min(1).optional(),
+    benchTake: z.object({ sessionId: SessionIdSchema, takeId: TakeIdSchema }).strict().optional(),
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();

@@ -41,6 +41,12 @@ function tool(
 
 /** Target-specific rather than path-shaped: callers can name an authority, never a file. */
 export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
+  tool("list_versions", "List saved version numbers and content hashes for a Bible, Canon entry, sheet or art direction before choosing a restore. Discovery only: do not cite this receipt in an action; read the current target separately and cite that complete read. The restore card shows and fences the selected historical content.", { target: { oneOf: [
+    { type: "object", properties: { kind: { const: "bible" } }, required: ["kind"], additionalProperties: false },
+    { type: "object", properties: { kind: { const: "art-direction" } }, required: ["kind"], additionalProperties: false },
+    { type: "object", properties: { kind: { const: "canon" }, id: { type: "string" } }, required: ["kind", "id"], additionalProperties: false },
+    { type: "object", properties: { kind: { const: "sheet" }, sheetType: { enum: ["character", "location", "faction"] }, id: { type: "string" } }, required: ["kind", "sheetType", "id"], additionalProperties: false },
+  ] } }, ["target"]),
   tool("get_candidate", "Read an exact retained proposition and its groups from this conversation, including authored draft, metadata, evidence and status. Join the ordered text chunks as JSON. Read every page before revising; this is draft context, not a world-source check or permission to modify accepted propositions.", { candidateId: { type: "string", description: "Candidate id from the conversation registry" }, expectedRevision: { type: "integer", minimum: 1, description: "Revision from the registry" } }, ["candidateId", "expectedRevision"]),
   tool("get_world_metadata", "Read the open world's complete metadata.", {}),
   tool("list_world_index", "List every targetable world, Canon, sheet, production and Series identity.", {}),

@@ -32,6 +32,8 @@ import {
   type Job,
   type ProductionBundle,
   type WorldBundle,
+  ArkeVersionTargetSchema,
+  type ArkeVersionTarget,
   type VoiceCandidate,
   type WorldChangeCandidate,
   type CandidateGroup,
@@ -44,6 +46,7 @@ import { audioCutReadRows, editorRequestReadRows, performanceReadRows, voiceSamp
 import { effectReadRows } from "./effect-proposal-reads.js";
 import { sha256 } from "../world/text-files.js";
 import { productionTakeImageSources } from "./production-take-images.js";
+import { versionTargetId, type VersionRow } from "./version-history.js";
 
 const DEFAULT_LIMIT = 8;
 const MAX_LIMIT = 20;
@@ -78,6 +81,7 @@ export interface ArkeExportReadRecord {
 }
 
 export interface TargetReadDeps {
+  readonly getVersions?: (target: ArkeVersionTarget) => Promise<readonly VersionRow[]>;
   readonly getConversationDrafts?: (lease: QueryLease) => Promise<Pick<import("@arke-studio/contracts").WorldChatLoaded, "candidates" | "groups">>;
   readonly getAudioStudio?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").AudioStudioSnapshot>;
   readonly getBenchRows?: (sessionId?: string) => readonly ProductionReadRow[];
@@ -617,6 +621,17 @@ export class WorldChatTargetReads {
     let rows: Row[];
 
     switch (tool) {
+      case "list_versions": {
+        assertArgs(args, ["target"]);
+        const requested = ArkeVersionTargetSchema.parse(args["target"]);
+        if (!this.deps.getVersions) throw new TargetReadError("Version history is unavailable on this host.");
+        const versions = await this.deps.getVersions(requested);
+        // This discovery receipt cannot stand in for a current world/Canon/sheet read.
+        readTarget = target("world-metadata", `versions:${versionTargetId(requested)}`);
+        rows = versions.map(version => ({ key: padded(version.version), value: version }));
+        revisionOrDigest = fence(versions);
+        break;
+      }
       case "get_candidate": {
         assertArgs(args, ["candidateId", "expectedRevision"]);
         const id = CandidateIdSchema.parse(args["candidateId"]);

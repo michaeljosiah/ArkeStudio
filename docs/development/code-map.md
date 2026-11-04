@@ -1926,6 +1926,17 @@ Client `components/system-panel.tsx`/CSS and `lib/system-panel.ts` own the round
 authenticated event/snapshot path, without becoming journal or support-export data. The existing
 Diagnostics route receives a finding reference for warning focus. See [system status](system-status.md)
 for collection limits, ownership, unavailable data and validation.
+### World image result use and restore discovery (#1410)
+
+Client `generation-result-use.ts` requests existing key-art/master-look approval cards for a
+Bench image. Coordinator `world-chat/bench-image-result.ts` checks the retained take and media
+hash; `references/key-art.ts` shares the atomic key-art commit, and master-look adoption uses
+the existing art-direction proposal authority. `world-chat/version-history.ts` supplies scoped
+saved-version discovery to `list_versions`; its paged receipt cannot replace a current-target
+read for restore. Tests: coordinator `bench/chat.test.ts`, `world-chat/version-history.test.ts`
+and existing action/restore tests; client `production-card-media.test.tsx`. SPEC-050 R-36/R-37,
+bounded to these two slots. Schema 122 is raised before a chat run's leased reads.
+
 ### Sent conversation attachments (#1412)
 
 Coordinator `world-chat/project.ts` preserves each message's attachment IDs and supplies portable
