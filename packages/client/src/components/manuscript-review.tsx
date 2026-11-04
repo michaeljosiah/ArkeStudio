@@ -88,7 +88,7 @@ export function ManuscriptReviewControl({ worldId, productionId, chapters, words
       if (event.pdf && event.requestId === exportRequest.current) {
         exportRequest.current = null; setExporting(false);
         const bytes = Uint8Array.from(atob(event.pdf), c => c.charCodeAt(0)), url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
-        const link = document.createElement("a"); link.href = url; link.download = `${productionId}-review-${event.review?.id ?? "report"}.pdf`; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+        const link = document.createElement("a"); link.href = url; link.download = `${event.review?.title ?? productionId} - Manuscript review.pdf`; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
       }
       if (selected.current && event.review?.id !== selected.current) return;
       if (!selected.current && event.review) selected.current = event.review.id;

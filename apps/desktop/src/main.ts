@@ -649,6 +649,9 @@ async function createWindow(): Promise<void> {
     if (!pageFullScreen || input.type !== "keyDown" || input.key !== "Escape") return;
     void window?.webContents.executeJavaScript(LEAVE_PAGE_FULL_SCREEN).catch(() => {});
   });
+  // A `download` link's save dialog would otherwise be titled with the page's blob: address (issue 2544).
+  window.webContents.session.removeAllListeners("will-download");
+  window.webContents.session.on("will-download", (_event, item) => item.setSaveDialogOptions({ title: "Save file", defaultPath: join(app.getPath("downloads"), item.getFilename()) }));
   window.webContents.session.setPermissionCheckHandler((contents, permission, _origin, details) => permitted({
     permission, sameWebContents: contents === window?.webContents, isMainFrame: details.isMainFrame,
     requestingUrl: details.requestingUrl ?? "", rendererUrl, mediaTypes: details.mediaType ? [details.mediaType] : [],
