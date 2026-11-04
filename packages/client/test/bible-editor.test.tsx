@@ -59,7 +59,7 @@ describe("the bible's editor", () => {
     for (const bible of [PROSE, `${PROSE}\n<br>\n`]) {
       const html = render(bible);
       assert.match(html, /Saved · v3/, "the version is on screen");
-      assert.match(html, /tokens a\s+turn/, "and so is what it costs to carry");
+      assert.match(html, /[0-9]+(<!-- -->)? word/, "and so is its length, in words rather than tokens");
     }
   });
 });
