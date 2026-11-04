@@ -90,6 +90,10 @@ describe("Pages (turn 247)", () => {
     await act(async () => { __setStateForTest(structuredClone(state), { connection: "open" }); });
     assert.match(m.container.textContent!, /Arke did not finish 1 · The tide/);
     assert.match(m.container.textContent!, /The writing turn failed/);
+    state.worldChat.lastFailure = { turnId, status: "failed", detail: "rejected: The requested change could not be prepared: A page is missing." };
+    await act(async () => { __setStateForTest(structuredClone(state), { connection: "open" }); });
+    assert.match(m.container.textContent!, /A page is missing/);
+    assert.doesNotMatch(m.container.textContent!, /rejected:|could not be prepared/);
     await act(async () => props(button(m.container, "Open Builder Chat")!).onClick({}));
     assert.equal(owner.getSnapshot().selected?.conversationId, id);
     delete state.worldChat.lastFailure;

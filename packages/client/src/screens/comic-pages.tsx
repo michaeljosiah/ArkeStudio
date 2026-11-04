@@ -269,7 +269,9 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const from = sourceStory && sourceChapter ? ` from chapter ${sourceChapter.order} of ${sourceStory.meta.title}` : "";
   const planWithArke = () => chapter && ask(`Plan chapter ${chapter.order}, ${chapter.title}, as pages${from}.`);
   const fixLean = (lean: ComicChapterPlan["leans"][number]) => chapter && ask(`In the plan for chapter ${chapter.order}, ${chapter.title}: page ${lean.page}, "${lean.line}" ${lean.why}. Settle it in the plan, and leave it out of leans once it is settled.`);
-  const draftWithArke = () => chapter && ask(`Draft chapter ${chapter.order}, ${chapter.title}, from its kept plan${from}.`);
+  // A press from this window, so a failure seen on reopening a page never starts a turn by itself.
+  const pressedDraft = useRef(false);
+  const draftWithArke = () => { if (chapter) { pressedDraft.current = true; ask(`Draft chapter ${chapter.order}, ${chapter.title}, from its kept plan${from}.`); } };
   // Arke at work on this chapter is said on the chapter itself (turn 256b): pressed from here, or the
   // pilot Start the pilot asked for, while a turn runs.
   const workspace = useStore().state?.worldChat ?? null;
@@ -284,6 +286,13 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const refused = conversation?.messages.findLast(message => message.role === "studio" && message.turnId === lastAsk?.turnId && message.refusals.length > 0);
   const failure = namesChapter ? conversation?.lastFailure?.turnId === lastAsk?.turnId ? conversation?.lastFailure
     : refused ? { detail: refused.refusals.join(" · ") } : undefined : undefined;
+  // The cold read sends a first draft back once (SPEC-064 R-64). On the turn's last attempt that ended
+  // the press in a refusal, and the next press worked: so it is pressed once more here (issue 2456).
+  useEffect(() => {
+    if (!pressedDraft.current || !failure?.detail?.includes(COLD_READ_REFUSAL)) return;
+    pressedDraft.current = false;
+    if (chapter) ask(`Draft chapter ${chapter.order}, ${chapter.title}, from its kept plan${from}.`);
+  }, [failure?.detail]); // eslint-disable-line react-hooks/exhaustive-deps
   const turnRunning = conversation?.runStatus === "running";
   const working = turnRunning && chapter !== undefined && drafted === undefined && pages.length === 0
     && ((asked !== undefined && Date.now() - asked < 30 * 60_000) || chapter.id === (new URLSearchParams(search).get("chapter") ?? chapters[0]?.id));
@@ -452,7 +461,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               ) : <>
               {failure ? <div role="status">
                 <h3>Arke did not finish {chapter?.order} · {chapter?.title}</h3>
-                <p>{failure.detail ?? "The writing turn did not complete. Open Builder Chat to review the result and try again."}</p>
+                <p>{failure.detail?.replace(/^(rejected:\s*)?(The requested change could not be prepared:\s*)?/, "") ?? "The writing turn did not complete. Open Builder Chat to review the result and try again."}</p>
                 {chatSurface && <Button onClick={() => chat?.open({ ...chatSurface, conversationId: conversation!.conversationId, newThread: false })}>Open Builder Chat</Button>}
               </div> : <h3>{chapter?.order} · {chapter?.title} has no pages</h3>}
               {keptPlan !== undefined && <span className="fy-comic__plankept"><Check size={12} />Plan kept · {keptPlan.pages.length} {keptPlan.pages.length === 1 ? "page" : "pages"}</span>}
@@ -496,6 +505,8 @@ const UNDER_PAGE = 272;
  * the page's own shape, but never so wide the script falls under its minimum, nor narrower than a
  * page anyone could read.
  */
+const COLD_READ_REFUSAL = "A reader who has only the pages could not follow";
+
 export function sideWidth(room: { width: number; height: number }, [across, down]: [number, number]): number {
   const tall = Math.round((room.height - UNDER_PAGE) * across / down) + 36;
   return Math.max(320, Math.min(tall, room.width - 136 - SCRIPT_MIN));
