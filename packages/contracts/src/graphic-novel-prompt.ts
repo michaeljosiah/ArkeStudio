@@ -45,7 +45,8 @@ export function comicPagePrompt(input: {
   const lines: string[] = [];
   lines.push(`A single finished comic book page, ${pageAspect(page, input.settings)}, ${layout}. ${READING_WORDS[reading]} Clean panel borders and gutters.`);
   if (input.look) lines.push(`Look: ${input.look.replace(/\s+/g, " ").trim()}`);
-  if (input.style?.trim()) lines.push(`Style: ${input.style.replace(/\s+/g, " ").trim()}`);
+  // A world's mood can fight the chosen style: "playful" beside Noir is how a smiling heroine reached a tense panel (issue 2424).
+  if (input.style?.trim()) lines.push(`Style: ${input.style.replace(/\s+/g, " ").trim()}${input.look ? " Where this style and the look above differ, follow the style." : ""}`);
   page.panels.forEach((panel, index) => {
     const who = panel.characters.map(input.names);
     const parts = [

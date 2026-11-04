@@ -86,7 +86,7 @@ describe("a comic page made (SPEC-064 R-22 – R-27)", () => {
       assert.doesNotMatch(before.brief, /\.png|Style:/);
       await h.send({ kind: "set-comic-settings", worldId: WORLD_ID, productionId: production, settings: { style: { words: "Crime noir comic: solid black shapes and stark white.", preset: "noir" } } });
       const after = await brief();
-      assert.match(after.brief, /Look: [^\n]+\n\nStyle: Crime noir comic: solid black shapes and stark white\./);
+      assert.match(after.brief, /Look: [^\n]+\n\nStyle: Crime noir comic: solid black shapes and stark white\. Where this style and the look above differ, follow the style\./);
       // A style is not the page's picture: a take made before it is still the page's (R-21a).
       const settings = h.store()!.getBundle().productions.find((p) => p.meta.id === production)!.comic!;
       const { style: _style, ...unstyled } = settings;
