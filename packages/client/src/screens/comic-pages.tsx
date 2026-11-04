@@ -291,6 +291,8 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   useEffect(() => {
     if (!pressedDraft.current || !failure?.detail?.includes(COLD_READ_REFUSAL)) return;
     pressedDraft.current = false;
+    // Words the author has started typing stay theirs; Draft with Arke is still there to press.
+    if (chat && chatSurface && chat.value(chatSurface.key, "draft", "") !== "") return;
     if (chapter) ask(`Draft chapter ${chapter.order}, ${chapter.title}, from its kept plan${from}.`);
   }, [failure?.detail]); // eslint-disable-line react-hooks/exhaustive-deps
   const turnRunning = conversation?.runStatus === "running";
