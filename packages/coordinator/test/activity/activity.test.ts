@@ -481,6 +481,14 @@ describe("actions offered only where the state permits (R-13, D10, §3.2)", () =
 });
 
 describe("running work (R-2, D6, D7)", () => {
+  it("says a queued job behind a paused provider is waiting on it (issue 2426)", () => {
+    const held = job({ status: "queued", provider: "fishaudio", target: { kind: "character-sheet", id: "maren-kest/g1" } });
+    const [paused] = computeRunning(baseState({ jobs: [held], queues: [{ provider: "fishaudio", paused: true, pauseKind: "fault", reason: "key rejected", held: 1 }] }));
+    assert.match(paused?.detail ?? "", /waiting · Fish Audio paused$/);
+    const [moving] = computeRunning(baseState({ jobs: [held], queues: [{ provider: "fishaudio", paused: false, held: 0 }] }));
+    assert.match(moving?.detail ?? "", /queued$/);
+  });
+
   it("shows generated work while its result is being prepared", () => {
     const pending = job({
       status: "succeeded",
