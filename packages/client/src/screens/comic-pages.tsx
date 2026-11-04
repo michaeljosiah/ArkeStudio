@@ -311,9 +311,10 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
     return () => observer.disconnect();
   }, [draftPages === null]); // eslint-disable-line react-hooks/exhaustive-deps
   const shape = pageAspect(page ?? draftPage ?? newPage(), settings).split(":").map(Number) as [number, number];
-  // Too narrow for the strip, the script's minimum and a readable page: the stylesheet's columns
-  // stand, as before turn 251 (codex on PR 2264).
-  const columns = room === null || room.width < 136 + SCRIPT_MIN + 320 ? undefined : `136px minmax(${SCRIPT_MIN}px, 1fr) ${sideWidth(room, shape)}px`;
+  // Too narrow for the strip, the script's minimum and a readable page, as with the chat open: the
+  // page goes under the script, or the script broke mid-word in a 130-pixel column (issue 2422).
+  const narrow = room !== null && room.width < 136 + SCRIPT_MIN + 320;
+  const columns = room === null || narrow ? undefined : `136px minmax(${SCRIPT_MIN}px, 1fr) ${sideWidth(room, shape)}px`;
 
   if (chapters.length === 0) {
     return <Screen id="comic-pages"><EmptyState title="No chapters yet" action={<Button onClick={() => navigate(`${base}/story/chapters`)}>Chapters</Button>} /></Screen>;
@@ -346,8 +347,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
           <Button disabled={unsaved} onClick={() => { send(); setExporting(true); }}>Export</Button>
         </div>
         {(draftPlan !== null && drafted !== undefined) || (planOpen && keptPlan !== undefined && draftPages === null) ? (
-          <div className="fy-comic__body" ref={body} style={{ gridTemplateColumns: columns }}>
-            <div className="fy-comic__strip" />
+          <div className={`fy-comic__body${narrow ? " narrow" : ""}`} ref={body} style={{ gridTemplateColumns: columns }}>
             <PlanView plan={(draftPlan ?? keptPlan)!} chapterOrder={chapter?.order ?? 1} fix={chatSurface ? fixLean : null}
               actions={draftPlan !== null && drafted !== undefined ? (
                 <>
@@ -362,7 +362,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               )} />
           </div>
         ) : draftPages !== null && drafted !== undefined ? (
-          <div className="fy-comic__body" ref={body} style={{ gridTemplateColumns: columns }}>
+          <div className={`fy-comic__body${narrow ? " narrow" : ""}`} ref={body} style={{ gridTemplateColumns: columns }}>
             <div className="fy-comic__strip">
               {draftPages.map((candidate, index) => (
                 <button key={candidate.id} type="button" className={cx("fy-comic__thumb fy-comic__thumb--draft", candidate.id === draftPage?.id && "on")} aria-label={`Draft page ${firstNumber + index}`} onClick={() => setDraftPageId(candidate.id)}>
@@ -417,7 +417,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
             {draftPage === undefined ? <div className="fy-comic__side" /> : <DraftSide key={draftPage.id} world={world} page={draftPage} panel={draftPanel} settings={settings} />}
           </div>
         ) : (
-        <div className="fy-comic__body" ref={body} style={{ gridTemplateColumns: columns }}>
+        <div className={`fy-comic__body${narrow ? " narrow" : ""}`} ref={body} style={{ gridTemplateColumns: columns }}>
           <div className="fy-comic__strip">
             {pages.map((candidate, index) => {
               const held = record(candidate.id);
