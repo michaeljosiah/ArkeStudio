@@ -631,6 +631,7 @@ export function WorldOverviewScreen() {
                 worldSlug={slug}
                 path={hasChapters ? (world.keyArt ?? "") : `productions/${production.meta.id}/${production.scenes[0]?.board?.image ?? "board-v2.png"}`}
                 label={production.meta.title}
+                fallbackSrc={productionPlate(production.meta)}
                 radius={8}
               />
             </div>
@@ -649,7 +650,7 @@ export function WorldOverviewScreen() {
         )}
         <div className="fy-cta" onClick={() => navigate(`/w/${worldId}/canon`)}>
           <div className="fy-cta__frame">
-            <Portrait worldSlug={slug} path={sheetPortraitPath("the-saltmarket")} label="Canon" radius={8} />
+            <Portrait worldSlug={slug} path={world.keyArt ?? ""} label="Canon" fallbackSrc="./worlds/new-world.webp" radius={8} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="fy-cta__title">Grow the canon</div>
