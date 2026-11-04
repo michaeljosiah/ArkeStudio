@@ -53,7 +53,7 @@ export function ProductionStudioCanvas({ world, production, focus, actions, onFo
     {production.episodes.map(episode => <section key={episode.id}><h3>{episode.order}. {episode.title}</h3>
       <ul>{episode.scenes.map(id => production.scenes.find(s => s.id === id)).filter(s => !!s).map(s => <li key={s.id}>
         <button type="button" onClick={() => onFocus({ view: "scene", sceneId: s.id })}>{s.title} · {shotCount(s)}</button></li>)}</ul></section>)}
-    {production.episodes.length === 0 && <ul>{sortScenes(production.scenes).map(s => <li key={s.id}><button type="button" onClick={() => onFocus({ view: "scene", sceneId: s.id })}>
+    {sortScenes(production.scenes).some(s => !production.episodes.some(episode => episode.scenes.includes(s.id))) && <ul>{sortScenes(production.scenes).filter(s => !production.episodes.some(episode => episode.scenes.includes(s.id))).map(s => <li key={s.id}><button type="button" onClick={() => onFocus({ view: "scene", sceneId: s.id })}>
       {s.number}. {s.title} · {shotCount(s)}</button></li>)}</ul>}
   </section>;
 }
