@@ -6,6 +6,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type WorldChatCheckReceipt, applyBibleEdits, BENCH_CHAT_SCHEMA_VERSION, CONVERSATIONAL_PROPS_SCHEMA_VERSION, CHAT_SEQUENCING_SCHEMA_VERSION, PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { benchReadRows } from "../bench/chat-reads.js";
+import { readVersionHistory } from "../world-chat/version-history.js";
+import { WORLD_RESULT_USE_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { frameRunReadRows } from "../world-chat/production-reads.js";
 import { readAudioRights } from "../audio/rights.js";
 import { readPlanRecords } from "../productions/plans.js";
@@ -110,6 +112,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       return { candidates: loaded.candidates, groups: loaded.groups };
     },
     getBenchRows: sessionId => benchReadRows(store.dir, sessionId),
+    getVersions: target => store.ownedRead(() => readVersionHistory(store.dir, store.getBundle(), target)),
     getGenerationRouteRows: deps.generationRoutes,
     getVoiceCatalogue: deps.voiceCatalogue,
     getFrameRunRows: (productionId) => frameRunReadRows(store, productionId, deps.jobs()),
@@ -236,6 +239,9 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     },
     ...(summarise ? { summarise } : {}),
     prepare: async ({ conversationId, runId, attachmentIds }) => {
+      // The catalogue can now retain Bench-source cards. Raise before leased metadata reads,
+      // so this host's own schema commit cannot stale the first approval in an older world.
+      await store.ensureSchemaVersion(WORLD_RESULT_USE_SCHEMA_VERSION, "world-chat-result-use");
       const lease = leases.mint({
         worldId: store.worldId,
         conversationId,

@@ -10,7 +10,11 @@ export function generationResultUses(action: ConversationActionCard, result: Res
   const origin = `completed result ${result.id} from generation action ${action.actionId}`;
   if (action.actionKind === "world-chat-bench-generation") return result.medium === "audio" && production
     ? [{ label: "Audio cue", request: `Prepare the existing filing and audio cue placement actions for the ${origin} in production ${production.meta.id}. Read its owning Bench session ${action.authority.id} and the current timeline, keep the source's role, and show the placement for review.` }]
-    : [{ label: "File result", request: `Prepare the existing filing action for the ${origin} in Bench session ${action.authority.id}. Read the current take and its subject, and show the filing destination for review.` }];
+    : [{ label: "File result", request: `Prepare the existing filing action for the ${origin} in Bench session ${action.authority.id}. Read the current take and its subject, and show the filing destination for review.` },
+      ...(result.medium === "image" ? [
+        { label: "Key art", request: `Prepare reference-world-image-result-use for the ${origin}, using benchTake {sessionId: "${action.authority.id}", takeId: "${result.id}"}. Read the complete Bench session, world metadata and references, then show the key art change for review.` },
+        { label: "Master look", request: `Prepare reference-master-look-result-use for the ${origin}, using benchTake {sessionId: "${action.authority.id}", takeId: "${result.id}"}. Read the complete Bench session, art direction and references, then show the master look change for review.` },
+      ] : [])];
   if (!production) return [];
   const performance = production.performances.find(p => p.id === result.id);
   if (performance) return [{ label: "Dialogue performance", request: `Review the ${origin} for shot ${performance.target.shotId} in production ${production.meta.id}. Read its current performance review and selection. Prepare the existing dialogue placement action when its human review is complete.` }];

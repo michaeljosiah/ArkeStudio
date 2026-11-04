@@ -97,6 +97,12 @@ it("keeps non-shot Bench use in its existing approval workflow, including retain
   assert.equal(use.label, "Audio cue"); assert.match(use.request, new RegExp(action.authority.id)); assert.match(use.request, new RegExp(result.id));
   const image = generationResultUses(action, { ...result, medium: "image" }, world)[0]!;
   assert.equal(image.label, "File result"); assert.match(image.request, /show the filing destination for review/);
+  const uses = generationResultUses(action, { ...result, medium: "image" }, world);
+  assert.deepEqual(uses.map(use => use.label), ["File result", "Key art", "Master look"]);
+  for (const use of uses.slice(1)) {
+    assert.match(use.request, /benchTake/); assert.match(use.request, /for review/);
+    assert.ok(use.request.includes(action.authority.id) && use.request.includes(result.id));
+  }
   assert.deepEqual(generationResultUses({ ...action, status: "pending" }, result, world), []);
   assert.deepEqual(generationResultUses({ ...action, worldId: ulid() }, result, world), []);
 });
