@@ -89,6 +89,11 @@ describe("a graphic novel as a book (SPEC-064 R-41, R-47, R-49)", () => {
         await h.send({ kind: "export-comic", requestId: rid(), worldId: WORLD_ID, productionId: production, formats: ["cbz", "pdf", "epub"] });
         const answer = last(h.events, "comic.exported")!.result;
         assert.ok(answer.ok, !answer.ok ? answer.reason : "");
+        // A second export the same day keeps the first file (issue 2425).
+        await h.send({ kind: "export-comic", requestId: rid(), worldId: WORLD_ID, productionId: production, formats: ["cbz"] });
+        const again = last(h.events, "comic.exported")!.result;
+        assert.ok(again.ok && answer.ok && again.files[0]!.file !== answer.files.find((made) => made.format === "cbz")!.file);
+        assert.match(again.ok ? again.files[0]!.file : "", /-2\.cbz$/);
         // A fixed-layout EPUB: mimetype first, pre-paginated, read right to left, each page's alt text.
         const epub = await openPromise(join(h.worldDir, answer.files.find((file) => file.format === "epub")!.file), { lazyEntries: true });
         const read: Record<string, string> = {};
