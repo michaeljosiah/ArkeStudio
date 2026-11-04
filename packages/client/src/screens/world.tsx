@@ -149,6 +149,8 @@ import {
   useWorld,
   type AuthoringActivity,
   renameWorld,
+  sendBenchNewSession,
+  useBench,
 } from "../lib/store.js";
 
 /** World screens (§2.9): the world is the home, productions are lenses over it. */
@@ -4255,13 +4257,19 @@ export function ArtifactsScreen() {
     </button>
   );
   // Turn 164 keeps the picker in the fifth slot; later artifacts continue in shelf order.
+  const benchSessionId = useBench()?.session.id;
   const cards = compact ? [...visible.slice(0, 4), null, ...visible.slice(4)] : [...visible, null];
   const doors = (<div className="fy-artifacts-door">
         <Button variant="outline" onClick={() => upload()}>{compact && <Upload size={16} />}Add files</Button>
         <Button
           variant="primary"
           data-testid="artifacts-generate"
-          onClick={() => void navigate(`/w/${worldId}/artifacts/bench`)}
+          onClick={() => {
+            // A new picture starts blank: resuming dropped the author into the last session's brief,
+            // a whole comic page's on this run (issue 2480). The last session is on the Bench's own list.
+            if (worldId) sendBenchNewSession(worldId);
+            void navigate(`/w/${worldId}/artifacts/bench`, { state: { leaving: benchSessionId ?? "" } });
+          }}
         >
           {compact && <Sparkle size={16} />}Generate
         </Button>
