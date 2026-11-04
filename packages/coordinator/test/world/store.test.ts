@@ -514,7 +514,9 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     for (const readOnly of [true, false]) {
       const store = await WorldStore.open(dir, { readOnly, clock: CLOCK });
       try {
-        assert.ok(store.getBundle().problems.some((p) => p.path === ".history/bible/v1.md"));
+        // Older text under the live version: says so, and sends nobody to a backup (design turn 268).
+        assert.deepEqual(store.getBundle().problems.find((p) => p.path === ".history/bible/v1.md"),
+          { kind: "history", path: ".history/bible/v1.md", label: "Bible · version 1", message: "differs from current" });
         assert.equal(store.getBundle().bible.version, 1);
         assert.equal(await readFile(join(dir, "bible.md"), "utf8"), original);
         assert.equal(await readFile(snapshot, "utf8"), damaged);

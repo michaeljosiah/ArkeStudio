@@ -10881,6 +10881,12 @@ export class Coordinator {
         this.emit({ at: new Date().toISOString(), type: "activity.seen", seen: settings.activity });
         return;
       }
+      case "settle-file-problems": {
+        if (!this.appSettings) return;
+        const settings = await this.appSettings.setActivitySeen({ fileProblems: { [msg.worldId]: msg.paths } });
+        this.emit({ at: new Date().toISOString(), type: "activity.seen", seen: settings.activity });
+        return;
+      }
       case "account-sign-in": {
         await this.account.signIn();
         return;

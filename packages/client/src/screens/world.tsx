@@ -344,12 +344,10 @@ function WorldConditionBanners() {
   const onOverview = location.pathname.replace(/\/+$/, "") === `/w/${worldId}`;
   const build = clientState?.app.builds.find((candidate) => candidate.worldId === worldId) ?? null;
   const notice = onOverview && build ? foundingNote(build) : null;
-  // A problem is a file that could not be read and is skipped, or — the other kind — a record
-  // that loaded and stands but says the same word as another (two props on one mention, issue
-  // 1116). The second is not data lost, so it is not described as such.
-  const unreadable = world.problems.filter((problem) => problem.kind !== "conflict");
-  const conflicts = world.problems.filter((problem) => problem.kind === "conflict");
-  const hasConditions = world.externalEdits.length > 0 || world.problems.length > 0 || notice !== null;
+  // File problems are not conditions of the screen (design turn 268): a band that stood over every
+  // tab made the app read as broken. They arrive once as a notice and stay listed in the Inbox.
+  // Outside edits stay, because the world's writes wait on them and Adopt lives here.
+  const hasConditions = world.externalEdits.length > 0 || notice !== null;
   if (!hasConditions) return null;
   return (
     <div className="fy-worldconditions">
@@ -384,30 +382,6 @@ function WorldConditionBanners() {
                 <Button onClick={() => reconcileExternalEdit(world.meta.worldId, e.path)}>Adopt</Button>
                 {e.refusal && <span style={{ color: "var(--danger)", fontSize: "var(--text-xs)" }}>{e.refusal}</span>}
               </div>
-            ))}
-          </div>
-        </Callout>
-      )}
-      {unreadable.length > 0 && (
-        <Callout tone="danger" title={`${unreadable.length} file(s) could not be read`}>
-          These files are skipped until fixed:
-          <div style={{ display: "grid", gap: "var(--space-1)", marginTop: "var(--space-2)" }}>
-            {unreadable.map((p) => (
-              <span key={p.path} className="mono" style={{ fontSize: "var(--text-xs)" }}>
-                {p.path} — {p.message}
-              </span>
-            ))}
-          </div>
-        </Callout>
-      )}
-      {conflicts.length > 0 && (
-        <Callout tone="warning" title={`${conflicts.length} record(s) say the same word`}>
-          Loaded, and in use until renamed:
-          <div style={{ display: "grid", gap: "var(--space-1)", marginTop: "var(--space-2)" }}>
-            {conflicts.map((p) => (
-              <span key={p.path} className="mono" style={{ fontSize: "var(--text-xs)" }}>
-                {p.path} — {p.message}
-              </span>
             ))}
           </div>
         </Callout>

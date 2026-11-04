@@ -23,9 +23,11 @@ import {
   type NeedsYouEntry,
   type RunningEntry,
   type UpdateState,
+  type WorldProblem,
 } from "@arke-studio/contracts";
 import { useMediaQuery } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
+import { fileProblemGroups, pendingFileNotice } from "../lib/file-problems.js";
 import { PageSheet } from "./page-sheet.js";
 import { OnYourPC } from "./on-your-pc.js";
 import { Badge, Button, Callout, IconButton, Input, cx } from "./ui.js";
@@ -69,6 +71,7 @@ import {
   resumeQueue,
   runBuildItem,
   setSpendThreshold,
+  settleFileProblems,
   useExports,
   useReconcileReport,
   useStore,
@@ -197,6 +200,11 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   useEffect(() => {
     if (panel.tab === "inbox" && panel.calls === undefined) markInboxSeen();
   }, [panel.tab, panel.calls]);
+  // Reading the list is being told: the notice and the dot go with it (design turn 268).
+  const fileNotice = pendingFileNotice(state);
+  useEffect(() => {
+    if (panel.tab === "inbox" && panel.calls === undefined && fileNotice) settleFileProblems(fileNotice.worldId, fileNotice.settles);
+  }, [panel.tab, panel.calls, fileNotice?.id, fileNotice?.settles.join("\n")]);
   useEffect(() => {
     if (panel.tab !== "new" || mark === null) return;
     if (seen.whatsNewSeenVersion === null || compareVersions(mark, seen.whatsNewSeenVersion) > 0) markWhatsNewSeen(mark);
@@ -288,6 +296,28 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   );
   return phone ? <PageSheet open onClose={closeActivityPanel} title="Activity" className="fy-activity-phone"
     {...(panel.calls !== undefined ? { onBack: leaveProviderCalls } : {})}>{content}</PageSheet> : content;
+}
+
+/** Every file problem the open world has now (design turn 268): where the details stay. */
+function FileProblems({ problems }: { problems: readonly WorldProblem[] }) {
+  return (
+    <>
+      {fileProblemGroups(problems).map((group) => (
+        <div key={group.title}>
+          <Eyebrow>{group.title} · {group.problems.length}</Eyebrow>
+          {group.problems.map((problem, index) => (
+            <div key={`${problem.path}-${index}`} className="fy-ap__row fy-ap__row--top">
+              <span className={cx("fy-ap__dot", group.quiet ? "fy-ap__dot--queued" : "fy-ap__dot--warn")} />
+              <div className="fy-ap__main">
+                <div className="fy-ap__rowtitle fy-ap__rowtitle--wrap"><span>{problem.label ?? problem.path}</span></div>
+                <div className="fy-ap__rowsub fy-ap__rowsub--wrap">{problem.message}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </>
+  );
 }
 
 function Eyebrow({ children, first = false }: { children: ReactNode; first?: boolean }) {
@@ -421,6 +451,7 @@ function Inbox({
           )}
         </>
       )}
+      {state.world && <FileProblems problems={state.world.problems} />}
       {activeWorldId !== null && videos.map((video) => <VideoDoneRow key={`${video.id}/${video.file.name}`} worldId={activeWorldId} dir={video.dir} file={video.file} />)}
       {buildMissing.map(({ build, missing }) => (
         <div key={build.buildId}>

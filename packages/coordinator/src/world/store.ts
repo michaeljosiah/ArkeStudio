@@ -938,12 +938,15 @@ export class WorldStore {
         }
         // The scanner already reports malformed records that have no history version to check.
         if (snapshot === null && liveMatches) return;
-        const report = () => this.scan.bundle.problems.push({ path: snapshot?.path ?? `${directory}/`,
-          message: `History for ${portablePath === ART_DIRECTION_PATH ? "art direction" : portablePath === BIBLE_PATH ? "the Bible" : portablePath}${snapshot ? `, version ${snapshot.version},` : ""} is unavailable. Restore its snapshot from a backup to use its history.` });
-        if (snapshot === null) { report(); return; }
+        // Names what is true of the snapshot, and only that: "unavailable" sent people to a backup
+        // for a snapshot that sat on disk with older text under the live record's version number.
+        const report = (message: "missing" | "differs from current" | "could not be read") => this.scan.bundle.problems.push({
+          kind: "history", path: snapshot?.path ?? `${directory}/`, message,
+          label: `${this.historyName(portablePath)}${snapshot ? ` · version ${snapshot.version}` : ""}` });
+        if (snapshot === null) { report("missing"); return; }
         let existing: string | null;
         try { existing = await this.readEntity(snapshot.path); }
-        catch { report(); return; }
+        catch { report("could not be read"); return; }
         // Old founding builds added only the approved image after the initial snapshot.
         // Require the committed baseline to match and every existing field to be unchanged.
         const canRepair = existing !== null && content !== null && portablePath === ART_DIRECTION_PATH && completesFoundingLook(existing, content);
@@ -951,9 +954,10 @@ export class WorldStore {
         if (repair && liveMatches && content !== null && (canSeed || canRepair)) {
           await this.verifyOwnership();
           try { await atomicWriteFile(join(this.dir, fromPortable(snapshot.path)), content); }
-          catch { await this.verifyOwnership(); report(); }
+          catch { await this.verifyOwnership(); report(existing === null ? "missing" : "differs from current"); }
         }
-        else if (existing === null || sha256(existing) !== expected) report();
+        else if (existing === null) report("missing");
+        else if (sha256(existing) !== expected) report("differs from current");
       });
     // A failed open must not release the world lock while another seed is still writing.
     const results = await Promise.allSettled(seeds);
@@ -961,6 +965,13 @@ export class WorldStore {
     if (failure) {
       throw failure.reason;
     }
+  }
+
+  private historyName(portablePath: string): string {
+    if (portablePath === ART_DIRECTION_PATH) return "Art direction";
+    if (portablePath === BIBLE_PATH) return "Bible";
+    const kind = classify(portablePath);
+    return kind.track === "sheet" ? this.scan.bundle.sheets.find((sheet) => sheet.id === kind.id)?.name ?? portablePath : portablePath;
   }
 
   private async readLastCommittedEntity(portablePath: string, expected = this.scanState.manifest[portablePath]): Promise<string> {

@@ -105,6 +105,8 @@
 .fy-ap__rowtitle { font: 600 13px var(--font-sans); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 8px; }
 .fy-ap__rowtitle > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .fy-ap__rowsub { font: 400 10.5px/1.45 var(--font-mono); color: var(--neutral-400); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A file problem's path and cause are the only place left that says them, so neither is clipped. */
+.fy-ap__rowtitle--wrap, .fy-ap__rowsub--wrap { white-space: normal; overflow-wrap: anywhere; }
 .fy-ap__reason { font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); margin-top: 8px; }
 .fy-ap__actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
 .fy-ap__end { flex: none; display: flex; align-items: center; gap: 6px; }

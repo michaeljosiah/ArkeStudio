@@ -479,6 +479,62 @@ describe("the two remembered facts (R-25)", () => {
   });
 });
 
+describe("a world's file problems (design turn 268)", () => {
+  const problems = [
+    { path: "canon/broken.md", message: "front matter: unexpected token" },
+    { kind: "conflict" as const, path: "references/prop_x/prop.json", message: "answers to @tea-cup" },
+    { kind: "history" as const, path: ".history/bible/v4.md", label: "Bible · version 4", message: "differs from current" },
+  ];
+  const withProblems = (list: NonNullable<ClientState["world"]>["problems"], told?: string[]) => {
+    const state = quiet();
+    state.world!.problems = list;
+    state.app.activitySeen = {
+      inboxSeenAt: new Date(Date.parse(TODAY) + 60_000).toISOString(),
+      whatsNewSeenVersion: null,
+      ...(told ? { fileProblems: { [state.world!.meta.worldId]: told } } : {}),
+    };
+    return state;
+  };
+
+  it("lists every problem in the Inbox, settled or not, past versions by their record's name", () => {
+    const state = withProblems(problems, ["canon/broken.md", "references/prop_x/prop.json"]);
+    const html = render(state, "inbox");
+    assert.ok(html.includes("Could not be read") && html.includes("canon/broken.md"));
+    assert.ok(html.includes("Same name") && html.includes("references/prop_x/prop.json"));
+    assert.ok(html.includes("History") && html.includes("Bible · version 4") && html.includes("differs from current"));
+    assert.equal(html.includes(".history/bible/v4.md"), false, "the record's name, not the snapshot's path");
+  });
+
+  it("opening the Inbox settles what is new, every announced path and no past version", async () => {
+    withState(withProblems(problems));
+    const sent = capture();
+    openActivityPanel("inbox");
+    await mounted(<MemoryRouter><ActivityPanel /></MemoryRouter>, async () => {
+      const settled = sent.find((m) => m.kind === "settle-file-problems");
+      assert.deepEqual(settled && "paths" in settled ? settled.paths : null, ["canon/broken.md", "references/prop_x/prop.json"]);
+    });
+  });
+
+  it("settles nothing when there is nothing new", async () => {
+    withState(withProblems(problems, ["canon/broken.md", "references/prop_x/prop.json"]));
+    const sent = capture();
+    openActivityPanel("inbox");
+    await mounted(<MemoryRouter><ActivityPanel /></MemoryRouter>, async () => {
+      assert.equal(sent.some((m) => m.kind === "settle-file-problems"), false);
+    });
+  });
+
+  it("lights the bell's foreground dot only for an announced path not yet told", () => {
+    const chrome = () => activityControl(renderToString(<MemoryRouter><AppChrome /></MemoryRouter>));
+    withState(withProblems(problems));
+    assert.ok(chrome().includes("fy-iconbtn__dot--new"), "new");
+    withState(withProblems(problems, ["canon/broken.md", "references/prop_x/prop.json"]));
+    assert.equal(chrome().includes("fy-iconbtn__dot"), false, "told");
+    withState(withProblems([problems[2]!]));
+    assert.equal(chrome().includes("fy-iconbtn__dot"), false, "a past version alone never lights it");
+  });
+});
+
 describe("What's new (R-26)", () => {
   it("lists the bundled cards newest first, with the waiting update on top and its own controls", () => {
     __setReleasesForTest([
