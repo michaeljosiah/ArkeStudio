@@ -707,6 +707,8 @@ const readerKey = (block: Speaking) => `${block.model.provider}/${block.model.id
  */
 function readGroupsFor(plan: AudiobookPlan, speaking: readonly Speaking[], misses: readonly Speaking[], neighbours: readonly Speaking[], room: ReadingRoom, at: string): PreparedGroup[] {
   const packing = DEFAULT_GROUP_PACKING;
+  const candidate = (block: Speaking): BlockTurns => ({ key: block.block.key, reader: readerKey(block),
+    maxCharacters: block.model.limits.maxPromptChars, maxSpeechUtf8Bytes: block.model.limits.maxSpeechUtf8Bytes, ...block.turns });
   const make = (members: Speaking[], kept: Speaking[]): PreparedGroup => {
     const turns = packTurns(members.map((block) => ({ key: block.block.key, reader: readerKey(block), ...block.turns })), packing).map(({ keys: _keys, ...turn }) => turn);
     return { members, kept, model: members[0]!.model, packing, turns, quote: quoteGroupedSpeech(members[0]!.model, turns, { at }) };
@@ -718,8 +720,9 @@ function readGroupsFor(plan: AudiobookPlan, speaking: readonly Speaking[], misse
     if (near.length === 0) return [];
     const order = plan.blocks.map((planned) => planned.block.key);
     const members = [...near, block].sort((a, b) => order.indexOf(a.block.key) - order.indexOf(b.block.key));
-    const packed = make(members, [block]);
-    return speechInputFits(groupedText(packed.turns), block.model.limits) ? [packed] : [];
+    // Retakes with neighbours obey the same style, byte and duration bounds as full runs.
+    const groups = groupReads(members.map(candidate), packing);
+    return groups.length === 1 ? [make(members, [block])] : [];
   }
   const byKey = new Map(speaking.map((block) => [block.block.key, block]));
   const breaks = readBreaks(plan);
@@ -727,7 +730,7 @@ function readGroupsFor(plan: AudiobookPlan, speaking: readonly Speaking[], misse
     const block = byKey.get(planned.block.key);
     if (block === undefined || !misses.includes(block) || !groupable(block, room, plan.book)) return null;
     const breakAfter = breaks.get(planned.block.key);
-    return { key: planned.block.key, reader: readerKey(block), maxCharacters: block.model.limits.maxPromptChars, ...block.turns, ...(breakAfter !== undefined ? { breakAfter } : {}) };
+    return { ...candidate(block), ...(breakAfter !== undefined ? { breakAfter } : {}) };
   });
   return groupReads(candidates, packing)
     .filter((group) => group.keys.length >= 2)

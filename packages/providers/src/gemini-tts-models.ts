@@ -5,12 +5,11 @@ import { GEMINI_SOUNDS } from "./voice-direction.js";
 export const GEMINI_SPEECH_INPUT_BYTES = 7000;
 
 /**
- * A grouped read's whole input, words and every turn's style together (design turn 185): the
- * coordinator packs a request to about 6,000 estimated tokens at 4 bytes a token, and this guard
- * sits a little above that and under the service's 8,192 tokens unless the words bill under 3.2
- * bytes a token — prose measured 4.4, short lines nearer 3.
+ * Grouping must not turn the price estimate (bytes / 4) into an input-limit guarantee. Use the
+ * same conservative byte allowance as solo reads, including every style and turn separator.
+ * This is a local request bound, not a measured Google token count (SPEC-049 R-25, issue 1335).
  */
-export const GEMINI_GROUPED_INPUT_BYTES = 26_000;
+export const GEMINI_GROUPED_INPUT_BYTES = GEMINI_SPEECH_INPUT_BYTES;
 /** Turns in one grouped read: far past five minutes of blocks, a bound on a malformed job rather than a plan. */
 export const GEMINI_GROUPED_TURNS_MAX = 400;
 
