@@ -468,7 +468,10 @@ describe("a read over the reader's cap (issue 1208)", () => {
       const heard = h.audio(REQUEST).filter((event) => event.status === "ready");
       assert.equal(h.audio(REQUEST).filter((event) => event.status === "failed").length, 1, "failed once");
       assert.ok(heard.length >= 1 && heard.length < pieces.length, `the pieces that landed first were heard: ${heard.length} of ${pieces.length}`);
-      assert.deepEqual(heard.map((event) => event.part), heard.map((_, index) => index), "in order, from the first");
+      // Parallel pieces are announced as they land (SPEC-046 R-9), not in part order.
+      const parts = heard.map((event) => event.part);
+      assert.equal(new Set(parts).size, parts.length, "each landed piece is announced once");
+      assert.ok(parts.every((part) => part !== undefined && Number.isInteger(part) && part >= 0 && part < pieces.length - 1), "only valid, non-refused pieces were heard");
       // A piece still landing when its block failed is not announced: the screen has been told
       // the read failed, and a part after that would say the read was going on.
       const failedAt = h.audio(REQUEST).findIndex((event) => event.status === "failed");
