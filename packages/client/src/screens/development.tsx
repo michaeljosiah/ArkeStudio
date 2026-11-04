@@ -300,23 +300,19 @@ export function DevelopmentWorkspace() {
             text={season?.ending ?? ""}
           />
         </div>
-        <div className="fy-texthost">
-          <div className="fy-mono">Series engine · read-only</div>
+        {series?.engine && <div className="fy-texthost">
+          <div className="fy-mono">Series engine</div>
           <div
             style={{ font: "400 12.5px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}
           >
-            {series
-              ? (series.engine ?? `${series.title} has no engine written yet.`)
-              : "This production belongs to no Series."}
+            {series.engine}
           </div>
-          {series && (
-            <ReadAloud
-              source={{ of: "series", seriesId: series.id }}
-              title={`${series.title} · engine`}
-              text={series.engine ?? ""}
-            />
-          )}
-        </div>
+          <ReadAloud
+            source={{ of: "series", seriesId: series.id }}
+            title={`${series.title} · engine`}
+            text={series.engine}
+          />
+        </div>}
       </div>
       {/*
         This screen is the production's front page (turn 93), so it is also its day one — and the
@@ -511,9 +507,8 @@ function FindingsPanel({ findings }: { findings: SeasonFinding[] }) {
       ) : (
         findings.map((finding, i) => (
           <div key={`${finding.kind}-${finding.about}-${i}`} className="fy-listrow">
-            <Badge tone="outline">{finding.kind}</Badge>
+            <Badge tone="outline">{finding.kind.replaceAll("-", " ")}</Badge>
             <span className="fy-listrow__text">{finding.message}</span>
-            <span className="fy-mono">{finding.about}</span>
           </div>
         ))
       )}

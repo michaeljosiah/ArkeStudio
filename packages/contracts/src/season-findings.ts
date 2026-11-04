@@ -93,7 +93,7 @@ export function seasonFindings(production: ProductionBundle, sheets: readonly Sh
       findings.push({
         kind: "continuity-contradiction",
         about: scene.id,
-        message: `"${scene.title}" (${scene.id}) belongs to no episode.`,
+        message: `"${scene.title}" isn't in an episode yet.`,
         evidence: [scene.id],
       });
     }
