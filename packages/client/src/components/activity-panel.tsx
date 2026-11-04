@@ -469,6 +469,9 @@ function Inbox({
 
 function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: boolean; navigate: NavigateFunction }) {
   const ref = entry.ref;
+  // A local engine has no bill to double, and the row above it says "no charge".
+  const heldProvider = useStore().state?.app.jobs.find(job => job.id === ref)?.provider;
+  const local = (PROVIDERS as Record<string, { local?: boolean } | undefined>)[heldProvider ?? ""]?.local === true;
   return (
     <div className="fy-ap__row fy-ap__row--top">
       <span className="fy-ap__dot fy-ap__dot--warn" />
@@ -487,10 +490,10 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
           {entry.actions.includes("resolve") && ref && (
             <>
               <Button size="sm" onClick={() => resolveHeldJob(ref, "resubmit")}>
-                Resubmit · may charge again
+                {local ? "Resubmit" : "Resubmit · may charge again"}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => resolveHeldJob(ref, "discard")}>
-                Abandon · prior cost unknown
+                {local ? "Abandon" : "Abandon · prior cost unknown"}
               </Button>
             </>
           )}

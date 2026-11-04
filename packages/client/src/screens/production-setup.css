@@ -27,7 +27,8 @@
 .fy-production-setup__outline li { margin-bottom: 12px; }
 .fy-production-setup__fields { border: 0; margin: 20px 0; padding: 0; display: grid; gap: 14px; min-width: 0; }
 .fy-production-setup__fields label { display: grid; gap: 6px; font-size: 12px; min-width: 0; }
-.fy-production-setup input, .fy-production-setup select { min-width: 0; padding: 9px; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.fy-production-setup .ui-select__control { padding-right: var(--space-7); }
+.fy-production-setup input, .fy-production-setup select:not(.ui-select__control) { min-width: 0; padding: 9px; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
 .fy-production-setup__delivery { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 /* The Target (design turn 205): label, control, and what the row comes to at its end. */
 .fy-production-target { border: 1px solid var(--line); border-radius: 8px; padding: 4px 16px 8px; margin: 0 0 20px; }

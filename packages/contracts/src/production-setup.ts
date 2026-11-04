@@ -57,10 +57,11 @@ export function adaptableStories(productions: ReadonlyArray<{ meta: Production; 
     // An audio drama is a story with no chapters; it is adapted from, never adapted.
     if (shape.medium !== "story" || shape.isAudioDrama) return [];
     const chapters = production.chapters.filter((chapter) => chapter.retired !== true);
-    if (chapters.length === 0) return [];
+    // Nothing written is nothing to adapt: an empty graphic novel was offered as "0 words".
+    const words = chapters.reduce((sum, chapter) => sum + (chapter.words ?? 0), 0);
+    if (chapters.length === 0 || words === 0) return [];
     return [{
-      id: production.meta.id, title: production.meta.title, kind: shape.kindLabel.toLowerCase(), chapters: chapters.length,
-      words: chapters.reduce((sum, chapter) => sum + (chapter.words ?? 0), 0),
+      id: production.meta.id, title: production.meta.title, kind: shape.kindLabel.toLowerCase(), chapters: chapters.length, words,
     }];
   }).sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
 }
