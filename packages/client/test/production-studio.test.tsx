@@ -122,6 +122,21 @@ it("opens complete chapter prose from an explicitly labelled excerpt (#1743)", a
   assert.match(dom.document.querySelector('.fy-actioncard')!.textContent!, /Excerpt shown/);
 });
 
+it("shows a comic plan or draft as a line, never its JSON (issue 2421)", async () => {
+  const action = card();
+  action.actionKind = "world-chat-production-comic-script";
+  action.authority = { kind: "proposal-manager", id: world.proposals[0]!.proposal.id };
+  action.cardFamily = "authored-diff";
+  action.shown = { ...action.shown, productionPreview: undefined, body: { family: "authored-diff", fields: [
+    { label: "Salt: Page plan", before: null, after: JSON.stringify({ passages: [{ what: "x".repeat(80) }], pages: [{ change: "a" }, { change: "b" }] }) },
+    { label: "Salt: Pages", before: null, after: "Panel 1: A long description of the panel. ".repeat(4) },
+  ], conflicts: [], openChoices: [] } };
+  await setup(action);
+  const text = dom.document.querySelector(".fy-actioncard")!.textContent!;
+  assert.match(text, /Page plan · 2 pages/); assert.match(text, /Drafted pages/);
+  assert.doesNotMatch(text, /passages|Panel 1/);
+});
+
 it("comic drafts name the review and open the draft's chapter without deciding (#2255)", async t => {
   const action = card();
   action.actionKind = "world-chat-production-comic-script";
