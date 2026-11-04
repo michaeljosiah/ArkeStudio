@@ -1,4 +1,4 @@
-import { modelEligible, modelForCapability, PROVIDERS, type ClientState, type ModelChoices } from "@arke-studio/contracts";
+import { credentialFaulted, modelEligible, modelForCapability, PROVIDERS, type ClientState, type ModelChoices } from "@arke-studio/contracts";
 import { eligibilityInputs } from "./dispatch-bar.js";
 import { Select } from "./ui.js";
 
@@ -6,7 +6,7 @@ import { Select } from "./ui.js";
 export function comicModelRefused(state: ClientState | null, modelId: string): boolean {
   const provider = state?.app.manifest?.models.find(model => model.id === modelId)?.provider;
   const status = state?.app.providers.find(entry => entry.id === provider);
-  return status !== undefined && (status.fault !== null || status.validation === "invalid");
+  return status !== undefined && (credentialFaulted(status) || status.validation === "invalid");
 }
 
 /** Setup and Pages share the production's image choice; only lettering models are offered. */

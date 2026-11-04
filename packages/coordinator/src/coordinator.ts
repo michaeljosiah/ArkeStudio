@@ -22487,6 +22487,8 @@ export class Coordinator {
         onSession: async (sessionId) => {
           await changeComicPage(store, input.productionId, input.page, (record) => ({ ...record,
             making: record.making.map((entry) => entry.requestId === input.requestId ? { ...entry, session: sessionId } : entry) }));
+          // Pages finds the job to cancel through this session, so the client needs it now.
+          await this.refreshWorldSnapshot(store.worldId);
         },
       });
       const take = made.ok ? ulid() : undefined;
