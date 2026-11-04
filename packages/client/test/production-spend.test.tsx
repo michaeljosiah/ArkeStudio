@@ -17,7 +17,7 @@ const view = (value?: ProductionSpendSummary) => parseHTML(renderToString(<Spend
 
 it("shows lifetime spend and current selected counts without a hit-rate or acceptance total", () => {
   const text = view(summary).textContent ?? view(summary).toString();
-  assert.match(text, /\$13.00/); assert.match(text, /7 generated · 2 selected/);
+  assert.match(text, /\$13.00/); assert.match(text, /7 made · 2 chosen/);
   assert.match(text, /1 local run/); assert.match(text, /1 plan attempt/);
   assert.doesNotMatch(text, /hit.rate|accepted|%/i);
 });
@@ -28,7 +28,7 @@ it("distinguishes loading, empty, partial and unavailable histories", () => {
   assert.match(view({ ...summary, coverage: "partial" }).toString(), /Known spend on this device/);
   const unavailable = view({ ...summary, coverage: "unavailable", spentMicroUsd: null, problems: ["ledger-unreadable"] }).toString();
   assert.match(unavailable, /Could not read spend history/); assert.doesNotMatch(unavailable, /\$0.00/);
-  assert.match(view({ ...summary, countsPartial: true }).toString(), /counts partial/);
+  assert.match(view({ ...summary, countsPartial: true }).toString(), /· partial/);
 });
 it("never describes local-only or plan-only work as a zero-dollar billed charge", () => {
   const local = view({ ...summary, spentMicroUsd: 0, sources: [{ source: "local-zero", entries: 1, microUsd: 0 }] }).toString();
@@ -54,7 +54,7 @@ it("opens one scoped receipt sheet and refreshes incomplete accounting without g
   root = createRoot(dom.document.getElementById("test")!);
   await act(async () => root!.render(<ProductionSpend production={production} />));
   const button = (text: string) => [...dom.document.querySelectorAll("button")].find(button => button.textContent?.includes(text))!;
-  await act(async () => button("Spend details").dispatchEvent(new dom.window.Event("click", { bubbles: true })));
+  await act(async () => button("Details").dispatchEvent(new dom.window.Event("click", { bubbles: true })));
   assert.equal(dom.document.querySelectorAll("dialog").length, 1);
   assert.match(dom.document.querySelector("dialog")!.textContent!, /Failed/);
   assert.match(dom.document.querySelector("dialog")!.textContent!, /\$2.40 cannot be assigned/);
