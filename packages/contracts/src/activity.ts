@@ -2,7 +2,7 @@ import type { ClientState } from "./client-state.js";
 import type { Job } from "./job.js";
 import type { LedgerEntry } from "./job.js";
 import { isReplayableFinalization } from "./job.js";
-import { PROVIDERS } from "./provider.js";
+import { balanceFaulted, PROVIDERS } from "./provider.js";
 import { GENERIC_ERROR_COPY } from "./error-copy.js";
 
 /** A provider as a person reads it (turn 192): its display name, its id only when it has none. */
@@ -204,7 +204,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
       // title had not, and "held, not failed" explained a word the count already carries.
       title: `${providerName(queue.provider)} paused`,
       detail: [
-        ...(queue.reason !== undefined && queue.reason !== GENERIC_ERROR_COPY && queue.reason !== "paused" ? [queue.reason] : []),
+        ...(balanceFaulted({ fault: queue.reason ?? null }) ? ["Out of credit"] : queue.reason !== undefined && queue.reason !== GENERIC_ERROR_COPY && queue.reason !== "paused" ? [queue.reason] : []),
         `${queue.held} job${queue.held === 1 ? "" : "s"} held`,
       ].join(" · "),
       at: "9999-12-31T00:00:00Z", // pauses have no timestamp; they sort newest within class

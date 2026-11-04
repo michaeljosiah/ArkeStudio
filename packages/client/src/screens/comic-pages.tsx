@@ -455,7 +455,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
                 </button>
               );
             })}
-            <button type="button" className="fy-comic__add" onClick={() => { const next = newPage(); edit([...pages, next]); setPageId(next.id); }}>+ Page</button>
+            {pages.length > 0 && <button type="button" className="fy-comic__add" onClick={() => { const next = newPage(); edit([...pages, next]); setPageId(next.id); }}>+ Page</button>}
           </div>
           {page === undefined ? (
             // A chapter with no pages (turns 249c, 254a, 254c): Arke plans it, then drafts it from the kept plan, or a page is started by hand.

@@ -353,7 +353,7 @@ export function WorldPickerScreen() {
             <p className="fy-hero__lede" style={{ margin: worlds.length ? "10px 0 0" : 0, maxWidth: 540 }}>
               {lede}
             </p>
-            <Button variant="ghost" className={cx("fy-home-pub", worlds.length === 0 && "fy-home-action")} onClick={() => navigate("/publications")}>
+            <Button variant="ghost" className="fy-home-pub fy-home-action" onClick={() => navigate("/publications")}>
               <Book size={18} />
               Open publication
             </Button>

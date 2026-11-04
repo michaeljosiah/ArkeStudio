@@ -505,7 +505,7 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
           {entry.actions.includes("settings") && ref && (
             <>
               <Button size="sm" onClick={() => resumeQueue(ref)}>
-                Resume {ref}
+                Resume {(PROVIDERS as Record<string, { displayName: string } | undefined>)[ref]?.displayName ?? ref}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => navigate("/settings/providers")}>
                 Settings
