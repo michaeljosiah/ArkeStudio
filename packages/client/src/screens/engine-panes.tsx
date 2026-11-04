@@ -634,7 +634,8 @@ export function OllamaDetail({ components }: { components: readonly SetupCompone
   useEffect(() => { refreshOllama(); }, []);
   // The switch stops the old service first, about nine seconds with nothing on screen to say it took (issue 2562).
   const [switching, setSwitching] = useState(false);
-  useEffect(() => { if (managed) setSwitching(false); }, [managed]);
+  // A refusal comes back as the old service's status with its reason, so any new word ends the wait.
+  useEffect(() => setSwitching(false), [managed, runtime?.state, runtime?.detail]);
   return (
     <>
       <RuntimeHead
