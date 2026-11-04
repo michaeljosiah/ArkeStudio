@@ -26,9 +26,9 @@ export function ConversationActionGroup({ actions, conversationSeq }: { actions:
     gesture.current = null;
   };
   return <section className="fy-actiongroup" aria-label="Turn card group">
-    <header className="fy-actiongroup__head"><strong>{actions.length} {actions.length === 1 ? "card" : "cards"}</strong><span>Estimated ${(estimate / 1_000_000).toFixed(2)}{unpriced ? " + unpriced work" : ""}</span>
+    <header className="fy-actiongroup__head">{(actions.length > 1 || estimate > 0 || unpriced) && <><strong>{actions.length} {actions.length === 1 ? "card" : "cards"}</strong><span>Estimated ${(estimate / 1_000_000).toFixed(2)}{unpriced ? " + unpriced work" : ""}</span></>}
       {eligible.length > 0 && <Button variant="primary" disabled={busy} onClick={() => void approve()}>{busy ? "Approving…" : `Approve all (${eligible.length})`}</Button>}
-      {individual.length > 0 && <span>{individual.length} individual {individual.length === 1 ? "decision" : "decisions"}</span>}
+      {individual.length > 1 && <span>{individual.length} decisions</span>}
     </header>
     {result && <p role="status">{result.approved} approved · {result.left} left. {result.detail}</p>}
     <ol className="fy-actiongroup__sequence">{ordered.map(action => <li key={action.actionId}>

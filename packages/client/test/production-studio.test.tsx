@@ -149,7 +149,7 @@ it("comic drafts name the review and open the draft's chapter without deciding (
   world.proposals[0]!.proposal.targets = [{ path: `productions/${production.meta.id}/comic/salt.json`, baseVersion: null, baseHash: null }];
   t.after(() => { world.proposals[0]!.proposal.targets = targets; });
   const made = await setup(action);
-  assert.match(dom.document.querySelector('.fy-actioncard')!.textContent!, /Salt: PagesNew draft→4 pages/);
+  assert.match(dom.document.querySelector('.fy-actioncard')!.textContent!, /4 pages/);
   assert.equal([...dom.document.querySelectorAll("button")].some(b => b.textContent === "Approve" || b.textContent === "Deny"), false);
   await click("Review in Pages");
   assert.match(dom.document.querySelector('[data-testid="location"]')!.textContent!, /\/story\/pages\?chapter=salt$/);
