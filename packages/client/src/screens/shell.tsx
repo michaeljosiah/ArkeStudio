@@ -1335,7 +1335,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
                     // A world that does not exist yet has nowhere to remember a model, so the chip
                     // picks for this conversation only, and letting go of it is the author's default.
-                    modelControl={<ModelChip state={state} value={writingModel ?? state?.app.agents.find(agent => agent.name === "story-writer")?.model ?? undefined} set={writingModel !== undefined}
+                    modelControl={<ModelChip state={state} value={writingModel ?? state?.app.agents.find(agent => agent.name === "world-author")?.model ?? state?.app.agents.find(agent => agent.name === "story-writer")?.model ?? undefined} set={writingModel !== undefined}
                       onPick={setWritingModel} needsTools unsetLabel="Use the default"
                       disabled={chatRunning || buildPressed || !!g?.founding} />}
                     {...(hostCanAttach()
