@@ -82,7 +82,7 @@ try {
     await js(`document.querySelector('button[aria-label="Close Chat"]')?.click()`);await new Promise(resolve=>setTimeout(resolve,150));
     assert.ok(await js(`!!document.querySelector('.fy-spend-summary')`), name + ': actual summary reachable');
     const before = await cdp('Page.captureScreenshot', { format: 'png' }); await writeFile(join(output, name + '-' + (dark ? 'dark' : 'light') + '.png'), Buffer.from(before.data, 'base64'));
-    assert.ok(await js(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Spend details'));b.focus();b.click();return true;})()`));
+    assert.ok(await js(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Details'));b.focus();b.click();return true;})()`));
     await until(() => js(`!!document.querySelector('.fy-production-spend[open]')`));
     const metrics = await js(`(()=>{const d=document.querySelector('.fy-production-spend'),b=d.querySelector('.fy-page-sheet__body'),h=d.querySelector('header').getBoundingClientRect(),f=d.querySelector('footer').getBoundingClientRect();return {width:d.clientWidth,scrollWidth:d.scrollWidth,body:b.clientHeight,bodyScroll:b.scrollHeight,head:h.top,foot:f.bottom,view:innerHeight,text:d.textContent};})()`);
     assert.equal(metrics.width, metrics.scrollWidth, name + ': no sheet horizontal overflow'); assert.ok(metrics.head >= 0 && metrics.foot <= height + 1, name + ': sheet header/footer within viewport');
@@ -96,7 +96,7 @@ try {
     const receipt = await cdp('Page.captureScreenshot', { format: 'png' }); await writeFile(join(output, name + '-sheet-' + (dark ? 'dark' : 'light') + '.png'), Buffer.from(receipt.data, 'base64'));
     await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
     await until(() => js(`!document.querySelector('.fy-production-spend[open]')`));
-    assert.ok(await js(`document.activeElement.textContent.includes('Spend details')`), name + ': focus returns to opener');
+    assert.ok(await js(`document.activeElement.textContent.includes('Details')`), name + ': focus returns to opener');
     results.push({ name, dark, ...metrics, text: undefined });
   }
   await writeFile(join(output, 'measurements.json'), JSON.stringify(results, null, 2)); console.log(`${results.length} actual App/PageSheet cases passed: hierarchy, themes, phone/short window, receipts, refresh, no horizontal overflow, Escape and focus return. ${output}`);
