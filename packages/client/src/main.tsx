@@ -20,6 +20,7 @@ import "./theme/tokens/typography.css";
 import "./theme/tokens/spacing.css";
 import "./theme/tokens/effects.css";
 import "./theme/tokens/launch.css";
+import "./theme/tokens/comic-ink.css";
 import "./theme/globals.css";
 import "./screens/production-setup.css";
 import "./screens/publications.css";

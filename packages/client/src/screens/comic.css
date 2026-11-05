@@ -309,7 +309,7 @@
 .fy-comic269__mark.bad { color: var(--destructive); }
 .fy-comic269__mark.none::after { content: ""; width: 10px; height: 10px; border: 1.5px solid var(--border); border-radius: 50%; }
 .fy-comic269__picked { outline: 2px solid var(--foreground); outline-offset: -1px; }
-.fy-comic269__cell, .fy-comic269__art { position: absolute; padding: 0; border: 1px solid #111; background: var(--secondary); overflow: hidden; display: block; }
+.fy-comic269__cell, .fy-comic269__art { position: absolute; padding: 0; border: 1px solid var(--comic-ink); background: var(--secondary); overflow: hidden; display: block; }
 .fy-comic269__cell { cursor: pointer; overflow: visible; }
 .fy-comic269__cell.on { outline: 3px solid var(--foreground); outline-offset: 1px; z-index: 2; }
 .fy-comic269__cell > img, .fy-comic269__art > img { width: 100%; height: 100%; object-fit: cover; display: block; user-select: none; }
@@ -333,33 +333,33 @@
 .fy-comic269__tool { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
 .fy-comic269__verdict { font-size: var(--text-sm); }
 .fy-comic269__stage { position: relative; display: flex; align-items: center; justify-content: center; padding: 16px; min-height: 0; min-width: 0; background: var(--secondary); overflow: hidden; }
-.fy-comic269__sheet { position: relative; height: 100%; max-width: 100%; background: #fff; box-shadow: 0 0 0 1px var(--border); touch-action: none; }
+.fy-comic269__sheet { position: relative; height: 100%; max-width: 100%; background: var(--comic-paper); box-shadow: 0 0 0 1px var(--border); touch-action: none; }
 .fy-comic269__ink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; }
 .fy-comic269__hit { position: absolute; z-index: 4; cursor: grab; outline: 0; }
 .fy-comic269__hit.on { outline: 1.5px dashed var(--foreground); outline-offset: 3px; }
 .fy-comic269__hit .ord { position: absolute; left: -8px; top: -8px; }
-.fy-comic269__hit u { position: absolute; width: 10px; height: 10px; background: #fff; border: 1.5px solid #111; touch-action: none; }
+.fy-comic269__hit u { position: absolute; width: 10px; height: 10px; background: var(--comic-paper); border: 1.5px solid var(--comic-ink); touch-action: none; }
 .fy-comic269__hit u.a { left: -8px; top: -8px; cursor: nwse-resize; } .fy-comic269__hit u.b { right: -8px; top: -8px; cursor: nesw-resize; }
 .fy-comic269__hit u.c { left: -8px; bottom: -8px; cursor: nesw-resize; } .fy-comic269__hit u.d { right: -8px; bottom: -8px; cursor: nwse-resize; }
-.fy-comic269__aim { position: absolute; z-index: 5; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: #fff; border: 2px solid #111; cursor: crosshair; touch-action: none; }
-.fy-comic269__scrim { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(0, 0, 0, 0.35); }
-.fy-comic269__modal { width: min(660px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 20px; background: var(--background); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28); display: flex; flex-direction: column; gap: 16px; }
+.fy-comic269__aim { position: absolute; z-index: 5; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--comic-paper); border: 2px solid var(--comic-ink); cursor: crosshair; touch-action: none; }
+.fy-comic269__scrim { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: color-mix(in srgb, var(--neutral-950) 35%, transparent); }
+.fy-comic269__modal { width: min(660px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 20px; background: var(--background); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-xl); display: flex; flex-direction: column; gap: 16px; }
 .fy-comic269__modal h3 { margin: 0; font: var(--type-ui); font-weight: 600; font-size: var(--text-md); }
 .fy-comic269__cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .fy-comic269__card { padding: 0; text-align: left; background: none; color: inherit; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; cursor: pointer; }
 .fy-comic269__card.on { outline: 2px solid var(--foreground); outline-offset: -1px; }
 .fy-comic269__card .pic { height: 300px; padding: 14px; background: var(--secondary); display: flex; align-items: center; justify-content: center; }
-.fy-comic269__card .sheet { position: relative; width: 180px; height: 270px; background: #fff; box-shadow: 0 0 0 1px var(--border); overflow: hidden; display: block; }
+.fy-comic269__card .sheet { position: relative; width: 180px; height: 270px; background: var(--comic-paper); box-shadow: 0 0 0 1px var(--border); overflow: hidden; display: block; }
 .fy-comic269__card .sheet > img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.fy-comic269__card .c { position: absolute; overflow: hidden; border: 1px solid #111; }
+.fy-comic269__card .c { position: absolute; overflow: hidden; border: 1px solid var(--comic-ink); }
 .fy-comic269__card .c img { width: 180px; height: 270px; object-fit: cover; display: block; }
 .fy-comic269__card .c.a { left: 2px; top: 2px; right: 2px; height: 132px; }
 .fy-comic269__card .c.b { left: 2px; top: 136px; width: 86px; bottom: 2px; }
 .fy-comic269__card .c.b img { margin-top: -130px; }
 .fy-comic269__card .c.d { right: 2px; top: 136px; width: 86px; bottom: 2px; }
 .fy-comic269__card .c.d img { margin: -130px 0 0 -90px; }
-.fy-comic269__card .w { position: absolute; z-index: 2; padding: 3px 7px; font: var(--type-mono); font-size: var(--text-2xs); font-weight: 700; color: #111; background: #fff; border: 1px solid #111; border-radius: 50%; }
-.fy-comic269__card .w.one { left: 10px; top: 10px; border-radius: 2px; background: #f4e7b4; }
+.fy-comic269__card .w { position: absolute; z-index: 2; padding: 3px 7px; font: var(--type-mono); font-size: var(--text-2xs); font-weight: 700; color: var(--comic-ink); background: var(--comic-paper); border: 1px solid var(--comic-ink); border-radius: 50%; }
+.fy-comic269__card .w.one { left: 10px; top: 10px; border-radius: 2px; background: var(--comic-caption); }
 .fy-comic269__card .w.two { left: 8px; top: 140px; }
 .fy-comic269__card .txt { padding: 12px 14px; display: flex; flex-direction: column; gap: 3px; font-size: var(--text-sm); color: var(--muted-foreground); }
 .fy-comic269__card .txt b { font: var(--type-ui); font-weight: 600; color: var(--foreground); margin-bottom: 3px; }

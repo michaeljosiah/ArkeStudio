@@ -1,3 +1,4 @@
+import { COMIC_CAPTION, COMIC_INK, COMIC_PAPER, COMIC_SOUND } from "../theme/tokens/comic-ink.js";
 import { BALLOON_EM, type ComicTypeface, type LayoutRect, type LetteringKind, type LetteringPlacement, type PageBox } from "@arke-studio/contracts";
 
 /**
@@ -15,10 +16,10 @@ export const comicTypeface = (value: ComicTypeface | undefined) => COMIC_TYPEFAC
 
 export interface PlacedBalloon { placement: LetteringPlacement; text: string; shape: LetteringKind }
 
-const INK = "#111111";
-const PAPER = "#ffffff";
-const CAPTION = "#f4e7b4";
-const SOUND = "#c2410c";
+const INK = COMIC_INK;
+const PAPER = COMIC_PAPER;
+const CAPTION = COMIC_CAPTION;
+const SOUND = COMIC_SOUND;
 
 /** The gap around a panel, as page fractions, the same on the stage and in the finished image. */
 const GUTTER = 0.008;
