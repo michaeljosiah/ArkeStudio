@@ -23,15 +23,15 @@ import {
 const SPEECH_MODELS = SHIPPED_MANIFEST.models.filter((model) => model.provider === "elevenlabs" && model.capability === "voice-tts").map((model) => model.id);
 
 /**
- * ElevenLabs names a refusal in `detail.status`, and two of them are not what their status
+ * ElevenLabs names a refusal in `detail.status` or `detail.code`, and two are not what their status
  * says: a spent character quota arrives as a 401, which read as a rejected key sends the person
  * to replace a key that works, and a full house — `too_many_concurrent_requests`,
  * `system_busy` — is a 429 that clears by itself. Either way the request was not taken.
  */
 async function refusal(res: Response, what: string): Promise<Error> {
-  const body = (await res.json().catch(() => null)) as { detail?: { status?: unknown; message?: unknown } } | null;
-  const status = typeof body?.detail?.status === "string" ? body.detail.status : "";
-  if (status === "quota_exceeded") return new ProviderPaymentRequiredError(`elevenlabs: this account's character quota is used up (HTTP ${res.status} quota_exceeded)`);
+  const body = (await res.json().catch(() => null)) as { detail?: { status?: unknown; code?: unknown; message?: unknown } } | null;
+  const status = typeof body?.detail?.status === "string" ? body.detail.status : typeof body?.detail?.code === "string" ? body.detail.code : "";
+  if (status === "quota_exceeded" || body?.detail?.code === "quota_exceeded") return new ProviderPaymentRequiredError(`elevenlabs: character limit reached. Check the API key's character cap and the account allowance in ElevenLabs (HTTP ${res.status} quota_exceeded)`);
   if (res.status === 429) return new ProviderBusyError(`elevenlabs: ElevenLabs is busy (HTTP 429${status ? ` ${status}` : ""})`, { witnessed: true });
   const said = typeof body?.detail?.message === "string" && body.detail.message.trim() ? `: ${body.detail.message.trim().slice(0, 200)}` : "";
   if (res.status === 401 || res.status === 403) return new ProviderAuthError("elevenlabs", `elevenlabs: ${what} was rejected${said} (HTTP ${res.status})`);

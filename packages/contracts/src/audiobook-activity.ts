@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
-import type { Job } from "./job.js";
+import type { Job, QueueStatus } from "./job.js";
 import { speechSettlement } from "./speech-pricing.js";
 import { formatMicroUsd } from "./money.js";
 
@@ -37,6 +37,13 @@ export type AudiobookActivity = z.infer<typeof AudiobookActivitySchema>;
 export type AudiobookActivityUpdate = Partial<Pick<AudiobookActivity, "phase" | "toMake" | "made" | "flagged" | "requests" | "request" | "estimatedMicroUsd" | "models" | "local" | "plan" | "reason">> & { job?: AudiobookActivity["jobs"][number] };
 export const audiobookActivityLive = (run: AudiobookActivity): boolean => ["queued", "reading", "aligning", "stopping"].includes(run.phase);
 export const audiobookActivityPath = (run: AudiobookActivity): string => `/w/${run.worldId}/p/${run.productionId}/story/chapters/${run.chapterId}?view=audiobook${run.scope === "block" && run.block ? `&block=${encodeURIComponent(run.block)}` : ""}`;
+
+/** A paused lane blocks only a queued request of this read, not already received audio. */
+export function audiobookActivityPause(run: AudiobookActivity, jobs: readonly Job[], queues: readonly QueueStatus[]): QueueStatus | undefined {
+  if (run.phase !== "reading" && run.phase !== "queued") return undefined;
+  const refs = new Set(audiobookActivityJobs(run, jobs).filter(ref => !ref.reused).map(ref => ref.id));
+  return queues.find(queue => queue.paused && jobs.some(job => refs.has(job.id) && job.worldId === run.worldId && job.productionId === run.productionId && job.status === "queued" && job.provider === queue.provider));
+}
 
 export function audiobookActivityTitle(run: AudiobookActivity): string {
   const noun = run.scope === "block" ? "Block re-read" : "Narration";

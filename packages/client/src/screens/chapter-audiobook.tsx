@@ -11,6 +11,7 @@ import {
   PERFORMANCE_NOTE_MAX,
   audiobookBeatAt,
   audiobookActivityLive,
+  audiobookActivityPause,
   audiobookActivityStage,
   audiobookBeatCount,
   hasReadingNotes,
@@ -58,6 +59,7 @@ import {
   type ManifestModel,
 } from "@arke-studio/contracts";
 import { CharacterNarration } from "../components/character-narration.js";
+import { openActivityPanel } from "../lib/activity-panel.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { DirectedText, type TurnBreak, MarkerMenu, VIEW_HASH, cueLabel, heldWords, markerLabel, viewPlan, type MarkerAt } from "../components/voice-direction.js";
 
@@ -374,9 +376,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const { worldId, prodId, chapter, body, cast, record, missing, reading, connection, locked } = input;
   const recordedList = input.recorded;
   const recordedKeys = useMemo(() => new Set(recordedList ?? []), [recordedList]);
-  const { world, storedNarrator, providerRows, modelRows, queues, activity } = useStoreSelector(store => ({
+  const { world, storedNarrator, providerRows, modelRows, queues, jobs, activity } = useStoreSelector(store => ({
     world: store.state?.world ?? null, storedNarrator: store.state?.app.narrator,
     providerRows: store.state?.app.providers, modelRows: store.state?.app.manifest?.models, queues: store.state?.app.queues,
+    jobs: store.state?.app.jobs,
     activity: store.state?.app.audiobookActivity?.find(run => run.worldId === worldId && run.productionId === prodId && run.chapterId === chapter.id && audiobookActivityLive(run)),
   }), shallowEqual);
   // What each character goes by in a row, the filter and the panel title; the full name stays the tooltip (design turn 194, rule 12b).
@@ -1056,13 +1059,14 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       // made or not, else those the chapter's read makes (codex on PR 1869).
       const asked = only.current;
       const readers = new Set(rows.filter((row) => (asked !== null ? asked.includes(row.block.key) : row.state !== "made" && row.state !== "awaiting")).map((row) => row.speaker.provider));
-      const lane = queues?.find((queue) => queue.paused && readers.has(queue.provider));
+      const lane = activity ? audiobookActivityPause(activity, jobs ?? [], queues ?? []) : queues?.find((queue) => queue.paused && readers.has(queue.provider));
       const waiting = lane === undefined ? null : readerUnavailableWords(lane.provider, lane.reason ?? "paused");
       return whole(
         <span className="fy-ab__control fy-ab__read-progress">
           <span className="fy-mono" data-testid="audiobook-progress">
             {waiting !== null ? `waiting · ${waiting} · ${run.made} of ${run.toMake}` : activity ? <><b>{audiobookActivityStage(activity).replace("Aligning locally", "Aligning")}</b><span className="fy-ab__read-saved">{activity.made} of {activity.toMake} blocks saved</span></> : run.requests !== undefined ? `reading… request ${Math.max(1, run.request ?? 1)} of ${run.requests} · ${run.made} of ${run.toMake}` : `reading… ${run.made} of ${run.toMake}`}
           </span>
+          {waiting !== null && <Button variant="ghost" onClick={() => openActivityPanel("inbox")}>Activity</Button>}
           <Button variant="ghost" disabled={activity?.phase === "stopping"} onClick={() => stopAudiobook(worldId, prodId, chapter.file)}>
             {activity?.phase === "stopping" ? "Stopping…" : "Stop"}
           </Button>
