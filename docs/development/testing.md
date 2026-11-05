@@ -1,5 +1,14 @@
 # Running and validating changes
 
+Missing writing tools (#1749): adapter `test/v2-world-tools.test.ts` checks bounded MCP evidence,
+failure isolation and shutdown; `test/v2-private-sessions.test.ts` covers private trace exclusion.
+Coordinator `test/world-chat/retrieval.test.ts` and `test/application/conversation-authoring.test.ts`
+check the actual served catalogue and run correlation. With `ARKE_TEST_OPENCODE2` pointing to
+the qualified native executable, adapter `test/v2-image-protocol.test.ts` also inspects the direct
+MCP tool in a local fake provider's requests across three turns of the same session. It uses an
+isolated profile and makes no paid requests. This does not establish Copilot compaction behavior
+or explain a model's historical missing-tool claim.
+
 Retail chapter MP3 delivery (SPEC-047 R-22/R-23): coordinator `test/audio/retail.test.ts` and
 `test/productions/audiobook-listening.test.ts`; client `test/audiobook-export.test.tsx`.
 Set `ARKE_FFMPEG` (optionally `ARKE_FFPROBE`) to a qualified installed/bundled encoder for actual

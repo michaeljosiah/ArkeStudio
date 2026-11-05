@@ -225,6 +225,8 @@ export interface LeasedSurface {
   retrieval: WorldChatRetrieval;
   /** Every call's receipt, including the ones that failed or could not run (§9.3). */
   onReceipt: (receipt: WorldChatCheckReceipt) => void;
+  /** The catalogue actually served, never tool arguments or the lease capability. */
+  onToolsListed?: (names: readonly string[]) => void;
 }
 
 /** A minted lease token: 32 random bytes as hex. */
@@ -340,9 +342,12 @@ export class WorldQueryServer {
           case "ping":
             reply({});
             return;
-          case "tools/list":
-            reply({ tools: tools?.tools ?? (token === null ? TOOLS : WORLD_CHAT_TOOLS) });
+          case "tools/list": {
+            const offered = tools?.tools ?? (token === null ? TOOLS : WORLD_CHAT_TOOLS);
+            reply({ tools: offered });
+            try { surface?.onToolsListed?.(offered.map(tool => tool.name)); } catch { /* Diagnostics cannot break retrieval. */ }
             return;
+          }
           case "tools/call": {
             const name = rpc.params?.["name"] as string;
             const args = (rpc.params?.["arguments"] as Record<string, unknown>) ?? {};

@@ -90,6 +90,7 @@ interface TrackedSession {
   agent?: string;
   permissionPolicy: SessionPermissionPolicy | null;
   image: SessionImageInput;
+  dispatches?: number;
 }
 
 /**
@@ -195,6 +196,24 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
 
   capabilities(): ReadonlySet<HarnessCapability> {
     return this.caps;
+  }
+
+  /** A connection snapshot is evidence about MCP, not proof of the provider's tool inventory. */
+  private async traceWorldTools(sessionId: string, tracked: TrackedSession, dispatch: number, runtime: AbortSignal): Promise<void> {
+    if (!this.opts.onTrace || tracked.private || tracked.purpose !== "world-chat" || !tracked.cwd) return;
+    let status = "unavailable";
+    try {
+      const rows = await this.http.reqData<unknown>("GET", "/api/mcp", undefined, {
+        location: tracked.cwd, responseBytes: 64 * 1024, signal: AbortSignal.any([runtime, AbortSignal.timeout(1500)]),
+      });
+      if (Array.isArray(rows)) {
+        const row = rows.find(row => row && typeof row === "object" && row.name === "arke-world");
+        status = row === undefined ? "missing" : ["connected", "pending", "disabled", "failed", "needs_auth"].includes(row.status?.status) ? row.status.status : "unknown";
+      }
+    } catch { /* Error bodies can contain capability URLs or private text; never record them. */ }
+    if (!runtime.aborted && !this.disposed && this.sessions.get(sessionId) === tracked) {
+      this.trace("world-tools.snapshot", { sessionId, dispatch, status });
+    }
   }
 
   readiness(): Readiness {
@@ -517,6 +536,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     const correlationId = input.correlationId ?? `corr_${Date.now().toString(36)}`;
     const prompt = imagePrompt(input.parts);
     const runtime = this.runtimeRequests;
+    const dispatch = tracked ? (tracked.dispatches = (tracked.dispatches ?? 0) + 1) : 0;
     this.pendingTurns.add(input.sessionId);
     if (tracked?.privateRequest) {
       void this.dispatchTransient(input.sessionId, correlationId, tracked, runtime);
@@ -530,6 +550,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
         }, { signal: runtime.signal, ...(tracked?.private ? { responseBytes: 2 * 1024 ** 2 } : {}) });
         if (tracked?.private && this.sessions.get(input.sessionId) !== tracked) return;
         this.trace("dispatch.accepted", { sessionId: input.sessionId });
+        if (tracked) await this.traceWorldTools(input.sessionId, tracked, dispatch, runtime.signal);
       } catch (err) {
         if (runtime.signal.aborted || this.disposed || tracked?.private && this.sessions.get(input.sessionId) !== tracked) return;
         this.trace("dispatch.failed", { sessionId: input.sessionId, error: String(err) });
