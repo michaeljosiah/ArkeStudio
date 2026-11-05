@@ -140,6 +140,31 @@ function activityControl(html: string): string {
   return html.slice(html.lastIndexOf("<button", label), html.indexOf("</button>", label));
 }
 
+it("shows each quota-blocked narration in Needs you and clears the pause when its lane resumes", () => {
+  const state = quiet();
+  state.app.queues = [{ provider: "elevenlabs", paused: true, held: 2, reason: "elevenlabs: character limit reached (HTTP 401 quota_exceeded)" }];
+  state.app.audiobookActivity = ["crossing", "arrival"].map((chapterId, i): AudiobookActivity => ({
+    id: `read-${i}`, worldId: FIXTURE_WORLD_ID, productionId: "bell-watch", chapterId, chapterFile: chapterId,
+    chapterTitle: chapterId, productionTitle: "Bell Watch", worldName: "The Undersong", scope: "chapter", phase: "reading", startedAt: TODAY, updatedAt: TODAY,
+    toMake: 20, made: 6, flagged: 0, requests: 4, request: 2, estimatedMicroUsd: 400000, models: ["ElevenLabs"], local: false,
+    jobs: [{ id: `request-${i}`, index: 2, reused: false }],
+  }));
+  state.app.jobs = state.app.audiobookActivity.map((run, i) => job({ id: `request-${i}`, productionId: run.productionId, provider: "elevenlabs", status: "queued", error: null }));
+  const paused = render(state, "inbox", "open");
+  assert.equal((paused.match(/Narration paused/g) ?? []).length, 2);
+  assert.equal((paused.match(/Waiting for ElevenLabs/g) ?? []).length, 2);
+  assert.equal((paused.match(/6 of 20 blocks saved/g) ?? []).length, 2);
+  assert.match(paused, /API key's character cap and the account allowance/);
+  assert.match(paused, /Resume ElevenLabs/);
+  assert.doesNotMatch(paused, /Running ·|Reading narration/);
+  assert.equal(inboxAttention(state, computeNeedsYou(state), state.app.audiobookActivity).attentionReads.length, 2);
+  state.app.queues[0]!.paused = false;
+  const resumed = render(state, "inbox", "open");
+  assert.doesNotMatch(resumed, /Narration paused|Waiting for ElevenLabs/);
+  assert.match(resumed, /Running · 2/);
+  assert.equal((resumed.match(/6 of 20 blocks saved/g) ?? []).length, 2);
+});
+
 it("marks normal and audiobook storage notices historical when disconnected", () => {
   const state = quiet();
   const request = { ...job({ status: "queued", error: null, attempt: 0 }), storageWait: { phase: "submission" as const, reason: "unavailable" as const, checking: true, observedAt: TODAY } };
