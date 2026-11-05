@@ -61,7 +61,7 @@ for (const failureStatus of [undefined, 503, 429, 400, "socket-drop", "manifest-
       ...Object.fromEntries(["SYSTEMROOT", "WINDIR", "COMSPEC", "PATH", "PATHEXT", "TEMP", "TMP"].flatMap(key => process.env[key] === undefined ? [] : [[key, process.env[key]!]])),
       ...v2ProfileEnv(profile), APPDATA: join(profile, "roaming"), LOCALAPPDATA: join(profile, "local"),
     } }, deps) });
-  assert(wiring.adapter && wiring.supervisor && wiring.recovery); assert.equal(wiring.harnessInfo?.version, "2.0.26");
+  assert(wiring.adapter && wiring.supervisor && wiring.recovery); assert.equal(wiring.harnessInfo?.version, "2.2.5");
   const ownedAdapter: HarnessAdapter = wiring.adapter;
   let interruptConfirmed = false;
   const native = failureStatus === "manifest-mismatch" || failureStatus === "wire-refusal" || failureStatus === "stop-late" ? new Proxy(ownedAdapter, { get(target, key) {

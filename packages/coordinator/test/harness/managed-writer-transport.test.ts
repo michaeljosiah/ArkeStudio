@@ -17,7 +17,7 @@ async function fixture(hold = false) {
   await supervisor.start(); const origin = supervisor.captureProcessOrigin(); assert(origin);
   const base = `http://127.0.0.1:${origin.port}`, directory = root.replaceAll("\\", "/");
   return { root, marker, release, supervisor, origin, base, directory,
-    create: JSON.stringify({ location: { directory }, model: { providerID: "ollama", id: "test" } }),
+    create: JSON.stringify({ location: { directory }, model: { providerID: "ollama", id: "test" }, permissions: [{ action: "skill", resource: "*", effect: "deny" }] }),
     rows: async () => (await readFile(marker, "utf8")).trim().split("\n").map(line => JSON.parse(line) as { path: string; body: string; clientPort: number }) };
 }
 async function create(h: Awaited<ReturnType<typeof fixture>>, writer: ManagedStudioWriterTransport) {
@@ -32,7 +32,7 @@ it("captures the selected effort and refuses a changed native model reference be
   const writer = new ManagedStudioWriterTransport({ origin: h.origin, current: () => true, request: input, authorization, verify: async () => { proofs++; return true; } });
   try {
     assert(writer.bindDirectory(h.root, "studio-assistant")); input.variant = "low";
-    const body = (variant?: string) => JSON.stringify({ location: { directory: h.directory }, model: { providerID: "ollama", id: "test", ...(variant ? { variant } : {}) } });
+    const body = (variant?: string) => JSON.stringify({ location: { directory: h.directory }, model: { providerID: "ollama", id: "test", ...(variant ? { variant } : {}) }, permissions: [{ action: "skill", resource: "*", effect: "deny" }] });
     for (const variant of [undefined, "default", "low"]) await assert.rejects(writer.fetch(h.base + "/api/session", { method: "POST", body: body(variant), headers: { authorization } }));
     assert.equal(proofs, 0);
     const accepted = await writer.fetch(h.base + "/api/session", { method: "POST", body: body("high"), headers: { authorization } }); await accepted.arrayBuffer();

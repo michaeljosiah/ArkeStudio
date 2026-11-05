@@ -7,7 +7,7 @@ only after selecting their URL in Settings → Providers → Ollama. Downloads a
 below use that selected endpoint; the managed copy has its own model folder and private port.
 See [Managed local runtimes](managed-local-runtimes.md) for ownership, overrides and updates.
 
-- Authoring sessions use the selected writing harness. OpenCode v2 2.0.26 natively discovers
+- Authoring sessions use the selected writing harness. OpenCode v2 2.2.5 natively discovers
   installed Ollama completion models on loopback; select one from the live harness catalogue. OpenCode owns prompts and
   tool calls; Ollama owns inference. A model must appear in that catalogue before Arke can
   offer it for authoring. Discovery reads `/api/tags` and `/api/show`; it does not download models. OpenCode owns

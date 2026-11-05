@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import type { WireModel } from "../../src/model-metadata.js";
 
 /**
- * A scripted OpenCode v2 stand-in serving the measured 2.0.26 surface: Basic-auth
+ * A scripted OpenCode v2 stand-in serving the measured 2.2.5 surface: Basic-auth
  * challenge on every route, `{ data, location }` envelopes, deep-object location queries,
  * inbox-shaped prompts with durable msg_ ids, session-scoped pending permissions, and an SSE
  * stream with `: heartbeat` comments. Hermetic — the suite runs without a real harness or a
@@ -41,7 +41,7 @@ export class StubOpenCodeV2 {
   readonly generations = new Map<string, ServerResponse>();
   /** Extra latency on the first health answer — the server-global warm-up switch. */
   coldHealthMs = 0;
-  version = "2.0.26";
+  version = "2.2.5";
   /** Answer the next GET .../message with a 503 — the completion-fetch blip switch. */
   failNextMessageFetch = false;
   /** Error bodies can echo private request text; privacy tests must exercise this path. */
@@ -280,7 +280,7 @@ export class StubOpenCodeV2 {
           const path = resolve(locationDir ?? ".", ".arke-private-control/index.js");
           let id = "arke.studio.private-control.v1";
           try { id = /id: "([^"]+)"/.exec(await readFile(path, "utf8"))?.[1] ?? id; } catch { /* Logical-location fixtures use the fixed legacy control. */ }
-          const plugins = reply?.plugins ?? [{ id, source: { type: "local", path },
+          const plugins = reply?.plugins ?? [{ id, source: { type: "local", path: resolve(locationDir ?? ".", ".arke-private-control") },
             features: { server: true }, state: { status: "active" } }];
           res.writeHead(200, { "Content-Type": "application/json" }).end(envelope(plugins, reply?.directory === null ? undefined : reply?.directory ?? locationDir));
           return;

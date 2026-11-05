@@ -42,7 +42,15 @@ it("qualifies native operational deny policy, zero tool schemas and exactly one 
   provider.listen(0, "127.0.0.1"); await once(provider, "listening");
   const providerAddress = provider.address(); assert(providerAddress && typeof providerAddress !== "string");
   const configDir = join(profile, ".config", "opencode"); await mkdir(configDir, { recursive: true });
-  await writeFile(join(configDir, "opencode.json"), JSON.stringify({ providers: { ollama: { settings: { baseURL: `http://127.0.0.1:${providerAddress.port}/v1`, apiKey: "synthetic-route-key" } } } }));
+  // One decoy of each kind in the profile. Each resource type defaults to allow and has its own
+  // policy action since 2.2.3, so a missing deny loads the decoy here rather than failing closed.
+  const decoyPlugin = join(profile, "decoy-plugin"); await mkdir(decoyPlugin);
+  await writeFile(join(decoyPlugin, "package.json"), '{"type":"module","main":"index.js","private":true}\n');
+  await writeFile(join(decoyPlugin, "index.js"), 'export default { id: "arke.decoy.plugin", async setup() {} };\n');
+  await mkdir(join(configDir, "skills", "arke-decoy-skill"), { recursive: true });
+  await writeFile(join(configDir, "skills", "arke-decoy-skill", "SKILL.md"), "---\nname: arke-decoy-skill\ndescription: ARKE_DECOY_SKILL_MUST_NOT_REACH_THE_MODEL\n---\nDecoy.\n");
+  await writeFile(join(configDir, "opencode.json"), JSON.stringify({ providers: { ollama: { settings: { baseURL: `http://127.0.0.1:${providerAddress.port}/v1`, apiKey: "synthetic-route-key" } } },
+    plugins: [decoyPlugin.replaceAll("\\", "/")], mcp: { servers: { "arke-decoy-mcp": { type: "remote", url: `http://127.0.0.1:${providerAddress.port}/decoy-mcp` } } } }));
   const socket = createSocket(); socket.listen(0, "127.0.0.1"); await once(socket, "listening");
   const address = socket.address(); assert(address && typeof address !== "string"); const port = address.port; await new Promise<void>(resolve => socket.close(() => resolve()));
   const env: Record<string, string> = {};
@@ -107,7 +115,15 @@ it("qualifies native operational deny policy, zero tool schemas and exactly one 
         await ref.privateTurnSettled;
         await new Promise(resolve => setTimeout(resolve, 500)); // bounded absence check for asynchronous helper requests
         assert.equal(requests.length - before, 1, "private turn must not launch hidden title/summary/compaction requests");
-        const actual = requests.at(-1)!; assert.equal(actual.model, model); assert.equal(actual.tools?.length ?? 0, 0, "no native tool schemas may reach the operational model");
+        const actual = requests.at(-1)!; assert.equal(actual.model, model); assert.deepEqual(actual.tools ?? [], [], "no native tool schemas may reach the operational model");
+        const outbound = JSON.stringify(actual.messages);
+        assert(!outbound.includes("ARKE_DECOY_SKILL_MUST_NOT_REACH_THE_MODEL"), "a profile skill must not reach the operational model");
+        assert(!outbound.includes("arke-decoy-mcp"), "a profile MCP server must not reach the operational model");
+        const servers = await request("GET", "/api/mcp?" + new URLSearchParams({ "location[directory]": cwd.replaceAll("\\", "/") }));
+        assert(!JSON.stringify(servers.body).includes("arke-decoy-mcp"), "the native policy removes a profile MCP server");
+        const plugins = await request("GET", "/api/plugin?" + new URLSearchParams({ "location[directory]": cwd.replaceAll("\\", "/") }));
+        assert(JSON.stringify(plugins.body).includes("arke.studio.private-control"), "the native policy keeps the fixed control");
+        assert(!JSON.stringify(plugins.body).includes("arke.decoy.plugin"), "the native policy refuses a profile plugin");
       } finally { stop.abort(); await reading; }
       assert.equal(await ref.privateRetire!(new AbortController().signal), true);
       assert.equal(await ref.privateRetire!(new AbortController().signal), true);
