@@ -164,6 +164,25 @@ describe("cast by a press, kept beside the chapter, keyed to the prose (R-44, R-
 describe("the author's corrections to the cast (design turn 155, SPEC-012 R-62..R-65)", () => {
   const worldSchema = async (dir: string) => (JSON.parse(await readFile(join(dir, "world.json"), "utf8")) as { schemaVersion: number }).schemaVersion;
 
+  it("keeps an explicit speaker choice when the matching derived occurrence is ambiguous (#1760)", async () => {
+    const { store } = await open();
+    const before = await openChapter(store, PRODUCTION, "neap"), body = '“No.” “No.”';
+    await saveChapter(store, PRODUCTION, "01-neap", body, { baseHash: before.hash });
+    const cast = await castLines(store, PRODUCTION, "neap", async () => ({ lines: [{ speaker: "maren-kest", quote: "“No.”" }] }));
+    const [first, second] = unassignedQuotes(body, cast.record);
+    assert.ok(first && second);
+    assert.equal(voicedBlocks(body, cast.record).blocks.some(block => block.speaker), false);
+    const chosen = await setVoicePin(store, PRODUCTION, "neap", { ...first, speaker: "Maren Kest", sheet: "maren-kest" });
+    assert.equal(chosen.pins?.length, 1, "a matching but ambiguous derivation cannot consume the explicit choice");
+    assert.ok(voicedBlocks(body, chosen).blocks.some(block => block.sheet === "maren-kest"));
+    const resolved = await setVoicePin(store, PRODUCTION, "neap", { ...second, narration: true });
+    assert.deepEqual(unassignedQuotes(body, resolved), []);
+    assert.deepEqual(voicedBlocks(body, resolved).blocks.map(block => block.sheet ?? null), ["maren-kest", null]);
+    await store.reload();
+    assert.deepEqual(await readVoices(store, PRODUCTION, "01-neap"), resolved);
+    assert.equal((await openChapter(store, PRODUCTION, "neap")).body.trim(), body);
+  });
+
   it("retains an intentional narration choice for an unmatched quotation across recasting and reopening (#1760)", async () => {
     const { store } = await open();
     const before = await openChapter(store, PRODUCTION, "neap");
