@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
@@ -21,8 +21,14 @@ const MAREN = "characters/maren-kest.md";
 
 type SheetResult = Extract<DomainEvent, { type: "sheet.edit-result" }>;
 
-async function harness() {
+async function harness(withoutVoice = false) {
   const made = await makeTempRoot();
+  if (withoutVoice) {
+    const path = join(made.worldDir, MAREN);
+    const doc = MarkdownFile.parse(await readFile(path, "utf8"));
+    doc.setBody(doc.sections().filter(s => !/^voice|^speech/i.test(s.heading)).map(s => `## ${s.heading}\n${s.body}`).join("\n\n"));
+    await writeFile(path, doc.serialize());
+  }
   const provider = new FsWorldProvider(made.root, { clock: () => CLOCK });
   closeOnCleanup(() => provider.close());
   await provider.loadWorld(WORLD_ID);
@@ -64,6 +70,42 @@ function resultFor(events: DomainEvent[], requestId: string): SheetResult {
 }
 
 describe("sheet form inline decisions (SPEC-040)", () => {
+  it("adds missing written Voice to an open proposal without accepting its other edits", async () => {
+    const h = await harness(true);
+    const before = await readFile(join(h.worldDir, MAREN), "utf8");
+    const draft = MarkdownFile.parse(before);
+    draft.setBody(draft.sections().map(s => `## ${s.heading}\n${s.heading === "Essence" ? "Unread Studio essence." : s.body}`).join("\n\n"));
+    const proposal = await h.provider.gate()!.stage({ kind: "sheet-edit", summary: "Studio draft", source: "chat:studio", targets: [{ path: MAREN, content: draft.serialize() }] });
+    const voice = { heading: "Voice · written", body: "Low and measured." };
+    const message = editMessage([voice], [voice.heading]);
+    await h.send(message);
+    assert.equal(resultFor(h.events, message.requestId).disposition, "merged");
+    assert.equal(await readFile(join(h.worldDir, MAREN), "utf8"), before);
+    const proposed = MarkdownFile.parse(await readFile(join(h.worldDir, ".proposals", proposal.id, MAREN), "utf8"));
+    assert.equal(proposed.sections().find(s => s.heading === voice.heading)?.body, voice.body);
+    assert.equal(proposed.sections().find(s => s.heading === "Essence")?.body, "Unread Studio essence.");
+    await h.provider.close();
+  });
+
+  it("adds a missing character Voice through ordinary acceptance and retains it after reopen", async () => {
+    const h = await harness(true);
+    const before = h.provider.openStore()!.getBundle().sheets.find(s => s.id === "maren-kest")!;
+    const voice = { heading: "Voice · written", body: "Low and measured, with a dry warmth." };
+    const message = editMessage([voice], [voice.heading]);
+    await h.send(message);
+    assert.equal(resultFor(h.events, message.requestId).disposition, "accepted");
+    const after = h.provider.openStore()!.getBundle().sheets.find(s => s.id === before.id)!;
+    assert.equal(after.version, before.version + 1);
+    assert.deepEqual(after.sections, [...before.sections, voice]);
+    assert.deepEqual(after.voice, before.voice, "written direction does not reassign the reader");
+    await h.provider.close();
+    const reopened = new FsWorldProvider(h.root, { clock: () => CLOCK });
+    closeOnCleanup(() => reopened.close());
+    await reopened.loadWorld(WORLD_ID);
+    assert.deepEqual(reopened.openStore()!.getBundle().sheets.find(s => s.id === before.id)?.sections, after.sections);
+    await reopened.close();
+  });
+
   for (const fullForm of [false, true]) it(`preserves omitted and unchanged sections when saving ${fullForm ? "a full form" : "one section"}`, async () => {
     const h = await harness();
     const path = "locations/the-quiet-ward.md";
