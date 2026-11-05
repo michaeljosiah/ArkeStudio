@@ -58,7 +58,10 @@ export class CreatorPublishingService implements CreatorPublishingPort {
     const actor = this.account.actorKey(); if (!actor) return { configured: true, scopeId: null, publications: [], refusal: "Sign in to submit an edition or see your receipts." };
     const publications: CreatorPublication[] = [];
     const files = (await readdir(join(this.root, "receipts", actor)).catch(() => [] as string[])).filter(f => /^[a-f0-9-]{36}\.json$/.test(f)).slice(0, 1000);
-    for (const file of files) { const record = await this.load(worldId, file.slice(0, -5)).catch(() => null); if (record) publications.push(record.publication); }
+    for (const file of files) { const record = await this.load(worldId, file.slice(0, -5)).catch(() => null); if (record) {
+      const p = record.publication;
+      publications.push(["pending", "uploading"].includes(p.transfer) && !this.active.has(p.id) ? { ...p, transfer: "paused", message: "Upload interrupted. Resume this saved edition when ready." } : p);
+    } }
     if (actor !== this.account.actorKey()) throw new CreatorSignInRequired();
     return { configured: true, scopeId: actor, publications: publications.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), refusal: null };
   }
@@ -193,6 +196,8 @@ export class CreatorPublishingService implements CreatorPublishingPort {
       if (record.remote && !["awaiting-upload", "uploaded", "held"].includes(record.remote.status)) throw new PublishingRefusal("already-submitted", "This edition is already submitted. Refresh its receipt to see its review status.");
       if (record.remote && record.uploadId) await this.api.request(`/publishing/submissions/${record.remote.id}/uploads/${record.uploadId}`, "DELETE", undefined, this.lifetime.signal);
       record.publication.transfer = "cancelled"; record.publication.message = "Upload cancelled. The receipt and exact edition are retained."; await this.persist(record);
+    } else if (action === "pause" && ["pending", "uploading"].includes(record.publication.transfer)) {
+      record.publication.transfer = "paused"; record.publication.message = "Upload paused. Resume the saved edition when ready."; await this.persist(record);
     } else if (action === "refresh" && record.remote && !this.active.has(id)) {
       const remote = AonikReceiptSchema.parse(await this.api.request(`/publishing/submissions/${record.remote.id}`, "GET", undefined, this.lifetime.signal));
       if (remote.revision.id !== record.remote.revision.id) { record.publication.transfer = "superseded"; record.publication.message = "A newer revision is now attached to this receipt."; }

@@ -88,4 +88,12 @@ describe("AONIK frozen-edition submissions", () => {
       h.api.catalogue = { version: 2, serial: 56, worlds: [] }; const requests = h.api.requests.length; await h.service.submit(h.store.worldId, p.candidateId, form); await h.service.control(h.store.worldId, p.candidateId, "resume"); assert.equal(h.api.requests.length, requests); assert.equal((await h.service.list(h.store.worldId)).publications[0]!.transfer, "complete");
     } finally { await h.service.stop(); }
   });
+  it("exposes a crash-left uploading journal as resumable without replaying at startup", async () => {
+    const h = await publishingFixture(); h.api.failure = "part"; const p = (await h.service.prepare(h.store, "story", h.exportId)).preview!;
+    await h.service.submit(h.store.worldId, p.candidateId, form); await settled(h.service, h.store.worldId); await h.service.stop();
+    const path = join(h.root, "cloud", "receipts", h.account.actorKey(), p.candidateId + ".json"); const saved = JSON.parse(await readFile(path, "utf8")); saved.publication.transfer = "uploading"; await writeFile(path, JSON.stringify(saved));
+    const resumed = h.restart(); try { const requests = h.api.requests.length; assert.equal((await resumed.list(h.store.worldId)).publications[0]!.transfer, "paused"); assert.equal(h.api.requests.length, requests);
+      await resumed.control(h.store.worldId, p.candidateId, "resume"); assert.equal((await settled(resumed, h.store.worldId)).publications[0]!.transfer, "complete"); assert.equal(h.api.receipts.size, 1);
+    } finally { await resumed.stop(); }
+  });
 });
