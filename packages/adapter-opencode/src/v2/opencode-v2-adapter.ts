@@ -24,7 +24,7 @@ import {
   type VendorOAuthAttempt,
   type VendorOAuthAttemptState,
 } from "@arke-studio/contracts";
-import { assessV2Permission, buildSessionConfigV2 } from "./config.js";
+import { assessV2Permission, buildSessionConfigV2, sessionRulesV2 } from "./config.js";
 import { PreparedSessionPolicies, type SessionPermissionPolicy } from "../permission-policy.js";
 import { parseSse, SseFrameLimitError } from "../sse.js";
 import { modelEnabled, modelMetadata, modelWritingRefusal, providerNameOf, type WireModel } from "../model-metadata.js";
@@ -48,7 +48,7 @@ import {
 /**
  * The live OpenCode v2 adapter (issue 327). Drives the authenticated /api surface of an
  * opencode2 standalone server and normalises its event stream into schema-validated harness
- * events. The supported release is 2.0.26; real-binary tests qualify launch, credential
+ * events. The supported release is 2.2.5; real-binary tests qualify launch, credential
  * persistence and a scripted local turn with tool confinement and a permission round trip.
  *
  * It never writes to a world, never calls commit(), and never decides what a ripple is —
@@ -119,6 +119,35 @@ let wireIdCounter = 0;
 function freshWireId(): string {
   wireIdCounter += 1;
   return `msg_arke_${Date.now().toString(36)}_${wireIdCounter.toString(36)}`;
+}
+
+/** The fields of a `GET .../message` row this adapter reads. */
+interface SessionMessageRow {
+  id?: string;
+  type?: string;
+  time?: { completed?: number };
+  finish?: string;
+  error?: unknown;
+  retry?: unknown;
+  content?: Array<{ type?: string; text?: string }>;
+}
+
+/**
+ * The assistant rows that make up one reply, oldest first, ending at `final`. The engine carries
+ * on by itself when a response hits its output limit or loses its stream part way: a synthetic
+ * instruction, then a new assistant row. Measured against 2.2.5, newest first: stop, synthetic,
+ * length, synthetic, length; a dropped stream leaves `finish: "error"` with `retry` set. Taking
+ * only the newest row hands back the tail of the reply. A tool loop's steps have no synthetic row
+ * between them and a row that ended any other way is an earlier reply, so neither is swept in.
+ */
+function replyRows(messages: SessionMessageRow[], final: SessionMessageRow): SessionMessageRow[] {
+  const rows = [final];
+  for (let at = messages.indexOf(final); ; at += 2) {
+    const earlier = messages[at + 2];
+    if (messages[at + 1]?.type !== "synthetic" || earlier?.type !== "assistant") return rows;
+    if (earlier.finish !== "length" && !(earlier.finish === "error" && earlier.retry !== undefined)) return rows;
+    rows.unshift(earlier);
+  }
 }
 
 export class OpenCodeV2Adapter implements HarnessAdapter {
@@ -360,6 +389,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
         return response;
       } } : {}) }) : this.http;
     const location = input.cwd;
+    const sessionRules = sessionRulesV2(input.agent);
     // The model is session state, pinned at creation (issue 1247). Measured against the pinned
     // build: an agent's `model` in opencode.json shows on GET /api/agent and is never consulted
     // for a turn — the runner reads only the session's own model, and a session without one
@@ -372,6 +402,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       {
         ...(location ? { location: { directory: wireDirectory(location) } } : {}),
         ...(model !== null ? { model } : {}),
+        ...(sessionRules.length > 0 ? { permissions: sessionRules } : {}),
       },
       { signal: input.signal, ...(privateSession ? { responseBytes: 64 * 1024 } : {}) },
     );
@@ -678,14 +709,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     };
     try {
       const messages = await (tracked?.ownerHttp ?? this.http).reqData<
-        Array<{
-          id?: string;
-          type?: string;
-          time?: { completed?: number };
-          finish?: string;
-          error?: unknown;
-          content?: Array<{ type?: string; text?: string }>;
-        }>
+        SessionMessageRow[]
       >("GET", `/api/session/${sessionId}/message`, undefined, { signal: AbortSignal.any([runtime.signal, AbortSignal.timeout(10_000)]),
         ...(tracked?.private ? { responseBytes: 4 * 1024 ** 2 } : {}) });
       if (runtime.signal.aborted || this.disposed || !stillAdmitted() || tracked?.privateResponseRejected) return;
@@ -701,11 +725,13 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
         }
         return;
       }
-      // Actual 2.0.26 failed rows also have time.completed, including after a missed SSE
+      // Actual 2.2.5 failed rows also have time.completed, including after a missed SSE
       // failure. Only the newest, error-free normal stop is a complete private response;
       // truncation, tool requests and unknown finish shapes remain a refusal, never a reply.
       if (tracked?.private && (done?.finish !== "stop" || done.error !== undefined || typeof id !== "string" || id.length > 256 || !Array.isArray(done.content) || done.content.some(part => part?.type === "text" && typeof part.text !== "string"))) { this.rejectPrivateResponse(sessionId); return; }
-      const text = (done?.content ?? [])
+      // A private reply is one row by construction: its control refuses a second provider request.
+      const text = (tracked?.private ? [done!] : replyRows(messages, done!))
+        .flatMap((row) => row.content ?? [])
         .filter((part) => part.type === "text")
         .map((part) => part.text ?? "")
         .join("");

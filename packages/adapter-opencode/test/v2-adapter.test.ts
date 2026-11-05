@@ -199,7 +199,7 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
     try {
       await adapter.init();
       assert.equal(adapter.readiness().ready, true);
-      assert.equal(adapter.serverVersion, "2.0.26");
+      assert.equal(adapter.serverVersion, "2.2.5");
     } finally {
       await adapter.dispose();
       await cold.stop();
@@ -208,13 +208,13 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
 
   it("rejects a running server from any other v2 release without probing the old API", async () => {
     const unsupported = new StubOpenCodeV2();
-    unsupported.version = "2.0.25";
+    unsupported.version = "2.2.4";
     await unsupported.start();
     const adapter = new OpenCodeV2Adapter({ baseUrl: () => unsupported.baseUrl(), password: () => STUB_V2_PASSWORD });
     try {
       await adapter.init();
       assert.equal(adapter.readiness().ready, false);
-      assert.match(adapter.readiness().reason ?? "", /2\.0\.25.*use 2\.0\.26/);
+      assert.match(adapter.readiness().reason ?? "", /2\.2\.4.*use 2\.2\.5/);
       assert.equal(adapter.capabilities().size, 0);
       assert.deepEqual(unsupported.requests.map(request => request.path), ["/api/info"]);
     } finally {
@@ -400,6 +400,39 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
       await adapter.dispose();
     }
   });
+
+  // Rows as the pinned engine stores them, newest first. v2-engine-defaults-protocol.test.ts
+  // measures the first two on the real binary.
+  const row = (type: string, text: string, finish?: string, more: Record<string, unknown> = {}) => (type === "assistant"
+    ? { id: `msg_${finish}_${text.length}`, type, finish, time: { created: 1, completed: 2 }, content: [{ type: "text", text }], ...more }
+    : { id: `msg_${type}_${text.length}`, type, text });
+  for (const [name, rows, expected] of [
+    ["an output limit continued twice", [{ id: "msg_idle", type: "idle" }, row("assistant", "Part three.", "stop"), row("synthetic", "Continue."),
+      row("assistant", "Part two. ", "length"), row("synthetic", "Continue..."), row("assistant", "Part one. ", "length"), row("user", "Write.")], "Part one. Part two. Part three."],
+    ["a dropped stream the engine carried on from", [{ id: "msg_idle", type: "idle" }, row("assistant", "rest.", "stop"), row("synthetic", "Continue."),
+      row("assistant", "Partial ", "error", { error: { type: "provider.transport" }, retry: { attempt: 2 } }), row("user", "Write.")], "Partial rest."],
+    ["an earlier truncated reply behind a person's message", [row("assistant", "Second.", "stop"), row("user", "Go on."), row("assistant", "First.", "length")], "Second."],
+    ["a notice after a finished reply", [row("assistant", "Second.", "stop"), row("synthetic", "A notice."), row("assistant", "First.", "stop")], "Second."],
+    ["a failure the engine did not carry on from", [row("assistant", "Second.", "stop"), row("synthetic", "A notice."), row("assistant", "First.", "error", { error: { type: "provider.auth" } })], "Second."],
+  ] as const) {
+    it(`reports one whole reply: ${name}`, async () => {
+      const adapter = makeAdapter();
+      try {
+        await adapter.init();
+        const ref = await adapter.createSession({ purpose: "authoring", agent: "scene-writer" });
+        const mark = stub.requests.length;
+        const eventsPromise = collect(adapter, (events) => events.some((e) => e.type === "message.completed"));
+        await until(() => stub.streamCount > 0, "the stub to open an event stream", SETTLE_MS);
+        await untilResynced(stub, mark);
+        stub.messagesBySession.set(ref.sessionId, [...rows]);
+        stub.emit({ id: "evt_reply", type: "session.execution.succeeded", data: { sessionID: ref.sessionId } });
+        const completed = (await eventsPromise).find((e) => e.type === "message.completed");
+        assert.equal(completed?.type === "message.completed" && completed.text, expected);
+      } finally {
+        await adapter.dispose();
+      }
+    });
+  }
 
   it("carries the held-call permission round trip, session-scoped reply included", async () => {
     const adapter = makeAdapter();
@@ -702,7 +735,7 @@ describe("v2 discovery and the release pin (issue 327 §3)", () => {
             probes++; assert.equal(actualEnv, env);
             if (command === "where" || command === "which") return source === "path" && args[0] === "opencode2"
               ? { status: 0, stdout: "synthetic-path.exe" } : { status: 1, stdout: "" };
-            return { status: 0, stdout: command === configured && source !== "configured" ? "1.0.0" : "2.0.26" };
+            return { status: 0, stdout: command === configured && source !== "configured" ? "1.0.0" : "2.2.5" };
           },
         } });
         assert.equal(result.found?.discovery.source, source); assert(probes > 0);
@@ -717,20 +750,20 @@ describe("v2 discovery and the release pin (issue 327 §3)", () => {
   });
 
   it("discovers stable v2 under its upstream opencode name and accepts only the qualified release", async () => {
-    for (const version of ["2.0.26", "2.0.25", "2.0.27", "0.0.0-beta-19271"]) {
+    for (const version of ["2.2.5", "2.2.4", "2.2.6", "2.0.26", "0.0.0-beta-19271"]) {
       const runCommand = async (command: string, args: string[]) => {
         if (command === "where" || command === "which") return args[0] === "opencode"
           ? { status: 0, stdout: "C:\\bin\\opencode.exe\n" } : { status: 1, stdout: "" };
         return { status: 0, stdout: `opencode v${version}` };
       };
       const result = await discoverPreferredHarness({ v2: { runCommand } });
-      assert.equal(result.found?.generation ?? null, version === "2.0.26" ? "v2" : null);
-      assert.equal(result.rejectedV2?.version ?? null, version === "2.0.26" ? null : version);
+      assert.equal(result.found?.generation ?? null, version === "2.2.5" ? "v2" : null);
+      assert.equal(result.rejectedV2?.version ?? null, version === "2.2.5" ? null : version);
     }
   });
   it("accepts only the qualified release, including its exact patch version", () => {
-    assert.equal(meetsV2Gate("2.0.26"), true);
-    for (const version of [null, "2.0.25", "2.0.27", "2.0.0", "2.0.26-beta.1", "3.0.0", "0.0.0-next-17444", "0.0.0-beta-19271", "1.18.35", "2.0.26garbage"]) {
+    assert.equal(meetsV2Gate("2.2.5"), true);
+    for (const version of [null, "2.2.4", "2.2.6", "2.0.26", "2.0.0", "2.2.5-beta.1", "3.0.0", "0.0.0-next-17444", "0.0.0-beta-19271", "1.18.35", "2.2.5garbage"]) {
       assert.equal(meetsV2Gate(version), false, String(version));
     }
   });
@@ -747,7 +780,7 @@ describe("v2 discovery and the release pin (issue 327 §3)", () => {
       return present[name] !== undefined ? { status: 0, stdout: present[name]! } : { status: 1, stdout: "" };
     };
 
-    const both = { opencode: "opencode v1.18.18", opencode2: "opencode2 v2.0.26" };
+    const both = { opencode: "opencode v1.18.18", opencode2: "opencode2 v2.2.5" };
     const preferred = await discoverPreferredHarness({ v2: { runCommand: machine(both) } });
     assert.equal(preferred.found?.generation, "v2");
 
@@ -774,11 +807,11 @@ describe("v2 discovery and the release pin (issue 327 §3)", () => {
             : { status: 1, stdout: "" };
         }
         if (command === configured) return { status: 0, stdout: "opencode2 v0.0.0-next-9000" };
-        return { status: 0, stdout: "opencode2 v2.0.26" };
+        return { status: 0, stdout: "opencode2 v2.2.5" };
       };
       const found = await discoverOpenCode2({ configuredPath: configured, runCommand: run });
       assert.equal(found?.source, "path", "the stale configured entry does not hide the current install");
-      assert.equal(found?.version, "2.0.26");
+      assert.equal(found?.version, "2.2.5");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

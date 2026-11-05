@@ -83,7 +83,7 @@ it("qualifies guarded transient native replies without persisted transcript copi
       const before = await request("GET", `/api/session/${id}/message`), count = calls.length;
       const result = await request("POST", `/api/session/${id}/generate`, { prompt: manifest.prompt });
       if (scenario === "success" || !guarded) { assert.equal(result.status, 200, scenario); assert.match(result.body.data.text, /TRANSIENT_NATIVE_REPLY_MARKER/); }
-      else { assert.equal(result.status, scenario === "socket-drop" ? 503 : 500, `${scenario} cannot be published as a successful generation`); const refusal = JSON.stringify(result.body ?? null);
+      else { assert.equal(result.status, 500, `${scenario} cannot be published as a successful generation`); const refusal = JSON.stringify(result.body ?? null);
         assert(!refusal.includes("TRANSIENT_NATIVE_")); assert(!refusal.includes("TRANSIENT_PRIVATE_PROVIDER_ERROR")); }
       assert.deepEqual((await request("GET", `/api/session/${id}/message`)).body, before.body, `${scenario} must not mutate native messages`);
       assert.equal(calls.length - count, 1, `${scenario} must not retry`);
