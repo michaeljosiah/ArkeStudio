@@ -1240,7 +1240,7 @@ export type ComicPageMade = Extract<DomainEvent, { type: "comic.page-made" }>;
 export type ComicTakeResult = Extract<DomainEvent, { type: "comic.take-result" }>;
 export type ComicPageLettered = Extract<DomainEvent, { type: "comic.page-lettered" }>;
 export type ComicLetteringPlaced = Extract<DomainEvent, { type: "comic.lettering-placed" }>;
-type ComicPageEvent = ComicPageQuote | ComicPageMade | ComicTakeResult;
+type ComicPageEvent = ComicPageQuote | ComicPageMade | ComicTakeResult | ComicPageLettered | ComicLetteringPlaced;
 const comicPageListeners = new Set<(event: ComicPageEvent) => void>();
 export function subscribeComicPages(listener: (event: ComicPageEvent) => void): () => void {
   comicPageListeners.add(listener);

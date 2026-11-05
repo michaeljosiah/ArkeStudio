@@ -378,6 +378,8 @@ export interface ComicPlan {
   pilot: boolean;
   /** Source chapter number chosen for the pilot; absent keeps older plans on their first row. */
   pilotFrom?: number | undefined;
+  /** Whole page or Panel by panel (R-36a); absent is Whole page. */
+  mode?: ComicMode | undefined;
   chapters: ComicPlanChapter[];
 }
 export const ComicPlanChapterSchema: z.ZodType<ComicPlanChapter, z.ZodTypeDef, unknown> = z.object({
@@ -392,6 +394,7 @@ export const ComicPlanSchema: z.ZodType<ComicPlan, z.ZodTypeDef, unknown> = z.ob
   style: ComicStyleSchema.optional(),
   pilot: z.boolean(),
   pilotFrom: z.number().int().min(1).max(500).optional(),
+  mode: ComicModeSchema.optional(),
   chapters: z.array(ComicPlanChapterSchema).max(500),
 }).strict().superRefine((plan, ctx) => {
   if (normalizeAspect(plan.aspect) !== plan.aspect) ctx.addIssue({ code: "custom", path: ["aspect"], message: `“${plan.aspect}” is not an aspect.` });
@@ -412,6 +415,7 @@ export interface ComicCreation {
   aspect: string;
   style?: ComicStyle | undefined;
   adapts?: ComicAdapts | undefined;
+  mode?: ComicMode | undefined;
   chapters: Array<{ stem: string; title: string }>;
 }
 export const ComicCreationSchema: z.ZodType<ComicCreation, z.ZodTypeDef, unknown> = z.object({
@@ -419,13 +423,14 @@ export const ComicCreationSchema: z.ZodType<ComicCreation, z.ZodTypeDef, unknown
   aspect: z.string().min(3).max(12),
   style: ComicStyleSchema.optional(),
   adapts: ComicAdaptsSchema.optional(),
+  mode: ComicModeSchema.optional(),
   chapters: z.array(z.object({ stem: SlugSchema, title: z.string().trim().min(1).max(200) }).strict()).max(500),
 }).strict();
 export const DEFAULT_COMIC_PLAN: ComicPlan = { reading: "ltr", aspect: DEFAULT_COMIC_ASPECT, pilot: true, chapters: [] };
 
 /** The three things setup asks by example (R-4): the page draws example cards for the one open. */
 /** What setup is asking (turn 249b), or the usual three as one card to use or change (turn 256a). */
-export const ComicAskSchema = z.enum(["usual", "reading", "aspect", "pilot"]);
+export const ComicAskSchema = z.enum(["usual", "reading", "aspect", "pilot", "mode"]);
 export type ComicAsk = z.infer<typeof ComicAskSchema>;
 
 // ---------------------------------------------------------------------------
@@ -840,12 +845,14 @@ export const BALLOON_EM = { s: 0.017, m: 0.021, l: 0.026 } as const;
 export function balloonBox(item: Pick<LetteringItem, "kind" | "text">, rect: LayoutRect, aspect: string, at: { x: number; y: number }, others: readonly PageBox[] = [], size: keyof typeof BALLOON_EM = "m"): PageBox {
   const [across, down] = aspect.split(":").map(Number) as [number, number];
   const em = BALLOON_EM[size] * (item.kind === "sfx" ? 1.6 : 1);
-  const pad = item.kind === "caption" || item.kind === "sfx" ? 1.2 : 2.6;
-  const chars = Math.max(4, item.text.length);
-  const lines = Math.max(1, Math.round(Math.sqrt((chars * 0.56 * em) / (1.25 * em * (across / down)) / 1.8)));
-  const w = Math.min(rect.w * 0.9, (chars * 0.56 * em) / lines + pad * em);
-  const usedLines = Math.max(1, Math.ceil((chars * 0.56 * em) / Math.max(em, w - pad * em)));
-  const h = Math.min(rect.h * 0.9, ((usedLines * 1.25 + pad * 0.7) * em * across) / down);
+  // Words set about twice as wide as they are tall, in capitals' width; an ellipse's type sits inside its corners.
+  const run = Math.max(4, item.text.length) * 0.64 * em;
+  const across2 = Math.sqrt(run * 1.25 * em * 2.2);
+  const lines = Math.max(1, Math.ceil(run / across2));
+  const round = item.kind !== "caption" && item.kind !== "sfx";
+  const w = Math.min(rect.w * 0.9, round ? across2 / 0.72 : across2 + em);
+  const tall = lines * 1.25 * em;
+  const h = Math.min(rect.h * 0.9, ((round ? tall / 0.7 : tall + em * 0.7) * across) / down);
   const place = (x: number, y: number): PageBox => ({
     x: Math.max(rect.x, Math.min(rect.x + rect.w - w, x)),
     y: Math.max(rect.y, Math.min(rect.y + rect.h - h, y)),

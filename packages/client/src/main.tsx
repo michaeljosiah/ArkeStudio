@@ -10,6 +10,9 @@ import "@fontsource/geist-sans/600.css";
 import "@fontsource/geist-sans/700.css";
 // The launch screen wordmark only (--font-wordmark). Two weights, because the lockup is two
 // lines: the mark at 200 and the tagline at 300. Nothing else in the app uses this face.
+// The typefaces a graphic novel's placed words are set in (SPEC-064 R-38a).
+import "@fontsource/comic-neue/700.css";
+import "@fontsource/bangers/400.css";
 import "@fontsource/jost/200.css";
 import "@fontsource/jost/300.css";
 import "./theme/tokens/colors.css";

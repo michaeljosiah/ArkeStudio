@@ -246,7 +246,7 @@ export async function createProductionFromPlan(
     const comic = content?.graphicNovel;
     const settings = comic ? ComicSettingsSchema.parse({
       ...DEFAULT_COMIC_SETTINGS, reading: comic.reading, aspect: comic.aspect,
-      ...(comic.style ? { style: comic.style } : {}), ...(comic.adapts ? { adapts: comic.adapts } : {}),
+      ...(comic.style ? { style: comic.style } : {}), ...(comic.adapts ? { adapts: comic.adapts } : {}), ...(comic.mode ? { mode: comic.mode } : {}),
     }) : DEFAULT_COMIC_SETTINGS;
     files.push({ path: `productions/${plan.production.id}/comic.json`, action: "create", content: `${JSON.stringify(settings, null, 2)}\n`, baseHash: null });
     const day = store.now().slice(0, 10);
