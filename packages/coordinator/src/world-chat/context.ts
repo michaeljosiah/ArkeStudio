@@ -344,14 +344,22 @@ function renderActionReceipts(actions: readonly ConversationActionCard[], bound:
   for (const card of actions.slice(-32).reverse()) {
     const results = card.receipt?.generation?.results ?? [];
     const words = measuredChapterWords(card);
-    const row = JSON.stringify({ actionId: card.actionId, kind: card.actionKind,
+    const record = { actionId: card.actionId, kind: card.actionKind,
       targets: card.targets.map(({ kind, id }) => ({ kind, id })), status: card.status,
       authority: card.authority,
-      ...(words.length ? { proposedWords: words.map(change => ({ ...change, delta: change.after - change.before })),
-        proposedBatchWords: chapterWordTotal(proposedBatchWords(actions.filter(action => action.turnId === card.turnId))) } : {}),
       ...(card.receipt ? { receipt: { kind: card.receipt.kind, id: card.receipt.id,
         results: results.slice(0, 8).map(({ id, status }) => ({ id, status })),
-        ...(results.length > 8 ? { omittedResults: results.length - 8 } : {}) } } : {}) });
+        ...(results.length > 8 ? { omittedResults: results.length - 8 } : {}) } } : {}) };
+    const counts = words.length ? { proposedWordTotal: chapterWordTotal(words),
+      proposedBatchWords: chapterWordTotal(proposedBatchWords(actions.filter(action => action.turnId === card.turnId))) } : {};
+    const room = bound - 100 - spent - 1;
+    let row = JSON.stringify({ ...record, ...counts, ...(words.length ? {
+      proposedWords: words.slice(0, 8).map(change => ({ ...change, delta: change.after - change.before })),
+      ...(words.length > 8 ? { omittedChapterCounts: words.length - 8 } : {}),
+    } : {}) });
+    // Count detail must never evict the action identity/status that fitted before counts existed.
+    if (row.length > room) row = JSON.stringify({ ...record, ...counts, ...(words.length ? { omittedChapterCounts: words.length } : {}) });
+    if (row.length > room) row = JSON.stringify(record);
     if (spent + row.length + 1 > bound - 100) break;
     rows.unshift(row);
     spent += row.length + 1;

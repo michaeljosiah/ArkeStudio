@@ -329,7 +329,7 @@ import { audioStudioProposalConversationAdapter } from "./audio-studio-proposals
 import { effectProposalConversationAdapter } from "./effect-proposals.js";
 import { effectOnlyTurnProblem, effectProposalRequestContext } from "./effect-proposal-scope.js";
 import type { EditorEffectDependencies } from "../productions/editor-effect-dependencies.js";
-import { CHAPTER_WORD_COUNT_LABEL, proposedChapterWords } from "@arke-studio/contracts";
+import { CHAPTER_WORD_COUNT_LABEL, measuredChapterWords, proposedChapterWords } from "@arke-studio/contracts";
 import { bookAuthoringRefusal, comicScriptDraft, episodeScriptDraft, foldedText, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
 import {
   stageWorldChatArtDirectionAction,
@@ -1777,9 +1777,10 @@ const clipped = (value: string | null, max = 20_000): string | null =>
 async function proposalProjection(
   store: WorldStore,
   gate: ProposalManager,
-  intent: Pick<ConversationActionPrepareIntent, "targets">,
+  intent: Pick<ConversationActionPrepareIntent, "targets" | "actionKind">,
   proposalId: string,
   preparing = true,
+  includeChapterWords = true,
 ): Promise<PreparedConversationActionAuthority> {
   const { proposal, review, ripple, scenePreview } = await gate.project(proposalId);
   if (proposal.kind === "comic-script") for (const target of review.targets) {
@@ -1798,7 +1799,7 @@ async function proposalProjection(
       after: clipped(field.proposed),
     })),
   );
-  fields.unshift(...proposedChapterWords(review.targets).map(change => ({
+  if (includeChapterWords && intent.actionKind === "world-chat-production-chapter") fields.unshift(...proposedChapterWords(review.targets).map(change => ({
     label: `${CHAPTER_WORD_COUNT_LABEL}${change.title}`.slice(0, 200), before: String(change.before), after: String(change.after),
   })));
   // Outline omissions use chapter positions, so even 100 entries fit in one review field.
@@ -4929,7 +4930,9 @@ export function worldChatActionAdapters(
       if (!checked.ok) {
         return { ok: false, reason: checked.stale ? "stale" : "blocked", detail: checked.detail };
       }
-      const currentProjection = await proposalProjection(store, gate, action, action.authority.id, false);
+      // Older pending bindings have no count fields. Keep their original preview format so
+      // upgrading does not mistake an unchanged draft for a stale one and discard it.
+      const currentProjection = await proposalProjection(store, gate, action, action.authority.id, false, measuredChapterWords(action).length > 0);
       if (conversationActionDigest(currentProjection.shown) !== action.previewDigest) {
         await gate.discard(action.authority.id);
         return { ok: false, reason: "stale", detail: "The proposal preview changed after this card was prepared." };

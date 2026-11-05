@@ -1,5 +1,5 @@
 import { freezeProductionTimeline, productionTimelineBody } from "../../src/world-chat/production-timeline.js";
-import { chapterWordTotal, countWords, measuredChapterWords, proposedBatchWords, proposedChapterWords } from "@arke-studio/contracts";
+import { CHAPTER_WORD_COUNT_LABEL, chapterWordTotal, countWords, measuredChapterWords, proposedBatchWords, proposedChapterWords } from "@arke-studio/contracts";
 import { assembleContext } from "../../src/world-chat/context.js";
 import { productionEditorCardPreview, readEditorRequestByAction } from "../../src/productions/editor-requests.js";
 import { ConversationActionService } from "../../src/application/conversation-actions.js";
@@ -3143,6 +3143,29 @@ it("stages a chapter with only the brief's eligible receipts and keeps section r
 });
 
 
+it("accepts a legacy pending chapter draft without discarding it on upgrade (#1748)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context), body = "An older draft still belongs to its author.";
+  const receipts = [currentReceipt(w.store, "chapters", context.productionId), currentReceipt(w.store, "story", context.productionId)];
+  const one = turn(w.conversationId, context, { receipts, actions: [{ kind: "production-chapter", productionId: context.productionId,
+    change: { operation: "edit", chapterId: "neap", changes: { body } }, checkReceiptIds: receipts.map(receipt => receipt.id) }] });
+  const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+  await appendTurn(w.log, one, prepared);
+  const { intent, payload } = prepared[0]!;
+  const authority = await w.adapters.find(adapter => adapter.actionKind === intent.actionKind)!.prepare!({ intent, payload });
+  const shown = structuredClone(authority.shown);
+  assert.equal(shown.body.family, "authored-diff");
+  if (shown.body.family !== "authored-diff") throw new Error("Wrong review");
+  shown.body.fields = shown.body.fields.filter(field => !field.label.startsWith(CHAPTER_WORD_COUNT_LABEL));
+  const binding = ConversationActionBindingSchema.parse({ ...intent, authority: authority.authority, authorityRevision: authority.authorityRevision,
+    previewDigest: conversationActionDigest(shown), shown, status: "pending", preparedAt: AT });
+  await w.log.append({ type: "action.prepared", binding }, { at: AT });
+  const old = (await loaded(new WorldChatStore(w.log.dir))).actions[0]!;
+  assert.deepEqual(measuredChapterWords(old), []);
+  assert.equal((await decide(w.lifecycle, w.log, old)).status, "completed");
+  assert.equal((await openChapter(w.store, context.productionId, "neap")).body.trim(), body);
+});
+
 it("measures complete chapter proposals before clipping, retaining counts after decisions and reload (#1743, #1748)", async () => {
   const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
   const w = await setup(context);
@@ -3172,6 +3195,15 @@ it("measures complete chapter proposals before clipping, retaining counts after 
   assert.match(report, /"after":6004/);
   assert.match(report, /"proposedBatchWords":\{"before":\d+,"after":6007/);
   assert.ok(!report.includes("The last bell sounded"), "count receipts add no manuscript text");
+  const large: ConversationActionCard = { ...card, targets: Array.from({ length: 100 }, (_, i) => ({ kind: "chapter", id: `chapter-${i}`, label: "Long title ".repeat(9) })),
+    shown: { ...card.shown, body: { family: "authored-diff", conflicts: [], openChoices: [], fields: Array.from({ length: 100 }, (_, i) => ({
+      label: CHAPTER_WORD_COUNT_LABEL + i + "Long title ".repeat(9), before: "0", after: "100",
+    })) } } };
+  const bounded = assembleContext({ candidates: [], messages: [], tombstones: [], currentUserMessage: "Report?", currentUserMessageId: newId("msg"), actions: [large] }).actionReceipts;
+  assert.ok(bounded.includes(card.actionId), "a large outline must retain the action receipt");
+  assert.match(bounded, /"proposedWordTotal":\{"before":0,"after":10000,"delta":10000\}/);
+  assert.match(bounded, /"omittedChapterCounts":92/);
+  assert.ok(bounded.length <= 12000);
   assert.equal((await openChapter(w.store, context.productionId, "neap")).body, before.body, "staging leaves saved prose unchanged");
   assert.equal((await decide(w.lifecycle, w.log, cards[1]!, "deny")).status, "denied");
   assert.equal(chapterWordTotal(proposedBatchWords((await loaded(w.log)).actions)).after, 6004);
