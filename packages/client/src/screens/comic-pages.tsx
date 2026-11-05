@@ -11,6 +11,7 @@ import {
   LAYOUT_TEMPLATES,
   comicBook,
   comicPageHash,
+  comicPanelStates,
   pageAspect,
   pageReading,
   panelRects,
@@ -46,6 +47,7 @@ import { ComicStylePicker } from "../components/comic-style-picker.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
 import { paragraphLabel } from "../lib/episode-script.js";
 import { comicStylePicture, comicStylePreset, draftFromStyle, styleFromDraft, type ComicStyleDraft } from "../lib/comic-styles.js";
+import { ComicModeSheet, PageWords, PanelMark, PanelSide, panelFaulted } from "./comic-panels.js";
 import { useProduction } from "../lib/selectors.js";
 import {
   acceptComicTake,
@@ -77,14 +79,15 @@ import {
  * A graphic novel's Pages (design turn 247, SPEC-064): the chapter's page strip, a page's editor —
  * its layout, its panels and their lines, which together are the script — and the page itself with
  * its takes, each take's lettering findings drawn where they are. Read shows the accepted pages;
- * Export makes the book. Lettering is always the model's (owner, turn 247): there is no overlay.
+ * Export makes the book. A book in Panel by panel (turn 269, comic-panels.tsx) keeps this strip and
+ * editor beside its own side column.
  */
 
-const KINDS: Array<[LetteringKind, string]> = [["caption", "Caption"], ["speech", "Speech"], ["thought", "Thought"], ["shout", "Shout"], ["whisper", "Whisper"], ["sfx", "Sound"]];
-const SPOKEN = new Set<LetteringKind>(["speech", "thought", "shout", "whisper"]);
+export const KINDS: Array<[LetteringKind, string]> = [["caption", "Caption"], ["speech", "Speech"], ["thought", "Thought"], ["shout", "Shout"], ["whisper", "Whisper"], ["sfx", "Sound"]];
+export const SPOKEN = new Set<LetteringKind>(["speech", "thought", "shout", "whisper"]);
 const FINDING: Record<LetteringFinding["kind"], string> = { missing: "Missing", altered: "Altered", extra: "Extra", clipped: "Cut off", order: "Order", speaker: "Speaker" };
 /** The picture review's kinds as Pages names them (turn 253). */
-const REVIEW_FINDING: Record<PageReviewFinding["kind"], string> = { content: "Scene", cast: "People", caption: "Caption", defect: "Defect", speaker: "Speaker", likeness: "Likeness", continuity: "Continuity", layout: "Layout" };
+export const REVIEW_FINDING: Record<PageReviewFinding["kind"], string> = { content: "Scene", cast: "People", caption: "Caption", defect: "Defect", speaker: "Speaker", likeness: "Likeness", continuity: "Continuity", layout: "Layout" };
 const LAYOUT_LABEL: Record<string, string> = { "grid-2x2": "Grid", "grid-3x3": "Grid 3×3", "strip-3": "Wide", splash: "Splash", feature: "Feature", manga: "Manga", webtoon: "Webtoon" };
 const READING: Array<[ComicReading, string]> = [["ltr", "Left to right"], ["rtl", "Right to left"], ["scroll", "Scroll"]];
 /** Edits settle into one save this long after the last keystroke. */
@@ -310,6 +313,11 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const [reading, setReading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [styling, setStyling] = useState(false);
+  const [moding, setModing] = useState(false);
+  // Panel by panel (turn 269): which tab, and the panel in hand, shared by the script and the side.
+  const [panelTab, setPanelTab] = useState<"panels" | "words">("panels");
+  const [panelId, setPanelId] = useState<string | null>(null);
+  const byPanel = settings.mode === "overlay";
 
   // The page stands at full height above its verdict, takes and actions, and the script takes the
   // rest of the width (design turn 251a). Pages sat in the 1,080 column every screen has, so the made
@@ -327,7 +335,8 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   // Too narrow for the strip, the script's minimum and a readable page, as with the chat open: the
   // page goes under the script, or the script broke mid-word in a 130-pixel column (issue 2422).
   const narrow = room !== null && room.width < 136 + SCRIPT_MIN + 320;
-  const columns = room === null || narrow ? undefined : `136px minmax(${SCRIPT_MIN}px, 1fr) ${sideWidth(room, shape)}px`;
+  const wordsOpen = byPanel && panelTab === "words" && page !== undefined && draftPages === null && draftPlan === null && !planOpen;
+  const columns = room === null || narrow ? undefined : wordsOpen ? `136px ${SCRIPT_MIN}px minmax(0, 1fr)` : `136px minmax(${SCRIPT_MIN}px, 1fr) ${sideWidth(room, shape)}px`;
 
   if (chapters.length === 0) {
     return <Screen id="comic-pages"><EmptyState title="No chapters yet" action={<Button onClick={() => navigate(`${base}/story/chapters`)}>Chapters</Button>} /></Screen>;
@@ -344,6 +353,9 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
             </select>
           </label>
           <span className="grow" />
+          <button type="button" className="fy-comic__sel as-button" aria-label={`Mode: ${byPanel ? "Panel by panel" : "Whole page"}`} onClick={() => setModing(true)}>
+            <b>Mode</b>{byPanel ? "Panel by panel" : "Whole page"}
+          </button>
           {/* Style (design turn 248b): the style's page and name, opening the same cards as Tell a story. */}
           <button type="button" className="fy-comic__sel as-button" aria-label={`Style: ${styleName(settings.style)}`} onClick={() => setStyling(true)}>
             <b>Style</b>
@@ -442,22 +454,29 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               const held = record(candidate.id);
               const accepted = held?.accepted[settings.language];
               const shown = held?.takes.find((take) => take.id === accepted) ?? held?.takes.at(-1);
-              const url = takeFile(world, shown);
+              // Panel by panel, a page with no finished image yet shows its first panel made (turn 269c).
+              const firstPanel = byPanel && shown === undefined ? comicPanelStates(candidate, held, settings).find((state) => state.shown !== undefined)?.shown : undefined;
+              const firstArt = firstPanel && world.artifacts.find((artifact) => artifact.id === firstPanel.artifact);
+              const url = takeFile(world, shown) ?? (firstArt ? mediaUrl(world.meta.slug, `artifacts/${firstArt.file}`) : null);
               const entry = book.find((item) => item.id === candidate.id);
               // Being made, or its newest take still being read: the strip says so too (turn 251b, 251c).
               const busy = (held?.making.length ?? 0) > 0 || beingRead(held?.takes.at(-1));
+              const faulted = byPanel && comicPanelStates(candidate, held, settings).some(panelFaulted);
               return (
                 <button key={candidate.id} type="button" className={cx("fy-comic__thumb", candidate.id === page?.id && "on", busy && "busy")} aria-label={`Page ${firstNumber + index}`} aria-busy={busy || undefined} onClick={() => setPageId(candidate.id)}>
                   {url !== null && <img src={url} alt="" />}
                   {busy && <Spin size={20} />}
-                  {!busy && entry?.take !== undefined && <span className={cx("s", (!entry.cleared || entry.overridden || entry.outOfDate) && "w")}>{entry.cleared && !entry.overridden && !entry.outOfDate ? <Check size={10} /> : <TriangleAlert size={10} />}</span>}
+                  {!busy && faulted && <span className="s x"><CircleAlert size={10} /></span>}
+                  {!busy && !faulted && entry?.take !== undefined && <span className={cx("s", (!entry.cleared || entry.overridden || entry.outOfDate) && "w")}>{entry.cleared && !entry.overridden && !entry.outOfDate ? <Check size={10} /> : <TriangleAlert size={10} />}</span>}
                   <span className="n">{firstNumber + index}</span>
                 </button>
               );
             })}
             {pages.length > 0 && <button type="button" className="fy-comic__add" onClick={() => { const next = newPage(); edit([...pages, next]); setPageId(next.id); }}>+ Page</button>}
           </div>
-          {page === undefined ? (
+          {wordsOpen ? (
+            <PageWords key={page!.id} world={world} production={production} page={page!} chapter={chapter!.id} saving={unsaved} connected={connection === "open"} tab={panelTab} pickTab={setPanelTab} change={setPage} />
+          ) : page === undefined ? (
             // A chapter with no pages (turns 249c, 254a, 254c): Arke plans it, then drafts it from the kept plan, or a page is started by hand.
             <div className="fy-comic__empty">
               {working ? (
@@ -486,7 +505,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               </>}
             </div>
           ) : (
-            !editing.has(page.id) && page.panels.some((panel) => panel.source !== undefined) ? (
+            !byPanel && !editing.has(page.id) && page.panels.some((panel) => panel.source !== undefined) ? (
               // Arke's pages read as pages; the form is one press away (issue 2458). A page started by hand has nothing to read yet.
               <div className="fy-comic__edit">
                 <div className="fy-comic__pagehead">
@@ -496,15 +515,21 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
                 <ReadPage world={world} page={page} number={firstNumber + pages.indexOf(page)} asked={[]} />
               </div>
             ) : <PageEditor world={world} page={page} number={firstNumber + pages.indexOf(page)} change={setPage}
-              remove={() => { edit(pages.filter((candidate) => candidate.id !== page.id)); setPageId(null); }} />
+              remove={() => { edit(pages.filter((candidate) => candidate.id !== page.id)); setPageId(null); }}
+              {...(byPanel ? { panels: { states: comicPanelStates(page, record(page.id), settings), selected: panelId, select: setPanelId } } : {})} />
           )}
-          {page === undefined ? null : (
+          {page === undefined || wordsOpen ? null : byPanel ? (
+            <PanelSide key={page.id} world={world} production={production} page={page} selected={panelId} select={setPanelId} saving={unsaved} connected={connection === "open"} tab={panelTab} pickTab={setPanelTab}
+              onReviewer={() => navigate(`/settings/harness?agent=${PAGE_REVIEWER}`)}
+              changeWithArke={chatSurface ? (panel) => ask(`On page ${firstNumber + pages.indexOf(page)} of chapter ${chapter?.order}, change panel ${panel}: `) : null} />
+          ) : (
             <PageSide key={page.id} world={world} production={production} page={page} saving={unsaved} connected={connection === "open"}
               problem={problem} onReader={() => navigate(`/settings/harness?agent=${LETTERING_READER}`)} onReviewer={() => navigate(`/settings/harness?agent=${PAGE_REVIEWER}`)} />
           )}
         </div>
         )}
       </div>
+      {moding && <ComicModeSheet worldId={worldId} productionId={productionId} mode={settings.mode} made={book.filter((entry) => entry.take !== undefined).length} onClose={() => setModing(false)} />}
       {styling && <ComicStyleSheet world={world} production={production} made={book.filter((entry) => entry.take !== undefined).length} onClose={() => setStyling(false)} />}
       {reading && <ComicReader world={world} production={production} onClose={() => setReading(false)} />}
       {exporting && <ComicExport world={world} production={production} onClose={() => setExporting(false)}
@@ -540,7 +565,9 @@ function LayoutTile({ id, on, pick }: { id: string; on: boolean; pick: () => voi
   );
 }
 
-function PageEditor({ world, page, number, change, remove }: { world: WorldBundle; page: ComicPage; number: number; change: (edit: (page: ComicPage) => ComicPage) => void; remove: () => void }) {
+function PageEditor({ world, page, number, change, remove, panels }: { world: WorldBundle; page: ComicPage; number: number; change: (edit: (page: ComicPage) => ComicPage) => void; remove: () => void;
+  /** Panel by panel: each panel's mark beside its name, and the panel in hand (turn 269b). */
+  panels?: { states: ReturnType<typeof comicPanelStates>; selected: string | null; select: (panel: string) => void } }) {
   const characters = world.sheets.filter((sheet) => sheet.type === "character");
   const places = world.sheets.filter((sheet) => sheet.type === "location");
   const name = (id: string) => world.sheets.find((sheet) => sheet.id === id)?.name ?? id;
@@ -552,8 +579,8 @@ function PageEditor({ world, page, number, change, remove }: { world: WorldBundl
         {["grid-2x2", "feature", "strip-3", "splash", "manga", "webtoon"].map((id) => <LayoutTile key={id} id={id} on={page.layout === id} pick={() => change((current) => ({ ...current, layout: id }))} />)}
       </div>
       {page.panels.map((current, index) => (
-        <div key={current.id} className="fy-comic__panel">
-          <div className="fy-comic__ph"><b>Panel {index + 1}</b><span className="grow" /><span className="m">{current.lettering.length} {current.lettering.length === 1 ? "line" : "lines"}</span>
+        <div key={current.id} className={cx("fy-comic__panel", panels?.selected === current.id && "fy-comic269__picked")} onClick={panels ? () => panels.select(current.id) : undefined}>
+          <div className="fy-comic__ph"><b>Panel {index + 1}</b>{panels?.states[index] && <PanelMark state={panels.states[index]!} />}<span className="grow" /><span className="m">{current.lettering.length} {current.lettering.length === 1 ? "line" : "lines"}</span>
             <button type="button" className="fy-comic__link" aria-label={`Remove panel ${index + 1}`} onClick={() => change((p) => ({ ...p, panels: p.panels.filter((_, i) => i !== index) }))}><X size={13} /></button>
           </div>
           <textarea className="fy-comic__desc" aria-label={`Panel ${index + 1}`} value={current.description} rows={2}
@@ -612,12 +639,12 @@ const READ_WINDOW_MS = 10 * 60_000;
 
 /** A take whose lettering is being read now: landed, no verdict yet, and recently. */
 function beingRead(take: ComicPageTake | undefined): boolean {
-  return take !== undefined && take.verification === undefined && Date.now() - Date.parse(take.at) < READ_WINDOW_MS;
+  return take !== undefined && take.mode !== "overlay" && take.verification === undefined && Date.now() - Date.parse(take.at) < READ_WINDOW_MS;
 }
 
 /** Read, and its picture being looked at now: the review follows the read (R-67, R-70). */
 function beingReviewed(take: ComicPageTake | undefined): boolean {
-  return take !== undefined && take.verification !== undefined && take.review === undefined && Date.now() - Date.parse(take.at) < READ_WINDOW_MS;
+  return take !== undefined && take.mode !== "overlay" && take.verification !== undefined && take.review === undefined && Date.now() - Date.parse(take.at) < READ_WINDOW_MS;
 }
 
 /** Why a picture is not reviewed, in a few words, and whether choosing a reviewer fixes it (turn 253d). */
@@ -759,7 +786,9 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
   // would read it again. The same reader can help here, unlike one that cannot see pictures.
   // A picture not reviewed, or reviewed before there was a review, is read again by the same press
   // once its words were read (turn 253d); a reader that cannot see pictures still needs choosing first.
-  const again = !reason.reader || (verification?.status === "unavailable" && verification.reason === "no-reader") || (verification?.status === "compared" && review?.status !== "compared");
+  // A page finished panel by panel has nothing of its own to read (R-37b); its panels were looked at.
+  const finished = shown?.mode === "overlay";
+  const again = !finished && (!reason.reader || (verification?.status === "unavailable" && verification.reason === "no-reader") || (verification?.status === "compared" && review?.status !== "compared"));
   const chooseReader = () => {
     if (shown === undefined) return;
     choosingReader.set(page.id, { take: shown.id, model: readerModel });
@@ -795,7 +824,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
         )}
         {!busy && held && <div className="fy-comic__band" role="status"><Spin size={14} />{checking ? "Checking lettering" : "Checking picture"}</div>}
       </div>
-      {shown !== undefined && <div className="fy-comic__verdicts">{outOfDate ? (
+      {shown !== undefined && (!finished || outOfDate) && <div className="fy-comic__verdicts">{outOfDate ? (
         <div className="fy-comic__verdict warn"><TriangleAlert size={15} /><b>Out of date</b><span className="grow" /><span className="m">the script changed</span></div>
       ) : checking ? (
         <div className="fy-comic__verdict"><Spin size={15} /><b>Checking lettering</b></div>
@@ -811,7 +840,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
         <div className="fy-comic__verdict warn"><TriangleAlert size={15} /><b>Not checked</b><span>{reason.text}</span></div>
       )}
       {/* The picture's own line under the words' (turn 253a). */}
-      {!outOfDate && !checking && (reviewing ? (
+      {!outOfDate && !checking && !finished && (reviewing ? (
         <div className="fy-comic__verdict pic"><Spin size={15} /><b>Picture</b><span>checking</span></div>
       ) : review?.status === "compared" ? (
         <div className={cx("fy-comic__verdict pic", pictureFaults.length ? "bad" : toLook.length ? "warn" : "ok")}>
@@ -896,12 +925,12 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
 }
 
 /** A turning wheel for Making and Checking; the icons take no class of their own. */
-function Spin({ size }: { size: number }) {
+export function Spin({ size }: { size: number }) {
   return <span className="fy-comic__spin" aria-hidden><LoaderCircle size={size} /></span>;
 }
 
 /** How long since `at`, as m:ss, ticking. */
-function Since({ at }: { at: string }) {
+export function Since({ at }: { at: string }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const tick = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(tick); }, []);
   const seconds = Math.max(0, Math.floor((now - Date.parse(at)) / 1000));

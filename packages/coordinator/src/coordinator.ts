@@ -50,8 +50,9 @@ import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdap
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
 import { DramaEditionService } from "./publications/drama.js";
 import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
-import { acceptComicTake, changeComicPage, comicPageRecord, comicPageRequest, comicPageTake, reviewComicTake, saveComicScript, seeComicWarning, setComicSettings, verifyComicTake } from "./productions/graphic-novel.js";
+import { acceptComicTake, changeComicPage, comicPageRecord, comicPageRequest, comicPageTake, comicPanelRequest, comicPanelsQuote, comicPanelsToMake, finishComicPage, placeComicPage, reviewComicPanel, reviewComicTake, saveComicScript, seeComicWarning, setComicLettering, setComicSettings, verifyComicTake } from "./productions/graphic-novel.js";
 import { harnessPageReader, type PageReader } from "./productions/graphic-novel-reader.js";
+import { harnessPagePlacer } from "./productions/graphic-novel-placer.js";
 import { harnessPageReviewer, type PageReviewer } from "./productions/graphic-novel-reviewer.js";
 import { harnessScriptReader } from "./productions/graphic-novel-script-reader.js";
 import { ComicExportBlocked, exportComic } from "./productions/comic-export.js";
@@ -131,6 +132,8 @@ import {
   OPENCODE_AVAILABILITY,
   type Capability,
   type ClientMessage,
+  DEFAULT_COMIC_SETTINGS,
+  comicPanelStates,
   takeClears,
   type HarnessAvailability,
   type HarnessEngine,
@@ -11776,7 +11779,10 @@ export class Coordinator {
           await this.reconcileComicPage(store, msg.productionId, msg.page);
           const model = await this.pictureModel(store, msg.productionId);
           if (!model) answer({ ok: false, reason: "no picture model is on" });
-          else {
+          else if ((msg.mode ?? this.comicMode(store, msg.productionId)) === "overlay") {
+            const quote = comicPanelsQuote(store, msg.productionId, msg.page, model, msg.panel);
+            answer(!quote.ok ? quote : { ok: true, model: model.id, modelName: model.displayName, mode: "overlay", aspect: quote.aspect, microUsd: quote.microUsd, brief: quote.brief, riding: quote.riding, missing: quote.missing });
+          } else {
             const request = comicPageRequest(store, msg.productionId, msg.page, model, msg.mode);
             const riding = request.ok ? request.who.filter((entry) => entry.carried && entry.reference !== null) : [];
             answer(!request.ok ? { ok: false, reason: request.reason } : {
@@ -11794,7 +11800,34 @@ export class Coordinator {
       case "make-comic-page": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        await this.makeAndCheckComicPage(store, msg);
+        if ((msg.mode ?? this.comicMode(store, msg.productionId)) === "overlay") await this.makeComicPanels(store, msg);
+        else await this.makeAndCheckComicPage(store, msg);
+        return;
+      }
+      case "set-comic-lettering":
+      case "finish-comic-page": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const answer = (disposition: "saved" | "finished" | "refused", reason?: string) => this.emit({ at: new Date().toISOString(), type: "comic.page-lettered",
+          requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, disposition, ...(reason ? { reason } : {}) });
+        try {
+          if (msg.kind === "set-comic-lettering") {
+            await setComicLettering(store, msg.productionId, msg.page, msg.placements, msg.undoesPlacing === true);
+            answer("saved");
+          } else {
+            await finishComicPage(store, msg.productionId, msg.page, { hash: msg.hash, jpeg: Buffer.from(msg.jpegBase64, "base64"), requestId: msg.requestId }, this.nowIso());
+            answer("finished");
+          }
+        } catch (err) {
+          answer("refused", describeCoordinatorError(err));
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "place-comic-lettering": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await this.placeComicLettering(store, msg);
         return;
       }
       case "export-comic": {
@@ -11827,7 +11860,12 @@ export class Coordinator {
           requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, take: msg.take, disposition, ...(reason ? { reason } : {}) });
         try {
           if (msg.kind === "check-comic-take") {
-            await this.readComicTake(store, msg.productionId, msg.page, msg.take);
+            const production = store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId);
+            const record = production ? comicPageRecord(production, msg.page) : null;
+            if (record?.panelTakes.some((take) => take.id === msg.take)) await this.reviewComicPanelTake(store, msg.productionId, msg.page, msg.take);
+            // A finished page is the panels and the script's words: nothing in it is read (R-37b).
+            else if (record?.takes.find((take) => take.id === msg.take)?.mode === "overlay") throw new Error("a finished page has no check; check its panels");
+            else await this.readComicTake(store, msg.productionId, msg.page, msg.take);
             answer("checked");
           } else if (msg.kind === "see-comic-warning") {
             await seeComicWarning(store, msg.productionId, msg.page, msg.take, msg.warning);
@@ -22356,6 +22394,19 @@ export class Coordinator {
       const id = ulid();
       let added = false;
       await changeComicPage(store, productionId, pageId, (record) => {
+        if (making.panel !== undefined) {
+          const panel = making.panel;
+          added = landed !== null && !record.panelTakes.some((existing) => existing.artifact === landed!.id);
+          return {
+            ...record,
+            making: record.making.filter((entry) => entry.requestId !== making.requestId),
+            panelTakes: !added ? record.panelTakes : [...record.panelTakes, {
+              id, panel, artifact: landed!.id, hash: making.hash, model: making.model,
+              ...(typeof cost === "number" ? { usd: cost / 1_000_000 } : {}), at: this.nowIso(),
+            }],
+            panelFailed: landed !== null ? record.panelFailed : { ...record.panelFailed, [panel]: { reason: "not made", at: this.nowIso() } },
+          };
+        }
         added = landed !== null && !record.takes.some((existing) => existing.artifact === landed!.id);
         return {
           ...record,
@@ -22366,7 +22417,13 @@ export class Coordinator {
           }],
         };
       });
-      if (added) this.checkFiledComicTake(store, productionId, pageId, id, making.requestId);
+      if (added && making.panel !== undefined) this.checkFiledComicPanel(store, productionId, pageId, id, making.panel, making.requestId);
+      else if (added) this.checkFiledComicTake(store, productionId, pageId, id, making.requestId);
+    }
+    // A paid panel the app closed on before its review finished is looked at now, or Pages said checking for good (codex on PR 2582).
+    const now = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+    for (const take of now === undefined ? [] : comicPageRecord(now, pageId).panelTakes) {
+      if (take.review === undefined) this.checkFiledComicPanel(store, productionId, pageId, take.id, take.panel, ulid());
     }
   }
 
@@ -22392,6 +22449,182 @@ export class Coordinator {
       await this.refreshWorldSnapshot(store.worldId);
       emit("made", { passed: takeClears(checked) });
     })().catch(() => {});
+  }
+
+  /** Panel takes being looked at in this process: one on the record with no review and not here was cut off by a restart. */
+  private readonly reviewingComicPanels = new Set<string>();
+
+  private comicMode(store: WorldStore, productionId: string): ComicMode {
+    return store.getBundle().productions.find((candidate) => candidate.meta.id === productionId)?.comic?.mode ?? "baked";
+  }
+
+  /** A panel's take looked at, one check at a time beside the page checks and for the same reason (see readComicTake). */
+  private reviewComicPanelTake(store: WorldStore, productionId: string, page: string, take: string) {
+    const control = new AbortController();
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    this.readingComicPages.add(control);
+    const turn = this.comicChecks.then(async () => {
+      try {
+        return await reviewComicPanel(store, productionId, page, take, this.pageReviewer(store), control.signal, () => this.nowIso());
+      } finally {
+        this.readingComicPages.delete(control);
+        store.closingSignal.removeEventListener("abort", onClose);
+      }
+    });
+    this.comicChecks = turn.then(() => {}, () => {});
+    return turn;
+  }
+
+  /**
+   * A panel that landed is read without holding up the next (R-37a, R-37b): panels arrive one at a
+   * time and each is looked at as it comes. Not awaited, as a late page's read is not.
+   */
+  private checkFiledComicPanel(store: WorldStore, productionId: string, page: string, take: string, panel: string, requestId: string): void {
+    if (this.reviewingComicPanels.has(take)) return;
+    this.reviewingComicPanels.add(take);
+    const emit = (state: "checking" | "made", extra: { passed?: boolean } = {}) =>
+      this.emit({ at: new Date().toISOString(), type: "comic.page-made", requestId, worldId: store.worldId, productionId, page, panel, state, take, ...extra });
+    const gone = () => this.stopping || store.closingSignal.aborted || this.opts.provider.openStore?.() !== store;
+    void (async () => {
+      if (gone()) return;
+      await this.refreshWorldSnapshot(store.worldId);
+      emit("checking");
+      const review = await this.reviewComicPanelTake(store, productionId, page, take)
+        .catch((err: unknown) => ({ status: "unavailable" as const, reason: "reviewer-failed" as const, detail: describeCoordinatorError(err), at: this.nowIso() }));
+      if (gone()) return;
+      await this.refreshWorldSnapshot(store.worldId);
+      emit("made", { passed: review.status === "compared" && review.findings.length === 0 });
+    })().catch(() => {}).finally(() => this.reviewingComicPanels.delete(take));
+  }
+
+  /**
+   * One press of Panel by panel (R-37a): every panel the press covers, each its own admission and its
+   * own Bench picture, on the one price the press showed. A panel refused, or failed, is written on the
+   * record and the rest go on: the fault is that panel's alone. All are written as making before the
+   * first is drawn, so Pages shows the whole press and a restart files what landed.
+   */
+  private async makeComicPanels(store: WorldStore, msg: Extract<ClientMessage, { kind: "make-comic-page" }>): Promise<void> {
+    const { productionId, page, worldId } = msg;
+    const emit = (state: "making" | "failed", extra: { panel?: string; reason?: string; sessionId?: string } = {}) =>
+      this.emit({ at: new Date().toISOString(), type: "comic.page-made", requestId: msg.requestId, worldId, productionId, page, state, ...extra });
+    const key = `${worldId}/${productionId}/${page}`;
+    if (this.makingComicPages.has(key)) { emit("failed", { reason: "making this page already" }); return; }
+    const control = new AbortController();
+    this.makingComicPages.set(key, control);
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    try {
+      const model = await this.pictureModel(store, productionId);
+      if (!model) { emit("failed", { reason: "no picture model is on" }); return; }
+      const panels = comicPanelsToMake(store, productionId, page, msg.panel);
+      if (panels.length === 0) { emit("failed", { reason: "every panel is made" }); return; }
+      const requests = panels.map((panel) => comicPanelRequest(store, productionId, page, panel, model));
+      const refused = requests.find((request) => !request.ok);
+      if (refused && !refused.ok) { emit("failed", { reason: refused.reason }); return; }
+      const total = requests.reduce((sum, request) => sum + (request.ok ? request.microUsd : 0), 0);
+      if (total > msg.confirmedMicroUsd) { emit("failed", { reason: `the price moved · ${priceLabel(total)}` }); return; }
+      const language = (store.getBundle().productions.find((candidate) => candidate.meta.id === productionId)?.comic ?? DEFAULT_COMIC_SETTINGS).language;
+      const admissions = requests.flatMap((request, index) => request.ok ? [{ requestId: index === 0 ? msg.requestId : ulid(), hash: request.state.hash, panel: request.state.panel.id, quoted: request.microUsd }] : []);
+      await changeComicPage(store, productionId, page, (record) => ({ ...record,
+        making: [...record.making, ...admissions.map((entry) => ({ requestId: entry.requestId, hash: entry.hash, mode: "overlay" as const, model: model.id, language, at: this.nowIso(), panel: entry.panel }))],
+        panelFailed: Object.fromEntries(Object.entries(record.panelFailed).filter(([panel]) => !panels.includes(panel))) }));
+      await this.refreshWorldSnapshot(worldId);
+      emit("making");
+      let spent = 0;
+      for (const [index, admission] of admissions.entries()) {
+        const letGo = async (reason: string) => {
+          await changeComicPage(store, productionId, page, (record) => ({ ...record,
+            making: record.making.filter((entry) => entry.requestId !== admission.requestId),
+            panelFailed: { ...record.panelFailed, [admission.panel]: { reason: reason.slice(0, 400), at: this.nowIso() } } }));
+          await this.refreshWorldSnapshot(worldId);
+          emit("failed", { panel: admission.panel, reason });
+        };
+        if (control.signal.aborted) { await letGo("stopped"); continue; }
+        // Asked again for each: the panel before it may now be accepted and ride as the drawing's reference.
+        // What this panel may spend: the press's price, less what is spent and what the panels after it were quoted.
+        const allowed = msg.confirmedMicroUsd - spent - admissions.slice(index + 1).reduce((sum, later) => sum + later.quoted, 0);
+        // A reference that became available since the quote can cost more; the press's price holds, so it stays home (codex on PR 2582).
+        let request = comicPanelRequest(store, productionId, page, admission.panel, model);
+        if (request.ok && request.microUsd > allowed) request = comicPanelRequest(store, productionId, page, admission.panel, model, { noStyleReference: true });
+        if (!request.ok) { await letGo(request.reason); continue; }
+        if (request.microUsd > allowed) { await letGo(`the price moved · ${priceLabel(request.microUsd)}`); continue; }
+        const number = request.state.index + 1;
+        const made = await this.makeBenchPicture(store, {
+          title: `Page ${request.number} · panel ${number}`,
+          prompt: request.prompt([]),
+          brief: request.prompt,
+          model,
+          ...(model.limits.providerSelectedSize !== true ? { aspect: request.aspect } : {}),
+          who: request.who,
+          requestId: admission.requestId,
+          ceilingMicroUsd: allowed,
+          signal: control.signal,
+          onSession: async (sessionId) => {
+            await changeComicPage(store, productionId, page, (record) => ({ ...record,
+              making: record.making.map((entry) => entry.requestId === admission.requestId ? { ...entry, session: sessionId } : entry) }));
+            await this.refreshWorldSnapshot(worldId);
+          },
+        });
+        const reserved = !made.ok && made.sessionId !== undefined ? comicPageTake(await this.benchFor(worldId, made.sessionId), admission.requestId) : undefined;
+        // As a page's: a picture still out when the wait ran out may yet land and is filed by the next look.
+        if (reserved !== undefined && (reserved.media !== undefined || !["failed", "cancelled", "needs-reconciliation"].includes(reserved.status))) {
+          this.watchLateComicPage(store, productionId, page);
+          continue;
+        }
+        if (!made.ok) { await letGo(made.reason); continue; }
+        spent += made.costMicroUsd ?? made.estimatedMicroUsd;
+        const take = ulid();
+        await changeComicPage(store, productionId, page, (record) => ({ ...record,
+          making: record.making.filter((entry) => entry.requestId !== admission.requestId),
+          panelTakes: [...record.panelTakes, { id: take, panel: admission.panel, artifact: made.artifact.id, hash: admission.hash, model: model.id, usd: (made.costMicroUsd ?? made.estimatedMicroUsd) / 1_000_000, at: this.nowIso() }] }));
+        this.checkFiledComicPanel(store, productionId, page, take, admission.panel, admission.requestId);
+      }
+    } catch (err) {
+      emit("failed", { reason: describeCoordinatorError(err) });
+    } finally {
+      store.closingSignal.removeEventListener("abort", onClose);
+      if (this.makingComicPages.get(key) === control) this.makingComicPages.delete(key);
+    }
+  }
+
+  /** Place with Arke (R-39a): one page, or each of a chapter's pages whose panels are all accepted. */
+  private async placeComicLettering(store: WorldStore, msg: Extract<ClientMessage, { kind: "place-comic-lettering" }>): Promise<void> {
+    const { productionId, worldId } = msg;
+    const emit = (state: "placing" | "placed" | "failed", extra: { lines?: number; pages?: number; reason?: string } = {}) =>
+      this.emit({ at: new Date().toISOString(), type: "comic.lettering-placed", requestId: msg.requestId, worldId, productionId, state, ...extra });
+    const ask = this.comicImageRunner(store);
+    if (ask === null) { emit("failed", { reason: "no image reader is ready" }); return; }
+    const control = new AbortController();
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    this.readingComicPages.add(control);
+    try {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+      if (!production) { emit("failed", { reason: "that production is not in this world" }); return; }
+      const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
+      const target = msg.target;
+      const pages = target.kind === "page" ? [target.page]
+        : (production.comicScripts?.find((entry) => entry.chapter === target.chapter)?.script.pages ?? [])
+          .filter((page) => comicPanelStates(page, comicPageRecord(production, page.id), settings).every((state) => state.accepted !== undefined))
+          .map((page) => page.id);
+      emit("placing");
+      const placer = harnessPagePlacer(ask);
+      let lines = 0;
+      let touched = 0;
+      for (const page of pages) {
+        const kept = await placeComicPage(store, productionId, page, placer, control.signal, () => this.nowIso());
+        lines += kept;
+        if (kept > 0) touched += 1;
+        await this.refreshWorldSnapshot(worldId);
+      }
+      emit("placed", { lines, pages: touched });
+    } catch (err) {
+      emit("failed", { reason: describeCoordinatorError(err) });
+    } finally {
+      this.readingComicPages.delete(control);
+      store.closingSignal.removeEventListener("abort", onClose);
+    }
   }
 
   /**

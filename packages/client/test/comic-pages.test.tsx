@@ -5,6 +5,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { Link, MemoryRouter, Route, Routes } from "react-router";
 import { WorldChatWorkspaceSchema, DEFAULT_COMIC_SETTINGS, DEFAULT_LETTERING_THRESHOLDS, comicPageHash, ulid, type ClientMessage, type ClientState, type ComicPage, type ComicPageRecord, type ComicPageTake } from "@arke-studio/contracts";
+import { EMPTY_COMIC_PAGE_RECORD } from "@arke-studio/contracts";
+import { panelInset, setWords } from "../src/lib/comic-balloons.js";
 import { ComicPagesScreen, notChecked, sideWidth } from "../src/screens/comic-pages.js";
 import { productionPages } from "../src/lib/production-navigation.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -71,6 +73,26 @@ async function mount(state: ClientState, reviewChapter?: string, owner?: GlobalC
 }
 const props = (el: Element) => (el as unknown as Record<string, Record<string, any>>)[Object.keys(el).find((key) => key.startsWith("__reactProps$"))!]!;
 const button = (container: HTMLElement, text: string) => [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === text);
+
+describe("Panel by panel, the words' arithmetic (SPEC-064 R-38a)", () => {
+  const measure = (line: string, px: number) => line.length * px * 0.5;
+  it("wraps to the room and sets type smaller until the words fit, but never below half size", () => {
+    const fits = setWords("Where are you going at this hour", { width: 200, height: 200 }, 20, measure);
+    assert.equal(fits.px, 20);
+    assert.ok(fits.lines.length > 1);
+    assert.ok(fits.lines.every((line) => measure(line, fits.px) <= 200));
+    const tight = setWords("Where are you going at this hour", { width: 120, height: 40 }, 20, measure);
+    assert.ok(tight.px < 20);
+    const hopeless = setWords("Where are you going at this hour of the night and the morning too", { width: 30, height: 10 }, 20, measure);
+    assert.ok(hopeless.px >= 10 * 0.94);
+  });
+  it("insets a panel the same fraction of the page's width on every side", () => {
+    const inset = panelInset({ x: 0, y: 0, w: 1, h: 0.5 }, "2:3");
+    const across = inset.x * 2000;
+    const down = inset.y * 3000;
+    assert.ok(Math.abs(across - down) < 1e-6);
+  });
+});
 
 describe("Pages (turn 247)", () => {
   it("opens the pilot's exact chat without replay, then shows its failure only on the matching chapter", async () => {
@@ -217,7 +239,7 @@ describe("Pages (turn 247)", () => {
     const one = page();
     const take = ulid();
     const item = one.panels[0]!.lettering[0]!.id;
-    const record: ComicPageRecord = { version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
+    const record: ComicPageRecord = { ...EMPTY_COMIC_PAGE_RECORD, version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
       id: take, artifact: ARTIFACT, hash: comicPageHash(one, DEFAULT_COMIC_SETTINGS, "baked"), mode: "baked", model: "gpt-image-2", language: "en", at: AT,
       verification: { status: "compared", reader, normalizationVersion: 1, thresholds: DEFAULT_LETTERING_THRESHOLDS, score: 0.6, speaker: "not-checked", regions: [], at: AT,
         findings: [{ id: `altered:${item}`, kind: "altered", item, expected: "Where are you?", found: "WHER ARE YOU?", box: { x: 0.1, y: 0.5, w: 0.3, h: 0.07 } }] },
@@ -236,7 +258,7 @@ describe("Pages (turn 247)", () => {
     const one = page();
     const take = ulid();
     const item = one.panels[0]!.lettering[0]!.id;
-    const record: ComicPageRecord = { version: 1, accepted: { en: take }, lettering: {}, acknowledged: {}, making: [], takes: [{
+    const record: ComicPageRecord = { ...EMPTY_COMIC_PAGE_RECORD, version: 1, accepted: { en: take }, lettering: {}, acknowledged: {}, making: [], takes: [{
       id: take, artifact: ARTIFACT, hash: comicPageHash(one, DEFAULT_COMIC_SETTINGS, "baked"), mode: "baked", model: "gpt-image-2", language: "en", at: AT,
       verification: { status: "compared", reader, normalizationVersion: 1, thresholds: DEFAULT_LETTERING_THRESHOLDS, score: 0.6, speaker: "not-checked", regions: [], at: AT,
         findings: [{ id: `missing:${item}`, kind: "missing", item, expected: "Where are you?" }] },
@@ -247,7 +269,7 @@ describe("Pages (turn 247)", () => {
 
   it("says a check that could not run is not checked, never a pass (247e)", async () => {
     const one = page();
-    const record: ComicPageRecord = { version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
+    const record: ComicPageRecord = { ...EMPTY_COMIC_PAGE_RECORD, version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
       id: ulid(), artifact: ARTIFACT, hash: comicPageHash(one, DEFAULT_COMIC_SETTINGS, "baked"), mode: "baked", model: "gpt-image-2", language: "en", at: AT,
       verification: { status: "unavailable", reason: "no-reader", at: AT } }] };
     const m = await mount(withBook([one], { [one.id]: record }));
@@ -383,7 +405,7 @@ describe("Pages uses the window and says what it is doing (turn 251)", () => {
 
   it("says Making on the page, its thumbnail and the button while the record says so (251b)", async () => {
     const one = page();
-    const record: ComicPageRecord = { version: 1, accepted: {}, lettering: {}, acknowledged: {}, takes: [],
+    const record: ComicPageRecord = { ...EMPTY_COMIC_PAGE_RECORD, version: 1, accepted: {}, lettering: {}, acknowledged: {}, takes: [],
       making: [{ requestId: ulid(), hash: hashOf(one), mode: "baked", model: "codex-image", language: "en", at: new Date(Date.now() - 72_000).toISOString() }] };
     const m = await mount(withBook([one], { [one.id]: record }));
     const over = m.container.querySelector(".fy-comic__over")!;
@@ -398,7 +420,7 @@ describe("Pages uses the window and says what it is doing (turn 251)", () => {
     const old = ulid();
     const landed = ulid();
     const take = (id: string, verification?: ComicPageTake["verification"]): ComicPageTake => ({ id, artifact: ARTIFACT, hash: hashOf(one), mode: "baked", model: "codex-image", language: "en", at: new Date().toISOString(), ...(verification ? { verification } : {}) });
-    const record: ComicPageRecord = { version: 1, accepted: { en: old }, lettering: {}, acknowledged: {}, making: [],
+    const record: ComicPageRecord = { ...EMPTY_COMIC_PAGE_RECORD, version: 1, accepted: { en: old }, lettering: {}, acknowledged: {}, making: [],
       takes: [take(old, { status: "unavailable", reason: "no-reader", at: AT }), take(landed)] };
     const m = await mount(withBook([one], { [one.id]: record }));
     await act(async () => __applyEventForTest({ at: AT, type: "comic.page-made", requestId: ulid(), worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", page: one.id, state: "checking", take: landed }));
@@ -411,7 +433,7 @@ describe("Pages uses the window and says what it is doing (turn 251)", () => {
   it("says the reader can't see pictures, and Choose reader checks again once one is chosen (251d)", async () => {
     const one = page();
     const id = ulid();
-    const record: ComicPageRecord = { version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
+    const record: ComicPageRecord = { ...EMPTY_COMIC_PAGE_RECORD, version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
       id, artifact: ARTIFACT, hash: hashOf(one), mode: "baked", model: "codex-image", language: "en", at: AT,
       verification: { status: "unavailable", reason: "reader-failed", detail: "The selected visual reviewer cannot inspect images. No image content was sent.", at: AT } }] };
     const state = withBook([one], { [one.id]: record });
@@ -435,7 +457,7 @@ describe("Pages uses the window and says what it is doing (turn 251)", () => {
     // app, where one was; nothing but changing the chosen model would read them.
     const one = page();
     const id = ulid();
-    const record: ComicPageRecord = { version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
+    const record: ComicPageRecord = { ...EMPTY_COMIC_PAGE_RECORD, version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
       id, artifact: ARTIFACT, hash: hashOf(one), mode: "baked", model: "codex-image", language: "en", at: AT,
       verification: { status: "unavailable", reason: "no-reader", at: AT } }] };
     const m = await mount(withBook([one], { [one.id]: record }));
@@ -546,7 +568,7 @@ describe("The page review in Pages (turn 253)", () => {
   const mountTake = async (verification: ComicPageTake["verification"], review: ComicPageTake["review"], acknowledged: ComicPageRecord["acknowledged"] = {}) => {
     const one = page();
     const id = ulid();
-    const record: ComicPageRecord = { version: 1, accepted: {}, lettering: {}, acknowledged: Object.keys(acknowledged).length ? { [id]: Object.values(acknowledged)[0]! } : {}, making: [],
+    const record: ComicPageRecord = { ...EMPTY_COMIC_PAGE_RECORD, version: 1, accepted: {}, lettering: {}, acknowledged: Object.keys(acknowledged).length ? { [id]: Object.values(acknowledged)[0]! } : {}, making: [],
       takes: [{ id, artifact: ARTIFACT, hash: hashOf(one), mode: "baked", model: "codex-image", language: "en", at: AT, ...(verification ? { verification } : {}), ...(review ? { review } : {}) }] };
     return { id, m: await mount(withBook([one], { [one.id]: record })) };
   };
