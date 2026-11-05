@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { dependencyOrder, groupApprovalEligible, type ConversationActionCard } from "@arke-studio/contracts";
+import { dependencyOrder, groupApprovalEligible, proposedBatchWords, type ConversationActionCard } from "@arke-studio/contracts";
+import { ChapterWordCounts } from "./chapter-word-counts.js";
 import { approveConversationGroup, type GroupApprovalResult } from "../lib/conversation-group-approval.js";
 import { conversationGroupApprovalPort } from "../lib/store.js";
 import { ConversationPermissionCard } from "./conversation.js";
@@ -16,6 +17,7 @@ export function ConversationActionGroup({ actions, conversationSeq }: { actions:
   const estimate = actions.reduce((sum, action) => sum + (action.shown.body.family === "generation" ? action.shown.body.estimatedMicroUsd ?? 0 : 0), 0);
   const unpriced = actions.some(action => action.shown.body.family === "generation" && action.shown.body.estimatedMicroUsd === undefined);
   const first = actions[0];
+  const words = proposedBatchWords(actions);
   if (!first) return null;
   const approve = async () => {
     if (gesture.current || !eligible.length) return;
@@ -31,6 +33,7 @@ export function ConversationActionGroup({ actions, conversationSeq }: { actions:
       {individual.length > 1 && <span>{individual.length} decisions</span>}
     </header>
     {result && <p role="status">{result.approved} approved · {result.left} left. {result.detail}</p>}
+    {words.length > 1 && <ChapterWordCounts changes={words} batch />}
     <ol className="fy-actiongroup__sequence">{ordered.map(action => <li key={action.actionId}>
       {action.dependencies.length > 0 && <p className="fy-chat__notice">Requires {action.dependencies.map(id => actions.find(one => one.actionId === id)?.shown.title ?? id).join(" · ")}</p>}
       <ConversationPermissionCard action={action} conversationSeq={conversationSeq} />

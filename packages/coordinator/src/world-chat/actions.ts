@@ -329,6 +329,7 @@ import { audioStudioProposalConversationAdapter } from "./audio-studio-proposals
 import { effectProposalConversationAdapter } from "./effect-proposals.js";
 import { effectOnlyTurnProblem, effectProposalRequestContext } from "./effect-proposal-scope.js";
 import type { EditorEffectDependencies } from "../productions/editor-effect-dependencies.js";
+import { CHAPTER_WORD_COUNT_LABEL, proposedChapterWords } from "@arke-studio/contracts";
 import { bookAuthoringRefusal, comicScriptDraft, episodeScriptDraft, foldedText, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
 import {
   stageWorldChatArtDirectionAction,
@@ -1797,6 +1798,9 @@ async function proposalProjection(
       after: clipped(field.proposed),
     })),
   );
+  fields.unshift(...proposedChapterWords(review.targets).map(change => ({
+    label: `${CHAPTER_WORD_COUNT_LABEL}${change.title}`.slice(0, 200), before: String(change.before), after: String(change.after),
+  })));
   // Outline omissions use chapter positions, so even 100 entries fit in one review field.
   if (proposal.kind === "chapter-draft" && proposal.summary.includes("viewpoint character left unset")) {
     fields.push({ label: "Viewpoint characters", before: null, after: clipped(proposal.summary) });

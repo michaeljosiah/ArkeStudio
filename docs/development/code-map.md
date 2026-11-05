@@ -2039,3 +2039,5 @@ observations under the native acceptance gate too. Native acceptance reconciles 
 coordinator `world-chat/actions.test.ts` and client `production-studio.test.tsx`.
 
 Bench images can be selected into a character kit through `bench-use-reference`: coordinator `bench/character-kit.ts` verifies the contained saved image/hash and reuses reference take recording plus main-photo/character-sheet acceptance. Client `components/bench-character-kit.tsx` owns the destination dialog and correlated result. Regression: coordinator `test/bench/character-kit.test.ts`, client `test/bench-character-kit.test.tsx` (issue #1657).
+
+Proposed chapter counts (#1748): contracts chapter-word-counts.ts measures complete gate review prose. World Chat projection freezes numeric fields before clipping excerpts; conversation receipts and the client ChapterWordCounts share those measurements. Batch reports omit discarded/superseded actions, and accepted manuscript totals still come from saved chapters.
