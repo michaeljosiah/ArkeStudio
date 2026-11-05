@@ -12,6 +12,8 @@ import { GenerationReferences, GenerationResults } from "./generation-card-body.
 import { ProductionExportReceipt } from "./production-export-card.js";
 import { TakeComparisonCard } from "./take-comparison-card.js";
 import { ConversationActionGroup } from "./conversation-action-group.js";
+import { ChapterWordCounts } from "./chapter-word-counts.js";
+import { CHAPTER_WORD_COUNT_LABEL, measuredChapterWords } from "@arke-studio/contracts";
 import { ProductionPlanCardView } from "./production-plan-card.js";
 import { ProductionSetupOutline } from "./production-setup-outline.js";
 import { HumanDecisionCardView } from "./human-decision-card.js";
@@ -517,9 +519,10 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
         {[...body.conflicts, ...body.openChoices].map((line) => <p key={line} className="fy-actioncard__notice">{line}</p>)}
       </div>;
       return <div className="fy-actioncard__body">
+        <ChapterWordCounts changes={measuredChapterWords(action)} />
         {action.sheetCreationProseFields ? <ProposalReviewFields target={{ action: "create", fields: body.fields.map((field, index) => ({
           field: field.label, before: field.before, proposed: field.after, metadata: !action.sheetCreationProseFields!.includes(index),
-        })) }} /> : body.fields.map((field) => <div key={field.label} className="fy-actioncard__change">
+        })) }} /> : body.fields.filter(field => action.actionKind !== "world-chat-production-chapter" || !field.label.startsWith(CHAPTER_WORD_COUNT_LABEL)).map((field) => <div key={field.label} className="fy-actioncard__change">
           <strong>{field.label}</strong>
           <span className="fy-actioncard__before">{field.before ?? "Not set"}</span>
           <span aria-hidden="true">→</span>
