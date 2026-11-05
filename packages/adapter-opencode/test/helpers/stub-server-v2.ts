@@ -59,6 +59,7 @@ export class StubOpenCodeV2 {
     models?: WireModel[]; status?: number; directory?: string | null; hold?: boolean;
   };
   pluginResponse?: (directory: string | undefined) => { plugins?: unknown[]; directory?: string | null };
+  mcpResponse?: (directory: string | undefined) => { rows?: unknown; directory?: string; status?: number; hold?: boolean };
   defaultModel: (WireModel & { id: string; providerID: string }) | null = null;
   /** The integration catalog GET /api/integration serves — raw wire rows, scripted per test. */
   integrations: unknown[] = [];
@@ -101,6 +102,12 @@ export class StubOpenCodeV2 {
         const locationDir = query["location[directory]"];
         const envelope = (data: unknown, directory?: string) =>
           JSON.stringify({ data, ...(directory !== undefined ? { location: { directory } } : {}) });
+
+        if (url.pathname === "/api/mcp" && req.method === "GET") {
+          const response = this.mcpResponse?.(locationDir) ?? { rows: [] };
+          if (!response.hold) res.writeHead(response.status ?? 200, { "Content-Type": "application/json" }).end(envelope(response.rows, response.directory ?? locationDir));
+          return;
+        }
 
         if (url.pathname === "/api/info") {
           const respond = () =>

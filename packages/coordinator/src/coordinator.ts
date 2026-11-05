@@ -24159,6 +24159,7 @@ export class Coordinator {
         void this.appLog?.append({ level: "warn", event: "world-chat.turn-failed", conversationId, runId, cause });
         if (isAuthShapedFailure(cause)) void this.vendorAuth.noteAuthFailure().catch(() => {});
       },
+      onToolDiagnostic: detail => { void this.appLog?.append({ level: "info", event: "world-chat.tools", ...detail }).catch(() => {}); },
       onProgress: (conversationId, label) => {
         this.emit({ at: new Date().toISOString(), type: "world-chat.progress", conversationId, label });
       },
