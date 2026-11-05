@@ -1,4 +1,6 @@
 import { ShotPromptProposalDiff } from "../components/prompt-review.js";
+import { ChapterWordCounts } from "../components/chapter-word-counts.js";
+import { proposedChapterWords } from "@arke-studio/contracts";
 import type {
   CanonEntry,
   ClientState,
@@ -328,6 +330,7 @@ export function ProposalPanel({
       <div className="dom-proposal__summary">{proposal.summary}</div>
       {staged.review ? (
         <div className="dom-review">
+          <ChapterWordCounts changes={proposedChapterWords(staged.review.targets)} />
           {staged.review.targets.map((t) => (
             <div key={t.path} className="dom-review__target">
               <div className="dom-review__head">

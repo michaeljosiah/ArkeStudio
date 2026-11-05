@@ -24,11 +24,11 @@ async function fixture(options: { personal?: boolean; suggest?: boolean; circuit
   if (options.circuit) control.targets.push({ ...emptyRecoveryTarget(key, "harness", Date.now()), circuitOpen: true });
   await store.save(control);
   const promptMarker = join(root, "accepted-prompts.txt");
-  const env = { PASSWORD: "synthetic-recovery-fixture", SERVICE_VERSION: options.version ?? "2.0.26", MODE: "healthy", IGNORE_STOP: "0",
+  const env = { PASSWORD: "synthetic-recovery-fixture", SERVICE_VERSION: options.version ?? "2.2.5", MODE: "healthy", IGNORE_STOP: "0",
     ...(options.protocolTurn ? { PROMPT_MARKER: promptMarker } : {}) };
   const wiring = await assembleHarness({ appRoot: root,
     v2: { ...(options.personal ? { configuredPath: process.execPath } : { bundledPath: process.execPath }),
-      runCommand: async command => command === "where" || command === "which" ? { status: 1, stdout: "" } : { status: 0, stdout: "opencode v2.0.26" } },
+      runCommand: async command => command === "where" || command === "which" ? { status: 1, stdout: "" } : { status: 0, stdout: "opencode v2.2.5" } },
     createSupervisor: (spec, deps) => new ChildSupervisor({ ...spec, command: process.execPath, args: [child], inheritEnv: false, env,
       readyTimeoutMs: options.readyTimeoutMs ?? 10_000, probeIntervalMs: 30,
       validateHealth: options.healthGate ? async response => {
@@ -112,7 +112,7 @@ it("a writing replacement that never verifies keeps its fence until a failed nat
 });
 
 it("running writing-server protocol validation refuses an unsupported process despite pinned discovery metadata", { timeout: 25_000 }, async () => {
-  const h = await fixture({ version: "2.0.25" });
+  const h = await fixture({ version: "2.2.4" });
   try {
     await h.coordinator.start(0); await until(() => h.worker.status === "failed", "unsupported server refused", 15000);
     assert.match(h.worker.reason!, /supported server protocol/); assert.equal(h.worker.spawnEpoch, 1); assert.equal(h.reservations(), 0);

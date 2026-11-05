@@ -248,6 +248,8 @@ export class AppSettingsFile {
    * neither ever moving back. Two windows mark independently, and a mark carrying the bundled
    * version can land after one carrying a waiting update's newer one; the later instant and the
    * later version win, so a release once read never becomes unread again (codex, PR 1087).
+   * A world's settled file problems replace that world's list and leave the others alone. An
+   * empty list drops the world, so a world with nothing wrong costs the file nothing.
    */
   async setActivitySeen(change: Partial<ActivitySeen>): Promise<AppSettings> {
     return this.mutate((current) => {
@@ -259,7 +261,15 @@ export class AppSettingsFile {
         change.whatsNewSeenVersion !== undefined
           ? laterVersion(current.activity.whatsNewSeenVersion, change.whatsNewSeenVersion)
           : current.activity.whatsNewSeenVersion;
-      const settings: AppSettings = { ...current, activity: { inboxSeenAt, whatsNewSeenVersion } };
+      const fileProblems = { ...current.activity.fileProblems };
+      for (const [worldId, paths] of Object.entries(change.fileProblems ?? {})) {
+        if (paths.length > 0) fileProblems[worldId] = paths;
+        else delete fileProblems[worldId];
+      }
+      const settings: AppSettings = {
+        ...current,
+        activity: { inboxSeenAt, whatsNewSeenVersion, ...(Object.keys(fileProblems).length > 0 ? { fileProblems } : {}) },
+      };
       return { settings, value: settings };
     });
   }

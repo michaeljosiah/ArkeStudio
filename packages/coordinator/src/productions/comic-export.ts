@@ -30,9 +30,6 @@ export function comicExportBlockers(production: ProductionBundle): string[] {
   if (book.length === 0) return ["the book has no pages"];
   return book.flatMap((entry) => entry.take === undefined ? [`page ${entry.number} · no accepted take`]
     : entry.outOfDate ? [`page ${entry.number} · the script changed since its take`]
-    // Clean art carries no words, and this version draws none over it (owner, turn 247): an overlay
-    // take would export every page's balloons missing (codex on PR 2225).
-    : entry.take.mode === "overlay" ? [`page ${entry.number} · its take has no lettering`]
     : !entry.cleared ? [`page ${entry.number} · lettering not cleared`] : []);
 }
 

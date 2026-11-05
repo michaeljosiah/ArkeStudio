@@ -319,6 +319,8 @@ import {
 import { benchChatSessionId, completeBenchChatAction } from "../bench/chat-session.js";
 import type { BenchChatControls } from "../bench/chat-controls.js";
 import { benchReadRows } from "../bench/chat-reads.js";
+import { benchImageResult, type BenchImageSource } from "./bench-image-result.js";
+import { WORLD_RESULT_USE_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { transitionProposalConversationAdapter } from "./transition-proposals.js";
 import { pictureProposalConversationAdapter } from "./picture-proposals.js";
 import { WorldChatTransitionProposalActionSchema } from "@arke-studio/contracts";
@@ -327,6 +329,7 @@ import { audioStudioProposalConversationAdapter } from "./audio-studio-proposals
 import { effectProposalConversationAdapter } from "./effect-proposals.js";
 import { effectOnlyTurnProblem, effectProposalRequestContext } from "./effect-proposal-scope.js";
 import type { EditorEffectDependencies } from "../productions/editor-effect-dependencies.js";
+import { CHAPTER_WORD_COUNT_LABEL, measuredChapterWords, proposedChapterWords } from "@arke-studio/contracts";
 import { bookAuthoringRefusal, comicScriptDraft, episodeScriptDraft, foldedText, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
 import {
   stageWorldChatArtDirectionAction,
@@ -395,10 +398,12 @@ export interface WorldChatActionAdapterDeps {
   readonly useWorldImage?: (
     candidateIndex: number,
     mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+    benchTake?: BenchImageSource,
   ) => Promise<boolean>;
   readonly useMasterLook?: (
     candidateIndex: number,
     mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+    benchTake?: BenchImageSource,
   ) => Promise<boolean>;
   readonly useReferenceCandidate?: (
     change: WorldChatReferenceResultUseAction["action"]["change"],
@@ -858,6 +863,8 @@ function productionActionTargets(
       { requirement: "exports", target: action.productionId },
     ];
     case "production-export-cancel": return [{ requirement: "exports", target: action.productionId }];
+    case "reference-world-image-result-use":
+    case "reference-master-look-result-use": return action.benchTake ? [{ requirement: "bench", target: action.benchTake.sessionId }] : [];
     case "bench-keep": return [{ requirement: "bench", target: action.sessionId }, { requirement: "artifacts", target: worldId }];
     case "bench-select":
     case "bench-discard": return [{ requirement: "bench", target: action.sessionId }];
@@ -1344,8 +1351,8 @@ function worldActionTargets(
       id: action.target.surface === "staged-reference" ? action.target.key : fallbackId,
       label: action.target.surface === "staged-reference" ? action.target.key : action.target.surface,
     }];
-    case "reference-world-image-result-use": return [{ kind: "world-image", id: `candidate:${action.candidateIndex}`, label: `Key art candidate ${action.candidateIndex}` }];
-    case "reference-master-look-result-use": return [{ kind: "master-look", id: `candidate:${action.candidateIndex}`, label: `Master look candidate ${action.candidateIndex}` }];
+    case "reference-world-image-result-use": return [{ kind: "world-image", id: action.benchTake?.takeId ?? `candidate:${action.candidateIndex}`, label: "World key art" }];
+    case "reference-master-look-result-use": return [{ kind: "master-look", id: action.benchTake?.takeId ?? `candidate:${action.candidateIndex}`, label: "World master look" }];
     case "reference-image-discard": return [{
       kind: action.target.surface,
       id: action.target.surface === "staged-reference" ? action.target.key : fallbackId,
@@ -1770,9 +1777,10 @@ const clipped = (value: string | null, max = 20_000): string | null =>
 async function proposalProjection(
   store: WorldStore,
   gate: ProposalManager,
-  intent: Pick<ConversationActionPrepareIntent, "targets">,
+  intent: Pick<ConversationActionPrepareIntent, "targets" | "actionKind">,
   proposalId: string,
   preparing = true,
+  includeChapterWords = true,
 ): Promise<PreparedConversationActionAuthority> {
   const { proposal, review, ripple, scenePreview } = await gate.project(proposalId);
   if (proposal.kind === "comic-script") for (const target of review.targets) {
@@ -1791,6 +1799,9 @@ async function proposalProjection(
       after: clipped(field.proposed),
     })),
   );
+  if (includeChapterWords && intent.actionKind === "world-chat-production-chapter") fields.unshift(...proposedChapterWords(review.targets).map(change => ({
+    label: `${CHAPTER_WORD_COUNT_LABEL}${change.title}`.slice(0, 200), before: String(change.before), after: String(change.after),
+  })));
   // Outline omissions use chapter positions, so even 100 entries fit in one review field.
   if (proposal.kind === "chapter-draft" && proposal.summary.includes("viewpoint character left unset")) {
     fields.push({ label: "Viewpoint characters", before: null, after: clipped(proposal.summary) });
@@ -2629,12 +2640,15 @@ async function sharedResourceProjection(
     }
     case "world-chat-reference-world-image-result-use": {
       authority = { kind: "world-store", id: intent.actionId };
-      if (!bundle.keyArtCandidates[payload.action.candidateIndex - 1]) {
+      if ((payload.action.candidateIndex === undefined) === (payload.action.benchTake === undefined)) throw new Error("Choose one pending candidate or one Bench take.");
+      const bench = payload.action.benchTake ? await benchImageResult(store, payload.action.benchTake) : null;
+      if (bench) { await store.ensureSchemaVersion(WORLD_RESULT_USE_SCHEMA_VERSION, "bench-image-result-use"); }
+      else if (!bundle.keyArtCandidates[payload.action.candidateIndex! - 1]) {
         throw new Error("That key art candidate is no longer available.");
       }
       if (!deps.useWorldImage) approvalBlockedReason = "Key art selection is unavailable.";
       shown = {
-        title: `Use key art candidate ${payload.action.candidateIndex}`,
+        title: payload.action.benchTake ? "Use Bench image as key art" : `Use key art candidate ${payload.action.candidateIndex}`,
         consequence: "Promotes the selected pending image to the world's key art and clears the candidate set.",
         affectedTargets: [...intent.targets],
         ripples: ["Generation or import never selects this result; this card is the separate artistic decision."],
@@ -2642,7 +2656,8 @@ async function sharedResourceProjection(
         body: {
           family: "take-review",
           mediaKind: "image",
-          mediaId: `world-image-candidate:${payload.action.candidateIndex}`,
+          mediaId: payload.action.benchTake?.takeId ?? `world-image-candidate:${payload.action.candidateIndex}`,
+          ...(bench ? { mediaPath: bench.mediaPath, ...(bundle.keyArt ? { currentMediaPath: bundle.keyArt } : {}) } : {}),
           destination: "World key art",
           currentSelection: bundle.keyArt === null ? null : "Current key art",
         },
@@ -2651,12 +2666,15 @@ async function sharedResourceProjection(
     }
     case "world-chat-reference-master-look-result-use": {
       authority = { kind: "proposal-manager", id: intent.actionId };
-      if (!bundle.masterLookCandidates[payload.action.candidateIndex - 1]) {
+      if ((payload.action.candidateIndex === undefined) === (payload.action.benchTake === undefined)) throw new Error("Choose one pending candidate or one Bench take.");
+      const bench = payload.action.benchTake ? await benchImageResult(store, payload.action.benchTake) : null;
+      if (bench) { await store.ensureSchemaVersion(WORLD_RESULT_USE_SCHEMA_VERSION, "bench-image-result-use"); }
+      else if (!bundle.masterLookCandidates[payload.action.candidateIndex! - 1]) {
         throw new Error("That master look candidate is no longer available.");
       }
       if (!deps.useMasterLook) approvalBlockedReason = "Master look selection is unavailable.";
       shown = {
-        title: `Use master look candidate ${payload.action.candidateIndex}`,
+        title: payload.action.benchTake ? "Use Bench image as master look" : `Use master look candidate ${payload.action.candidateIndex}`,
         consequence: "Accepts the selected image as a new version of the world look, preserving the prior look and its history.",
         affectedTargets: [...intent.targets],
         ripples: ["Future image generation uses the new master look; existing takes retain their recorded provenance."],
@@ -2664,7 +2682,8 @@ async function sharedResourceProjection(
         body: {
           family: "take-review",
           mediaKind: "image",
-          mediaId: `master-look-candidate:${payload.action.candidateIndex}`,
+          mediaId: payload.action.benchTake?.takeId ?? `master-look-candidate:${payload.action.candidateIndex}`,
+          ...(bench ? { mediaPath: bench.mediaPath, ...(bundle.artDirection.masterLook ? { currentMediaPath: bundle.artDirection.masterLook } : {}) } : {}),
           destination: "World master look",
           currentSelection: bundle.artDirection.masterLook ? "Current master look" : null,
         },
@@ -4079,13 +4098,13 @@ async function executeSharedResource(
       };
     }
     case "world-chat-reference-world-image-result-use": {
-      if (!await deps.useWorldImage?.(payload.action.candidateIndex, options)) {
+      if (!await deps.useWorldImage?.(payload.action.candidateIndex ?? 0, options, payload.action.benchTake)) {
         return { status: "failed", detail: "That key art candidate could not be selected." };
       }
       return { status: "completed", receipt: { kind: "world-image", id: action.actionId, summary: "The selected candidate became the world's key art." } };
     }
     case "world-chat-reference-master-look-result-use": {
-      if (!await deps.useMasterLook?.(payload.action.candidateIndex, options)) {
+      if (!await deps.useMasterLook?.(payload.action.candidateIndex ?? 0, options, payload.action.benchTake)) {
         return { status: "failed", detail: "That master look candidate could not be selected." };
       }
       return { status: "completed", receipt: { kind: "master-look", id: action.actionId, summary: "The selected candidate became a new master look version." } };
@@ -4911,7 +4930,9 @@ export function worldChatActionAdapters(
       if (!checked.ok) {
         return { ok: false, reason: checked.stale ? "stale" : "blocked", detail: checked.detail };
       }
-      const currentProjection = await proposalProjection(store, gate, action, action.authority.id, false);
+      // Older pending bindings have no count fields. Keep their original preview format so
+      // upgrading does not mistake an unchanged draft for a stale one and discard it.
+      const currentProjection = await proposalProjection(store, gate, action, action.authority.id, false, measuredChapterWords(action).length > 0);
       if (conversationActionDigest(currentProjection.shown) !== action.previewDigest) {
         await gate.discard(action.authority.id);
         return { ok: false, reason: "stale", detail: "The proposal preview changed after this card was prepared." };

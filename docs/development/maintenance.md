@@ -6,11 +6,14 @@ the filesystem error code. OpenCode's version probe runs on the verified extract
 it is copied into the stage, so the directory being swapped has not executed a binary (#1227).
 Run `node --test apps/desktop/test/runtime-support.test.mjs` for the retry and staging checks.
 
-OpenCode v2 is standardised on stable **2.0.26**. Only that release passes discovery and
+OpenCode v2 is standardised on stable **2.2.5**. Only that release passes discovery and
 authenticated `/api/info` readiness; older v2 builds have no compatibility path. Update
 `OPENCODE2_PINNED_VERSION` in adapter discovery together with the version, archive hash and
 licence source in `apps/desktop/runtime-sources.json`, and rerun the real-binary checks in
-[testing](testing.md#writing-engines-and-model-control) before moving the pin. Stable v2 uses
+[testing](testing.md#writing-engines-and-model-control) before moving the pin. A new release can
+add engine tools that confined agents get unasked, because the engine allows any action no rule
+names: `v2-engine-defaults-protocol.test.ts` pins the exact list, so read what it reports rather
+than adding the new name to the expected list. Stable v2 uses
 `@opencode/cli-windows-x64` and extracts `package/bin/opencode.exe`; staging renames it to
 `opencode2.exe` to preserve Studio's installed paths. PATH discovery checks both command names
 and accepts only the pinned v2 release. OpenCode v1 has no adapter, fallback or launch override.

@@ -1,4 +1,5 @@
 import { ChapterReviewControl } from "../components/chapter-review.js";
+import { QuoteReview } from "../components/quote-review.js";
 import { ManuscriptReviewPassage } from "../components/manuscript-review.js";
 import { parkedDrafts, parkedKey, type ParkedDraft } from "../lib/chapter-drafts.js";
 import { AudioStudioWorkspace } from "./audio-studio-workspace.js";
@@ -32,6 +33,7 @@ import {
   pinTarget,
   performanceNote,
   pinnedLines,
+  unassignedQuotes,
   castStanding,
   reconcileCast,
   legacyVoiceModel,
@@ -1443,6 +1445,9 @@ export function ChapterWorkspace({
     if (target === null) return;
     setVoicePin(worldId, prodId, chapter.file, { ...target, ...pick });
   };
+  const [quoteReviewOpen, setQuoteReviewOpen] = useState(false);
+  useEffect(() => setQuoteReviewOpen(false), [chapter.id]);
+  const quotesToReview = useMemo(() => voicesMoved ? [] : unassignedQuotes(record?.body ?? "", voicesRecord), [record?.body, voicesRecord, voicesMoved]);
   // A recorded speaker's lines out and back (turn 155d), opened from the block's Takes panel.
   const [linesFor, setLinesFor] = useState<{ speaker: string; label: string } | null>(null);
   // One narrator performs the cast (turn 155g): the speaker whose note row is focused, and the
@@ -2703,6 +2708,7 @@ export function ChapterWorkspace({
                 </p>
               )}
               {narratorDialog}
+              {quotesToReview.length > 0 && <Button variant="ghost" data-testid="quote-review-press" onClick={() => setQuoteReviewOpen(true)}>{quotesToReview.length} unassigned quote{quotesToReview.length === 1 ? "" : "s"} · Review</Button>}
             </section>
 
     </>
@@ -4096,6 +4102,11 @@ export function ChapterWorkspace({
               </aside>
             </PageSheet>
           )}
+          <PageSheet open={quoteReviewOpen} title="Review unassigned quotes" subtitle={`Saved chapter · ${chapter.title}`} onClose={() => setQuoteReviewOpen(false)}>
+            <QuoteReview quotes={quotesToReview} choices={record?.body === live ? pinChoices : null} onPick={(quote, pick) => {
+              if (pinChoices && record?.body === live) setVoicePin(worldId, prodId, chapter.file, { ...quote, ...pick });
+            }} />
+          </PageSheet>
           {/* The chapter's Looks (design turn 193a): from the Audiobook head and from the rail's Voices in any view (rule 18). */}
           <LookSheet open={illustrationLookOpen} onClose={closeChapterLooks} worldId={worldId} productionId={prodId} chapterFile={chapter.file} chapterOrder={chapter.order} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} blockKeys={audiobook.rows.map((row) => row.block.key)} />
           {view === "audiobook" && lookToMake !== null && <NewLookSheet open onClose={() => setLookToMake(null)} worldId={worldId} productionId={prodId} chapterFile={chapter.file} chapterOrder={chapter.order} who={{ key: lookToMake.key, name: lookToMake.name, sheet: lookToMake.sheet }} line={lookToMake.line} />}

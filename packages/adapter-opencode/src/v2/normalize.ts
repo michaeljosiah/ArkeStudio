@@ -7,7 +7,8 @@ import { toolSummary } from "../normalize.js";
  *
  * v2 frames are flat: `{ id, type, data, location?, durable? }` — no payload wrapper, no
  * `properties`. The vocabulary was measured against 2.0.26 end to end, including a
- * full keyed turn with a held tool call and a permission round trip.
+ * full keyed turn with a held tool call and a permission round trip, and repeated on 2.2.5 with
+ * a scripted provider.
  */
 
 export type NormalizeV2Outcome =

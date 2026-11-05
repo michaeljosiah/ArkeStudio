@@ -5,7 +5,7 @@ import { OpenCodeV2Http, sameDirectory, type V2Envelope } from "./http.js";
 
 /**
  * OpenCode forks Copilot's first model sync per location. Until it settles, the catalogue
- * in 2.0.26 can already return aisdk:@ai-sdk/github-copilot before remote routing is known.
+ * in 2.2.5 can already return aisdk:@ai-sdk/github-copilot before remote routing is known.
  * That fallback sends Claude to /v1/chat/completions (404). Require the resolved endpoint
  * and native Anthropic package rather than the older runtime's SDK spelling (#1709).
  * Global discovery is not evidence for a new scratch directory. Wait only before publishing

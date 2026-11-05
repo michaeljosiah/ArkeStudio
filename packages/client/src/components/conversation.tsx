@@ -12,6 +12,8 @@ import { GenerationReferences, GenerationResults } from "./generation-card-body.
 import { ProductionExportReceipt } from "./production-export-card.js";
 import { TakeComparisonCard } from "./take-comparison-card.js";
 import { ConversationActionGroup } from "./conversation-action-group.js";
+import { ChapterWordCounts } from "./chapter-word-counts.js";
+import { CHAPTER_WORD_COUNT_LABEL, measuredChapterWords } from "@arke-studio/contracts";
 import { ProductionPlanCardView } from "./production-plan-card.js";
 import { ProductionSetupOutline } from "./production-setup-outline.js";
 import { HumanDecisionCardView } from "./human-decision-card.js";
@@ -76,6 +78,7 @@ import { ARKE_HALF_QUERY } from "../lib/arke-half.js";
 import { ReplyRead } from "./read-aloud.js";
 import { useReadReplies } from "./read-replies.js";
 import { ConversationReply } from "./conversation-reply.js";
+import { ConversationAttachments } from "./conversation-attachments.js";
 
 /**
  * One conversation, drawn once (design turn 86).
@@ -127,7 +130,8 @@ export function ConversationTranscript({
   about?: string;
 }) {
   const navigate = useNavigate();
-  const worldId = useStore().state?.world?.meta.worldId;
+  const world = useStore().state?.world;
+  const worldId = world?.meta.worldId;
   const messages = workspace?.messages ?? [];
   const visibleTurns = new Set(messages.filter((message) => message.role === "studio").map((message) => message.turnId));
   const humanDecisions = workspace?.humanDecisions ?? [];
@@ -172,6 +176,7 @@ export function ConversationTranscript({
         >
           <div className="fy-chat__bubble">
             {m.role === "studio" ? <ConversationReply key={m.id} text={m.text} /> : about === undefined ? m.text : withoutSubject(m.text, about)}
+            {m.role === "user" && <ConversationAttachments ids={m.attachmentIds ?? []} attachments={workspace?.attachments ?? []} worldSlug={world?.meta.slug} />}
             {m.role === "studio" && m.receipts.length > 0 && (
               // One tick for the row, not one per receipt: the tick means "this is what was
               // read", and repeating it turned a footnote into a checklist.
@@ -514,9 +519,10 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
         {[...body.conflicts, ...body.openChoices].map((line) => <p key={line} className="fy-actioncard__notice">{line}</p>)}
       </div>;
       return <div className="fy-actioncard__body">
+        <ChapterWordCounts changes={measuredChapterWords(action)} />
         {action.sheetCreationProseFields ? <ProposalReviewFields target={{ action: "create", fields: body.fields.map((field, index) => ({
           field: field.label, before: field.before, proposed: field.after, metadata: !action.sheetCreationProseFields!.includes(index),
-        })) }} /> : body.fields.map((field) => <div key={field.label} className="fy-actioncard__change">
+        })) }} /> : body.fields.filter(field => action.actionKind !== "world-chat-production-chapter" || !field.label.startsWith(CHAPTER_WORD_COUNT_LABEL)).map((field) => <div key={field.label} className="fy-actioncard__change">
           <strong>{field.label}</strong>
           <span className="fy-actioncard__before">{field.before ?? "Not set"}</span>
           <span aria-hidden="true">→</span>

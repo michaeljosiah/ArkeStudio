@@ -40,7 +40,7 @@ it("keeps an ephemeral native bridge capability separate from the reviewed provi
   for (const value of [{ ...transport, baseURL: "http://localhost:43210/v1" }, { ...transport, baseURL: "https://127.0.0.1/v1" }, { ...transport, baseURL: transport.baseURL + "?secret=x" },
     { ...transport, baseURL: "http://127.0.0.1:43210/other" }, { ...transport, apiKey: "provider-key" }, { ...transport, extra: true }]) assert.throws(() => privateBridgeTransport(value), /Invalid private/);
 });
-it("writes fixed private control code before its config with one literal native integration allow", () => {
+it("writes fixed private control code before its config with one literal native plugin allow", () => {
   const adapter = new OpenCodeV2Adapter({ baseUrl: () => "http://127.0.0.1:0", password: () => null });
   for (const agent of ["studio-assistant", "diagnostic-specialist"]) {
     const files = adapter.sessionFiles({ agent, model: "ollama/model" }, "/private/control");
@@ -49,8 +49,8 @@ it("writes fixed private control code before its config with one literal native 
     assert(!files[1]!.contents.includes("fetch")); assert(!files[1]!.contents.includes("console"));
     const config = JSON.parse(files[2]!.contents), path = privateControlDirectory("/private/control");
     assert.deepEqual(config.plugins, [path]);
-    assert.deepEqual(config.experimental.policies.filter((rule: { action: string; effect: string }) => rule.action === "integration.use"), [
-      { action: "integration.use", resource: "*", effect: "deny" }, { action: "integration.use", resource: `plugin:${path}`, effect: "allow" },
+    assert.deepEqual(config.policies.filter((rule: { action: string; effect: string }) => rule.action === "plugin.use"), [
+      { action: "plugin.use", resource: "*", effect: "deny" }, { action: "plugin.use", resource: path, effect: "allow" },
     ]);
     assert.deepEqual(config.permissions, [{ action: "*", resource: "*", effect: "deny" }]);
     assert.throws(() => adapter.sessionFiles({ agent, model: "ollama/model" }), /session directory/);

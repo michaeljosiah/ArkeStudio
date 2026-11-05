@@ -311,13 +311,16 @@ export type StagedProposal = z.infer<typeof StagedProposalSchema>;
  * A file that failed to parse — the world still opens; the failure is named (SPEC-002 R-2). A
  * `conflict` is the other kind: a record that loaded and stands, but says the same word as
  * another (two props answering to one mention, issue 1116), for a person to rename — never
- * skipped, so never described as unreadable.
+ * skipped, so never described as unreadable. A `history` problem is a past version's snapshot
+ * that is missing or disagrees with its record: the live record is whole and in use, so it is
+ * listed and never announced (design turn 268). `label` names the record when its path would not.
  */
 export const WorldProblemSchema = z
   .object({
     path: z.string().min(1),
     message: z.string().min(1),
-    kind: z.enum(["unreadable", "conflict"]).optional(),
+    kind: z.enum(["unreadable", "conflict", "history"]).optional(),
+    label: z.string().min(1).optional(),
   })
   .strict();
 export type WorldProblem = z.infer<typeof WorldProblemSchema>;

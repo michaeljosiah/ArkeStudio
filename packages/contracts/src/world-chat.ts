@@ -38,6 +38,7 @@ import {
   SlugSchema,
   TakeIdSchema,
   TurnIdSchema,
+  WorldFilePathSchema,
 } from "./ids.js";
 import { BIBLE_EDIT_BOUNDS, BibleEditRecordSchema, BibleEditSchema, type BibleEdit } from "./bible.js";
 import {
@@ -1886,6 +1887,8 @@ export const WorldChatTranscriptMessageSchema = z
     turnId: TurnIdSchema.optional(),
     role: z.enum(["user", "studio"]),
     text: z.string(),
+    /** Attachments sent with this message, retained when the conversation is reopened. */
+    attachmentIds: z.array(ChatAttachmentIdSchema).optional(),
     /** Persisted receipts, already worded for a person: "read Maren Kest v4". */
     receipts: z.array(z.string().max(200)),
     /**
@@ -1986,6 +1989,8 @@ export const WorldChatWorkspaceSchema = z
             kind: z.enum(["document", "image", "audio", "video", "other"]),
             readability: z.enum(["text-readable", "not-readable", "extracted-text-available"]),
             promoted: z.boolean(),
+            /** Portable preview address; the client adds its current media authorization. */
+            imagePath: WorldFilePathSchema.optional(),
             imageInspection: z.literal("prepared").optional(),
           })
           .strict(),
@@ -2871,8 +2876,8 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "reference-style": "Set the style override a character's kit is generated in.",
   "reference-generation": "Generate kit images: establish a look, main photo, character sheet, looks, missing or regenerated tiles, location views.",
   "reference-image-import": "Import an image the person picks as a world image, master look or staged reference. Approve opens the picker.",
-  "reference-world-image-result-use": "Use a pending world-image candidate as the world's key art.",
-  "reference-master-look-result-use": "Use a pending master-look candidate as the world's master look.",
+  "reference-world-image-result-use": "Use one pending candidateIndex OR a benchTake {sessionId, takeId} as the world's key art. For a Bench take, also read get_bench_session and cite its complete receipt. Never supply both sources.",
+  "reference-master-look-result-use": "Use one pending candidateIndex OR a benchTake {sessionId, takeId} as the world's master look. For a Bench take, also read get_bench_session and cite its complete receipt. Never supply both sources.",
   "reference-image-discard": "Discard a pending world-image or master-look candidate, or a staged reference.",
   "voice-assignment": "Assign a voice to a sheet, or clear it with null. Name only a voice you have read through list_voices.",
   "voice-audition": "Hear a character's line in a voice before assigning it.",

@@ -22,7 +22,26 @@ export interface PageReviewInput {
   /** The accepted take of the page before it, for continuity (R-21). */
   previous?: { bytes: Uint8Array; extension: string };
   references: ReadonlyArray<{ name: string; bytes: Uint8Array; extension: string }>;
+  /** What it is asked in place of `PAGE_REVIEW_PROMPT`: one panel's review (R-37b). */
+  prompt?: string;
 }
+
+/**
+ * One panel alone (R-37b). Anatomy comes first and hand by hand: asked in one line, the reads passed
+ * a backwards hand and a stray third limb that a person sees at once (the trials of 4 November 2026).
+ */
+export const PANEL_REVIEW_PROMPT = [
+  "You review one generated comic book panel against what it should show. It is a single picture with no words; words are set over it later.",
+  "Image block page is the panel. Each image block ref:<name> is the reference picture for that person or place.",
+  "First go through the picture person by person, and for each person hand by hand. Count their arms and hands. For each hand, look at whether it joins that person's own arm at a wrist that bends the way a wrist can, whether it has five fingers, whether the thumb is on the correct side for a left or right hand with the palm or back as shown, and whether it holds what it is said to hold. Then check their eyes, face and legs the same way. Any fault there is a defect.",
+  "Report a finding only for a fault a reader would see. Kinds:",
+  "content: the panel does not show what its description says (the action, the place, or an object it names).",
+  "cast: a person it names is missing, the wrong person is drawn, or a person appears whom the description does not call for.",
+  "defect: extra or merged faces, figures or limbs, broken anatomy, a duplicated person, or any balloon, caption, sound effect or lettering the description does not call for.",
+  "likeness: a person does not match their reference (face, hair, build, costume).",
+  "For each finding give a note of at most twelve plain words, and its box as fractions of the panel when you can place it.",
+  'Return ONLY JSON: {"findings":[{"kind":"defect","note":"...","box":{"x":0.1,"y":0.1,"w":0.3,"h":0.2}}],"cleared":[]}. A panel with no faults returns {"findings":[],"cleared":[]}.',
+].join("\n");
 
 export const PAGE_REVIEW_PROMPT = [
   "You review one generated comic book page against the script it was drawn from. Judge only what is drawn; the words are checked separately.",
@@ -65,7 +84,7 @@ export function harnessPageReviewer(ask: ImageJsonRunner): PageReviewer {
       const extras = input.extras.length ? `\n\nEXTRA TEXT THE LETTERING CHECK FOUND:\n${input.extras.map((extra) => `${extra.id}: "${extra.text}"`).join("\n")}` : "";
       const answer = AnswerSchema.parse(await ask({
         agent: "comic-page-reviewer",
-        prompt: `${PAGE_REVIEW_PROMPT}\n\nTHE PAGE'S SCRIPT:\n${input.script}${extras}`,
+        prompt: `${input.prompt ?? PAGE_REVIEW_PROMPT}\n\nTHE PAGE'S SCRIPT:\n${input.script}${extras}`,
         images: [
           { block: "page", ...input.page },
           ...(input.previous ? [{ block: "previous", ...input.previous }] : []),

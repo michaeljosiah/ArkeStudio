@@ -691,20 +691,22 @@ describe("the served surface", () => {
   async function serve(withLease: boolean) {
     const h = await harness();
     const receipts: WorldChatCheckReceipt[] = [];
+    const listed: Array<readonly string[]> = [];
     const server = new WorldQueryServer(
       () => null,
-      withLease ? { retrieval: h.retrieval, onReceipt: (r) => receipts.push(r) } : undefined,
+      withLease ? { retrieval: h.retrieval, onReceipt: (r) => receipts.push(r), onToolsListed: names => { listed.push(names); throw new Error("Broken diagnostic sink"); } } : undefined,
     );
     await server.start();
-    return { h, server, receipts };
+    return { h, server, receipts, listed };
   }
 
   it("offers the world-chat tools on a leased path and the ambient set on the plain one", async () => {
-    const { h, server } = await serve(true);
+    const { h, server, listed } = await serve(true);
     const token = h.mint().token;
 
     const leased = await rpc(server.leasedUrl(token)!, "tools/list");
     const names = (leased.body as { result: { tools: Array<{ name: string }> } }).result.tools.map((t) => t.name);
+    assert.deepEqual(listed, [names], "diagnostics report the catalogue actually served even if their sink throws");
     assert.ok(names.includes("search_sheets"));
     assert.ok(names.includes("get_attachment_text"));
     assert.ok(names.includes("get_production"), "the production read reaches leased callers (round 3)");
@@ -720,6 +722,7 @@ describe("the served surface", () => {
     assert.ok(!ambientNames.includes("describe_action"), "drafting agents prepare no world-chat actions");
     assert.ok(ambientNames.includes("get_production"), "drafting agents can read the production too");
     assert.equal(ambientNames.length, 6, "the ambient surface: the original five plus the production read");
+    assert.equal(listed.length, 1, "ambient tools are not attributed to a writing lease");
 
     await server.stop();
     h.index?.close();

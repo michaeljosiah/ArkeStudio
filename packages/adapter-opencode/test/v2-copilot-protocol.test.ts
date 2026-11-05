@@ -97,7 +97,7 @@ it("waits for native Copilot routing before dispatching Claude (#1709)", {
       authorization: "Basic " + Buffer.from(`opencode:${password}`).toString("base64"),
     }, signal: AbortSignal.timeout(10_000) });
     assert.equal(health.status, 200);
-    assert.equal((await health.json() as { version: string }).version, "2.0.26");
+    assert.equal((await health.json() as { version: string }).version, "2.2.5");
   }
   const traces: string[] = [];
   const adapter = new OpenCodeV2Adapter({ baseUrl: () => url, password: () => password,

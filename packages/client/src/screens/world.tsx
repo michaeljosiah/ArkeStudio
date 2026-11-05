@@ -12,6 +12,8 @@ import {
   beatPictureShotId,
   type ProductionBundle,
   CHARACTER_ROLE_MAX,
+  WRITTEN_VOICE_HEADING,
+  isWrittenVoiceHeading,
   CharacterAliasesInputSchema,
   MICRODRAMA_DEFAULTS,
   AUDIO_DRAMA_KIND,
@@ -344,12 +346,10 @@ function WorldConditionBanners() {
   const onOverview = location.pathname.replace(/\/+$/, "") === `/w/${worldId}`;
   const build = clientState?.app.builds.find((candidate) => candidate.worldId === worldId) ?? null;
   const notice = onOverview && build ? foundingNote(build) : null;
-  // A problem is a file that could not be read and is skipped, or — the other kind — a record
-  // that loaded and stands but says the same word as another (two props on one mention, issue
-  // 1116). The second is not data lost, so it is not described as such.
-  const unreadable = world.problems.filter((problem) => problem.kind !== "conflict");
-  const conflicts = world.problems.filter((problem) => problem.kind === "conflict");
-  const hasConditions = world.externalEdits.length > 0 || world.problems.length > 0 || notice !== null;
+  // File problems are not conditions of the screen (design turn 268): a band that stood over every
+  // tab made the app read as broken. They arrive once as a notice and stay listed in the Inbox.
+  // Outside edits stay, because the world's writes wait on them and Adopt lives here.
+  const hasConditions = world.externalEdits.length > 0 || notice !== null;
   if (!hasConditions) return null;
   return (
     <div className="fy-worldconditions">
@@ -384,30 +384,6 @@ function WorldConditionBanners() {
                 <Button onClick={() => reconcileExternalEdit(world.meta.worldId, e.path)}>Adopt</Button>
                 {e.refusal && <span style={{ color: "var(--danger)", fontSize: "var(--text-xs)" }}>{e.refusal}</span>}
               </div>
-            ))}
-          </div>
-        </Callout>
-      )}
-      {unreadable.length > 0 && (
-        <Callout tone="danger" title={`${unreadable.length} file(s) could not be read`}>
-          These files are skipped until fixed:
-          <div style={{ display: "grid", gap: "var(--space-1)", marginTop: "var(--space-2)" }}>
-            {unreadable.map((p) => (
-              <span key={p.path} className="mono" style={{ fontSize: "var(--text-xs)" }}>
-                {p.path} — {p.message}
-              </span>
-            ))}
-          </div>
-        </Callout>
-      )}
-      {conflicts.length > 0 && (
-        <Callout tone="warning" title={`${conflicts.length} record(s) say the same word`}>
-          Loaded, and in use until renamed:
-          <div style={{ display: "grid", gap: "var(--space-1)", marginTop: "var(--space-2)" }}>
-            {conflicts.map((p) => (
-              <span key={p.path} className="mono" style={{ fontSize: "var(--text-xs)" }}>
-                {p.path} — {p.message}
-              </span>
             ))}
           </div>
         </Callout>
@@ -2445,11 +2421,14 @@ export function CharacterEditScreen() {
   // null while untouched, so an unedited sheet stages nothing for the field at all.
   const [editedRole, setEditedRole] = useState<string | null>(null);
 
-  const sections = (sheet?.sections ?? []).map((s) => ({
+  const formSections = [...(sheet?.sections ?? [])];
+  if (sheet?.type === "character" && !formSections.some(s => isWrittenVoiceHeading(s.heading))) formSections.push({ heading: WRITTEN_VOICE_HEADING, body: "" });
+  const voiceHeading = formSections.find(s => isWrittenVoiceHeading(s.heading))?.heading;
+  const sections = formSections.map((s) => ({
     heading: s.heading,
     body: edited[s.heading] ?? s.body,
   }));
-  const changed = sections.filter((s, i) => s.body !== sheet?.sections[i]?.body);
+  const changed = sections.filter(s => s.body !== (sheet?.sections.find(original => original.heading === s.heading)?.body ?? ""));
   // Role is a character's short line on the world hub card, and the one frontmatter field this
   // form edits. It is capped so the card can hold it on a single line (SPEC-007 §2.3.1).
   const editsRole = sheet?.type === "character";
@@ -2627,8 +2606,8 @@ export function CharacterEditScreen() {
                 scrollers on a page that already scrolls (issue 1007). The editor is the point
                 of this screen, so it gets the room; the column scrolls, as it did.
               */}
-              {sections.map((s, i) => {
-                const isChanged = s.body !== sheet?.sections[i]?.body;
+              {sections.map((s) => {
+                const isChanged = changed.some(change => change.heading === s.heading);
                 return (
                   <div key={s.heading}>
                     <div className="fy-fieldlabel">
@@ -2636,10 +2615,12 @@ export function CharacterEditScreen() {
                       {isChanged && <span className="fy-changedtag">· changed</span>}
                     </div>
                     <Textarea
+                      aria-label={s.heading}
                       className="fy-sheetedit__prose"
                       value={s.body}
                       onChange={(e) => setEdited((prev) => ({ ...prev, [s.heading]: e.target.value }))}
                     />
+                    {editsRole && s.heading === voiceHeading && <p style={{ color: "var(--muted-foreground)", fontSize: 13 }}>The audiobook director uses up to 240 characters from the start of this section, with whitespace collapsed. Longer notes stay on the sheet.</p>}
                   </div>
                 );
               })}

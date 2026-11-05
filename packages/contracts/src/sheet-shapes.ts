@@ -1,5 +1,9 @@
 import type { SheetKind } from "./world.js";
 
+export const WRITTEN_VOICE_HEADING = "Voice · written";
+/** Match the existing headings the audiobook director consumes, including legacy Speech. */
+export const isWrittenVoiceHeading = (heading: string): boolean => /^voice|^speech/i.test(heading);
+
 /**
  * The three shapes of the one sheet entity (SPEC-007 §2.2, D1, D2).
  *
@@ -33,7 +37,7 @@ export const SHEET_SHAPES: Record<SheetKind, SheetShape> = {
       { heading: "Essence", required: true, hint: "Who they are in two or three sentences." },
       { heading: "Appearance", required: true, hint: "What a camera would see." },
       { heading: "Relationships", required: false, hint: "Who they trust, owe, fear." },
-      { heading: "Voice · written", required: false, hint: "How they speak on the page." },
+      { heading: WRITTEN_VOICE_HEADING, required: false, hint: "How they speak on the page." },
     ],
     imageEvidenceSections: ["Appearance"],
   },

@@ -52,14 +52,14 @@
   },
   "opencode2": {
     "_note": "The stable v2 harness (issue 327 §9, SPEC-016). Only this exact qualified release is supported; no older-v2 compatibility paths. Bundle, adapter gate and native qualification move together. MIT (anomalyco/opencode); invoked as a separate supervised process, never linked.",
-    "version": "2.0.26",
+    "version": "2.2.5",
     "license": {
-      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9b4ec5714d481559990db0a816d5dec19541a814/LICENSE",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9bbb8ce18c80f099e0e448775f59d965ead40a21/LICENSE",
       "sha256": "625F0F619133F89BBBB2ABE37369613DFA1885EBA1E50D02170DEB62BB42CB6B"
     },
     "x64": {
-      "url": "https://registry.npmjs.org/@opencode/cli-windows-x64/-/cli-windows-x64-2.0.26.tgz",
-      "sha256": "86D9DC8CC450E52B97A97A68807EC25E8E1E7362B0983F8CEC911C254086462E"
+      "url": "https://registry.npmjs.org/@opencode/cli-windows-x64/-/cli-windows-x64-2.2.5.tgz",
+      "sha256": "7A9E1DBE80965B75ACE78D512C91CE4E6C9E4683FA5A5A25B00FF0B736F1C15C"
     }
   },
   "ffmpeg": {

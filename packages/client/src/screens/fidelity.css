@@ -4678,6 +4678,11 @@ select.fy-set__pill { padding-right: 26px; }
   [data-screen="new-world"] > .fy-gate { flex-direction: column; min-height: 0; overflow-y: auto; }
   [data-screen="new-world"] > .fy-gate > .fy-gate__main { flex: none; min-height: 70vh; border-right: none; border-bottom: 1px solid var(--border); }
   [data-screen="new-world"] > .fy-gate > .fy-gate__side { flex: none; width: auto; }
+  /* The character form must retain room for its fields beside the fixed-width review rail. */
+  [data-screen="character-edit"].fy-gate { flex-direction: column; min-height: 0; overflow-y: auto; }
+  [data-screen="character-edit"] > .fy-gate__main { flex: none; overflow: visible; border-right: 0; }
+  [data-screen="character-edit"] .fy-gate__body { flex: none; overflow: visible; }
+  [data-screen="character-edit"] > .fy-gate__side { flex: none; width: auto; }
   .fy-chat__wrap .fy-gate__main { border-right: none; border-bottom: 1px solid var(--border); }
   .fy-chat__wrap .fy-gate__side { width: auto; }
   /* There is no column to give the history here, so it becomes a strip across the top — and its

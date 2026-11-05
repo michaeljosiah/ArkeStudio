@@ -9,7 +9,7 @@ import type { ArkeBridge } from "../src/arke-bridge.js";
 import { QueueToaster } from "../src/components/queue-toaster.js";
 import { __applyEventForTest, __pendingQueueRequestsForTest, __setBridgeForTest, __setStateForTest, generateMainPhoto } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
-import type { AudiobookActivity } from "@arke-studio/contracts";
+import type { AudiobookActivity, ClientState } from "@arke-studio/contracts";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }) });
@@ -161,4 +161,48 @@ it("announces a failed job after its queued receipt expires without replaying th
   await act(async () => __applyEventForTest({ type: "job.updated", at: job.updatedAt, job: failed }));
   await tick(0);
   assert.equal(container.querySelectorAll(".fy-note").length, 0);
+});
+
+it("raises a file problem's notice once and waits for an answer, past versions never (design turn 268)", async (t) => {
+  const { container, tick } = await mount(t);
+  const sent: { kind: string; paths?: string[] }[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } as ArkeBridge);
+  const state = (problems: NonNullable<ClientState["world"]>["problems"], told?: string[]): ClientState => {
+    const next = structuredClone(FIXTURE_STATE) as ClientState;
+    next.world!.problems = problems;
+    if (told) next.app.activitySeen = { ...next.app.activitySeen, fileProblems: { [next.world!.meta.worldId]: told } };
+    return next;
+  };
+  const show = async (next: ClientState) => { await act(async () => { __setStateForTest(next); }); await tick(0); };
+  const history = { kind: "history" as const, path: ".history/bible/v4.md", label: "Bible · version 4", message: "missing" };
+  await show(state([history]));
+  assert.doesNotMatch(container.textContent!, /could not be read/, "a past version alone raises nothing");
+
+  const broken = { path: "canon/broken.md", message: "front matter" };
+  await show(state([broken, history]));
+  assert.match(container.textContent!, /1 file could not be read/);
+  await tick(60_000);
+  assert.match(container.textContent!, /1 file could not be read/, "it does not time out unanswered");
+
+  const close = container.querySelector<HTMLElement>('[aria-label="Dismiss"]')!;
+  await act(async () => close.click());
+  assert.deepEqual(sent.find(message => message.kind === "settle-file-problems")?.paths, ["canon/broken.md"], "the past version is not announced, so it is not settled");
+
+  await show(state([broken, history], ["canon/broken.md"]));
+  await tick(1000);
+  assert.doesNotMatch(container.textContent!, /could not be read/, "told: it does not return");
+  await show(state([broken, { path: "canon/other.md", message: "front matter" }, history], ["canon/broken.md"]));
+  assert.match(container.textContent!, /1 file could not be read/, "only the new path is counted");
+});
+
+it("forgets a told path once it clears, so its return is news (design turn 268)", async (t) => {
+  const { tick } = await mount(t);
+  const sent: { kind: string; paths?: string[] }[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } as ArkeBridge);
+  const next = structuredClone(FIXTURE_STATE) as ClientState;
+  next.world!.problems = [];
+  next.app.activitySeen = { ...next.app.activitySeen, fileProblems: { [next.world!.meta.worldId]: ["canon/broken.md"] } };
+  await act(async () => { __setStateForTest(next); });
+  await tick(0);
+  assert.deepEqual(sent.find(message => message.kind === "settle-file-problems")?.paths, []);
 });

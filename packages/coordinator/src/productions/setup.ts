@@ -15,7 +15,7 @@ import { WorldChatStore, conversationDir } from "../world-chat/store.js";
 import { foldConversation } from "../world-chat/fold.js";
 import { discoverConversations } from "../world-chat/discover.js";
 import { WorldChatService } from "../world-chat/service.js";
-import { ADAPT_FROM_SCHEMA_VERSION, AUDIO_DRAMA_SCHEMA_VERSION, COMIC_ADAPTATION_SCHEMA_VERSION, COMIC_USUAL_SCHEMA_VERSION, COMIC_PILOT_SCHEMA_VERSION, CommitStaleError, NARRATOR_SAMPLES_SCHEMA_VERSION, PRODUCTION_TARGET_SCHEMA_VERSION, WORLD_MODELS_SCHEMA_VERSION } from "../world/commit.js";
+import { ADAPT_FROM_SCHEMA_VERSION, AUDIO_DRAMA_SCHEMA_VERSION, COMIC_ADAPTATION_SCHEMA_VERSION, COMIC_PANELS_SCHEMA_VERSION, COMIC_USUAL_SCHEMA_VERSION, COMIC_PILOT_SCHEMA_VERSION, CommitStaleError, NARRATOR_SAMPLES_SCHEMA_VERSION, PRODUCTION_TARGET_SCHEMA_VERSION, WORLD_MODELS_SCHEMA_VERSION } from "../world/commit.js";
 
 /**
  * An audio drama's plan rests on the whole story (SPEC-057 R-5, codex on PR 1866): a plan
@@ -72,6 +72,8 @@ export async function fenceAdaptableSource(world: WorldStore, update: Production
   if (update.fields?.kind === GRAPHIC_NOVEL_KIND || update.fields?.graphicNovel || update.fields?.comicAsk) await world.ensureSchemaVersion(COMIC_ADAPTATION_SCHEMA_VERSION, "production-setup");
   if (update.fields?.comicAsk === "usual") await world.ensureSchemaVersion(COMIC_USUAL_SCHEMA_VERSION, "production-setup");
   if (update.fields?.graphicNovel?.pilotFrom !== undefined) await world.ensureSchemaVersion(COMIC_PILOT_SCHEMA_VERSION, "production-setup");
+  // The mode's question and answer are strict setup fields a build of 122 cannot read (turn 269).
+  if (update.fields?.comicAsk === "mode" || update.fields?.graphicNovel?.mode !== undefined) await world.ensureSchemaVersion(COMIC_PANELS_SCHEMA_VERSION, "production-setup");
 }
 
 function initialState(worldId: string, setupId: ConversationId, seed?: ProductionSetupSeed): ProductionSetupState {

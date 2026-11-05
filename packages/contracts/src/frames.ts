@@ -70,7 +70,7 @@ import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from
 import { DomainEventSchema, type DomainEvent } from "./events.js";
 import { DramaDeliverySchema } from "./audio-drama-edition.js";
 import { DramaChapterDecisionSchema, DramaReviewDecisionSchema, DramaRoleKeySchema, DramaRoleSchema, EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
-import { COMIC_LIMITS, ComicAttemptCapSchema, ComicModeSchema, ComicPageSchema, ComicReadingSchema, ComicStyleSchema, LetteringThresholdsSchema } from "./graphic-novel.js";
+import { COMIC_LIMITS, ComicAttemptCapSchema, ComicModeSchema, ComicPageSchema, ComicReadingSchema, ComicStyleSchema, ComicTypefaceSchema, LetteringPlacementSchema, LetteringThresholdsSchema } from "./graphic-novel.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema, PropStateSelectionSchema } from "./prop.js";
 import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
@@ -1531,6 +1531,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** The Inbox was opened: the instant the bell's foreground dot measures against (SPEC-014 R-25). */
   z.object({ kind: z.literal("mark-inbox-seen") }).strict(),
+  z.object({ kind: z.literal("settle-file-problems"), worldId: z.string().min(1), paths: z.array(z.string().min(1)) }).strict(),
   /** What's new was read up to this bundled release (SPEC-014 R-25). */
   z.object({ kind: z.literal("mark-whats-new-seen"), version: z.string().min(1) }).strict(),
   /**
@@ -2525,6 +2526,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       page: UlidSchema,
       mode: ComicModeSchema.optional(),
+      /** Panel by panel: this panel's price alone (R-37a). */
+      panel: UlidSchema.optional(),
     })
     .strict(),
   /** One page made on the price its press showed (R-22, R-25, R-27). */
@@ -2542,6 +2545,50 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        */
       confirmedMicroUsd: z.number().int().min(0),
       untilPasses: z.literal(true).optional(),
+      /** Panel by panel: this panel alone; absent makes every panel not yet accepted (R-37a). */
+      panel: UlidSchema.optional(),
+    })
+    .strict(),
+  /** The words over a page's panels, placed by the author or an Undo of Arke's placing (R-38a, R-39a). */
+  z
+    .object({
+      kind: z.literal("set-comic-lettering"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      placements: z.array(LetteringPlacementSchema).max(COMIC_LIMITS.letteringPerPage),
+      /** This is the Undo of Arke's placing, so what it kept for one is let go. */
+      undoesPlacing: z.literal(true).optional(),
+    })
+    .strict(),
+  /** Arke places every unplaced line of one page, or of a chapter's ready pages; no picture credit (R-39a). */
+  z
+    .object({
+      kind: z.literal("place-comic-lettering"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      target: z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("page"), page: UlidSchema }).strict(),
+        z.object({ kind: z.literal("chapter"), chapter: z.string().min(1).max(200) }).strict(),
+      ]),
+    })
+    .strict(),
+  /**
+   * Accept page (R-48a): the one image the client flattened from the panels and words, filed as the
+   * page's take. `hash` is the page as the client drew it, so an edit meanwhile refuses it. The client
+   * draws it because the balloons on screen are its canvas: what is placed is what ships.
+   */
+  z
+    .object({
+      kind: z.literal("finish-comic-page"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      hash: z.string().min(1).max(80),
+      jpegBase64: z.string().min(1).max(40_000_000),
     })
     .strict(),
   /** The book as CBZ and/or PDF from the accepted pages (SPEC-064 R-47, R-49). */
@@ -2573,6 +2620,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         reading: ComicReadingSchema.optional(),
         aspect: z.string().min(3).max(12).optional(),
         mode: ComicModeSchema.optional(),
+        typeface: ComicTypefaceSchema.optional(),
         thresholds: LetteringThresholdsSchema.optional(),
         cap: ComicAttemptCapSchema.optional(),
         /** The book's style (R-21a); `null` is World look, the world's art direction alone. */

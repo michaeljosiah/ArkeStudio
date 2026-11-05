@@ -126,7 +126,7 @@ describe("a graphic novel planned with Arke (SPEC-064 R-3, R-4, turn 249b)", () 
     for (const chapter of bundle.productions.find(production => production.meta.id === STORY)!.chapters) chapter.audiobook ??= {} as never;
     const brief = await productionSetupBrief(bundle, draft, read, 400_000);
     assert.match(brief, /This production is a graphic novel/);
-    assert.match(brief, /set fields\.comicAsk to "reading", "aspect" or "pilot"/);
+    assert.match(brief, /set fields\.comicAsk to "reading", "aspect", "pilot" or "mode"/);
     assert.match(brief, /one chapter of pages for each selected source chapter/);
     assert.match(brief, /A one-chapter plan is a first-class result/);
     assert.doesNotMatch(brief, /read every chapter/i);

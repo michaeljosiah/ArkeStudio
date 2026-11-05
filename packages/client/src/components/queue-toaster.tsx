@@ -8,6 +8,7 @@ import {
   subscribeJobReady,
   subscribeRecoveryNotices,
   isOwnSceneCreate,
+  settleFileProblems,
   subscribeQueueResults,
   subscribeCommandFailures,
   subscribeRemoteRefusals,
@@ -22,6 +23,7 @@ import {
 import { mediaUrl } from "../lib/media.js";
 import { enqueueNote, failedNote, queueNoteId, readyNote, type QueueNote } from "./queue-note.js";
 import { followLink, openActivityPanel } from "../lib/activity-panel.js";
+import { pendingFileNotice, staleFileSettlement } from "../lib/file-problems.js";
 import { useDeviceNotifications } from "./device-notifications.js";
 import { Button, cx } from "./ui.js";
 
@@ -170,6 +172,26 @@ export function QueueToaster() {
   const update = useUpdateStatus();
   const { state } = useStore();
   useDeviceNotifications(state);
+
+  // A file problem's notice (design turn 268). It waits for an answer rather than timing out, so
+  // nobody misses a skipped file by looking away; the store's settled list is what makes it once,
+  // and withdraws it here when another window or the Inbox settles it first.
+  const fileNotice = pendingFileNotice(state);
+  const fileNoticeKey = fileNotice && JSON.stringify([fileNotice.id, fileNotice.title, fileNotice.meta, fileNotice.settles]);
+  const raisedFileNotice = useRef<string | null>(null);
+  useEffect(() => {
+    if (raisedFileNotice.current !== null && raisedFileNotice.current !== fileNotice?.id) toast.dismiss(raisedFileNotice.current);
+    raisedFileNotice.current = fileNotice?.id ?? null;
+    if (!fileNotice) return;
+    const note: QueueNote = { id: fileNotice.id, tone: "warning", title: fileNotice.title, meta: fileNotice.meta, action: { label: "View", to: "/activity" } };
+    const settle = () => { settleFileProblems(fileNotice.worldId, fileNotice.settles); toast.dismiss(fileNotice.id); };
+    toast.custom(() => <StableNote note={note} onAct={() => { settle(); openActivityPanel("inbox"); }} onDismiss={settle} />, { id: fileNotice.id, duration: Infinity });
+  }, [fileNoticeKey]);
+  // A problem fixed and later back is a new problem, so a path stops counting as told once it clears.
+  const staleFiles = staleFileSettlement(state);
+  useEffect(() => {
+    if (staleFiles) settleFileProblems(staleFiles.worldId, staleFiles.paths);
+  }, [staleFiles && JSON.stringify(staleFiles)]);
 
   // Subscriptions register once; the callbacks read the latest jobs through a ref rather than
   // re-subscribing on every store frame.

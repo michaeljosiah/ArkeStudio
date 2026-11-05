@@ -29,5 +29,5 @@ export function TakeComparisonCard({ action }: { action: ConversationActionCard 
   const production = world.productions.find(p => p.meta.id === action.productionId);
   const cells = [{ id: body.currentSelection, label: "Current selection" }, { id: body.mediaId, label: "Candidate" }];
   return <div className="fy-generation-card__grid" aria-label="Take comparison">{cells.map(({ id, label }) => <TakeMediaFigure key={label} world={world} {...(production ? { production } : {})} id={id} label={label}
-    {...(label === "Candidate" ? { fallback: { path: body.mediaPath, kind: body.mediaKind, poster: body.posterPath } } : {})} />)}</div>;
+    fallback={label === "Candidate" ? { path: body.mediaPath, kind: body.mediaKind, poster: body.posterPath } : { path: body.currentMediaPath, kind: body.mediaKind }} />)}</div>;
 }
