@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { voicedBlocks } from "@arke-studio/contracts";
+import { voicedBlocks, unassignedQuotes } from "@arke-studio/contracts";
 import { castLines, mergeVoicePasses, readVoices, setVoicePin, verifyVoices, voicesPath, type RawVoices, type VoicesDeriverInput } from "../../src/productions/voices.js";
 import { CAST_PARAGRAPHS_SCHEMA_VERSION, VOICE_PINS_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { openChapter, saveChapter } from "../../src/productions/ops.js";
@@ -163,6 +163,26 @@ describe("cast by a press, kept beside the chapter, keyed to the prose (R-44, R-
 
 describe("the author's corrections to the cast (design turn 155, SPEC-012 R-62..R-65)", () => {
   const worldSchema = async (dir: string) => (JSON.parse(await readFile(join(dir, "world.json"), "utf8")) as { schemaVersion: number }).schemaVersion;
+
+  it("retains an intentional narration choice for an unmatched quotation across recasting and reopening (#1760)", async () => {
+    const { store } = await open();
+    const before = await openChapter(store, PRODUCTION, "neap");
+    const body = '“Stay,” Maren said.\n\nThe letter read: “Return by dawn.”';
+    await saveChapter(store, PRODUCTION, "01-neap", body, { baseHash: before.hash });
+    const cast = await castLines(store, PRODUCTION, "neap", async () => ({ lines: [] }));
+    const [speech, letter] = unassignedQuotes(body, cast.record);
+    assert.ok(speech && letter);
+    await setVoicePin(store, PRODUCTION, "neap", { ...letter, narration: true });
+    await setVoicePin(store, PRODUCTION, "neap", { ...speech, speaker: "Maren Kest", sheet: "maren-kest" });
+    const recast = await castLines(store, PRODUCTION, "neap", async () => ({ lines: [{ speaker: "maren-kest", quote: letter.quote }] }));
+    assert.deepEqual(unassignedQuotes(body, recast.record), []);
+    assert.ok(!voicedBlocks(body, recast.record).blocks.some(block => block.speaker && block.text.includes("Return by dawn")));
+    await store.reload();
+    const reopened = await readVoices(store, PRODUCTION, "01-neap");
+    assert.ok(reopened && reopened !== "unreadable");
+    assert.deepEqual(unassignedQuotes(body, reopened), []);
+    assert.equal((await openChapter(store, PRODUCTION, "neap")).body.trim(), body);
+  });
 
   it("a pin is written beside the derived lines, raises the world first, and the read applies it", async () => {
     const { dir, store } = await open();

@@ -625,6 +625,39 @@ export function voicedBlocks(
   return { blocks, ambiguous };
 }
 
+/** Quoted spans with no standing voice or explicit narration choice; an advisory review, not dialogue coverage. */
+export function unassignedQuotes(body: string, record: CastShape | null): Array<Pick<VoicePin, "paragraph" | "occurrence" | "quote">> {
+  if (record === null) return [];
+  const paragraphs = chapterParagraphs(body), standing = reconcileCast(record, body);
+  const covered = new Map<number, Array<{ start: number; end: number }>>();
+  const add = (paragraph: number, span: { start: number; end: number }) => covered.set(paragraph, [...(covered.get(paragraph) ?? []), span]);
+  // Use the actual voiced blocks: ambiguous or overlapping derived attributions fall back to
+  // narration there, and must not hide a quote from review here. Walk repeated text in order.
+  const cursors = new Map<number, number>();
+  for (const block of voicedBlocks(body, record).blocks) {
+    const start = paragraphs[block.paragraph]!.indexOf(block.text, cursors.get(block.paragraph) ?? 0);
+    if (start < 0) continue;
+    const end = start + block.text.length;
+    cursors.set(block.paragraph, end);
+    if (block.speaker !== undefined) add(block.paragraph, { start, end });
+  }
+  for (const pin of standing.pins) {
+    if (pin.narration !== true) continue;
+    const hit = occurrencesOf(paragraphs[pin.paragraph] ?? "", pin.quote)[pin.occurrence];
+    if (hit) add(pin.paragraph, hit);
+  }
+  return paragraphs.flatMap((paragraph, index) => {
+    // Changed paragraphs already have Cast again; do not imply their unfinished cast was audited.
+    if (standing.toCast.includes(index)) return [];
+    return quoteSpans(paragraph).flatMap(span => {
+      if ((covered.get(index) ?? []).some(hit => span.start < hit.end && hit.start < span.end)) return [];
+      const quote = paragraph.slice(span.start, span.end);
+      const occurrence = occurrencesOf(paragraph, quote).findIndex(hit => hit.start === span.start);
+      return occurrence < 0 ? [] : [{ paragraph: index, occurrence, quote }];
+    });
+  });
+}
+
 /**
  * What a pin names for a block, or for words selected inside one (SPEC-012 R-63): its paragraph,
  * the words, and which occurrence of them in the paragraph — found by walking the paragraph's

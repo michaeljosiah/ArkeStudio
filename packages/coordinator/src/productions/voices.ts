@@ -443,11 +443,11 @@ export async function setVoicePin(store: WorldStore, productionId: string, chapt
       }
       pin = { paragraph: input.paragraph, occurrence: input.occurrence, quote: input.quote, speaker, ...(input.sheet !== undefined ? { sheet: input.sheet } : {}) };
     }
-    // Saying what the derivation says is no correction: the pin is dropped rather than kept. A
-    // kept line is not what the derivation said, only what the edit left: its speaker is a pin.
+    // Keep an explicit narration choice even for an uncast quote, so advisory review remembers
+    // it and a later cast cannot silently turn quoted text into speech. Matching speakers need no pin.
     const derived = standing.find((line) => line.occurrence === input.occurrence && line.quote === input.quote);
     const same = pin.narration === true
-      ? derived === undefined
+      ? false
       : derived !== undefined && derived.kept !== true && (pin.sheet !== undefined ? derived.sheet === pin.sheet : derived.sheet === undefined && derived.speaker === pin.speaker);
     if (same) pin = null;
   }
