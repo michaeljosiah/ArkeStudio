@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { normalizeAspect } from "../src/manifest.js";
+import { ulid } from "../src/ids.js";
+import type { ComicPage } from "../src/graphic-novel.js";
 import {
   ComicPageRecordSchema,
   ComicPlanSchema,
@@ -9,7 +12,16 @@ import {
   DEFAULT_COMIC_SETTINGS,
   GRAPHIC_NOVEL_KIND,
   LAYOUT_TEMPLATES,
+  EMPTY_COMIC_PAGE_RECORD,
+  balloonBox,
+  comicPageFinishable,
   comicPageHash,
+  comicPanelHash,
+  comicPanelRects,
+  comicPanelStates,
+  panelShape,
+  panelTakeClears,
+  unplacedLines,
   letteringInOrder,
   pageReading,
   panelRects,
@@ -117,9 +129,59 @@ describe("the picture's fingerprint (R-11, R-25)", () => {
     assert.notEqual(comicPageHash(described, DEFAULT_COMIC_SETTINGS, "baked"), hash);
     assert.notEqual(comicPageHash(lettered, DEFAULT_COMIC_SETTINGS, "baked"), hash);
   });
-  it("ignores lettering text for overlay art, which shows none", () => {
+  it("counts the words on a finished overlay page, which holds them, and never on a panel's art (R-37a, R-48a)", () => {
     const lettered = structuredClone(page); lettered.panels[0]!.lettering[1]!.text = "Where are you now?";
-    assert.equal(comicPageHash(lettered, DEFAULT_COMIC_SETTINGS, "overlay"), comicPageHash(page, DEFAULT_COMIC_SETTINGS, "overlay"));
+    assert.notEqual(comicPageHash(lettered, DEFAULT_COMIC_SETTINGS, "overlay"), comicPageHash(page, DEFAULT_COMIC_SETTINGS, "overlay"));
+    assert.equal(comicPanelHash(lettered.panels[0]!, "4:3"), comicPanelHash(page.panels[0]!, "4:3"));
+    const described = structuredClone(page); described.panels[0]!.description = "Maren turns.";
+    assert.notEqual(comicPanelHash(described.panels[0]!, "4:3"), comicPanelHash(page.panels[0]!, "4:3"));
+    assert.notEqual(comicPanelHash(page.panels[0]!, "1:1"), comicPanelHash(page.panels[0]!, "4:3"));
+  });
+});
+
+describe("a page laid out in code (R-37a, R-38a)", () => {
+  const panels = (count: number) => Array.from({ length: count }, () => ({ id: ulid(), description: "x", characters: [], lettering: [] }));
+  it("gives every panel a rectangle, from its template or as rows of two", () => {
+    assert.equal(comicPanelRects({ layout: "feature", panels: panels(3) }, "ltr")[0]!.h, 0.5);
+    const six = comicPanelRects({ layout: "manga", panels: panels(6) }, "ltr");
+    assert.equal(six.length, 6);
+    assert.deepEqual(six[3], { x: 0.5, y: 1 / 3, w: 0.5, h: 1 / 3 });
+    const five = comicPanelRects({ layout: "grid-2x2", panels: panels(7) }, "rtl");
+    assert.deepEqual(five[6], { x: 0, y: 0.75, w: 1, h: 0.25 });
+    assert.equal(five[0]!.x, 0.5, "right to left reads the right column first");
+  });
+  it("names a box's shape in its lowest terms", () => {
+    assert.equal(panelShape("2:3", { x: 0, y: 0, w: 1, h: 0.5 }), "4:3");
+    assert.equal(panelShape("2:3", { x: 0, y: 0, w: 0.5, h: 0.5 }), "2:3");
+    assert.equal(normalizeAspect(panelShape("2:3", { x: 0, y: 0, w: 0.4, h: 0.35 })) !== null, true);
+  });
+  it("keeps a line's box inside its panel and clear of the box before it", () => {
+    const rect = { x: 0.5, y: 0.5, w: 0.5, h: 0.5 };
+    const first = balloonBox({ kind: "speech", text: "Where are you going at this hour of the night?" }, rect, "2:3", { x: 1, y: 1 });
+    assert.ok(first.x >= 0.5 && first.x + first.w <= 1 + 1e-9);
+    assert.ok(first.y >= 0.5 && first.y + first.h <= 1 + 1e-9);
+    const top = balloonBox({ kind: "speech", text: "Hello" }, rect, "2:3", { x: 0, y: 0 });
+    const next = balloonBox({ kind: "speech", text: "Hello again" }, rect, "2:3", { x: 0, y: 0 }, [top]);
+    assert.ok(next.y >= top.y + top.h);
+  });
+  it("finishes a page only with every panel accepted and every line placed", () => {
+    const line = { id: ulid(), kind: "caption" as const, text: "Dawn." };
+    const panel = { id: ulid(), description: "x", characters: [], lettering: [line] };
+    const one: ComicPage = { id: ulid(), layout: "splash", status: "ready", panels: [panel] };
+    const hash = comicPanelStates(one, undefined, DEFAULT_COMIC_SETTINGS)[0]!.hash;
+    const take = { id: ulid(), panel: panel.id, artifact: "art_01J00000000000000000000000" as never, hash, model: "m", at: "2026-11-05T12:00:00.000Z" };
+    const held = { ...EMPTY_COMIC_PAGE_RECORD, panelTakes: [take], panelAccepted: { [panel.id]: take.id } };
+    assert.equal(comicPageFinishable(one, held, DEFAULT_COMIC_SETTINGS), false);
+    assert.deepEqual(unplacedLines(one, held).map((item) => item.id), [line.id]);
+    const placed = { ...held, placements: [{ item: line.id, box: { x: 0, y: 0, w: 0.2, h: 0.1 } }] };
+    assert.equal(comicPageFinishable(one, placed, DEFAULT_COMIC_SETTINGS), true);
+    assert.equal(comicPanelStates({ ...one, panels: [{ ...panel, description: "y" }] }, placed, DEFAULT_COMIC_SETTINGS)[0]!.accepted, undefined, "a take of what it no longer shows is not the panel");
+  });
+  it("clears a finished overlay take without a check, and a baked one only with one (R-37b)", () => {
+    assert.equal(takeClears({ mode: "overlay" }), true);
+    assert.equal(takeClears({ mode: "baked" }), false);
+    assert.equal(panelTakeClears({}), false);
+    assert.equal(panelTakeClears({ review: { status: "unavailable", reason: "no-reviewer", at: "2026-11-05T12:00:00.000Z" } }), false);
   });
 });
 

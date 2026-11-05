@@ -1,5 +1,5 @@
 import { PICTURE_IDENTITY_LINE, referenceBriefLine } from "./audiobook-illustrate.js";
-import { layoutTemplate, pageAspect, pageReading, type ComicMode, type ComicPage, type ComicSettings, type LetteringItem } from "./graphic-novel.js";
+import { layoutTemplate, pageAspect, pageReading, type ComicMode, type ComicPage, type ComicPanel, type ComicSettings, type LetteringItem } from "./graphic-novel.js";
 
 /**
  * The page brief (SPEC-064 R-16, R-23): the look, the layout, each panel in reading order, then the
@@ -22,6 +22,44 @@ const READING_WORDS = {
 } as const;
 
 export interface ComicCited { name: string; kind: "character" | "place"; token: string }
+
+/** The accepted panel that rides to hold the book's drawing (R-37b), by the name the Bench cites it. */
+export const COMIC_STYLE_REFERENCE = "Style reference";
+
+/**
+ * One panel's brief (R-37a): what it shows and nothing it says. The line about the style reference
+ * names everything not to take from it: told to match an anchor panel, the trial's cells drew the
+ * anchor's statue in nearly every panel (2026-11-04).
+ */
+export function comicPanelPrompt(input: {
+  panel: ComicPanel;
+  shape: string;
+  look?: string;
+  style?: string;
+  names: (sheet: string) => string;
+  cited: readonly ComicCited[];
+}): string {
+  const { panel } = input;
+  const who = panel.characters.map(input.names);
+  const lines = [`One comic book panel, a single image exactly ${input.shape} in shape, filling the whole frame with no border and no gutter.`];
+  if (input.look) lines.push(`Look: ${input.look.replace(/\s+/g, " ").trim()}`);
+  if (input.style?.trim()) lines.push(`Style: ${input.style.replace(/\s+/g, " ").trim()}${input.look ? " Where this style and the look above differ, follow the style." : ""}`);
+  lines.push([
+    `The panel: ${panel.description.replace(/\s+/g, " ").trim()}`,
+    panel.shot ? `Shot: ${panel.shot}.` : "",
+    who.length ? `Shows ${who.join(", ")}.` : "",
+    panel.location ? `At ${input.names(panel.location)}.` : "",
+  ].filter(Boolean).join(" "));
+  const anchor = input.cited.find((entry) => entry.name === COMIC_STYLE_REFERENCE);
+  const cast = input.cited.filter((entry) => entry !== anchor);
+  const references = [referenceBriefLine(cast), cast.some((entry) => entry.kind === "character") ? PICTURE_IDENTITY_LINE : ""].filter(Boolean).join(" ");
+  if (references) lines.push(references);
+  if (anchor) lines.push(`@${anchor.token} is another panel of this book, shown only for how it is drawn: its line, colour and finish. Take no person, place, object or composition from it.`);
+  lines.push("Every person has natural anatomy: two arms, two hands, five fingers on each hand, each hand joined to its own arm and turned the way a real wrist allows.");
+  if (panel.lettering.length) lines.push("Leave a calm area of the picture clear of faces and hands, where words will be set later.");
+  lines.push("Draw no lettering at all: no balloons, captions, sound effects, titles or page numbers. Writing only where the panel's description calls for it.");
+  return lines.join("\n\n");
+}
 
 export function comicPagePrompt(input: {
   page: ComicPage;

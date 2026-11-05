@@ -618,6 +618,14 @@ export const COMIC_USUAL_SCHEMA_VERSION = 119;
 export const COMIC_PILOT_SCHEMA_VERSION = 120;
 const COMIC_PLAN_KEYS = /"(plan|read)"\s*:/;
 /**
+ * Panel by panel (design turn 269, SPEC-064 R-36a – R-48a): the panels and placed words on the strict
+ * page record, and the typeface on the strict settings, which a build of 122 refuses, dropping the
+ * page's takes or the book's settings with them. An overlay take is refused by no reader, but a
+ * build of 122 holds its export, so it rides here too.
+ */
+export const COMIC_PANELS_SCHEMA_VERSION = 123;
+const COMIC_PANELS_KEYS = /"(panelTakes|placements|typeface)"\s*:|"mode"\s*:\s*"overlay"/;
+/**
  * An audio drama's takes (SPEC-057 R-29, codex on PR 1871): `drama-takes/` and the `episode` on a
  * take's strict audiobook sidecar. A build before them drops each such artifact as unreadable.
  */
@@ -1124,6 +1132,7 @@ export class Committer {
       files.some((f) => GRAPHIC_NOVEL_FILE.test(f.path) && f.newContent != null) ? GRAPHIC_NOVEL_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/(comic\.json$|comic\/)/.test(f.path) && f.newContent != null && COMIC_ADAPTATION_KEYS.test(f.newContent)) ? COMIC_ADAPTATION_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/comic-pages\//.test(f.path) && f.newContent != null && COMIC_PAGE_REVIEW_KEYS.test(f.newContent)) ? COMIC_PAGE_REVIEW_SCHEMA_VERSION : 0,
+      files.some((f) => /^productions\/[^/]+\/(comic\.json$|comic-pages\/)/.test(f.path) && f.newContent != null && COMIC_PANELS_KEYS.test(f.newContent)) ? COMIC_PANELS_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/comic\//.test(f.path) && f.newContent != null && COMIC_PLAN_KEYS.test(f.newContent)) ? COMIC_PLAN_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/comic\//.test(f.path) && f.newContent != null && /"mysteries"\s*:\s*\[\s*"/.test(f.newContent)) ? COMIC_USUAL_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/drama-takes\//.test(f.path) && f.newContent != null) ? DRAMA_TAKE_SCHEMA_VERSION : 0,

@@ -2,7 +2,7 @@ import type { TraversalEvidence } from "@arke-studio/contracts";
 import type { ArkePlayerPartRequest, ArkePlayerPictureSize, SetGuideEntry, SetGuideTeasers } from "@arke-studio/contracts";
 import type { StoryPublishAction } from "@arke-studio/contracts";
 import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
-import type { AudiobookReader, PictureShot, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
+import type { LetteringPlacement, AudiobookReader, PictureShot, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
 import type { WorldOpenPhase } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
@@ -1238,6 +1238,8 @@ export function subscribeComicScriptSaveResults(listener: (result: ComicScriptSa
 export type ComicPageQuote = Extract<DomainEvent, { type: "comic.page-quote" }>;
 export type ComicPageMade = Extract<DomainEvent, { type: "comic.page-made" }>;
 export type ComicTakeResult = Extract<DomainEvent, { type: "comic.take-result" }>;
+export type ComicPageLettered = Extract<DomainEvent, { type: "comic.page-lettered" }>;
+export type ComicLetteringPlaced = Extract<DomainEvent, { type: "comic.lettering-placed" }>;
 type ComicPageEvent = ComicPageQuote | ComicPageMade | ComicTakeResult;
 const comicPageListeners = new Set<(event: ComicPageEvent) => void>();
 export function subscribeComicPages(listener: (event: ComicPageEvent) => void): () => void {
@@ -2070,7 +2072,7 @@ function handleFrame(json: string): void {
     if (event.type === "episode-script.save-result") {
       for (const listener of episodeScriptSaveListeners) listener(event);
     }
-    if (event.type === "comic.page-quote" || event.type === "comic.page-made" || event.type === "comic.take-result") {
+    if (event.type === "comic.page-quote" || event.type === "comic.page-made" || event.type === "comic.take-result" || event.type === "comic.page-lettered" || event.type === "comic.lettering-placed") {
       for (const listener of comicPageListeners) listener(event);
     }
     if (event.type === "comic.exported") {
@@ -5555,9 +5557,33 @@ export function saveComicScript(worldId: string, productionId: string, chapter: 
 }
 
 /** Ask what a page would cost and send; also files a page that landed while the app was closed (SPEC-064 R-25). */
-export function quoteComicPage(worldId: string, productionId: string, page: string, mode?: ComicMode): string | null {
+export function quoteComicPage(worldId: string, productionId: string, page: string, mode?: ComicMode, panel?: string): string | null {
   const requestId = ulid();
-  return send({ kind: "quote-comic-page", requestId, worldId, productionId, page, ...(mode !== undefined ? { mode } : {}) }) ? requestId : null;
+  return send({ kind: "quote-comic-page", requestId, worldId, productionId, page, ...(mode !== undefined ? { mode } : {}), ...(panel !== undefined ? { panel } : {}) }) ? requestId : null;
+}
+
+/** Panel by panel: every panel not yet made, or this one, on the price its press showed (SPEC-064 R-37a). */
+export function makeComicPanels(worldId: string, productionId: string, page: string, confirmedMicroUsd: number, panel?: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "make-comic-page", requestId, worldId, productionId, page, confirmedMicroUsd, ...(panel !== undefined ? { panel } : {}) }) ? requestId : null;
+}
+
+/** Where a page's words stand (SPEC-064 R-38a); `undoesPlacing` lets go of what Arke's placing kept. */
+export function setComicLettering(worldId: string, productionId: string, page: string, placements: LetteringPlacement[], undoesPlacing = false): string | null {
+  const requestId = ulid();
+  return send({ kind: "set-comic-lettering", requestId, worldId, productionId, page, placements, ...(undoesPlacing ? { undoesPlacing: true as const } : {}) }) ? requestId : null;
+}
+
+/** Place with Arke, a page or a chapter's ready pages (SPEC-064 R-39a). */
+export function placeComicLettering(worldId: string, productionId: string, target: { kind: "page"; page: string } | { kind: "chapter"; chapter: string }): string | null {
+  const requestId = ulid();
+  return send({ kind: "place-comic-lettering", requestId, worldId, productionId, target }) ? requestId : null;
+}
+
+/** Accept page: the image flattened here, filed as the page (SPEC-064 R-48a). */
+export function finishComicPage(worldId: string, productionId: string, page: string, hash: string, jpegBase64: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "finish-comic-page", requestId, worldId, productionId, page, hash, jpegBase64 }) ? requestId : null;
 }
 
 /** Make a page on the price its press showed (SPEC-064 R-27). */
