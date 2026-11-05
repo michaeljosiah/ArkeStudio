@@ -22420,6 +22420,11 @@ export class Coordinator {
       if (added && making.panel !== undefined) this.checkFiledComicPanel(store, productionId, pageId, id, making.panel, making.requestId);
       else if (added) this.checkFiledComicTake(store, productionId, pageId, id, making.requestId);
     }
+    // A paid panel the app closed on before its review finished is looked at now, or Pages said checking for good (codex on PR 2582).
+    const now = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+    for (const take of now === undefined ? [] : comicPageRecord(now, pageId).panelTakes) {
+      if (take.review === undefined) this.checkFiledComicPanel(store, productionId, pageId, take.id, take.panel, ulid());
+    }
   }
 
   /**
@@ -22445,6 +22450,9 @@ export class Coordinator {
       emit("made", { passed: takeClears(checked) });
     })().catch(() => {});
   }
+
+  /** Panel takes being looked at in this process: one on the record with no review and not here was cut off by a restart. */
+  private readonly reviewingComicPanels = new Set<string>();
 
   private comicMode(store: WorldStore, productionId: string): ComicMode {
     return store.getBundle().productions.find((candidate) => candidate.meta.id === productionId)?.comic?.mode ?? "baked";
@@ -22473,6 +22481,8 @@ export class Coordinator {
    * time and each is looked at as it comes. Not awaited, as a late page's read is not.
    */
   private checkFiledComicPanel(store: WorldStore, productionId: string, page: string, take: string, panel: string, requestId: string): void {
+    if (this.reviewingComicPanels.has(take)) return;
+    this.reviewingComicPanels.add(take);
     const emit = (state: "checking" | "made", extra: { passed?: boolean } = {}) =>
       this.emit({ at: new Date().toISOString(), type: "comic.page-made", requestId, worldId: store.worldId, productionId, page, panel, state, take, ...extra });
     const gone = () => this.stopping || store.closingSignal.aborted || this.opts.provider.openStore?.() !== store;
@@ -22485,7 +22495,7 @@ export class Coordinator {
       if (gone()) return;
       await this.refreshWorldSnapshot(store.worldId);
       emit("made", { passed: review.status === "compared" && review.findings.length === 0 });
-    })().catch(() => {});
+    })().catch(() => {}).finally(() => this.reviewingComicPanels.delete(take));
   }
 
   /**
@@ -22515,14 +22525,14 @@ export class Coordinator {
       const total = requests.reduce((sum, request) => sum + (request.ok ? request.microUsd : 0), 0);
       if (total > msg.confirmedMicroUsd) { emit("failed", { reason: `the price moved · ${priceLabel(total)}` }); return; }
       const language = (store.getBundle().productions.find((candidate) => candidate.meta.id === productionId)?.comic ?? DEFAULT_COMIC_SETTINGS).language;
-      const admissions = requests.flatMap((request, index) => request.ok ? [{ requestId: index === 0 ? msg.requestId : ulid(), hash: request.state.hash, panel: request.state.panel.id }] : []);
+      const admissions = requests.flatMap((request, index) => request.ok ? [{ requestId: index === 0 ? msg.requestId : ulid(), hash: request.state.hash, panel: request.state.panel.id, quoted: request.microUsd }] : []);
       await changeComicPage(store, productionId, page, (record) => ({ ...record,
         making: [...record.making, ...admissions.map((entry) => ({ requestId: entry.requestId, hash: entry.hash, mode: "overlay" as const, model: model.id, language, at: this.nowIso(), panel: entry.panel }))],
         panelFailed: Object.fromEntries(Object.entries(record.panelFailed).filter(([panel]) => !panels.includes(panel))) }));
       await this.refreshWorldSnapshot(worldId);
       emit("making");
       let spent = 0;
-      for (const admission of admissions) {
+      for (const [index, admission] of admissions.entries()) {
         const letGo = async (reason: string) => {
           await changeComicPage(store, productionId, page, (record) => ({ ...record,
             making: record.making.filter((entry) => entry.requestId !== admission.requestId),
@@ -22532,8 +22542,13 @@ export class Coordinator {
         };
         if (control.signal.aborted) { await letGo("stopped"); continue; }
         // Asked again for each: the panel before it may now be accepted and ride as the drawing's reference.
-        const request = comicPanelRequest(store, productionId, page, admission.panel, model);
+        // What this panel may spend: the press's price, less what is spent and what the panels after it were quoted.
+        const allowed = msg.confirmedMicroUsd - spent - admissions.slice(index + 1).reduce((sum, later) => sum + later.quoted, 0);
+        // A reference that became available since the quote can cost more; the press's price holds, so it stays home (codex on PR 2582).
+        let request = comicPanelRequest(store, productionId, page, admission.panel, model);
+        if (request.ok && request.microUsd > allowed) request = comicPanelRequest(store, productionId, page, admission.panel, model, { noStyleReference: true });
         if (!request.ok) { await letGo(request.reason); continue; }
+        if (request.microUsd > allowed) { await letGo(`the price moved · ${priceLabel(request.microUsd)}`); continue; }
         const number = request.state.index + 1;
         const made = await this.makeBenchPicture(store, {
           title: `Page ${request.number} · panel ${number}`,
@@ -22543,7 +22558,7 @@ export class Coordinator {
           ...(model.limits.providerSelectedSize !== true ? { aspect: request.aspect } : {}),
           who: request.who,
           requestId: admission.requestId,
-          ceilingMicroUsd: Math.max(msg.confirmedMicroUsd - spent, request.microUsd),
+          ceilingMicroUsd: allowed,
           signal: control.signal,
           onSession: async (sessionId) => {
             await changeComicPage(store, productionId, page, (record) => ({ ...record,

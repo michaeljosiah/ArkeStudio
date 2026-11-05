@@ -273,7 +273,9 @@ export function PageWords({ world, production, page, chapter, saving, connected,
   const lines = useMemo(() => pageLines(page), [page]);
   const stored = record?.placements;
   const storedKey = JSON.stringify(stored ?? []);
-  const [placements, setPlacements] = useState<LetteringPlacement[]>(stored ?? []);
+  // A line deleted in the script leaves its placement on the record; sent back, it would refuse every later save (codex on PR 2582).
+  const known = (list: readonly LetteringPlacement[]) => list.filter((entry) => lines.some((line) => line.item.id === entry.item));
+  const [placements, setPlacements] = useState<LetteringPlacement[]>(() => known(stored ?? []));
   const undo = useRef<LetteringPlacement[][]>([]);
   const dragging = useRef(false);
   const [picked, setPicked] = useState<string | null>(null);
@@ -299,14 +301,18 @@ export function PageWords({ world, production, page, chapter, saving, connected,
     setSending(true);
   };
   const save = (next: LetteringPlacement[], undoesPlacing = false) => {
-    queued.current = { next, undoesPlacing: undoesPlacing || queued.current?.undoesPlacing === true };
+    queued.current = { next: known(next), undoesPlacing: undoesPlacing || queued.current?.undoesPlacing === true };
     flush();
   };
+  // Leaving with an edit still waiting sends it: nothing here would hear the answer it waits for (codex on PR 2582).
+  useEffect(() => () => {
+    if (queued.current !== null) setComicLettering(worldId, productionId, page.id, queued.current.next, queued.current.undoesPlacing);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (dragging.current || inFlight.current !== null || queued.current !== null) return;
     // Just after a save, only the snapshot of that save is news; anything else is older and on its way past.
     if (Date.now() - answeredAt.current < 1500 && storedKey !== lastSaved.current) return;
-    setPlacements(stored ?? []);
+    setPlacements(known(stored ?? []));
   }, [storedKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const lastSaved = useRef<string | null>(null);
   useEffect(() => subscribeComicPages((event) => {
@@ -369,7 +375,7 @@ export function PageWords({ world, production, page, chapter, saving, connected,
     if (!record?.placedByArke) return;
     undo.current = [];
     setUndoDepth(0);
-    setPlacements(record.placedByArke.before);
+    setPlacements(known(record.placedByArke.before));
     save(record.placedByArke.before, true);
   };
   /** A line placed where its panel has room; dragging puts it where the author wants it. */

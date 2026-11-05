@@ -4,7 +4,7 @@ import { comicBook, comicPageHash, comicPanelStates, ulid, type ComicPage, type 
 import { Coordinator } from "../../src/coordinator.js";
 import { comicExportBlockers } from "../../src/productions/comic-export.js";
 import { createChapter, createProduction } from "../../src/productions/ops.js";
-import { finishComicPage, nearestPanelShape, placeComicPage, saveComicScript, setComicLettering, setComicSettings } from "../../src/productions/graphic-novel.js";
+import { changeComicPage, finishComicPage, nearestPanelShape, placeComicPage, saveComicScript, setComicLettering, setComicSettings } from "../../src/productions/graphic-novel.js";
 import type { PageReviewer } from "../../src/productions/graphic-novel-reviewer.js";
 import { IMAGE, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
 import { until } from "../wait.js";
@@ -101,6 +101,32 @@ describe("Panel by panel (SPEC-064 R-37a, R-37b)", () => {
       await h.send({ kind: "accept-comic-take", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, take: take.id, override: { findings: ["review:defect:0"] } });
       assert.equal(record(h, production).panelAccepted[gull], take.id);
       assert.deepEqual(record(h, production).panelTakes.at(-1)!.override?.findings, ["review:defect:0"]);
+    }, { model: DRAWER }).finally(restore);
+  });
+
+  it("looks at a filed panel the app closed on before its review, when the page is next opened", () => {
+    const restore = reviewing(() => []);
+    return withHarness(async (h) => {
+      const { store, production, page } = await book(h);
+      const quote = await quoted(h, production, page.id);
+      await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, confirmedMicroUsd: quote.microUsd });
+      await until(() => Object.keys(record(h, production).panelAccepted).length === 3, "the panels to land");
+      // As the app left it: filed, with no verdict and nothing looking at it.
+      await changeComicPage(store, production, page.id, (held) => ({ ...held, panelAccepted: {}, panelTakes: held.panelTakes.map(({ review: _gone, ...take }) => take) }));
+      await quoted(h, production, page.id);
+      await until(() => Object.keys(record(h, production).panelAccepted).length === 3, "the reviews to run again");
+    }, { model: DRAWER }).finally(restore);
+  });
+
+  it("keeps every panel inside the price the press confirmed when a style reference has become available", () => {
+    const restore = reviewing(() => []);
+    return withHarness(async (h) => {
+      const { production, page } = await book(h);
+      const quote = await quoted(h, production, page.id);
+      await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, confirmedMicroUsd: quote.microUsd });
+      await until(() => record(h, production).panelTakes.length === 3, "the panels to land");
+      const spent = h.enqueued.reduce((sum, job) => sum + job.estimatedMicroUsd, 0);
+      assert.ok(spent <= quote.microUsd, `${spent} within ${quote.microUsd}`);
     }, { model: DRAWER }).finally(restore);
   });
 

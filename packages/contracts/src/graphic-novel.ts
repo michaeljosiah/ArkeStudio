@@ -549,12 +549,14 @@ export function letteringInOrder(pages: readonly ComicPage[], firstPage = 1): Co
  * What makes a page's picture what it is (R-11, R-25), and nothing else: a typo fixed in `notes` or
  * a status change is not a stale page. A finished overlay take holds the words flattened into it
  * (R-48a), so they count in either mode; retyping a line asks for Accept page again and redraws no
- * panel, because a panel's own art is fingerprinted by `comicPanelHash`.
+ * panel, because a panel's own art is fingerprinted by `comicPanelHash`. Its typeface is drawn into
+ * it too, so changing the book's asks the same (codex on PR 2582).
  */
-export function comicPageHash(page: ComicPage, settings: Pick<ComicSettings, "reading" | "aspect">, mode: ComicMode): string {
+export function comicPageHash(page: ComicPage, settings: Pick<ComicSettings, "reading" | "aspect" | "typeface">, mode: ComicMode): string {
   const reading = pageReading(page, settings);
   const picture = {
     layout: page.layout, reading, aspect: pageAspect(page, settings), mode,
+    ...(mode === "overlay" ? { typeface: settings.typeface ?? "comic" } : {}),
     panels: page.panels.map((panel) => ({
       description: panel.description, shot: panel.shot ?? null, characters: panel.characters,
       location: panel.location ?? null, size: panel.size ?? null,

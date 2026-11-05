@@ -406,7 +406,7 @@ export type ComicPanelRequest =
   | { ok: false; reason: string };
 
 /** One panel's generation: its people and place riding, and no line of its script (R-37a). */
-export function comicPanelRequest(store: WorldStore, productionId: string, pageId: string, panelId: string, model: ManifestModel): ComicPanelRequest {
+export function comicPanelRequest(store: WorldStore, productionId: string, pageId: string, panelId: string, model: ManifestModel, options: { noStyleReference?: boolean } = {}): ComicPanelRequest {
   const production = graphicNovel(store, productionId);
   const found = findComicPage(production, pageId);
   if (!found) return { ok: false, reason: "that page is no longer in the script" };
@@ -427,7 +427,7 @@ export function comicPanelRequest(store: WorldStore, productionId: string, pageI
   const missing = cast.filter((entry) => !entry.carried || entry.reference === null).map((entry) => entry.name);
   const riding = cast.filter((entry) => entry.carried && entry.reference !== null).length;
   // The cast's pictures first; the drawing's reference takes a place only if one is left over.
-  const anchor = riding < referenceBudgetFor(model) ? styleAnchor(store, production, pageId, panelId) : null;
+  const anchor = options.noStyleReference !== true && riding < referenceBudgetFor(model) ? styleAnchor(store, production, pageId, panelId) : null;
   const who: PictureWho[] = anchor === null ? cast : [...cast, { key: "comic-style-reference", name: COMIC_STYLE_REFERENCE, kind: "place", reference: anchor, carried: true }];
   const look = artDirectionFor(store, productionId);
   const style = settings.style?.words;

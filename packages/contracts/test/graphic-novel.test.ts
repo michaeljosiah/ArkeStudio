@@ -136,6 +136,8 @@ describe("the picture's fingerprint (R-11, R-25)", () => {
     const described = structuredClone(page); described.panels[0]!.description = "Maren turns.";
     assert.notEqual(comicPanelHash(described.panels[0]!, "4:3"), comicPanelHash(page.panels[0]!, "4:3"));
     assert.notEqual(comicPanelHash(page.panels[0]!, "1:1"), comicPanelHash(page.panels[0]!, "4:3"));
+    assert.notEqual(comicPageHash(page, { ...DEFAULT_COMIC_SETTINGS, typeface: "bold" }, "overlay"), comicPageHash(page, DEFAULT_COMIC_SETTINGS, "overlay"), "the typeface is drawn into it");
+    assert.equal(comicPageHash(page, { ...DEFAULT_COMIC_SETTINGS, typeface: "bold" }, "baked"), comicPageHash(page, DEFAULT_COMIC_SETTINGS, "baked"));
   });
 });
 
