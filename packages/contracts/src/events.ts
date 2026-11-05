@@ -14,6 +14,7 @@ import { StoryEditionSchema, StoryPublishResultSchema } from "./story-publicatio
 import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { valueSchema } from "./value-schema.js";
 import { StageConstructionDraftSchema } from "./stage-construction.js";
+import { CreatorPublishingStateSchema } from "./creator-publishing.js";
 import { AccountStateSchema } from "./account.js";
 import { MasterAudioReviewSchema, PreparedPerformanceAudioReviewSchema } from "./audio-reference.js";
 import { PromptReviewSchema } from "./prompt-review.js";
@@ -2569,6 +2570,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("activity.seen"), seen: ActivitySeenSchema }).strict(),
   /** The Arke account moved: a handoff begun, come back or refused, a sign-out (design turn 151). */
   z.object({ ...base, type: z.literal("account.changed"), account: AccountStateSchema }).strict(),
+  z.object({ ...base, type: z.literal("creator-publishing.changed"), worldId: UlidSchema, requestId: UlidSchema.optional(), state: CreatorPublishingStateSchema }).strict(),
   z
     .object({
       ...base,

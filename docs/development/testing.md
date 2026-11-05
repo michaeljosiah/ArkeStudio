@@ -1,5 +1,10 @@
 # Running and validating changes
 
+Creator publishing #2391: see [host configuration, focused suites and live qualification
+limits](aonik-publishing.md). `node scripts/smoke-creator-publishing.mjs` exercises the
+real sandboxed Electron file page at desktop/Fold/phone widths. Protocol and synthetic
+package tests do not establish live Auth0 sign-in or an AONIK dev deployment.
+
 Retail chapter MP3 delivery (SPEC-047 R-22/R-23): coordinator `test/audio/retail.test.ts` and
 `test/productions/audiobook-listening.test.ts`; client `test/audiobook-export.test.tsx`.
 Set `ARKE_FFMPEG` (optionally `ARKE_FFPROBE`) to a qualified installed/bundled encoder for actual

@@ -823,6 +823,14 @@ export function subscribeAudiobookExported(listener: (answer: AudiobookExported)
   return () => audiobookExportedListeners.delete(listener);
 }
 /** The world package for Arke Player (design turn 233c): answered to the export that named it. */
+export type CreatorPublishingChanged = Extract<DomainEvent, { type: "creator-publishing.changed" }>;
+const creatorPublishingListeners = new Set<(answer: CreatorPublishingChanged) => void>();
+export function subscribeCreatorPublishing(listener: (answer: CreatorPublishingChanged) => void): () => void {
+  creatorPublishingListeners.add(listener); return () => creatorPublishingListeners.delete(listener);
+}
+export function creatorPublishing(command: Omit<Extract<ClientMessage, { kind: "creator-publishing-list" }>, "requestId"> | Omit<Extract<ClientMessage, { kind: "creator-publishing-prepare" }>, "requestId"> | Omit<Extract<ClientMessage, { kind: "creator-publishing-submit" }>, "requestId"> | Omit<Extract<ClientMessage, { kind: "creator-publishing-control" }>, "requestId">): string | null {
+  const requestId = ulid(); return send({ ...command, requestId }) ? requestId : null;
+}
 export type ArkePlayerExported = Extract<DomainEvent, { type: "arke-player.exported" }>;
 const arkePlayerExportedListeners = new Set<(answer: ArkePlayerExported) => void>();
 export function subscribeArkePlayerExported(listener: (answer: ArkePlayerExported) => void): () => void {
@@ -2156,6 +2164,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "audiobook.exported") {
       for (const listener of audiobookExportedListeners) listener(event);
+    }
+    if (event.type === "creator-publishing.changed") {
+      for (const listener of creatorPublishingListeners) listener(event);
     }
     if (event.type === "arke-player.exported") {
       for (const listener of arkePlayerExportedListeners) listener(event);

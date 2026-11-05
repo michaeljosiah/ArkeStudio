@@ -223,7 +223,7 @@ function SignedIn({ account }: { account: Extract<AccountState, { kind: "signed-
               <span className="fy-account__end">
                 {session === "offline" ? (
                   <span className="fy-account__state">offline</span>
-                ) : (
+                ) : account.pages !== undefined && (remote || !account.pages.includes("plan")) ? null : (
                   <button
                     type="button"
                     role="menuitem"
@@ -236,7 +236,7 @@ function SignedIn({ account }: { account: Extract<AccountState, { kind: "signed-
                 )}
               </span>
             </div>
-            <button
+            {(account.pages === undefined || (!remote && account.pages.includes("account"))) && <button
               type="button"
               role="menuitem"
               className="fy-account__row fy-account__row--item"
@@ -246,7 +246,7 @@ function SignedIn({ account }: { account: Extract<AccountState, { kind: "signed-
               <span className="fy-account__end">
                 <ArrowUpRight size={14} />
               </span>
-            </button>
+            </button>}
           </>
         )}
       </div>

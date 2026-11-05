@@ -23,6 +23,7 @@ import {
 import { downloadMedia } from "../lib/download.js";
 import { mediaUrl } from "../lib/media.js";
 import { listWebPackages, openExportsFolder, subscribeArkePlayerExported, subscribeWebPackages, exportArkePlayer, useStore, useWorld, type ArkePlayerExported } from "../lib/store.js";
+import { CreatorPublishingPanel } from "./creator-publishing.js";
 import { Folder, megabytes, Toggle } from "./audiobook-video.js";
 import { cx } from "./ui.js";
 
@@ -426,6 +427,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
             </div>
           )}
           {handed !== null && <div className="fy-abv-warn">{handed}</div>}
+          {listed?.find(entry => entry.file === made.file)?.exportId && <CreatorPublishingPanel worldId={worldId} productionId={production.meta.id} exportId={listed!.find(entry => entry.file === made.file)!.exportId!} />}
         </div>
       )}
     </>

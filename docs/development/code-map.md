@@ -1,5 +1,12 @@
 # Code map
 
+Creator publishing (#2391): contracts `creator-publishing.ts` defines confirmation and
+receipt DTOs; coordinator `publishing/` owns optional OIDC sign-in, frozen Player ZIPs,
+fixed-origin transport and durable resumable requests. Desktop `aonik-publishing.ts`
+composes protected storage and browser handoff. Client `components/creator-publishing.tsx`
+is shared by export results and Publications. Its host/human-only wire events never
+enter world changelogs. See [configuration and qualification](aonik-publishing.md).
+
 Audiobook edit anchors (#1668): contracts `audiobook.ts` relocates cast paragraph seams by
 unique whole-paragraph hashes and derives `startHashes` for shaped blocks. `audiobook-beats.ts`
 uses unique unchanged text to recover moved beat names. `audiobook-listening.ts` uses those
