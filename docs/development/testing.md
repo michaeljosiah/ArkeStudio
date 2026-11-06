@@ -1,5 +1,10 @@
 # Running and validating changes
 
+Oversized conversation messages (#1742): client `test/harness-model-controls.test.tsx` covers
+idle and first-message drafts, passage prefixes, selection-menu drafts, automatic openings,
+World Chat and the shared send guard. Check 16,000 characters still fit the transport schema,
+while oversized drafts remain editable without a create, send or optimistic wait.
+
 Unavailable picture targets (#1812): coordinator `test/productions/audiobook-picture-rejection.test.ts`
 checks correlated pre-dispatch failures for the picture and its linked Tall without queueing work.
 Client `test/audiobook-picture.test.tsx` checks that the existing card leaves Generating and shows

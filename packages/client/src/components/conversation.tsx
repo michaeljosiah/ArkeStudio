@@ -13,7 +13,7 @@ import { ProductionExportReceipt } from "./production-export-card.js";
 import { TakeComparisonCard } from "./take-comparison-card.js";
 import { ConversationActionGroup } from "./conversation-action-group.js";
 import { ChapterWordCounts } from "./chapter-word-counts.js";
-import { CHAPTER_WORD_COUNT_LABEL, measuredChapterWords } from "@arke-studio/contracts";
+import { CHAPTER_WORD_COUNT_LABEL, measuredChapterWords, worldChatTextRefusal } from "@arke-studio/contracts";
 import { ProductionPlanCardView } from "./production-plan-card.js";
 import { ProductionSetupOutline } from "./production-setup-outline.js";
 import { HumanDecisionCardView } from "./human-decision-card.js";
@@ -898,6 +898,14 @@ export function ProductionConversationBody({
   const [notesCollapsed, setNotesCollapsed] = useState<boolean | undefined>(undefined);
   const [omittedAttachments, setOmittedAttachments] = useConversationState<ReadonlySet<string>>("omittedAttachments", new Set());
   const [attachmentTrouble, setAttachmentTrouble] = useConversationState<readonly { name: string; reason: string }[]>("attachmentTrouble", []);
+  const checkText = (text: string) => {
+    const reason = worldChatTextRefusal(text);
+    setAttachmentTrouble(previous => {
+      const rest = previous.filter(item => item.name !== "Message");
+      return reason ? [...rest, { name: "Message", reason }] : rest.length === previous.length ? previous : rest;
+    });
+    return reason === null;
+  };
   const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string; path: string } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
   const hasContext = entry !== undefined || !!productionId;
@@ -1029,6 +1037,7 @@ export function ProductionConversationBody({
     if (opening.files) void attachHostFiles(worldChatAttachTarget(worldId, opened), opening.files).then(refusals => { setAttachmentTrouble(refusals); opening.onAttached?.(refusals); });
     else if (opening.attach) worldChatAttachFiles(worldId, opened);
     else {
+      if (!checkText(opening.text)) { setMessage(current => current || opening.text); setOpening(null); return; }
       const requestId = sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false, undefined, opening.variant);
       if (requestId === null) return;
       opening.onSent?.(requestId);
@@ -1074,6 +1083,7 @@ export function ProductionConversationBody({
       return;
     }
     handedOver.current = true;
+    if (!checkText(openWith)) { setMessage(current => current || openWith); return; }
     if (conversationId) {
       sendWorldChat(worldId, conversationId, openWith, [], undefined, languageModelId, false, undefined, chatVariant);
       return;
@@ -1102,6 +1112,7 @@ export function ProductionConversationBody({
     again?: string,
   ): boolean => {
     if (!text || !worldId || !hasContext || presentation?.scopeMissing) return false;
+    if (!checkText(text)) return false;
     // A second line said while the first is still opening its thread would open a second one,
     // and one said over a running turn starts a second turn the first can no longer stop.
     // Nor over a line just sent that the thread has not shown yet (codex on PR 1232): the runner
@@ -1165,6 +1176,8 @@ export function ProductionConversationBody({
         ...(languageModelId ? { modelId: languageModelId } : {}), ...(chatVariant ? { variant: chatVariant } : {}) }, message);
       return;
     }
+    const contextPrefix = draftAsk ? draftAsk.text.slice(0, draftAsk.text.length - draftAsk.line.length).trimEnd() : dock?.subjectPrefix;
+    if (!checkText(contextPrefix === undefined ? text : `${contextPrefix} ${text}`)) return;
     // The words leave the box only once they have gone (codex on PR 1232): a line held back —
     // a turn running, one just sent — stays where the author typed it.
     // A line a menu press started is about the passage it was pressed on (codex on PR 1232).

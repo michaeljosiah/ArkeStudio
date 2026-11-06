@@ -1,5 +1,5 @@
 import { PromptTargetSchema, PromptInspectSourceSchema } from "./prompt-tools.js";
-import { WorldChatInputRequestSchema, WorldChatInputRoutingSchema } from "./world-chat-input.js";
+import { WORLD_CHAT_INPUT_BOUNDS, WorldChatInputRequestSchema, WorldChatInputRoutingSchema } from "./world-chat-input.js";
 import { MediaMeasurementSourceSchema } from "./media-measurement.js";
 import { Sha256Schema as MeasurementHashSchema } from "./ids.js";
 import { TraversalEvidenceSchema } from "./routing.js";
@@ -701,7 +701,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       requestId: z.string().min(1),
       conversationId: ConversationIdSchema,
-      text: z.string().min(1).max(16_000),
+      text: z.string().min(1).max(WORLD_CHAT_INPUT_BOUNDS.text),
       attachmentIds: z.array(z.string().min(1)).max(20).default([]),
       /** This turn's language-model override; absent uses the production's remembered choice. */
       modelId: z.string().min(1).optional(),

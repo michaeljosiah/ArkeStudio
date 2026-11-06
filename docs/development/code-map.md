@@ -1,5 +1,10 @@
 # Code map
 
+Conversation text limits (#1742): contracts `world-chat-input.ts` owns the shared bound and
+`worldChatTextRefusal`; the idle frame reuses that bound. Production conversations and World Chat
+validate complete outgoing text before clearing drafts or creating a conversation, using their
+existing composer refusal chips. Client `sendWorldChat` also refuses before transport or holds.
+
 A picture request with an unavailable world or chapter (#1812) is rejected by the coordinator's
 `make-audiobook-picture` handler through `command.failed`, before any dispatch. Client `store.ts`
 folds the correlated picture/Tall rejection into the existing `audiobookAsks` failure state.
