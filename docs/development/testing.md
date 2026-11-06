@@ -12,6 +12,9 @@ package tests do not establish live Auth0 sign-in or an AONIK dev deployment.
 Coordinator `test/remote-access.test.ts` sends valid publishing list, prepare,
 submit and control payloads through the real paired-device gateway and verifies
 that none reach the upstream host session; trusted desktop commands remain allowed.
+Coordinator `test/publishing/polling.test.ts` holds a real receipt read across upload
+completion: SPEC-058 R-98 receipt tracking must not label that live transfer interrupted.
+The restart tests still expose an abandoned uploading journal as resumable.
 
 Unavailable picture targets (#1812): coordinator `test/productions/audiobook-picture-rejection.test.ts`
 checks correlated pre-dispatch failures for the picture and its linked Tall without queueing work.

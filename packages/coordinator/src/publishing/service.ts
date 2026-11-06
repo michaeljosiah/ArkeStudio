@@ -56,11 +56,13 @@ export class CreatorPublishingService implements CreatorPublishingPort {
   }
   async list(worldId: string): Promise<CreatorPublishingState> {
     const actor = this.account.actorKey(); if (!actor) return { configured: true, scopeId: null, publications: [], refusal: "Sign in to submit an edition or see your receipts." };
+    // A read may return an older journal after its live transfer has finished.
+    const activeAtRead = new Set(this.active.keys());
     const publications: CreatorPublication[] = [];
     const files = (await readdir(join(this.root, "receipts", actor)).catch(() => [] as string[])).filter(f => /^[a-f0-9-]{36}\.json$/.test(f)).slice(0, 1000);
     for (const file of files) { const record = await this.load(worldId, file.slice(0, -5)).catch(() => null); if (record) {
       const p = record.publication;
-      publications.push(["pending", "uploading"].includes(p.transfer) && !this.active.has(p.id) ? { ...p, transfer: "paused", message: "Upload interrupted. Resume this saved edition when ready." } : p);
+      publications.push(["pending", "uploading"].includes(p.transfer) && !activeAtRead.has(p.id) && !this.active.has(p.id) ? { ...p, transfer: "paused", message: "Upload interrupted. Resume this saved edition when ready." } : p);
     } }
     if (actor !== this.account.actorKey()) throw new CreatorSignInRequired();
     return { configured: true, scopeId: actor, publications: publications.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), refusal: null };

@@ -84,7 +84,7 @@ describe("AONIK frozen-edition submissions", () => {
     } finally { await h.service.stop(); }
   });
   it("submits a part only against the published head and does not replay an accepted confirmation", async () => {
-    const h = await publishingFixture("part"); try { const p = (await h.service.prepare(h.store, "story", h.exportId)).preview!; await h.service.submit(h.store.worldId, p.candidateId, form); const result = await settled(h.service, h.store.worldId); assert.equal(result.publications[0]!.transfer, "complete");
+    const h = await publishingFixture("part"); try { const p = (await h.service.prepare(h.store, "story", h.exportId)).preview!; await h.service.submit(h.store.worldId, p.candidateId, form); const result = await settled(h.service, h.store.worldId); assert.equal(result.publications[0]!.transfer, "complete", result.publications[0]!.message ?? undefined);
       h.api.catalogue = { version: 2, serial: 56, worlds: [] }; const requests = h.api.requests.length; await h.service.submit(h.store.worldId, p.candidateId, form); await h.service.control(h.store.worldId, p.candidateId, "resume"); assert.equal(h.api.requests.length, requests); assert.equal((await h.service.list(h.store.worldId)).publications[0]!.transfer, "complete");
     } finally { await h.service.stop(); }
   });
