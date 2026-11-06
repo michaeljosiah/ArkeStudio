@@ -304,6 +304,82 @@ async function leave(m: Mounted) {
   m.container.remove();
 }
 
+describe("chapter autosave when hidden (#1746)", () => {
+  const visibility = async (state: "visible" | "hidden") => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+  };
+  afterEach(() => { Reflect.deleteProperty(document, "visibilityState"); });
+
+  it("sends a pending draft on hide without waiting for the debounce, and waits for acknowledgement", async () => {
+    await visibility("visible");
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const value = BODY + "\n\nBefore hiding.";
+    await typeProse(m, value);
+    assert.equal(m.sent.some(message => message.kind === "save-chapter"), false);
+    await visibility("hidden");
+    const saves = m.sent.filter(message => message.kind === "save-chapter");
+    assert.equal(saves.length, 1);
+    assert.equal(saves[0]!.body, value);
+    assert.equal(saves[0]!.baseHash, HASH);
+    assert.match(text(m), /Saving/);
+    await visibility("hidden");
+    assert.equal(m.sent.filter(message => message.kind === "save-chapter").length, 1);
+    await answerSave(saves[0]!, "saved");
+    assert.match(text(m), /Saved · v4/);
+  });
+
+  it("queues newer hidden text behind the in-flight save's returned base", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    await typeProse(m, BODY + "\n\nFirst.");
+    await visibility("hidden");
+    const first = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.ok(first);
+    const latest = BODY + "\n\nFirst. Then second.";
+    await typeProse(m, latest);
+    assert.equal(m.sent.filter(message => message.kind === "save-chapter").length, 1);
+    const nextHash = `sha256:${"b".repeat(64)}`;
+    await answerSave(first, "saved", nextHash);
+    const next = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.notEqual(next.requestId, first.requestId);
+    assert.equal(next.body, latest);
+    assert.equal(next.baseHash, nextHash);
+    await answerSave(next, "saved");
+  });
+
+  it("sends edits delivered while already hidden without starting another timer", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    await visibility("hidden");
+    assert.equal(m.sent.some(message => message.kind === "save-chapter"), false);
+    const value = BODY + "\n\nA late editor update.";
+    await typeProse(m, value);
+    const save = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.ok(save);
+    assert.equal(save.body, value);
+    await answerSave(save, "saved");
+  });
+
+  it("keeps a conflicting draft on hide without overwriting the changed chapter", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const value = BODY + "\n\nMy edit.";
+    await typeProse(m, value);
+    await visibility("hidden");
+    const save = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.ok(save);
+    await answerSave(save, "refused");
+    await answerOpen(m, "A competing edit. <br>", `sha256:${"c".repeat(64)}`);
+    await visibility("visible");
+    await visibility("hidden");
+    assert.equal(m.sent.filter(message => message.kind === "save-chapter").length, 1);
+    assert.equal(sourceProps(m).value, value);
+    assert.match(text(m), /Not saved/);
+  });
+});
+
 describe("chapter autosave recovery (#954)", () => {
   it("retries a refused save when the refreshed record only changed the plan", async () => {
     const m = await mount(inkbound());

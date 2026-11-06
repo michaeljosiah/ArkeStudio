@@ -831,6 +831,15 @@ export function ChapterWorkspace({
   );
 
   useEffect(() => {
+    // Hiding does not unmount the chapter. Send the pending prose before background timers slow.
+    const hidden = () => {
+      if (document.visibilityState === "hidden" && timer.current !== null && draftRef.current !== null) flushSave(draftRef.current);
+    };
+    document.addEventListener("visibilitychange", hidden);
+    return () => document.removeEventListener("visibilitychange", hidden);
+  }, [flushSave]);
+
+  useEffect(() => {
     return subscribeChapterSaveResults((result: ChapterSaveResult) => {
       if (result.requestId !== pendingSave.current) return;
       pendingSave.current = null;
@@ -993,7 +1002,9 @@ export function ChapterWorkspace({
     setSaving(true);
     setSaveRefusal(null);
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => flushSave(value), AUTOSAVE_MS);
+    // The rich editor can hand over its final serialisation during the same hide event.
+    if (document.visibilityState === "hidden") flushSave(value);
+    else timer.current = setTimeout(() => flushSave(value), AUTOSAVE_MS);
   };
   const onChange = onChangeAt(epoch.current);
 

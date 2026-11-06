@@ -1270,6 +1270,15 @@ process-local theme overrides; a desktop display is required.
 
 ## Chapter workspace layout
 
+For hidden chapter autosave (#1746), run client `test/chapter-workspace.test.tsx` and
+`node --import tsx scripts/smoke-chapter-autosave.mts` from the repository root with a desktop
+display. The native check mounts the real rich/Markdown editors in a sandboxed Electron file
+page, hides/minimises its own window and verifies eight saves through the fenced chapter writer
+in a disposable fixture world. Hidden transitions must send before the normal debounce; some
+Windows display sessions report a minimised renderer as visible, in which case the check verifies
+normal persistence and reports that visibility honestly. It does not exercise force-quit recovery
+or establish the original report's elapsed delay. No author world or provider is used.
+
 For chapter layout changes, run `node scripts/smoke-chapter-layout.mjs` from the root with a
 desktop display. It renders fixture chapters in sandboxed Chromium at laptop and desktop sizes,
 checks the manuscript and stacked cards, the Markdown selection gutter, and model resets on

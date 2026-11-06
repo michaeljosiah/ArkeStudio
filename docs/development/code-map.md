@@ -938,6 +938,10 @@ See [running the standalone server](standalone-server.md) and coordinator
 
 Chapter autosave recovery stays in client `screens/chapter-workspace.tsx`: file-hash changes refresh the base, while `parkedDrafts` retains unacknowledged or refused prose across navigation. Conflicting saved prose requires an explicit choice; the coordinator's base-hash guard is unchanged (issue 954).
 
+Hidden chapter saves (#1746) flush the rich editor's pending Markdown and the workspace's
+pending autosave on `visibilitychange`. Updates already arriving hidden use the same immediate
+save path, including its single in-flight request, returned base hash and conflict guard.
+
 Chapter-list entry remembers each chapter's last Manuscript/Audiobook/Timing view for the app
 session through client `lib/chapter-view.ts`, keyed by world, production and chapter. An explicit
 `view` query takes precedence. This is client navigation state, never a world write or a read
