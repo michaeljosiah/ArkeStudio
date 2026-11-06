@@ -1,5 +1,9 @@
 # Code map
 
+A picture request with an unavailable world or chapter (#1812) is rejected by the coordinator's
+`make-audiobook-picture` handler through `command.failed`, before any dispatch. Client `store.ts`
+folds the correlated picture/Tall rejection into the existing `audiobookAsks` failure state.
+
 Audiobook edit anchors (#1668): contracts `audiobook.ts` relocates cast paragraph seams by
 unique whole-paragraph hashes and derives `startHashes` for shaped blocks. `audiobook-beats.ts`
 uses unique unchanged text to recover moved beat names. `audiobook-listening.ts` uses those
