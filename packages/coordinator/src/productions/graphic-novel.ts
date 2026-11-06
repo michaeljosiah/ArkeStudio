@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  COMIC_STYLE_REFERENCE, SCRIPT_READ_BLOCKING, SPOKEN_KINDS, balloonBox, comicPageFinishable, comicPanelPrompt, comicPanelStates, compareLettering, comicBook, panelTakeClears, ulid, type ComicPageTake, type ComicPanelState, type LetteringPlacement, type PageBox, type DraftComicPage, type WorldChatCheckReceipt, pageReading, sheetReferencePicture, takeBlocking, takeClears, type LetteringVerification, type PageReview, type ReviewWarning,
+  COMIC_STYLE_REFERENCE, SCRIPT_READ_BLOCKING, SPOKEN_KINDS, balloonBox, panelInset, comicPageFinishable, comicPanelPrompt, comicPanelStates, compareLettering, comicBook, panelTakeClears, ulid, type ComicPageTake, type ComicPanelState, type LetteringPlacement, type PageBox, type DraftComicPage, type WorldChatCheckReceipt, pageReading, sheetReferencePicture, takeBlocking, takeClears, type LetteringVerification, type PageReview, type ReviewWarning,
   COMIC_LIMITS, COMIC_PROMPT_MAX, ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema, DEFAULT_COMIC_SETTINGS, EMPTY_COMIC_PAGE_RECORD,
   comicPageHash, comicPagePrompt, makesShape, pageAspect, pictureQuote, productionShape,
   type ComicCited, type ComicMode, type ComicPage, type ComicPageRecord, type ComicSettings, type ManifestModel, type PictureWho, type ProductionBundle,
@@ -11,7 +11,7 @@ import { referenceBudgetFor } from "../references/generate.js";
 import { pictureWho } from "./audiobook-picture-suggest.js";
 import { artDirectionFor } from "./audiobook-look.js";
 import type { PageReader } from "./graphic-novel-reader.js";
-import type { PagePlacer } from "./graphic-novel-placer.js";
+import { clearOfFaces, tailClearOfFaces, type PagePlacer } from "./graphic-novel-placer.js";
 import { PANEL_REVIEW_PROMPT, type PageReviewer } from "./graphic-novel-reviewer.js";
 import { pagesForReading, type ScriptReader } from "./graphic-novel-script-reader.js";
 import { ConversationActionPreparationError } from "../arke-actions/lifecycle.js";
@@ -618,13 +618,16 @@ export async function placeComicPage(store: WorldStore, productionId: string, pa
     const picture = own ? await pictureBytes(store, `artifacts/${own.file}`) : null;
     if (picture === null) throw new Error(`panel ${state.index + 1} is not accepted yet`);
     const answer = await placer.place({ picture, description: state.panel.description, lines: lines.map((item) => ({ id: item.id, kind: item.kind, ...(item.speaker ? { speaker: name(item.speaker) } : {}), text: item.text })) }, signal);
+    // The art's own edge, not the layout's: a box held to the layout's rect sat across the gutter in round 95.
+    const art = panelInset(state.rect, aspect);
+    const faces = answer.faces.map((face) => ({ x: art.x + face.x * art.w, y: art.y + face.y * art.h, w: face.w * art.w, h: face.h * art.h }));
     const boxes: PageBox[] = [];
     for (const item of lines) {
-      const spot = answer.find((entry) => entry.item === item.id);
+      const spot = answer.lines.find((entry) => entry.item === item.id);
       if (!spot) continue;
-      const box = balloonBox(item, state.rect, aspect, spot, boxes);
+      const box = clearOfFaces(balloonBox(item, art, aspect, spot, boxes), faces, boxes, art);
       boxes.push(box);
-      const tail = SPOKEN_KINDS.has(item.kind) && spot.tail ? { x: state.rect.x + spot.tail.x * state.rect.w, y: state.rect.y + spot.tail.y * state.rect.h } : undefined;
+      const tail = SPOKEN_KINDS.has(item.kind) && spot.tail ? tailClearOfFaces(box, { x: art.x + spot.tail.x * art.w, y: art.y + spot.tail.y * art.h }, faces, art) : undefined;
       placed.push({ item: item.id, box, ...(tail ? { tail } : {}) });
     }
   }

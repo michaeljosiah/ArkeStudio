@@ -15,6 +15,7 @@ import {
   EMPTY_COMIC_PAGE_RECORD,
   balloonBox,
   comicPageFinishable,
+  comicInk,
   comicPageHash,
   comicPanelHash,
   comicPanelRects,
@@ -138,6 +139,12 @@ describe("the picture's fingerprint (R-11, R-25)", () => {
     assert.notEqual(comicPanelHash(page.panels[0]!, "1:1"), comicPanelHash(page.panels[0]!, "4:3"));
     assert.notEqual(comicPageHash(page, { ...DEFAULT_COMIC_SETTINGS, typeface: "bold" }, "overlay"), comicPageHash(page, DEFAULT_COMIC_SETTINGS, "overlay"), "the typeface is drawn into it");
     assert.equal(comicPageHash(page, { ...DEFAULT_COMIC_SETTINGS, typeface: "bold" }, "baked"), comicPageHash(page, DEFAULT_COMIC_SETTINGS, "baked"));
+    // A black-and-white style prints other colours, so it asks for Accept page; a colour one leaves accepted pages alone (turn 271e).
+    const noir = { ...DEFAULT_COMIC_SETTINGS, style: { words: "ink", preset: "noir" } };
+    assert.equal(comicInk(noir), "mono");
+    assert.notEqual(comicPageHash(page, noir, "overlay"), comicPageHash(page, DEFAULT_COMIC_SETTINGS, "overlay"));
+    assert.equal(comicInk({ style: { words: "own words" } }), "colour");
+    assert.equal(comicPageHash(page, { ...DEFAULT_COMIC_SETTINGS, style: { words: "oils", preset: "painted" } }, "overlay"), comicPageHash(page, DEFAULT_COMIC_SETTINGS, "overlay"));
   });
 });
 

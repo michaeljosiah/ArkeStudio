@@ -47,7 +47,7 @@ import { ComicStylePicker } from "../components/comic-style-picker.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
 import { paragraphLabel } from "../lib/episode-script.js";
 import { comicStylePicture, comicStylePreset, draftFromStyle, styleFromDraft, type ComicStyleDraft } from "../lib/comic-styles.js";
-import { ComicModeSheet, PageWords, PanelMark, PanelSide, panelFaulted } from "./comic-panels.js";
+import { ComicModeSheet, PageWords, PanelMark, PanelSide, panelFaulted, panelHeldFault } from "./comic-panels.js";
 import { useProduction } from "../lib/selectors.js";
 import {
   acceptComicTake,
@@ -262,10 +262,10 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const sourceStory = adaptedFrom ? world.productions.find((candidate) => candidate.meta.id === settings.adapts!.story) : undefined;
   const sourceChapter = adaptedFrom ? sourceStory?.chapters.find((candidate) => candidate.id === adaptedFrom.from) : undefined;
   // One press asks (turn 256): the words are sent, never left in the chat box for a second press.
-  const ask = (words: string) => {
+  const ask = (words: string, send = true) => {
     if (!chat || !chatSurface || !chapter) return;
     chat.setValue(chatSurface.key, "draft", words);
-    chat.setValue(chatSurface.key, "autoSend", true);
+    if (send) chat.setValue(chatSurface.key, "autoSend", true);
     chat.open(chatSurface);
     askedOf.set(`${worldId}:${productionId}:${chapter.id}`, Date.now());
   };
@@ -462,11 +462,13 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               // Being made, or its newest take still being read: the strip says so too (turn 251b, 251c).
               const busy = (held?.making.length ?? 0) > 0 || beingRead(held?.takes.at(-1));
               const faulted = byPanel && comicPanelStates(candidate, held, settings).some(panelFaulted);
+              const heldFault = byPanel && comicPanelStates(candidate, held, settings).some(panelHeldFault);
               return (
                 <button key={candidate.id} type="button" className={cx("fy-comic__thumb", candidate.id === page?.id && "on", busy && "busy")} aria-label={`Page ${firstNumber + index}`} aria-busy={busy || undefined} onClick={() => setPageId(candidate.id)}>
                   {url !== null && <img src={url} alt="" />}
                   {busy && <Spin size={20} />}
                   {!busy && faulted && <span className="s x"><CircleAlert size={10} /></span>}
+                  {!busy && !faulted && entry?.take === undefined && heldFault && <span className="s w"><TriangleAlert size={10} /></span>}
                   {!busy && !faulted && entry?.take !== undefined && <span className={cx("s", (!entry.cleared || entry.overridden || entry.outOfDate) && "w")}>{entry.cleared && !entry.overridden && !entry.outOfDate ? <Check size={10} /> : <TriangleAlert size={10} />}</span>}
                   <span className="n">{firstNumber + index}</span>
                 </button>
@@ -521,7 +523,11 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
           {page === undefined || wordsOpen ? null : byPanel ? (
             <PanelSide key={page.id} world={world} production={production} page={page} selected={panelId} select={setPanelId} saving={unsaved} connected={connection === "open"} tab={panelTab} pickTab={setPanelTab}
               onReviewer={() => navigate(`/settings/harness?agent=${PAGE_REVIEWER}`)}
-              changeWithArke={chatSurface ? (panel) => ask(`On page ${firstNumber + pages.indexOf(page)} of chapter ${chapter?.order}, change panel ${panel}: `) : null} />
+              changeWithArke={chatSurface ? (panel, finding) => {
+                // With a finding it is a whole request; with none (a refused panel) the words wait for the author to finish them (turn 270d).
+                const where = `Page ${firstNumber + pages.indexOf(page)}, panel ${panel}.`;
+                ask(finding === null ? `${where} ` : `${where} ${finding} Fix it.`, finding !== null);
+              } : null} />
           ) : (
             <PageSide key={page.id} world={world} production={production} page={page} saving={unsaved} connected={connection === "open"}
               problem={problem} onReader={() => navigate(`/settings/harness?agent=${LETTERING_READER}`)} onReviewer={() => navigate(`/settings/harness?agent=${PAGE_REVIEWER}`)} />
