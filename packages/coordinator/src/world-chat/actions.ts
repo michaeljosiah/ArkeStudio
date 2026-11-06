@@ -1962,6 +1962,17 @@ function savedStoryReviewObservations(action: Pick<ConversationActionCard, "prod
       || (observation.requirement === "chapters" && [action.productionId, `${action.productionId}::plan`].includes(observation.target)))) };
 }
 
+const STORY_PROPOSAL_KINDS: readonly string[] = ["world-chat-production-overview", "world-chat-production-prose-style", "world-chat-production-chapter"];
+
+/** Whether another story card of this card's own turn has been accepted, which is what moved its collection reads. */
+async function siblingAccepted(store: WorldStore, action: ConversationActionCard): Promise<boolean> {
+  const log = new WorldChatStore(conversationDir(store.dir, action.conversationId));
+  const meta = await log.readMeta();
+  if (!meta) return false;
+  return foldConversation(meta.id, meta.createdAt, (await log.read()).events).view.actions.some((other) =>
+    other.actionId !== action.actionId && other.turnId === action.turnId && other.status === "completed" && STORY_PROPOSAL_KINDS.includes(other.actionKind));
+}
+
 /** Native review relaxes only collection context; cited cast and exact chapter reads still fence the write. */
 export async function savedStoryProposalPrecondition(store: WorldStore, proposal: Proposal): Promise<WorldStatePrecondition | undefined> {
   if (!proposal.source.startsWith("world-chat-action:") || !["story-overview", "prose-style", "chapter-draft"].includes(proposal.kind)) return undefined;
@@ -4919,7 +4930,7 @@ export function worldChatActionAdapters(
       const current = observationsCurrent(store, action);
       // An accepted sibling can move the story/chapters collection without changing this draft.
       // Keep that draft for an explicit native review; chat approval still requires its reads.
-      const canReviewSaved = ["world-chat-production-overview", "world-chat-production-prose-style", "world-chat-production-chapter"].includes(action.actionKind)
+      const canReviewSaved = STORY_PROPOSAL_KINDS.includes(action.actionKind)
         && observationsCurrent(store, savedStoryReviewObservations(action)).ok;
       if (!current.ok && !canReviewSaved) {
         await gate.discard(action.authority.id);
@@ -4937,14 +4948,17 @@ export function worldChatActionAdapters(
         await gate.discard(action.authority.id);
         return { ok: false, reason: "stale", detail: "The proposal preview changed after this card was prepared." };
       }
-      if (!current.ok) return { ok: false, reason: "blocked", detail: "Story context changed. Review the saved proposal before accepting. No regeneration is needed." };
+      // ...unless the move was its own turn's: a card Arke offered beside this one, approved first, is
+      // no reason to send the author to a full review (turn 270e, round 95).
+      if (!current.ok && !await siblingAccepted(store, action)) return { ok: false, reason: "blocked", detail: "Story context changed. Review the saved proposal before accepting. No regeneration is needed." };
       return { ok: true };
     },
     execute: async (action) => {
       if (!gate) return { status: "failed", detail: "The proposal authority is unavailable." };
       const proposal = await gate.readManifest(action.authority.id);
+      const relaxed = STORY_PROPOSAL_KINDS.includes(action.actionKind) && await siblingAccepted(store, action);
       const outcome = await gate.accept(proposal.id, {
-        precondition: observationPrecondition(store, action),
+        precondition: observationPrecondition(store, relaxed ? savedStoryReviewObservations(action) : action),
       }).catch((error): AcceptOutcome => {
         if (error instanceof WorldStateStaleError) {
           return { status: "stale", stalePaths: [], detail: error.detail };

@@ -128,7 +128,7 @@ export const ComicChapterPlanSchema = z.object({
     turn: z.string().trim().min(1).max(200),
   }).strict()).min(1).max(COMIC_LIMITS.pagesPerChapter),
   /** What the reader holds (R-61): each person, place, thing or rule, and the page that first shows or names it. */
-  knows: z.array(z.object({ name: z.string().trim().min(1).max(120), page: z.number().int().min(1).max(COMIC_LIMITS.pagesPerChapter), how: z.string().trim().min(1).max(40) }).strict()).max(200).default([]),
+  knows: z.array(z.object({ name: z.string().trim().min(1).max(120), page: z.number().int().min(1).max(COMIC_LIMITS.pagesPerChapter), how: z.string().trim().min(1).max(160) }).strict()).max(200).default([]),
   /**
    * Questions the book means the reader to carry (turn 256c): the cold read is told them and does
    * not count them as faults. Nineteen of a draft's flags in the owner's run were mysteries the

@@ -3231,21 +3231,11 @@ describe("saved sibling proposal review (#1740)", () => {
     return { ...w, productionId, cards: (await loaded(w.log)).actions };
   }
 
-  it("retains unchanged style and outline for explicit review after overview acceptance, including recovery", async () => {
+  it("leaves unchanged style and outline ready to approve after overview acceptance (turn 270e)", async () => {
     const w = await siblings();
     assert.equal((await decide(w.lifecycle, w.log, w.cards[0]!)).status, "completed");
     for (const card of w.cards.slice(1)) {
-      const before = await w.gate.project(card.authority.id);
-      const result = await decide(w.lifecycle, w.log, card);
-      assert.equal(result.reason, "validation-refused");
-      assert.match(result.detail!, /Review the saved proposal/);
-      assert.equal((await loaded(w.log)).actions.find(action => action.actionId === card.actionId)!.status, "pending");
-      assert.deepEqual((await w.gate.project(card.authority.id)).review, before.review);
-      await w.lifecycle.recoverConversation(w.conversationId);
-      assert.equal((await decide(w.lifecycle, w.log, card)).reason, "validation-refused", "recovery does not approve the changed context");
-      const precondition = await savedStoryProposalPrecondition(w.store, await w.gate.readManifest(card.authority.id));
-      assert.equal((await acceptDecided(w.gate, card.authority.id, precondition)).status, "accepted");
-      await w.lifecycle.reconcileAction(w.conversationId, card.actionId);
+      assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
       assert.equal((await loaded(w.log)).actions.find(action => action.actionId === card.actionId)!.status, "completed");
     }
     const production = w.store.getBundle().productions.find(p => p.meta.id === w.productionId)!;
@@ -3268,17 +3258,14 @@ describe("saved sibling proposal review (#1740)", () => {
     assert.equal((await w.gate.listOpen()).some(p => p.id === card.authority.id), false);
   });
 
-  it("rechecks cited inputs at native acceptance, even after a context-only refusal", async () => {
+  it("still refuses a sibling whose own cited inputs changed, in chat and at native acceptance", async () => {
     const w = await siblings(), card = w.cards[2]!;
     assert.equal((await decide(w.lifecycle, w.log, w.cards[0]!)).status, "completed");
-    assert.equal((await decide(w.lifecycle, w.log, card)).reason, "validation-refused");
     const precondition = await savedStoryProposalPrecondition(w.store, await w.gate.readManifest(card.authority.id));
     assert.ok(precondition);
     await w.store.retire("characters/maren-kest.md", "test");
     assert.equal((await acceptDecided(w.gate, card.authority.id, precondition)).status, "stale");
-    const worlds = createLocalWorldRepository({ openStore: () => w.store, gate: () => w.gate } as WorldProvider);
-    await assert.rejects(() => worlds.use(w.store.worldId, session => session.accept(card.authority.id, {})), /sheets changed/);
-    await worlds.close();
+    assert.notEqual((await decide(w.lifecycle, w.log, card)).status, "completed");
     assert.equal(w.store.getBundle().productions.find(p => p.meta.id === w.productionId)!.chapters.length, 0);
   });
 });
