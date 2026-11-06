@@ -497,7 +497,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               {keptPlan !== undefined && <span className="fy-comic__plankept"><Check size={12} />Plan kept · {keptPlan.pages.length} {keptPlan.pages.length === 1 ? "page" : "pages"}</span>}
               {sourceStory && sourceChapter
                 ? <span className="m">From {sourceStory.meta.title} · chapter {sourceChapter.order}{sourceChapter.words !== undefined ? ` · ${sourceChapter.words.toLocaleString("en-GB")} words` : ""}</span>
-                : chapter?.words !== undefined && <span className="m">{chapter.words.toLocaleString("en-GB")} words</span>}
+                : (chapter?.words ?? 0) > 0 && <span className="m">{chapter!.words!.toLocaleString("en-GB")} words</span>}
               <div className="fy-comic__emptyacts">
                 {chatSurface && keptPlan === undefined && <Button variant="primary" onClick={planWithArke}><Sparkle size={14} />Plan with Arke</Button>}
                 {chatSurface && keptPlan !== undefined && <Button variant="primary" onClick={draftWithArke}><Sparkle size={14} />Draft with Arke</Button>}
