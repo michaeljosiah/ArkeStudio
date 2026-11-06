@@ -22512,7 +22512,7 @@ export class Coordinator {
    * record and the rest go on: the fault is that panel's alone. All are written as making before the
    * first is drawn, so Pages shows the whole press and a restart files what landed.
    */
-  private async makeComicPanels(store: WorldStore, msg: Extract<ClientMessage, { kind: "make-comic-page" }>): Promise<void> {
+  private async makeComicPanels(store: WorldStore, msg: Extract<ClientMessage, { kind: "make-comic-page" }>, stop?: AbortSignal): Promise<void> {
     const { productionId, page, worldId } = msg;
     const emit = (state: "making" | "failed", extra: { panel?: string; reason?: string; sessionId?: string } = {}) =>
       this.emit({ at: new Date().toISOString(), type: "comic.page-made", requestId: msg.requestId, worldId, productionId, page, state, ...extra });
@@ -22522,6 +22522,9 @@ export class Coordinator {
     this.makingComicPages.set(key, control);
     const onClose = () => control.abort();
     store.closingSignal.addEventListener("abort", onClose, { once: true });
+    // A Make card's Stop reaches here too: the panel in hand finishes and the rest of the page is not drawn.
+    stop?.addEventListener("abort", onClose, { once: true });
+    if (stop?.aborted) control.abort();
     try {
       const model = await this.pictureModel(store, productionId);
       if (!model) { emit("failed", { reason: "no picture model is on" }); return; }
@@ -22594,6 +22597,7 @@ export class Coordinator {
       emit("failed", { reason: describeCoordinatorError(err) });
     } finally {
       store.closingSignal.removeEventListener("abort", onClose);
+      stop?.removeEventListener("abort", onClose);
       if (this.makingComicPages.get(key) === control) this.makingComicPages.delete(key);
     }
   }
@@ -24244,7 +24248,7 @@ export class Coordinator {
     };
     const ops: ComicMakeOps = {
       unmade: (page) => states(page).filter((state) => state.shown === undefined && !state.making).map((state) => state.panel.id),
-      faulted: (page) => states(page).filter((state) => !state.making && state.accepted === undefined && state.shown?.review !== undefined && takeBlocking(state.shown).length > 0).map((state) => state.panel.id),
+      faulted: (page) => states(page).filter((state) => !state.making && state.accepted === undefined && state.shown?.review?.status === "compared" && takeBlocking(state.shown).length > 0).map((state) => state.panel.id),
       allAccepted: (page) => { const all = states(page); return all.length > 0 && all.every((state) => state.accepted !== undefined); },
       price: (page, panels) => {
         let sum = 0;
@@ -24256,7 +24260,7 @@ export class Coordinator {
         return sum;
       },
       spent: () => usd() - before,
-      make: (page, confirmedMicroUsd, panel) => this.makeComicPanels(store, { kind: "make-comic-page", requestId: ulid(), worldId: store.worldId, productionId, page, confirmedMicroUsd, ...(panel ? { panel } : {}) } as Extract<ClientMessage, { kind: "make-comic-page" }>),
+      make: (page, confirmedMicroUsd, panel) => this.makeComicPanels(store, { kind: "make-comic-page", requestId: ulid(), worldId: store.worldId, productionId, page, confirmedMicroUsd, ...(panel ? { panel } : {}) } as Extract<ClientMessage, { kind: "make-comic-page" }>, control.signal),
       reviewed: async (page, signal) => {
         // Bounded: a review the reader never answers is a panel left for the author, not a run stuck for good.
         const deadline = Date.now() + 5 * 60_000;
@@ -24277,8 +24281,9 @@ export class Coordinator {
         this.comicMakes.delete(run);
         store.closingSignal.removeEventListener("abort", onClose);
         const lifecycle = new ConversationActionLifecycle({ worldPath: store.dir, worldId: store.worldId, adapters: [], now: () => this.nowIso() });
-        const spent = priceLabel(usd() - before);
-        const summary = stop === "limit" ? `Stopped at the price approved. Spent ${spent}.` : stop === "stopped" ? `Stopped. Spent ${spent}.` : `Finished. Spent ${spent}.`;
+        const spent = priceLabel(usd() - before).replace("~", "");
+        const paid = cap > 0 ? ` Spent ${spent}.` : "";
+        const summary = stop === "limit" ? `Stopped at the price approved.${paid}` : stop === "stopped" ? `Stopped.${paid}` : `Finished.${paid}`;
         await lifecycle.recordStatus(card.conversationId, card.actionId, stop === "failed" ? "failed" : "completed", {
           authority: card.authority, authorityRevision: card.authorityRevision,
           ...(stop === "failed" ? { detail: reason ?? "The run failed." } : { receipt: { kind: "comic-make", id: run, summary } }),
@@ -24964,6 +24969,7 @@ export class Coordinator {
       this.lateComicPages.clear();
       for (const control of this.readingComicPages) control.abort();
       for (const control of this.exportingComics) control.abort();
+      for (const control of this.comicMakes.values()) control.abort();
       for (const control of this.makingMotion.values()) control.abort();
       for (const control of this.preparingWordTiming.values()) control.abort();
       for (const run of this.checkingAudiobookWords.values()) run.control.abort();

@@ -1991,13 +1991,24 @@ function savedStoryReviewObservations(action: Pick<ConversationActionCard, "prod
 
 const STORY_PROPOSAL_KINDS: readonly string[] = ["world-chat-production-overview", "world-chat-production-prose-style", "world-chat-production-chapter"];
 
-/** Whether another story card of this card's own turn has been accepted, which is what moved its collection reads. */
+/**
+ * Whether another story card of this card's own turn is what moved its collection reads: one was
+ * accepted, and nothing but this turn's cards has touched the production since. An edit from anywhere
+ * else keeps the refusal, and an earlier one would have stopped the first sibling too.
+ */
 async function siblingAccepted(store: WorldStore, action: ConversationActionCard): Promise<boolean> {
   const log = new WorldChatStore(conversationDir(store.dir, action.conversationId));
   const meta = await log.readMeta();
   if (!meta) return false;
-  return foldConversation(meta.id, meta.createdAt, (await log.read()).events).view.actions.some((other) =>
-    other.actionId !== action.actionId && other.turnId === action.turnId && other.status === "completed" && STORY_PROPOSAL_KINDS.includes(other.actionKind));
+  const siblings = new Set(foldConversation(meta.id, meta.createdAt, (await log.read()).events).view.actions
+    .filter((other) => other.actionId !== action.actionId && other.turnId === action.turnId && other.status === "completed" && STORY_PROPOSAL_KINDS.includes(other.actionKind))
+    .map((other) => other.authority.id));
+  if (siblings.size === 0) return false;
+  const changes = (await readChanges(join(store.dir, "changes.jsonl"))) as Array<{ entity?: string; path?: string; proposalId?: string }>;
+  const first = changes.findIndex((change) => change.proposalId !== undefined && siblings.has(change.proposalId));
+  if (first < 0) return false;
+  const prefix = `productions/${action.productionId}/`;
+  return changes.slice(first).every((change) => !(change.path ?? change.entity ?? "").startsWith(prefix) || (change.proposalId !== undefined && siblings.has(change.proposalId)));
 }
 
 /** Native review relaxes only collection context; cited cast and exact chapter reads still fence the write. */
@@ -3690,7 +3701,7 @@ async function sharedResourceProjection(
           provider: ready?.provider ?? "Unavailable", model: ready?.modelName ?? "Unavailable",
           quantity: Math.max(1, ready?.panels ?? 1), references: [],
           // The pages the run covers, which the card counts from.
-          ...(ready ? { deterministicInputs: ready.pages } : {}),
+          ...(ready ? { deterministicInputs: [...ready.pages, `briefs:${ready.briefs}`] } : {}),
           options: ready ? [
             { label: "Pages", value: String(ready.pages.length) },
             { label: "Panels", value: String(ready.panels) },

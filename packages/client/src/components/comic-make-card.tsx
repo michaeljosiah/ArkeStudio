@@ -82,6 +82,7 @@ export function ComicMakeCardBody({ action }: { action: ConversationActionCard }
     const states = comicPanelStates(page, records(page), settings);
     return { page, number: book.find((entry) => entry.id === page.id)?.number ?? 0, states, made: states.filter((state) => state.shown !== undefined).length, making: states.some((state) => state.making) };
   });
+  // While it runs, counted from the takes since Approve; once it ends, what was spent is the receipt's, or later takes would count.
   const spent = rows.reduce((sum, row) => sum + row.states.reduce((all, state) => all + state.takes.reduce((takes, take) => takes + (action.decision && take.at >= action.decision.decidedAt ? Math.round((take.usd ?? 0) * 1_000_000) : 0), 0), 0), 0);
   // The limit is enforced, not estimated, and a plan-paid run has none to show.
   const exact = (microUsd: number) => priceLabel(microUsd).replace("~", "");
@@ -122,7 +123,6 @@ export function ComicMakeCardBody({ action }: { action: ConversationActionCard }
     <div className="fy-comicmake__facts">
       <div><span>Panels</span><b>{panels.filter((state) => state.shown !== undefined).length} of {panels.length}</b></div>
       <div><span>Lines placed</span><b>{placed} of {lines.length}</b></div>
-      {cap !== undefined && cap > 0 && <div className="price"><span>Spent</span><b>{exact(spent)}{limit}</b></div>}
     </div>
     {needs.length > 0 && <div className="fy-comicmake__needs">
       <b>Needs you</b>

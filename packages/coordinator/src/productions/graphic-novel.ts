@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  COMIC_STYLE_REFERENCE, SCRIPT_READ_BLOCKING, SPOKEN_KINDS, balloonBox, panelInset, comicPageFinishable, comicPanelPrompt, comicPanelStates, compareLettering, comicBook, panelTakeClears, REVIEW_BLOCKING, ulid, type ComicPageTake, type ComicPanelState, type LetteringPlacement, type PageBox, type DraftComicPage, type WorldChatCheckReceipt, pageReading, sheetReferencePicture, takeBlocking, takeClears, type LetteringVerification, type PageReview, type ReviewWarning,
+  COMIC_STYLE_REFERENCE, SCRIPT_READ_BLOCKING, SPOKEN_KINDS, textDigest, balloonBox, panelInset, comicPageFinishable, comicPanelPrompt, comicPanelStates, compareLettering, comicBook, panelTakeClears, REVIEW_BLOCKING, ulid, type ComicPageTake, type ComicPanelState, type LetteringPlacement, type PageBox, type DraftComicPage, type WorldChatCheckReceipt, pageReading, sheetReferencePicture, takeBlocking, takeClears, type LetteringVerification, type PageReview, type ReviewWarning,
   COMIC_LIMITS, COMIC_PROMPT_MAX, ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema, DEFAULT_COMIC_SETTINGS, EMPTY_COMIC_PAGE_RECORD,
   comicPageHash, comicPagePrompt, makesShape, pageAspect, pictureQuote, productionShape,
   type ComicCited, type ComicMode, type ComicPage, type ComicPageRecord, type ComicSettings, type ManifestModel, type PictureWho, type ProductionBundle,
@@ -468,7 +468,7 @@ export function comicPanelFix(store: WorldStore, productionId: string, pageId: s
 
 export type ComicMakeTarget = { kind: "chapter"; chapter: string } | { kind: "page"; page: string } | { kind: "panel"; page: string; panel: string };
 export type ComicMakeQuote =
-  | { ok: true; pages: string[]; panels: number; lines: number; redraws: number; baseMicroUsd: number; capMicroUsd: number; missing: string[] }
+  | { ok: true; pages: string[]; panels: number; lines: number; redraws: number; baseMicroUsd: number; capMicroUsd: number; missing: string[]; briefs: string }
   | { ok: false; reason: string };
 
 /** The Make card's price (turn 270a): the panels it would draw now, and the most its redraws could add. */
@@ -494,7 +494,12 @@ export function comicMakeQuote(store: WorldStore, productionId: string, target: 
   }
   const redraws = target.kind === "panel" ? 0 : comicCardRedraws(asked.length);
   const lines = pages.reduce((sum, page) => sum + (findComicPage(production, page)?.page.panels ?? []).reduce((count, panel) => count + panel.lettering.length, 0), 0);
-  return { ok: true, pages, panels: asked.length, lines, redraws, baseMicroUsd, capMicroUsd: baseMicroUsd + redraws * unit, missing: [...missing] };
+  // What the price was for: an edited brief changes the card's preview, so Approve cannot spend on words the author never saw priced.
+  const briefs = textDigest(JSON.stringify(pages.map((page) => {
+    const held = findComicPage(production, page);
+    return held ? comicPanelStates(held.page, comicPageRecord(production, page), settings).map((state) => state.hash) : [];
+  })));
+  return { ok: true, pages, panels: asked.length, lines, redraws, baseMicroUsd, capMicroUsd: baseMicroUsd + redraws * unit, missing: [...missing], briefs };
 }
 
 /** The price and brief a page's press shows (R-37a): the panels it would make, at one price. */

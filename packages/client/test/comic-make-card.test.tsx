@@ -97,5 +97,6 @@ describe("the Make card (turn 270)", () => {
     assert.ok(button(m.container, "Accept 1 page"));
     assert.equal(m.sent.some((message) => message.kind === "finish-comic-page" || message.kind === "accept-comic-take"), false);
     assert.match(m.container.textContent!, /Lines placed1 of 2/);
+    assert.doesNotMatch(m.container.textContent!, /Spent/, "what was spent is the receipt's");
   });
 });

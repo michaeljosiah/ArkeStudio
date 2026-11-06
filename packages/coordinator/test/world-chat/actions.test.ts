@@ -3257,6 +3257,13 @@ describe("saved sibling proposal review (#1740)", () => {
     assert.equal((await w.gate.listOpen()).some(p => p.id === card.authority.id), false);
   });
 
+  it("still refuses a sibling when something outside its turn moved the story too", async () => {
+    const w = await siblings();
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[0]!)).status, "completed");
+    await createChapter(w.store, w.productionId, { title: "From elsewhere", order: 9 });
+    assert.notEqual((await decide(w.lifecycle, w.log, w.cards[1]!)).status, "completed");
+  });
+
   it("still refuses a sibling whose own cited inputs changed, in chat and at native acceptance", async () => {
     const w = await siblings(), card = w.cards[2]!;
     assert.equal((await decide(w.lifecycle, w.log, w.cards[0]!)).status, "completed");
@@ -3907,7 +3914,7 @@ describe("a graphic novel's cards (turn 270)", () => {
     await bindAll(w.lifecycle, prepared);
     return (await loaded(w.log)).actions;
   };
-  const ready = { ok: true as const, pages: ["p"], panels: 13, lines: 19, redraws: 6, baseMicroUsd: 2_860_000, capMicroUsd: 4_180_000, missing: ["Old Tam"], provider: "openai", modelName: "GPT Image 2", costLabel: "Up to $4.18" };
+  const ready = { ok: true as const, pages: ["p"], panels: 13, lines: 19, redraws: 6, baseMicroUsd: 2_860_000, capMicroUsd: 4_180_000, missing: ["Old Tam"], briefs: "b1", provider: "openai", modelName: "GPT Image 2", costLabel: "Up to $4.18" };
   const host = (over: Partial<NonNullable<WorldChatActionAdapterDeps["comicMake"]>> = {}): NonNullable<WorldChatActionAdapterDeps["comicMake"]> => ({
     quote: async () => ready, start: async () => ({ status: "running", detail: "Arke is making the pages." }), running: () => true, exportBook: async () => [{ file: "exports/book.cbz" }], ...over,
   });
@@ -3921,9 +3928,17 @@ describe("a graphic novel's cards (turn 270)", () => {
     if (body.family !== "generation") return;
     assert.equal(body.enforceableCapMicroUsd, 4_180_000);
     assert.equal(body.cost, "Up to $4.18");
-    assert.deepEqual(body.deterministicInputs, ["p"]);
+    assert.deepEqual(body.deterministicInputs, ["p", "briefs:b1"]);
     assert.deepEqual(card!.shown.ripples, ["No picture of Old Tam"]);
     assert.equal((await decide(w.lifecycle, w.log, card!)).status, "running");
+  });
+
+  it("will not spend on a brief changed since the card was priced", async () => {
+    let briefs = "b1";
+    const w = await comicBook({ comicMake: host({ quote: async () => ({ ...ready, briefs }) }) });
+    const [card] = await offer(w, [{ kind: "production-comic-make", target: { kind: "chapter", chapter: w.chapter } }]);
+    briefs = "b2";
+    assert.notEqual((await decide(w.lifecycle, w.log, card!)).status, "running");
   });
 
   it("will not start a card the book refuses", async () => {
