@@ -93,21 +93,34 @@ Server verification and editorial approval remain authoritative.
 
 ## Dev qualification status — 5 November 2026
 
-Read-only Azure checks found the API URL, Auth0 issuer and audience shown above. API
-revision `aonik-dev-api--0000372` uses digest
-`sha256:90ee92c631e74066cb51e20240cef1ecc2ccf3a255560371cd0ea02e959ab8b2`,
-tagged AONIK commit `7c625ec7943a4d815b60005c226bc6766e30460a` on October 13.
-It predates publishing #398–#402. The newer image for merged commit `d05793b5` exists
-in the dev registry but is not the running API image. No `Publishing` environment
-settings are present on that API revision. Public HTTP probes initially returned 401
-for the catalogue and subsequently timed out; neither establishes a working channel.
-The public client ID found on the admin SPA has not been qualified as a native client
-and is not reused by Studio.
+The latest merged AONIK application (`d05793b5`) is deployed to dev. API revision
+`aonik-dev-api--0000375` and Worker `aonik-dev-worker--0000366` are healthy, with
+private intake/delivery shares mounted and one replica of each kept running. The
+isolated `arke-worlds-dev` channel belongs to Arke Kidz tenant
+`1087cc03-46cc-45fa-9023-f0ce4f7bbdb8`; its admission, review and publication switches
+remain closed. See the [AONIK #403 runbook](https://github.com/michaeljosiah/aonik/blob/codex/arke-dev-qualification-403/docs/runbooks/arke-publishing-dev.md)
+and [draft PR #405](https://github.com/michaeljosiah/aonik/pull/405) for deployment
+digests, storage checks and remaining prerequisites.
 
-Live rehearsal is therefore **not qualified**. AONIK #403 must establish the API/worker
-rollout, private storage, pinned verifier, tenant/test channel, current approved rights
-statement and native creator client before a live sign-in/upload can be claimed. No
-real creator package, approval or public catalogue was changed during implementation.
+After owner approval, Auth0 **Arke Studio Dev** was registered as a public Native
+client, ID `9SfLUjB57WtWEQUNm1twTO7UQRnsUzvY`. Its sole callback is
+`http://127.0.0.1:37619/aonik/callback`; code and refresh grants are enabled and
+implicit grant is disabled. Refresh rotation has a 24-hour idle lifetime, seven-day
+maximum and zero overlap. The AONIK API permits offline access. Studio supplies
+S256 PKCE, state and nonce. No client secret or Admin SPA client is used.
+
+The [non-secret dev profile](https://github.com/michaeljosiah/aonik/blob/codex/arke-dev-qualification-403/iac/azure/environments/dev/arke-studio.json)
+passes Studio's actual configuration parser. Set `ARKE_AONIK_CONFIG` to its local
+absolute path, using an isolated Studio workspace and Electron user-data directory.
+Its synthetic distribution wording is a proposed declaration, requiring the
+submitting human's explicit confirmation; it is not permission for production.
+
+Live rehearsal is **not qualified**. The isolated desktop launched, but computer-use
+access to its window timed out before a creator sign-in was exercised. The deployed
+Worker has no Docker runtime for the verifier adapter; a compatible isolated executor
+is still required. Tenant module/independent reviewer setup and Player dev-channel
+support are also outstanding. No real creator package, approval or public catalogue
+was changed during preparation.
 Use synthetic fixtures on that test channel, interrupt/resume an upload, restart Studio,
 inspect creator feedback, replace a revision, and independently approve/publish through
 AONIK before checking the Player catalogue. Do not use an admin token or public storage
