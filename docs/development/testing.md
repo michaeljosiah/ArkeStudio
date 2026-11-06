@@ -4,6 +4,9 @@ Creator publishing #2391: see [host configuration, focused suites and live quali
 limits](aonik-publishing.md). `node scripts/smoke-creator-publishing.mjs` exercises the
 real sandboxed Electron file page at desktop/Fold/phone widths. Protocol and synthetic
 package tests do not establish live Auth0 sign-in or an AONIK dev deployment.
+Coordinator `test/remote-access.test.ts` sends valid publishing list, prepare,
+submit and control payloads through the real paired-device gateway and verifies
+that none reach the upstream host session; trusted desktop commands remain allowed.
 
 Unavailable picture targets (#1812): coordinator `test/productions/audiobook-picture-rejection.test.ts`
 checks correlated pre-dispatch failures for the picture and its linked Tall without queueing work.
