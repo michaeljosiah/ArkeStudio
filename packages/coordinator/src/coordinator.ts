@@ -24206,7 +24206,19 @@ export class Coordinator {
         },
         start: (action, card) => this.startComicMakeForAction(store, action, card),
         running: (run) => this.comicMakes.has(run),
-        exportBook: (action, requestId) => exportComic(store, action.productionId, action.formats, new Date(this.nowIso()), store.closingSignal, requestId, action.chapter),
+        exportBook: async (action, requestId) => {
+          // Stopped by the world closing and by the app stopping, as the Pages press is.
+          const control = new AbortController();
+          const onClose = () => control.abort();
+          store.closingSignal.addEventListener("abort", onClose, { once: true });
+          this.exportingComics.add(control);
+          try {
+            return await exportComic(store, action.productionId, action.formats, new Date(this.nowIso()), control.signal, requestId, action.chapter);
+          } finally {
+            this.exportingComics.delete(control);
+            store.closingSignal.removeEventListener("abort", onClose);
+          }
+        },
       },
       interactiveExportVoices: (productionId) => this.interactiveExportVoices(store, productionId),
       onExportProgress: event => this.publishExportProgress(store, event),
@@ -24290,6 +24302,8 @@ export class Coordinator {
         });
         if (this.stillOpen(store)) {
           await this.refreshConversations(store);
+          // The thread on screen holds its own copy of the card: without this it said Running for good (round 96).
+          if (this.getState().worldChat?.conversationId === card.conversationId) await this.openWorldChat(store, card.conversationId);
           this.transport.broadcastSnapshot();
         }
       }));

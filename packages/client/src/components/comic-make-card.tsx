@@ -112,7 +112,12 @@ export function ComicMakeCardBody({ action }: { action: ConversationActionCard }
     const first = review?.status === "compared" ? review.findings[0] : undefined;
     return { page: row.page, number: row.number, panel: state.index + 1, kind: first?.kind ?? "review" };
   }));
-  const ready = rows.filter((row) => comicPageFinishable(row.page, records(row.page), settings) && !(records(row.page)?.accepted[settings.language]));
+  // A page accepted before its words or typeface changed is out of date, and can be accepted again.
+  const ready = rows.filter((row) => {
+    const record = records(row.page);
+    const standing = record?.takes.find((take) => take.id === record.accepted[settings.language]);
+    return comicPageFinishable(row.page, record, settings) && standing?.hash !== comicPageHash(row.page, settings, "overlay");
+  });
   const accept = async () => {
     setAccepting(true);
     try { for (const row of ready) await acceptPage(world, production, row.page); } finally { setAccepting(false); }
