@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
-import type { ClientMessage, CreatorPublication } from "@arke-studio/contracts";
+import type { ClientMessage, CreatorPackagePreview, CreatorPublication } from "@arke-studio/contracts";
 import { CreatorPublicationHistory, CreatorPublishingPanel } from "../src/components/creator-publishing.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -22,6 +22,17 @@ async function mounted(run: (container: HTMLElement, sent: ClientMessage[]) => P
   finally { await act(async () => root.unmount()); container.remove(); __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE); }
 }
 function reply(publications: CreatorPublication[], replyScope = scope) { __applyEventForTest({ at: "2026-11-05T12:00:00Z", type: "creator-publishing.changed", worldId, state: { configured: true, scopeId: replyScope, publications, refusal: null } }); }
+it("offers single-line declaration fields matching AONIK's current metadata contract", async () => {
+  await mounted(async container => {
+    await act(async () => { const panel = container.querySelector("details")!; panel.open = true; panel.dispatchEvent(new Event("toggle")); });
+    const preview: CreatorPackagePreview = { candidateId: publication.id, exportId: publication.exportId, title: publication.title, creatorDisplayName: "Creator", summary: "Synthetic description", worldId, edition: publication.edition, fileName: "fixture.zip", bytes: publication.packageBytes, sha256: publication.packageSha256, kind: "world", channelKey: "test", rightsDeclarationVersion: "test-v1", permissionText: "Synthetic permission", artworkAssetId: "cover", assets: [{ id: "cover", path: "cover.png", mediaType: "image/png", bytes: 10 }] };
+    await act(async () => __applyEventForTest({ at: "2026-11-05T12:00:00Z", type: "creator-publishing.changed", worldId, state: { configured: true, scopeId: scope, publications: [], refusal: null, preview } }));
+    for (const label of ["Public description", "Artwork, writing and voice attribution", "Distribution rights for every included file"]) {
+      const field = container.querySelector(`[aria-label="${label}"]`); assert.equal(field?.tagName, "INPUT");
+    }
+    assert.equal(container.querySelector("textarea"), null); assert.match(container.textContent!, /Use one line for each field/);
+  });
+});
 it("shows approval separately from delivery and sends only typed receipt controls", async () => {
   await mounted(async (container, sent) => { await act(async () => reply([publication])); assert.match(container.textContent!, /Approved · awaiting publication/); assert.ok(!container.querySelector("progress"));
     await act(async () => (Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Refresh receipt")!).click()); const command = sent.find(c => c.kind === "creator-publishing-control"); assert.equal(command?.kind, "creator-publishing-control"); if (command?.kind === "creator-publishing-control") { assert.equal(command.id, publication.id); assert.equal(command.action, "refresh"); }

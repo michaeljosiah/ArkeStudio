@@ -4,7 +4,7 @@ import { CreatorPublishingFormSchema, type CreatorPackagePreview, type CreatorPu
 import { cancelAccountSignIn, creatorPublishing, signInAccount, subscribeCreatorPublishing, useStore } from "../lib/store.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { OnYourPC } from "./on-your-pc.js";
-import { Button, Input, Textarea } from "./ui.js";
+import { Button, Input } from "./ui.js";
 
 function useCreatorPublishing(worldId: string, enabled = true) {
   const { state: app, connection } = useStore(); const account = app?.app.account;
@@ -33,7 +33,7 @@ export function CreatorPublishingPanel({ worldId, productionId, exportId }: { wo
   const saved = !!preview && !!reply?.publications.some(p => p.id === preview.candidateId);
   useEffect(() => { setPreview(null); setError(null); setReplace(""); setForm(f => ({ ...f, rightsBasis: "", evidenceReference: "", attribution: "", distributionPermissionGranted: false })); }, [exportId, scope]);
   useEffect(() => { if (reply?.preview?.exportId === exportId) { const p = reply.preview; setPreview(p); setForm(f => ({ ...f, title: p.title, creatorDisplayName: p.creatorDisplayName, summary: p.summary, distributionPermissionGranted: false })); } }, [reply?.preview, exportId]);
-  const field = (name: keyof typeof form, label: string, maxLength: number, multiline = false) => <label className={multiline ? "fy-creator-field fy-creator-wide" : "fy-creator-field"}><span>{label}</span>{multiline ? <Textarea aria-label={label} value={String(form[name])} maxLength={maxLength} onChange={e => setForm(f => ({ ...f, [name]: e.target.value }))} /> : <Input aria-label={label} value={String(form[name])} maxLength={maxLength} onChange={e => setForm(f => ({ ...f, [name]: e.target.value }))} />}</label>;
+  const field = (name: keyof typeof form, label: string, maxLength: number, wide = false) => <label className={wide ? "fy-creator-field fy-creator-wide" : "fy-creator-field"}><span>{label}</span><Input aria-label={label} value={String(form[name])} maxLength={maxLength} onChange={e => setForm(f => ({ ...f, [name]: e.target.value }))} /></label>;
   return <details className="fy-creator-publishing" open={open} onToggle={e => setOpen(e.currentTarget.open)}><summary>Submit to Arke Player</summary>
     {isRemoteSession() ? <OnYourPC>submit a Player edition</OnYourPC> : <>
       <p>Submit this frozen edition for independent editorial review. Your source world stays on this device.</p>
@@ -45,6 +45,7 @@ export function CreatorPublishingPanel({ worldId, productionId, exportId }: { wo
           <p>Public artwork: {preview.assets.find(a => a.id === preview.artworkAssetId)?.path}. Only the files listed below are submitted.</p>
           <details><summary>Files included in this edition</summary><ul>{preview.assets.map(a => <li key={a.id}>{a.path} · {a.mediaType}</li>)}</ul></details>
           <fieldset className="fy-creator-fields" disabled={saved}><legend>Public details and distribution rights</legend>
+            <p className="fy-creator-wide">Use one line for each field.</p>
             {field("title", "Public title", 200)}{field("creatorDisplayName", "Public creator name", 200)}{field("summary", "Public description", 2000, true)}{field("language", "Language", 35)}
             <label className="fy-creator-field"><span>Audience</span><select aria-label="Audience" className="ui-input" value={form.audience} onChange={e => setForm(f => ({ ...f, audience: e.target.value as CreatorPublishingForm["audience"] }))}><option value="general">General</option><option value="children">Children</option><option value="adults">Adults</option></select></label>
             {field("ageRating", "Age suitability", 120)}{field("attribution", "Artwork, writing and voice attribution", 2000, true)}{field("rightsBasis", "Distribution rights for every included file", 1000, true)}{field("evidenceReference", "Rights evidence reference", 512)}

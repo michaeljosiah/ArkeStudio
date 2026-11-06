@@ -11,6 +11,8 @@ artwork, and complete the public details, audience, attribution and rights evide
 The distribution permission is unchecked until the author confirms it. **Submit for
 review** saves the exact intent before making a network request. It does not approve
 or publish anything. This flow is separate from video/EPUB/M4B Story Publish.
+Declaration fields use single lines, matching AONIK's current metadata and rights
+validation; the editor does not offer unsupported paragraph breaks.
 
 The world's Publications view shows saved receipts for the current creator, their
 upload progress and current editorial state. Pause retains uploaded chunks. Cancel
@@ -60,6 +62,9 @@ is refused. Credentials are encrypted in `<app-root>/creator-publishing/account.
 with current-user filesystem permissions. They are never sent over the Studio bridge,
 written to a world, included in its changelog, or exposed as an avatar URL. Other
 private publishing state and frozen copies have current-user permissions too.
+Cancellation, timeout and shutdown close the callback even if the OS browser launch
+has not returned. A late launch cannot complete the cancelled handoff or save tokens
+(SPEC-025 R-28).
 
 ## Frozen editions and recovery
 

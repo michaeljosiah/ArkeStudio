@@ -10,7 +10,7 @@ import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { tempDir } from "../tmp.js";
 
 async function waitFor(check: () => boolean) { const until = Date.now() + 10000; while (!check()) { if (Date.now() > until) throw new Error("Account did not settle"); await new Promise(resolve => setTimeout(resolve, 10)); } }
-async function fixture(mode: "ok" | "denied" | "waiting" = "ok", timeout = 10000) {
+async function fixture(mode: "ok" | "denied" | "waiting" = "ok", timeout = 10000, opening?: Promise<void>) {
   const root = await tempDir("arke-creator-account-"); const cipher = devCipher(); const file = join(root, "account.dat");
   const configuration = parseAonikConfiguration({ apiBaseUrl: "https://api.example.invalid", issuer: "https://identity.example.invalid", clientId: "native-public-client", scope: "openid profile offline_access", tenantId: randomUUID(), channelKey: "test", rightsDeclarationVersion: "fixture", permissionText: "Synthetic fixture permission" });
   const { privateKey, publicKey } = await generateKeyPair("RS256"); const jwk = { ...await exportJWK(publicKey), kid: "test", alg: "RS256", use: "sig" };
@@ -32,6 +32,7 @@ async function fixture(mode: "ok" | "denied" | "waiting" = "ok", timeout = 10000
   };
   const account = new AonikAccount({ configuration, file, cipher, fetch: fetcher, clock: () => now, secrets: { register: value => secrets.push(value) }, handoffTimeoutMs: timeout,
     openExternal: async url => { authorization = new URL(url); assert.equal(authorization.searchParams.get("code_challenge_method"), "S256"); assert.ok(authorization.searchParams.get("nonce")); const callback = new URL(authorization.searchParams.get("redirect_uri")!); assert.equal(callback.hostname, "127.0.0.1");
+      if (opening) { await opening; return; }
       // An unsolicited local request cannot complete or consume the handoff.
       const wrong = new URL(callback); wrong.searchParams.set("state", "wrong"); assert.equal((await fetch(wrong)).status, 400);
       if (mode === "waiting") return;
@@ -63,6 +64,28 @@ describe("native creator account", () => {
   });
   it("times out an abandoned browser handoff without retaining credentials", async () => {
     const h = await fixture("waiting", 100); try { await h.account.signIn(); await waitFor(() => h.account.current().kind === "signed-out"); assert.match(JSON.stringify(h.account.current()), /timed out/); assert.equal(h.account.actorKey(), null); await assert.rejects(readFile(h.file)); } finally { await h.account.stop(); }
+  });
+  for (const end of ["cancel", "stop", "timeout"] as const) it(`${end} closes the callback while the OS browser launch is still pending`, async () => {
+    let release!: () => void;
+    const opening = new Promise<void>(resolve => { release = resolve; });
+    const h = await fixture("waiting", end === "timeout" ? 500 : 10000, opening);
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await h.account.signIn(); await waitFor(() => !!h.authorization);
+      const ended = end === "cancel" ? h.account.cancelSignIn() : end === "stop" ? h.account.stop() : waitFor(() => h.account.current().kind === "signed-out");
+      await Promise.race([ended, new Promise<never>((_, reject) => { deadline = setTimeout(() => reject(new Error("Browser launch blocked handoff cancellation")), 2000); })]);
+      await assert.rejects(fetch(h.authorization!.searchParams.get("redirect_uri")!));
+      assert.equal(h.account.actorKey(), null); await assert.rejects(readFile(h.file), { code: "ENOENT" });
+      if (end === "cancel") assert.equal(h.account.current().kind, "signed-out");
+      if (end === "timeout") assert.match(JSON.stringify(h.account.current()), /timed out/);
+      const state = h.account.current(); release(); await opening; await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(h.account.current(), state, "late browser completion cannot restore a cancelled account");
+    } finally {
+      clearTimeout(deadline); release();
+      // Also release the old implementation's callback so a failed regression can clean up.
+      if (h.authorization) { const callback = new URL(h.authorization.searchParams.get("redirect_uri")!); callback.searchParams.set("state", h.authorization.searchParams.get("state")!); callback.searchParams.set("error", "access_denied"); await fetch(callback).catch(() => {}); }
+      await h.account.stop();
+    }
   });
   it("retains an offline creator identity without claiming a valid session", async () => {
     const h = await fixture(); try { await h.account.signIn(); await waitFor(() => h.account.current().kind === "signed-in"); const actor = h.account.actorKey(); h.expire(); h.offline(); await assert.rejects(h.account.bearer()); assert.equal(h.account.actorKey(), actor); assert.match(JSON.stringify(h.account.current()), /offline/); } finally { await h.account.stop(); }

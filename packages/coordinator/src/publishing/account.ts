@@ -108,6 +108,7 @@ export class AonikAccount implements AccountService {
     });
     const done = (async () => {
       const timer = setTimeout(() => controller.abort(), this.options.handoffTimeoutMs ?? 180000); timer.unref();
+      let onAbort: (() => void) | undefined;
       try {
         await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(this.options.configuration.redirectPort, "127.0.0.1", resolve); });
         const address = server.address(); if (!address || typeof address === "string") throw new Error("No callback listener");
@@ -117,8 +118,19 @@ export class AonikAccount implements AccountService {
           state, nonce, code_challenge: await oidc.calculatePKCECodeChallenge(verifier), code_challenge_method: "S256" });
         trustedAonikUrl(url.origin + url.pathname, this.options.configuration.allowLoopbackHttp);
         if (controller.signal.aborted || generation !== this.generation) return;
-        await this.options.openExternal(url.href);
-        const returned = await Promise.race([callback, new Promise<never>((_, reject) => controller.signal.addEventListener("abort", () => reject(new CreatorSignInRequired()), { once: true }))]);
+        const cancelled = new Promise<never>((_, reject) => {
+          onAbort = () => reject(new CreatorSignInRequired());
+          controller.signal.addEventListener("abort", onAbort, { once: true });
+          if (controller.signal.aborted) onAbort();
+        });
+        // The OS browser launch cannot be aborted. Stop owning the callback immediately;
+        // a late browser completion must not keep cancellation or shutdown waiting.
+        const returned = await Promise.race([cancelled, Promise.resolve().then(async () => {
+          controller.signal.throwIfAborted();
+          await this.options.openExternal(url.href);
+          return callback;
+        })]);
+        if (controller.signal.aborted || generation !== this.generation || this.stopped) return;
         const tokens = await oidc.authorizationCodeGrant(configuration, returned, { pkceCodeVerifier: verifier, expectedState: state, expectedNonce: nonce, idTokenExpected: true });
         const claims = tokens.claims(); if (!claims?.sub) throw new CreatorSignInRequired();
         const profile = configuration.serverMetadata().userinfo_endpoint ? await oidc.fetchUserInfo(configuration, tokens.access_token, claims.sub) : claims;
@@ -128,7 +140,7 @@ export class AonikAccount implements AccountService {
         await this.keep(c, generation, controller.signal); if (generation === this.generation && !controller.signal.aborted) { this.credentials = c; this.signed("ok"); }
       } catch {
         if (generation === this.generation && !this.stopped) this.move({ kind: "signed-out", refusal: controller.signal.aborted ? "Sign-in timed out. Try again in your browser." : "Sign-in was not completed. Try again in your browser." });
-      } finally { clearTimeout(timer); server.closeAllConnections(); server.close(); if (this.handoff?.controller === controller) this.handoff = null; }
+      } finally { clearTimeout(timer); if (onAbort) controller.signal.removeEventListener("abort", onAbort); server.closeAllConnections(); server.close(); if (this.handoff?.controller === controller) this.handoff = null; }
     })();
     this.handoff = { controller, server, done };
   }
