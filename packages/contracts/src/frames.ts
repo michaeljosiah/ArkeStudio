@@ -18,6 +18,7 @@ import { VoiceDesignDraftSchema } from "./designed-voice.js";
 import { GenesisDraftSchema } from "./genesis.js";
 import { GenesisImportResolveSchema } from "./genesis-imports.js";
 import { GenesisImageTargetSchema } from "./genesis-images.js";
+import { CreatorPublishingFormSchema } from "./creator-publishing.js";
 import { AccountPageSchema } from "./account.js";
 import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
@@ -1540,6 +1541,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * the browser, or clears the refusal a rejected one left. Open puts one of the account's own
    * pages in the system browser — the app draws no billing and no profile form.
    */
+  z.object({ kind: z.literal("creator-publishing-list"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("creator-publishing-prepare"), worldId: UlidSchema, productionId: SlugSchema, exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("creator-publishing-submit"), worldId: UlidSchema, candidateId: z.string().uuid(), form: CreatorPublishingFormSchema, replace: z.string().uuid().optional(), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("creator-publishing-control"), worldId: UlidSchema, id: z.string().uuid(), action: z.enum(["pause", "resume", "cancel", "refresh"]), requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("account-sign-in") }).strict(),
   z.object({ kind: z.literal("account-create") }).strict(),
   z.object({ kind: z.literal("account-cancel-sign-in") }).strict(),

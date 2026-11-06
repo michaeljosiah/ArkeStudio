@@ -5,6 +5,17 @@ idle and first-message drafts, passage prefixes, selection-menu drafts, automati
 World Chat and the shared send guard. Check 16,000 characters still fit the transport schema,
 while oversized drafts remain editable without a create, send or optimistic wait.
 
+Creator publishing #2391: see [host configuration, focused suites and live qualification
+limits](aonik-publishing.md). `node scripts/smoke-creator-publishing.mjs` exercises the
+real sandboxed Electron file page at desktop/Fold/phone widths. Protocol and synthetic
+package tests do not establish live Auth0 sign-in or an AONIK dev deployment.
+Coordinator `test/remote-access.test.ts` sends valid publishing list, prepare,
+submit and control payloads through the real paired-device gateway and verifies
+that none reach the upstream host session; trusted desktop commands remain allowed.
+Coordinator `test/publishing/polling.test.ts` holds a real receipt read across upload
+completion: SPEC-058 R-98 receipt tracking must not label that live transfer interrupted.
+The restart tests still expose an abandoned uploading journal as resumable.
+
 Unavailable picture targets (#1812): coordinator `test/productions/audiobook-picture-rejection.test.ts`
 checks correlated pre-dispatch failures for the picture and its linked Tall without queueing work.
 Client `test/audiobook-picture.test.tsx` checks that the existing card leaves Generating and shows

@@ -25,6 +25,7 @@ import { PageSheet } from "./page-sheet.js";
 import { WordTimingControl } from "./audiobook-word-timing.js";
 import { Button } from "./ui.js";
 import { Folder, Seg, SHAPES, SUBTITLES, VideoFiles, VideoOptionRows, VideoPreview, VideoExportPreview, megabytes, useVideoState, videoQuote, wholeChapters, withShape } from "./audiobook-video.js";
+import { CreatorPublishingPanel } from "./creator-publishing.js";
 import { bookChapters, useArkePlayerExport } from "./arke-player-export.js";
 
 /**
@@ -510,6 +511,7 @@ export function WebPackages({ worldId }: { worldId: string }) {
           <strong>{entry.title}</strong>
           {/* A part says which, after the edition it follows (236e): `Arke Player part 2`. */}
           <span className="fy-mono">{[entry.release?.part !== undefined ? `${KIND[entry.kind]} part ${entry.release.part.number}` : KIND[entry.kind], entry.exportedAt.slice(0, 10), entry.holds, entry.bytes !== undefined ? megabytes(entry.bytes) : undefined].filter(Boolean).join(" · ")}</span>
+          {entry.kind === "arke-player" && entry.productionId && entry.exportId && <CreatorPublishingPanel worldId={worldId} productionId={entry.productionId} exportId={entry.exportId} />}
           <div className="fy-publication-actions">
             {entry.sha256 !== undefined && (
               <Button variant="ghost" onClick={() => void navigator.clipboard?.writeText(entry.sha256!)}>

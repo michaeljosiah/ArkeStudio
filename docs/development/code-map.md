@@ -5,6 +5,13 @@ Conversation text limits (#1742): contracts `world-chat-input.ts` owns the share
 validate complete outgoing text before clearing drafts or creating a conversation, using their
 existing composer refusal chips. Client `sendWorldChat` also refuses before transport or holds.
 
+Creator publishing (#2391): contracts `creator-publishing.ts` defines confirmation and
+receipt DTOs; coordinator `publishing/` owns optional OIDC sign-in, frozen Player ZIPs,
+fixed-origin transport and durable resumable requests. Desktop `aonik-publishing.ts`
+composes protected storage and browser handoff. Client `components/creator-publishing.tsx`
+is shared by export results and Publications. Its host/human-only wire events never
+enter world changelogs. See [configuration and qualification](aonik-publishing.md).
+
 A picture request with an unavailable world or chapter (#1812) is rejected by the coordinator's
 `make-audiobook-picture` handler through `command.failed`, before any dispatch. Client `store.ts`
 folds the correlated picture/Tall rejection into the existing `audiobookAsks` failure state.

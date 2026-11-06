@@ -1,0 +1,27 @@
+import React from "react";
+import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router";
+import { CreatorPublishingPanel, CreatorPublicationHistory } from "./src/components/creator-publishing";
+import { __setBridgeForTest, __setStateForTest, __applyEventForTest } from "./src/lib/store";
+import { FIXTURE_STATE } from "./test/fixture-state";
+import "./src/theme/tokens/colors.css";
+import "./src/theme/tokens/typography.css";
+import "./src/theme/tokens/spacing.css";
+import "./src/theme/tokens/effects.css";
+import "./src/theme/globals.css";
+import "./src/components/ui.css";
+import "./src/components/creator-publishing.css";
+const worldId = FIXTURE_STATE.world.meta.worldId, scopeId = "a".repeat(64), id = "11111111-1111-4111-8111-111111111111";
+const preview = { candidateId: id, exportId: "ap_fixture", title: "Lantern Garden", creatorDisplayName: "Synthetic Creator", summary: "An illustrated adventure for families", worldId: "lantern-garden", edition: "2026-11-05", fileName: "lantern-garden.zip", bytes: 12345678, sha256: "b".repeat(64), kind: "world", channelKey: "test", rightsDeclarationVersion: "synthetic-fixture-v1", permissionText: "Synthetic fixture: permit review and distribution of this exact edition.", artworkAssetId: "cover", assets: [{ id: "cover", path: "pictures/cover.jpg", mediaType: "image/jpeg", bytes: 1234 }] };
+let publications = [], frames = []; window.creatorFrames = frames;
+const respond = state => setTimeout(() => __applyEventForTest({ at: "2026-11-05T12:00:00Z", type: "creator-publishing.changed", worldId, state: { configured: true, scopeId, publications, refusal: null, ...state } }), 10);
+__setBridgeForTest({ connect() {}, subscribe() {}, send(json) { const command = JSON.parse(json); frames.push(command);
+  if (command.kind === "creator-publishing-list") respond({});
+  if (command.kind === "creator-publishing-prepare") respond({ preview });
+  if (command.kind === "creator-publishing-submit") { publications = [{ id, worldId, productionId: "story", exportId: preview.exportId, title: preview.title, edition: preview.edition, packageSha256: preview.sha256, packageBytes: preview.bytes, receiptId: "22222222-2222-4222-8222-222222222222", revisionId: "33333333-3333-4333-8333-333333333333", revisionNumber: 1, status: "validating", transfer: "complete", receivedBytes: preview.bytes, updatedAt: "2026-11-05T12:00:00Z", message: null, decisions: [] }]; respond({}); }
+}});
+const pause = () => new Promise(resolve => setTimeout(resolve, 120)); const root = createRoot(document.getElementById("root"));
+window.mountCreator = async () => { publications = []; frames.splice(0); __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, account: { kind: "signed-in", person: { name: "Synthetic Creator", email: "creator@example.invalid", picture: null }, plan: { name: "Creator", paid: false }, session: "ok", creatorScope: scopeId, pages: [] } } }, { connection: "open" }); root.render(<MemoryRouter><main key={Math.random()}><CreatorPublishingPanel worldId={worldId} productionId="story" exportId={preview.exportId} /><CreatorPublicationHistory worldId={worldId} /></main></MemoryRouter>); await pause(); document.querySelector("summary").click(); await pause(); };
+window.pressCreator = async label => { const button = [...document.querySelectorAll("button")].find(b => b.textContent === label); if (!button || button.disabled) throw new Error("Unavailable: " + label); button.click(); await pause(); };
+window.fillCreator = async () => { for (const [label, value] of [["Age suitability", "Families, age 6+"], ["Artwork, writing and voice attribution", "Synthetic fixtures only"], ["Distribution rights for every included file", "Author-created test fixtures"], ["Rights evidence reference", "fixture-provenance"]]) { const input = document.querySelector('[aria-label="' + label + '"]'); const proto = input.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, "value").set.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); } await pause(); };
+window.checkCreator = () => { const main = document.querySelector("main"); if (main.scrollWidth > main.clientWidth + 2 || document.documentElement.scrollWidth > innerWidth) throw new Error("Creator form overflows"); for (const button of main.querySelectorAll("button")) if (button.getBoundingClientRect().height < 43) throw new Error("Small action: " + button.textContent); return { width: innerWidth, bytesConfirmed: !!document.querySelector("code"), saved: !!document.querySelector('[aria-label="Player submission receipts"]') }; };

@@ -683,6 +683,9 @@ import { reviewGenesisImports, resolveGenesisImport, recoverGenesisImports } fro
 import { FOUNDING_CONVERSATION_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { FoundingBuildService } from "./world/founding-build.js";
 import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
+import type { CreatorPublishingPort } from "./publishing/service.js";
+import { PublishingRefusal } from "./publishing/api.js";
+import { CreatorSignInRequired } from "./publishing/account.js";
 import { NoArkeCloud, type AccountService } from "./account.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import { localAiSetupReadiness, type SetupStatus } from "@arke-studio/contracts";
@@ -993,6 +996,7 @@ export interface CoordinatorOptions {
    * — `NoArkeCloud`, the local default — and the control says so when pressed.
    */
   account?: AccountService;
+  creatorPublishing?: CreatorPublishingPort;
   /** Host-supplied authoring policy. Coordinator consumes contracts; the shared launcher
    * in harness/v2-launch.ts owns concrete adapter assembly for desktop and dev. */
   authoring?: {
@@ -3875,6 +3879,7 @@ export class Coordinator {
       );
     }
     this.account = opts.account ?? new NoArkeCloud();
+    if (opts.creatorPublishing) this.lifecycleDisposers.add(opts.creatorPublishing.onChange((worldId, state) => { if (!this.stopping) this.emit({ at: new Date().toISOString(), type: "creator-publishing.changed", worldId, state }); }));
     // A host's service can answer a handoff long after stop(); detached with the other
     // subscriptions so a late answer never reaches a drained transport.
     this.lifecycleDisposers.add(
@@ -4988,6 +4993,7 @@ export class Coordinator {
       // Who is signed in is UI state with a person's name and address in it; the log would keep
       // them past the sign-out (SPEC-025 R-26).
       parsed.type !== "account.changed" &&
+      parsed.type !== "creator-publishing.changed" &&
       // The bundle is a state dump made for a support thread, and since SPEC-032 R-38 it also
       // carries the findings — whose firstSeen bookkeeping R-35 says is never written to disk.
       // Journalling the event would have durably recorded both on every generate.
@@ -10894,6 +10900,30 @@ export class Coordinator {
         if (!this.appSettings) return;
         const settings = await this.appSettings.setActivitySeen({ fileProblems: { [msg.worldId]: msg.paths } });
         this.emit({ at: new Date().toISOString(), type: "activity.seen", seen: settings.activity });
+        return;
+      }
+      case "creator-publishing-list":
+      case "creator-publishing-prepare":
+      case "creator-publishing-submit":
+      case "creator-publishing-control": {
+        if (this.stopping) return;
+        const service = this.opts.creatorPublishing;
+        let state;
+        try {
+          if (!service) state = { configured: false, scopeId: null, publications: [], refusal: "Cloud publishing is not configured on this device. Local export remains available." };
+          else if (msg.kind === "creator-publishing-list") state = await service.list(msg.worldId);
+          else if (msg.kind === "creator-publishing-prepare") {
+            const store = this.opts.provider.openStore?.();
+            if (!store || store.worldId !== msg.worldId) throw new PublishingRefusal("world-unavailable", "Open this world before preparing its frozen edition.");
+            state = await service.prepare(store, msg.productionId, msg.exportId);
+          } else if (msg.kind === "creator-publishing-submit") state = await service.submit(msg.worldId, msg.candidateId, msg.form, msg.replace);
+          else state = await service.control(msg.worldId, msg.id, msg.action);
+        } catch (error) {
+          state = { configured: !!service, scopeId: this.account.current().kind === "signed-in" ? (this.account.current() as Extract<ReturnType<AccountService["current"]>, { kind: "signed-in" }>).creatorScope ?? null : null, publications: service ? (await service.list(msg.worldId).catch(() => ({ publications: [] }))).publications : [],
+            refusal: error instanceof PublishingRefusal || error instanceof CreatorSignInRequired ? error.message : "This publishing request could not be confirmed. Refresh the saved receipt before continuing." };
+        }
+        const account = this.account.current();
+        if (!this.stopping && state.scopeId === (account.kind === "signed-in" ? account.creatorScope ?? null : null)) this.emit({ at: new Date().toISOString(), type: "creator-publishing.changed", worldId: msg.worldId, requestId: msg.requestId, state });
         return;
       }
       case "account-sign-in": {
@@ -24939,6 +24969,8 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    const creatorPublishingStopped = this.opts.creatorPublishing?.stop();
+    const creatorAccountStopped = this.account.stop?.();
     this.recoveryActions.closeAdmission();
     for (const detach of this.recoveryTargetObservers.values()) detach(); this.recoveryTargetObservers.clear();
     const systemResourcesStopped = this.opts.systemResources?.stop();
@@ -24969,6 +25001,7 @@ export class Coordinator {
     // but none can reserve work and receive an id from a queue shutdown has stopped accepting.
     this.jobQueue?.stopAccepting();
     this.stopPromise = (async () => {
+      await Promise.allSettled([creatorPublishingStopped, creatorAccountStopped]);
       this.opts.onShutdownWait?.("chapter reviews");
       await this.chapterReviewService?.stop();
       await this.manuscriptReviewService?.stop();
