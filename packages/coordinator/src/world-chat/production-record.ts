@@ -71,7 +71,8 @@ export function productionRecord(bundle: WorldBundle, productionId: string): Rec
       comicScripts: (production.comicScripts ?? []).map((entry) => ({ chapter: entry.chapter, ...entry.script, baseHash: entry.hash })),
       comicPages: comicBook(production).map((entry) => ({ page: entry.id, number: entry.number, chapter: entry.chapter, accepted: entry.take?.id ?? null,
         outOfDate: entry.outOfDate, cleared: entry.cleared, findings: entry.take?.verification?.status === "compared" ? entry.take.verification.findings.map((finding) => ({ kind: finding.kind, expected: finding.expected, found: finding.found })) : null,
-        ...((production.comic ?? DEFAULT_COMIC_SETTINGS).mode === "overlay" ? comicPanelRecord(entry, production, production.comic ?? DEFAULT_COMIC_SETTINGS) : {}) })),
+        // A page made Whole page before the book changed mode has its words in its picture: it has no panels or lines waiting.
+        ...((production.comic ?? DEFAULT_COMIC_SETTINGS).mode !== "overlay" ? {} : entry.take?.mode === "baked" ? { madeAs: "whole-page" } : comicPanelRecord(entry, production, production.comic ?? DEFAULT_COMIC_SETTINGS)) })),
       // The chapters with no pages yet (turn 249c), as unwrittenEpisodes names a drama's, so Arke is
       // never told by an empty list that there is nothing to draft.
       unpagedChapters: unpaged(production),
