@@ -45,7 +45,7 @@ export function harnessPagePlacer(ask: ImageJsonRunner): PagePlacer {
       const known = new Set(input.lines.map((line) => line.id));
       // Only the lines it was given, and only with a place it could say: a line it left out stays unplaced.
       const placed = answer.lines.flatMap((raw): PlacedLine[] => {
-        const entry = raw as { id?: unknown; x?: unknown; y?: unknown; tail?: { x?: unknown; y?: unknown } };
+        const entry = (raw ?? {}) as { id?: unknown; x?: unknown; y?: unknown; tail?: { x?: unknown; y?: unknown } };
         const x = unit(entry.x);
         const y = unit(entry.y);
         if (typeof entry.id !== "string" || !known.has(entry.id) || x === null || y === null) return [];
@@ -55,7 +55,7 @@ export function harnessPagePlacer(ask: ImageJsonRunner): PagePlacer {
       });
       // A face it could not box is one less to avoid, never a reason to lose the page's lines.
       const faces = (answer.faces ?? []).flatMap((raw): PageBox[] => {
-        const entry = raw as { x?: unknown; y?: unknown; w?: unknown; h?: unknown };
+        const entry = (raw ?? {}) as { x?: unknown; y?: unknown; w?: unknown; h?: unknown };
         const [x, y, w, h] = [unit(entry.x), unit(entry.y), unit(entry.w), unit(entry.h)];
         return x === null || y === null || w === null || h === null || w === 0 || h === 0 ? [] : [{ x, y, w, h }];
       });
