@@ -17,8 +17,9 @@ to perform on behalf of the user". After its report: "Design turns first please"
 
 ## Choices for the owner
 
-1. **Arke may spend, on a priced card.** This reverses 269's "Arke places words but does not spend".
-   Approve is still the author's press, at a stated limit. If this is a no, 270a–c go and 270d–e stay.
+1. **Arke may spend, on a priced card. Decided by the owner, 6 November 2026: yes, on approval.** This
+   reverses 269's "Arke places words but does not spend". Approve is still the author's press, at a stated
+   limit.
 2. **Redraws are limited for the card, not per panel.** One hand failed every take in the cell trial, so
    a per-panel allowance could pay for three bad takes on one panel. 13 panels at $0.22 plus up to 6
    redraws is the $4.18 drawn.
