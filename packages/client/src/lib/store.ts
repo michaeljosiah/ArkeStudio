@@ -5611,6 +5611,11 @@ export function acceptComicTake(worldId: string, productionId: string, page: str
 }
 
 /** A picture review's warning on a take marked Seen (SPEC-064 R-69, turn 253c). */
+/** Stop a Make card's run: a panel already started finishes, and nothing new starts (turn 270b). */
+export function stopComicMake(worldId: string, run: string): void {
+  send({ kind: "stop-comic-make", worldId, run });
+}
+
 export function seeComicWarning(worldId: string, productionId: string, page: string, take: string, warning: "layout" | "continuity" | "likeness"): string | null {
   const requestId = ulid();
   return send({ kind: "see-comic-warning", requestId, worldId, productionId, page, take, warning }) ? requestId : null;

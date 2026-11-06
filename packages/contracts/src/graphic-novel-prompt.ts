@@ -38,6 +38,8 @@ export function comicPanelPrompt(input: {
   style?: string;
   names: (sheet: string) => string;
   cited: readonly ComicCited[];
+  /** What the review found in the last take, when this one is drawn to correct it (turn 269c). */
+  fix?: string;
 }): string {
   const { panel } = input;
   const who = panel.characters.map(input.names);
@@ -50,6 +52,7 @@ export function comicPanelPrompt(input: {
     who.length ? `Shows ${who.join(", ")}.` : "",
     panel.location ? `At ${input.names(panel.location)}.` : "",
   ].filter(Boolean).join(" "));
+  if (input.fix?.trim()) lines.push(`Correct this from the last attempt: ${input.fix.replace(/\s+/g, " ").trim()}`);
   const anchor = input.cited.find((entry) => entry.name === COMIC_STYLE_REFERENCE);
   const cast = input.cited.filter((entry) => entry !== anchor);
   const references = [referenceBriefLine(cast), cast.some((entry) => entry.kind === "character") ? PICTURE_IDENTITY_LINE : ""].filter(Boolean).join(" ");

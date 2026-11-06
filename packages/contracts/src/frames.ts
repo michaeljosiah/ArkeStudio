@@ -3394,6 +3394,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("cancel-export"), worldId: UlidSchema, exportId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("stop-comic-make"), worldId: UlidSchema, run: z.string().min(1).max(100) }).strict(),
   /** SPEC-013 R-22: a folder that reopens identically elsewhere — history kept, caches dropped. */
   z.object({ kind: z.literal("export-world"), worldId: UlidSchema }).strict(),
   /** SPEC-015 R-19: remove shelf membership while retaining bytes and provenance. */

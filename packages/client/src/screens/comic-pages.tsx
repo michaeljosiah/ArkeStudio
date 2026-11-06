@@ -34,7 +34,6 @@ import {
   type LetteringItem,
   type LetteringKind,
   type PageReview,
-  type PageReviewFinding,
   type ProductionBundle,
   type WorldBundle,
 } from "@arke-studio/contracts";
@@ -47,6 +46,7 @@ import { ComicStylePicker } from "../components/comic-style-picker.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
 import { paragraphLabel } from "../lib/episode-script.js";
 import { comicStylePicture, comicStylePreset, draftFromStyle, styleFromDraft, type ComicStyleDraft } from "../lib/comic-styles.js";
+import { REVIEW_FINDING } from "../lib/comic-findings.js";
 import { ComicModeSheet, PageWords, PanelMark, PanelSide, panelFaulted, panelHeldFault } from "./comic-panels.js";
 import { useProduction } from "../lib/selectors.js";
 import {
@@ -87,7 +87,7 @@ export const KINDS: Array<[LetteringKind, string]> = [["caption", "Caption"], ["
 export const SPOKEN = new Set<LetteringKind>(["speech", "thought", "shout", "whisper"]);
 const FINDING: Record<LetteringFinding["kind"], string> = { missing: "Missing", altered: "Altered", extra: "Extra", clipped: "Cut off", order: "Order", speaker: "Speaker" };
 /** The picture review's kinds as Pages names them (turn 253). */
-export const REVIEW_FINDING: Record<PageReviewFinding["kind"], string> = { content: "Scene", cast: "People", caption: "Caption", defect: "Defect", speaker: "Speaker", likeness: "Likeness", continuity: "Continuity", layout: "Layout" };
+export { REVIEW_FINDING };
 const LAYOUT_LABEL: Record<string, string> = { "grid-2x2": "Grid", "grid-3x3": "Grid 3×3", "strip-3": "Wide", splash: "Splash", feature: "Feature", manga: "Manga", webtoon: "Webtoon" };
 const READING: Array<[ComicReading, string]> = [["ltr", "Left to right"], ["rtl", "Right to left"], ["scroll", "Scroll"]];
 /** Edits settle into one save this long after the last keystroke. */

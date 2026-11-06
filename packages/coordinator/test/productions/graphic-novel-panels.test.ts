@@ -4,6 +4,7 @@ import { comicBook, comicPageHash, comicPanelStates, ulid, type ComicPage, type 
 import { Coordinator } from "../../src/coordinator.js";
 import { comicExportBlockers } from "../../src/productions/comic-export.js";
 import { createChapter, createProduction } from "../../src/productions/ops.js";
+import { productionRecord } from "../../src/world-chat/production-record.js";
 import { clearOfFaces, harnessPagePlacer, tailClearOfFaces } from "../../src/productions/graphic-novel-placer.js";
 import { changeComicPage, finishComicPage, nearestPanelShape, placeComicPage, saveComicScript, setComicLettering, setComicSettings } from "../../src/productions/graphic-novel.js";
 import type { PageReviewer } from "../../src/productions/graphic-novel-reviewer.js";
@@ -128,6 +129,22 @@ describe("Panel by panel (SPEC-064 R-37a, R-37b)", () => {
       await until(() => record(h, production).panelTakes.length === 3, "the panels to land");
       const spent = h.enqueued.reduce((sum, job) => sum + job.estimatedMicroUsd, 0);
       assert.ok(spent <= quote.microUsd, `${spent} within ${quote.microUsd}`);
+    }, { model: DRAWER }).finally(restore);
+  });
+
+  it("lets Arke read each panel's state and the review's words (turn 270)", () => {
+    const restore = reviewing(() => [{ id: "review:f1", kind: "defect", note: "Left eye sits low" }]);
+    return withHarness(async (h) => {
+      const { store, production, page } = await book(h);
+      const quote = await quoted(h, production, page.id);
+      await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, confirmedMicroUsd: quote.microUsd });
+      await until(() => record(h, production).panelTakes.filter((take) => take.review !== undefined).length === 3, "the reviews");
+      const read = productionRecord(store.getBundle(), production) as { comicPages: Array<{ linesPlaced: number; linesTotal: number; panels: Array<{ state: string; findings: Array<{ note: string }> }> }> };
+      const entry = read.comicPages[0]!;
+      assert.deepEqual(entry.panels.map((panel) => panel.state), ["at-fault", "at-fault", "at-fault"]);
+      assert.equal(entry.panels[0]!.findings[0]!.note, "Left eye sits low");
+      assert.equal(entry.linesPlaced, 0);
+      assert.ok(entry.linesTotal > 0);
     }, { model: DRAWER }).finally(restore);
   });
 
