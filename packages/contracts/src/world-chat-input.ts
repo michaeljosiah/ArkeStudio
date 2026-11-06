@@ -11,6 +11,13 @@ import { ChatAttachmentIdSchema, IsoDateTimeSchema, MessageIdSchema, RunIdSchema
  * is promoted to a primary turn or confirmed as included in a running one.
  */
 export const WORLD_CHAT_INPUT_BOUNDS = { text: 16_000, attachments: 20, unresolved: 10, settled: 10 } as const;
+
+/** Validate the complete message, including any passage context, before its draft is cleared. */
+export function worldChatTextRefusal(text: string): string | null {
+  return text.length > WORLD_CHAT_INPUT_BOUNDS.text
+    ? `Use at most ${WORLD_CHAT_INPUT_BOUNDS.text.toLocaleString("en-GB")} characters, including passage context. Shorten the message or attach a document. Your draft is retained.`
+    : null;
+}
 /**
  * The world boundary raised before the first input event is written (SPEC-045 R-27). A build that
  * predates these events reads the conversation log tolerantly and would skip them — losing queued
