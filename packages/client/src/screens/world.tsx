@@ -5075,7 +5075,7 @@ export function NewProductionScreen() {
           <Input
             id="production-name"
             aria-label="Name"
-            placeholder="Name it · working titles are fine"
+            placeholder={isGraphicNovel ? "Arke can name it" : "Name it · working titles are fine"}
             value={title}
             onChange={(e) => {
               setTitle(e.target.value);

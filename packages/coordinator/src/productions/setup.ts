@@ -28,6 +28,10 @@ export function assertSourceReadForPlan(
   // A graphic novel can preview just the requested chapters; each planned source still needs a current full read.
   const plansAudio = !!update.fields?.audioDrama && draft.kind === AUDIO_DRAMA_KIND;
   const plansPages = !!update.fields?.graphicNovel && update.fields.graphicNovel.chapters.length > 0 && draft.kind === GRAPHIC_NOVEL_KIND;
+  // Said here so the turn can repair it: in a real run Arke put the lines in its reply and left the plan blocked (0.5.103).
+  if (plansPages && !draft.source && update.fields!.graphicNovel!.chapters.some(chapter => chapter.about === undefined)) {
+    throw new Error("Each chapter of an original book says what happens in it: give every chapter in fields.graphicNovel.chapters an about line, and send the whole plan again.");
+  }
   if ((!plansAudio && !plansPages) || !draft.source) return;
   const story = bundle.productions.find(production => production.meta.id === draft.source!.productionId);
   if (!story) return;

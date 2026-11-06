@@ -69,6 +69,15 @@ describe("a graphic novel planned with Arke (SPEC-064 R-3, R-4, turn 249b)", () 
     assert.match(await readFile(join(store.dir, "productions", plan.production.id, "chapters", `${book.chapters[0]!.id}.md`), "utf8"), /She hears it at low water\./);
   });
 
+  it("refuses an original book's plan with no line for a chapter, so the turn can repair it (turn 272)", async () => {
+    const store = await open();
+    const draft = (await new ProductionSetupService(store).start(`cv_${ulid()}` as ConversationId, { kind: "graphic-novel" })).draft;
+    const plan = (about?: string) => ({ expectedRevision: draft.revision, fields: { graphicNovel: { reading: "ltr" as const, aspect: "2:3", pilot: true, chapters: [{ from: 1, title: "Low Water", pages: 8, ...(about ? { about } : {}) }] } } });
+    assert.throws(() => assertSourceReadForPlan(store.getBundle(), plan(), draft, []), /says what happens in it/);
+    assert.doesNotThrow(() => assertSourceReadForPlan(store.getBundle(), plan("She hears it."), draft, []));
+    assert.match(await productionSetupBrief(store.getBundle(), draft, async () => ({ result: {}, receipt: { id: newId("check"), runId: newId("run"), tool: "get-entry", status: "complete", consulted: [], at: CLOCK } }) as never, 400_000), /about: what happens in it/);
+  });
+
   it("starts empty as Panel by panel with one chapter, and leaves other creations alone (turn 272)", async () => {
     const store = await open();
     const empty = await createProduction(store, { title: "By hand", medium: "story", productionKind: "graphic-novel", startEmpty: true });
