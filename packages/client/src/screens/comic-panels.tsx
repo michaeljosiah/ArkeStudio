@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
   DEFAULT_COMIC_SETTINGS,
   REVIEW_BLOCKING,
@@ -176,7 +176,8 @@ export function PanelSide({ world, production, page, selected, select, saving, c
   return (
     <div className="fy-comic__side">
       <PanelTabs tab={tab} pick={pickTab} />
-      <div className="fy-comic__page" style={{ aspectRatio: aspect.replace(":", " / ") }}>
+      {/* The page gives up height so the verdict, takes and actions stay on screen (turn 271a). */}
+      <div className="fy-comic__page fy-comic271__page" style={{ aspectRatio: aspect.replace(":", " / "), "--page-ratio": aspect.replace(":", " / ") } as CSSProperties}>
         {keptWhole && standingUrl ? <img src={standingUrl} alt="Page as made" /> : states.map((entry) => {
           const url = artUrl(world, entry.panel.id === current?.panel.id ? shown : entry.shown);
           const box = panelInset(entry.rect, aspect);

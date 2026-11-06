@@ -384,3 +384,4 @@
 .fy-comic__body.narrow .fy-comic269__lines > .fy-comic271__scroll { overflow: visible; }
 .fy-comic__body.narrow .fy-comic__edit.fy-comic269__lines { overflow: visible; }
 .fy-comic269__lines .fy-comic269__tool { margin-top: 0; }
+.fy-comic__page.fy-comic271__page { width: min(100%, calc(46vh * (var(--page-ratio)))); align-self: center; }
