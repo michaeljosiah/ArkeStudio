@@ -27,6 +27,8 @@
 .fy-production-kind__plate { height: 98px; border-radius: 9px; border: 1px solid var(--border); background: var(--muted); margin-bottom: 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .fy-production-defaults { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .fy-production-step__foot { display: flex; align-items: center; gap: 16px; }
+/* Picking a style grows what is above it (turn 272): in round 95 the press moved and the click missed. */
+.fy-production-step__foot--held { position: sticky; bottom: 0; z-index: 1; padding-block: 12px; background: var(--background); border-top: 1px solid var(--border); }
 /* Adapt from on an audio drama's step two (design turn 230b): a caption over the whole width. */
 .fy-production-step__adapt { display: grid; gap: 6px; }
 .fy-production-step__label { font: 500 13px var(--font-sans); color: var(--muted-foreground); }

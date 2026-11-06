@@ -624,6 +624,8 @@ const COMIC_PLAN_KEYS = /"(plan|read)"\s*:/;
  * build of 122 holds its export, so it rides here too.
  */
 export const COMIC_PANELS_SCHEMA_VERSION = 123;
+/** An original book's plan (design turn 272): `about` and `noPicture` on the strict setup plan, which a build of 123 refuses as an unreadable setup. */
+export const COMIC_ORIGINAL_SCHEMA_VERSION = 124;
 const COMIC_PANELS_KEYS = /"(panelTakes|placements|typeface)"\s*:|"mode"\s*:\s*"overlay"/;
 /**
  * An audio drama's takes (SPEC-057 R-29, codex on PR 1871): `drama-takes/` and the `episode` on a

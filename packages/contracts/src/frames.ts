@@ -2110,6 +2110,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       logline: z.string().max(500).optional(),
       /** The production a Soundtrack is for (SPEC-060 R-3): music only, written to its `music.json`. */
       soundtrackFor: SlugSchema.optional(),
+      /** A graphic novel from the door's Start empty (turn 272): Panel by panel, with one chapter. */
+      startEmpty: z.literal(true).optional(),
     })
     .strict(),
   /**

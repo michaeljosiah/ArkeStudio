@@ -365,9 +365,11 @@ export const DEFAULT_COMIC_SETTINGS: ComicSettings = ComicSettingsSchema.parse({
  * named by that chapter's number. Page counts and layouts are first guesses, never limits.
  */
 export interface ComicPlanChapter {
-  /** The adapted story's chapter number. */
+  /** The adapted story's chapter number; in an original book, its place in the plan (turn 272). */
   from: number;
   title: string;
+  /** What happens in it, for an original book, which has no source to name (turn 272). */
+  about?: string | undefined;
   pages: number;
   layout?: string | undefined;
 }
@@ -385,11 +387,14 @@ export interface ComicPlan {
   pilotFrom?: number | undefined;
   /** Whole page or Panel by panel (R-36a); absent is Whole page. */
   mode?: ComicMode | undefined;
+  /** Who the plan needs that has no picture yet (turn 272). Named, and nothing is made for them here. */
+  noPicture?: string[] | undefined;
   chapters: ComicPlanChapter[];
 }
 export const ComicPlanChapterSchema: z.ZodType<ComicPlanChapter, z.ZodTypeDef, unknown> = z.object({
   from: z.number().int().min(1).max(500),
   title: z.string().trim().min(1).max(200),
+  about: z.string().trim().min(1).max(280).optional(),
   pages: z.number().int().min(1).max(COMIC_LIMITS.pagesPerChapter),
   layout: z.string().min(1).max(60).optional(),
 }).strict();
@@ -400,6 +405,7 @@ export const ComicPlanSchema: z.ZodType<ComicPlan, z.ZodTypeDef, unknown> = z.ob
   pilot: z.boolean(),
   pilotFrom: z.number().int().min(1).max(500).optional(),
   mode: ComicModeSchema.optional(),
+  noPicture: z.array(z.string().trim().min(1).max(120)).max(24).optional(),
   chapters: z.array(ComicPlanChapterSchema).max(500),
 }).strict().superRefine((plan, ctx) => {
   if (normalizeAspect(plan.aspect) !== plan.aspect) ctx.addIssue({ code: "custom", path: ["aspect"], message: `“${plan.aspect}” is not an aspect.` });
@@ -421,7 +427,7 @@ export interface ComicCreation {
   style?: ComicStyle | undefined;
   adapts?: ComicAdapts | undefined;
   mode?: ComicMode | undefined;
-  chapters: Array<{ stem: string; title: string }>;
+  chapters: Array<{ stem: string; title: string; about?: string | undefined }>;
 }
 export const ComicCreationSchema: z.ZodType<ComicCreation, z.ZodTypeDef, unknown> = z.object({
   reading: ComicReadingSchema,
@@ -429,9 +435,11 @@ export const ComicCreationSchema: z.ZodType<ComicCreation, z.ZodTypeDef, unknown
   style: ComicStyleSchema.optional(),
   adapts: ComicAdaptsSchema.optional(),
   mode: ComicModeSchema.optional(),
-  chapters: z.array(z.object({ stem: SlugSchema, title: z.string().trim().min(1).max(200) }).strict()).max(500),
+  chapters: z.array(z.object({ stem: SlugSchema, title: z.string().trim().min(1).max(200), about: z.string().trim().min(1).max(280).optional() }).strict()).max(500),
 }).strict();
 export const DEFAULT_COMIC_PLAN: ComicPlan = { reading: "ltr", aspect: DEFAULT_COMIC_ASPECT, pilot: true, chapters: [] };
+/** A new book is Panel by panel unless changed (turn 272). Absent still reads as Whole page, for books that exist. */
+export const NEW_COMIC_PLAN: ComicPlan = { ...DEFAULT_COMIC_PLAN, mode: "overlay" };
 
 /** The three things setup asks by example (R-4): the page draws example cards for the one open. */
 /** What setup is asking (turn 249b), or the usual three as one card to use or change (turn 256a). */

@@ -11284,6 +11284,7 @@ export class Coordinator {
           ...(msg.defaults !== undefined ? { defaults: msg.defaults } : {}),
           ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
           ...(msg.soundtrackFor !== undefined ? { soundtrackFor: msg.soundtrackFor } : {}),
+          ...(msg.startEmpty ? { startEmpty: true } : {}),
           ...(requestId !== undefined ? { requestId } : {}),
         }, () => this.refreshWorldSnapshot(msg.worldId));
         if (result.status === "created") answer({ disposition: "created", slug: result.slug });

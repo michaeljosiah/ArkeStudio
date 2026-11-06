@@ -227,7 +227,8 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
               failure={workspace?.lastFailure ?? null} canRetry={!locked && !running}
               onStop={() => command({ operation: "cancel" })}
               onRetry={turnId => command({ operation: "retry", turnId })}
-              empty={<div className="fy-production-setup__welcome"><h2>Start with a possibility.</h2>
+              // An original book has nothing to read, so the page asks (turn 272): no turn is spent to say it.
+              empty={graphicNovel && !draft?.source ? <div className="fy-production-setup__welcome"><h2>What happens in it?</h2><p>A line is enough.</p></div> : <div className="fy-production-setup__welcome"><h2>Start with a possibility.</h2>
                 <p>A scene you can see. A character with something to lose. A season you have already mapped out.</p>
                 <p>We’ll shape it here, with {world?.meta.name ?? "your world"} around us.</p></div>} />
             {/* The narrator question, answered by example (230c, R-6): the same moment both ways, side by side. */}
@@ -237,7 +238,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
             )}
             {/* A graphic novel's three questions, answered by example (249b): cards for the one Arke is asking. */}
             {graphicNovel && draft?.comicAsk && !locked && !running && (
-              <ComicAskCards ask={draft.comicAsk} disabled={!!pending || running || !!unavailable} pilotTitle={draft.graphicNovel?.chapters[0]?.title}
+              <ComicAskCards ask={draft.comicAsk} disabled={!!pending || running || !!unavailable} pilotTitle={draft.graphicNovel?.chapters[0]?.title} mode={draft.graphicNovel?.mode}
                 onChoose={text => command({ operation: "send", text, ...(modelId ? { modelId } : {}) })} />
             )}
             {/* Under Arke's plan, the two ways on (230c, issue 1883): start the pilot, or change the plan first. */}

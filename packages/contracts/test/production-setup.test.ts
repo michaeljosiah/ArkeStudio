@@ -160,6 +160,20 @@ describe("conversational production setup (SPEC-012 §4)", () => {
     assert.match(productionSetupProblems({ ...original, audioDrama: plan([1]) }, []).join(" "), /original drama's pilot names no chapters/);
   });
 
+  it("an original graphic novel's plan says what happens in each chapter (turn 272)", () => {
+    const original = { ...draft(), kind: "graphic-novel" as const, scenes: [] };
+    const plan = (about?: string) => ({ reading: "ltr" as const, aspect: "2:3", pilot: true, chapters: [{ from: 1, title: "The bell", pages: 8, ...(about ? { about } : {}) }] });
+    assert.deepEqual(productionSetupProblems({ ...original, graphicNovel: plan("She hears it at low water.") }, []), []);
+    assert.match(productionSetupProblems({ ...original, graphicNovel: plan() }, []).join(" "), /says what happens in it/);
+  });
+
+  it("a plan Arke gives without a mode keeps the book's; Whole page is said (turn 272)", () => {
+    const book = { ...draft(), kind: "graphic-novel" as const, scenes: [], graphicNovel: { reading: "ltr" as const, aspect: "2:3", pilot: true, mode: "overlay" as const, chapters: [] } };
+    const given = { reading: "ltr" as const, aspect: "2:3", pilot: true, chapters: [] };
+    assert.equal(applyProductionSetupUpdate(book, { expectedRevision: book.revision, fields: { graphicNovel: given } }).graphicNovel?.mode, "overlay");
+    assert.equal(applyProductionSetupUpdate(book, { expectedRevision: book.revision, fields: { graphicNovel: { ...given, mode: "baked" } } }).graphicNovel?.mode, "baked");
+  });
+
   it("a changed Adapt from returns an audio drama to the default plan; the same one keeps it", () => {
     const planned = { episodes: 4, minutes: 30, narrator: "narrated" as const, keptFromListener: [{ fact: "Ilo is alive", revealEpisode: 3 }], pilot: { title: "Gold", chapters: [1] } };
     const drama = { ...draft(), kind: "audio-drama" as const, scenes: [], source: { productionId: "juju" }, audioDrama: planned };

@@ -5223,6 +5223,8 @@ export function createProduction(
     productionKind?: string;
     /** The production a soundtrack is for (SPEC-060 R-1). */
     soundtrackFor?: string;
+    /** A graphic novel from the door's Start empty (turn 272). */
+    startEmpty?: true;
     seriesTitle?: string;
     aspect?: string;
     frameRate?: 24 | 25 | 30;
