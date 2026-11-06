@@ -1989,6 +1989,9 @@ function handleFrame(json: string): void {
     let frameRunStartResults = current.frameRunStartResults;
     if (event.type === "command.failed") {
       if (event.requestId) pendingQueueRequests.delete(event.requestId);
+      if (event.command === "make-audiobook-picture" && event.requestId && audiobookAsks[event.requestId]?.state === "working") {
+        audiobookAsks = { ...audiobookAsks, [event.requestId]: { state: "failed", reason: event.reason } };
+      }
       for (const listener of commandFailureListeners) listener(event);
     }
     if (event.type === "queue.enqueue-result") {

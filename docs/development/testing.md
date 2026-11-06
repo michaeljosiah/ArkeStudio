@@ -1,5 +1,10 @@
 # Running and validating changes
 
+Unavailable picture targets (#1812): coordinator `test/productions/audiobook-picture-rejection.test.ts`
+checks correlated pre-dispatch failures for the picture and its linked Tall without queueing work.
+Client `test/audiobook-picture.test.tsx` checks that the existing card leaves Generating and shows
+the reason, ignores unrelated request ids, and never retries automatically.
+
 Missing writing tools (#1749): adapter `test/v2-world-tools.test.ts` checks bounded MCP evidence,
 failure isolation and shutdown; `test/v2-private-sessions.test.ts` covers private trace exclusion.
 Coordinator `test/world-chat/retrieval.test.ts` and `test/application/conversation-authoring.test.ts`

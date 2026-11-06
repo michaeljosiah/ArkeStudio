@@ -53,6 +53,8 @@ export interface Harness {
 }
 
 export interface HarnessOptions {
+  /** Exercise request refusal before a world is selected. */
+  openWorld?: boolean;
   transport?: (application: Coordinator["serverApplication"]) => import("../../src/studio-server.js").StudioEventSink;
   picture?: PictureDeriver;
   look?: LookDeriver;
@@ -86,7 +88,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
   await mkdir(join(worldDir, "productions", LEDGER, ".voices"), { recursive: true });
   await options.prepare?.(worldDir);
   const provider = new FsWorldProvider(root, { clock: () => CLOCK });
-  await provider.loadWorld(WORLD_ID);
+  if (options.openWorld !== false) await provider.loadWorld(WORLD_ID);
   const events: DomainEvent[] = [];
   const seen: PictureDeriverInput[] = [];
   const enqueued: Harness["enqueued"] = [];

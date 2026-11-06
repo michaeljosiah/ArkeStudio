@@ -17711,10 +17711,20 @@ export class Coordinator {
         // A suggestion made (design turn 191a, R-99): through the Bench as any image is, on the
         // price the press showed, and filed on the block as its picture — one that keeps the
         // look it was made under. A failure is held with its reason and never retried unasked.
+        // Before resolving a chapter there is no chapter id for picture-made (SPEC-047 R-99).
+        // Reject each waiting request through the existing command failure channel instead.
+        const reject = (reason: string) => {
+          for (const requestId of new Set([msg.requestId, ...(msg.tall ? [msg.tall.requestId] : [])])) {
+            this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId, reason });
+          }
+          void this.appLog?.append({ kind: "audiobook.picture-rejected", requestId: msg.requestId,
+            worldId: msg.worldId, production: msg.productionId, chapter: msg.chapterFile,
+            phase: "before-dispatch", reason });
+        };
         const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
+        if (!store || store.worldId !== msg.worldId) return reject("The target world is not open. No generation was started.");
         const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
-        if (!chapter) return;
+        if (!chapter) return reject("The target chapter is unavailable. No generation was started.");
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, block: msg.block };
         const at = () => new Date().toISOString();
         const key = `${msg.worldId}/${msg.productionId}/${chapter.file}/${msg.block}`;
