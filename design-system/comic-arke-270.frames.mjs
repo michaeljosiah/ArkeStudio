@@ -63,12 +63,12 @@ export const faultSide = (page = 'gn271-page') => `<div class="gn247-side gn251-
 <div class="gn271-foot"><span class="m">3 of 3</span><span class="gn271-model">GPT Image 2${DOWN}</span><span class="grow"></span><span class="gn247-btn ghost sm">Brief</span></div></div>`;
 
 // The dock, as the installed app draws it.
-const user = words => `<div class="gn270-u">${words}</div>`;
-const said = (...lines) => `<div class="gn270-a">${lines.map(words => `<p>${words}</p>`).join('')}<div class="gn270-tools"><span>Listen</span><span>Copy</span></div></div>`;
+export const user = words => `<div class="gn270-u">${words}</div>`;
+export const said = (...lines) => `<div class="gn270-a">${lines.map(words => `<p>${words}</p>`).join('')}<div class="gn270-tools"><span>Listen</span><span>Copy</span></div></div>`;
 const fact = (label, value, cls = '') => `<div class="gn270-fact ${cls}"><span>${label}</span><b>${value}</b></div>`;
 const actionCard = (title, status, body, state = 'pending') => `<article class="gn270-card" data-status="${state}"><div class="gn270-cardhead"><h3>${title}</h3><span class="st">${status}</span></div>${body}</article>`;
 const decide = '<div class="gn270-cardacts"><span class="gn247-btn pri">Approve</span><span class="gn247-btn ghost">Deny</span></div>';
-const dock = (...turns) => `<aside class="gn270-dock"><div class="gn270-dockhead"><div><b>Builder Chat</b><span>Saltlight / Low Water, drawn</span></div><span class="grow"></span><span class="x">&#183;&#183;&#183;</span><span class="x">${CLOSE}</span></div><div class="gn270-dockbody">${turns.join('')}</div><div class="gn270-composer"><span class="ph">Ask Arke...</span><div class="row"><span class="i">${PLUS}</span><span class="i">${MIC}</span><span class="gn270-modelchip">Claude Opus 5.5${DOWN}</span><span class="grow"></span><span class="send">${SEND}</span></div></div></aside>`;
+export const dock = (...turns) => `<aside class="gn270-dock"><div class="gn270-dockhead"><div><b>Builder Chat</b><span>Saltlight / Low Water, drawn</span></div><span class="grow"></span><span class="x">&#183;&#183;&#183;</span><span class="x">${CLOSE}</span></div><div class="gn270-dockbody">${turns.join('')}</div><div class="gn270-composer"><span class="ph">Ask Arke...</span><div class="row"><span class="i">${PLUS}</span><span class="i">${MIC}</span><span class="gn270-modelchip">Claude Opus 5.5${DOWN}</span><span class="grow"></span><span class="send">${SEND}</span></div></div></aside>`;
 
 const screen = (label, side, main) => `<div class="gn247 gn251 gn253 gn269 gn270 gn271" data-screen-label="${label}" style="width:1720px;height:850px">${rail}<div class="gn247-main gn270-main">${main}</div>${side}</div>`;
 const body = (...columns) => `<div class="gn247-body" style="grid-template-columns:136px minmax(0,1fr) 372px">${columns.join('')}</div>`;
