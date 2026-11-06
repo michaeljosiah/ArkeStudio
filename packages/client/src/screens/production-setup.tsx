@@ -106,8 +106,9 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
     startingPilot.current = false;
     command({ operation: "create", expectedRevision: setup.draft.revision, reviewId: setup.review.id });
   }, [setup?.review?.id, pending]);
-  // A review refused or a draft changed under it lets the press go (it is pressed again).
-  useEffect(() => { if (!pending && !setup?.review) startingPilot.current = false; }, [pending]);
+  // A review refused lets the press go (it is pressed again). Only a refusal: the request can settle
+  // before the review reaches this page, and on that order the press was dropped and needed a second (0.5.104).
+  useEffect(() => { if (failure) startingPilot.current = false; }, [failure]);
 
   useEffect(() => {
     if (state?.app.health.harness.status === "healthy") listHarnessModels();
