@@ -5,7 +5,7 @@ import { Coordinator } from "../../src/coordinator.js";
 import { comicExportBlockers } from "../../src/productions/comic-export.js";
 import { createChapter, createProduction } from "../../src/productions/ops.js";
 import { productionRecord } from "../../src/world-chat/production-record.js";
-import { clearOfFaces, tailClearOfFaces } from "../../src/productions/graphic-novel-placer.js";
+import { clearOfFaces, harnessPagePlacer, tailClearOfFaces } from "../../src/productions/graphic-novel-placer.js";
 import { changeComicPage, finishComicPage, nearestPanelShape, placeComicPage, saveComicScript, setComicLettering, setComicSettings } from "../../src/productions/graphic-novel.js";
 import type { PageReviewer } from "../../src/productions/graphic-novel-reviewer.js";
 import { IMAGE, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
@@ -238,6 +238,12 @@ describe("the words and the finished page (SPEC-064 R-38a, R-39a, R-48a)", () =>
 describe("Place with Arke keeps words clear of faces (SPEC-064 R-39a, turn 271)", () => {
   const PANEL = { x: 0, y: 0, w: 1, h: 1 };
   const FACE = { x: 0.4, y: 0.4, w: 0.2, h: 0.2 };
+
+  it("keeps a page's lines when the reader sends an unusable entry", async () => {
+    const placer = harnessPagePlacer(async () => ({ lines: [null, { id: "a", x: 0.1, y: 0.2 }], faces: [null, { x: 0.1, y: 0.1, w: 0.2, h: 0.2 }] }) as never);
+    const placed = await placer.place({ picture: { bytes: new Uint8Array(), extension: "png" }, description: "", lines: [{ id: "a", kind: "caption", text: "x" }] }, new AbortController().signal);
+    assert.deepEqual(placed, { lines: [{ item: "a", x: 0.1, y: 0.2 }], faces: [{ x: 0.1, y: 0.1, w: 0.2, h: 0.2 }] });
+  });
 
   it("moves a balloon off a face by the least distance that stays in the panel", () => {
     const moved = clearOfFaces({ x: 0.35, y: 0.3, w: 0.2, h: 0.12 }, [FACE], [], PANEL);
