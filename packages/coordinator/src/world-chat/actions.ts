@@ -77,6 +77,9 @@ import {
   WorldChatProductionProseStyleActionSchema,
   WorldChatProductionEpisodeScriptActionSchema,
   WorldChatProductionComicScriptActionSchema,
+  WorldChatProductionComicMakeActionSchema,
+  WorldChatProductionComicModeActionSchema,
+  WorldChatProductionComicExportActionSchema,
   type WorldChatSubject,
   WorldChatProductionSceneActionSchema,
   WorldChatProductionSceneDeleteActionSchema,
@@ -330,6 +333,9 @@ import { effectProposalConversationAdapter } from "./effect-proposals.js";
 import { effectOnlyTurnProblem, effectProposalRequestContext } from "./effect-proposal-scope.js";
 import type { EditorEffectDependencies } from "../productions/editor-effect-dependencies.js";
 import { CHAPTER_WORD_COUNT_LABEL, measuredChapterWords, proposedChapterWords } from "@arke-studio/contracts";
+import { comicBook } from "@arke-studio/contracts";
+import { comicExportBlockers } from "../productions/comic-export.js";
+import { setComicSettings } from "../productions/graphic-novel.js";
 import { bookAuthoringRefusal, comicScriptDraft, episodeScriptDraft, foldedText, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
 import {
   stageWorldChatArtDirectionAction,
@@ -444,6 +450,15 @@ export interface WorldChatActionAdapterDeps {
     actionId: string,
   ) => Promise<ConversationActionExecutionOutcome>;
   readonly reconcileBenchGeneration?: (action: ConversationActionCard) => Promise<ConversationActionExecutionOutcome | null>;
+  /** A graphic novel's Arke cards (turn 270). */
+  readonly comicMake?: {
+    quote(productionId: string, target: import("../productions/graphic-novel.js").ComicMakeTarget): Promise<
+      | (Extract<import("../productions/graphic-novel.js").ComicMakeQuote, { ok: true }> & { provider: string; modelName: string; costLabel: string })
+      | { ok: false; reason: string }>;
+    start(action: import("@arke-studio/contracts").WorldChatProductionComicMakeAction["action"], card: ConversationActionCard): Promise<ConversationActionExecutionOutcome>;
+    running(run: string): boolean;
+    exportBook(action: { productionId: string; chapter?: string | undefined; formats: ReadonlyArray<"cbz" | "pdf" | "epub"> }, requestId: string): Promise<Array<{ file: string }>>;
+  };
   readonly startProductionExport?: (
     action: WorldChatProductionCutExportAction["action"],
     card: ConversationActionCard,
@@ -533,6 +548,9 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   // The script is read through get_production; its metadata read names the production it writes.
   "production-episode-script": ["production-metadata"],
   "production-comic-script": ["production-metadata"],
+  "production-comic-make": ["production-metadata"],
+  "production-comic-mode": ["production-metadata"],
+  "production-comic-export": ["production-metadata"],
   "production-season": ["seasons"],
   "production-episode": ["episodes"],
   // The story read carries the prose style (turn 128): a draft or a revision that never saw it
@@ -727,6 +745,9 @@ function productionActionTargets(
     case "music-track-edit":
     case "music-sequence-set":
     case "production-episode-script":
+    case "production-comic-make":
+    case "production-comic-mode":
+    case "production-comic-export":
     case "production-comic-script": return [{ requirement: "production-metadata", target: action.productionId }];
     case "music-track-choose": return [{ requirement: "production-metadata", target: action.productionId }, { requirement: "bench", target: action.sessionId }];
     case "production-series": return [
@@ -1028,6 +1049,9 @@ function preparedWorldPayload(
     case "production-prose-style": return WorldChatProductionProseStyleActionSchema.parse({ kind: "world-chat-production-prose-style", ...common });
     case "production-episode-script": return WorldChatProductionEpisodeScriptActionSchema.parse({ kind: "world-chat-production-episode-script", ...common });
     case "production-comic-script": return WorldChatProductionComicScriptActionSchema.parse({ kind: "world-chat-production-comic-script", ...common });
+    case "production-comic-make": return WorldChatProductionComicMakeActionSchema.parse({ kind: "world-chat-production-comic-make", ...common });
+    case "production-comic-mode": return WorldChatProductionComicModeActionSchema.parse({ kind: "world-chat-production-comic-mode", ...common });
+    case "production-comic-export": return WorldChatProductionComicExportActionSchema.parse({ kind: "world-chat-production-comic-export", ...common });
     case "production-season": return WorldChatProductionSeasonActionSchema.parse({ kind: "world-chat-production-season", ...common });
     case "production-episode": return WorldChatProductionEpisodeActionSchema.parse({ kind: "world-chat-production-episode", ...common });
     case "production-chapter": return WorldChatProductionChapterActionSchema.parse({ kind: "world-chat-production-chapter", ...common });
@@ -1394,7 +1418,10 @@ function worldActionTargets(
     case "production-overview": return [{ kind: "story", id: action.productionId, label: "Story overview" }];
     case "production-prose-style": return [{ kind: "story", id: action.productionId, label: "Prose style" }];
     case "production-episode-script": return [{ kind: "production", id: action.productionId, label: `Episode ${action.episode} script` }];
-    case "production-comic-script": return [{ kind: "production", id: action.productionId, label: "Pages" }];
+    case "production-comic-script":
+    case "production-comic-make":
+    case "production-comic-mode":
+    case "production-comic-export": return [{ kind: "production", id: action.productionId, label: "Pages" }];
     case "production-season": return [{ kind: "season", id: action.productionId, label: "Season" }];
     case "production-episode": return [{
       kind: "episode",
@@ -3639,6 +3666,81 @@ async function sharedResourceProjection(
       };
       break;
     }
+    case "world-chat-production-comic-make": {
+      authority = { kind: "job-queue", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const quote = await deps.comicMake?.quote(payload.action.productionId, payload.action.target);
+      if (!quote) approvalBlockedReason = "Making pages is unavailable in this host.";
+      else if (!quote.ok) approvalBlockedReason = quote.reason;
+      const ready = quote?.ok ? quote : null;
+      const target = payload.action.target;
+      const chapter = target.kind === "chapter" ? production.chapters.find((candidate) => candidate.id === target.chapter) : undefined;
+      const number = target.kind === "chapter" ? 0 : comicBook(production).find((entry) => entry.id === target.page)?.number ?? 0;
+      const index = target.kind === "panel" ? (comicBook(production).find((entry) => entry.id === target.page)?.page.panels.findIndex((panel) => panel.id === target.panel) ?? -1) + 1 : 0;
+      shown = {
+        title: target.kind === "chapter" ? `Make chapter ${chapter?.order ?? ""}`.trim() : target.kind === "page" ? `Make page ${number}` : `Make panel ${index} again`,
+        consequence: "Draws the panels, redraws faults and places the words. Faults left and Accept page stay yours.",
+        affectedTargets: [...intent.targets],
+        ripples: ready?.missing.length ? [`No picture of ${ready.missing.join(", ")}`] : [],
+        permissionReason: "spend-and-compute",
+        body: {
+          family: "generation", medium: "image", purpose: "Graphic novel panels",
+          prompt: "Each panel's own brief, as Pages shows it.",
+          provider: ready?.provider ?? "Unavailable", model: ready?.modelName ?? "Unavailable",
+          quantity: Math.max(1, ready?.panels ?? 1), references: [],
+          // The pages the run covers, which the card counts from.
+          ...(ready ? { deterministicInputs: ready.pages } : {}),
+          options: ready ? [
+            { label: "Pages", value: String(ready.pages.length) },
+            { label: "Panels", value: String(ready.panels) },
+            { label: "Lines", value: String(ready.lines) },
+            { label: "Redraws", value: ready.redraws > 0 ? `Up to ${ready.redraws}` : "None" },
+          ] : [],
+          output: "Panels filed on their pages", cost: ready?.costLabel ?? "Quote unavailable",
+          ...(ready ? { estimatedMicroUsd: ready.baseMicroUsd, currency: "USD" as const, enforceableCapMicroUsd: ready.capMicroUsd } : {}),
+          cancellationSupported: true,
+        },
+      };
+      break;
+    }
+    case "world-chat-production-comic-mode": {
+      authority = { kind: "production-store", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const name = (mode: string) => mode === "overlay" ? "Panel by panel" : "Whole page";
+      const made = comicBook(production).filter((entry) => entry.take !== undefined).length;
+      shown = {
+        title: `Use ${name(payload.action.mode)}`,
+        consequence: "Applies to a page the next time it is made.",
+        affectedTargets: [...intent.targets],
+        ripples: made > 0 ? [`${made} ${made === 1 ? "page" : "pages"} made stay as they are`] : [],
+        permissionReason: "authored-change",
+        body: { family: "setting", setting: "Mode", current: name(production.comic?.mode ?? "baked"), proposed: name(payload.action.mode), consequences: [] },
+      };
+      break;
+    }
+    case "world-chat-production-comic-export": {
+      authority = { kind: "export", id: `ex_${intent.actionId.slice(4)}` };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const wanted = payload.action.chapter;
+      const blockers = comicExportBlockers(production, wanted);
+      if (blockers.length > 0) approvalBlockedReason = blockers.slice(0, 3).join("; ");
+      if (!deps.comicMake) approvalBlockedReason ??= "Export is unavailable in this host.";
+      const chapter = wanted === undefined ? undefined : production.chapters.find((candidate) => candidate.id === wanted);
+      const count = comicBook(production).filter((entry) => wanted === undefined || entry.chapter === wanted).length;
+      const files = payload.action.formats.map((format) => format.toUpperCase()).join(", ");
+      shown = {
+        title: chapter ? `Export chapter ${chapter.order}` : `Export ${production.meta.title}`,
+        consequence: "Writes new files to this world's exports.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "export",
+        body: { family: "host-action", action: `${count} ${count === 1 ? "page" : "pages"} · ${files}`, effect: "No cost" },
+      };
+      break;
+    }
     case "world-chat-production-export-cancel": {
       const record = deps.getExports?.().find((candidate) =>
         candidate.id === payload.action.exportId &&
@@ -4528,6 +4630,17 @@ async function executeSharedResource(
     case "world-chat-production-cut-export":
       if (!deps.startProductionExport) return { status: "failed", detail: "Local video export is unavailable." };
       return deps.startProductionExport(payload.action, action);
+    case "world-chat-production-comic-make":
+      if (!deps.comicMake) return { status: "failed", detail: "Making pages is unavailable." };
+      return deps.comicMake.start(payload.action, action);
+    case "world-chat-production-comic-mode":
+      await setComicSettings(store, payload.action.productionId, { mode: payload.action.mode });
+      return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary: `Mode is now ${payload.action.mode === "overlay" ? "Panel by panel" : "Whole page"}.` } };
+    case "world-chat-production-comic-export": {
+      if (!deps.comicMake) return { status: "failed", detail: "Export is unavailable." };
+      const files = await deps.comicMake.exportBook(payload.action, action.actionId);
+      return { status: "completed", receipt: { kind: "comic-export", id: action.authority.id, summary: files.map((file) => file.file).join(", ") } };
+    }
     case "world-chat-production-export-cancel":
       return deps.cancelExport?.(payload.action.exportId)
         ? {
@@ -5223,6 +5336,10 @@ export function worldChatActionAdapters(
             };
           }
         }
+        // A run the app closed on is not resumed: what it made stays on the pages, and the card says it stopped.
+        if (action.actionKind === "world-chat-production-comic-make" && action.status === "running" && deps.comicMake?.running(action.authority.id) !== true) {
+          return { status: "failed", detail: "The app closed during this run. The panels already made are kept." };
+        }
         if (action.actionKind === "world-chat-production-cut-export") {
           const record = deps.getExports?.().find((candidate) => candidate.id === action.authority.id);
           if (record?.status === "done") {
@@ -5465,6 +5582,9 @@ export function worldChatActionAdapters(
     "world-chat-production-routing-traversal",
     "world-chat-production-interactive-export",
     "world-chat-production-cut-export",
+    "world-chat-production-comic-make",
+    "world-chat-production-comic-mode",
+    "world-chat-production-comic-export",
     "world-chat-production-export-cancel",
     "world-chat-bench-generation",
     "world-chat-bench-keep", "world-chat-bench-select", "world-chat-bench-discard",

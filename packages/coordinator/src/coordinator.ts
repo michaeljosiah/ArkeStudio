@@ -50,12 +50,13 @@ import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdap
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
 import { DramaEditionService } from "./publications/drama.js";
 import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
-import { acceptComicTake, changeComicPage, comicPageRecord, comicPageRequest, comicPageTake, comicPanelRequest, comicPanelsQuote, comicPanelsToMake, finishComicPage, placeComicPage, reviewComicPanel, reviewComicTake, saveComicScript, seeComicWarning, setComicLettering, setComicSettings, verifyComicTake } from "./productions/graphic-novel.js";
+import { acceptComicTake, changeComicPage, comicMakeQuote, comicPageRecord, comicPageRequest, comicPageTake, comicPanelFix, comicPanelRequest, comicPanelsQuote, comicPanelsToMake, finishComicPage, placeComicPage, reviewComicPanel, reviewComicTake, saveComicScript, seeComicWarning, setComicLettering, setComicSettings, verifyComicTake } from "./productions/graphic-novel.js";
 import { harnessPageReader, type PageReader } from "./productions/graphic-novel-reader.js";
 import { harnessPagePlacer } from "./productions/graphic-novel-placer.js";
 import { harnessPageReviewer, type PageReviewer } from "./productions/graphic-novel-reviewer.js";
 import { harnessScriptReader } from "./productions/graphic-novel-script-reader.js";
 import { ComicExportBlocked, exportComic } from "./productions/comic-export.js";
+import { runComicMake, type ComicMakeOps } from "./productions/comic-make-run.js";
 import { makeImageJsonRunner } from "./harness/review-task.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
@@ -179,7 +180,9 @@ import {
   type WorldChatReferenceImportAction,
   type WorldChatReferenceResultUseAction,
   type WorldChatProductionTakeImportAction,
+  takeBlocking,
   type WorldChatProductionCutExportAction,
+  type WorldChatProductionComicMakeAction,
   type WorldChatBenchGenerationAction,
   type ConversationActionCard,
   type WorldChatContext,
@@ -3709,6 +3712,8 @@ export class Coordinator {
   private readonly chapterSaves = new Set<Promise<unknown>>();
   /** A conversation card fixes the export identity before the legacy renderer starts. */
   private readonly requestedExportIds = new Map<string, string>();
+  /** Make cards running in this process, by run; one the app closed on is told so by its card's reconcile. */
+  private readonly comicMakes = new Map<string, AbortController>();
   /** Route layout and screen guards may ask for the same world before either receives its snapshot. */
   private openWorldTail: Promise<void> = Promise.resolve();
   private readonly openingWorlds = new Map<string, Promise<void>>();
@@ -11851,6 +11856,9 @@ export class Coordinator {
         }
         return;
       }
+      case "stop-comic-make":
+        this.comicMakes.get(msg.run)?.abort();
+        return;
       case "see-comic-warning":
       case "check-comic-take":
       case "accept-comic-take": {
@@ -22544,9 +22552,11 @@ export class Coordinator {
         // Asked again for each: the panel before it may now be accepted and ride as the drawing's reference.
         // What this panel may spend: the press's price, less what is spent and what the panels after it were quoted.
         const allowed = msg.confirmedMicroUsd - spent - admissions.slice(index + 1).reduce((sum, later) => sum + later.quoted, 0);
+        // One panel again is drawn to correct what the review found on it (turn 269c).
+        const fix = msg.panel === undefined ? undefined : comicPanelFix(store, productionId, page, admission.panel);
         // A reference that became available since the quote can cost more; the press's price holds, so it stays home (codex on PR 2582).
-        let request = comicPanelRequest(store, productionId, page, admission.panel, model);
-        if (request.ok && request.microUsd > allowed) request = comicPanelRequest(store, productionId, page, admission.panel, model, { noStyleReference: true });
+        let request = comicPanelRequest(store, productionId, page, admission.panel, model, fix ? { fix } : {});
+        if (request.ok && request.microUsd > allowed) request = comicPanelRequest(store, productionId, page, admission.panel, model, { noStyleReference: true, ...(fix ? { fix } : {}) });
         if (!request.ok) { await letGo(request.reason); continue; }
         if (request.microUsd > allowed) { await letGo(`the price moved · ${priceLabel(request.microUsd)}`); continue; }
         const number = request.state.index + 1;
@@ -24181,6 +24191,19 @@ export class Coordinator {
         this.reconcileBenchGenerationForConversationAction(store, action),
       startProductionExport: (action, card) =>
         this.startProductionExportForConversationAction(store, action, card),
+      comicMake: {
+        quote: async (productionId, target) => {
+          const model = await this.pictureModel(store, productionId);
+          if (!model) return { ok: false, reason: "No picture model is on." };
+          const quote = comicMakeQuote(store, productionId, target, model);
+          if (!quote.ok) return quote;
+          const plan = model.id === "codex-image";
+          return { ...quote, provider: model.provider, modelName: model.displayName, costLabel: plan ? priceLabel(0, "included-plan") : `Up to ${priceLabel(quote.capMicroUsd).replace("~", "")}` };
+        },
+        start: (action, card) => this.startComicMakeForAction(store, action, card),
+        running: (run) => this.comicMakes.has(run),
+        exportBook: (action, requestId) => exportComic(store, action.productionId, action.formats, new Date(this.nowIso()), store.closingSignal, requestId, action.chapter),
+      },
       interactiveExportVoices: (productionId) => this.interactiveExportVoices(store, productionId),
       onExportProgress: event => this.publishExportProgress(store, event),
       cancelExport: (exportId) => {
@@ -24190,6 +24213,82 @@ export class Coordinator {
         return true;
       },
     };
+  }
+
+  /** An approved Make card (turn 270b): runs in the background, and its card is told how it ended. */
+  private async startComicMakeForAction(store: WorldStore, action: WorldChatProductionComicMakeAction["action"], card: ConversationActionCard) {
+    const body = card.shown.body;
+    if (body.family !== "generation" || body.enforceableCapMicroUsd === undefined) return { status: "failed" as const, detail: "This card has no approved price." };
+    const model = await this.pictureModel(store, action.productionId);
+    if (!model) return { status: "failed" as const, detail: "No picture model is on." };
+    const quote = comicMakeQuote(store, action.productionId, action.target, model);
+    if (!quote.ok) return { status: "failed" as const, detail: quote.reason };
+    const cap = body.enforceableCapMicroUsd;
+    if (quote.baseMicroUsd > cap) return { status: "failed" as const, detail: `The price moved to ${priceLabel(quote.baseMicroUsd)}. Ask Arke for a new card.` };
+    const { productionId, target } = action;
+    const run = card.authority.id;
+    const control = new AbortController();
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    this.comicMakes.set(run, control);
+    const taken = (page: string) => {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+      return production ? comicPageRecord(production, page).panelTakes : [];
+    };
+    const usd = () => quote.pages.reduce((sum: number, page: string) => sum + taken(page).reduce((all, take) => all + Math.round((take.usd ?? 0) * 1_000_000), 0), 0);
+    const before = usd();
+    const states = (page: string) => {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+      const found = production?.comicScripts?.flatMap((entry) => entry.script.pages).find((candidate) => candidate.id === page);
+      return production && found ? comicPanelStates(found, comicPageRecord(production, page), production.comic ?? DEFAULT_COMIC_SETTINGS) : [];
+    };
+    const ops: ComicMakeOps = {
+      unmade: (page) => states(page).filter((state) => state.shown === undefined && !state.making).map((state) => state.panel.id),
+      faulted: (page) => states(page).filter((state) => !state.making && state.accepted === undefined && state.shown?.review !== undefined && takeBlocking(state.shown).length > 0).map((state) => state.panel.id),
+      allAccepted: (page) => { const all = states(page); return all.length > 0 && all.every((state) => state.accepted !== undefined); },
+      price: (page, panels) => {
+        let sum = 0;
+        for (const panel of panels) {
+          const request = comicPanelRequest(store, productionId, page, panel, model);
+          if (!request.ok) return null;
+          sum += request.microUsd;
+        }
+        return sum;
+      },
+      spent: () => usd() - before,
+      make: (page, confirmedMicroUsd, panel) => this.makeComicPanels(store, { kind: "make-comic-page", requestId: ulid(), worldId: store.worldId, productionId, page, confirmedMicroUsd, ...(panel ? { panel } : {}) } as Extract<ClientMessage, { kind: "make-comic-page" }>),
+      reviewed: async (page, signal) => {
+        // Bounded: a review the reader never answers is a panel left for the author, not a run stuck for good.
+        const deadline = Date.now() + 5 * 60_000;
+        while (!signal.aborted && Date.now() < deadline && taken(page).some((take) => take.review === undefined && this.reviewingComicPanels.has(take.id))) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      },
+      place: async (page, signal) => {
+        const ask = this.comicImageRunner(store);
+        if (ask === null) return;
+        await placeComicPage(store, productionId, page, harnessPagePlacer(ask), signal, () => this.nowIso());
+        await this.refreshWorldSnapshot(store.worldId);
+      },
+    };
+    this.trackBackground(runComicMake({ pages: quote.pages, ...(target.kind === "panel" ? { panel: target.panel } : {}), redraws: quote.redraws, ceilingMicroUsd: cap, signal: control.signal }, ops)
+      .then((stop) => ({ stop, reason: null as string | null }), (err: unknown) => ({ stop: "failed" as const, reason: describeCoordinatorError(err) }))
+      .then(async ({ stop, reason }) => {
+        this.comicMakes.delete(run);
+        store.closingSignal.removeEventListener("abort", onClose);
+        const lifecycle = new ConversationActionLifecycle({ worldPath: store.dir, worldId: store.worldId, adapters: [], now: () => this.nowIso() });
+        const spent = priceLabel(usd() - before);
+        const summary = stop === "limit" ? `Stopped at the price approved. Spent ${spent}.` : stop === "stopped" ? `Stopped. Spent ${spent}.` : `Finished. Spent ${spent}.`;
+        await lifecycle.recordStatus(card.conversationId, card.actionId, stop === "failed" ? "failed" : "completed", {
+          authority: card.authority, authorityRevision: card.authorityRevision,
+          ...(stop === "failed" ? { detail: reason ?? "The run failed." } : { receipt: { kind: "comic-make", id: run, summary } }),
+        });
+        if (this.stillOpen(store)) {
+          await this.refreshConversations(store);
+          this.transport.broadcastSnapshot();
+        }
+      }));
+    return { status: "running" as const, detail: "Arke is making the pages." };
   }
 
   private async startProductionExportForConversationAction(

@@ -1,4 +1,5 @@
 import { freezeProductionTimeline, productionTimelineBody } from "../../src/world-chat/production-timeline.js";
+import { saveComicScript } from "../../src/productions/graphic-novel.js";
 import { CHAPTER_WORD_COUNT_LABEL, chapterWordTotal, countWords, measuredChapterWords, proposedBatchWords, proposedChapterWords } from "@arke-studio/contracts";
 import { assembleContext } from "../../src/world-chat/context.js";
 import { productionEditorCardPreview, readEditorRequestByAction } from "../../src/productions/editor-requests.js";
@@ -49,7 +50,7 @@ import { ConversationActionLifecycle, conversationActionDigest } from "../../src
 import { ARKE_CLIENT_COMMAND_REGISTRY, worldChatActionDescriptor } from "../../src/arke-actions/registry.js";
 import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
 import { readEditorRequest } from "../../src/productions/editor-requests.js";
-import { createEpisode, createProduction, openChapter } from "../../src/productions/ops.js";
+import { createChapter, createEpisode, createProduction, openChapter } from "../../src/productions/ops.js";
 import { addMusicTrack, editMusicTrack, ensureMusicSession, musicRecordFence, readMusicRecord } from "../../src/productions/music.js";
 import { bookAuthoringRefusal } from "../../src/world-chat/production-authoring.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
@@ -3885,5 +3886,67 @@ describe("a music track from World Chat (SPEC-060 R-9 – R-13)", () => {
     const preparedTwo = prepareWorldChatActions(w.store, w.lifecycle, two);
     await appendTurn(w.log, two, preparedTwo);
     await assert.rejects(bindAll(w.lifecycle, preparedTwo), /could not prepare this action/);
+  });
+});
+
+describe("a graphic novel's cards (turn 270)", () => {
+  async function comicBook(deps: WorldChatActionAdapterDeps = {}) {
+    const w = await setup({ kind: "world" }, deps);
+    const productionId = await createProduction(w.store, { title: "Low Water, drawn", medium: "story", productionKind: "graphic-novel" });
+    const chapter = await createChapter(w.store, productionId, { title: "The tide", order: 1 });
+    const page = { id: ulid(), layout: "splash" as const, status: "ready" as const, panels: [{ id: ulid(), description: "Maren.", characters: [], lettering: [] }] };
+    await saveComicScript(w.store, productionId, { chapter, pages: [page], baseHash: null });
+    return { ...w, productionId, chapter, page };
+  }
+  const offer = async (w: Awaited<ReturnType<typeof comicBook>>, actions: Array<Record<string, unknown>>) => {
+    const receipts = [currentReceipt(w.store, "production-metadata", w.productionId)];
+    const checked = actions.map((action) => ModelWorldChatActionSchema.parse({ ...action, productionId: w.productionId, checkReceiptIds: receipts.map((receipt) => receipt.id) }));
+    const one = turn(w.conversationId, { kind: "world" }, { receipts, actions: checked });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one, w.actionDeps);
+    await appendTurn(w.log, one, prepared);
+    await bindAll(w.lifecycle, prepared);
+    return (await loaded(w.log)).actions;
+  };
+  const ready = { ok: true as const, pages: ["p"], panels: 13, lines: 19, redraws: 6, baseMicroUsd: 2_860_000, capMicroUsd: 4_180_000, missing: ["Old Tam"], provider: "openai", modelName: "GPT Image 2", costLabel: "Up to $4.18" };
+  const host = (over: Partial<NonNullable<WorldChatActionAdapterDeps["comicMake"]>> = {}): NonNullable<WorldChatActionAdapterDeps["comicMake"]> => ({
+    quote: async () => ready, start: async () => ({ status: "running", detail: "Arke is making the pages." }), running: () => true, exportBook: async () => [{ file: "exports/book.cbz" }], ...over,
+  });
+
+  it("prices a chapter on one card, with the most it can cost as its limit", async () => {
+    const w = await comicBook({ comicMake: host() });
+    const [card] = await offer(w, [{ kind: "production-comic-make", target: { kind: "chapter", chapter: w.chapter } }]);
+    assert.equal(card!.shown.title, "Make chapter 1");
+    const body = card!.shown.body;
+    assert.equal(body.family, "generation");
+    if (body.family !== "generation") return;
+    assert.equal(body.enforceableCapMicroUsd, 4_180_000);
+    assert.equal(body.cost, "Up to $4.18");
+    assert.deepEqual(body.deterministicInputs, ["p"]);
+    assert.deepEqual(card!.shown.ripples, ["No picture of Old Tam"]);
+    assert.equal((await decide(w.lifecycle, w.log, card!)).status, "running");
+  });
+
+  it("will not start a card the book refuses", async () => {
+    const w = await comicBook({ comicMake: host({ quote: async () => ({ ok: false, reason: "This book is Whole page. Arke makes Panel by panel books." }) }) });
+    const [card] = await offer(w, [{ kind: "production-comic-make", target: { kind: "chapter", chapter: w.chapter } }]);
+    assert.notEqual((await decide(w.lifecycle, w.log, card!)).status, "running");
+    assert.match(card!.blockedReason ?? "", /Whole page/);
+  });
+
+  it("sets Mode on a card, and a sibling Make card stays ready to approve", async () => {
+    const w = await comicBook({ comicMake: host() });
+    const [mode, make] = await offer(w, [{ kind: "production-comic-mode", mode: "overlay" }, { kind: "production-comic-make", target: { kind: "page", page: w.page.id } }]);
+    assert.equal(mode!.shown.title, "Use Panel by panel");
+    assert.equal((await decide(w.lifecycle, w.log, mode!)).status, "completed");
+    assert.equal(w.store.getBundle().productions.find((candidate) => candidate.meta.id === w.productionId)!.comic!.mode, "overlay");
+    assert.equal((await decide(w.lifecycle, w.log, make!)).status, "running");
+  });
+
+  it("exports only accepted pages", async () => {
+    const w = await comicBook({ comicMake: host() });
+    const [card] = await offer(w, [{ kind: "production-comic-export", chapter: w.chapter, formats: ["cbz"] }]);
+    assert.equal(card!.shown.title, "Export chapter 1");
+    assert.match(card!.blockedReason ?? "", /no accepted take/);
+    assert.notEqual((await decide(w.lifecycle, w.log, card!)).status, "completed");
   });
 });
