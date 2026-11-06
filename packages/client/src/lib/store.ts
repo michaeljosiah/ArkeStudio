@@ -14,6 +14,7 @@ import { SnapshotPageBuffer } from "./snapshot-pages.js";
 import type { GroupApprovalPort } from "./conversation-group-approval.js";
 import {
   BROWSER_ATTACHMENT_MAX_BYTES,
+  worldChatTextRefusal,
   type AccountPage,
   type AskCandidate,
   type AskResult,
@@ -7404,6 +7405,7 @@ export function sendWorldChat(
   /** This turn's effort for whichever model answers, in the harness's own name (design turn 195). */
   variant?: string,
 ): string | null {
+  if (worldChatTextRefusal(text) !== null) return null;
   const sent = send({
     kind: "world-chat-send",
     worldId,

@@ -1,5 +1,10 @@
 # Code map
 
+Conversation text limits (#1742): contracts `world-chat-input.ts` owns the shared bound and
+`worldChatTextRefusal`; the idle frame reuses that bound. Production conversations and World Chat
+validate complete outgoing text before clearing drafts or creating a conversation, using their
+existing composer refusal chips. Client `sendWorldChat` also refuses before transport or holds.
+
 Creator publishing (#2391): contracts `creator-publishing.ts` defines confirmation and
 receipt DTOs; coordinator `publishing/` owns optional OIDC sign-in, frozen Player ZIPs,
 fixed-origin transport and durable resumable requests. Desktop `aonik-publishing.ts`
