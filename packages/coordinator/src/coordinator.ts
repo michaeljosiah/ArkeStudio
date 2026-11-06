@@ -22551,7 +22551,12 @@ export class Coordinator {
           await this.refreshWorldSnapshot(worldId);
           emit("failed", { panel: admission.panel, reason });
         };
-        if (control.signal.aborted) { await letGo("stopped"); continue; }
+        // Stopped before it was drawn is not a fault: it goes back to not made, ready for the next press.
+        if (control.signal.aborted) {
+          await changeComicPage(store, productionId, page, (record) => ({ ...record, making: record.making.filter((entry) => entry.requestId !== admission.requestId) }));
+          await this.refreshWorldSnapshot(worldId);
+          continue;
+        }
         // Asked again for each: the panel before it may now be accepted and ride as the drawing's reference.
         // What this panel may spend: the press's price, less what is spent and what the panels after it were quoted.
         const allowed = msg.confirmedMicroUsd - spent - admissions.slice(index + 1).reduce((sum, later) => sum + later.quoted, 0);

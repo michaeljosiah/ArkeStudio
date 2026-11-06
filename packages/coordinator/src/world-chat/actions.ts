@@ -3701,13 +3701,14 @@ async function sharedResourceProjection(
           provider: ready?.provider ?? "Unavailable", model: ready?.modelName ?? "Unavailable",
           quantity: Math.max(1, ready?.panels ?? 1), references: [],
           // The pages the run covers, which the card counts from.
-          ...(ready ? { deterministicInputs: [...ready.pages, `briefs:${ready.briefs}`] } : {}),
-          options: ready ? [
+          // Fenced on the briefs it was priced for, unless it waits on a card: the brief it redraws may be what that card changes (turn 270d).
+          ...(ready ? { deterministicInputs: [...ready.pages, ...(intent.dependencies.length > 0 ? [] : [`briefs:${ready.briefs}`])] } : {}),
+          options: !ready ? [] : target.kind === "panel" ? [{ label: "Other panels", value: "Stay" }] : [
             { label: "Pages", value: String(ready.pages.length) },
             { label: "Panels", value: String(ready.panels) },
             { label: "Lines", value: String(ready.lines) },
-            { label: "Redraws", value: ready.redraws > 0 ? `Up to ${ready.redraws}` : "None" },
-          ] : [],
+            { label: "Redraws", value: `Up to ${ready.redraws}` },
+          ],
           output: "Panels filed on their pages", cost: ready?.costLabel ?? "Quote unavailable",
           ...(ready ? { estimatedMicroUsd: ready.baseMicroUsd, currency: "USD" as const, enforceableCapMicroUsd: ready.capMicroUsd } : {}),
           cancellationSupported: true,

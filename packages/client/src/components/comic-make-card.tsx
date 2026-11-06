@@ -17,6 +17,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { flattenComicPage, type PlacedBalloon } from "../lib/comic-balloons.js";
+import { REVIEW_FINDING } from "../lib/comic-findings.js";
 import { mediaUrl } from "../lib/media.js";
 import { finishComicPage, stopComicMake, useStore } from "../lib/store.js";
 import { Check, ChevronRight, CircleAlert } from "./icons.js";
@@ -110,7 +111,7 @@ export function ComicMakeCardBody({ action }: { action: ConversationActionCard }
   const needs = rows.flatMap((row) => row.states.filter((state) => state.accepted === undefined && state.shown?.review !== undefined && !panelTakeClears(state.shown)).map((state) => {
     const review = state.shown?.review;
     const first = review?.status === "compared" ? review.findings[0] : undefined;
-    return { page: row.page, number: row.number, panel: state.index + 1, kind: first?.kind ?? "review" };
+    return { page: row.page, number: row.number, panel: state.index + 1, kind: first ? REVIEW_FINDING[first.kind] : "Review" };
   }));
   // A page accepted before its words or typeface changed is out of date, and can be accepted again.
   const ready = rows.filter((row) => {
@@ -134,7 +135,7 @@ export function ComicMakeCardBody({ action }: { action: ConversationActionCard }
     {needs.length > 0 && <div className="fy-comicmake__needs">
       <b>Needs you</b>
       {needs.map((need) => <button key={`${need.page.id}:${need.panel}`} type="button" onClick={() => open(need.page)}>
-        <CircleAlert size={14} /><span>Page {need.number} · panel {need.panel}</span><span className="m">{need.kind[0]!.toUpperCase()}{need.kind.slice(1)}</span><ChevronRight size={14} />
+        <CircleAlert size={14} /><span>Page {need.number} · panel {need.panel}</span><span className="m">{need.kind}</span><ChevronRight size={14} />
       </button>)}
     </div>}
     {ready.length > 0 && <div className="fy-actioncard__actions"><Button variant="primary" disabled={accepting} onClick={() => void accept()}>Accept {ready.length} {ready.length === 1 ? "page" : "pages"}</Button></div>}

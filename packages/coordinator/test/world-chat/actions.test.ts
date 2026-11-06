@@ -3941,6 +3941,15 @@ describe("a graphic novel's cards (turn 270)", () => {
     assert.notEqual((await decide(w.lifecycle, w.log, card!)).status, "running");
   });
 
+  it("does not fence a redraw on the brief the card it waits on will change", async () => {
+    let briefs = "b1";
+    const w = await comicBook({ comicMake: host({ quote: async () => ({ ...ready, briefs }) }) });
+    const [mode, make] = await offer(w, [{ kind: "production-comic-mode", ref: "first", mode: "overlay" }, { kind: "production-comic-make", after: ["first"], target: { kind: "page", page: w.page.id } }]);
+    assert.equal((await decide(w.lifecycle, w.log, mode!)).status, "completed");
+    briefs = "b2";
+    assert.equal((await decide(w.lifecycle, w.log, make!)).status, "running");
+  });
+
   it("will not start a card the book refuses", async () => {
     const w = await comicBook({ comicMake: host({ quote: async () => ({ ok: false, reason: "This book is Whole page. Arke makes Panel by panel books." }) }) });
     const [card] = await offer(w, [{ kind: "production-comic-make", target: { kind: "chapter", chapter: w.chapter } }]);

@@ -425,7 +425,7 @@ export function ConversationPermissionCard({
           {consequences}
         </details>
       ) : <>{body}{consequences}</>}
-      {action.statusDetail && <p className="fy-actioncard__notice">{action.statusDetail}</p>}
+      {action.statusDetail && !(comicMake && terminal) && <p className="fy-actioncard__notice">{action.statusDetail}</p>}
       {!comicMake && !action.receipt?.generation && ["approved", "queued", "running", "completed", "failed", "cancelled"].includes(action.status) && action.shown.body.family === "generation" && <GenerationResults action={action} />}
       {action.actionKind === "world-chat-production-cut-export" && <ProductionExportReceipt action={action} />}
       <StagePlayblastReceipt action={action} />
