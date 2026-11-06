@@ -56,7 +56,7 @@ import { harnessPagePlacer } from "./productions/graphic-novel-placer.js";
 import { harnessPageReviewer, type PageReviewer } from "./productions/graphic-novel-reviewer.js";
 import { harnessScriptReader } from "./productions/graphic-novel-script-reader.js";
 import { ComicExportBlocked, exportComic } from "./productions/comic-export.js";
-import { runComicMake, type ComicMakeOps } from "./productions/comic-make-run.js";
+import { comicMakeSpent, runComicMake, type ComicMakeOps } from "./productions/comic-make-run.js";
 import { makeImageJsonRunner } from "./harness/review-task.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
@@ -24276,7 +24276,11 @@ export class Coordinator {
         }
         return sum;
       },
-      spent: () => usd() - before,
+      spent: () => {
+        const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+        const stillOut = production ? quote.pages.reduce((sum: number, page: string) => sum + comicPageRecord(production, page).making.length, 0) : 0;
+        return comicMakeSpent(usd(), before, stillOut, quote.unitMicroUsd);
+      },
       make: (page, confirmedMicroUsd, panel) => this.makeComicPanels(store, { kind: "make-comic-page", requestId: ulid(), worldId: store.worldId, productionId, page, confirmedMicroUsd, ...(panel ? { panel } : {}) } as Extract<ClientMessage, { kind: "make-comic-page" }>, control.signal),
       reviewed: async (page, signal) => {
         // Bounded: a review the reader never answers is a panel left for the author, not a run stuck for good.

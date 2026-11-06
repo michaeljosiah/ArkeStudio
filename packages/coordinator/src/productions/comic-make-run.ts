@@ -10,6 +10,13 @@ export const COMIC_REDRAWS_PER_PANEL = 2;
 /** The card's limit: a redraw for about every second panel, and six at most. */
 export const comicCardRedraws = (panels: number): number => Math.min(6, Math.ceil(panels / 2));
 
+/**
+ * What counts against the approved price: what was filed, and every picture still out. One that outlasts
+ * the wait stays reserved and may yet land and be charged, so it is spent until it says otherwise.
+ */
+export const comicMakeSpent = (filedMicroUsd: number, beforeMicroUsd: number, stillOut: number, unitMicroUsd: number): number =>
+  filedMicroUsd - beforeMicroUsd + stillOut * unitMicroUsd;
+
 export interface ComicMakeOps {
   /** The panels of a page with no picture yet. */
   unmade(page: string): string[];

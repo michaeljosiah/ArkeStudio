@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { comicCardRedraws, runComicMake, type ComicMakeOps } from "../../src/productions/comic-make-run.js";
+import { comicCardRedraws, comicMakeSpent, runComicMake, type ComicMakeOps } from "../../src/productions/comic-make-run.js";
 
 /** A book of plain pages: each panel at $1, and the first `faultsFor` takes of a panel at fault. */
 function book(pages: Record<string, string[]>, faultsFor: (panel: string) => number = () => 0) {
@@ -84,6 +84,11 @@ describe("what an approved Make card does (turn 270)", () => {
     assert.equal(takes.get("a1"), 1);
     assert.equal(takes.has("a2"), false);
     assert.ok(!log.some((line) => line.startsWith("place")));
+  });
+
+  it("counts a picture still out against the price until it lands", () => {
+    assert.equal(comicMakeSpent(300, 100, 2, 50), 300);
+    assert.equal(comicMakeSpent(100, 100, 0, 50), 0);
   });
 
   it("limits redraws to about every second panel and six at most", () => {

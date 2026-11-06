@@ -468,7 +468,7 @@ export function comicPanelFix(store: WorldStore, productionId: string, pageId: s
 
 export type ComicMakeTarget = { kind: "chapter"; chapter: string } | { kind: "page"; page: string } | { kind: "panel"; page: string; panel: string };
 export type ComicMakeQuote =
-  | { ok: true; pages: string[]; panels: number; lines: number; redraws: number; baseMicroUsd: number; capMicroUsd: number; missing: string[]; briefs: string }
+  | { ok: true; pages: string[]; panels: number; lines: number; redraws: number; baseMicroUsd: number; capMicroUsd: number; unitMicroUsd: number; missing: string[]; briefs: string }
   | { ok: false; reason: string };
 
 /** The Make card's price (turn 270a): the panels it would draw now, and the most its redraws could add. */
@@ -500,7 +500,7 @@ export function comicMakeQuote(store: WorldStore, productionId: string, target: 
     const held = findComicPage(production, page);
     return held ? comicPanelStates(held.page, comicPageRecord(production, page), settings).map((state) => state.hash) : [];
   })));
-  return { ok: true, pages, panels: asked.length, lines, redraws, baseMicroUsd, capMicroUsd: baseMicroUsd + redraws * unit, missing: [...missing], briefs };
+  return { ok: true, pages, panels: asked.length, lines, redraws, baseMicroUsd, capMicroUsd: baseMicroUsd + redraws * unit, unitMicroUsd: unit, missing: [...missing], briefs };
 }
 
 /** The price and brief a page's press shows (R-37a): the panels it would make, at one price. */

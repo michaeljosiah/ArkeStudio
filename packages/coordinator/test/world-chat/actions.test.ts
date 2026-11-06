@@ -3914,7 +3914,7 @@ describe("a graphic novel's cards (turn 270)", () => {
     await bindAll(w.lifecycle, prepared);
     return (await loaded(w.log)).actions;
   };
-  const ready = { ok: true as const, pages: ["p"], panels: 13, lines: 19, redraws: 6, baseMicroUsd: 2_860_000, capMicroUsd: 4_180_000, missing: ["Old Tam"], briefs: "b1", provider: "openai", modelName: "GPT Image 2", costLabel: "Up to $4.18" };
+  const ready = { ok: true as const, pages: ["p"], panels: 13, lines: 19, redraws: 6, baseMicroUsd: 2_860_000, capMicroUsd: 4_180_000, unitMicroUsd: 220_000, missing: ["Old Tam"], briefs: "b1", provider: "openai", modelName: "GPT Image 2", costLabel: "Up to $4.18" };
   const host = (over: Partial<NonNullable<WorldChatActionAdapterDeps["comicMake"]>> = {}): NonNullable<WorldChatActionAdapterDeps["comicMake"]> => ({
     quote: async () => ready, start: async () => ({ status: "running", detail: "Arke is making the pages." }), running: () => true, exportBook: async () => [{ file: "exports/book.cbz" }], ...over,
   });
