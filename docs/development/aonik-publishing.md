@@ -91,15 +91,15 @@ edition and next part both before upload and before submission. An unpublished l
 export does not establish release lineage; a changed/unavailable published base refuses.
 Server verification and editorial approval remain authoritative.
 
-## Dev qualification status — 5 November 2026
+## Dev qualification status — 6 November 2026
 
-The latest merged AONIK application (`d05793b5`) is deployed to dev. API revision
-`aonik-dev-api--0000375` and Worker `aonik-dev-worker--0000366` are healthy, with
+The tested AONIK application images (`78be974c`) and email configuration (`a6dc2e1d`)
+are deployed to dev. API revision `aonik-dev-api--0000379` is healthy, with
 private intake/delivery shares mounted and one replica of each kept running. The
 isolated `arke-worlds-dev` channel belongs to Arke Kidz tenant
 `1087cc03-46cc-45fa-9023-f0ce4f7bbdb8`; its admission, review and publication switches
-remain closed. See the [AONIK #403 runbook](https://github.com/michaeljosiah/aonik/blob/codex/arke-dev-qualification-403/docs/runbooks/arke-publishing-dev.md)
-and [draft PR #405](https://github.com/michaeljosiah/aonik/pull/405) for deployment
+remain closed. See the [AONIK #403 runbook](https://github.com/michaeljosiah/aonik/blob/3e65caa9/docs/runbooks/arke-publishing-dev.md)
+and [PR #406](https://github.com/michaeljosiah/aonik/pull/406) for deployment
 digests, storage checks and remaining prerequisites.
 
 After owner approval, Auth0 **Arke Studio Dev** was registered as a public Native
@@ -109,18 +109,24 @@ implicit grant is disabled. Refresh rotation has a 24-hour idle lifetime, seven-
 maximum and zero overlap. The AONIK API permits offline access. Studio supplies
 S256 PKCE, state and nonce. No client secret or Admin SPA client is used.
 
-The [non-secret dev profile](https://github.com/michaeljosiah/aonik/blob/codex/arke-dev-qualification-403/iac/azure/environments/dev/arke-studio.json)
+The [non-secret dev profile](https://github.com/michaeljosiah/aonik/blob/3e65caa9/iac/azure/environments/dev/arke-studio.json)
 passes Studio's actual configuration parser. Set `ARKE_AONIK_CONFIG` to its local
 absolute path, using an isolated Studio workspace and Electron user-data directory.
 Its synthetic distribution wording is a proposed declaration, requiring the
 submitting human's explicit confirmation; it is not permission for production.
 
-Live rehearsal is **not qualified**. The isolated desktop launched, but computer-use
-access to its window timed out before a creator sign-in was exercised. The deployed
-Worker has no Docker runtime for the verifier adapter; a compatible isolated executor
-is still required. Tenant module/independent reviewer setup and Player dev-channel
-support are also outstanding. No real creator package, approval or public catalogue
-was changed during preparation.
+The full live rehearsal is **not qualified**. Both synthetic creators completed code
++ PKCE sign-in through Studio's actual `AonikAccount` adapter in an isolated harness.
+Authenticated profile reads return Active; real verification emails were delivered
+and confirmed, and all required AONIK onboarding gates pass. This establishes the
+adapter path, not desktop UI sign-in, refresh rotation or persistent credential
+recovery. See the [sanitized account evidence](https://github.com/michaeljosiah/aonik/blob/3e65caa9/docs/runbooks/evidence/arke-creator-email-2026-11-06.json).
+
+The isolated Azure Dynamic Sessions verifier is deployed and qualified with synthetic
+fixtures; actual Worker-managed intake still needs a live job. Tenant module and
+independent reviewer setup, desktop submission, and Player dev-channel support remain
+outstanding. Synthetic accounts do not establish two consenting human pilot creators.
+No real creator package, approval or public catalogue was changed during preparation.
 Use synthetic fixtures on that test channel, interrupt/resume an upload, restart Studio,
 inspect creator feedback, replace a revision, and independently approve/publish through
 AONIK before checking the Player catalogue. Do not use an admin token or public storage

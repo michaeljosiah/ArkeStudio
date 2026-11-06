@@ -8,6 +8,7 @@ import {
   audiobookSeamHash,
   audiobookTextHash,
   castParagraphHashes,
+  unassignedQuotes,
   pictureMarkKey,
   sentencesOf,
   type ArtifactSidecar,
@@ -210,6 +211,33 @@ async function answerOpen(m: Mounted, extra: { audiobook?: ChapterAudiobook; aud
 }
 
 const CAST = { version: 4, hash: HASH, derivedAt: AT, passes: 1, dropped: 0, omitted: 0, lines: [{ speaker: "Maren Kest", sheet: "maren-kest", paragraph: 1, occurrence: 0, quote: "“You hear it too,”" }] };
+
+it("reviews unmatched quotations through exact pins without changing prose or starting synthesis (#1760)", async () => {
+  const body = '“Stay,” Maren said.<br>\n\nThe letter read: “Return by dawn.”';
+  const voices: ChapterVoices = { ...CAST, lines: [], paragraphs: castParagraphHashes(body) };
+  const m = await mount(inkbound("performed"));
+  await answerOpen(m, { body, voices });
+  await act(async () => q(m, '[data-testid="quote-review-press"]')!.click());
+  assert.equal(all(m, '[data-testid="quote-review-row"]').length, 2);
+  assert.ok(text(m).includes("does not prove dialogue coverage"));
+  m.sent.length = 0;
+  const rows = all(m, '[data-testid="quote-review-row"]');
+  await act(async () => (Array.from(rows[1]!.querySelectorAll("button")).find(button => button.textContent === "Keep as narration") as HTMLElement).click());
+  const narration = m.sent.findLast(message => message.kind === "set-voice-pin") as Extract<ClientMessage, { kind: "set-voice-pin" }>;
+  assert.equal(narration.quote, "“Return by dawn.”"); assert.equal(narration.narration, true); assert.equal(narration.paragraph, 1);
+  const select = rows[0]!.querySelector("select")!;
+  const maren = Array.from(select.querySelectorAll("option")).find(option => option.textContent === "Maren Kest")!;
+  assert.ok(maren);
+  await act(async () => { Object.defineProperty(select, "value", { configurable: true, value: maren.getAttribute("value") }); select.dispatchEvent(new dom.window.Event("change", { bubbles: true })); });
+  await act(async () => (Array.from(rows[0]!.querySelectorAll("button")).find(button => button.textContent === "Apply") as HTMLElement).click());
+  const speech = m.sent.findLast(message => message.kind === "set-voice-pin") as Extract<ClientMessage, { kind: "set-voice-pin" }>;
+  assert.equal(speech.quote, "“Stay,”"); assert.equal(speech.sheet, "maren-kest");
+  assert.ok(m.sent.every(message => message.kind === "set-voice-pin"), "review only sends existing pin commands");
+  const reviewed = { ...voices, pins: unassignedQuotes(body, voices).map((quote, index) => ({ ...quote, ...(index === 0 ? { speaker: "Maren Kest", sheet: "maren-kest" } : { narration: true as const }) })) };
+  await act(async () => __applyEventForTest({ at: AT, type: "voices.record", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", record: reviewed }));
+  assert.equal(all(m, '[data-testid="quote-review-row"]').length, 0);
+  assert.ok(text(m).includes("Nothing left in this review list"));
+});
 
 const NARRATION_KEYS = ["title", "p0.0", "p1.0", "p3.0"];
 

@@ -67,6 +67,7 @@ export * from "./harness.js";
 export * from "./harness-models.js";
 export * from "./ask.js";
 export * from "./sheet-shapes.js";
+export * from "./chapter-word-counts.js";
 export * from "./provider.js";
 export * from "./comfyui.js";
 export * from "./local-sampling.js";

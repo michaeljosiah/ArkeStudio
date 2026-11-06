@@ -21,6 +21,7 @@ async function fixture() {
   let research = false;
   type Surface = Parameters<ConversationRunDependencies["query"]["attachLease"]>[1];
   const surfaces = new Map<string, Surface>();
+  const diagnostics: Array<Parameters<NonNullable<ConversationRunDependencies["onToolDiagnostic"]>>[0]> = [];
   const deps = conversationRunDependencies(store, {
     adapter: null, sessionInput: input => input ?? {}, scratchRoot,
     summaryDir: join(scratchRoot, "summary"), activeStore: () => active,
@@ -34,10 +35,11 @@ async function fixture() {
     jobs: () => [], exports: async () => [], actionExports: () => [],
     researchAllowed: () => research, resolveLanguageModel: async () => ({}),
     onTurnFailed: () => {}, onProgress: () => {},
+    onToolDiagnostic: detail => { diagnostics.push(detail); throw new Error("Broken diagnostic sink"); },
   });
   const conversationId = newId("cv") as ConversationId;
   const runId = newId("run") as RunId;
-  return { store, deps, surfaces, conversationId, runId,
+  return { store, deps, surfaces, diagnostics, conversationId, runId,
     select: (value: WorldStore | null) => { active = value; },
     research: (value: boolean) => { research = value; } };
 }
@@ -49,6 +51,8 @@ it("a writing run revokes its lease and removes scratch on release", async () =>
   await access(prepared.cwd);
   const surface = h.surfaces.get(prepared.leaseToken)!;
   assert.ok(surface);
+  surface.onToolsListed?.(["list_chapters", "get_chapter"]);
+  assert.deepEqual(h.diagnostics, [{ runId: h.runId, phase: "catalog", tools: ["list_chapters", "get_chapter"] }]);
   await surface.retrieval.call(prepared.leaseToken, "list_entities", {});
   h.select(null);
   await assert.rejects(surface.retrieval.call(prepared.leaseToken, "list_entities", {}), /No world is open/);

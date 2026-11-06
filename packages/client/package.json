@@ -14,6 +14,8 @@
   },
   "dependencies": {
     "@arke-studio/contracts": "*",
+    "@fontsource/bangers": "^5.2.5",
+    "@fontsource/comic-neue": "^5.2.5",
     "@fontsource/geist-sans": "^5.2.5",
     "@fontsource/jost": "^5.3.0",
     "@sanity/diff-match-patch": "^3.2.0",

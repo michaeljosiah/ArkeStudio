@@ -5,6 +5,20 @@ limits](aonik-publishing.md). `node scripts/smoke-creator-publishing.mjs` exerci
 real sandboxed Electron file page at desktop/Fold/phone widths. Protocol and synthetic
 package tests do not establish live Auth0 sign-in or an AONIK dev deployment.
 
+Unavailable picture targets (#1812): coordinator `test/productions/audiobook-picture-rejection.test.ts`
+checks correlated pre-dispatch failures for the picture and its linked Tall without queueing work.
+Client `test/audiobook-picture.test.tsx` checks that the existing card leaves Generating and shows
+the reason, ignores unrelated request ids, and never retries automatically.
+
+Missing writing tools (#1749): adapter `test/v2-world-tools.test.ts` checks bounded MCP evidence,
+failure isolation and shutdown; `test/v2-private-sessions.test.ts` covers private trace exclusion.
+Coordinator `test/world-chat/retrieval.test.ts` and `test/application/conversation-authoring.test.ts`
+check the actual served catalogue and run correlation. With `ARKE_TEST_OPENCODE2` pointing to
+the qualified native executable, adapter `test/v2-image-protocol.test.ts` also inspects the direct
+MCP tool in a local fake provider's requests across three turns of the same session. It uses an
+isolated profile and makes no paid requests. This does not establish Copilot compaction behavior
+or explain a model's historical missing-tool claim.
+
 Retail chapter MP3 delivery (SPEC-047 R-22/R-23): coordinator `test/audio/retail.test.ts` and
 `test/productions/audiobook-listening.test.ts`; client `test/audiobook-export.test.tsx`.
 Set `ARKE_FFMPEG` (optionally `ARKE_FFPROBE`) to a qualified installed/bundled encoder for actual
@@ -1091,7 +1105,7 @@ and client `test/harness-model-controls.test.tsx`, `test/agents.test.tsx`,
 `test/settings-general.test.tsx`, `test/production-setup.test.tsx`. Catalog tests cover
 canonical/legacy references, discovery failure and retry, precedence and Stage image capability.
 Adapter tests exercise captured settings, confined tool access, cancellation and final-turn events.
-OpenCode discovery tests require v2 2.0.26 and prove a v1-only installation cannot launch.
+OpenCode discovery tests require v2 2.2.5 and prove a v1-only installation cannot launch.
 Coordinator `test/studio-server.test.ts` also proves the real Node composition can satisfy the
 mandatory readiness gate with explicitly selected healthy ComfyUI and Ollama services.
 
@@ -1100,7 +1114,11 @@ For an OpenCode v2 pin change, stage the exact runtime and qualify the actual bi
 ```powershell
 npm run prepare:opencode2 --workspace @arke-studio/desktop
 $env:ARKE_TEST_OPENCODE2 = (Resolve-Path apps/desktop/build-resources/opencode2/opencode2.exe).Path
-node --import tsx --test packages/adapter-opencode/test/v2-input-protocol.test.ts packages/adapter-opencode/test/v2-image-protocol.test.ts packages/adapter-opencode/test/v2-copilot-protocol.test.ts packages/coordinator/test/v2-launch.test.ts
+node --import tsx --test packages/adapter-opencode/test/v2-input-protocol.test.ts packages/adapter-opencode/test/v2-image-protocol.test.ts packages/adapter-opencode/test/v2-copilot-protocol.test.ts packages/adapter-opencode/test/v2-operational-protocol.test.ts packages/adapter-opencode/test/v2-engine-defaults-protocol.test.ts packages/coordinator/test/v2-launch.test.ts packages/coordinator/test/studio-assistant/pinned-native.test.ts packages/coordinator/test/studio-assistant/provider-bridge-native.test.ts packages/coordinator/test/studio-assistant/transient-native.test.ts
+# The outgoing release's executable, extracted from its own package, makes the profile to upgrade.
+$env:ARKE_TEST_OPENCODE2_PREVIOUS = 'C:\path\to\previous\opencode.exe'
+node --import tsx --test packages/adapter-opencode/test/v2-profile-upgrade-protocol.test.ts
+Remove-Item Env:ARKE_TEST_OPENCODE2_PREVIOUS
 $env:ARKE_OPENCODE2_CMD = $env:ARKE_TEST_OPENCODE2
 $env:ARKE_LIVE_HARNESS = '1'
 node --import tsx --test packages/adapter-opencode/test/live-credential-store.test.ts
@@ -1117,6 +1135,24 @@ confirmation, and durable key add/restart/removal. They make no paid requests an
 live cloud-provider inference or OAuth sign-in. Ordinary CI skips the native probes; its protocol
 fixtures still run. The [inbox evidence](conversation-inputs.md#opencode-v2-inbox) does not qualify
 native steering.
+
+`v2-engine-defaults-protocol.test.ts` covers what the engine does unasked. It pins the exact tools
+a read-only and a writing agent receive, in a git repository, because the engine counts the whole
+repository as inside a session: `execute`, `session_move` and `worktree_create` must reach nothing,
+`edit` must stop at the session directory and `worktree_remove` must stop at the same rule. It also
+checks that a reply the engine continued past an output limit or a dropped stream is reported whole,
+that a sealed session refuses that continuation with one provider request, and that the default-on
+image tool stays away from roster agents, with a control agent proving the tool is really offered.
+`v2-operational-protocol.test.ts` adds a decoy plugin, skill and MCP server to the profile, since
+each has its own managed-policy action that allows by default.
+
+`v2-profile-upgrade-protocol.test.ts` covers what a pin change does to a person's existing sign-ins.
+The outgoing release makes the profile: a stored key, a conversation and a hand-written OAuth row.
+The pinned release must then list both connections, read the conversation, continue it and leave
+the credential bytes unchanged. It finishes by reopening the upgraded profile with the outgoing
+release and printing what happens, which is evidence rather than a requirement: 2.0.26 launched on
+a profile 2.2.5 had migrated, listed both connections and read the conversation. It uses synthetic
+credentials, so it does not prove a vendor still honours a real sign-in.
 
 OpenCode image changes also run `packages/adapter-opencode/test/v2-images.test.ts` and the
 coordinator's `test/world-chat/images.test.ts`. Verify that cloud aliases exposed through a
@@ -1891,14 +1927,14 @@ receivers, stale-generation interrupts, missing proof, single-prompt private ses
 private late-settlement notification without transcript replay. Combine with model-routing,
 recovery/harness and v2-launch tests for the native gate. These use scripted local providers,
 not physical model-memory measurements; the optional pinned-native launch case is separate.
-Set `ARKE_TEST_OPENCODE2` to the staged or installed **2.0.26** executable and run adapter
+Set `ARKE_TEST_OPENCODE2` to the staged or installed **2.2.5** executable and run adapter
 `test/v2-operational-protocol.test.ts` alongside `test/v2-operational-config.test.ts` for the
 actual native operational policy. It launches a fresh credential-free temporary profile and a
 scripted loopback provider, counts every model request (including automatic helpers), checks
 zero tool schemas and probes direct native read/unknown-tool denials without the adapter's
 permission backstop. It makes no paid or real inference request. Run the existing
 `test/v2-input-protocol.test.ts` with the same executable to retain ordinary writing/tool-loop
-qualification. The pinned 2.0.26 installed executable passes both; production Studio destination,
+qualification. The pinned 2.2.5 installed executable passes both; production Studio destination,
 full payload/persistence and spend qualification remain separate gates.
 Adapter `test/v2-private-destination.test.ts` uses native HTTP/SSE plus a scripted model-metadata
 server. It checks session/variant/role/location and scoped catalogue agreement, opaque frozen
@@ -1913,7 +1949,7 @@ HTTP/SSE, model metadata, the runner and production wrappers: native proof prece
 both identities enter its digest, either nonlocal verdict requires consent, and a route change
 while queued refuses before dispatch without retaining unsent GPU/runtime admission. Missing
 native proof/fence cannot fall back to the host claim. Opt-in `pinned-native.test.ts` runs the
-same runner through the shared actual 2.0.26 launcher, a credential-free profile and scripted
+same runner through the shared actual 2.2.5 launcher, a credential-free profile and scripted
 provider, checking one approved zero-tool completion, settlement and private trace exclusion.
 An earlier unguarded 2.0.26 probe measured three provider requests after two HTTP 503/429 failures
 despite one application approval/dispatch. The fixed Arke control now refuses native retries:
@@ -1938,7 +1974,7 @@ Adapter `test/v2-private-retirement.test.ts` verifies completed/unsent exact-ses
 refusal of unknown inference/Stop acknowledgements, original server/authentication binding,
 changed owner fields/generation, both native absence checks, idempotent retry, finite private
 admission and late-event/cache/trace exclusion. The pinned operational fixture verifies actual
-2.0.26 session and message endpoints return 404 after the capability succeeds. The pinned runner
+2.2.5 session and message endpoints return 404 after the capability succeeds. The pinned runner
 fixture also runs bounded native retirement before settling private admission. Coordinator
 `native-route.test.ts` retains the durable Studio request/reply and unrelated creative bytes
 through failed native deletion, blocks further inference without holding GPU memory, then
@@ -2067,7 +2103,7 @@ private destination/payload/transient/retirement tests. The loopback fixtures re
 filesystem/socket access and cover one exact approved body, private authentication, metadata
 stripping, declared/actual/fragment bounds, failed body cancellation, startup/shutdown and original
 cleanup capability retention. A bridge factory cannot replace absent host-origin proof.
-With `ARKE_TEST_OPENCODE2` explicitly set to the pinned 2.0.26 executable, run coordinator
+With `ARKE_TEST_OPENCODE2` explicitly set to the pinned 2.2.5 executable, run coordinator
 `test/studio-assistant/provider-bridge-native.test.ts` and `pinned-native.test.ts` with bounded
 concurrency. They use disposable native profiles and a synthetic Ollama HTTP endpoint, not an
 installed model or personal profile. The new cases exercise actual runner/configuration transport,

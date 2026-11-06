@@ -12,6 +12,8 @@ import {
   beatPictureShotId,
   type ProductionBundle,
   CHARACTER_ROLE_MAX,
+  WRITTEN_VOICE_HEADING,
+  isWrittenVoiceHeading,
   CharacterAliasesInputSchema,
   MICRODRAMA_DEFAULTS,
   AUDIO_DRAMA_KIND,
@@ -2419,11 +2421,14 @@ export function CharacterEditScreen() {
   // null while untouched, so an unedited sheet stages nothing for the field at all.
   const [editedRole, setEditedRole] = useState<string | null>(null);
 
-  const sections = (sheet?.sections ?? []).map((s) => ({
+  const formSections = [...(sheet?.sections ?? [])];
+  if (sheet?.type === "character" && !formSections.some(s => isWrittenVoiceHeading(s.heading))) formSections.push({ heading: WRITTEN_VOICE_HEADING, body: "" });
+  const voiceHeading = formSections.find(s => isWrittenVoiceHeading(s.heading))?.heading;
+  const sections = formSections.map((s) => ({
     heading: s.heading,
     body: edited[s.heading] ?? s.body,
   }));
-  const changed = sections.filter((s, i) => s.body !== sheet?.sections[i]?.body);
+  const changed = sections.filter(s => s.body !== (sheet?.sections.find(original => original.heading === s.heading)?.body ?? ""));
   // Role is a character's short line on the world hub card, and the one frontmatter field this
   // form edits. It is capped so the card can hold it on a single line (SPEC-007 §2.3.1).
   const editsRole = sheet?.type === "character";
@@ -2601,8 +2606,8 @@ export function CharacterEditScreen() {
                 scrollers on a page that already scrolls (issue 1007). The editor is the point
                 of this screen, so it gets the room; the column scrolls, as it did.
               */}
-              {sections.map((s, i) => {
-                const isChanged = s.body !== sheet?.sections[i]?.body;
+              {sections.map((s) => {
+                const isChanged = changed.some(change => change.heading === s.heading);
                 return (
                   <div key={s.heading}>
                     <div className="fy-fieldlabel">
@@ -2610,10 +2615,12 @@ export function CharacterEditScreen() {
                       {isChanged && <span className="fy-changedtag">· changed</span>}
                     </div>
                     <Textarea
+                      aria-label={s.heading}
                       className="fy-sheetedit__prose"
                       value={s.body}
                       onChange={(e) => setEdited((prev) => ({ ...prev, [s.heading]: e.target.value }))}
                     />
+                    {editsRole && s.heading === voiceHeading && <p style={{ color: "var(--muted-foreground)", fontSize: 13 }}>The audiobook director uses up to 240 characters from the start of this section, with whitespace collapsed. Longer notes stay on the sheet.</p>}
                   </div>
                 );
               })}

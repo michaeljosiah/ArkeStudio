@@ -81,6 +81,7 @@ export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDra
         graphicNovel: {
           reading: plan.reading, aspect: plan.aspect,
           ...(plan.style ? { style: plan.style } : {}),
+          ...(plan.mode ? { mode: plan.mode } : {}),
           ...(story ? { adapts: { story: story.meta.id, chapters: chapters.flatMap((chapter) => chapter.from ? [{ chapter: chapter.stem, from: chapter.from }] : []) } } : {}),
           chapters: chapters.map(({ stem, title }) => ({ stem, title })),
         },

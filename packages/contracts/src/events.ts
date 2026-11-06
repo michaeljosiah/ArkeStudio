@@ -578,6 +578,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       state: z.enum(["making", "checking", "made", "failed"]),
       /** Which try of Try until it passes this is, from 1 (R-27). */
       attempt: z.number().int().min(1).optional(),
+      /** The panel this is about, in Panel by panel (R-37a). */
+      panel: UlidSchema.optional(),
       /** Whether the take's lettering passed its check, once checked. */
       passed: z.boolean().optional(),
       take: UlidSchema.optional(),
@@ -610,6 +612,33 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       page: UlidSchema,
       take: UlidSchema,
       disposition: z.enum(["checked", "accepted", "seen", "refused"]),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+  /** `set-comic-lettering` and `finish-comic-page` answered (R-38a, R-48a). */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic.page-lettered"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      disposition: z.enum(["saved", "finished", "refused"]),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+  /** `place-comic-lettering`, Arke's placing (R-39a): placing, then how many lines on how many pages, or why not. */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic.lettering-placed"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      state: z.enum(["placing", "placed", "failed"]),
+      lines: z.number().int().min(0).optional(),
+      pages: z.number().int().min(0).optional(),
       reason: z.string().min(1).optional(),
     })
     .strict(),

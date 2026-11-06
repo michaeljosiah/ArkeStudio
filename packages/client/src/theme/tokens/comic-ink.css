@@ -1,0 +1,6 @@
+/* A graphic novel as it prints (SPEC-064 R-38a): the book's colours, the same in dark mode. comic-ink.ts holds them for the canvas. */
+:root {
+  --comic-ink: #111111;
+  --comic-paper: #ffffff;
+  --comic-caption: #f4e7b4;
+}

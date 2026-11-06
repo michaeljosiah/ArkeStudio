@@ -76,6 +76,7 @@ export interface ConversationRunDependencies {
   resolveLanguageModel: NonNullable<RunDeps["resolveLanguageModel"]>;
   onTurnFailed: NonNullable<RunDeps["onTurnFailed"]>;
   onProgress: NonNullable<RunDeps["onProgress"]>;
+  onToolDiagnostic?: (detail: { runId: string; phase: "session" | "catalog"; sessionId?: string; configured?: boolean; tools?: readonly string[] }) => void;
 }
 
 /**
@@ -84,6 +85,9 @@ export interface ConversationRunDependencies {
  * The caller owns runner caching and shutdown, and supplies host policy and tool delivery.
  */
 export function conversationRunDependencies(store: WorldStore, deps: ConversationRunDependencies): RunDeps {
+  const toolDiagnostic: NonNullable<ConversationRunDependencies["onToolDiagnostic"]> = detail => {
+    try { deps.onToolDiagnostic?.(detail); } catch { /* A diagnostic sink cannot change a writing turn. */ }
+  };
   const leases = new QueryLeaseRegistry(() => deps.activeStore()?.worldId ?? null);
   const attachments = new WorldChatAttachmentStore(store.dir);
   const receipts = new Map<string, WorldChatCheckReceipt[]>();
@@ -270,6 +274,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
        */
       deps.query.attachLease(lease.token, {
         retrieval,
+        onToolsListed: tools => toolDiagnostic({ runId, phase: "catalog", tools }),
         onReceipt: (receipt) => {
           const seen = receipts.get(receipt.runId) ?? [];
           receipts.set(receipt.runId, [...seen, receipt]);
@@ -333,6 +338,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
         signal,
       );
       images.start(runId, session.sessionId, signal); media.start(runId, signal ?? store.closingSignal);
+      toolDiagnostic({ runId, phase: "session", sessionId: session.sessionId, configured: url !== undefined });
       return session;
     },
     prepareImages: async ({ leaseToken, attachments: selected }) => {

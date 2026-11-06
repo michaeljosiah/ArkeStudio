@@ -15,7 +15,10 @@ export function privateBridgeTransport(value: PrivateSessionTransport): Readonly
 const SOURCE = `export default {
   id: "${ID}",
   async setup(api) {
+    let transmitted = false;
     await api.session.hook("retry", event => { event.decision = { retry: false }; });
+    // The engine carries on by itself past an output limit. One dispatch is one provider request.
+    await api.session.hook("http.request", () => { if (transmitted) throw new Error("Private request refused"); transmitted = true; });
   }
 };
 `;
@@ -149,7 +152,8 @@ export function privateControlDirectory(directory: string): string {
  * or a proof against arbitrary external modification of the host's owned control files. */
 export async function privateControlProof(http: OpenCodeV2Http, directory: string, signal: AbortSignal, request?: PrivateSessionRequest, kind: "primary" | "generate" = "primary"): Promise<string | null | undefined> {
   if (kind !== "primary" && kind !== "generate" || kind === "generate" && !request) return null;
-  const source = `${privateControlDirectory(directory)}/index.js`;
+  // A local plugin's source is its directory, not its entry point (measured against 2.2.5).
+  const source = privateControlDirectory(directory);
   const envelope = await http.req<V2Envelope<Array<{ id?: string; source?: { type?: string; path?: string }; state?: { status?: string }; features?: { server?: boolean } }>>>(
     "GET", "/api/plugin", undefined, { location: directory, signal, responseBytes: 1024 ** 2 });
   if (!sameDirectory(envelope?.location?.directory, directory) || !Array.isArray(envelope.data) || envelope.data.length > 256) return null;

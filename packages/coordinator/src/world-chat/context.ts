@@ -6,6 +6,7 @@ import type {
   WorldChatMessage,
 } from "@arke-studio/contracts";
 import { contentHash } from "./observations.js";
+import { chapterWordTotal, measuredChapterWords, proposedBatchWords } from "@arke-studio/contracts";
 
 /**
  * What a run is allowed to see (#70 §8.5).
@@ -342,12 +343,23 @@ function renderActionReceipts(actions: readonly ConversationActionCard[], bound:
   let spent = 0;
   for (const card of actions.slice(-32).reverse()) {
     const results = card.receipt?.generation?.results ?? [];
-    const row = JSON.stringify({ actionId: card.actionId, kind: card.actionKind,
+    const words = measuredChapterWords(card);
+    const record = { actionId: card.actionId, kind: card.actionKind,
       targets: card.targets.map(({ kind, id }) => ({ kind, id })), status: card.status,
       authority: card.authority,
       ...(card.receipt ? { receipt: { kind: card.receipt.kind, id: card.receipt.id,
         results: results.slice(0, 8).map(({ id, status }) => ({ id, status })),
-        ...(results.length > 8 ? { omittedResults: results.length - 8 } : {}) } } : {}) });
+        ...(results.length > 8 ? { omittedResults: results.length - 8 } : {}) } } : {}) };
+    const counts = words.length ? { proposedWordTotal: chapterWordTotal(words),
+      proposedBatchWords: chapterWordTotal(proposedBatchWords(actions.filter(action => action.turnId === card.turnId))) } : {};
+    const room = bound - 100 - spent - 1;
+    let row = JSON.stringify({ ...record, ...counts, ...(words.length ? {
+      proposedWords: words.slice(0, 8).map(change => ({ ...change, delta: change.after - change.before })),
+      ...(words.length > 8 ? { omittedChapterCounts: words.length - 8 } : {}),
+    } : {}) });
+    // Count detail must never evict the action identity/status that fitted before counts existed.
+    if (row.length > room) row = JSON.stringify({ ...record, ...counts, ...(words.length ? { omittedChapterCounts: words.length } : {}) });
+    if (row.length > room) row = JSON.stringify(record);
     if (spent + row.length + 1 > bound - 100) break;
     rows.unshift(row);
     spent += row.length + 1;

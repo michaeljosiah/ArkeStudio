@@ -183,7 +183,7 @@ for (const metadata of [
   try {
     const observing = h.observe(), sent = h.send(); await h.submitted();
     let confirmed = false; void h.ref.privateTurnSettled!.then(() => { confirmed = true; });
-    // The native failure event was lost while disconnected. Actual 2.0.26 failed assistant
+    // The native failure event was lost while disconnected. Actual 2.2.5 failed assistant
     // rows still carry time.completed; that timestamp alone must never publish a reply.
     h.stub.messagesBySession.set(h.ref.sessionId, [{ id: "cached-terminal-row", type: "assistant", time: { completed: 1 }, ...metadata,
       content: [{ type: "text", text: '{"kind":"reply","text":"PRIVATE_VALID_LOOKING_FAILED_REPLY"}' }] }]);

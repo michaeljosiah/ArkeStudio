@@ -11,7 +11,7 @@ const LOOPBACK = ["localhost", "127.0.0.1"];
  * refused to serve, and the whole client drew in Segoe UI (turn 239 check). Font files are public. */
 export function fontPackagesOutside(served: readonly string[]): string[] {
   const require = createRequire(import.meta.url);
-  return ["@fontsource/geist-sans", "@fontsource/jost"].flatMap(name => {
+  return ["@fontsource/geist-sans", "@fontsource/jost", "@fontsource/comic-neue", "@fontsource/bangers"].flatMap(name => {
     try { return [dirname(require.resolve(name))]; } catch { return []; }
   }).filter(dir => !served.some(root => { const path = relative(root, dir); return !path.startsWith("..") && !isAbsolute(path); }));
 }

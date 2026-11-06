@@ -1,7 +1,7 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { ChapterVoicesSchema, castParagraphHashes, chapterParagraphs, occurrencesOf, rebaseCast, reconcileCast, type ChapterVoicePin, type ChapterVoices, type HarnessAdapter } from "@arke-studio/contracts";
+import { ChapterVoicesSchema, castParagraphHashes, chapterParagraphs, occurrencesOf, pinTarget, rebaseCast, reconcileCast, voicedBlocks, type ChapterVoicePin, type ChapterVoices, type HarnessAdapter } from "@arke-studio/contracts";
 import type { SessionInput } from "../harness/session-files.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { CAST_PARAGRAPHS_SCHEMA_VERSION, VOICE_PINS_SCHEMA_VERSION } from "../world/commit.js";
@@ -443,13 +443,21 @@ export async function setVoicePin(store: WorldStore, productionId: string, chapt
       }
       pin = { paragraph: input.paragraph, occurrence: input.occurrence, quote: input.quote, speaker, ...(input.sheet !== undefined ? { sheet: input.sheet } : {}) };
     }
-    // Saying what the derivation says is no correction: the pin is dropped rather than kept. A
-    // kept line is not what the derivation said, only what the edit left: its speaker is a pin.
+    // Keep an explicit narration choice even for an uncast quote, so advisory review remembers
+    // it and a later cast cannot silently turn quoted text into speech.
     const derived = standing.find((line) => line.occurrence === input.occurrence && line.quote === input.quote);
     const same = pin.narration === true
-      ? derived === undefined
+      ? false
       : derived !== undefined && derived.kept !== true && (pin.sheet !== undefined ? derived.sheet === pin.sheet : derived.sheet === undefined && derived.speaker === pin.speaker);
-    if (same) pin = null;
+    if (same) {
+      // Matching a derived label is only a no-op when that exact occurrence really voices.
+      // An ambiguous repeated quote needs the author's pin to make the attribution stand.
+      const blocks = voicedBlocks(opened.body, { ...current, pins: [] }).blocks;
+      if (blocks.some((block, index) => {
+        if (block.speaker === undefined || block.paragraph !== input.paragraph || block.text !== input.quote) return false;
+        return pinTarget(opened.body, blocks, index)?.occurrence === input.occurrence;
+      })) pin = null;
+    }
   }
   const overlaps = (other: ChapterVoicePin) => {
     if (other.paragraph !== input.paragraph) return false;

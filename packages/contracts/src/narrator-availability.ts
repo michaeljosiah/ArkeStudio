@@ -41,6 +41,7 @@ export function bookNarratorUnavailable(
  * door's limit once failed the whole door, not just the warning (codex on PR 1869).
  */
 export function readerUnavailableWords(provider: string, reason: string): string {
+  if (/quota_exceeded/i.test(reason)) return `${providerName(provider)} character limit reached — check the API key's character cap and the account allowance`;
   if (providerFaultCategory(reason) === "billing") return `${providerName(provider)} needs payment`;
   return reason.length <= NARRATOR_UNAVAILABLE_MAX ? reason : `${reason.slice(0, NARRATOR_UNAVAILABLE_MAX - 1).trimEnd()}…`;
 }

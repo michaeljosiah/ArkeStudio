@@ -64,3 +64,25 @@
 
 .fy-production-preview__stage .fy-swstage__construction { display: none; }
 .fy-chat__runreport-frames .fy-portrait--fallback { aspect-ratio: 16/9; }
+
+/* The Make card (design turn 270). */
+.fy-comicmake { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.fy-comicmake__facts { display: flex; flex-direction: column; gap: 5px; }
+.fy-comicmake__facts > div { display: flex; justify-content: space-between; gap: 12px; font-size: var(--text-sm); }
+.fy-comicmake__facts span { color: var(--muted-foreground); }
+.fy-comicmake__facts b { font-weight: 500; text-align: right; }
+.fy-comicmake__facts .price { padding-top: 7px; margin-top: 2px; border-top: 1px solid var(--border); }
+.fy-comicmake__facts .price b { font: var(--type-mono); font-size: var(--text-sm); font-weight: 600; }
+.fy-comicmake__note { margin: 0; font-size: var(--text-sm); }
+.fy-comicmake__steps { display: flex; flex-direction: column; gap: 6px; }
+.fy-comicmake__steps > div { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--muted-foreground); }
+.fy-comicmake__steps > div.done, .fy-comicmake__steps > div.now { color: var(--foreground); }
+.fy-comicmake__steps svg { color: var(--success); flex: none; }
+.fy-comicmake__steps i { width: 14px; height: 14px; flex: none; display: grid; place-items: center; }
+.fy-comicmake__steps i::after { content: ""; width: 9px; height: 9px; border: 1.5px solid var(--border); border-radius: 50%; }
+.fy-comicmake__steps .now i::after { border-color: var(--foreground); }
+.fy-comicmake .m { margin-left: auto; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comicmake__needs { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.fy-comicmake__needs > b { padding: 7px 10px; font: var(--type-label); font-weight: 600; background: var(--secondary); }
+.fy-comicmake__needs button { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 10px; border: 0; border-top: 1px solid var(--border); background: none; color: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; }
+.fy-comicmake__needs button > svg:first-child { color: var(--destructive); flex: none; }
