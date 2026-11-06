@@ -1,5 +1,5 @@
 import { COMIC_CAPTION, COMIC_INK, COMIC_PAPER, COMIC_SOUND } from "../theme/tokens/comic-ink.js";
-import { BALLOON_EM, type ComicTypeface, type LayoutRect, type LetteringKind, type LetteringPlacement, type PageBox } from "@arke-studio/contracts";
+import { BALLOON_EM, panelInset, type ComicInk, type ComicTypeface, type LayoutRect, type LetteringKind, type LetteringPlacement, type PageBox } from "@arke-studio/contracts";
 
 /**
  * Drawing a page's placed words (SPEC-064 R-38a, R-48a). One painter for the stage and the finished
@@ -21,14 +21,7 @@ const PAPER = COMIC_PAPER;
 const CAPTION = COMIC_CAPTION;
 const SOUND = COMIC_SOUND;
 
-/** The gap around a panel, as page fractions, the same on the stage and in the finished image. */
-const GUTTER = 0.008;
-export function panelInset(rect: LayoutRect, aspect: string): LayoutRect {
-  const [across, down] = aspect.split(":").map(Number) as [number, number];
-  const gx = GUTTER;
-  const gy = (GUTTER * across) / down;
-  return { x: rect.x + gx, y: rect.y + gy, w: Math.max(0, rect.w - 2 * gx), h: Math.max(0, rect.h - 2 * gy) };
-}
+export { panelInset };
 
 /** The room inside a shape for its words: an ellipse's text sits inside its corners. */
 function textRoom(shape: LetteringKind, width: number, height: number, em: number): { width: number; height: number } {
@@ -100,7 +93,7 @@ function tailPath(ctx: CanvasRenderingContext2D, box: { x: number; y: number; w:
   ctx.closePath();
 }
 
-export function paintBalloon(ctx: CanvasRenderingContext2D, balloon: PlacedBalloon, page: { width: number; height: number }, typeface: ComicTypeface | undefined): void {
+export function paintBalloon(ctx: CanvasRenderingContext2D, balloon: PlacedBalloon, page: { width: number; height: number }, typeface: ComicTypeface | undefined, ink: ComicInk = "colour"): void {
   const { placement, shape } = balloon;
   const face = comicTypeface(typeface);
   const box = { x: placement.box.x * page.width, y: placement.box.y * page.height, w: placement.box.w * page.width, h: placement.box.h * page.height };
@@ -113,7 +106,7 @@ export function paintBalloon(ctx: CanvasRenderingContext2D, balloon: PlacedBallo
   ctx.strokeStyle = INK;
   ctx.fillStyle = PAPER;
   if (shape === "caption") {
-    ctx.fillStyle = CAPTION;
+    ctx.fillStyle = ink === "mono" ? PAPER : CAPTION;
     ctx.fillRect(box.x, box.y, box.w, box.h);
     ctx.strokeRect(box.x, box.y, box.w, box.h);
   } else if (shape !== "sfx") {
@@ -150,19 +143,20 @@ export function paintBalloon(ctx: CanvasRenderingContext2D, balloon: PlacedBallo
     ctx.translate(box.x + box.w / 2, box.y + box.h / 2);
     ctx.rotate(-0.1);
     ctx.translate(-(box.x + box.w / 2), -(box.y + box.h / 2));
-    ctx.strokeStyle = INK;
+    // Black words on black ink would vanish, so a black-and-white book's sound is outlined in paper (turn 271e).
+    ctx.strokeStyle = ink === "mono" ? PAPER : INK;
     ctx.lineWidth = line * 2.4;
   }
   set.lines.forEach((text, index) => {
     if (shape === "sfx") ctx.strokeText(text, across, top + index * height);
-    ctx.fillStyle = shape === "sfx" ? SOUND : INK;
+    ctx.fillStyle = shape === "sfx" && ink === "colour" ? SOUND : INK;
     ctx.fillText(text, across, top + index * height);
   });
   ctx.restore();
 }
 
 /** A canvas redrawn for its size in device pixels: a stage's balloons, sharp on any screen. */
-export function paintStage(canvas: HTMLCanvasElement, balloons: readonly PlacedBalloon[], page: { width: number; height: number }, typeface: ComicTypeface | undefined): void {
+export function paintStage(canvas: HTMLCanvasElement, balloons: readonly PlacedBalloon[], page: { width: number; height: number }, typeface: ComicTypeface | undefined, ink: ComicInk = "colour"): void {
   const ctx = canvas.getContext?.("2d");
   if (!ctx) return;
   const ratio = globalThis.devicePixelRatio ?? 1;
@@ -170,7 +164,7 @@ export function paintStage(canvas: HTMLCanvasElement, balloons: readonly PlacedB
   canvas.height = Math.round(page.height * ratio);
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, page.width, page.height);
-  for (const balloon of balloons) paintBalloon(ctx, balloon, page, typeface);
+  for (const balloon of balloons) paintBalloon(ctx, balloon, page, typeface, ink);
 }
 
 /** The width of a finished page: a trade comic's page at about 300 dots an inch. */
@@ -180,7 +174,7 @@ const FINISHED_WIDTH = 2000;
  * The finished image (R-48a): each panel centre-cropped into its box, then the words. Read with fetch,
  * not an `<img>`: a drawn cross-origin picture taints the canvas, and a tainted canvas cannot be read.
  */
-export async function flattenComicPage(input: { aspect: string; panels: ReadonlyArray<{ url: string; rect: LayoutRect }>; balloons: readonly PlacedBalloon[]; typeface: ComicTypeface | undefined }): Promise<string> {
+export async function flattenComicPage(input: { aspect: string; panels: ReadonlyArray<{ url: string; rect: LayoutRect }>; balloons: readonly PlacedBalloon[]; typeface: ComicTypeface | undefined; ink?: ComicInk }): Promise<string> {
   const [across, down] = input.aspect.split(":").map(Number) as [number, number];
   const page = { width: FINISHED_WIDTH, height: Math.round((FINISHED_WIDTH * down) / across) };
   const canvas = document.createElement("canvas");
@@ -208,7 +202,7 @@ export async function flattenComicPage(input: { aspect: string; panels: Readonly
     ctx.lineWidth = page.width * 0.0016;
     ctx.strokeRect(box.x, box.y, box.w, box.h);
   }
-  for (const balloon of input.balloons) paintBalloon(ctx, balloon, page, input.typeface);
+  for (const balloon of input.balloons) paintBalloon(ctx, balloon, page, input.typeface, input.ink);
   return canvas.toDataURL("image/jpeg", 0.93).split(",")[1]!;
 }
 

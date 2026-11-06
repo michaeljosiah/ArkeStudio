@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
   DEFAULT_COMIC_SETTINGS,
   REVIEW_BLOCKING,
   balanceFaulted,
   balloonBox,
   comicBook,
+  comicInk,
   comicPageFinishable,
   comicPageHash,
   comicPanelStates,
@@ -26,7 +27,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { ComicModelChoice, comicModelRefused } from "../components/comic-model-choice.js";
-import { Check, CircleAlert, RotateCcw, Sparkle, TriangleAlert } from "../components/icons.js";
+import { Check, ChevronRight, CircleAlert, RotateCcw, Sparkle, TriangleAlert } from "../components/icons.js";
 import { Button, cx } from "../components/ui.js";
 import { COMIC_TYPEFACES, clampBox, flattenComicPage, paintStage, panelInset, type PlacedBalloon } from "../lib/comic-balloons.js";
 import { comicStylePicture } from "../lib/comic-styles.js";
@@ -67,10 +68,16 @@ export function panelFaulted(state: ComicPanelState): boolean {
   return take !== undefined && take.review !== undefined && state.accepted === undefined && !panelTakeClears(take);
 }
 
+/** A panel accepted with a fault still on it: settled, but not clean (turn 271b). */
+export function panelHeldFault(state: ComicPanelState): boolean {
+  return state.accepted !== undefined && !panelTakeClears(state.accepted);
+}
+
 /** The mark beside a panel in the script: made, being made, at fault or not yet (turn 269b). */
 export function PanelMark({ state }: { state: ComicPanelState }) {
   if (state.making || (state.shown !== undefined && state.shown.review === undefined)) return <span className="fy-comic269__mark" aria-label="Making"><Spin size={12} /></span>;
   if (panelFaulted(state)) return <span className="fy-comic269__mark bad" aria-label="To fix"><CircleAlert size={14} /></span>;
+  if (panelHeldFault(state)) return <span className="fy-comic269__mark held" aria-label="Accepted with a fault"><TriangleAlert size={14} /></span>;
   if (state.accepted !== undefined) return <span className="fy-comic269__mark ok" aria-label="Accepted"><Check size={14} /></span>;
   return <span className="fy-comic269__mark none" aria-label="Not made" />;
 }
@@ -86,7 +93,7 @@ export function PanelTabs({ tab, pick }: { tab: "panels" | "words"; pick: (tab: 
 
 export function PanelSide({ world, production, page, selected, select, saving, connected, tab, pickTab, onReviewer, changeWithArke }: {
   world: WorldBundle; production: ProductionBundle; page: ComicPage; selected: string | null; select: (panel: string) => void; saving: boolean; connected: boolean;
-  tab: "panels" | "words"; pickTab: (tab: "panels" | "words") => void; onReviewer: () => void; changeWithArke: ((panel: number) => void) | null;
+  tab: "panels" | "words"; pickTab: (tab: "panels" | "words") => void; onReviewer: () => void; changeWithArke: ((panel: number, finding: string | null) => void) | null;
 }) {
   const worldId = world.meta.worldId;
   const productionId = production.meta.id;
@@ -142,6 +149,14 @@ export function PanelSide({ world, production, page, selected, select, saving, c
     setPressed(true);
     if (makeComicPanels(worldId, productionId, page.id, quote.microUsd, only) === null) setPressed(false);
   };
+  const faulted = states.filter(panelFaulted);
+  const faultAt = current === undefined ? -1 : faulted.findIndex((entry) => entry.panel.id === current.panel.id);
+  const nextFault = faulted.length > (faultAt >= 0 ? 1 : 0) ? faulted[(faultAt + 1) % faulted.length] : undefined;
+  // Accepting goes on to the next fault (turn 271b): three flagged panels were three hunts through the page.
+  const accept = (take: ComicPanelTake, overrides?: { findings: string[] }) => {
+    acceptComicTake(worldId, productionId, page.id, take.id, overrides);
+    if (nextFault !== undefined && nextFault.panel.id !== current?.panel.id) select(nextFault.panel.id);
+  };
   const review = shown?.review;
   const seen = new Set(shown ? record?.acknowledged[shown.id] ?? [] : []);
   const faults = review?.status === "compared" ? review.findings.filter((finding) => REVIEW_BLOCKING.has(finding.kind)) : [];
@@ -155,11 +170,14 @@ export function PanelSide({ world, production, page, selected, select, saving, c
   const standingUrl = standing && (() => { const file = world.artifacts.find((candidate) => candidate.id === standing.artifact)?.file; return file ? mediaUrl(world.meta.slug, `artifacts/${file}`) : null; })();
   // A page made before the book changed mode stays until its panels are made (R-36a).
   const keptWhole = standing?.mode === "baked" && states.every((entry) => entry.shown === undefined && !entry.making);
+  const allAccepted = states.every((entry) => entry.accepted !== undefined);
+  const held = current !== undefined && panelHeldFault(current) && shown?.id === current.accepted?.id;
 
   return (
     <div className="fy-comic__side">
       <PanelTabs tab={tab} pick={pickTab} />
-      <div className="fy-comic__page" style={{ aspectRatio: aspect.replace(":", " / ") }}>
+      {/* The page gives up height so the verdict, takes and actions stay on screen (turn 271a). */}
+      <div className="fy-comic__page fy-comic271__page" style={{ aspectRatio: aspect.replace(":", " / "), "--page-ratio": aspect.replace(":", " / ") } as CSSProperties}>
         {keptWhole && standingUrl ? <img src={standingUrl} alt="Page as made" /> : states.map((entry) => {
           const url = artUrl(world, entry.panel.id === current?.panel.id ? shown : entry.shown);
           const box = panelInset(entry.rect, aspect);
@@ -180,19 +198,38 @@ export function PanelSide({ world, production, page, selected, select, saving, c
         })}
       </div>
       {current !== undefined && (
-        <div className="fy-comic__verdicts">
+        <div className="fy-comic__verdicts fy-comic271__review">
           {current.failed && shown === undefined ? (
             <div className="fy-comic__verdict bad" title={current.failed}><CircleAlert size={15} /><b>Panel {current.index + 1}</b><span>{/refus|moderat|safety|policy/i.test(current.failed) ? "refused" : "not made"}</span></div>
           ) : shown === undefined ? null : reading ? (
             <div className="fy-comic__verdict"><Spin size={15} /><b>Panel {current.index + 1}</b><span>checking</span></div>
           ) : review?.status === "compared" ? (
-            <div className={cx("fy-comic__verdict", faults.length ? "bad" : "ok")}>
-              {faults.length ? <CircleAlert size={15} /> : <Check size={15} />}
-              <b>Panel {current.index + 1}</b><span>{faults.length ? `${faults.length} to fix` : "as written"}</span>
-              <span className="grow" /><span className="m">{modelLabel(review.reviewer.version.split(":")[1] ?? review.reviewer.id)}</span>
+            <div className={cx("fy-comic__verdict", held ? "warn" : faults.length ? "bad" : "ok")}>
+              {held ? <TriangleAlert size={15} /> : faults.length ? <CircleAlert size={15} /> : <Check size={15} />}
+              <b>Panel {current.index + 1}</b><span>{held ? `Accepted · ${faults.length} ${faults.length === 1 ? "fault" : "faults"}` : faults.length ? `${faults.length} to fix` : "as written"}</span>
+              <span className="grow" />
+              {allAccepted ? <Button size="sm" onClick={() => pickTab("words")}>Words</Button> : null}
+              {faultAt >= 0 && <span className="m">{faultAt + 1} of {faulted.length}</span>}
+              {faultAt >= 0 && nextFault !== undefined && nextFault.panel.id !== current.panel.id && <button type="button" className="fy-comic271__next" aria-label="Next fault" onClick={() => select(nextFault.panel.id)}><ChevronRight size={13} /></button>}
+              {faultAt < 0 && !allAccepted && <span className="m">{modelLabel(review.reviewer.version.split(":")[1] ?? review.reviewer.id)}</span>}
             </div>
           ) : (
             <div className="fy-comic__verdict warn"><TriangleAlert size={15} /><b>Panel {current.index + 1}</b><span>not checked</span><span className="grow" /><span className="m">{unreviewed.text}</span></div>
+          )}
+          {review?.status === "compared" && review.findings.length > 0 && (
+            <div className="fy-comic__finds">
+              {review.findings.map((finding) => {
+                const warning = !REVIEW_BLOCKING.has(finding.kind);
+                const looked = warning && seen.has(finding.kind as "layout" | "continuity" | "likeness");
+                return (
+                  <div key={finding.id} className={cx("fy-comic__find", looked && "clear")}>
+                    <span className={cx("k", warning && "w")}>{REVIEW_FINDING[finding.kind]}</span>
+                    <span className="what">{finding.note}</span>
+                    {warning && !looked && shown !== undefined && <Button size="sm" disabled={!connected} onClick={() => seeComicWarning(worldId, productionId, page.id, shown.id, finding.kind as "layout" | "continuity" | "likeness")}>Seen</Button>}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}
@@ -208,43 +245,29 @@ export function PanelSide({ world, production, page, selected, select, saving, c
         </div>
       )}
       <div className="fy-comic__acts">
-        {shown !== undefined && !reading && shown.id !== current?.accepted?.id && panelTakeClears(shown) && shown.hash === current?.hash && <Button variant="primary" onClick={() => acceptComicTake(worldId, productionId, page.id, shown.id)}>Accept</Button>}
+        {shown !== undefined && !reading && shown.id !== current?.accepted?.id && panelTakeClears(shown) && shown.hash === current?.hash && <Button variant="primary" onClick={() => accept(shown)}>Accept</Button>}
         {unreviewed.reviewer && shown !== undefined && !reading && <Button variant="primary" onClick={onReviewer}>Choose reviewer</Button>}
         <Button variant={shown !== undefined && !reading && shown.id !== current?.accepted?.id && panelTakeClears(shown) ? "secondary" : "primary"} disabled={!usable || busy || !connected || (only !== undefined && quote?.ok === true && quote.microUsd === 0 && quote.model !== "codex-image" && current === undefined)} onClick={make}
           title={quote && !quote.ok ? quote.reason : undefined}>{busy ? <Spin size={13} /> : <Sparkle size={13} />}{press}</Button>
         {usable && !busy && <span className="fy-comic__price">{cost}</span>}
         {shown !== undefined && !reading && !panelTakeClears(shown) && shown.id !== current?.accepted?.id && shown.hash === current?.hash && (
-          <Button title="Keeps this take with what was found on the record" onClick={() => acceptComicTake(worldId, productionId, page.id, shown.id, { findings: takeBlocking(shown) })}>Accept anyway</Button>
+          <Button title="Keeps this take with what was found on the record" onClick={() => accept(shown, { findings: takeBlocking(shown) })}>Accept anyway</Button>
         )}
-        {changeWithArke !== null && current !== undefined && (faults.length > 0 || current.failed !== undefined) && <Button onClick={() => changeWithArke(current.index + 1)}>Change with Arke</Button>}
+        {changeWithArke !== null && current !== undefined && (faults.length > 0 || current.failed !== undefined) && <Button onClick={() => { const first = review?.status === "compared" ? review.findings.find((finding) => REVIEW_BLOCKING.has(finding.kind)) : undefined; changeWithArke(current.index + 1, first ? `${REVIEW_FINDING[first.kind]}: ${first.note}` : null); }}>Change with Arke</Button>}
         <span className="grow" />
         {shown !== undefined && !reading && review?.status === "unavailable" && <Button variant="ghost" size="sm" disabled={!connected} onClick={() => checkComicTake(worldId, productionId, page.id, shown.id)}>Check again</Button>}
       </div>
-      <ComicModelChoice wordless state={state} choices={production.meta.models} disabled={!connected || busy}
-        onChange={(model) => { setQuoted(null); asked.current = null; setProductionModel(worldId, productionId, "image", model); }} />
-      <div className="fy-comic__make">
-        <span className="m">{made} of {states.length}{quote?.ok ? ` · ${quote.modelName}` : quote && !quote.ok ? ` · ${quote.reason}` : ""}{usable && quote?.ok && quote.riding.length ? ` · ${quote.riding.join(", ")} ride` : ""}</span>
+      {said !== null && <div className="fy-comic__verdict bad"><CircleAlert size={15} /><span>{said}</span></div>}
+      {quote && !quote.ok && <div className="fy-comic__verdict warn"><TriangleAlert size={15} /><span>{quote.reason}</span></div>}
+      {usable && quote?.ok && quote.missing.length > 0 && <div className="fy-comic__verdict warn"><TriangleAlert size={15} /><span>No picture of {quote.missing.join(", ")}</span></div>}
+      {brief && quote?.ok && <pre className="fy-comic__brief">{quote.brief}</pre>}
+      <div className="fy-comic271__foot">
+        <span className="m" title={usable && quote?.ok && quote.riding.length ? `${quote.riding.join(", ")} ride` : undefined}>{made} of {states.length}</span>
+        <ComicModelChoice wordless state={state} choices={production.meta.models} disabled={!connected || busy}
+          onChange={(model) => { setQuoted(null); asked.current = null; setProductionModel(worldId, productionId, "image", model); }} />
         <span className="grow" />
         <Button variant="ghost" size="sm" aria-expanded={brief} onClick={() => setBrief(!brief)}>Brief</Button>
       </div>
-      {usable && quote?.ok && quote.missing.length > 0 && <div className="fy-comic__verdict warn"><TriangleAlert size={15} /><span>No picture of {quote.missing.join(", ")}</span></div>}
-      {brief && quote?.ok && <pre className="fy-comic__brief">{quote.brief}</pre>}
-      {said !== null && <div className="fy-comic__verdict bad"><CircleAlert size={15} /><span>{said}</span></div>}
-      {review?.status === "compared" && review.findings.length > 0 && (
-        <div className="fy-comic__finds">
-          {review.findings.map((finding) => {
-            const warning = !REVIEW_BLOCKING.has(finding.kind);
-            const looked = warning && seen.has(finding.kind as "layout" | "continuity" | "likeness");
-            return (
-              <div key={finding.id} className={cx("fy-comic__find", looked && "clear")}>
-                <span className={cx("k", warning && "w")}>{REVIEW_FINDING[finding.kind]}</span>
-                <span className="what">{finding.note}</span>
-                {warning && !looked && shown !== undefined && <Button size="sm" disabled={!connected} onClick={() => seeComicWarning(worldId, productionId, page.id, shown.id, finding.kind as "layout" | "continuity" | "likeness")}>Seen</Button>}
-              </div>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }
@@ -327,6 +350,8 @@ export function PageWords({ world, production, page, chapter, saving, connected,
       setSaid(event.disposition === "refused" ? event.reason ?? "refused" : null);
     }
     if (event.type === "comic.lettering-placed" && event.requestId === asked.current) {
+      // Edits from before the placing would step back over it: from here Undo takes the placing back first.
+      if (event.state === "placed") { undo.current = []; setUndoDepth(0); }
       setPlacing(event.state === "placing");
       setSaid(event.state === "failed" ? event.reason ?? "not placed" : null);
     }
@@ -348,7 +373,8 @@ export function PageWords({ world, production, page, chapter, saving, connected,
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  const paint = () => { if (canvas.current && size) paintStage(canvas.current, balloons, size, settings.typeface); };
+  const ink = comicInk(settings);
+  const paint = () => { if (canvas.current && size) paintStage(canvas.current, balloons, size, settings.typeface, ink); };
   useEffect(paint);
   // A typeface not yet used on screen arrives after the first paint.
   useEffect(() => { void document.fonts?.ready.then(paint); }, [settings.typeface]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -363,27 +389,26 @@ export function PageWords({ world, production, page, chapter, saving, connected,
     setPlacements(next);
     save(next);
   };
+  /** One Undo (turn 271d): the last change, whether the author's or a placing by Arke, which counts as one. */
   const stepBack = () => {
     const previous = undo.current.at(-1);
-    if (previous === undefined) return;
-    undo.current = undo.current.slice(0, -1);
-    setUndoDepth(undo.current.length);
-    setPlacements(previous);
-    save(previous);
+    if (previous !== undefined) {
+      undo.current = undo.current.slice(0, -1);
+      setUndoDepth(undo.current.length);
+      setPlacements(previous);
+      save(previous);
+    } else if (record?.placedByArke) {
+      setPlacements(known(record.placedByArke.before));
+      save(record.placedByArke.before, true);
+    }
   };
-  const undoPlacing = () => {
-    if (!record?.placedByArke) return;
-    undo.current = [];
-    setUndoDepth(0);
-    setPlacements(known(record.placedByArke.before));
-    save(record.placedByArke.before, true);
-  };
+  const undoButton = undo.current.length > 0 || record?.placedByArke ? <Button size="sm" disabled={!connected} onClick={stepBack}><RotateCcw size={13} />Undo</Button> : null;
   /** A line placed where its panel has room; dragging puts it where the author wants it. */
   const place = (item: LetteringItem, panelIndex: number) => {
     const rect = states[panelIndex]?.rect;
     if (!rect) return;
     const others = latest.current.map((entry) => entry.box);
-    const box = balloonBox(item, rect, aspect, { x: 0.04, y: 0.04 }, others);
+    const box = balloonBox(item, panelInset(rect, aspect), aspect, { x: 0.04, y: 0.04 }, others);
     const tail = SPOKEN.has(item.kind) ? { x: Math.min(1, box.x + box.w * 0.6), y: Math.min(1, box.y + box.h + 0.03) } : undefined;
     commit([...latest.current, { item: item.id, box, ...(tail ? { tail } : {}) }]);
     setPicked(item.id);
@@ -434,7 +459,7 @@ export function PageWords({ world, production, page, chapter, saving, connected,
     setFinishing(true);
     try {
       const panels = states.map((state) => ({ url: artUrl(world, state.accepted)!, rect: state.rect }));
-      const jpeg = await flattenComicPage({ aspect, panels, balloons, typeface: settings.typeface });
+      const jpeg = await flattenComicPage({ aspect, panels, balloons, typeface: settings.typeface, ink });
       asked.current = finishComicPage(worldId, productionId, page.id, hash, jpeg);
       if (asked.current === null) { setFinishing(false); setSaid("not connected"); }
     } catch (err) {
@@ -460,14 +485,20 @@ export function PageWords({ world, production, page, chapter, saving, connected,
       <div className="fy-comic__edit fy-comic269__lines">
         <h3>Page {number}<span className="grow" /><span className="m">{lines.length - left.length} of {lines.length} placed</span><PanelTabs tab={tab} pick={pickTab} /></h3>
         {record?.placedByArke ? (
-          <div className="fy-comic269__placed"><Sparkle size={14} /><b>Arke placed {record.placedByArke.lines} {record.placedByArke.lines === 1 ? "line" : "lines"}</b><span className="grow" /><Button size="sm" disabled={!connected} onClick={undoPlacing}><RotateCcw size={13} />Undo</Button></div>
+          <div className="fy-comic269__placed"><Sparkle size={14} /><b>Arke placed {record.placedByArke.lines} {record.placedByArke.lines === 1 ? "line" : "lines"}</b><span className="grow" />{undoButton}</div>
         ) : null}
-        <div className="fy-comic269__acts">
-          {left.length > 0 && <Button variant="primary" disabled={placing || !connected || notAccepted > 0} onClick={() => arke({ kind: "page", page: page.id })}>{placing ? <Spin size={13} /> : <Sparkle size={13} />}Place with Arke</Button>}
-          <Button disabled={placing || !connected} onClick={() => arke({ kind: "chapter", chapter })}>Whole chapter</Button>
-          <span className="grow" />
-          {undo.current.length > 0 && <Button variant="ghost" size="sm" onClick={stepBack}><RotateCcw size={13} />Undo</Button>}
-        </div>
+        {notAccepted > 0 ? (
+          // What is in the way, and the way to it (turn 271c), in place of a greyed press with no reason.
+          <div className="fy-comic271__blocked"><CircleAlert size={15} /><b>{notAccepted} {notAccepted === 1 ? "panel" : "panels"} to accept</b><span className="grow" />{!record?.placedByArke && undoButton}<Button variant="primary" onClick={() => pickTab("panels")}>Panels<ChevronRight size={13} /></Button></div>
+        ) : left.length > 0 || (!record?.placedByArke && undoButton !== null) ? (
+          <div className="fy-comic269__acts">
+            {left.length > 0 && <Button variant="primary" disabled={placing || !connected} onClick={() => arke({ kind: "page", page: page.id })}>{placing ? <Spin size={13} /> : <Sparkle size={13} />}Place with Arke</Button>}
+            {left.length > 0 && <Button disabled={placing || !connected} onClick={() => arke({ kind: "chapter", chapter })}>Whole chapter</Button>}
+            <span className="grow" />
+            {!record?.placedByArke && undoButton}
+          </div>
+        ) : null}
+        <div className="fy-comic271__scroll">
         {lines.map(({ item, panel }, index) => (
           <div key={item.id} role="button" tabIndex={0} className={cx("fy-comic269__line", item.id === picked && "on")} onClick={() => { setPicked(item.id); if (!placedIds.has(item.id) && connected) place(item, panel); }}
             onKeyDown={(event) => { if (event.key === "Enter" && event.target === event.currentTarget) { setPicked(item.id); if (!placedIds.has(item.id)) place(item, panel); } }}>
@@ -491,6 +522,7 @@ export function PageWords({ world, production, page, chapter, saving, connected,
             </div>
           </div>
         ))}
+        </div>
         <div className="fy-comic269__tool">
           {pickedPlacement !== undefined && pickedLine !== undefined && <>
             <label className="fy-comic__sel"><b>Shape</b>

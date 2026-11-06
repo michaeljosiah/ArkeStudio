@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { Link, MemoryRouter, Route, Routes } from "react-router";
-import { WorldChatWorkspaceSchema, DEFAULT_COMIC_SETTINGS, DEFAULT_LETTERING_THRESHOLDS, comicPageHash, ulid, type ClientMessage, type ClientState, type ComicPage, type ComicPageRecord, type ComicPageTake } from "@arke-studio/contracts";
+import { WorldChatWorkspaceSchema, DEFAULT_COMIC_SETTINGS, DEFAULT_LETTERING_THRESHOLDS, comicPageHash, comicPanelStates, ulid, type ClientMessage, type ClientState, type ComicPage, type ComicPageRecord, type ComicPageTake } from "@arke-studio/contracts";
 import { EMPTY_COMIC_PAGE_RECORD } from "@arke-studio/contracts";
 import { panelInset, setWords } from "../src/lib/comic-balloons.js";
 import { ComicPagesScreen, notChecked, sideWidth } from "../src/screens/comic-pages.js";
@@ -721,5 +721,97 @@ describe("Adapt before drawing (turn 254)", () => {
     const m = await mount(drafting({ pages: [page()], read }));
     assert.match(m.container.querySelector(".fy-comic__draftbar")!.textContent!, /Read/);
     assert.ok(button(m.container, "Keep"));
+  });
+});
+
+describe("Panels and Words, the shorter path (turn 271)", () => {
+  const SETTINGS = { ...DEFAULT_COMIC_SETTINGS, mode: "overlay" as const };
+  const three = (): ComicPage => ({ id: ulid(), layout: "feature", status: "draft", panels: [1, 2, 3].map((n) => ({ id: ulid(), description: `Panel ${n}.`, characters: [], lettering: [{ id: ulid(), kind: "caption" as const, text: `Line ${n}` }] })) });
+  const LONG = "Her left eye sits lower than the right, and the words about it run on well past the width of one row.";
+  const faulty = { status: "compared", reviewer: reader, findings: [{ id: "f1", kind: "defect", note: LONG }], cleared: [], at: AT } as never;
+  const clean = { status: "compared", reviewer: reader, findings: [], cleared: [], at: AT } as never;
+  function book(reviews: unknown[], accepted: number[] = []) {
+    const sheet = three();
+    const states = comicPanelStates(sheet, undefined, SETTINGS);
+    const takes = states.map((entry, index) => ({ id: ulid(), panel: entry.panel.id, artifact: ARTIFACT, hash: entry.hash, model: "image", at: AT, review: reviews[index] }));
+    const record = { ...EMPTY_COMIC_PAGE_RECORD, panelTakes: takes, panelAccepted: Object.fromEntries(accepted.map((index) => [states[index]!.panel.id, takes[index]!.id])) } as ComicPageRecord;
+    const state = withBook([sheet], { [sheet.id]: record });
+    state.world!.productions.at(-1)!.comic = SETTINGS;
+    return { state, sheet, takes };
+  }
+  const press = async (container: HTMLElement, name: string) => act(async () => props(button(container, name)!).onClick({}));
+  const wordsTab = async (container: HTMLElement) => act(async () => props([...container.querySelectorAll('[role="tab"]')].find((entry) => entry.textContent === "Words")!).onClick({}));
+
+  it("shows a panel's fault whole, directly under its verdict, ahead of the model", async () => {
+    const m = await mount(book([clean, faulty, clean], [0, 2]).state);
+    const review = m.container.querySelector(".fy-comic271__review")!;
+    assert.match(review.textContent!, /Panel 2/);
+    assert.match(review.querySelector(".fy-comic__find .what")!.textContent!, /past the width of one row/);
+    const side = m.container.querySelector(".fy-comic__side")!.innerHTML;
+    assert.ok(side.indexOf("fy-comic271__review") < side.indexOf("fy-comic271__foot"), "the model comes after the fault");
+    assert.equal(m.container.querySelector(".fy-comic__make"), null, "one line at the foot");
+  });
+
+  it("Accept anyway goes on to the next fault, and the arrow steps through them", async () => {
+    const { state, takes } = book([clean, faulty, faulty], [0]);
+    const m = await mount(state);
+    assert.match(m.container.querySelector(".fy-comic271__review")!.textContent!, /Panel 2.*1 of 2/);
+    await act(async () => props(m.container.querySelector('[aria-label="Next fault"]')!).onClick({}));
+    assert.match(m.container.querySelector(".fy-comic271__review")!.textContent!, /Panel 3.*2 of 2/);
+    await act(async () => props(m.container.querySelector('[aria-label="Next fault"]')!).onClick({}));
+    await press(m.container, "Accept anyway");
+    const sent = m.sent.find((message) => message.kind === "accept-comic-take") as { take: string } | undefined;
+    assert.equal(sent?.take, takes[1]!.id);
+    assert.match(m.container.querySelector(".fy-comic271__review")!.textContent!, /Panel 3/);
+  });
+
+  it("marks a panel accepted with a fault amber, not red, and offers Words once all are in", async () => {
+    const m = await mount(book([clean, faulty, clean], [0, 1, 2]).state);
+    assert.ok(m.container.querySelector('[aria-label="Accepted with a fault"]'));
+    assert.equal(m.container.querySelector('[aria-label="To fix"]'), null);
+    await act(async () => props(m.container.querySelector('button[aria-label="Panel 2"]')!).onClick({}));
+    const verdict = m.container.querySelector(".fy-comic271__review .fy-comic__verdict")!;
+    assert.match(verdict.className, /warn/);
+    assert.match(verdict.textContent!, /Accepted · 1 fault/);
+    await press(m.container, "Words");
+    assert.ok(m.container.querySelector(".fy-comic269__lines"));
+  });
+
+  it("Words says what is in the way and goes to it, with no greyed Place with Arke", async () => {
+    const m = await mount(book([clean, faulty, clean], [0]).state);
+    await wordsTab(m.container);
+    assert.match(m.container.querySelector(".fy-comic271__blocked")!.textContent!, /2 panels to accept/);
+    assert.equal(button(m.container, "Place with Arke"), undefined);
+    await act(async () => props([...m.container.querySelectorAll(".fy-comic271__blocked button")].at(-1)!).onClick({}));
+    assert.equal(m.container.querySelector(".fy-comic269__lines"), null);
+  });
+
+  it("Words has one Undo: a placing by Arke is one change", async () => {
+    const { state, sheet } = book([clean, clean, clean], [0, 1, 2]);
+    const box = { x: 0.1, y: 0.1, w: 0.2, h: 0.1 };
+    const placements = sheet.panels.map((panel) => ({ item: panel.lettering[0]!.id, box }));
+    const held = state.world!.productions.at(-1)!.comicPages![0]!.record;
+    Object.assign(held, { placements, placedByArke: { at: AT, lines: 3, before: [] } });
+    const m = await mount(state);
+    await wordsTab(m.container);
+    const undos = [...m.container.querySelectorAll("button")].filter((entry) => entry.textContent?.trim() === "Undo");
+    assert.equal(undos.length, 1);
+    await act(async () => props(undos[0]!).onClick({}));
+    const sent = m.sent.find((message) => message.kind === "set-comic-lettering") as { placements: unknown[]; undoesPlacing?: boolean } | undefined;
+    assert.deepEqual(sent?.placements, []);
+    assert.equal(sent?.undoesPlacing, true);
+    assert.ok(m.container.querySelector(".fy-comic269__verdict"), "the foot stays");
+  });
+
+  it("Change with Arke sends the finding", async () => {
+    const owner = new GlobalChatController();
+    const { state } = book([clean, faulty, clean], [0, 2]);
+    const surface = chatSurfaceForPage(state, `/w/${FIXTURE_WORLD_ID}/p/low-water-drawn/story/pages`);
+    owner.setCurrent(surface);
+    const m = await mount(state, undefined, owner);
+    await press(m.container, "Change with Arke");
+    const said = (name: string, fallback: unknown) => owner.value(surface!.key, name, fallback);
+    assert.match(String(said("draft", "")), /^Page 1, panel 2\. Defect: Her left eye.*Fix it\.$/);
+    assert.equal(said("autoSend", false), true);
   });
 });
